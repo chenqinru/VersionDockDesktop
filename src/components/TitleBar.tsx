@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { useBridge } from '../platform/context';
+import { SettingsPanel } from './SettingsPanel';
 
 export function TitleBar() {
   const development = import.meta.env.DEV;
@@ -14,15 +15,10 @@ export function TitleBar() {
   const snapshot = useAppStore((state) => state.snapshot);
   const refresh = useAppStore((state) => state.refresh);
   const busy = useAppStore((state) => state.busy);
-  const theme = useAppStore((state) => state.bootstrap?.state.theme ?? 'system');
-  const language = useAppStore((state) => state.bootstrap?.state.language ?? 'system');
-  const setTheme = useAppStore((state) => state.setTheme);
-  const setLanguage = useAppStore((state) => state.setLanguage);
-  const externalEditor = useAppStore((state) => state.bootstrap?.state.externalEditor);
-  const setExternalEditor = useAppStore((state) => state.setExternalEditor);
   const recentWorkspaces = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const { t } = useI18n();
+  const closeSettings = useCallback(() => setSettings(false), []);
 
   useEffect(() => { void bridge.window.isMaximized().then(setMaximized); }, [bridge]);
 
@@ -70,27 +66,15 @@ export function TitleBar() {
       </header>
       {workspaces && snapshot && (
         <aside className="workspace-switcher">
-          <div className="settings-heading"><span>{t('Switch Workspace')}</span><button onClick={() => setWorkspaces(false)}><Codicon name="close" /></button></div>
+          <div className="settings-heading"><span>{t('Switch Workspace')}</span><button type="button" aria-label={t('Close')} title={t('Close')} onClick={() => setWorkspaces(false)}><Codicon name="close" /></button></div>
           <button className="workspace-open-other" disabled={busy} onClick={() => void chooseWorkspace()}><Codicon name="folder-opened" />{t('Open Another Workspace')}</button>
           <strong>{t('Recent Workspaces')}</strong>
           <div className="workspace-switch-list">{recentWorkspaces.map((workspace) => <button key={workspace.id} className={workspace.id === snapshot.workspace.id ? 'active' : ''} disabled={!workspace.available || busy} onClick={() => { void openWorkspace(workspace.paths).then(() => setWorkspaces(false)); }}><Codicon name={workspace.available ? 'folder' : 'warning'} /><span><b>{workspace.name}</b><small>{workspace.paths.join(' · ')}</small></span>{workspace.id === snapshot.workspace.id && <Codicon name="check" />}</button>)}</div>
         </aside>
       )}
       {settings && (
-        <aside className="settings-popover">
-          <div className="settings-heading"><span>{t('Settings')}</span><button onClick={() => setSettings(false)}><Codicon name="close" /></button></div>
-          <label>{t('Theme')}<select value={theme} onChange={(event) => void setTheme(event.target.value as typeof theme)}><option value="system">{t('System')}</option><option value="light">{t('Light')}</option><option value="dark">{t('Dark')}</option></select></label>
-          <label>{t('Language')}<select value={language} onChange={(event) => void setLanguage(event.target.value as typeof language)}><option value="system">{t('System')}</option><option value="zhCn">{t('Simplified Chinese')}</option><option value="en">{t('English')}</option></select></label>
-          <ExternalEditorSettings editor={externalEditor} save={setExternalEditor} />
-        </aside>
+        <SettingsPanel onClose={closeSettings} />
       )}
     </>
   );
-}
-
-function ExternalEditorSettings({ editor, save }: { editor: import('../bindings/generated').ExternalEditor | null | undefined; save: (executable: string, args: string[]) => void }) {
-  const [executable, setExecutable] = useState(editor?.executable ?? '');
-  const [args, setArgs] = useState(editor?.args.join('\n') ?? '');
-  const { t } = useI18n();
-  return <div className="settings-editor"><strong>{t('External editor')}</strong><input value={executable} onChange={(event) => setExecutable(event.target.value)} placeholder={t('Executable path')} /><textarea value={args} onChange={(event) => setArgs(event.target.value)} placeholder={t('One argument per line')} /><small>{t('Available placeholders: {path}, {relativePath}, {repo}')}</small><button onClick={() => save(executable, args.split('\n').filter((argument) => argument.length > 0))}>{t('Save')}</button></div>;
 }
