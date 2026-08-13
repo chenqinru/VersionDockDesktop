@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+*.log
+coverage/
+test-results/
+playwright-report/
