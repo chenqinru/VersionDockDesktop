@@ -31,12 +31,14 @@ const desktopEn: Messages = {
   'Remove from changelist': 'Remove from changelist', 'Delete changelist {0}?': 'Delete changelist {0}?', 'Unassigned': 'Unassigned',
   'Worktrees': 'Worktrees', 'Add worktree': 'Add worktree', 'No worktrees': 'No worktrees', 'Branch name': 'Branch name', 'Create new branch': 'Create new branch',
   'Lock': 'Lock', 'Unlock': 'Unlock', 'Prune': 'Prune', 'Remove worktree {0}?': 'Remove worktree {0}?', 'Force remove worktree {0}?': 'Force remove worktree {0}?', 'Main worktree': 'Main worktree',
+  'Subtree': 'Subtree', 'Register subtree': 'Register subtree', 'No registered subtrees': 'No registered subtrees', 'Subtree prefix': 'Subtree prefix', 'Subtree remote': 'Existing remote name', 'Subtree branch': 'Branch', 'Squash subtree history': 'Squash subtree history', 'Squash': 'Squash', 'Full history': 'Full history', 'Unregister': 'Unregister', 'Unregister subtree {0}? Files and history will not be removed.': 'Unregister subtree {0}? Files and history will not be removed.', 'Pending': 'Pending', 'Recover': 'Recover',
   'Branch Compare': 'Branch Compare', 'Compare': 'Compare', 'Target': 'Target', 'Select two branches to compare': 'Select two branches to compare',
   'Only in {0}': 'Only in {0}', 'Changed files': 'Changed files', 'No changed files': 'No changed files', 'No unique commits': 'No unique commits',
   'Remotes': 'Remotes', 'Remote name': 'Remote name', 'Remote URL': 'Remote URL', 'No remotes': 'No remotes', 'Add': 'Add', 'Close': 'Close',
   'Fetch URL': 'Fetch URL', 'Push URL': 'Push URL', 'Set fetch URL': 'Set fetch URL', 'Set push URL': 'Set push URL', 'Remove remote {0}?': 'Remove remote {0}?',
   'External editor': 'External editor', 'Executable path': 'Executable path', 'One argument per line': 'One argument per line', 'Available placeholders: {path}, {relativePath}, {repo}': 'Available placeholders: {path}, {relativePath}, {repo}', 'Save': 'Save', 'Open in external editor': 'Open in external editor',
   'Switch Workspace': 'Switch Workspace', 'Open Another Workspace': 'Open Another Workspace',
+  'Clear': 'Clear', 'Date range': 'Date range', 'From': 'From', 'To': 'To', 'From to': 'From → To', 'Filter branches and tags': 'Filter branches and tags…',
   'Binary conflict cannot be edited': 'Binary conflict cannot be edited', 'Choose which complete version to keep.': 'Choose which complete version to keep.', 'Keep mine': 'Keep mine', 'Keep theirs': 'Keep theirs', 'Keep working': 'Keep working', 'Keep mine and mark resolved?': 'Keep mine and mark resolved?', 'Keep theirs and mark resolved?': 'Keep theirs and mark resolved?', 'Keep working file and mark resolved?': 'Keep working file and mark resolved?',
 };
 
@@ -60,7 +62,7 @@ const desktopZh: Messages = {
   'No repositories were found in this workspace.': '此工作区中未发现仓库。', 'Force delete branch': '强制删除分支',
   'Delete branch {0}?': '删除分支 {0}？', 'Delete tag {0}?': '删除标签 {0}？', 'Checkout branch {0}?': '切换到分支 {0}？',
   'Lines': '行', 'Staged': '已暂存', 'Amend': '修订提交',
-  'Stash': '暂存区', 'Stashes': '暂存记录', 'Stash changes': '暂存更改', 'No stashes': '没有暂存记录', 'Apply': '应用', 'Pop': '弹出', 'Drop': '删除',
+  'Stash': '暂存', 'Stashes': '暂存记录', 'Stash changes': '暂存更改', 'No stashes': '没有暂存记录', 'Apply': '应用', 'Pop': '弹出', 'Drop': '删除',
   'Include untracked files': '包含未跟踪文件', 'Stash message': '暂存说明', 'Drop stash {0}?': '删除暂存记录 {0}？', 'WIP stash': '临时暂存',
   'Shelf': '搁置', 'Shelves': '搁置记录', 'Shelve changes': '搁置更改', 'No shelves': '没有搁置记录', 'Shelf name': '搁置名称',
   'Drop shelf {0}?': '删除搁置记录 {0}？', 'WIP shelf': '临时搁置', 'file': '个文件',
@@ -68,12 +70,14 @@ const desktopZh: Messages = {
   'Remove from changelist': '移出更改列表', 'Delete changelist {0}?': '删除更改列表 {0}？', 'Unassigned': '未分组',
   'Worktrees': '工作树', 'Add worktree': '添加工作树', 'No worktrees': '没有工作树', 'Branch name': '分支名称', 'Create new branch': '创建新分支',
   'Lock': '锁定', 'Unlock': '解锁', 'Prune': '清理失效项', 'Remove worktree {0}?': '移除工作树 {0}？', 'Force remove worktree {0}?': '强制移除工作树 {0}？', 'Main worktree': '主工作树',
+  'Subtree': 'Subtree', 'Register subtree': '注册 Subtree', 'No registered subtrees': '未注册 Subtree', 'Subtree prefix': 'Subtree 前缀路径', 'Subtree remote': '已有远程名称', 'Subtree branch': '分支', 'Squash subtree history': '压缩 Subtree 历史', 'Squash': '压缩历史', 'Full history': '完整历史', 'Unregister': '取消注册', 'Unregister subtree {0}? Files and history will not be removed.': '取消注册 Subtree {0}？不会删除文件或历史记录。', 'Pending': '待恢复', 'Recover': '恢复',
   'Branch Compare': '分支比较', 'Compare': '比较', 'Target': '目标', 'Select two branches to compare': '选择两个分支进行比较',
   'Only in {0}': '仅存在于 {0}', 'Changed files': '更改文件', 'No changed files': '没有文件差异', 'No unique commits': '没有独有提交',
   'Remotes': '远程仓库', 'Remote name': '远程名称', 'Remote URL': '远程 URL', 'No remotes': '没有远程仓库', 'Add': '添加', 'Close': '关闭',
   'Fetch URL': '拉取 URL', 'Push URL': '推送 URL', 'Set fetch URL': '设置拉取 URL', 'Set push URL': '设置推送 URL', 'Remove remote {0}?': '移除远程仓库 {0}？',
   'External editor': '外部编辑器', 'Executable path': '可执行文件路径', 'One argument per line': '每行一个参数', 'Available placeholders: {path}, {relativePath}, {repo}': '可用占位符：{path}、{relativePath}、{repo}', 'Save': '保存', 'Open in external editor': '在外部编辑器中打开',
   'Switch Workspace': '切换项目', 'Open Another Workspace': '打开其他项目',
+  'Clear': '清除', 'Date range': '日期范围', 'From': '起始', 'To': '截止', 'From to': '起始 → 截止', 'Filter branches and tags': '筛选分支和标签…',
   'Binary conflict cannot be edited': '无法编辑二进制冲突', 'Choose which complete version to keep.': '请选择要保留的完整版本。', 'Keep mine': '保留当前版本', 'Keep theirs': '保留对方版本', 'Keep working': '保留工作文件', 'Keep mine and mark resolved?': '保留当前版本并标记为已解决？', 'Keep theirs and mark resolved?': '保留对方版本并标记为已解决？', 'Keep working file and mark resolved?': '保留工作文件并标记为已解决？',
 };
 

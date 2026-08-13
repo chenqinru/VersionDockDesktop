@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     models::{
         BranchOperation, ConflictChoice, RemoteOperation, RepositoryMeta, StashOperation,
-        SyncAction, TagOperation, VcsKind,
+        SubtreeOperation, SubtreeState, SyncAction, TagOperation, VcsKind,
     },
     shelf, vcs, workspace,
 };
@@ -166,6 +166,231 @@ fn repo(path: &Path, kind: VcsKind) -> RepositoryMeta {
         is_submodule: false,
         is_worktree: false,
     }
+}
+
+#[tokio::test]
+async fn real_git_subtree_registry_and_operations() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let parent = tempdir().unwrap();
+    let source = tempdir().unwrap();
+    let bare_remote = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], parent.path());
+    command("git", &["init", "-b", "main"], source.path());
+    command("git", &["init", "--bare"], bare_remote.path());
+    for directory in [parent.path(), source.path()] {
+        command(
+            "git",
+            &["config", "user.name", "VersionDock Test"],
+            directory,
+        );
+        command(
+            "git",
+            &["config", "user.email", "versiondock@example.test"],
+            directory,
+        );
+    }
+    std::fs::write(parent.path().join("README.md"), "parent\n").unwrap();
+    command("git", &["add", "README.md"], parent.path());
+    command("git", &["commit", "-m", "parent initial"], parent.path());
+    std::fs::write(source.path().join("library.txt"), "one\n").unwrap();
+    command("git", &["add", "library.txt"], source.path());
+    command("git", &["commit", "-m", "source initial"], source.path());
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "origin",
+            bare_remote.path().to_str().unwrap(),
+        ],
+        source.path(),
+    );
+    command(
+        "git",
+        &["push", "--set-upstream", "origin", "main"],
+        source.path(),
+    );
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "subtree-source",
+            bare_remote.path().to_str().unwrap(),
+        ],
+        parent.path(),
+    );
+
+    let repository = repo(parent.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+    assert!(vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Add {
+            prefix: "vendor/failed".into(),
+            remote: "subtree-source".into(),
+            branch: "missing-branch".into(),
+            squash: true,
+        },
+        &token,
+    )
+    .await
+    .is_err());
+    assert!(vcs::subtrees(&repository, &token).await.unwrap().is_empty());
+    vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Add {
+            prefix: "vendor/library".into(),
+            remote: "subtree-source".into(),
+            branch: "main".into(),
+            squash: true,
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(parent.path().join("vendor/library/library.txt")).unwrap(),
+        "one\n"
+    );
+    let entries = vcs::subtrees(&repository, &token).await.unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].prefix, "vendor/library");
+    assert_eq!(entries[0].remote, "subtree-source");
+    assert!(entries[0].squash);
+    let id = entries[0].id.clone();
+    let config = Command::new("git")
+        .args([
+            "config",
+            "--local",
+            "--get",
+            &format!("versiondock.subtree.{id}.prefix"),
+        ])
+        .current_dir(parent.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&config.stdout).trim(),
+        "vendor/library"
+    );
+
+    std::fs::write(source.path().join("library.txt"), "one\ntwo\n").unwrap();
+    command("git", &["add", "library.txt"], source.path());
+    command("git", &["commit", "-m", "source update"], source.path());
+    command("git", &["push", "origin", "main"], source.path());
+    vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Pull {
+            subtree_id: id.clone(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(parent.path().join("vendor/library/library.txt")).unwrap(),
+        "one\ntwo\n"
+    );
+    command(
+        "git",
+        &["remote", "remove", "subtree-source"],
+        parent.path(),
+    );
+    let error = vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Push {
+            subtree_id: id.clone(),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, "SUBTREE_REMOTE_NOT_FOUND");
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "subtree-source",
+            bare_remote.path().to_str().unwrap(),
+        ],
+        parent.path(),
+    );
+
+    command(
+        "git",
+        &[
+            "config",
+            "--local",
+            &format!("versiondock.subtree.{id}.state"),
+            "pending",
+        ],
+        parent.path(),
+    );
+    let pending = vcs::subtrees(&repository, &token).await.unwrap();
+    assert_eq!(pending[0].state, SubtreeState::Pending);
+    let error = vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Pull {
+            subtree_id: id.clone(),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, "SUBTREE_REGISTRATION_PENDING");
+
+    vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Remove {
+            subtree_id: id.clone(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(vcs::subtrees(&repository, &token).await.unwrap().is_empty());
+    assert!(parent.path().join("vendor/library/library.txt").exists());
+    let removed_section = Command::new("git")
+        .args([
+            "config",
+            "--local",
+            "--get-regexp",
+            &format!("^versiondock\\.subtree\\.{id}\\."),
+        ])
+        .current_dir(parent.path())
+        .output()
+        .unwrap();
+    assert!(!removed_section.status.success());
+    assert!(vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Add {
+            prefix: "../escape".into(),
+            remote: "subtree-source".into(),
+            branch: "main".into(),
+            squash: false,
+        },
+        &token,
+    )
+    .await
+    .is_err());
+    assert!(vcs::subtree_operation(
+        &repository,
+        SubtreeOperation::Add {
+            prefix: "vendor/url".into(),
+            remote: bare_remote.path().to_string_lossy().into_owned(),
+            branch: "main".into(),
+            squash: false,
+        },
+        &token,
+    )
+    .await
+    .is_err());
+    let svn_repository = repo(parent.path(), VcsKind::Svn);
+    let error = vcs::subtrees(&svn_repository, &token).await.unwrap_err();
+    assert_eq!(error.code, "UNSUPPORTED_OPERATION");
 }
 
 #[tokio::test]

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { BootstrapData, BridgeCommand, ConflictFile, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, BridgeCommand, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from './appStore';
 
@@ -16,13 +16,18 @@ const snapshot = (id: string, generation: number): WorkspaceSnapshot => ({
   repositories: [],
 });
 
+const repository = (id: string, name: string): RepositoryStatus => ({
+  meta: { id, name, rootPath: `/tmp/${id}`, color: id === 'a' ? '#4ec9b0' : '#61afef', kind: 'git', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false },
+  branch: 'main', revision: 'abc', ahead: 0, behind: 0, files: [], conflicts: 0, operation: null,
+});
+
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 };
 
-afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, conflicts: [], merge: undefined, mergeResult: '', mode: 'history', busy: false, error: undefined }));
+afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, remotes: {}, mode: 'history', busy: false, error: undefined }));
 
 describe('appStore async lifecycle', () => {
   it('does not let an older workspace response replace the newest workspace', async () => {
@@ -75,5 +80,35 @@ describe('appStore async lifecycle', () => {
     response.resolve(snapshot('workspace', 2));
     await refreshing;
     expect(useAppStore.getState()).toMatchObject({ mode: 'diff', busy: false });
+  });
+
+  it('aggregates history from every repository without losing repository scope', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('a', 'Alpha'), repository('b', 'Beta')];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'history') return { commits: [{ repoId: command.payload.repo_id, hash: command.payload.repo_id, shortHash: command.payload.repo_id, parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: command.payload.repo_id, refs: [] }], hasMore: false };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a' });
+    await useAppStore.getState().loadHistory(true);
+    expect(useAppStore.getState().history.map((commit) => commit.repoId)).toEqual(['a', 'b']);
+    expect(Object.keys(useAppStore.getState().historyByRepo)).toEqual(['a', 'b']);
+  });
+
+  it('uses a repository-scoped subtree command without cwd and refreshes registered entries', async () => {
+    const commands: BridgeCommand[] = [];
+    const entries: SubtreeEntry[] = [{ id: 'entry', prefix: 'vendor/api', remote: 'origin', branch: 'main', squash: true, state: 'active' }];
+    const bridge = new MockBridge((command) => {
+      commands.push(command);
+      if (command.type === 'subtrees') return entries;
+      if (command.type === 'workspaceRefresh') return snapshot('workspace', 2);
+      if (command.type === 'conflicts') return [];
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: snapshot('workspace', 1), selectedRepoId: 'repo' });
+    await useAppStore.getState().subtreeOperation('repo', { type: 'pull', subtree_id: 'entry' });
+    expect(commands[0]).toEqual({ type: 'subtreeOperation', payload: { workspace_id: 'workspace', repo_id: 'repo', operation: { type: 'pull', subtree_id: 'entry' } } });
+    expect(commands[0]).not.toHaveProperty('cwd');
+    expect(useAppStore.getState().subtrees.repo).toEqual(entries);
   });
 });

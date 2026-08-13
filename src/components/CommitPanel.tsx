@@ -8,6 +8,9 @@ import { ShelfPanel } from './ShelfPanel';
 import { buildFileTree, type FileTreeNode } from './fileTree';
 import { ChangelistManager } from './ChangelistManager';
 import { WorktreePanel } from './WorktreePanel';
+import { SubtreePanel } from './SubtreePanel';
+
+const emptyRepositories: RepositoryStatus[] = [];
 
 function StatusMark({ file }: { file: FileChange }) {
   const value = file.conflicted ? 'C' : file.status === 'untracked' ? 'U' : file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : file.status === 'renamed' ? 'R' : 'M';
@@ -74,10 +77,12 @@ export function CommitPanel() {
   const stashEnabled = useAppStore((state) => state.bootstrap?.capabilities.stash ?? false);
   const shelfEnabled = useAppStore((state) => state.bootstrap?.capabilities.shelf ?? false);
   const worktreeEnabled = useAppStore((state) => state.bootstrap?.capabilities.worktree ?? false);
+  const subtreeEnabled = useAppStore((state) => state.bootstrap?.capabilities.subtree ?? false);
   const stashCount = useAppStore((state) => Object.values(state.stashes).reduce((sum, items) => sum + items.length, 0));
   const shelfCount = useAppStore((state) => Object.values(state.shelves).reduce((sum, items) => sum + items.length, 0));
+  const subtreeCount = useAppStore((state) => Object.values(state.subtrees).reduce((sum, items) => sum + items.length, 0));
   const storedTab = useAppStore((state) => state.bootstrap?.state.activeTab);
-  const tab = stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : 'changes';
+  const tab = stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : subtreeEnabled && storedTab === 'subtree' ? 'subtree' : 'changes';
   const setTab = useAppStore((state) => state.setActiveTab);
   const changelistEnabled = useAppStore((state) => state.bootstrap?.capabilities.changelist ?? false);
   const changelists = useAppStore((state) => state.changelists);
@@ -88,7 +93,8 @@ export function CommitPanel() {
   const [amend, setAmend] = useState(false);
   const [context, setContext] = useState<{ x: number; y: number; repo: RepositoryStatus; file: FileChange }>();
   const { t } = useI18n();
-  const repos = snapshot?.repositories ?? [];
+  const repos = snapshot?.repositories ?? emptyRepositories;
+  const gitRepos = useMemo(() => repos.filter((repo) => repo.meta.kind === 'git'), [repos]);
   const selectedByRepo = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const key of selected) { const [repoId, path] = key.split('\0'); map.set(repoId, [...(map.get(repoId) ?? []), path]); }
@@ -111,14 +117,14 @@ export function CommitPanel() {
   return (
     <aside className="commit-panel" onClick={() => setContext(undefined)}>
       <div className="panel-toolbar"><strong>VERSIONDOCK</strong><span /><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button></div>
-      <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="git-commit" /><span>{t('Changes')}</span><b>{repos.reduce((sum, repo) => sum + repo.files.length, 0)}</b></button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" /><span>{t('Shelf')}</span><b>{shelfCount}</b></button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" /><span>{t('Stash')}</span><b>{stashCount}</b></button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="repo-clone" /><span>{t('Worktrees')}</span></button>}</div>
-      {tab === 'worktree' ? <WorktreePanel repos={repos.filter((repo) => repo.meta.kind === 'git')} /> : tab === 'shelf' ? <ShelfPanel repos={repos.filter((repo) => repo.meta.kind === 'git')} selectedPaths={selectedByRepo} /> : tab === 'stash' ? <StashPanel repos={repos.filter((repo) => repo.meta.kind === 'git')} selectedPaths={selectedByRepo} /> : <>
+      <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="git-commit" /><span>{t('Changes')}</span><b>{repos.reduce((sum, repo) => sum + repo.files.length, 0)}</b></button>{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" /><span>{t('Stash')}</span><b>{stashCount}</b></button>}{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" /><span>{t('Shelf')}</span><b>{shelfCount}</b></button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="repo-clone" /><span>{t('Worktrees')}</span></button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo-clone" /><span>{t('Subtree')}</span><b>{subtreeCount}</b></button>}</div>
+      {tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : <>
       {conflicts.length > 0 && (
         <button className="conflict-banner" onClick={() => void openMerge(conflicts[0])}><Codicon name="warning" /><span><strong>{t('Resolve conflicts')}</strong><small>{conflicts.length} {t('Conflicts')}</small></span><Codicon name="chevron-right" /></button>
       )}
       <div className="changes-actions">
-        <button disabled={!activeRepo || !activePaths.length || activeRepo.meta.kind !== 'git'} onClick={() => activeRepo && void stage(activeRepo.meta.id, activePaths)}><Codicon name="add" />{t('Stage')}</button>
-        <button disabled={!activeRepo || !activePaths.length || activeRepo.meta.kind !== 'git'} onClick={() => activeRepo && void unstage(activeRepo.meta.id, activePaths)}><Codicon name="remove" />{t('Unstage')}</button>
+        <button disabled={!activeRepo || !activePaths.length || activeRepo.meta.kind !== 'git'} onClick={() => activeRepo && void stage(activeRepo.meta.id, activePaths)}><Codicon name="add" /><span>{t('Stage')}</span></button>
+        <button disabled={!activeRepo || !activePaths.length || activeRepo.meta.kind !== 'git'} onClick={() => activeRepo && void unstage(activeRepo.meta.id, activePaths)}><Codicon name="remove" /><span>{t('Unstage')}</span></button>
         <span />
         <button className={viewMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => setFileViewMode('tree')}><Codicon name="list-tree" /></button>
         <button className={viewMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setFileViewMode('list')}><Codicon name="list-flat" /></button>
@@ -132,7 +138,7 @@ export function CommitPanel() {
       </div>
       <div className="commit-form">
         <div className="selected-summary"><span><i style={{ background: activeRepo?.meta.color }} />{activeRepo?.meta.name ?? t('Select a repository')}</span><b>{activePaths.length || activeRepo?.files.length || 0}</b></div>
-        <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder={t('Commit message')} />
+        <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(false); }} />
         {activeRepo?.meta.kind === 'git' && <label className="amend"><input type="checkbox" checked={amend} onChange={(event) => setAmend(event.target.checked)} />Amend</label>}
         <div className="commit-buttons">
           <button disabled={!message.trim() || !activeRepo || busy} onClick={() => void doCommit(false)}><Codicon name="check" />{t('Commit')}</button>

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
@@ -8,8 +8,9 @@ use crate::{
     models::{
         BranchCompareResult, BranchInfo, BranchOperation, CommitDetail, CommitFile, CommitNode,
         ConflictChoice, DesktopError, DiffDocument, HistoryPage, MergeVersions, RemoteInfo,
-        RemoteOperation, RepositoryMeta, StashEntry, StashOperation, SyncAction, TagInfo,
-        TagOperation, VcsKind, WorktreeEntry, WorktreeOperation,
+        RemoteOperation, RepositoryMeta, StashEntry, StashOperation, SubtreeEntry,
+        SubtreeOperation, SubtreeState, SyncAction, TagInfo, TagOperation, VcsKind, WorktreeEntry,
+        WorktreeOperation,
     },
     state::safe_relative,
 };
@@ -18,6 +19,7 @@ const FIELD: char = '\u{1f}';
 const RECORD: char = '\u{1e}';
 const DIFF_MAX_BYTES: usize = 5 * 1024 * 1024;
 const DIFF_MAX_LINES: usize = 50_000;
+const SUBTREE_CONFIG_PREFIX: &str = "versiondock.subtree.";
 
 async fn execute(
     program: &str,
@@ -44,6 +46,24 @@ async fn git(
     let mut safe = vec!["-c".into(), "core.quotepath=false".into()];
     safe.extend(args);
     execute("git", safe, repo, token).await
+}
+
+async fn git_network(
+    args: Vec<String>,
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<cli::CommandOutput, DesktopError> {
+    let mut safe = vec!["-c".into(), "core.quotepath=false".into()];
+    safe.extend(args);
+    cli::run(
+        "git",
+        &safe,
+        Path::new(&repo.root_path),
+        None,
+        cli::NETWORK_TIMEOUT,
+        token,
+    )
+    .await
 }
 
 async fn svn(
@@ -1091,6 +1111,437 @@ pub async fn worktrees(
         entries.push(entry);
     }
     Ok(entries)
+}
+
+pub async fn subtrees(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<SubtreeEntry>, DesktopError> {
+    ensure_git(repo)?;
+    let raw = git(
+        vec![
+            "config".into(),
+            "--local".into(),
+            "--null".into(),
+            "--list".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let mut records = HashMap::<String, SubtreeConfigRecord>::new();
+    for item in raw.split('\0').filter(|item| !item.is_empty()) {
+        let Some((key, value)) = item.split_once('\n') else {
+            continue;
+        };
+        let Some((id, field)) = parse_subtree_config_key(key) else {
+            continue;
+        };
+        let record = records.entry(id.into()).or_default();
+        match field {
+            "version" => record.version = Some(value.into()),
+            "prefix" => record.prefix = Some(value.into()),
+            "remote" => record.remote = Some(value.into()),
+            "branch" => record.branch = Some(value.into()),
+            "squash" => record.squash = Some(value.into()),
+            "state" => record.state = Some(value.into()),
+            _ => unreachable!("subtree config keys are allowlisted"),
+        }
+    }
+
+    let mut entries = records
+        .into_iter()
+        .filter_map(|(id, record)| subtree_entry_from_config(id, record).ok())
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        left.prefix
+            .cmp(&right.prefix)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(entries)
+}
+
+pub async fn subtree_operation(
+    repo: &RepositoryMeta,
+    operation: SubtreeOperation,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    ensure_git(repo)?;
+    match operation {
+        SubtreeOperation::Add {
+            prefix,
+            remote,
+            branch,
+            squash,
+        } => {
+            validate_subtree_prefix(repo, &prefix)?;
+            validate_subtree_remote(repo, &remote, token).await?;
+            validate_ref(&branch)?;
+            let existing = subtrees(repo, token).await?;
+            if existing.iter().any(|entry| entry.prefix == prefix) {
+                return Err(DesktopError::new(
+                    "SUBTREE_PREFIX_EXISTS",
+                    "A subtree is already registered for this prefix",
+                    true,
+                ));
+            }
+            let id = subtree_id(&prefix);
+            if existing.iter().any(|entry| entry.id == id) {
+                return Err(DesktopError::new(
+                    "SUBTREE_ID_COLLISION",
+                    "Subtree registration ID collision",
+                    false,
+                ));
+            }
+            let entry = SubtreeEntry {
+                id,
+                prefix,
+                remote,
+                branch,
+                squash,
+                state: SubtreeState::Pending,
+            };
+            persist_subtree(repo, &entry, token).await?;
+            let mut args = vec![
+                "subtree".into(),
+                "add".into(),
+                "--prefix".into(),
+                entry.prefix.clone(),
+            ];
+            if entry.squash {
+                args.push("--squash".into());
+            }
+            args.extend([entry.remote.clone(), entry.branch.clone()]);
+            if let Err(error) = git_network(args, repo, token).await {
+                remove_subtree_config(repo, &entry.id, token).await;
+                return Err(error);
+            }
+            activate_subtree(repo, &entry.id, token).await.map_err(|_| {
+                DesktopError::new(
+                    "SUBTREE_REGISTRATION_PENDING",
+                    "Subtree was added, but its registration is pending recovery",
+                    true,
+                )
+            })
+        }
+        SubtreeOperation::Pull { subtree_id } => {
+            let entry = registered_subtree(repo, &subtree_id, token).await?;
+            ensure_active_subtree(repo, &entry, token).await?;
+            let mut args = vec![
+                "subtree".into(),
+                "pull".into(),
+                "--prefix".into(),
+                entry.prefix,
+            ];
+            if entry.squash {
+                args.push("--squash".into());
+            }
+            args.extend([entry.remote, entry.branch]);
+            git_network(args, repo, token).await.map(|_| ())
+        }
+        SubtreeOperation::Push { subtree_id } => {
+            let entry = registered_subtree(repo, &subtree_id, token).await?;
+            ensure_active_subtree(repo, &entry, token).await?;
+            git_network(
+                vec![
+                    "subtree".into(),
+                    "push".into(),
+                    "--prefix".into(),
+                    entry.prefix,
+                    entry.remote,
+                    entry.branch,
+                ],
+                repo,
+                token,
+            )
+            .await
+            .map(|_| ())
+        }
+        SubtreeOperation::Remove { subtree_id } => {
+            let entry = registered_subtree(repo, &subtree_id, token).await?;
+            remove_subtree_config_strict(repo, &entry.id, token).await?;
+            Ok(())
+        }
+    }
+}
+
+#[derive(Default)]
+struct SubtreeConfigRecord {
+    version: Option<String>,
+    prefix: Option<String>,
+    remote: Option<String>,
+    branch: Option<String>,
+    squash: Option<String>,
+    state: Option<String>,
+}
+
+fn parse_subtree_config_key(key: &str) -> Option<(&str, &str)> {
+    let suffix = key.strip_prefix(SUBTREE_CONFIG_PREFIX)?;
+    let (id, field) = suffix.split_once('.')?;
+    if id.len() != 32
+        || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !matches!(
+            field,
+            "version" | "prefix" | "remote" | "branch" | "squash" | "state"
+        )
+        || field.contains('.')
+    {
+        return None;
+    }
+    Some((id, field))
+}
+
+fn subtree_entry_from_config(
+    id: String,
+    record: SubtreeConfigRecord,
+) -> Result<SubtreeEntry, DesktopError> {
+    if record.version.as_deref() != Some("1") {
+        return Err(invalid_subtree_registry(&id));
+    }
+    let prefix = record.prefix.ok_or_else(|| invalid_subtree_registry(&id))?;
+    let remote = record.remote.ok_or_else(|| invalid_subtree_registry(&id))?;
+    let branch = record.branch.ok_or_else(|| invalid_subtree_registry(&id))?;
+    let squash = match record.squash.as_deref() {
+        Some("true") => true,
+        Some("false") => false,
+        _ => return Err(invalid_subtree_registry(&id)),
+    };
+    let state = match record.state.as_deref() {
+        Some("active") => SubtreeState::Active,
+        Some("pending") => SubtreeState::Pending,
+        _ => return Err(invalid_subtree_registry(&id)),
+    };
+    if !is_safe_subtree_relative_path(&prefix)
+        || validate_ref(&remote).is_err()
+        || validate_ref(&branch).is_err()
+        || subtree_id(&prefix) != id
+    {
+        return Err(invalid_subtree_registry(&id));
+    }
+    Ok(SubtreeEntry {
+        id,
+        prefix,
+        remote,
+        branch,
+        squash,
+        state,
+    })
+}
+
+async fn registered_subtree(
+    repo: &RepositoryMeta,
+    subtree_id: &str,
+    token: &CancellationToken,
+) -> Result<SubtreeEntry, DesktopError> {
+    validate_subtree_id(subtree_id)?;
+    subtrees(repo, token)
+        .await?
+        .into_iter()
+        .find(|entry| entry.id == subtree_id)
+        .ok_or_else(|| {
+            DesktopError::new(
+                "SUBTREE_NOT_FOUND",
+                "Subtree registration was not found",
+                true,
+            )
+        })
+}
+
+async fn persist_subtree(
+    repo: &RepositoryMeta,
+    entry: &SubtreeEntry,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    for (field, value) in [
+        ("version", "1"),
+        ("prefix", entry.prefix.as_str()),
+        ("remote", entry.remote.as_str()),
+        ("branch", entry.branch.as_str()),
+        ("squash", if entry.squash { "true" } else { "false" }),
+        ("state", "pending"),
+    ] {
+        if let Err(error) = git(
+            vec![
+                "config".into(),
+                "--local".into(),
+                subtree_config_key(&entry.id, field),
+                value.into(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        {
+            remove_subtree_config(repo, &entry.id, token).await;
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+async fn activate_subtree(
+    repo: &RepositoryMeta,
+    id: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    git(
+        vec![
+            "config".into(),
+            "--local".into(),
+            subtree_config_key(id, "state"),
+            "active".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn remove_subtree_config_strict(
+    repo: &RepositoryMeta,
+    id: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    git(
+        vec![
+            "config".into(),
+            "--local".into(),
+            "--remove-section".into(),
+            subtree_config_section(id),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|_| ())
+}
+
+async fn remove_subtree_config(repo: &RepositoryMeta, id: &str, token: &CancellationToken) {
+    let _ = git(
+        vec![
+            "config".into(),
+            "--local".into(),
+            "--remove-section".into(),
+            subtree_config_section(id),
+        ],
+        repo,
+        token,
+    )
+    .await;
+}
+
+fn subtree_config_section(id: &str) -> String {
+    format!("{}.{}", SUBTREE_CONFIG_PREFIX.trim_end_matches('.'), id)
+}
+
+fn subtree_config_key(id: &str, field: &str) -> String {
+    format!("{SUBTREE_CONFIG_PREFIX}{id}.{field}")
+}
+
+fn subtree_id(prefix: &str) -> String {
+    hex::encode(Sha256::digest(prefix.as_bytes()))[..32].into()
+}
+
+fn validate_subtree_id(value: &str) -> Result<(), DesktopError> {
+    if value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(DesktopError::new(
+            "INVALID_SUBTREE_ID",
+            "Invalid subtree registration ID",
+            false,
+        ))
+    }
+}
+
+fn validate_subtree_prefix(repo: &RepositoryMeta, value: &str) -> Result<(), DesktopError> {
+    if !is_safe_subtree_relative_path(value) {
+        return Err(DesktopError::new(
+            "INVALID_SUBTREE_PREFIX",
+            "Subtree prefix must be a safe repository-relative path",
+            false,
+        ));
+    }
+    safe_relative(Path::new(&repo.root_path), value, true).map_err(|_| {
+        DesktopError::new(
+            "INVALID_SUBTREE_PREFIX",
+            "Subtree prefix must not traverse a symbolic link",
+            false,
+        )
+    })?;
+    Ok(())
+}
+
+async fn validate_subtree_remote(
+    repo: &RepositoryMeta,
+    value: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    validate_ref(value).map_err(|_| {
+        DesktopError::new(
+            "INVALID_SUBTREE_REMOTE",
+            "Subtree remote must be an existing Git remote name",
+            false,
+        )
+    })?;
+    git(
+        vec!["remote".into(), "get-url".into(), value.into()],
+        repo,
+        token,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|_| {
+        DesktopError::new(
+            "SUBTREE_REMOTE_NOT_FOUND",
+            "Subtree remote is not configured for this repository",
+            true,
+        )
+    })
+}
+
+async fn ensure_active_subtree(
+    repo: &RepositoryMeta,
+    entry: &SubtreeEntry,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if entry.state != SubtreeState::Active {
+        return Err(DesktopError::new(
+            "SUBTREE_REGISTRATION_PENDING",
+            "Subtree registration is pending recovery; unregister it before retrying",
+            true,
+        ));
+    }
+    validate_subtree_prefix(repo, &entry.prefix)?;
+    validate_subtree_remote(repo, &entry.remote, token).await
+}
+
+fn is_safe_subtree_relative_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 4 * 1024
+        || value.contains(['\0', '\r', '\n'])
+        || Path::new(value).is_absolute()
+    {
+        return false;
+    }
+    let mut has_normal_component = false;
+    for component in Path::new(value).components() {
+        match component {
+            std::path::Component::Normal(_) => has_normal_component = true,
+            _ => return false,
+        }
+    }
+    has_normal_component
+}
+
+fn invalid_subtree_registry(id: &str) -> DesktopError {
+    DesktopError::new(
+        "INVALID_SUBTREE_REGISTRY",
+        format!("Invalid subtree registry entry: {id}"),
+        false,
+    )
 }
 
 pub async fn remotes(

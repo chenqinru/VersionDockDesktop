@@ -9,10 +9,10 @@
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "VersionDock Desktop: 仅启动前端",
+      "name": "VersionDock Desktop: Browser Dev（演示数据）",
       "type": "node-terminal",
       "request": "launch",
-      "command": "npm run dev",
+      "command": "npm run browser:dev",
       "cwd": "${workspaceFolder}"
     }
   ]

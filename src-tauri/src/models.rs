@@ -158,6 +158,15 @@ pub enum BridgeCommand {
         repo_id: String,
         operation: WorktreeOperation,
     },
+    Subtrees {
+        workspace_id: String,
+        repo_id: String,
+    },
+    SubtreeOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: SubtreeOperation,
+    },
     BranchCompare {
         workspace_id: String,
         repo_id: String,
@@ -287,6 +296,33 @@ pub enum WorktreeOperation {
     Lock { path: String },
     Unlock { path: String },
     Prune,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SubtreeOperation {
+    Add {
+        prefix: String,
+        remote: String,
+        branch: String,
+        squash: bool,
+    },
+    Pull {
+        subtree_id: String,
+    },
+    Push {
+        subtree_id: String,
+    },
+    Remove {
+        subtree_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtreeState {
+    Active,
+    Pending,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -638,6 +674,17 @@ pub struct WorktreeEntry {
     pub lock_reason: Option<String>,
     pub prunable: bool,
     pub main: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtreeEntry {
+    pub id: String,
+    pub prefix: String,
+    pub remote: String,
+    pub branch: String,
+    pub squash: bool,
+    pub state: SubtreeState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

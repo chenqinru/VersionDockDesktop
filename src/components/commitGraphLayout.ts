@@ -20,8 +20,11 @@ const laneColor = (lane: number) => GRAPH_PALETTE[lane % GRAPH_PALETTE.length];
 export function layoutCommits(commits: CommitNode[]): GraphCommit[] {
   const visible = new Set(commits.map((commit) => scoped(commit)));
   const active: Array<string | null> = [];
+  let previousRepoId: string | undefined;
 
   return commits.map((commit) => {
+    if (previousRepoId !== undefined && previousRepoId !== commit.repoId) active.length = 0;
+    previousRepoId = commit.repoId;
     const key = scoped(commit);
     let lane = active.indexOf(key);
     const startsHere = lane < 0;

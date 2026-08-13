@@ -4,17 +4,31 @@ import '@vscode/codicons/dist/codicon.css';
 import './styles.css';
 import { App } from './App';
 import { BridgeContext } from './platform/context';
-import { TauriBridge } from './platform/bridge';
+import type { VersionDockBridge } from './platform/bridge';
 import { useAppStore } from './store/appStore';
 
-const bridge = new TauriBridge();
+let disposeBridge: () => void = () => undefined;
 
 async function start() {
+  const browserDev = import.meta.env.MODE === 'browser';
+  const bridge: VersionDockBridge = browserDev
+    ? new (await import('./platform/browserDevBridge')).BrowserDevBridge()
+    : new (await import('./platform/bridge')).TauriBridge();
+  const disposable = bridge as VersionDockBridge & { dispose?: () => void };
+  if (typeof disposable.dispose === 'function') disposeBridge = () => disposable.dispose?.();
+
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode><BridgeContext.Provider value={bridge}><App /></BridgeContext.Provider></React.StrictMode>,
   );
-  try { await bridge.initialize(); } catch (error) { console.warn('Native event channel unavailable', error); }
+  const initializable = bridge as VersionDockBridge & { initialize?: () => Promise<void> };
+  if (typeof initializable.initialize === 'function') {
+    try { await initializable.initialize(); } catch (error) { console.warn('Native event channel unavailable', error); }
+  }
   await useAppStore.getState().initialize(bridge);
+  if (browserDev) {
+    const firstCommit = useAppStore.getState().history[0];
+    if (firstCommit) await useAppStore.getState().selectCommit(firstCommit);
+  }
 }
 
 void start().catch((error) => {
@@ -22,4 +36,4 @@ void start().catch((error) => {
   document.body.dataset.startupError = error instanceof Error ? error.message : String(error);
 });
 
-window.addEventListener('beforeunload', () => bridge.dispose());
+window.addEventListener('beforeunload', () => disposeBridge());

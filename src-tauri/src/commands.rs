@@ -78,6 +78,7 @@ async fn dispatch(
                     shelf: true,
                     changelist: true,
                     worktree: true,
+                    subtree: true,
                     compare: true,
                     remote_management: true,
                     ..DesktopCapabilities::default()
@@ -377,6 +378,29 @@ async fn dispatch(
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, async {
                 vcs::worktree_operation(&state.config_dir, &repo, operation, token).await
+            })
+            .await?;
+            json(true)
+        }
+        BridgeCommand::Subtrees {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit =
+                state.read_limit.acquire().await.map_err(|_| {
+                    DesktopError::new("APP_CLOSING", "Application is closing", true)
+                })?;
+            json(vcs::subtrees(&repo, token).await?)
+        }
+        BridgeCommand::SubtreeOperation {
+            workspace_id,
+            repo_id,
+            operation,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            with_write(state, &repo_id, async {
+                vcs::subtree_operation(&repo, operation, token).await
             })
             .await?;
             json(true)

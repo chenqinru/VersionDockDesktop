@@ -131,6 +131,13 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	workspace_id: string,
 	repo_id: string,
 	operation: WorktreeOperation,
+} } | { type: "subtrees"; payload: {
+	workspace_id: string,
+	repo_id: string,
+} } | { type: "subtreeOperation"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	operation: SubtreeOperation,
 } } | { type: "branchCompare"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -348,6 +355,19 @@ export type StashEntry = {
 };
 
 export type StashOperation = { type: "create"; message: string; paths: string[]; include_untracked: boolean } | { type: "apply"; reference: string } | { type: "pop"; reference: string } | { type: "drop"; reference: string };
+
+export type SubtreeEntry = {
+	id: string,
+	prefix: string,
+	remote: string,
+	branch: string,
+	squash: boolean,
+	state: SubtreeState,
+};
+
+export type SubtreeOperation = { type: "add"; prefix: string; remote: string; branch: string; squash: boolean } | { type: "pull"; subtree_id: string } | { type: "push"; subtree_id: string } | { type: "remove"; subtree_id: string };
+
+export type SubtreeState = "active" | "pending";
 
 export type SyncAction = "fetch" | "pull" | "push" | "update";
 
