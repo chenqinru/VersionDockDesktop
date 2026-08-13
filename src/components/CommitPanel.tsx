@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
@@ -6,9 +6,11 @@ import type { FileChange, RepositoryStatus } from '../bindings/generated';
 import { StashPanel } from './StashPanel';
 import { ShelfPanel } from './ShelfPanel';
 import { buildFileTree, type FileTreeNode } from './fileTree';
-import { ChangelistManager } from './ChangelistManager';
 import { WorktreePanel } from './WorktreePanel';
 import { SubtreePanel } from './SubtreePanel';
+import { PushPanel } from './PushPanel';
+import { FileIcon } from './FileIcon';
+import { branchColor } from './branchColor';
 
 const emptyRepositories: RepositoryStatus[] = [];
 
@@ -17,39 +19,59 @@ function StatusMark({ file }: { file: FileChange }) {
   return <span className={`status-mark status-${file.status}`}>{value}</span>;
 }
 
-function TreeNode({ node, depth, repo, selected, toggle, onFile, onContext }: { node: FileTreeNode; depth: number; repo: RepositoryStatus; selected: Set<string>; toggle: (key: string) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void }) {
-  const [expanded, setExpanded] = useState(true);
-  if (!node.file) return <div className="tree-directory"><button style={{ paddingLeft: 18 + depth * 14 }} onClick={() => setExpanded(!expanded)}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><Codicon name={expanded ? 'folder-opened' : 'folder'} /><span>{node.name}</span></button>{expanded && node.children.map((child) => <TreeNode key={child.path} node={child} depth={depth + 1} repo={repo} selected={selected} toggle={toggle} onFile={onFile} onContext={onContext} />)}</div>;
+function SelectionCheckbox({ label, checked, indeterminate = false, disabled = false, onChange }: { label: string; checked: boolean; indeterminate?: boolean; disabled?: boolean; onChange: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <span className={`selection-checkbox ${checked || indeterminate ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}>
+    <input ref={ref} aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={onChange} onClick={(event) => event.stopPropagation()} />
+    {(checked || indeterminate) && <Codicon name={indeterminate ? 'remove' : 'check'} />}
+  </span>;
+}
+
+type ExpansionCommand = { sequence: number; expanded: boolean };
+
+function TreeNode({ node, depth, repo, selected, setFiles, onFile, onContext, expansion }: { node: FileTreeNode; depth: number; repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; expansion: ExpansionCommand }) {
+  const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
+  const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
+  if (!node.file) {
+    const selectedCount = node.files.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
+    const allSelected = node.files.length > 0 && selectedCount === node.files.length;
+    return <div className="tree-directory"><div className="directory-row" style={{ paddingLeft: 20 + depth * 20 }}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} onChange={() => setFiles(repo.meta.id, node.files.map((file) => file.path), !allSelected)} /><button onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><b>{node.files.length}</b></div>{expanded && node.children.map((child) => <TreeNode key={child.path} node={child} depth={depth + 1} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} expansion={expansion} />)}</div>;
+  }
   const key = `${repo.meta.id}\0${node.file.path}`;
-  return <div className={`file-row ${node.file.conflicted ? 'conflicted' : ''}`} style={{ paddingLeft: 18 + depth * 14 }} onDoubleClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
-    <input aria-label={node.file.path} type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
-    <button onClick={() => onFile(node.file!)}><Codicon name="file" /><span className="file-name">{node.name}</span></button>
+  return <div className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''}`} style={{ paddingLeft: 20 + depth * 20 }} onDoubleClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
+    <SelectionCheckbox label={node.file.path} checked={selected.has(key)} onChange={() => setFiles(repo.meta.id, [node.file!.path], !selected.has(key))} />
+    <button onClick={() => onFile(node.file!)}><FileIcon name={node.name} /><span className="file-name">{node.name}</span></button>
     {node.file.staged && <span className="staged-dot" />}<StatusMark file={node.file} />
   </div>;
 }
 
-function RepoFiles({ repo, active, selected, toggle, onFile, onContext, viewMode }: { repo: RepositoryStatus; active: boolean; selected: Set<string>; toggle: (key: string) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; viewMode: 'tree' | 'list' }) {
-  const [expanded, setExpanded] = useState(true);
+function RepoFiles({ repo, selected, setFiles, onFile, onContext, viewMode, expansion }: { repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; viewMode: 'tree' | 'list'; expansion: ExpansionCommand }) {
+  const { t } = useI18n();
+  const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
+  const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
   const tree = useMemo(() => buildFileTree(repo.files), [repo.files]);
+  const selectedCount = repo.files.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
+  const allSelected = repo.files.length > 0 && selectedCount === repo.files.length;
+  const branch = branchColor(repo.branch || repo.revision);
   return (
-    <section className={`repo-change-group ${active ? 'active' : ''}`}>
-      <button className="repo-heading" onClick={() => setExpanded(!expanded)}>
-        <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
-        <i style={{ background: repo.meta.color }} />
-        <strong>{repo.meta.name}</strong>
-        <span className="branch-chip"><Codicon name="git-branch" />{repo.branch || repo.revision}</span>
+    <section className="repo-change-group">
+      <div className="repo-heading" style={{ background: `color-mix(in srgb, ${repo.meta.color} 18%, var(--versiondock-surface))` }}>
+        <SelectionCheckbox label={repo.meta.name} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!repo.files.length} onChange={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), !allSelected)} />
+        <button onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><span className="branch-chip" style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}><Codicon name="git-branch" />{repo.branch || repo.revision}</span></button>
         {(repo.ahead > 0 || repo.behind > 0) && <span className="repo-sync-state">{repo.ahead > 0 && `↑${repo.ahead}`}{repo.behind > 0 && ` ↓${repo.behind}`}</span>}
-        <b>{repo.files.length}</b>
-      </button>
-      {expanded && viewMode === 'tree' && tree.map((node) => <TreeNode key={node.path} node={node} depth={0} repo={repo} selected={selected} toggle={toggle} onFile={onFile} onContext={onContext} />)}
+        <b>{selectedCount}/{repo.files.length}</b>
+      </div>
+      {expanded && !repo.files.length && <div className="repo-no-changes">{t('No changes')}</div>}
+      {expanded && viewMode === 'tree' && tree.map((node) => <TreeNode key={node.path} node={node} depth={0} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} expansion={expansion} />)}
       {expanded && viewMode === 'list' && repo.files.map((file) => {
         const key = `${repo.meta.id}\0${file.path}`;
         const parts = file.path.split('/');
         const name = parts.pop();
         return (
-          <div className={`file-row ${file.conflicted ? 'conflicted' : ''}`} key={key} onDoubleClick={() => onFile(file)} onContextMenu={(event) => onContext(event, file)}>
-            <input aria-label={file.path} type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
-            <button onClick={() => onFile(file)}><Codicon name="file" /><span className="file-name">{name}</span><small>{parts.join('/')}</small></button>
+          <div className={`file-row status-${file.status} ${file.conflicted ? 'conflicted' : ''}`} style={{ paddingLeft: 20 }} key={key} onDoubleClick={() => onFile(file)} onContextMenu={(event) => onContext(event, file)}>
+            <SelectionCheckbox label={file.path} checked={selected.has(key)} onChange={() => setFiles(repo.meta.id, [file.path], !selected.has(key))} />
+            <button onClick={() => onFile(file)}><FileIcon name={name ?? file.path} /><span className="file-name">{name}</span><small>{parts.join('/')}</small></button>
             {file.staged && <span className="staged-dot" />}
             <StatusMark file={file} />
           </div>
@@ -61,12 +83,12 @@ function RepoFiles({ repo, active, selected, toggle, onFile, onContext, viewMode
 
 export function CommitPanel() {
   const snapshot = useAppStore((state) => state.snapshot);
-  const selectedRepoId = useAppStore((state) => state.selectedRepoId);
   const selectRepo = useAppStore((state) => state.selectRepo);
   const openDiff = useAppStore((state) => state.openDiff);
   const stage = useAppStore((state) => state.stage);
   const unstage = useAppStore((state) => state.unstage);
-  const commit = useAppStore((state) => state.commit);
+  const discard = useAppStore((state) => state.discard);
+  const commitMany = useAppStore((state) => state.commitMany);
   const conflicts = useAppStore((state) => state.conflicts);
   const openMerge = useAppStore((state) => state.openMerge);
   const busy = useAppStore((state) => state.busy);
@@ -82,15 +104,20 @@ export function CommitPanel() {
   const shelfCount = useAppStore((state) => Object.values(state.shelves).reduce((sum, items) => sum + items.length, 0));
   const subtreeCount = useAppStore((state) => Object.values(state.subtrees).reduce((sum, items) => sum + items.length, 0));
   const storedTab = useAppStore((state) => state.bootstrap?.state.activeTab);
-  const tab = stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : subtreeEnabled && storedTab === 'subtree' ? 'subtree' : 'changes';
+  const pushEnabled = snapshot?.repositories.some((repo) => repo.meta.kind === 'git') ?? false;
+  const tab = pushEnabled && storedTab === 'push' ? 'push' : stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : subtreeEnabled && storedTab === 'subtree' ? 'subtree' : 'changes';
   const setTab = useAppStore((state) => state.setActiveTab);
   const changelistEnabled = useAppStore((state) => state.bootstrap?.capabilities.changelist ?? false);
   const changelists = useAppStore((state) => state.changelists);
   const changelistOperation = useAppStore((state) => state.changelistOperation);
-  const [showChangelists, setShowChangelists] = useState(false);
   const [selected, setSelected] = useState(new Set<string>());
   const [message, setMessage] = useState('');
-  const [amend, setAmend] = useState(false);
+  const [amendRepos, setAmendRepos] = useState(new Set<string>());
+  const [commitMenu, setCommitMenu] = useState(false);
+  const [saveMenu, setSaveMenu] = useState(false);
+  const [viewMenu, setViewMenu] = useState(false);
+  const [expansion, setExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
+  const [textareaHeight, setTextareaHeight] = useState(54);
   const [context, setContext] = useState<{ x: number; y: number; repo: RepositoryStatus; file: FileChange }>();
   const { t } = useI18n();
   const repos = snapshot?.repositories ?? emptyRepositories;
@@ -100,49 +127,76 @@ export function CommitPanel() {
     for (const key of selected) { const [repoId, path] = key.split('\0'); map.set(repoId, [...(map.get(repoId) ?? []), path]); }
     return map;
   }, [selected]);
-  const activeRepo = repos.find((repo) => repo.meta.id === selectedRepoId) ?? repos[0];
-  const activePaths = activeRepo ? selectedByRepo.get(activeRepo.meta.id) ?? [] : [];
-
-  const toggle = (key: string) => setSelected((current) => {
+  const commitTargets = repos.filter((repo) => (selectedByRepo.get(repo.meta.id)?.length ?? 0) > 0);
+  const setFiles = (repoId: string, paths: string[], value: boolean) => setSelected((current) => {
     const next = new Set(current);
-    if (next.has(key)) next.delete(key); else next.add(key);
+    for (const path of paths) {
+      const key = `${repoId}\0${path}`;
+      if (value) next.add(key); else next.delete(key);
+    }
     return next;
   });
   const doCommit = async (push: boolean) => {
-    if (!activeRepo || !message.trim()) return;
-    await commit(activeRepo.meta.id, message, amend, activePaths, push);
+    if (!message.trim() || !commitTargets.length) return;
+    await commitMany(commitTargets.map((repo) => {
+      const paths = selectedByRepo.get(repo.meta.id) ?? [];
+      return {
+        repoId: repo.meta.id,
+        paths,
+        unstagePaths: repo.files.filter((file) => file.staged && !paths.includes(file.path)).map((file) => file.path),
+        amend: amendRepos.has(repo.meta.id),
+      };
+    }), message, push);
     setMessage(''); setSelected(new Set());
   };
-
+  const doSave = async (kind: 'stash' | 'shelf') => {
+    for (const repo of commitTargets.filter((item) => item.meta.kind === 'git')) {
+      const paths = selectedByRepo.get(repo.meta.id) ?? [];
+      if (kind === 'stash') await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: message.trim() || t('WIP stash'), paths, include_untracked: true });
+      else await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: message.trim() || t('WIP shelf'), paths });
+    }
+  };
+  const discardAll = async () => {
+    const total = repos.reduce((sum, repo) => sum + repo.files.length, 0);
+    if (!total || !confirm(t('Discard changes to {0} files? This cannot be undone.', total))) return;
+    for (const repo of repos) await discard(repo.meta.id, repo.files.map((file) => file.path));
+    setSelected(new Set());
+  };
+  const startTextareaResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = textareaHeight;
+    const move = (moveEvent: PointerEvent) => setTextareaHeight(Math.max(52, Math.min(window.innerHeight * 0.55, startHeight + startY - moveEvent.clientY)));
+    const finish = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  };
   return (
     <aside className="commit-panel" onClick={() => setContext(undefined)}>
-      <div className="panel-toolbar"><strong>VERSIONDOCK</strong><span /><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button></div>
-      <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="git-commit" /><span>{t('Changes')}</span><b>{repos.reduce((sum, repo) => sum + repo.files.length, 0)}</b></button>{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" /><span>{t('Stash')}</span><b>{stashCount}</b></button>}{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" /><span>{t('Shelf')}</span><b>{shelfCount}</b></button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="repo-clone" /><span>{t('Worktrees')}</span></button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo-clone" /><span>{t('Subtree')}</span><b>{subtreeCount}</b></button>}</div>
-      {tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : <>
+      <div className="panel-toolbar"><strong>{t('VersionDock Commit')}</strong><span /><button disabled={busy} title={t('Fetch')} onClick={() => void Promise.all(gitRepos.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button></div>
+      <div className="commit-commandbar"><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button>{tab === 'changes' && <><button disabled={!repos.some((repo) => repo.files.length) || busy} title={t('Rollback')} onClick={() => void discardAll()}><Codicon name="discard" /></button><button title={t('Expand all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: true }))}><Codicon name="expand-all" /></button><button title={t('Collapse all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button><div className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu(!viewMenu); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={viewMode === 'list' ? 'selected' : ''} onClick={() => { setFileViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{viewMode === 'list' && <Codicon name="check" />}</button><button className={viewMode === 'tree' ? 'selected' : ''} onClick={() => { setFileViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{viewMode === 'tree' && <Codicon name="check" />}</button></div>}</div></>}<span /></div>
+      <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}<b>{repos.reduce((sum, repo) => sum + repo.files.length, 0)}</b></button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Push')} className={tab === 'push' ? 'active' : ''} onClick={() => setTab('push')}><Codicon name="cloud-upload" />{tab === 'push' && <span>{t('Push')}</span>}{gitRepos.reduce((sum, repo) => sum + repo.ahead, 0) > 0 && <b>{gitRepos.reduce((sum, repo) => sum + repo.ahead, 0)}</b>}</button>}</div>
+      {tab === 'push' ? <PushPanel repos={gitRepos} /> : tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : <>
       {conflicts.length > 0 && (
         <button className="conflict-banner" onClick={() => void openMerge(conflicts[0])}><Codicon name="warning" /><span><strong>{t('Resolve conflicts')}</strong><small>{conflicts.length} {t('Conflicts')}</small></span><Codicon name="chevron-right" /></button>
       )}
-      <div className="changes-actions">
-        <button disabled={!activeRepo || !activePaths.length || activeRepo.meta.kind !== 'git'} onClick={() => activeRepo && void stage(activeRepo.meta.id, activePaths)}><Codicon name="add" /><span>{t('Stage')}</span></button>
-        <button disabled={!activeRepo || !activePaths.length || activeRepo.meta.kind !== 'git'} onClick={() => activeRepo && void unstage(activeRepo.meta.id, activePaths)}><Codicon name="remove" /><span>{t('Unstage')}</span></button>
-        <span />
-        <button className={viewMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => setFileViewMode('tree')}><Codicon name="list-tree" /></button>
-        <button className={viewMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setFileViewMode('list')}><Codicon name="list-flat" /></button>
-        {changelistEnabled && activeRepo && <button className={showChangelists ? 'selected' : ''} title={t('Changelists')} onClick={(event) => { event.stopPropagation(); setShowChangelists(!showChangelists); }}><Codicon name="list-unordered" /></button>}
-      </div>
-      {showChangelists && activeRepo && <ChangelistManager repoId={activeRepo.meta.id} close={() => setShowChangelists(false)} />}
       <div className="changes-scroll">
         {!repos.length && <div className="empty-state"><Codicon name="source-control" />{t('No repositories found')}</div>}
-        {repos.map((repo) => <div key={repo.meta.id} onMouseDown={() => void selectRepo(repo.meta.id)}><RepoFiles repo={repo} active={repo.meta.id === activeRepo?.meta.id} selected={selected} toggle={toggle} onFile={(file) => void openDiff(repo.meta.id, file.path, file.staged)} onContext={(event, file) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, repo, file }); }} viewMode={viewMode} /></div>)}
-        {!!repos.length && repos.every((repo) => !repo.files.length) && <div className="empty-state"><Codicon name="check" />{t('No changes')}</div>}
+        {repos.map((repo) => <div key={repo.meta.id} onMouseDown={() => void selectRepo(repo.meta.id)}><RepoFiles repo={repo} selected={selected} setFiles={setFiles} onFile={(file) => void openDiff(repo.meta.id, file.path, file.staged)} onContext={(event, file) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, repo, file }); }} viewMode={viewMode} expansion={expansion} /></div>)}
       </div>
       <div className="commit-form">
-        <div className="selected-summary"><span><i style={{ background: activeRepo?.meta.color }} />{activeRepo?.meta.name ?? t('Select a repository')}</span><b>{activePaths.length || activeRepo?.files.length || 0}</b></div>
-        <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(false); }} />
-        {activeRepo?.meta.kind === 'git' && <label className="amend"><input type="checkbox" checked={amend} onChange={(event) => setAmend(event.target.checked)} />Amend</label>}
-        <div className="commit-buttons">
-          <button disabled={!message.trim() || !activeRepo || busy} onClick={() => void doCommit(false)}><Codicon name="check" />{t('Commit')}</button>
-          {activeRepo?.meta.kind === 'git' && <button disabled={!message.trim() || busy} onClick={() => void doCommit(true)}><Codicon name="cloud-upload" />{t('Commit & Push')}</button>}
+        <div className="commit-resize-grip" role="separator" aria-label={t('Resize commit message')} aria-orientation="horizontal" onPointerDown={startTextareaResize}><i /></div>
+        {repos.length > 1 && <div className="commit-targets">{commitTargets.length === 0 ? <span>{t('No files selected')}</span> : commitTargets.map((repo) => <em key={repo.meta.id} style={{ color: repo.meta.color, background: `${repo.meta.color}28`, borderColor: `${repo.meta.color}60` }}><button title={t('Remove {0}', repo.meta.name)} onClick={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), false)}><Codicon name="close" /></button>{repo.meta.name}<b>{selectedByRepo.get(repo.meta.id)?.length}</b></em>)}</div>}
+        {commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(commitTargets[0].meta.id)} onChange={() => setAmendRepos((current) => { const next = new Set(current); if (next.has(commitTargets[0].meta.id)) next.delete(commitTargets[0].meta.id); else next.add(commitTargets[0].meta.id); return next; })} />{t('Amend')}</label></div>}
+        <textarea style={{ height: textareaHeight }} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(false); }} />
+        <div className="commit-actions">
+          <div className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doSave('stash')}><Codicon name="save" />{t('Stash')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setSaveMenu(!saveMenu); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu"><button onClick={() => { void doSave('stash'); setSaveMenu(false); }}><Codicon name="save" />{t('Stash changes')}</button><button onClick={() => { void doSave('shelf'); setSaveMenu(false); }}><Codicon name="archive" />{t('Shelve changes')}</button></div>}</div>
+          <div className="split-button commit-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doCommit(false)}><Codicon name="check" />{t('Commit')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setCommitMenu(!commitMenu); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
         </div>
       </div>
       {context && <div className="context-menu" style={{ left: context.x, top: context.y }} onClick={(event) => event.stopPropagation()}>

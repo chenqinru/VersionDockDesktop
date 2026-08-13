@@ -175,6 +175,18 @@ async fn dispatch(
             .await?;
             json(true)
         }
+        BridgeCommand::Discard {
+            workspace_id,
+            repo_id,
+            paths,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            with_write(state, &repo_id, async {
+                vcs::discard(&repo, &paths, token).await
+            })
+            .await?;
+            json(true)
+        }
         BridgeCommand::Commit {
             workspace_id,
             repo_id,
@@ -227,6 +239,17 @@ async fn dispatch(
                     DesktopError::new("APP_CLOSING", "Application is closing", true)
                 })?;
             json(vcs::commit_detail(&repo, &revision, token).await?)
+        }
+        BridgeCommand::UnpushedCommits {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit =
+                state.read_limit.acquire().await.map_err(|_| {
+                    DesktopError::new("APP_CLOSING", "Application is closing", true)
+                })?;
+            json(vcs::unpushed_commits(&repo, token).await?)
         }
         BridgeCommand::Branches {
             workspace_id,

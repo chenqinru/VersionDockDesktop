@@ -140,6 +140,95 @@ async fn real_git_branch_compare_and_remote_management() {
     .is_err());
 }
 
+#[tokio::test]
+async fn real_git_discard_restores_tracked_and_removes_untracked_files() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("tracked.txt"), "original\n").unwrap();
+    command("git", &["add", "tracked.txt"], directory.path());
+    command("git", &["commit", "-m", "initial"], directory.path());
+    std::fs::write(directory.path().join("tracked.txt"), "changed\n").unwrap();
+    std::fs::write(directory.path().join("untracked.txt"), "temporary\n").unwrap();
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    vcs::discard(
+        &repository,
+        &["tracked.txt".into(), "untracked.txt".into()],
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("tracked.txt")).unwrap(),
+        "original\n"
+    );
+    assert!(!directory.path().join("untracked.txt").exists());
+}
+
+#[tokio::test]
+async fn real_git_lists_only_unpushed_commits() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let remote = tempdir().unwrap();
+    command("git", &["init", "--bare"], remote.path());
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "base.txt"], directory.path());
+    command("git", &["commit", "-m", "base"], directory.path());
+    command(
+        "git",
+        &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["push", "--set-upstream", "origin", "main"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("local.txt"), "one\ntwo\n").unwrap();
+    command("git", &["add", "local.txt"], directory.path());
+    command("git", &["commit", "-m", "local only"], directory.path());
+
+    let commits = vcs::unpushed_commits(
+        &repo(directory.path(), VcsKind::Git),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0].message, "local only");
+    assert_eq!(commits[0].files_changed, 1);
+    assert_eq!(commits[0].additions, 2);
+}
+
 fn command(program: &str, args: &[&str], cwd: &Path) {
     let output = Command::new(program)
         .args(args)

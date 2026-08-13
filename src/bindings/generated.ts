@@ -62,6 +62,10 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	workspace_id: string,
 	repo_id: string,
 	paths: string[],
+} } | { type: "discard"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	paths: string[],
 } } | { type: "commit"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -83,6 +87,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	workspace_id: string,
 	repo_id: string,
 	revision: string,
+} } | { type: "unpushedCommits"; payload: {
+	workspace_id: string,
+	repo_id: string,
 } } | { type: "branches"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -385,6 +392,17 @@ export type ToolAvailability = {
 	git: boolean,
 	svn: boolean,
 	svnadmin: boolean,
+};
+
+export type UnpushedCommit = {
+	hash: string,
+	shortHash: string,
+	message: string,
+	author: string,
+	date: string,
+	filesChanged: number,
+	additions: number,
+	deletions: number,
 };
 
 export type VcsKind = "git" | "svn";

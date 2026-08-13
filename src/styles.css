@@ -94,7 +94,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .changes-scroll { flex: 1; overflow: auto; min-height: 0; }.repo-change-group { border-bottom: 1px solid var(--versiondock-border-soft); }.repo-heading { width: 100%; height: 30px; padding: 0 7px; display: flex; align-items: center; gap: 5px; text-align: left; }.repo-heading:hover { background: var(--versiondock-hover); }.repo-heading i { width: 7px; height: 7px; border-radius: 50%; }.repo-heading strong { font-size: 11px; letter-spacing: .5px; overflow: hidden; text-overflow: ellipsis; }.repo-heading .branch-chip { display: inline-flex; gap: 3px; padding: 1px 4px; border: 1px solid color-mix(in srgb, var(--versiondock-accent) 50%, transparent); color: var(--versiondock-accent); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.repo-heading > b { margin-left: auto; font-size: 10px; }
 .file-row { height: 27px; display: flex; align-items: center; padding: 0 7px 0 18px; gap: 5px; }.file-row:hover { background: var(--versiondock-hover); }.file-row input { width: 14px; height: 14px; accent-color: var(--versiondock-accent-bg); margin: 0; }.file-row button { min-width: 0; flex: 1; height: 100%; padding: 0; display: flex; align-items: center; gap: 5px; text-align: left; }.file-row .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.file-row small { color: var(--versiondock-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.status-mark { width: 14px; text-align: center; font-weight: 600; font-size: 11px; color: #e2c08d; }.status-added, .status-untracked { color: var(--versiondock-success); }.status-deleted, .conflicted .status-mark { color: var(--versiondock-danger); }.staged-dot { width: 5px; height: 5px; background: var(--versiondock-success); border-radius: 50%; }
 .tree-directory > button { width: 100%; height: 27px; display: flex; align-items: center; gap: 5px; text-align: left; }.tree-directory > button:hover { background: var(--versiondock-hover); }.tree-directory > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.commit-form { flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }.selected-summary { height: 23px; color: var(--versiondock-muted); font-size: 11px; }.commit-form textarea { width: 100%; height: 72px; padding: 7px; resize: vertical; border: 1px solid var(--versiondock-border); background: var(--versiondock-input); font-family: inherit; }.amend { height: 25px; display: flex; align-items: center; gap: 4px; font-size: 11px; }.commit-buttons { display: flex; gap: 5px; }.commit-buttons button { height: 30px; flex: 1; display: flex; justify-content: center; align-items: center; gap: 5px; background: var(--versiondock-accent-bg); color: white; }.commit-buttons button:last-child { background: color-mix(in srgb, var(--versiondock-accent-bg) 70%, var(--versiondock-surface)); }
 .context-menu { position: fixed; z-index: 150; width: 190px; padding: 4px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 20px #0008; animation: menu-in .1s ease-out; }.context-menu button { width: 100%; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; text-align: left; }.context-menu button:hover { background: var(--versiondock-selected); }.context-menu i { display: block; height: 1px; margin: 4px; background: var(--versiondock-border); }
 .history-workspace { height: 100%; display: flex; flex-direction: column; }.history-filters { height: 38px; padding: 5px 7px; border-bottom: 1px solid var(--versiondock-border); display: flex; gap: 5px; align-items: center; background: var(--versiondock-surface); }.history-filters label { width: 280px; height: 27px; display: flex; align-items: center; gap: 5px; padding: 0 6px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); }.history-filters input { min-width: 0; flex: 1; background: transparent; border: 0; outline: 0; }.history-filters > span { flex: 1; }.history-filters button { height: 27px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--versiondock-border); }.history-filters button:hover { background: var(--versiondock-hover); }
 .history-columns { min-height: 0; flex: 1; display: grid; grid-template-columns: 220px minmax(360px, 1fr) minmax(280px, 360px); }.branch-sidebar { overflow: auto; border-right: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }.branch-filter { height: 34px; display: flex; align-items: center; gap: 5px; padding: 0 7px; border-bottom: 1px solid var(--versiondock-border-soft); }.branch-filter span { flex: 1; overflow: hidden; text-overflow: ellipsis; }.branch-filter button { width: 24px; height: 24px; }.branch-group { padding: 3px 0; }.branch-group button { width: 100%; height: 26px; padding: 0 7px 0 20px; display: flex; align-items: center; gap: 6px; text-align: left; }.branch-group button:hover, .branch-group button.active { background: var(--versiondock-hover); }.branch-group button.active { color: var(--versiondock-accent); }.branch-group button span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.branch-group button b { font-size: 10px; }.branch-group .group-title { padding-left: 6px; height: 24px; }.branch-group .group-title strong { font-size: 10px; color: var(--versiondock-muted); }.svn-branch { padding: 12px; display: grid; grid-template-columns: 18px 1fr; gap: 4px; }.svn-branch small { grid-column: 2; color: var(--versiondock-muted); }
@@ -110,45 +109,166 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 
 /* VersionDock plugin visual alignment: dense, divider-led desktop workbench. */
 .panel-toolbar { height: 30px; padding: 0 6px 0 10px; background: var(--versiondock-surface); }
-.panel-toolbar strong { font-size: 10px; letter-spacing: .06em; }
+.panel-toolbar strong { font-size: 11px; font-weight: 600; line-height: 16px; letter-spacing: 0; }
 .panel-toolbar button { width: 24px; height: 24px; }
 
-.commit-tabs { height: 34px; display: flex; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-surface); }
+.commit-commandbar { flex: 0 0 29px; height: 29px; padding: 2px 6px; display: flex; align-items: center; gap: 1px; border-bottom: 1px solid var(--versiondock-border-soft); background: color-mix(in srgb, var(--versiondock-surface) 88%, var(--versiondock-bg)); }
+.commit-commandbar > span { flex: 1; }
+.commit-commandbar button { width: 24px; height: 24px; display: grid; place-items: center; color: var(--versiondock-muted); }
+.commit-commandbar button:hover, .commit-commandbar button.selected { color: var(--versiondock-text); background: var(--versiondock-hover); }
+.view-options { position: relative; }
+.view-options-menu { position: absolute; z-index: 140; top: 27px; left: 0; width: 152px; padding: 4px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 18px #0008; }
+.view-options-menu strong { display: block; padding: 3px 6px 5px; color: var(--versiondock-muted); font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.view-options-menu button { width: 100%; height: 27px; padding: 0 6px; display: flex; align-items: center; justify-content: flex-start; gap: 7px; color: var(--versiondock-text); }
+.view-options-menu button > .codicon:last-child { margin-left: auto; }
+
+.commit-tabs { flex: 0 0 29px; height: 29px; display: flex; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-bg); }
 .commit-tabs::-webkit-scrollbar { display: none; }
-.commit-tabs button { min-width: max-content; flex: 0 0 auto; justify-content: center; gap: 3px; padding: 0 4px; white-space: nowrap; color: var(--versiondock-muted); font-size: 10px; }
+.commit-tabs button { min-width: 0; flex: 0 0 auto; justify-content: flex-start; gap: 0; padding: 5px 10px; white-space: nowrap; color: var(--versiondock-muted); font-size: 12px; line-height: 17px; }
+.commit-tabs button.active { padding: 5px 12px; color: var(--versiondock-text); font-weight: 600; }
 .commit-tabs button:hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
-.commit-tabs button.active { color: var(--versiondock-text); }
-.commit-tabs button.active::after { height: 1px; }
-.commit-tabs button > .codicon { font-size: 12px; }
+.commit-tabs button.active::after { height: 2px; }
+.commit-tabs button > .codicon { margin-right: 0; font-size: 13px; }
+.commit-tabs button.active > .codicon { margin-right: 5px; }
 .commit-tabs button > span { min-width: 0; }
-.commit-tabs b { min-width: 14px; height: 13px; line-height: 13px; padding: 0 3px; border-radius: 7px; text-align: center; font-size: 9px; }
+.commit-tabs b { min-width: 16px; height: 16px; margin-left: 5px; padding: 0 5px; border-radius: 8px; line-height: 16px; text-align: center; font-size: 10px; font-weight: 700; }
+
+.commit-panel { background: var(--versiondock-bg); }
+.conflict-banner { margin: 6px 6px 5px; min-height: 43px; }
+.changes-actions { flex: 0 0 29px; height: 29px; padding: 2px 6px; background: var(--versiondock-bg); }
+.changes-actions button { color: var(--versiondock-muted); }
+.changes-scroll { background: var(--versiondock-surface); }
+.repo-change-group { border-bottom: 0; }
+.repo-heading { width: 100%; height: 26px; padding: 0 6px; display: flex; align-items: center; gap: 0; background: color-mix(in srgb, var(--versiondock-surface-alt) 72%, transparent); }
+.repo-heading > .selection-checkbox { flex: 0 0 auto; margin: 0 1px 0 0; }
+.repo-heading > button { min-width: 0; flex: 1; height: 100%; padding: 0 2px 0 4px; display: flex; align-items: center; gap: 4px; text-align: left; }
+.repo-heading > button > .codicon { font-size: 12px; }
+.repo-heading i { width: 8px; height: 8px; }
+.repo-heading strong { text-transform: uppercase; font-size: 11px; letter-spacing: .05em; }
+.repo-heading .branch-chip { max-width: 50%; height: 19px; align-items: center; padding: 0 5px; border: 1px solid; border-radius: 3px; font-size: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-heading > b { min-width: 18px; height: 16px; flex: 0 0 auto; padding: 0 5px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+.file-row, .directory-row { height: 22px; min-height: 22px; font-size: 12px; line-height: 22px; }
+.file-row { gap: 3px; padding-right: 8px; }
+.selection-checkbox { position: relative; width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border)); border-radius: 2px; background: transparent; color: #fff; }
+.selection-checkbox.selected {
+  border-color: var(--versiondock-accent-bg);
+  background-color: var(--versiondock-accent-bg);
+}
+.selection-checkbox.disabled { opacity: .3; pointer-events: none; }
+.selection-checkbox input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: default; }
+.selection-checkbox .codicon { position: relative; pointer-events: none; font-size: 11px; line-height: 11px; font-weight: 700; }
+.selection-checkbox:has(input:focus-visible) { outline: 1px solid var(--versiondock-focusBorder, var(--versiondock-accent)); outline-offset: 1px; }
+.directory-row > .selection-checkbox, .file-row > .selection-checkbox { margin-right: 3px; }
+.file-row button { gap: 4px; }
+.file-row .file-name { color: var(--versiondock-text); }
+.file-row.status-added .file-name, .file-row.status-untracked .file-name { color: var(--versiondock-success); }
+.file-row.status-deleted .file-name, .file-row.conflicted .file-name { color: var(--versiondock-danger); }
+.file-row.status-modified .file-name { color: #e2c08d; }
+.file-row small { font-size: 11px; line-height: 22px; }
+.directory-row { display: flex; align-items: center; gap: 0; padding-right: 8px; }
+.directory-row:hover { background: var(--versiondock-hover); }
+.directory-row > .selection-checkbox { flex: 0 0 auto; }
+.directory-row > button { min-width: 0; flex: 1; height: 100%; padding: 0 0 0 4px; display: flex; align-items: center; gap: 4px; text-align: left; }
+.directory-row > button > .codicon:first-child { width: 12px; font-size: 12px; }
+.directory-row > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.directory-row > b { min-width: 14px; color: var(--versiondock-muted); font-size: 11px; font-weight: 400; text-align: center; }
+.repo-no-changes { padding: 12px 8px; color: var(--versiondock-muted); font-size: 12px; text-align: center; }
+.status-mark { font-size: 11px; line-height: 22px; }
+.file-type-icon { width: 16px; height: 16px; flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; color: var(--versiondock-muted); }
+.file-type-icon .codicon { font-size: 16px; }
+.file-type-icon.folder { color: var(--versiondock-muted); }
+.file-type-icon.tone-typescript { color: #519aba; }
+.file-type-icon.tone-javascript { color: #e8d44d; }
+.file-type-icon.tone-vue { color: #42b883; }
+.file-type-icon.tone-svelte { color: #ff5a1f; }
+.file-type-icon.tone-rust { color: #dea584; }
+.file-type-icon.tone-java { color: #e76f00; }
+.file-type-icon.tone-kotlin { color: #a97bff; }
+.file-type-icon.tone-python { color: #4b8bbe; }
+.file-type-icon.tone-ruby { color: #cc342d; }
+.file-type-icon.tone-go { color: #00add8; }
+.file-type-icon.tone-code { color: #79c0ff; }
+.file-type-icon.tone-html { color: #e44d26; }
+.file-type-icon.tone-css { color: #42a5f5; }
+.file-type-icon.tone-json, .file-type-icon.tone-javascript { color: #e8d44d; }
+.file-type-icon.tone-yaml, .file-type-icon.tone-config { color: #cb6f6f; }
+.file-type-icon.tone-xml { color: #f19a3e; }
+.file-type-icon.tone-database { color: #c586c0; }
+.file-type-icon.tone-markdown { color: #75beff; }
+.file-type-icon.tone-shell { color: #89d185; }
+.file-type-icon.tone-powershell { color: #5391fe; }
+.file-type-icon.tone-image { color: #c586c0; }
+.file-type-icon.tone-npm { color: #cb3837; }
+.file-type-icon.tone-docker { color: #2496ed; }
+.file-type-icon.tone-git { color: #f05032; }
+.commit-form { position: relative; flex: 0 0 auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--versiondock-bg); border-top: 1px solid var(--versiondock-border); }
+.commit-resize-grip { position: absolute; z-index: 2; top: -4px; left: 0; right: 0; height: 9px; display: flex; align-items: center; justify-content: center; cursor: ns-resize; touch-action: none; }
+.commit-resize-grip i { width: 32px; height: 2px; border-radius: 2px; background: var(--versiondock-border); }
+.commit-resize-grip:hover i, .commit-resize-grip:active i { background: var(--versiondock-accent); }
+.commit-targets { min-height: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; }
+.commit-targets > span { color: var(--versiondock-muted); font-size: 11px; font-style: italic; }
+.commit-targets > em { height: 20px; padding: 1px 7px 1px 4px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid; border-radius: 10px; font-size: 11px; line-height: 16px; font-style: normal; }
+.commit-targets > em button { width: 12px; height: 12px; padding: 0; display: grid; place-items: center; color: inherit; }
+.commit-targets > em button .codicon { font-size: 10px; }
+.commit-targets > em b { min-width: 14px; height: 14px; padding: 0 3px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; background: rgba(255,255,255,.15); font-size: 10px; }
+.commit-options { min-height: 22px; display: flex; align-items: center; justify-content: flex-start; gap: 6px; }
+.commit-options label { display: flex; align-items: center; gap: 3px; color: var(--versiondock-text); font-size: 11px; }
+.commit-options input { width: 13px; height: 13px; margin: 0; }
+.commit-form textarea { display: block; width: 100%; min-height: 52px; padding: 5px 7px; resize: none; color: var(--versiondock-text); background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 3px; font-size: 12px; line-height: 1.5; }
+.commit-actions { display: flex; align-items: center; gap: 6px; }
+.split-button { position: relative; height: 30px; display: flex; border: 1px solid var(--versiondock-border); border-radius: 3px; overflow: visible; }
+.split-button > button { height: 28px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.split-button > button:first-child { min-width: 72px; padding: 0 9px; }
+.split-button > button:nth-child(2) { width: 25px; padding: 0; border-left: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
+.save-action { color: var(--versiondock-text); background: var(--versiondock-surface-alt); }
+.commit-action { min-width: 0; flex: 1; color: white; background: var(--versiondock-accent-bg); border-color: transparent; }
+.commit-action > button:first-child { flex: 1; }
+.split-button button:disabled { opacity: .42; }
+.split-menu { position: absolute; z-index: 130; left: 0; bottom: 34px; min-width: 165px; padding: 3px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 18px #0008; }
+.split-menu.right { left: auto; right: 0; }
+.split-menu button { width: 100%; height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 7px; text-align: left; }
+.split-menu button:hover { background: var(--versiondock-hover); }
+
+.push-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; background: var(--versiondock-bg); }
+.push-scroll { min-height: 0; flex: 1; overflow: auto; }
+.push-repo-section { border-bottom: 1px solid var(--versiondock-border-soft); }
+.push-repo-section > header { height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 6px; background: color-mix(in srgb, var(--versiondock-surface-alt) 72%, transparent); }
+.push-repo-section > header > input { width: 13px; height: 13px; margin: 0; accent-color: var(--versiondock-accent-bg); }
+.push-repo-section > header > button { min-width: 0; flex: 1; height: 100%; display: flex; align-items: center; gap: 5px; text-align: left; }
+.push-repo-section header i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
+.push-repo-section header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; font-size: 10px; letter-spacing: .06em; }
+.push-repo-section .branch-chip { min-width: 0; max-width: 48%; display: flex; align-items: center; gap: 3px; padding: 1px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-accent); border: 1px solid color-mix(in srgb, var(--versiondock-accent) 48%, transparent); font-size: 9px; }
+.ahead-badge, .publish-badge { display: flex; align-items: center; gap: 2px; color: var(--versiondock-success); font-size: 9px; font-weight: 600; }
+.publish-badge { color: var(--versiondock-accent); }
+.push-commit-row { min-height: 43px; display: flex; align-items: center; gap: 6px; padding: 4px 7px 4px 20px; border-top: 1px solid var(--versiondock-border-soft); }
+.push-commit-row:hover { background: var(--versiondock-hover); }
+.push-commit-row > .codicon { color: var(--versiondock-accent); }
+.push-commit-row > span { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.push-commit-row strong, .push-commit-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.push-commit-row small { color: var(--versiondock-muted); font-size: 9px; }
+.push-commit-row code { color: var(--versiondock-muted); font: 9px var(--versiondock-code); }
+.push-commit-row em { display: flex; gap: 3px; font: normal 9px var(--versiondock-code); }
+.push-commit-row em b { color: var(--versiondock-success); }.push-commit-row em i { color: var(--versiondock-danger); font-style: normal; }
+.push-state { min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--versiondock-muted); font-size: 10px; }
+.push-state.success { color: var(--versiondock-success); }
+.push-panel > footer { flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--versiondock-border); background: var(--versiondock-bg); }
+.push-panel > footer > span { display: block; padding: 0 2px 5px; color: var(--versiondock-muted); font-size: 10px; }
+.push-panel > footer > button { width: 100%; height: 29px; display: flex; align-items: center; justify-content: center; gap: 6px; color: white; background: var(--versiondock-accent-bg); }
 
 .changes-actions { height: 28px; gap: 2px; padding: 2px 5px; }
 .changes-actions button { height: 23px; padding: 0 5px; border-radius: 2px; }
 .repo-change-group { border-bottom-color: var(--versiondock-border); }
-.repo-change-group.active { box-shadow: inset 2px 0 var(--versiondock-accent); }
-.repo-heading { height: 27px; gap: 4px; padding: 0 6px; }
+.repo-heading { height: 26px; gap: 0; padding: 0 6px; }
+.repo-heading > .selection-checkbox { margin-right: 0; }
 .repo-heading i { width: 8px; height: 8px; }
-.repo-heading strong { font-size: 10px; text-transform: uppercase; letter-spacing: .045em; }
-.repo-heading .branch-chip { max-width: 46%; height: 18px; align-items: center; padding: 0 4px; border-radius: 2px; }
+.repo-heading strong { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.repo-heading .branch-chip { max-width: 46%; height: 19px; align-items: center; padding: 0 5px; border-radius: 3px; }
 .repo-sync-state { margin-left: auto; color: var(--versiondock-success); font-size: 10px; white-space: nowrap; }
 .repo-sync-state + b { margin-left: 2px; }
-.file-row, .tree-directory > button { height: 24px; }
-.file-row { gap: 4px; padding-right: 6px; }
-.file-row input { width: 13px; height: 13px; }
-.file-row .codicon, .tree-directory .codicon { font-size: 13px; }
-.status-mark { font-size: 10px; }
+.file-row, .tree-directory > button { height: 22px; min-height: 22px; }
+.file-row { gap: 3px; padding-right: 8px; }
+.file-row .selection-checkbox { width: 13px; height: 13px; }
 .changes-scroll .empty-state { min-height: 150px; }
-
-.commit-form { padding: 5px 6px 6px; }
-.selected-summary { height: 24px; display: flex; align-items: center; font-size: 10px; }
-.selected-summary span { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; font-weight: 600; letter-spacing: .035em; }
-.selected-summary i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
-.selected-summary b { font-weight: 500; }
-.commit-form textarea { height: 62px; padding: 6px; line-height: 1.4; resize: none; }
-.amend { height: 23px; }
-.commit-buttons { gap: 4px; }
-.commit-buttons button { height: 28px; }
 
 .history-filters { height: 36px; padding: 4px 6px; gap: 4px; }
 .history-filters label { width: clamp(170px, 22vw, 290px); height: 27px; }

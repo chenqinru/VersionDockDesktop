@@ -72,6 +72,11 @@ pub enum BridgeCommand {
         repo_id: String,
         paths: Vec<String>,
     },
+    Discard {
+        workspace_id: String,
+        repo_id: String,
+        paths: Vec<String>,
+    },
     Commit {
         workspace_id: String,
         repo_id: String,
@@ -96,6 +101,10 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         revision: String,
+    },
+    UnpushedCommits {
+        workspace_id: String,
+        repo_id: String,
     },
     Branches {
         workspace_id: String,
@@ -604,6 +613,19 @@ pub struct CommitDetail {
 pub struct HistoryPage {
     pub commits: Vec<CommitNode>,
     pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnpushedCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+    pub files_changed: u32,
+    pub additions: u32,
+    pub deletions: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

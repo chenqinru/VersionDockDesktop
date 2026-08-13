@@ -9,8 +9,8 @@ use crate::{
         BranchCompareResult, BranchInfo, BranchOperation, CommitDetail, CommitFile, CommitNode,
         ConflictChoice, DesktopError, DiffDocument, HistoryPage, MergeVersions, RemoteInfo,
         RemoteOperation, RepositoryMeta, StashEntry, StashOperation, SubtreeEntry,
-        SubtreeOperation, SubtreeState, SyncAction, TagInfo, TagOperation, VcsKind, WorktreeEntry,
-        WorktreeOperation,
+        SubtreeOperation, SubtreeState, SyncAction, TagInfo, TagOperation, UnpushedCommit, VcsKind,
+        WorktreeEntry, WorktreeOperation,
     },
     state::safe_relative,
 };
@@ -196,6 +196,116 @@ pub async fn unstage(
             .collect::<Result<Vec<_>, _>>()?,
     );
     git(args, repo, token).await?;
+    Ok(())
+}
+
+pub async fn discard(
+    repo: &RepositoryMeta,
+    paths: &[String],
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let root = Path::new(&repo.root_path);
+    for path in paths {
+        let safe = relative_path(root, path, true)?;
+        match repo.kind {
+            VcsKind::Git => {
+                let pathspec = format!(":(literal){safe}");
+                let status = git(
+                    vec![
+                        "status".into(),
+                        "--porcelain".into(),
+                        "--".into(),
+                        pathspec.clone(),
+                    ],
+                    repo,
+                    token,
+                )
+                .await?
+                .stdout_text();
+                if status.trim_start().starts_with("??") {
+                    let target = root.join(&safe);
+                    let metadata = std::fs::symlink_metadata(&target).map_err(|error| {
+                        DesktopError::new("DISCARD_FAILED", error.to_string(), true)
+                    })?;
+                    if metadata.is_dir() {
+                        std::fs::remove_dir_all(&target)
+                    } else {
+                        std::fs::remove_file(&target)
+                    }
+                    .map_err(|error| {
+                        DesktopError::new("DISCARD_FAILED", error.to_string(), true)
+                    })?;
+                } else {
+                    git(
+                        vec![
+                            "restore".into(),
+                            "--source=HEAD".into(),
+                            "--staged".into(),
+                            "--worktree".into(),
+                            "--".into(),
+                            pathspec,
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?;
+                }
+            }
+            VcsKind::Svn => {
+                let status = svn(
+                    vec!["status".into(), "--".into(), safe.clone()],
+                    repo,
+                    token,
+                )
+                .await?
+                .stdout_text();
+                if status.starts_with('?') {
+                    let target = root.join(&safe);
+                    let metadata = std::fs::symlink_metadata(&target).map_err(|error| {
+                        DesktopError::new("DISCARD_FAILED", error.to_string(), true)
+                    })?;
+                    if metadata.is_dir() {
+                        std::fs::remove_dir_all(&target)
+                    } else {
+                        std::fs::remove_file(&target)
+                    }
+                    .map_err(|error| {
+                        DesktopError::new("DISCARD_FAILED", error.to_string(), true)
+                    })?;
+                } else {
+                    let remove_after_revert = status.starts_with('A');
+                    svn(
+                        vec![
+                            "revert".into(),
+                            "--depth".into(),
+                            "infinity".into(),
+                            "--".into(),
+                            safe.clone(),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?;
+                    if remove_after_revert {
+                        let target = root.join(&safe);
+                        if let Ok(metadata) = std::fs::symlink_metadata(&target) {
+                            if metadata.is_dir() {
+                                std::fs::remove_dir_all(&target)
+                            } else {
+                                std::fs::remove_file(&target)
+                            }
+                            .map_err(|error| {
+                                DesktopError::new("DISCARD_FAILED", error.to_string(), true)
+                            })?;
+                        }
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -446,6 +556,82 @@ pub async fn history(
         VcsKind::Git => git_history(repo, skip, limit, filter, token).await,
         VcsKind::Svn => svn_history(repo, skip, limit, filter, token).await,
     }
+}
+
+pub async fn unpushed_commits(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<UnpushedCommit>, DesktopError> {
+    ensure_git(repo)?;
+    let has_upstream = git(
+        vec![
+            "rev-parse".into(),
+            "--abbrev-ref".into(),
+            "--symbolic-full-name".into(),
+            "@{upstream}".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .is_ok();
+
+    let mut range = if has_upstream {
+        vec!["@{upstream}..HEAD".into()]
+    } else {
+        let remotes = git(vec!["remote".into()], repo, token).await?.stdout_text();
+        if remotes.lines().any(|line| !line.trim().is_empty()) {
+            vec!["HEAD".into(), "--not".into(), "--remotes".into()]
+        } else {
+            vec!["HEAD".into()]
+        }
+    };
+    range.push("--max-count=100".into());
+    range.push(format!(
+        "--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%an{FIELD}%aI"
+    ));
+    range.push("--shortstat".into());
+    let raw = git(
+        std::iter::once("log".into()).chain(range).collect(),
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+
+    Ok(raw
+        .split(RECORD)
+        .filter_map(|record| {
+            let mut lines = record.lines().filter(|line| !line.trim().is_empty());
+            let fields = lines.next()?.split(FIELD).collect::<Vec<_>>();
+            if fields.len() < 5 || fields[0].is_empty() {
+                return None;
+            }
+            let stat = lines.find(|line| line.contains("changed"));
+            let number_before = |needle: &str| -> u32 {
+                stat.and_then(|line| {
+                    line.split(',').find_map(|part| {
+                        let trimmed = part.trim();
+                        trimmed
+                            .contains(needle)
+                            .then(|| trimmed.split_whitespace().next()?.parse().ok())
+                            .flatten()
+                    })
+                })
+                .unwrap_or(0)
+            };
+            Some(UnpushedCommit {
+                hash: fields[0].into(),
+                short_hash: fields[1].into(),
+                message: fields[2].into(),
+                author: fields[3].into(),
+                date: fields[4].into(),
+                files_changed: number_before("file changed").max(number_before("files changed")),
+                additions: number_before("insertion"),
+                deletions: number_before("deletion"),
+            })
+        })
+        .collect())
 }
 
 async fn git_history(
