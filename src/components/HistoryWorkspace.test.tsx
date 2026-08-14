@@ -77,6 +77,24 @@ describe('HistoryWorkspace data helpers', () => {
     expect(buildSidebarModel(snapshot.repositories, {}, { repo: [{ name: 'v1.0.0-api', hash: 'a', date: '' }] }, 'api').tags).toHaveLength(1);
   });
 
+  it('sorts sidebar branches like the VersionDock plugin', () => {
+    const model = buildSidebarModel(snapshot.repositories, {
+      repo: [
+        { name: 'zeta', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'release/candidate', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'release', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'prod/task', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'main', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'trunk', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'development', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'feature/current', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+      ],
+    }, {});
+    expect(model.local.map((branch) => branch.name)).toEqual([
+      'feature/current', 'main', 'release', 'trunk', 'development', 'prod/task', 'release/candidate', 'zeta',
+    ]);
+  });
+
   it('uses single click for highlighting and double click for history filtering', () => {
     const onRefFilter = vi.fn();
     useAppStore.setState({ bootstrap: bootstrap(false, false), snapshot, selectedRepoId: 'repo', branchesByRepo: {

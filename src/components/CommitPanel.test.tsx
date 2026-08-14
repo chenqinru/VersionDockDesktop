@@ -77,20 +77,33 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByText('Amend')).toBeInTheDocument();
   });
 
-  it('keeps empty repositories expandable and renders their own no-changes body', () => {
+  it('collapses empty repositories by default while keeping them expandable', () => {
     const secondRepo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'empty-two', name: 'Empty Two', color: '#cc6a9a' } };
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [gitRepo, secondRepo] }, selectedRepoId: 'repo' });
     renderPanel();
-    expect(screen.getAllByText('No changes')).toHaveLength(2);
+    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.repo-heading > b')).toHaveLength(0);
     expect(screen.getByLabelText('Repository')).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Repositorymain' }));
     expect(screen.getAllByText('No changes')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Repositorymain' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Empty Twomain' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
     fireEvent.click(screen.getByTitle('Collapse all'));
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTitle('Expand all'));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
+  });
+
+  it('auto-expands a repository when changes appear after an empty initial state', async () => {
+    const { rerender } = renderPanel();
+    useAppStore.setState({ bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo' });
+    rerender(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
+    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+
+    const changedRepo = { ...gitRepo, files: [{ path: 'src/App.tsx', status: 'modified' as const, staged: false, unstaged: true, conflicted: false }] };
+    useAppStore.setState({ snapshot: { ...gitSnapshot, repositories: [changedRepo] } });
+    rerender(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
+    await waitFor(() => expect(screen.getByLabelText('src/App.tsx')).toBeInTheDocument());
   });
 
   it('omits the changelist toolbar button and exposes a draggable commit-message separator', () => {

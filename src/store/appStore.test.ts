@@ -127,6 +127,24 @@ describe('appStore async lifecycle', () => {
     expect(Object.keys(useAppStore.getState().historyByRepo)).toEqual(['a', 'b']);
   });
 
+  it('selects the first history commit and loads its detail when opening a repository', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    const commit: CommitNode = { repoId: 'repo', hash: 'first', shortHash: 'first', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'first commit', refs: [] };
+    const detail: CommitDetail = { commit, fullMessage: commit.message, branches: { local: ['main'], remote: [], tags: [] }, files: [{ path: 'README.md', status: 'M', added: 1, removed: 0 }] };
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'history') return { commits: [commit], hasMore: false };
+      if (command.type === 'commitDetail') return detail;
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace });
+
+    await useAppStore.getState().selectRepo('repo', true);
+
+    expect(useAppStore.getState().selectedCommits).toEqual([commit]);
+    expect(useAppStore.getState().selectedCommit).toEqual(detail);
+  });
+
   it('interleaves repository heads without breaking each repository order', () => {
     const make = (repoId: string, hash: string, date: string): CommitNode => ({
       repoId, hash, shortHash: hash, parents: [], author: 'Ada', email: '', authorDate: date, committerDate: date, message: hash, refs: [],

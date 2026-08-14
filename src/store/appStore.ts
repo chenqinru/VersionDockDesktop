@@ -308,6 +308,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           }))));
         }
         await Promise.all(requests);
+        const firstCommit = get().history[0];
+        if (firstCommit && !get().selectedCommits.length) await get().selectCommit(firstCommit);
       });
     },
 

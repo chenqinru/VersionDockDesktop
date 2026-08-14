@@ -5,6 +5,15 @@ export type MergedBranch = { name: string; instances: BranchInstance[]; current:
 
 const MAINLINE_BRANCH = /^(main|master|prod|develop|dev|release)(?:[/-].*)?$/i;
 
+// Keep the sidebar ordering aligned with VersionDock's BranchSidebar. These
+// are exact branch names; names such as `release/candidate` remain regular
+// branches in the reference implementation.
+const SIDEBAR_PRIMARY_BRANCHES = new Set(['main', 'master', 'trunk', 'develop', 'dev', 'release']);
+
+function isSidebarPrimaryBranch(name: string): boolean {
+  return SIDEBAR_PRIMARY_BRANCHES.has(name.toLowerCase());
+}
+
 export type SidebarBranch = {
   key: string;
   name: string;
@@ -81,8 +90,8 @@ function mergeSidebarBranches(
   }
   return [...values.values()].sort((left, right) => {
     if (left.current !== right.current) return left.current ? -1 : 1;
-    const leftMainline = MAINLINE_BRANCH.test(left.name);
-    const rightMainline = MAINLINE_BRANCH.test(right.name);
+    const leftMainline = isSidebarPrimaryBranch(left.name);
+    const rightMainline = isSidebarPrimaryBranch(right.name);
     if (leftMainline !== rightMainline) return leftMainline ? -1 : 1;
     return left.name.localeCompare(right.name);
   });
