@@ -7,7 +7,7 @@ function curve(fromX: number, fromY: number, toX: number, toY: number) {
 }
 
 export function CommitGraph({ commit, selected }: { commit: GraphCommit; selected: boolean }) {
-  const width = Math.max(24, commit.laneCount * LANE_WIDTH + 4);
+  const width = Math.max(24, commit.laneCount * LANE_WIDTH + 8);
   const middle = COMMIT_ROW_HEIGHT / 2;
   const dotX = commit.lane * LANE_WIDTH + LANE_WIDTH / 2;
   const paths = useMemo(() => commit.segments.map((segment) => {
@@ -19,9 +19,9 @@ export function CommitGraph({ commit, selected }: { commit: GraphCommit; selecte
   }), [commit.segments, middle]);
 
   return <svg className="commit-graph" width={width} height={COMMIT_ROW_HEIGHT} aria-hidden="true">
-    {paths.map((path, index) => <path key={index} d={path.path} fill="none" stroke={path.color} strokeWidth="1.5" />)}
-    <circle cx={dotX} cy={middle} r={commit.parents.length > 1 ? DOT_RADIUS + 3 : DOT_RADIUS + 2} fill="var(--vscode-editor-background)" />
-    {commit.parents.length > 1 && <circle cx={dotX} cy={middle} r={DOT_RADIUS + 2} fill="none" stroke={commit.color} strokeWidth="1.3" opacity=".7" />}
-    <circle cx={dotX} cy={middle} r={selected ? DOT_RADIUS + 1 : DOT_RADIUS} fill={selected ? '#fff' : commit.color} stroke={selected ? commit.color : 'var(--vscode-editor-background)'} strokeWidth={selected ? 2 : 1} />
+    {paths.map((path, index) => <path key={index} d={path.path} fill="none" stroke={path.color} strokeWidth="1.7" strokeLinecap="round" />)}
+    <circle cx={dotX} cy={middle} r={commit.parents.length > 1 ? DOT_RADIUS + 3 : DOT_RADIUS + 2} fill="var(--versiondock-bg)" />
+    {commit.parents.length > 1 && <circle cx={dotX} cy={middle} r={DOT_RADIUS + 2} fill="none" stroke={selected ? 'var(--vscode-button-foreground)' : commit.color} strokeWidth="1.4" opacity=".8" />}
+    <circle cx={dotX} cy={middle} r={selected ? DOT_RADIUS + 1 : DOT_RADIUS} fill={selected ? 'var(--vscode-button-foreground)' : commit.color} stroke={selected ? commit.color : 'var(--versiondock-bg)'} strokeWidth={selected ? 2 : 1.2} />
   </svg>;
 }

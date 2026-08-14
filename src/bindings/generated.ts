@@ -227,6 +227,8 @@ export type CommitNode = {
 	committerDate: string,
 	message: string,
 	refs: string[],
+	incoming?: boolean,
+	unpushed?: boolean,
 };
 
 export type ConflictChoice = "mine" | "theirs" | "working";

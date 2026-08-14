@@ -90,7 +90,7 @@ describe('HistoryWorkspace data helpers', () => {
     expect(onRefFilter).toHaveBeenCalledWith('feature/ui');
   });
 
-  it('keeps repository and branch filters single-select', () => {
+  it('keeps repository and branch filters single-select and closes after selection', () => {
     const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
     useAppStore.setState({
       bootstrap: bootstrap(false, false),
@@ -106,15 +106,24 @@ describe('HistoryWorkspace data helpers', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Repository' }));
     fireEvent.click(screen.getByRole('radio', { name: 'Repo 2GIT' }));
+    expect(screen.queryByRole('radio', { name: 'Repo 2GIT' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Repo 2' })[0]).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Repo 2' })[0]);
     expect(screen.getByRole('radio', { name: 'Repo 2GIT' })).toBeChecked();
     fireEvent.click(screen.getByRole('radio', { name: 'RepoGIT' }));
+    expect(screen.queryByRole('radio', { name: 'RepoGIT' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Repo' })[0]);
     expect(screen.getByRole('radio', { name: 'RepoGIT' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'Repo 2GIT' })).not.toBeChecked();
+    expect(screen.getAllByRole('button', { name: 'Repo' })[0]).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Branch / Tags' }));
     fireEvent.click(screen.getByRole('radio', { name: 'feature/ui' }));
+    expect(screen.queryByRole('radio', { name: 'feature/ui' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'feature/ui' }));
     expect(screen.getByRole('radio', { name: 'feature/ui' })).toBeChecked();
     fireEvent.click(screen.getByRole('radio', { name: 'main' }));
+    expect(screen.queryByRole('radio', { name: 'main' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'main' }));
     expect(screen.getByRole('radio', { name: 'main' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'feature/ui' })).not.toBeChecked();
   });

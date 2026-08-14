@@ -4,6 +4,7 @@ import { FileIcon } from './FileIcon';
 import { useAppStore, type AppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
+import { branchColor } from './branchColor';
 import type { CommitDetail, CommitNode } from '../bindings/generated';
 
 type DetailTreeNode = { name: string; path: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
@@ -19,9 +20,7 @@ function initials(value: string): string {
 }
 
 function avatarColor(value: string): string {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) hash = value.charCodeAt(index) + ((hash << 5) - hash);
-  return `hsl(${Math.abs(hash) % 360}, 55%, 45%)`;
+  return branchColor(value || 'author');
 }
 
 function statusClass(status: string): string {
@@ -116,7 +115,7 @@ function DetailRepoGroup({ files, repoName, repoColor, openDiff, allExpanded, cl
   const [expanded, setExpanded] = useState(true);
   const isExpanded = allExpanded ?? expanded;
   return <div className="detail-repo-group">
-    <button className="detail-root-label" title={repoName} onClick={() => { if (allExpanded !== null) clearAllExpanded(); setExpanded((value) => !value); }}>
+      <button className="detail-root-label" title={repoName} onClick={() => { if (allExpanded !== null) clearAllExpanded(); setExpanded((value) => !value); }}>
       <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repoColor ?? 'var(--versiondock-accent)' }} /><strong>{repoName}</strong><b>{files.length}</b>
     </button>
     {isExpanded && buildTree(files).map((node) => <DetailTreeNodeView key={node.path} node={collapseTree(node)} depth={1} openDiff={openDiff} allExpanded={allExpanded} clearAllExpanded={clearAllExpanded} />)}

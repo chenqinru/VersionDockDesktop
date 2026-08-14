@@ -1,0 +1,129 @@
+/* Git log parity layer: compact geometry and interaction states from the plugin reference. */
+.history-workspace { min-width: 0; background: var(--versiondock-bg); }
+.history-filters { flex: 0 0 36px; height: 36px; padding: 4px 6px; gap: 4px; background: var(--versiondock-bg); border-bottom: 1px solid var(--versiondock-border); }
+.history-filters .commit-search { width: auto; min-width: 170px; flex: 1.15 1 170px; height: 28px; padding: 0 7px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 3px; }
+.history-filters .commit-search > .codicon { color: var(--versiondock-muted); }
+.history-filters .commit-search input { font-size: 12px; }
+.history-filters .filter-anchor { min-width: 150px; height: 28px; flex: 1 1 150px; }
+.history-filters .branch-filter-anchor { flex-grow: .75; }
+.history-filters .date-filter-anchor { width: 386px; max-width: 100%; flex: 0 0 386px; }
+.history-filters .filter-button { width: 100%; min-width: 0; height: 28px; padding: 0 8px; gap: 5px; color: var(--versiondock-muted); border: 1px solid var(--versiondock-border); background: var(--versiondock-input); border-radius: 3px; }
+.history-filters .filter-button > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.history-filters .filter-button > i { width: 5px; height: 5px; flex: 0 0 5px; margin-left: 0; border-radius: 50%; background: var(--versiondock-accent); }
+.history-filters .filter-button.active, .history-filters .filter-button.open { color: var(--versiondock-text); border-color: color-mix(in srgb, var(--versiondock-accent) 60%, var(--versiondock-border)); background: color-mix(in srgb, var(--versiondock-accent) 7%, var(--versiondock-input)); }
+.history-filters .filter-button > .codicon { flex: 0 0 auto; font-size: 12px; }
+.history-filters .filter-button > .codicon:last-child { margin-left: 0; font-size: 10px; }
+.history-filters .filter-button > .filter-repo-dot { width: 7px; min-width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
+.history-filter-spacer { display: none; }
+.history-clear-filters, .more-button { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; padding: 0; color: var(--versiondock-muted); border: 1px solid transparent; border-radius: 3px; }
+.history-clear-filters { color: var(--versiondock-danger); }
+.history-filters button.history-clear-filters:hover { color: var(--versiondock-danger); background: color-mix(in srgb, var(--versiondock-danger) 14%, transparent); border-color: transparent; }
+.more-button:hover, .more-button.selected { color: var(--versiondock-text); background: var(--versiondock-hover); border-color: var(--versiondock-border); }
+.filter-popover { top: 32px; left: 0; width: 100%; min-width: 0; max-height: 390px; overflow: hidden; background: var(--versiondock-surface-alt); border-color: var(--versiondock-border); border-radius: 4px; box-shadow: 0 8px 24px color-mix(in srgb, var(--versiondock-bg) 70%, transparent); }
+.filter-anchor > .filter-popover:not(.date-popover) { right: 0; width: auto; min-width: 0; max-width: none; box-sizing: border-box; }
+.filter-popover > header { height: 31px; flex: 0 0 31px; padding: 0 8px; }
+.filter-popover > header strong { font-size: 11px; font-weight: 600; }
+.filter-popover > header button { height: 22px; color: var(--versiondock-accent); }
+.popover-search { width: auto !important; height: 29px !important; margin: 4px 5px 2px; padding: 0 6px !important; gap: 5px; background: var(--versiondock-input) !important; border: 1px solid var(--versiondock-border) !important; }
+.popover-search .codicon { color: var(--versiondock-muted); font-size: 11px; }
+.popover-search input { min-width: 0; flex: 1; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; }
+.filter-options { padding: 3px; }
+.filter-options label { height: 28px; min-height: 28px; width: 100%; padding: 0 7px; gap: 7px; border-radius: 2px; }
+.filter-options label { position: relative; cursor: pointer; }
+.filter-options label:hover { background: var(--versiondock-hover); }
+.filter-options label > input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.filter-options label:focus-within { outline: 1px solid var(--versiondock-accent); outline-offset: -1px; }
+.filter-options label > span { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-options label > span small { flex: 0 0 auto; margin-left: auto; color: var(--versiondock-muted); font: 10px var(--versiondock-code); }
+.filter-options .filter-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-options label > .codicon:last-child { width: 13px; flex: 0 0 13px; margin-left: 6px; color: var(--versiondock-accent); font-size: 11px; text-align: center; }
+.filter-options label > .codicon:not(:last-child) { flex: 0 0 13px; color: var(--versiondock-muted); font-size: 12px; }
+.filter-options label > i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
+.filter-empty { padding: 12px 8px; color: var(--versiondock-muted); text-align: center; font-size: 11px; }
+.date-popover { left: 0; right: 0; width: auto; max-width: calc(100vw - 16px); transform: translateX(var(--date-popover-offset, 0px)); }
+.calendar-panes { display: flex; padding: 8px 9px 10px; }
+.calendar-pane { min-width: 0; flex: 1; }
+.calendar-divider { width: 1px; margin: 0 9px; background: var(--versiondock-border); }
+.calendar-nav { height: 24px; display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.calendar-nav strong { color: var(--versiondock-text); font-size: 12px; font-weight: 600; }
+.calendar-nav button { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; color: var(--versiondock-muted); border-radius: 3px; }
+.calendar-nav button:hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+.calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; }
+.calendar-weekdays { margin: 4px 0 2px; }
+.calendar-weekdays span { color: var(--versiondock-muted); font-size: 10px; font-weight: 600; text-align: center; }
+.calendar-grid button, .calendar-grid span { min-width: 0; height: 23px; display: grid; place-items: center; padding: 0; border-radius: 3px; font-size: 11px; }
+.calendar-grid button { cursor: pointer; }
+.calendar-grid button:hover, .calendar-grid button.in-range { background: color-mix(in srgb, var(--versiondock-accent) 22%, transparent); }
+.calendar-grid button.edge { color: var(--vscode-button-foreground); background: var(--versiondock-accent-bg); font-weight: 700; }
+.history-more { position: relative; flex: 0 0 28px; z-index: 30; }
+.more-menu { position: absolute; z-index: 120; top: 32px; right: 0; width: 190px; padding: 4px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 6px 20px color-mix(in srgb, var(--versiondock-bg) 68%, transparent); }
+.more-menu button { width: 100%; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; text-align: left; border-radius: 2px; }
+.more-menu button:hover { color: var(--versiondock-text); background: var(--versiondock-selected); }
+.more-menu .codicon { color: var(--versiondock-muted); font-size: 13px; }
+.history-columns { display: flex; min-height: 0; flex: 1; }
+.log-pane { min-width: 0; background: var(--versiondock-bg); }
+.commit-list { position: relative; height: 100%; overflow: auto; background: var(--versiondock-bg); }
+.commit-list-content { position: relative; min-height: 100%; }
+.repo-strip { position: absolute; left: 0; z-index: 3; width: 6px; display: flex; align-items: stretch; padding: 0; overflow: hidden; color: var(--versiondock-text); text-align: left; background: transparent; border: 0; border-right: 1px solid transparent; border-radius: 0; box-sizing: border-box; }
+.repo-strip.expanded { width: 110px; background: color-mix(in srgb, var(--repo-color) 12%, var(--versiondock-bg)); border: 1px solid color-mix(in srgb, var(--repo-color) 45%, transparent); border-left: 0; border-radius: 0; }
+.repo-strip { cursor: pointer; }
+.repo-strip:hover { filter: brightness(1.15); }
+.repo-strip-bar { width: 6px; height: 100%; flex: 0 0 6px; display: block; background: var(--repo-color); }
+.repo-strip strong { position: absolute; top: 0; left: 12px; right: 4px; height: 28px; overflow: hidden; color: var(--versiondock-text); font-size: 10px; font-weight: 700; letter-spacing: .06em; line-height: 28px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.commit-row { position: absolute; left: 0; right: 0; z-index: 2; height: 28px; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 0; color: var(--versiondock-text); background: transparent; border: 0; font-size: 12px; text-align: left; }
+.commit-row.project-expanded { padding-left: 110px; }
+.commit-row.project-expanded > .repo-stripe { display: none; }
+.commit-row { cursor: pointer; }
+.commit-row:hover { background: var(--versiondock-hover); }
+.commit-row.selected { background: var(--versiondock-selected); }
+.repo-stripe { width: 6px; height: 100%; flex: 0 0 6px; }
+.commit-graph { flex: 0 0 auto; height: 28px; overflow: visible; }
+.commit-refs { min-width: 0; max-width: 42%; display: flex; align-items: center; gap: 3px; overflow: hidden; }
+.commit-refs em { min-width: 0; max-width: 150px; height: 17px; display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; overflow: hidden; padding: 0 5px; color: var(--ref-color, var(--versiondock-accent)); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 20%, transparent); border: 1px solid color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 55%, transparent); border-radius: 3px; font-size: 10px; font-style: normal; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.commit-refs em .codicon { flex: 0 0 auto; font-size: 10px; }
+.commit-refs em.head { --ref-color: var(--versiondock-warning); }
+.commit-refs em.tag { --ref-color: var(--versiondock-muted); }
+.commit-refs em.svn { --ref-color: var(--versiondock-muted); }
+.commit-refs em.selected { color: var(--versiondock-bg); background: var(--ref-color, var(--versiondock-accent)); border-color: var(--ref-color, var(--versiondock-accent)); }
+.commit-refs em.ref-overflow { color: var(--versiondock-muted); background: transparent; border-color: var(--versiondock-border); }
+.commit-refs em.ref-overflow.selected { color: var(--versiondock-bg); background: var(--versiondock-accent); border-color: var(--versiondock-accent); }
+.commit-subject-text { min-width: 60px; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-author { width: 160px; min-width: 0; flex: 0 0 160px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; overflow: hidden; color: var(--versiondock-muted); font-size: 11px; text-align: right; white-space: nowrap; }
+.commit-author-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-avatar { width: 18px; height: 18px; flex: 0 0 18px; display: grid; place-items: center; overflow: hidden; color: #fff; border-radius: 50%; font-size: 8px; font-weight: 600; }
+.commit-row time { width: 100px; flex: 0 0 100px; margin-left: 0; color: var(--versiondock-muted); font-size: 11px; text-align: right; white-space: nowrap; }
+.commit-flow-indicators { width: 0; flex: 0 0 0; display: inline-flex; align-items: center; justify-content: flex-end; gap: 1px; overflow: visible; }
+.commit-flow-indicators.has-flow { width: 16px; flex-basis: 16px; }
+.commit-flow-indicators.has-both { width: 28px; flex-basis: 28px; }
+.commit-flow-icon { flex: 0 0 auto; font-size: 12px; }
+.commit-flow-icon.incoming { color: var(--versiondock-accent); }
+.commit-flow-icon.unpushed { color: var(--versiondock-success); }
+.commit-row-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+.commit-row-actions button { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; color: var(--versiondock-muted); border-radius: 3px; }
+.commit-row-actions button:hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+.commit-popover { position: fixed; z-index: 140; width: 265px; min-height: 100px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 5px; box-shadow: 0 8px 26px color-mix(in srgb, var(--versiondock-bg) 70%, transparent); font-size: 11px; }
+.popover-line { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.popover-line code { color: var(--versiondock-muted); font: 11px var(--versiondock-code); }
+.popover-line span:not(.mini-avatar) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.popover-line i { color: var(--versiondock-muted); font-style: normal; }
+.popover-line time { color: var(--versiondock-muted); font-size: 10px; }
+.commit-popover > .commit-refs { max-width: 100%; }
+.commit-popover > small { color: var(--versiondock-muted); text-align: center; }
+.commit-popover .added { margin-left: auto; color: var(--versiondock-success); }
+.commit-popover .removed { color: var(--versiondock-danger); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (max-width: 1320px) {
+  .history-filters .commit-search { min-width: 140px; flex-basis: 160px; }
+  .history-filters .filter-anchor { min-width: 105px; flex-basis: 115px; }
+  .history-filters .branch-filter-anchor { flex-grow: .75; }
+  .history-filters .date-filter-anchor { width: auto; min-width: 150px; flex: 1.2 1 150px; }
+  .commit-author { width: 100px; flex-basis: 100px; }
+  .commit-row time { width: 94px; flex-basis: 94px; }
+}
+
+@media (max-width: 1100px) {
+  .history-filters .commit-search { min-width: 120px; flex-basis: 140px; }
+  .history-filters .filter-anchor { min-width: 90px; flex-basis: 100px; }
+  .history-filters .branch-filter-anchor { flex-grow: .75; }
+  .history-filters .date-filter-anchor { min-width: 120px; flex-basis: 120px; }
+}

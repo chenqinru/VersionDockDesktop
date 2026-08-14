@@ -8,12 +8,49 @@ const LIGHT_PALETTE = [
   '#587818', '#2a4e98', '#962878', '#2a7840', '#982020', '#287878', '#6a2496', '#2a6890',
 ] as const;
 
-const PRIMARY_BRANCH = /^(main|master|develop|development|dev|trunk)$/i;
+const PRIMARY_BRANCH = /^(main|master|prod|develop|development|dev|trunk|release)(?:[/-].*)?$/i;
 
-export function branchColor(name: string): string {
-  if (PRIMARY_BRANCH.test(name)) return document.documentElement.dataset.theme === 'light' ? '#2e6898' : '#6aaed0';
+function normalizedBranchName(name: string): string {
+  if (name.startsWith('refs/heads/')) return name.slice('refs/heads/'.length);
+  if (name.startsWith('refs/remotes/')) {
+    const remoteRef = name.slice('refs/remotes/'.length);
+    const slash = remoteRef.indexOf('/');
+    return slash >= 0 ? remoteRef.slice(slash + 1) : remoteRef;
+  }
+  if (/^(origin|upstream|gitee|remotes)\//.test(name)) return name.slice(name.indexOf('/') + 1);
+  return name;
+}
+
+export function primaryBranchColor(): string {
+  return 'var(--versiondock-accent)';
+}
+
+export function headColor(): string {
+  return 'var(--versiondock-warning)';
+}
+
+export function tagColor(): string {
+  return 'var(--versiondock-muted)';
+}
+
+export function branchColor(name: string, isHead = false, isTag = false): string {
+  const normalized = normalizedBranchName(name);
+  if (isTag) return tagColor();
+  if (PRIMARY_BRANCH.test(normalized)) return primaryBranchColor();
+  if (isHead) return headColor();
   let hash = 0;
-  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  for (const character of normalized) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
   const palette = document.documentElement.dataset.theme === 'light' ? LIGHT_PALETTE : DARK_PALETTE;
   return palette[hash % palette.length];
+}
+
+export function currentPalette(): readonly string[] {
+  return document.documentElement.dataset.theme === 'light' ? LIGHT_PALETTE : DARK_PALETTE;
+}
+
+export function branchPaletteIndex(name: string): number {
+  const normalized = normalizedBranchName(name);
+  let hash = 0;
+  for (const character of normalized) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return hash % DARK_PALETTE.length;
 }

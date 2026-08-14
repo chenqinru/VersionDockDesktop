@@ -215,7 +215,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
     {showVcsBadges && <VcsBadge kind={branch.vcsKind} />}
     {branch.current && <em className="branch-head-badge">{multiRepo && headCount > 0 && headCount < branch.repoIds.length ? `HEAD ${headCount}/${branch.repoIds.length}` : 'HEAD'}</em>}
     {(ahead > 0 || behind > 0) && <span className="branch-ahead-behind">{ahead > 0 && <b className="ahead">↑{ahead}</b>}{behind > 0 && <b className="behind">↓{behind}</b>}</span>}
-    {multiRepo && <span className="branch-repo-dots">{branch.repoIds.map((repoId) => <i key={repoId} style={{ background: repoColors[repoId] ?? '#888' }} />)}</span>}
+    {multiRepo && <span className="branch-repo-dots">{branch.repoIds.map((repoId) => <i key={repoId} style={{ background: repoColors[repoId] ?? 'var(--versiondock-muted)' }} />)}</span>}
   </div>;
 }
 
@@ -245,7 +245,7 @@ function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, detached, o
     <Codicon name="tag" />
     <span className="branch-ref-name">{tag.name}</span>
     {showVcsBadges && <VcsBadge kind={tag.vcsKind} />}
-    {multiRepo && <span className="branch-repo-dots">{tag.repoIds.map((repoId) => <i key={repoId} style={{ background: repoColors[repoId] ?? '#888' }} />)}</span>}
+    {multiRepo && <span className="branch-repo-dots">{tag.repoIds.map((repoId) => <i key={repoId} style={{ background: repoColors[repoId] ?? 'var(--versiondock-muted)' }} />)}</span>}
   </div>;
 }
 

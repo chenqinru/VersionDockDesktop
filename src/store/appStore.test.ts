@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { MockBridge } from '../platform/bridge';
-import { useAppStore } from './appStore';
+import { interleaveHistory, useAppStore } from './appStore';
 
 const bootstrap: BootstrapData = {
   state: { theme: 'system', language: 'system', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
@@ -125,6 +125,17 @@ describe('appStore async lifecycle', () => {
     await useAppStore.getState().loadHistory(true);
     expect(useAppStore.getState().history.map((commit) => commit.repoId)).toEqual(['a', 'b']);
     expect(Object.keys(useAppStore.getState().historyByRepo)).toEqual(['a', 'b']);
+  });
+
+  it('interleaves repository heads without breaking each repository order', () => {
+    const make = (repoId: string, hash: string, date: string): CommitNode => ({
+      repoId, hash, shortHash: hash, parents: [], author: 'Ada', email: '', authorDate: date, committerDate: date, message: hash, refs: [],
+    });
+    const result = interleaveHistory({
+      a: [make('a', 'a-new', '2026-01-01T10:00:00Z'), make('a', 'a-old', '2026-01-01T08:00:00Z')],
+      b: [make('b', 'b-new', '2026-01-01T09:00:00Z'), make('b', 'b-old', '2026-01-01T07:00:00Z')],
+    });
+    expect(result.map((commit) => commit.hash)).toEqual(['a-new', 'b-new', 'a-old', 'b-old']);
   });
 
   it('loads branch and tag refs for SVN repositories as well as Git', async () => {

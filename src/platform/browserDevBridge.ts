@@ -35,15 +35,15 @@ const initialRepositories: RepositoryStatus[] = [
   repository('api', 'API', '#61afef', 'prod', [
     { path: 'youth-module-system/src/main/java/ConfigService.java', status: 'modified', staged: false, unstaged: true, conflicted: false },
   ], 0, 2),
-  repository('sentry-admin', 'SENTRY-ADMIN', '#c678dd', 'main', []),
-  repository('system-admin', 'SYSTEM-ADMIN', '#dcdcaa', 'prod', [
+  repository('sentry-admin', 'SENTRY-ADMIN', '#dcdcaa', 'main', []),
+  repository('system-admin', 'SYSTEM-ADMIN', '#c678dd', 'prod', [
     { path: 'src/pages/system/config/index.vue', status: 'added', staged: true, unstaged: false, conflicted: false },
   ], 0, 1),
-  repository('transaction-works-admin', 'TRANSACTION-WORKS-ADMIN', '#d19a66', 'prod', []),
+  repository('transaction-works-admin', 'TRANSACTION-WORKS-ADMIN', '#f14c4c', 'prod', []),
 ];
 
 const makeCommit = (repoId: string, hash: string, message: string, author: string, date: string, refs: string[], parents: string[] = []): CommitNode => ({
-  repoId, hash: hash.padEnd(40, '0'), shortHash: hash.slice(0, 8), parents, author,
+  repoId, hash: hash.padEnd(40, '0'), shortHash: hash.slice(0, 8), parents: parents.map((parent) => parent.padEnd(40, '0')), author,
   email: `${author.toLowerCase().replaceAll(' ', '.')}@example.test`, authorDate: date, committerDate: date, message, refs,
 });
 
@@ -68,20 +68,159 @@ const histories: Record<string, CommitNode[]> = {
   ],
 };
 
+const demoHash = (repoId: string, index: number) => `${repoId}-${index.toString(36).padStart(2, '0')}`;
+
+function createDemoHistory(repoId: string, branch: string, authors: string[]): CommitNode[] {
+  const count = 54;
+  const mergeIndexes = new Set([7, 15, 26, 39]);
+  return Array.from({ length: count }, (_, index) => {
+    const hash = demoHash(repoId, index);
+    const parents = index === count - 1 ? [] : [demoHash(repoId, index + 1)];
+    if (mergeIndexes.has(index) && index + 6 < count) parents.push(demoHash(repoId, index + 6));
+    const refs = index === 0 ? [`HEAD -> ${branch}`, `origin/${branch}`] : [];
+    if (index === 5) refs.push('origin/feature/phase2-dev');
+    if (index === 10) refs.push(branch);
+    if (index === 18) refs.push('tag: v1.0.0');
+    if (index === 32) refs.push('tag: v0.9.0');
+    const date = new Date(Date.UTC(2026, 7, 13, 9, 30) - index * 1000 * 60 * 95).toISOString();
+    const author = authors[index % authors.length];
+    const message = mergeIndexes.has(index)
+      ? `Merge branch '${index % 2 ? 'feature/phase2-dev' : 'prod'}' into ${branch}`
+      : `${index % 3 === 0 ? 'feat' : index % 3 === 1 ? 'fix' : 'refactor'}(${repoId}): ${index % 2 ? '优化提交日志和项目配置展示' : '完善业务模块查询与编辑能力'}`;
+    return { ...makeCommit(repoId, hash, message, author, date, refs, parents), incoming: index % 9 === 5, unpushed: index % 13 === 0 };
+  });
+}
+
+const officeRulesMessages = [
+  'feat(office-rules): 新增即发年月字段并更新通讯录标题和组织架构名称',
+  'feat(office-rules): 调整制度统计卡片样式并支持点击筛选',
+  'fix(office-rules): 卡片 hover 改用分类间色蓝底白字',
+  'fix(office-rules): 制度卡片 hover 改为紫底白字',
+  'fix(office-rules): 卡片 hover 改为文字颜色加深',
+  'fix(office-rules): 卡片 hover 改为阴影提高，避免位移截断顶部',
+  'fix(office-rules): 废止状态标签红并修复卡片 hover 顶边被截断',
+  'fix(office-rules): 回退状态强调样式，卡片仅加粗区分',
+  'feat(office-rules): 制度查询新增横向并优化状态样式区分',
+  'fix(office-rules): 废止与版本变更后同步刷新制度统计',
+  'refactor(office-rules): 移除当前展示版本列与版本号表单字段',
+  'feat(office-rules): 列表增加当前展示版本列',
+  'refactor(office-rules): 列表表序号并移除制度编号字段',
+  'feat(office-rules): 制度管理顶部增加状态统计条',
+  'feat(office-rules): 优化制度列表字段、操作列与编辑弹窗体验',
+  'fix(teacher): 岗位责任书为空时不展示查看责任书按钮',
+  'style(responsibility-preview): 收紧当前岗位责任文本字号与行距',
+  'feat(contacts): 部门通讯录布局与岗位责任预览交互优化',
+  'style(teacher): 优化代码格式，调整选项获取方式并重新添加从数组时长字段',
+  'feat(teacher): 移除正式入职时间和参加工会活动情况字段，新增最新处理时间排序功能',
+  'feat(bpm-my): 我发起的列表区分已结束与进行中，近3天有更新时突出显示',
+  'style(workspace): 加宽我的面板顶部统计卡片',
+  'feat(bpm-copy): 菜单角标与工作台抄送计数改为仅统计未读',
+  'feat(bpm-copy): 抄送列表支持已读状态并突出显示未读选项',
+  'feat(menu): 我发起的菜单角标与工作台进行中数量保持一致',
+  'style(workspace): 统一我的待办、通知公告与我的消息列表字体与配色',
+  'feat(workspace): 最新消息改名为我的消息并增加更新红点',
+  'feat(workspace): 通知公告有更新时间标题显示红点，点击后清除',
+  'feat(workspace): 我的面板改版，顶栏统计可跳转并优化列表布局',
+  'feat(common-ui): 常用功能卡片样式改版',
+  'feat(common-ui): 工作台头部支持统计项展示与点击',
+  'refactor(notify): 将“我的站内信”文案统一为“我的消息”',
+  'feat(menu): 我的待办与抄送的菜单增加计数角标',
+] as const;
+
+function createOfficeRulesHistory(): CommitNode[] {
+  const count = 54;
+  const branchPlans = [
+    { merge: 31, head: 36, root: 37, base: 42 },
+    { merge: 44, head: 48, root: 49, base: 53 },
+  ];
+  const mergeIndexes = new Set(branchPlans.map((plan) => plan.merge));
+  const branchRows = new Map<number, { hash: string; parent: string }>();
+  branchPlans.forEach((plan, branchIndex) => {
+    const headHash = `transaction-works-admin-branch-${branchIndex}`;
+    const rootHash = `transaction-works-admin-branch-root-${branchIndex}`;
+    branchRows.set(plan.head, { hash: headHash, parent: rootHash });
+    branchRows.set(plan.root, { hash: rootHash, parent: demoHash('transaction-works-admin', plan.base) });
+  });
+  const hashAt = (index: number) => branchRows.get(index)?.hash ?? demoHash('transaction-works-admin', index);
+  const nextMainIndex = (index: number) => {
+    for (let next = index + 1; next < count; next += 1) if (!branchRows.has(next)) return next;
+    return -1;
+  };
+  const leadRows = [
+    { message: 'chore(config): 忽略 Rebel 配置文件', author: 'chenqinru', date: '2026-08-14T18:01:00+08:00', refs: ['chenqinru', 'HEAD -> chenqinru'] },
+  ] as const;
+  const start = new Date('2026-08-14T17:32:00+08:00');
+  return Array.from({ length: count }, (_, index) => {
+    const hash = hashAt(index);
+    const branchRow = branchRows.get(index);
+    const nextMain = nextMainIndex(index);
+    const plan = branchPlans.find((value) => value.merge === index);
+    const parents = branchRow
+      ? [branchRow.parent]
+      : plan
+        ? [nextMain >= 0 ? hashAt(nextMain) : '', hashAt(plan.head)].filter(Boolean)
+        : nextMain >= 0 ? [hashAt(nextMain)] : [];
+    const lead = leadRows[index];
+    const date = lead?.date ?? new Date(start.getTime() - (index - leadRows.length) * 4 * 60_000).toISOString();
+    const refs: string[] = lead ? [...lead.refs] : [];
+    if (index === 1) refs.push('origin/feat/phase2-dev');
+    if (index === 17) refs.push('origin/prod');
+    if (index === 22) refs.push('prod');
+    if (index === 30) refs.push('origin/dev-ziye');
+    if (index === 40) refs.push('tag: v1.0.0');
+    const author = lead?.author ?? (index % 9 === 0 ? 'chenqinru' : index % 7 === 0 ? 'huguoliang' : 'ziye');
+    const message = lead?.message ?? (mergeIndexes.has(index)
+      ? `Merge branch '${index % 2 ? 'main' : 'prod'}' into feat/office-rules`
+      : officeRulesMessages[(index - leadRows.length) % officeRulesMessages.length]);
+    return { ...makeCommit('transaction-works-admin', hash, message, author, date, refs, parents), incoming: index % 11 === 4, unpushed: index % 17 === 0 };
+  });
+}
+
+function createSvnHistory(repoId: string, branch: string, author: string): CommitNode[] {
+  return Array.from({ length: 42 }, (_, index) => {
+    const revision = 7453 - index;
+    const parents = index === 41 ? [] : [`r${revision - 1}`];
+    const date = new Date(Date.UTC(2026, 7, 13, 8, 50) - index * 1000 * 60 * 125).toISOString();
+    return makeCommit(repoId, `r${revision}`, index === 0 ? `SVN 修订 ${revision}` : `feat(${branch}): 完善业务配置与列表展示`, author, date, index === 0 ? ['HEAD'] : [], parents);
+  });
+}
+
+const demoHistories: Record<string, CommitNode[]> = Object.fromEntries([
+  ['admin', createDemoHistory('admin', 'main', ['chenqinru', 'ziye', 'huguoliang'])],
+  ['api', createDemoHistory('api', 'prod', ['ziye', 'huguoliang', 'chenqinru'])],
+  ['sentry-admin', createDemoHistory('sentry-admin', 'main', ['ziye', 'xih'])],
+  ['system-admin', createDemoHistory('system-admin', 'prod', ['chenqinru', 'ziye'])],
+  ['transaction-works-admin', createOfficeRulesHistory()],
+]);
+
 const mixedHistories: Record<string, CommitNode[]> = {
-  'mixed-git': histories.admin.map((commit) => ({ ...commit, repoId: 'mixed-git' })),
-  'mixed-api-git': histories.api.map((commit) => ({ ...commit, repoId: 'mixed-api-git' })),
-  'mixed-admin-svn': [makeCommit('mixed-admin-svn', 'r24', 'SVN 修订 24', 'chenqinru', '2026-08-10T11:36:00+08:00', ['HEAD'], ['r23'])],
-  'mixed-api-svn': [makeCommit('mixed-api-svn', 'r30', 'SVN 修订 30', 'ziye', '2026-08-09T16:20:00+08:00', ['HEAD'], ['r29'])],
+  'mixed-git': createDemoHistory('mixed-git', 'main', ['chenqinru', 'ziye']),
+  'mixed-api-git': createDemoHistory('mixed-api-git', 'main', ['ziye', 'huguoliang']),
+  'mixed-admin-svn': createSvnHistory('mixed-admin-svn', 'admin_code', 'xih'),
+  'mixed-api-svn': createSvnHistory('mixed-api-svn', 'api', 'xih'),
 };
 
-const activeHistories = browserDemoMode === 'mixed' ? mixedHistories : histories;
+const activeHistories = browserDemoMode === 'mixed' ? mixedHistories : demoHistories;
+
+const demoLocalBranchNames = [
+  'prod', 'main', 'chenqinru', 'bpm-feature', 'bpm-listener', 'cqr', 'data-permission1', 'data-permission2',
+  'DataPermission', 'demo1', 'dev-remote', 'dev-ziye', 'feat/work-report-push', 'file-type-handler',
+  'fleet-local-history', 'HealthCheck', 'hugl', 'prod_sys', 'prod-metadata', 'prod-redis-dqueue',
+  'prod-task-center', 'prod-ziye', 'RedisDelay', 'resilience4j', 'rocketmq', 'send-mail', 'send-sms',
+  'sentry', 'task-center', 'test', 'transaction-works-task-center', 'upgrade', 'upload-task', 'upload-validate',
+];
 
 const branches: Record<string, BranchInfo[]> = Object.fromEntries(initialRepositories.map((repo) => {
+  if (repo.meta.id === 'transaction-works-admin') {
+    const local = demoLocalBranchNames.map((name) => ({ name, current: name === repo.branch, remote: false, remoteName: null, upstream: name === repo.branch ? `origin/${name}` : null, ahead: name === repo.branch ? repo.ahead : 0, behind: name === repo.branch ? repo.behind : 0 }));
+    return [repo.meta.id, [
+      ...local,
+      { name: 'origin/prod', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
+      { name: 'gitee/prod', current: false, remote: true, remoteName: 'gitee', upstream: null, ahead: 0, behind: 0 },
+    ]];
+  }
   const values: BranchInfo[] = [
     { name: repo.branch, current: true, remote: false, remoteName: null, upstream: `origin/${repo.branch}`, ahead: repo.ahead, behind: repo.behind },
-    { name: 'feature/shared-ui', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
-    { name: `feature/${repo.meta.id}-local`, current: false, remote: false, remoteName: null, upstream: null, ahead: 3, behind: 0 },
     { name: `origin/${repo.branch}`, current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
     { name: `gitee/${repo.branch}`, current: false, remote: true, remoteName: 'gitee', upstream: null, ahead: 0, behind: 0 },
   ];
@@ -136,6 +275,11 @@ const detailFiles: Record<string, CommitFile[]> = {
     { path: 'src/main/java/cn/versiondock/api/ConfigService.java', status: 'M', added: 18, removed: 4 },
     { path: 'src/main/resources/application.yml', status: 'M', added: 4, removed: 2 },
   ],
+  'transaction-works-admin': [
+    { path: 'apps/web-antd/src/views/service/office-service/rules/data.ts', status: 'M', added: 6, removed: 2 },
+    { path: 'apps/web-antd/src/views/service/personnel/contacts/modules/dept-sider.vue', status: 'M', added: 2, removed: 2 },
+    { path: 'apps/web-antd/src/views/service/personnel/contacts/index.vue', status: 'M', added: 1, removed: 1 },
+  ],
 };
 
 const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mixed' ? {
@@ -148,7 +292,7 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 
 const initialState: AppStateSnapshot = {
   theme: 'dark', language: 'zhCn', lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
-  panelSizes: { commit: 345, branches: 220, detail: 350 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null,
+  panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null,
   branchSidebarCollapsed: false, branchSidebarCollapsedSections: [],
 };
 

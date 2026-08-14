@@ -60,6 +60,16 @@
   --versiondock-input: #ffffff;
 }
 
+:root[data-theme="light"] .detail-message-card {
+  background: var(--versiondock-surface);
+  border: 0;
+}
+
+:root[data-theme="light"] .detail-message-title strong,
+:root[data-theme="light"] .detail-message-card pre {
+  color: #222222;
+}
+
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--versiondock-bg); color: var(--versiondock-text); }
 button, input, textarea, select { font: inherit; color: inherit; }
@@ -356,9 +366,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .branch-ref-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-head-badge, .branch-vcs-badge { flex: 0 0 auto; height: 14px; padding: 0 4px; border-radius: 2px; font-style: normal; font-size: 9px; font-weight: 700; line-height: 14px; }
 .branch-head-badge { background: var(--versiondock-accent-bg); color: #fff; letter-spacing: .02em; }
-.branch-vcs-badge { color: #fff; }
-.branch-vcs-badge.git { background: #c88619; }
-.branch-vcs-badge.svn { background: #9b64cf; }
+.branch-vcs-badge { color: var(--vscode-button-foreground); }
+.branch-vcs-badge.git { background: var(--versiondock-warning); }
+.branch-vcs-badge.svn { background: var(--versiondock-accent-bg); }
 .branch-repo-dots { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
 .branch-repo-dots i { width: 6px; height: 6px; border-radius: 50%; }
 .branch-ahead-behind { flex: 0 0 auto; display: flex; gap: 3px; font-size: 10px; }
@@ -434,12 +444,12 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-file-row .file-type-icon { flex: 0 0 16px; }
 .detail-file-row.status-added > .detail-file-name { color: var(--versiondock-success); }
 .detail-file-row.status-deleted > .detail-file-name { color: var(--versiondock-danger); }
-.detail-file-row.status-modified > .detail-file-name { color: #e2c08d; }
-.detail-file-row.status-renamed > .detail-file-name { color: #73c991; }
+.detail-file-row.status-modified > .detail-file-name { color: var(--versiondock-warning); }
+.detail-file-row.status-renamed > .detail-file-name { color: var(--versiondock-success); }
 .detail-file-row.status-added > em { color: var(--versiondock-success); }
 .detail-file-row.status-deleted > em { color: var(--versiondock-danger); }
-.detail-file-row.status-modified > em { color: #e2c08d; }
-.detail-file-row.status-renamed > em { color: #73c991; }
+.detail-file-row.status-modified > em { color: var(--versiondock-warning); }
+.detail-file-row.status-renamed > em { color: var(--versiondock-success); }
 .detail-info-resize { flex: 0 0 4px; height: 4px; display: flex; align-items: center; justify-content: center; border-top: 1px solid var(--versiondock-border); cursor: ns-resize; touch-action: none; }
 .detail-info-resize i { display: none; }
 .detail-summary { min-height: 220px; max-height: 48%; padding: 9px 12px 12px; overflow: auto; box-sizing: border-box; border-top: 0; background: var(--versiondock-bg); display: flex; flex-direction: column; gap: 4px; }
@@ -453,7 +463,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-repo-row { min-height: 22px; display: flex; align-items: center; color: var(--versiondock-muted); font-size: 10px; font-weight: 600; letter-spacing: .045em; text-transform: uppercase; }
 .detail-repo-row span { display: flex; align-items: center; gap: 6px; }
 .detail-repo-row i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
-.detail-message-card { margin: 5px 0 8px; padding: 7px 8px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border-soft); border-radius: 4px; }
+.detail-message-card { margin: 5px 0 8px; padding: 7px 8px; background: var(--versiondock-input); border: 0; border-radius: 4px; }
 .detail-message-title { min-width: 0; display: flex; align-items: flex-start; gap: 6px; }
 .detail-message-title strong { min-width: 0; flex: 1; font-size: 12px; line-height: 1.45; font-weight: 600; }
 .detail-message-title button { width: 20px; height: 20px; flex: 0 0 20px; color: var(--versiondock-muted); }
@@ -470,9 +480,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-refs { margin: 0; }
 .detail-refs em { height: 18px; padding: 0 5px; display: inline-flex; align-items: center; gap: 3px; border-radius: 3px; font-size: 10px; line-height: 16px; }
 .detail-refs em .codicon { font-size: 10px; }
-.detail-refs em.head { color: #e5c55b; border-color: #d7ba7d80; background: #d7ba7d18; }
-.detail-refs em.remote { color: #61afef; border-color: #61afef80; background: #61afef18; }
-.detail-refs em.tag { color: #c678dd; border-color: #c678dd80; background: #c678dd18; }
+.detail-refs em.head { color: var(--versiondock-warning); border-color: color-mix(in srgb, var(--versiondock-warning) 65%, transparent); background: color-mix(in srgb, var(--versiondock-warning) 12%, transparent); }
+.detail-refs em.remote { color: var(--versiondock-accent); border-color: color-mix(in srgb, var(--versiondock-accent) 50%, transparent); background: color-mix(in srgb, var(--versiondock-accent) 10%, transparent); }
+.detail-refs em.tag { color: var(--versiondock-warning); border-color: color-mix(in srgb, var(--versiondock-warning) 50%, transparent); background: color-mix(in srgb, var(--versiondock-warning) 10%, transparent); }
 .detail-aggregate-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; color: var(--versiondock-muted); font-size: 10px; }
 .aggregate-item { padding: 8px 0 12px; border-top: 0; }
 .aggregate-item + .aggregate-item { border-top: 1px solid var(--versiondock-border-soft); }
@@ -507,7 +517,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-summary .detail-toolbar { flex: 0 0 22px; height: 22px; margin: 0 0 2px; padding: 0; border-bottom: 0; }
 .detail-summary .detail-toolbar-label { font-size: 11px; gap: 4px; }
 .detail-single { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.detail-message-card { margin: 2px 0 3px; padding: 10px 12px; border-top: 0; }
+.detail-message-card { margin: 2px 0 3px; padding: 10px 12px; border: 0; }
 .detail-message-title { align-items: center; gap: 8px; }
 .detail-message-title strong { color: var(--versiondock-text); font: 400 12px/1.45 var(--versiondock-code); }
 .detail-message-title button { width: 18px; height: 18px; padding: 0; flex: 0 0 18px; }

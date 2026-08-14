@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
@@ -710,6 +713,12 @@ async fn git_history(
     }
     let raw = git(args, repo, token).await?.stdout_text();
     let mut commits = parse_git_log(&repo.id, &raw);
+    let unpushed = git_revision_hashes(repo, vec!["@{upstream}..HEAD".into()], token).await;
+    let incoming = git_revision_hashes(repo, vec!["HEAD..@{upstream}".into()], token).await;
+    for commit in &mut commits {
+        commit.unpushed = unpushed.contains(&commit.hash);
+        commit.incoming = incoming.contains(&commit.hash);
+    }
     let has_more = commits.len() > limit as usize;
     commits.truncate(limit as usize);
     Ok(HistoryPage { commits, has_more })
@@ -738,9 +747,32 @@ fn parse_git_log(repo_id: &str, raw: &str) -> Vec<CommitNode> {
                     .filter(|value| !value.is_empty())
                     .map(String::from)
                     .collect(),
+                incoming: false,
+                unpushed: false,
             })
         })
         .collect()
+}
+
+async fn git_revision_hashes(
+    repo: &RepositoryMeta,
+    revisions: Vec<String>,
+    token: &CancellationToken,
+) -> HashSet<String> {
+    let mut args = vec!["rev-list".into(), "--max-count=500".into()];
+    args.extend(revisions);
+    git(args, repo, token)
+        .await
+        .map(|output| {
+            output
+                .stdout_text()
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub async fn branch_compare(
@@ -857,6 +889,8 @@ async fn svn_history(
                 committer_date: text("date").into(),
                 message,
                 refs: vec![],
+                incoming: false,
+                unpushed: false,
             })
         })
         .collect::<Vec<_>>();
@@ -986,6 +1020,8 @@ pub async fn commit_detail(
                     message
                 },
                 refs: vec![],
+                incoming: false,
+                unpushed: false,
             };
             let files = document
                 .descendants()

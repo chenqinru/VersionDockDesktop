@@ -13,6 +13,39 @@ export type CommitSelectionMode = 'single' | 'toggle' | 'range';
 export type DiffRange = { fromRevision: string; toRevision: string };
 export type CommitChangesModel = { commits: CommitNode[]; files: DetailFileTarget[] };
 
+function compareHistoryHeads(left: CommitNode, right: CommitNode): number {
+  const leftTime = Date.parse(left.committerDate);
+  const rightTime = Date.parse(right.committerDate);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return rightTime - leftTime;
+  if (Number.isFinite(rightTime) !== Number.isFinite(leftTime)) return Number.isFinite(rightTime) ? 1 : -1;
+  const byRepo = left.repoId.localeCompare(right.repoId);
+  return byRepo !== 0 ? byRepo : right.hash.localeCompare(left.hash);
+}
+
+/** Merge each repository's already-topological log without reordering a repo's parent chain. */
+export function interleaveHistory(historyByRepo: Record<string, CommitNode[]>): CommitNode[] {
+  const logs = Object.values(historyByRepo);
+  const positions = logs.map(() => 0);
+  const total = logs.reduce((count, log) => count + log.length, 0);
+  const result: CommitNode[] = [];
+  while (result.length < total) {
+    let selectedIndex = -1;
+    let selected: CommitNode | undefined;
+    for (let index = 0; index < logs.length; index += 1) {
+      const candidate = logs[index][positions[index]];
+      if (!candidate) continue;
+      if (!selected || compareHistoryHeads(candidate, selected) < 0) {
+        selected = candidate;
+        selectedIndex = index;
+      }
+    }
+    if (!selected || selectedIndex < 0) break;
+    result.push(selected);
+    positions[selectedIndex] += 1;
+  }
+  return result;
+}
+
 export interface AppStore {
   bridge?: VersionDockBridge;
   ready: boolean;
@@ -355,7 +388,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         nextByRepo[repoId] = [...existing, ...page.commits];
         nextHasMore[repoId] = page.hasMore;
       }
-      const history = repos.flatMap((repo) => nextByRepo[repo.meta.id] ?? []);
+      const history = interleaveHistory(nextByRepo);
       set({ historyByRepo: nextByRepo, historyHasMoreByRepo: nextHasMore, history, historyHasMore: Object.values(nextHasMore).some(Boolean) });
     },
 

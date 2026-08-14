@@ -601,6 +601,10 @@ pub struct CommitNode {
     pub committer_date: String,
     pub message: String,
     pub refs: Vec<String>,
+    #[serde(default)]
+    pub incoming: bool,
+    #[serde(default)]
+    pub unpushed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
