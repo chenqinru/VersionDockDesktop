@@ -13,6 +13,14 @@ import { applyTheme, resolveTheme } from './theme';
 import { useResizable } from './hooks/useResizable';
 import { useBridge } from './platform/context';
 
+const UI_FONT_SIZE = {
+  minimum: { pixels: '11px', scale: '0.8461538462' },
+  small: { pixels: '12px', scale: '0.9230769231' },
+  standard: { pixels: '13px', scale: '1' },
+  large: { pixels: '14px', scale: '1.0769230769' },
+  maximum: { pixels: '15px', scale: '1.1538461538' },
+} as const;
+
 export function App() {
   const bridge = useBridge();
   const bootstrap = useAppStore((state) => state.bootstrap);
@@ -28,6 +36,7 @@ export function App() {
   const [dropActive, setDropActive] = useState(false);
   const themePreference = bootstrap?.state.theme ?? 'system';
   const languagePreference = bootstrap?.state.language ?? 'system';
+  const uiFontSize = bootstrap?.state.uiFontSize ?? 'standard';
   const language = resolveLanguage(languagePreference);
   const t = useMemo(() => createTranslator(language, pluginMessages), [language, pluginMessages]);
   const commitWidth = bootstrap?.state.panelSizes.commit ?? 360;
@@ -40,6 +49,16 @@ export function App() {
     const update = () => applyTheme(resolveTheme(themePreference, media.matches));
     update(); media.addEventListener('change', update); return () => media.removeEventListener('change', update);
   }, [themePreference]);
+
+  useEffect(() => {
+    const size = UI_FONT_SIZE[uiFontSize];
+    // 清理旧版本曾写入的内联 zoom，避免热更新或旧页面状态把整个窗口缩小。
+    document.documentElement.style.removeProperty('zoom');
+    document.body.style.removeProperty('zoom');
+    document.getElementById('root')?.style.removeProperty('zoom');
+    document.documentElement.style.setProperty('--versiondock-ui-font-size', size.pixels);
+    document.documentElement.style.setProperty('--versiondock-ui-font-scale', size.scale);
+  }, [uiFontSize]);
 
   useEffect(() => {
     document.documentElement.lang = language;

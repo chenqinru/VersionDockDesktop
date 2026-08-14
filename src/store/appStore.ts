@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitNode, ConflictFile, DiffDocument,
-  BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference,
+  BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation,
   UnpushedCommit, MergeCommitSummary,
 } from '../bindings/generated';
@@ -133,6 +133,7 @@ export interface AppStore {
   backToHistory: () => void;
   setTheme: (value: ThemePreference) => Promise<void>;
   setLanguage: (value: LanguagePreference) => Promise<void>;
+  setUiFontSize: (value: UiFontSizePreference) => void;
   setExternalEditor: (executable: string, args: string[]) => void;
   setFileViewMode: (value: 'tree' | 'list') => void;
   setActiveTab: (value: 'changes' | 'shelf' | 'stash' | 'worktree' | 'subtree' | 'push') => void;
@@ -142,7 +143,7 @@ export interface AppStore {
 }
 
 const emptyState: AppStateSnapshot = {
-  theme: 'system', language: 'system', lastWorkspaceId: null, recentWorkspaces: [],
+  theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [],
   panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null,
   branchSidebarCollapsed: false, branchSidebarCollapsedSections: [],
 };
@@ -583,6 +584,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     setLanguage: async (language) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;
       bootstrap.state.language = language; set({ bootstrap: { ...bootstrap } }); persist();
+    },
+    setUiFontSize: (uiFontSize) => {
+      const bootstrap = get().bootstrap; if (!bootstrap) return;
+      bootstrap.state.uiFontSize = uiFontSize; set({ bootstrap: { ...bootstrap } }); persist();
     },
     setExternalEditor: (executable, args) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;

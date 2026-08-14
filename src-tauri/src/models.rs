@@ -430,6 +430,8 @@ pub struct RepositoryEvent {
 pub struct AppStateSnapshot {
     pub theme: ThemePreference,
     pub language: LanguagePreference,
+    #[serde(default)]
+    pub ui_font_size: UiFontSizePreference,
     pub last_workspace_id: Option<String>,
     pub recent_workspaces: Vec<WorkspaceDescriptor>,
     pub panel_sizes: PanelSizes,
@@ -458,6 +460,17 @@ pub enum LanguagePreference {
     System,
     ZhCn,
     En,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum UiFontSizePreference {
+    Minimum,
+    Small,
+    #[default]
+    Standard,
+    Large,
+    Maximum,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

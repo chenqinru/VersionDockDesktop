@@ -9,6 +9,7 @@ import { SettingsPanel } from './SettingsPanel';
 const state = (): AppStateSnapshot => ({
   theme: 'system',
   language: 'system',
+  uiFontSize: 'standard',
   lastWorkspaceId: null,
   recentWorkspaces: [],
   panelSizes: { commit: 360, branches: 220, detail: 360 },
@@ -57,8 +58,11 @@ describe('SettingsPanel', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), { target: { value: 'dark' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'zhCn' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'File view' }), { target: { value: 'list' } });
+    const fontSize = screen.getByRole('combobox', { name: 'UI font size' });
+    expect(Array.from(fontSize.querySelectorAll('option')).map((option) => option.value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
+    fireEvent.change(fontSize, { target: { value: 'maximum' } });
 
-    expect(useAppStore.getState().bootstrap?.state).toMatchObject({ theme: 'dark', language: 'zhCn', fileViewMode: 'list' });
+    expect(useAppStore.getState().bootstrap?.state).toMatchObject({ theme: 'dark', language: 'zhCn', fileViewMode: 'list', uiFontSize: 'maximum' });
   });
 
   it('saves external editor arguments and restores null when the executable is cleared', async () => {

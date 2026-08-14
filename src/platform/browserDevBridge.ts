@@ -292,7 +292,7 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 
 const initialState: AppStateSnapshot = {
   theme: 'dark', language: 'zhCn', lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
-  panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null,
+  panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', uiFontSize: 'standard', externalEditor: null,
   branchSidebarCollapsed: false, branchSidebarCollapsedSections: [],
 };
 

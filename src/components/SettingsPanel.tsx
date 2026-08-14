@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import type { ExternalEditor, LanguagePreference, ThemePreference } from '../bindings/generated';
+import type { ExternalEditor, LanguagePreference, ThemePreference, UiFontSizePreference } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
@@ -29,10 +29,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(settingsCategories[0].id);
   const theme = useAppStore((state) => state.bootstrap?.state.theme ?? 'system');
   const language = useAppStore((state) => state.bootstrap?.state.language ?? 'system');
+  const uiFontSize = useAppStore((state) => state.bootstrap?.state.uiFontSize ?? 'standard');
   const fileViewMode = useAppStore((state) => state.bootstrap?.state.fileViewMode === 'list' ? 'list' : 'tree');
   const externalEditor = useAppStore((state) => state.bootstrap?.state.externalEditor);
   const setTheme = useAppStore((state) => state.setTheme);
   const setLanguage = useAppStore((state) => state.setLanguage);
+  const setUiFontSize = useAppStore((state) => state.setUiFontSize);
   const setFileViewMode = useAppStore((state) => state.setFileViewMode);
   const setExternalEditor = useAppStore((state) => state.setExternalEditor);
 
@@ -126,6 +128,16 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <option value="system">{t('System')}</option>
                   <option value="zhCn">{t('Simplified Chinese')}</option>
                   <option value="en">{t('English')}</option>
+                </select>
+              </label>
+              <label className="settings-field">
+                <span className="settings-label"><strong>{t('UI font size')}</strong><small>{t('Choose the application UI font size')}</small></span>
+                <select aria-label={t('UI font size')} value={uiFontSize} onChange={(event) => setUiFontSize(event.target.value as UiFontSizePreference)}>
+                  <option value="minimum">{t('Minimum')}</option>
+                  <option value="small">{t('Small')}</option>
+                  <option value="standard">{t('Standard')}</option>
+                  <option value="large">{t('Large')}</option>
+                  <option value="maximum">{t('Maximum')}</option>
                 </select>
               </label>
             </SettingsSection>

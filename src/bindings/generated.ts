@@ -4,6 +4,7 @@
 export type AppStateSnapshot = {
 	theme: ThemePreference,
 	language: LanguagePreference,
+	uiFontSize?: UiFontSizePreference,
 	lastWorkspaceId: string | null,
 	recentWorkspaces: WorkspaceDescriptor[],
 	panelSizes: PanelSizes,
@@ -423,6 +424,8 @@ export type ToolAvailability = {
 	svn: boolean,
 	svnadmin: boolean,
 };
+
+export type UiFontSizePreference = "minimum" | "small" | "standard" | "large" | "maximum";
 
 export type UnpushedCommit = {
 	hash: string,
