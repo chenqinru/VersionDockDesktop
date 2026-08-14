@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
@@ -7,6 +7,8 @@ import { useBridge } from '../platform/context';
 export function TitleBar() {
   const [workspaces, setWorkspaces] = useState(false);
   const [maximized, setMaximized] = useState(false);
+  const workspaceAnchor = useRef<HTMLDivElement>(null);
+  const workspaceMenu = useRef<HTMLElement>(null);
   const bridge = useBridge();
   const platform = bridge.platform();
   const snapshot = useAppStore((state) => state.snapshot);
@@ -20,6 +22,29 @@ export function TitleBar() {
     if (platform !== 'linux') return;
     void bridge.window.isMaximized().then(setMaximized);
   }, [bridge, platform]);
+
+  useEffect(() => {
+    if (!workspaces) return;
+    const handleOutsideInteraction = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (workspaceAnchor.current?.contains(target) || workspaceMenu.current?.contains(target)) return;
+      setWorkspaces(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setWorkspaces(false);
+    };
+    document.addEventListener('pointerdown', handleOutsideInteraction, true);
+    document.addEventListener('focusin', handleOutsideInteraction, true);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideInteraction, true);
+      document.removeEventListener('focusin', handleOutsideInteraction, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [workspaces]);
 
   const chooseWorkspace = async () => {
     const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
@@ -38,7 +63,7 @@ export function TitleBar() {
     <>
       <header className={`titlebar ${platform}`}>
         <div className="titlebar-drag" onPointerDown={(event) => { if (event.button === 0) void bridge.window.startDragging(); }} onDoubleClick={() => void bridge.window.toggleMaximize()} />
-        <div className="titlebar-workspace">
+        <div ref={workspaceAnchor} className="titlebar-workspace">
             <button
               type="button"
               className={`workspace-trigger ${workspaces ? 'selected' : ''}`}
@@ -47,7 +72,7 @@ export function TitleBar() {
               aria-haspopup="menu"
               aria-label={`${t('Workspace')}: ${workspaceName}`}
               title={workspaceName}
-              onClick={() => setWorkspaces(!workspaces)}
+              onClick={() => setWorkspaces((value) => !value)}
             >
               <Codicon name="folder-opened" />
               <span className="workspace-trigger-label">{t('Workspace')}</span>
@@ -71,7 +96,7 @@ export function TitleBar() {
         )}
       </header>
       {workspaces && snapshot && (
-        <aside className="workspace-switcher" role="menu">
+        <aside ref={workspaceMenu} className="workspace-switcher" role="menu">
           <button className="workspace-open-other" role="menuitem" disabled={busy} onClick={() => void chooseWorkspace()}><Codicon name="folder-opened" /><span>{t('Open Another Workspace')}</span><Codicon name="chevron-right" /></button>
           <div className="workspace-menu-section"><span>{t('Recent Workspaces')}</span></div>
           <div className="workspace-switch-list">{recentWorkspaces.map((workspace) => <button key={workspace.id} role="menuitem" className={workspace.id === snapshot.workspace.id ? 'active' : ''} disabled={!workspace.available || busy} onClick={() => { void switchWorkspace(workspace.paths); }}><Codicon name={workspace.available ? 'history' : 'warning'} /><span><b>{workspace.name}</b><small>{workspace.paths.join(' · ')}</small></span>{workspace.id === snapshot.workspace.id && <Codicon name="check" />}</button>)}</div>

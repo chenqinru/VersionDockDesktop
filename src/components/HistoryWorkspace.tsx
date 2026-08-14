@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
 import { useAppStore, selectedRepository } from '../store/appStore';
@@ -138,6 +138,7 @@ function CommitDetailPanel() {
 export function HistoryWorkspace() {
   const [tool, setTool] = useState<'compare' | 'remotes'>();
   const [menu, setMenu] = useState<FilterMenu>(null);
+  const activeFilter = useRef<HTMLDivElement>(null);
   const [authors, setAuthors] = useState(new Set<string>());
   const [repos, setRepos] = useState(new Set<string>());
   const [refs, setRefs] = useState(new Set<string>());
@@ -161,14 +162,36 @@ export function HistoryWorkspace() {
     const date = Date.parse(commit.committerDate); if (from && date < Date.parse(`${from}T00:00:00`)) return false; if (to && date > Date.parse(`${to}T23:59:59`)) return false; return true;
   }), [allHistory, authors, from, refs, repos, to]);
   const toggleSet = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (value: string) => setter((current) => { const next = new Set(current); if (next.has(value)) next.delete(value); else next.add(value); return next; });
+
+  useEffect(() => {
+    if (!menu) return;
+    const handleOutsideInteraction = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node) || !activeFilter.current?.contains(target)) setMenu(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setMenu(null);
+    };
+    document.addEventListener('pointerdown', handleOutsideInteraction, true);
+    document.addEventListener('focusin', handleOutsideInteraction, true);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideInteraction, true);
+      document.removeEventListener('focusin', handleOutsideInteraction, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menu]);
+
   if (!selectedRepoId) return <div className="workspace-empty"><Codicon name="repo" />{t('Select a repository')}</div>;
   if (tool === 'compare' && repo?.meta.kind === 'git') return <BranchComparePanel repoId={repo.meta.id} close={() => { clearComparison(); setTool(undefined); }} />;
   return <section className="history-workspace" onClick={() => menu && setMenu(null)}>
     <div className="history-filters" onClick={(event) => event.stopPropagation()}><label className="commit-search"><Codicon name="search" /><input value={filter} onChange={(event) => setFilter(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void loadHistory(true); }} placeholder={t('Search commits')} />{filter && <button onClick={() => { setFilter(''); queueMicrotask(() => void loadHistory(true)); }}><Codicon name="close" /></button>}</label>
-      <div className="filter-anchor"><ToggleFilter icon="person" label={authors.size ? `${t('Author')} · ${authors.size}` : t('Author')} active={!!authors.size} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <CheckMenu title={t('Author')} values={authorOptions} selected={authors} toggle={toggleSet(setAuthors)} clear={() => setAuthors(new Set())} />}</div>
-      <div className="filter-anchor"><ToggleFilter icon="repo" label={repos.size ? `${t('Repository')} · ${repos.size}` : t('Repository')} active={!!repos.size} open={menu === 'repos'} onClick={() => setMenu(menu === 'repos' ? null : 'repos')} />{menu === 'repos' && <CheckMenu title={t('Repository')} values={repoOptions} selected={repos} toggle={toggleSet(setRepos)} clear={() => setRepos(new Set())} />}</div>
-      <div className="filter-anchor"><ToggleFilter icon="git-branch" label={refs.size ? `${t('Branch')} / ${t('Tags')} · ${refs.size}` : `${t('Branch')} / ${t('Tags')}`} active={!!refs.size} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <CheckMenu title={`${t('Branch')} / ${t('Tags')}`} values={refOptions} selected={refs} toggle={toggleSet(setRefs)} clear={() => setRefs(new Set())} />}</div>
-      <div className="filter-anchor"><ToggleFilter icon="calendar" label={from || to ? `${from || '…'} → ${to || '…'}` : t('From to')} active={!!from || !!to} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} />{menu === 'dates' && <DateMenu from={from} to={to} setFrom={setFrom} setTo={setTo} />}</div><span />
+      <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" label={authors.size ? `${t('Author')} · ${authors.size}` : t('Author')} active={!!authors.size} open={menu === 'authors'} onClick={() => setMenu((current) => current === 'authors' ? null : 'authors')} />{menu === 'authors' && <CheckMenu title={t('Author')} values={authorOptions} selected={authors} toggle={toggleSet(setAuthors)} clear={() => setAuthors(new Set())} />}</div>
+      <div ref={menu === 'repos' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="repo" label={repos.size ? `${t('Repository')} · ${repos.size}` : t('Repository')} active={!!repos.size} open={menu === 'repos'} onClick={() => setMenu((current) => current === 'repos' ? null : 'repos')} />{menu === 'repos' && <CheckMenu title={t('Repository')} values={repoOptions} selected={repos} toggle={toggleSet(setRepos)} clear={() => setRepos(new Set())} />}</div>
+      <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="git-branch" label={refs.size ? `${t('Branch')} / ${t('Tags')} · ${refs.size}` : `${t('Branch')} / ${t('Tags')}`} active={!!refs.size} open={menu === 'refs'} onClick={() => setMenu((current) => current === 'refs' ? null : 'refs')} />{menu === 'refs' && <CheckMenu title={`${t('Branch')} / ${t('Tags')}`} values={refOptions} selected={refs} toggle={toggleSet(setRefs)} clear={() => setRefs(new Set())} />}</div>
+      <div ref={menu === 'dates' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="calendar" label={from || to ? `${from || '…'} → ${to || '…'}` : t('From to')} active={!!from || !!to} open={menu === 'dates'} onClick={() => setMenu((current) => current === 'dates' ? null : 'dates')} />{menu === 'dates' && <DateMenu from={from} to={to} setFrom={setFrom} setTo={setTo} />}</div><span />
       {repo?.meta.kind === 'git' && compareEnabled && <button onClick={() => setTool('compare')}><Codicon name="compare-changes" />{t('Compare')}</button>}{repo?.meta.kind === 'git' && remotesEnabled && <button className={tool === 'remotes' ? 'selected' : ''} onClick={() => setTool(tool === 'remotes' ? undefined : 'remotes')}><Codicon name="remote" />{t('Remotes')}</button>}{repo?.meta.kind === 'git' ? <><button title={t('Fetch')} onClick={() => void sync(repo.meta.id, 'fetch')}><Codicon name="cloud-download" /></button><button title={t('Pull')} onClick={() => void sync(repo.meta.id, 'pull')}><Codicon name="arrow-down" /></button><button title={t('Push')} onClick={() => void sync(repo.meta.id, 'push')}><Codicon name="arrow-up" /></button></> : <button onClick={() => repo && void sync(repo.meta.id, 'update')}><Codicon name="sync" />{t('Update')}</button>}
     </div>
     {tool === 'remotes' && repo?.meta.kind === 'git' && <RemoteManager repoId={repo.meta.id} close={() => setTool(undefined)} />}

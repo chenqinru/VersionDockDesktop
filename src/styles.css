@@ -64,8 +64,13 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--versiondock-bg); color: var(--versiondock-text); }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { border: 0; background: transparent; cursor: default; }
-button:disabled { opacity: .45; }
+button:not(:disabled) { cursor: pointer; transition: background-color .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
+button:not(:disabled):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+button:disabled { opacity: .45; cursor: default; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px solid var(--versiondock-accent); outline-offset: -1px; }
+input:not(:disabled), textarea:not(:disabled), select:not(:disabled) { transition: border-color .12s ease, box-shadow .12s ease, background-color .12s ease; }
+input:not(:disabled):hover, textarea:not(:disabled):hover, select:not(:disabled):hover { border-color: color-mix(in srgb, var(--versiondock-accent) 55%, var(--versiondock-border)); }
+input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { cursor: pointer; }
 .codicon { font-size: 14px; }
 .app-shell { height: 100%; display: flex; flex-direction: column; position: relative; }
 .titlebar { height: 38px; flex: 0 0 38px; display: flex; align-items: stretch; background: var(--versiondock-surface-alt); user-select: none; position: relative; z-index: 20; }
@@ -160,6 +165,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .repo-heading { width: 100%; min-width: 0; height: 26px; padding: 0 6px; display: flex; align-items: center; gap: 0; overflow: hidden; white-space: nowrap; background: color-mix(in srgb, var(--versiondock-surface-alt) 72%, transparent); }
 .repo-heading > .selection-checkbox { flex: 0 0 auto; margin: 0 1px 0 0; }
 .repo-heading > button { min-width: 0; flex: 1; height: 100%; padding: 0 2px 0 4px; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; text-align: left; }
+.repo-heading > button:not(:disabled):hover { background: transparent; }
 .repo-heading > button > .codicon { flex: 0 0 auto; font-size: 12px; }
 .repo-heading i { width: 8px; height: 8px; flex: 0 0 8px; }
 .repo-heading strong { min-width: 20px; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; font-size: 11px; letter-spacing: .05em; }
@@ -448,6 +454,19 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   .settings-modal { width: calc(100vw - 24px); max-height: calc(100vh - 24px); padding: 12px; }
   .settings-field { grid-template-columns: minmax(0, 1fr) 126px; gap: 7px; }
 }
+
+/* Default interaction feedback for controls without a component-specific hover state. */
+.selection-checkbox:not(.disabled), .selection-checkbox:not(.disabled) input { cursor: pointer; }
+.welcome-primary .primary:not(:disabled):hover,
+.merge-workspace header .primary:not(:disabled):hover,
+.compare-workspace > header .primary:not(:disabled):hover,
+.commit-action > button:not(:disabled):hover,
+.push-panel > footer > button:not(:disabled):hover,
+.remote-add button:not(:disabled):hover { color: #fff; background: var(--versiondock-accent); }
+.commit-action > button:not(:disabled):hover { background: color-mix(in srgb, #fff 10%, var(--versiondock-accent-bg)); }
+button.danger:not(:disabled):hover,
+.remote-list .danger:not(:disabled):hover { color: #fff; background: color-mix(in srgb, var(--versiondock-danger) 72%, var(--versiondock-surface)); border-color: var(--versiondock-danger); }
+.conflict-banner:hover { background: color-mix(in srgb, var(--versiondock-warning) 22%, var(--versiondock-surface)); }
 .stash-repo > header { height: 28px; padding: 0 6px; }
 .stash-repo > header strong { font-size: 10px; letter-spacing: .055em; text-transform: uppercase; }
 .stash-repo > header button { width: 23px; height: 23px; padding: 0; justify-content: center; border: 0; }

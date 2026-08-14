@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
@@ -10,14 +10,35 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
   const busy = useAppStore((state) => state.busy);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const popover = useRef<HTMLElement>(null);
   const { t } = useI18n();
   useEffect(() => { void load(repoId); }, [load, repoId]);
+  useEffect(() => {
+    const handleOutsideInteraction = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && popover.current?.contains(target)) return;
+      close();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      close();
+    };
+    document.addEventListener('pointerdown', handleOutsideInteraction, true);
+    document.addEventListener('focusin', handleOutsideInteraction, true);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideInteraction, true);
+      document.removeEventListener('focusin', handleOutsideInteraction, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [close]);
   const add = () => {
     if (!name.trim() || !url.trim()) return;
     void operate(repoId, { type: 'add', name: name.trim(), url: url.trim() });
     setName(''); setUrl('');
   };
-  return <section className="remote-popover" role="dialog" aria-label={t('Remotes')}>
+  return <section ref={popover} className="remote-popover" role="dialog" aria-label={t('Remotes')}>
     <header><Codicon name="remote" /><strong>{t('Remotes')}</strong><button title={t('Close')} onClick={close}><Codicon name="close" /></button></header>
     <div className="remote-add"><input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('Remote name')} /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder={t('Remote URL')} onKeyDown={(event) => { if (event.key === 'Enter') add(); }} /><button disabled={busy || !name.trim() || !url.trim()} onClick={add}><Codicon name="add" />{t('Add')}</button></div>
     <div className="remote-list">{values.length === 0 && <div className="compare-empty">{t('No remotes')}</div>}{values.map((remote) => <article key={remote.name}>

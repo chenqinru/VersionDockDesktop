@@ -121,6 +121,10 @@ export function CommitPanel() {
   const [expansion, setExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
   const [textareaHeight, setTextareaHeight] = useState(54);
   const [context, setContext] = useState<{ x: number; y: number; repo: RepositoryStatus; file: FileChange }>();
+  const viewMenuRef = useRef<HTMLDivElement>(null);
+  const saveMenuRef = useRef<HTMLDivElement>(null);
+  const commitMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const repos = snapshot?.repositories ?? emptyRepositories;
   const gitRepos = useMemo(() => repos.filter((repo) => repo.meta.kind === 'git'), [repos]);
@@ -178,11 +182,40 @@ export function CommitPanel() {
     window.addEventListener('pointerup', finish);
     window.addEventListener('pointercancel', finish);
   };
+
+  useEffect(() => {
+    if (!commitMenu && !saveMenu && !viewMenu && !context) return;
+    const handleOutsideInteraction = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (context && !contextMenuRef.current?.contains(target)) setContext(undefined);
+      if (viewMenu && !viewMenuRef.current?.contains(target)) setViewMenu(false);
+      if (saveMenu && !saveMenuRef.current?.contains(target)) setSaveMenu(false);
+      if (commitMenu && !commitMenuRef.current?.contains(target)) setCommitMenu(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setContext(undefined);
+      setViewMenu(false);
+      setSaveMenu(false);
+      setCommitMenu(false);
+    };
+    document.addEventListener('pointerdown', handleOutsideInteraction, true);
+    document.addEventListener('focusin', handleOutsideInteraction, true);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideInteraction, true);
+      document.removeEventListener('focusin', handleOutsideInteraction, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [commitMenu, context, saveMenu, viewMenu]);
+
   return (
     <aside className="commit-panel" onClick={() => setContext(undefined)}>
       <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span /><button disabled={busy} title={t('Fetch')} onClick={() => void Promise.all(gitRepos.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>
       {settings && <SettingsPanel onClose={() => setSettings(false)} />}
-      <div className="commit-commandbar"><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button>{tab === 'changes' && <><button disabled={!repos.some((repo) => repo.files.length) || busy} title={t('Rollback')} onClick={() => void discardAll()}><Codicon name="discard" /></button><button title={t('Expand all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: true }))}><Codicon name="expand-all" /></button><button title={t('Collapse all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button><div className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu(!viewMenu); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={viewMode === 'list' ? 'selected' : ''} onClick={() => { setFileViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{viewMode === 'list' && <Codicon name="check" />}</button><button className={viewMode === 'tree' ? 'selected' : ''} onClick={() => { setFileViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{viewMode === 'tree' && <Codicon name="check" />}</button></div>}</div></>}<span /></div>
+      <div className="commit-commandbar"><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button>{tab === 'changes' && <><button disabled={!repos.some((repo) => repo.files.length) || busy} title={t('Rollback')} onClick={() => void discardAll()}><Codicon name="discard" /></button><button title={t('Expand all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: true }))}><Codicon name="expand-all" /></button><button title={t('Collapse all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button><div ref={viewMenuRef} className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={viewMode === 'list' ? 'selected' : ''} onClick={() => { setFileViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{viewMode === 'list' && <Codicon name="check" />}</button><button className={viewMode === 'tree' ? 'selected' : ''} onClick={() => { setFileViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{viewMode === 'tree' && <Codicon name="check" />}</button></div>}</div></>}<span /></div>
       <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}<b>{repos.reduce((sum, repo) => sum + repo.files.length, 0)}</b></button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Push')} className={tab === 'push' ? 'active' : ''} onClick={() => setTab('push')}><Codicon name="cloud-upload" />{tab === 'push' && <span>{t('Push')}</span>}{gitRepos.reduce((sum, repo) => sum + repo.ahead, 0) > 0 && <b>{gitRepos.reduce((sum, repo) => sum + repo.ahead, 0)}</b>}</button>}</div>
       {tab === 'push' ? <PushPanel repos={gitRepos} /> : tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} /> : <>
       {conflicts.length > 0 && (
@@ -198,11 +231,11 @@ export function CommitPanel() {
         {commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(commitTargets[0].meta.id)} onChange={() => setAmendRepos((current) => { const next = new Set(current); if (next.has(commitTargets[0].meta.id)) next.delete(commitTargets[0].meta.id); else next.add(commitTargets[0].meta.id); return next; })} />{t('Amend')}</label></div>}
         <textarea style={{ height: textareaHeight }} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(false); }} />
         <div className="commit-actions">
-          <div className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doSave('stash')}><Codicon name="save" />{t('Stash')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setSaveMenu(!saveMenu); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu"><button onClick={() => { void doSave('stash'); setSaveMenu(false); }}><Codicon name="save" />{t('Stash changes')}</button><button onClick={() => { void doSave('shelf'); setSaveMenu(false); }}><Codicon name="archive" />{t('Shelve changes')}</button></div>}</div>
-          <div className="split-button commit-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doCommit(false)}><Codicon name="check" />{t('Commit')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setCommitMenu(!commitMenu); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
+          <div ref={saveMenuRef} className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doSave('stash')}><Codicon name="save" />{t('Stash')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu"><button onClick={() => { void doSave('stash'); setSaveMenu(false); }}><Codicon name="save" />{t('Stash changes')}</button><button onClick={() => { void doSave('shelf'); setSaveMenu(false); }}><Codicon name="archive" />{t('Shelve changes')}</button></div>}</div>
+          <div ref={commitMenuRef} className="split-button commit-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doCommit(false)}><Codicon name="check" />{t('Commit')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
         </div>
       </div>
-      {context && <div className="context-menu" style={{ left: context.x, top: context.y }} onClick={(event) => event.stopPropagation()}>
+      {context && <div ref={contextMenuRef} className="context-menu" style={{ left: context.x, top: context.y }} onClick={(event) => event.stopPropagation()}>
         <button onClick={() => { void openDiff(context.repo.meta.id, context.file.path, context.file.staged); setContext(undefined); }}><Codicon name="diff" />{t('Diff')}</button>
         <button onClick={() => { void systemOpen(context.repo.meta.id, context.file.path, false); setContext(undefined); }}><Codicon name="go-to-file" />{t('Open')}</button>
         {externalEditor && <button onClick={() => { void systemOpen(context.repo.meta.id, context.file.path, false, true); setContext(undefined); }}><Codicon name="code" />{t('Open in external editor')}</button>}
