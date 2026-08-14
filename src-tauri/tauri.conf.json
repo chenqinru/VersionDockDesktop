@@ -13,12 +13,12 @@
     "windows": [
       {
         "label": "main",
-        "title": "VersionDock Desktop",
+        "title": " ",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,
         "minHeight": 680,
-        "decorations": false,
+        "decorations": true,
         "transparent": false,
         "resizable": true,
         "center": true,

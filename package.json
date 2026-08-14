@@ -8,7 +8,7 @@
     "dev": "vite",
     "browser:dev": "vite --mode browser",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "tauri:dev": "node scripts/tauri-dev.mjs",
     "tauri:build": "tauri build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",

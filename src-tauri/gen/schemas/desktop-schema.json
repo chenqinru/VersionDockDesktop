@@ -2577,6 +2577,78 @@
           "markdownDescription": "Denies the version command without any pre-configured scope."
         },
         {
+          "description": "Default permissions for system symbol lookup.\n#### This default permission set includes:\n\n- `allow-get-symbol`",
+          "type": "string",
+          "const": "system-symbols:default",
+          "markdownDescription": "Default permissions for system symbol lookup.\n#### This default permission set includes:\n\n- `allow-get-symbol`"
+        },
+        {
+          "description": "Enables the get_symbol command without any pre-configured scope.",
+          "type": "string",
+          "const": "system-symbols:allow-get-symbol",
+          "markdownDescription": "Enables the get_symbol command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_symbol command without any pre-configured scope.",
+          "type": "string",
+          "const": "system-symbols:deny-get-symbol",
+          "markdownDescription": "Denies the get_symbol command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the plugin: glyph path lookup, caption actions, and window state.\n#### This default permission set includes:\n\n- `allow-get-glyph-path`\n- `allow-window-command`\n- `allow-window-state`\n- `allow-enable-snap`",
+          "type": "string",
+          "const": "window-controls:default",
+          "markdownDescription": "Default permissions for the plugin: glyph path lookup, caption actions, and window state.\n#### This default permission set includes:\n\n- `allow-get-glyph-path`\n- `allow-window-command`\n- `allow-window-state`\n- `allow-enable-snap`"
+        },
+        {
+          "description": "Enables the enable_snap command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:allow-enable-snap",
+          "markdownDescription": "Enables the enable_snap command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_glyph_path command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:allow-get-glyph-path",
+          "markdownDescription": "Enables the get_glyph_path command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the window_command command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:allow-window-command",
+          "markdownDescription": "Enables the window_command command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:allow-window-state",
+          "markdownDescription": "Enables the window_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the enable_snap command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:deny-enable-snap",
+          "markdownDescription": "Denies the enable_snap command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_glyph_path command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:deny-get-glyph-path",
+          "markdownDescription": "Denies the get_glyph_path command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_command command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:deny-window-command",
+          "markdownDescription": "Denies the window_command command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-controls:deny-window-state",
+          "markdownDescription": "Denies the window_state command without any pre-configured scope."
+        },
+        {
           "description": "This permission set configures what kind of\noperations are available from the window state plugin.\n\n#### Granted Permissions\n\nAll operations are enabled by default.\n\n\n#### This default permission set includes:\n\n- `allow-filename`\n- `allow-restore-state`\n- `allow-save-window-state`",
           "type": "string",
           "const": "window-state:default",

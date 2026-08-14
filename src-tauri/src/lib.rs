@@ -20,14 +20,30 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_system_symbols::init())
+        .plugin(tauri_plugin_window_controls::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_state_flags(StateFlags::all())
+                // The window configuration owns decorations per platform. Do not restore
+                // the legacy `decorated: false` value saved by earlier borderless builds.
+                .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
                 .build(),
         )
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             app.manage(AppState::load(config_dir));
+
+            #[cfg(target_os = "windows")]
+            {
+                use tauri_plugin_window_controls::WindowControlsExt;
+
+                let window = app
+                    .get_webview_window("main")
+                    .expect("main window not found");
+                window.set_title_bar_height(38)?;
+                window.set_title_bar_overlay(true)?;
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
