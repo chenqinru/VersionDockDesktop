@@ -74,7 +74,7 @@ export function TitleBar() {
         <aside className="workspace-switcher" role="menu">
           <button className="workspace-open-other" role="menuitem" disabled={busy} onClick={() => void chooseWorkspace()}><Codicon name="folder-opened" /><span>{t('Open Another Workspace')}</span><Codicon name="chevron-right" /></button>
           <div className="workspace-menu-section"><span>{t('Recent Workspaces')}</span></div>
-          <div className="workspace-switch-list">{recentWorkspaces.map((workspace) => <button key={workspace.id} role="menuitem" className={workspace.id === snapshot.workspace.id ? 'active' : ''} disabled={!workspace.available || busy} onClick={() => { void switchWorkspace(workspace.paths); }}><Codicon name={workspace.available ? 'folder' : 'warning'} /><span><b>{workspace.name}</b><small>{workspace.paths.join(' · ')}</small></span>{workspace.id === snapshot.workspace.id && <Codicon name="check" />}</button>)}</div>
+          <div className="workspace-switch-list">{recentWorkspaces.map((workspace) => <button key={workspace.id} role="menuitem" className={workspace.id === snapshot.workspace.id ? 'active' : ''} disabled={!workspace.available || busy} onClick={() => { void switchWorkspace(workspace.paths); }}><Codicon name={workspace.available ? 'history' : 'warning'} /><span><b>{workspace.name}</b><small>{workspace.paths.join(' · ')}</small></span>{workspace.id === snapshot.workspace.id && <Codicon name="check" />}</button>)}</div>
         </aside>
       )}
     </>
