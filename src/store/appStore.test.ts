@@ -95,6 +95,26 @@ describe('appStore async lifecycle', () => {
     expect(Object.keys(useAppStore.getState().historyByRepo)).toEqual(['a', 'b']);
   });
 
+  it('loads branch and tag refs for SVN repositories as well as Git', async () => {
+    const svn = { ...repository('svn', 'SVN'), meta: { ...repository('svn', 'SVN').meta, kind: 'svn' as const } };
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [svn];
+    const commands: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      commands.push(command);
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'branches') return [{ name: 'trunk', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }];
+      if (command.type === 'tags') return [{ name: 'v1.0.0', hash: 'r4', date: '' }];
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'svn' });
+    await useAppStore.getState().selectRepo('svn', true);
+    expect(commands.some((command) => command.type === 'branches' && command.payload.repo_id === 'svn')).toBe(true);
+    expect(commands.some((command) => command.type === 'tags' && command.payload.repo_id === 'svn')).toBe(true);
+    expect(useAppStore.getState().branchesByRepo.svn[0].name).toBe('trunk');
+    expect(useAppStore.getState().tagsByRepo.svn[0].hash).toBe('r4');
+  });
+
   it('uses a repository-scoped subtree command without cwd and refreshes registered entries', async () => {
     const commands: BridgeCommand[] = [];
     const entries: SubtreeEntry[] = [{ id: 'entry', prefix: 'vendor/api', remote: 'origin', branch: 'main', squash: true, state: 'active' }];

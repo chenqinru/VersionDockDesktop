@@ -3,6 +3,140 @@ import type { BranchInfo, CommitFile, RepositoryStatus } from '../bindings/gener
 type BranchInstance = { repoId: string; repo: RepositoryStatus; branch: BranchInfo };
 export type MergedBranch = { name: string; instances: BranchInstance[]; current: boolean; remote: boolean };
 
+const MAINLINE_BRANCH = /^(main|master|prod|develop|dev|release)(?:[/-].*)?$/i;
+
+export type SidebarBranch = {
+  key: string;
+  name: string;
+  ref: string;
+  remote: boolean;
+  remoteName?: string;
+  current: boolean;
+  instances: BranchInstance[];
+  repoIds: string[];
+  vcsKind: 'git' | 'svn';
+};
+
+export type SidebarTag = {
+  key: string;
+  name: string;
+  instances: Array<{ repo: RepositoryStatus; tag: { name: string; hash: string; date: string } }>;
+  repoIds: string[];
+  vcsKind: 'git' | 'svn';
+};
+
+export type SidebarModel = {
+  local: SidebarBranch[];
+  remotes: Array<{ name: string; branches: SidebarBranch[] }>;
+  tags: SidebarTag[];
+};
+
+function remoteNameFor(branch: BranchInfo): string {
+  if (branch.remoteName) return branch.remoteName;
+  return branch.name.split('/')[0] || 'remote';
+}
+
+function branchBaseName(branch: BranchInfo): string {
+  if (!branch.remote) return branch.name;
+  const remote = remoteNameFor(branch);
+  return branch.name.startsWith(`${remote}/`) ? branch.name.slice(remote.length + 1) : branch.name;
+}
+
+function mergeSidebarBranches(
+  repos: RepositoryStatus[],
+  branchesByRepo: Record<string, BranchInfo[]>,
+  remote: boolean,
+  filter: string,
+): SidebarBranch[] {
+  const values = new Map<string, SidebarBranch>();
+  const needle = filter.trim().toLowerCase();
+  for (const repo of repos) {
+    for (const branch of branchesByRepo[repo.meta.id] ?? []) {
+      if (branch.remote !== remote) continue;
+      const name = branchBaseName(branch);
+      const remoteName = remote ? remoteNameFor(branch) : undefined;
+      const ref = remote ? branch.name : name;
+      const searchable = `${branch.name} ${name} ${remoteName ?? ''}`.toLowerCase();
+      if (needle && !searchable.includes(needle)) continue;
+      const key = remote ? `remote:${remoteName}:${name}` : `local:${name}`;
+      const existing = values.get(key);
+      if (existing) {
+        if (!existing.repoIds.includes(repo.meta.id)) existing.repoIds.push(repo.meta.id);
+        existing.instances.push({ repoId: repo.meta.id, repo, branch });
+        existing.current ||= branch.current;
+      } else {
+        values.set(key, {
+          key,
+          name,
+          ref,
+          remote,
+          remoteName,
+          current: branch.current,
+          instances: [{ repoId: repo.meta.id, repo, branch }],
+          repoIds: [repo.meta.id],
+          vcsKind: repo.meta.kind,
+        });
+      }
+    }
+  }
+  return [...values.values()].sort((left, right) => {
+    if (left.current !== right.current) return left.current ? -1 : 1;
+    const leftMainline = MAINLINE_BRANCH.test(left.name);
+    const rightMainline = MAINLINE_BRANCH.test(right.name);
+    if (leftMainline !== rightMainline) return leftMainline ? -1 : 1;
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function mergeSidebarTags(
+  repos: RepositoryStatus[],
+  tagsByRepo: Record<string, Array<{ name: string; hash: string; date: string }>>,
+  filter: string,
+): SidebarTag[] {
+  const values = new Map<string, SidebarTag>();
+  const needle = filter.trim().toLowerCase();
+  for (const repo of repos) {
+    for (const tag of tagsByRepo[repo.meta.id] ?? []) {
+      if (needle && !tag.name.toLowerCase().includes(needle)) continue;
+      const key = `${repo.meta.kind}:${tag.name}`;
+      const existing = values.get(key);
+      if (existing) {
+        if (!existing.repoIds.includes(repo.meta.id)) existing.repoIds.push(repo.meta.id);
+        existing.instances.push({ repo, tag });
+      } else {
+        values.set(key, {
+          key,
+          name: tag.name,
+          instances: [{ repo, tag }],
+          repoIds: [repo.meta.id],
+          vcsKind: repo.meta.kind,
+        });
+      }
+    }
+  }
+  return [...values.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function buildSidebarModel(
+  repos: RepositoryStatus[],
+  branchesByRepo: Record<string, BranchInfo[]>,
+  tagsByRepo: Record<string, Array<{ name: string; hash: string; date: string }>>,
+  filter = '',
+): SidebarModel {
+  const local = mergeSidebarBranches(repos, branchesByRepo, false, filter);
+  const remoteValues = mergeSidebarBranches(repos, branchesByRepo, true, filter);
+  const remotes = new Map<string, SidebarBranch[]>();
+  for (const branch of remoteValues) {
+    const name = branch.remoteName ?? 'remote';
+    remotes.set(name, [...(remotes.get(name) ?? []), branch]);
+  }
+  return {
+    local,
+    remotes: [...remotes.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, branches]) => ({ name, branches })),
+    tags: mergeSidebarTags(repos, tagsByRepo, filter),
+  };
+}
+
 export function mergeBranches(repos: RepositoryStatus[], branchesByRepo: Record<string, BranchInfo[]>, remote: boolean): MergedBranch[] {
   const values = new Map<string, MergedBranch>();
   const seenInstances = new Set<string>();
@@ -23,7 +157,6 @@ export function mergeBranches(repos: RepositoryStatus[], branchesByRepo: Record<
   return [...values.values()].sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
 }
 
-const MAINLINE_BRANCH = /^(main|master|prod|develop|dev|release)(?:[/-].*)?$/i;
 export function splitVisibleBranches(entries: MergedBranch[], searching: boolean) {
   if (searching) return { primary: entries, other: [] as MergedBranch[] };
   return entries.reduce<{ primary: MergedBranch[]; other: MergedBranch[] }>((groups, entry) => {

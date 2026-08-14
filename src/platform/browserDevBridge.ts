@@ -17,6 +17,13 @@ const repository = (
   branch, revision: `${id}628f9b3`, ahead, behind, files, conflicts: 0, operation: null,
 });
 
+const svnRepository = (
+  id: string, name: string, color: string, branch: string, revision: string, behind = 0,
+): RepositoryStatus => ({
+  meta: { id, name, rootPath: `/browser-demo/${id}`, color, kind: 'svn', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false },
+  branch, revision, ahead: 0, behind, files: [], conflicts: 0, operation: null,
+});
+
 const initialRepositories: RepositoryStatus[] = [
   repository('admin', 'ADMIN', '#4ec9b0', 'main', [
     { path: 'apps/web-antd/src/api/infra/config/index.ts', status: 'modified', staged: false, unstaged: true, conflicted: false },
@@ -60,18 +67,55 @@ const histories: Record<string, CommitNode[]> = {
 
 const branches: Record<string, BranchInfo[]> = Object.fromEntries(initialRepositories.map((repo) => {
   const values: BranchInfo[] = [
-    { name: repo.branch, current: true, remote: false, upstream: `origin/${repo.branch}`, ahead: repo.ahead, behind: repo.behind },
-    { name: 'feature/shared-ui', current: false, remote: false, upstream: null, ahead: 0, behind: 0 },
-    { name: `feature/${repo.meta.id}-local`, current: false, remote: false, upstream: null, ahead: 3, behind: 0 },
-    { name: `origin/${repo.branch}`, current: false, remote: true, upstream: null, ahead: 0, behind: 0 },
+    { name: repo.branch, current: true, remote: false, remoteName: null, upstream: `origin/${repo.branch}`, ahead: repo.ahead, behind: repo.behind },
+    { name: 'feature/shared-ui', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+    { name: `feature/${repo.meta.id}-local`, current: false, remote: false, remoteName: null, upstream: null, ahead: 3, behind: 0 },
+    { name: `origin/${repo.branch}`, current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
+    { name: `gitee/${repo.branch}`, current: false, remote: true, remoteName: 'gitee', upstream: null, ahead: 0, behind: 0 },
   ];
-  if (repo.branch !== 'main') values.splice(1, 0, { name: 'main', current: false, remote: false, upstream: 'origin/main', ahead: 0, behind: 0 });
+  if (repo.branch !== 'main') values.splice(1, 0, { name: 'main', current: false, remote: false, remoteName: null, upstream: 'origin/main', ahead: 0, behind: 0 });
   return [repo.meta.id, values];
 }));
+
+const mixedRepositories: RepositoryStatus[] = [
+  { ...initialRepositories[0], meta: { ...initialRepositories[0].meta, id: 'mixed-git', name: 'GHCWBX' } },
+  { ...initialRepositories[1], meta: { ...initialRepositories[1].meta, id: 'mixed-api-git', name: 'API' } },
+  svnRepository('mixed-admin-svn', 'ADMIN', '#d19a66', 'admin_code', '24', 24),
+  svnRepository('mixed-api-svn', 'API', '#c678dd', 'api', '30', 30),
+];
+
+const mixedBranches: Record<string, BranchInfo[]> = {
+  'mixed-git': [
+    { name: 'main', current: true, remote: false, remoteName: null, upstream: 'origin/main', ahead: 0, behind: 0 },
+    { name: 'prod', current: false, remote: false, remoteName: null, upstream: 'origin/prod', ahead: 3, behind: 0 },
+    { name: 'origin/main', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
+  ],
+  'mixed-api-git': [
+    { name: 'main', current: true, remote: false, remoteName: null, upstream: 'origin/main', ahead: 0, behind: 0 },
+    { name: 'feature/api', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+    { name: 'origin/main', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
+  ],
+  'mixed-admin-svn': [
+    { name: 'admin_code', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 24 },
+    { name: 'trunk', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+  ],
+  'mixed-api-svn': [
+    { name: 'api', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 30 },
+    { name: 'trunk', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+  ],
+};
 
 const tags: Record<string, TagInfo[]> = Object.fromEntries(initialRepositories.map((repo) => [repo.meta.id, [
   { name: 'v1.0.0', hash: histories[repo.meta.id][0].hash, date: histories[repo.meta.id][0].committerDate },
 ]]));
+
+const versionNames = ['prod/v0.0.2', 'prod/v0.0.3', 'prod/v1.0.0', 'prod/v1.0.1', 'prod/v1.0.2', 'test/v0.0.1', 'test/v1.0.0', 'test/v1.0.1', 'v0.0.1', 'v0.0.2', 'v1.0.0-bate', 'v1.0.1', 'v1.7.1', 'v1.7.2', 'v1.7.3', 'v1.8.0', 'v1.8.1', 'v1.8.2', 'v1.8.3', 'v1.9.0', 'v2.0.0', 'v2.0.1', 'v2.1.0'];
+const demoTags: Record<string, TagInfo[]> = Object.fromEntries(initialRepositories.map((repo) => [repo.meta.id, [
+  ...(tags[repo.meta.id] ?? []),
+  ...versionNames.map((name, index) => ({ name, hash: `${repo.meta.id}-tag-${index}`, date: '2026-08-13T08:00:00.000Z' })),
+]]));
+
+const browserDemoMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sidebar') === 'mixed' ? 'mixed' : 'git';
 
 const detailFiles: Record<string, CommitFile[]> = {
   admin: [
@@ -87,11 +131,14 @@ const detailFiles: Record<string, CommitFile[]> = {
 const initialState: AppStateSnapshot = {
   theme: 'dark', language: 'zhCn', lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
   panelSizes: { commit: 345, branches: 220, detail: 350 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null,
+  branchSidebarCollapsed: false, branchSidebarCollapsedSections: [],
 };
 
 export class BrowserDevBridge implements VersionDockBridge {
   private state: AppStateSnapshot = structuredClone(initialState);
-  private repositories = structuredClone(initialRepositories);
+  private repositories = structuredClone(browserDemoMode === 'mixed' ? mixedRepositories : initialRepositories);
+  private readonly branchValues = browserDemoMode === 'mixed' ? mixedBranches : branches;
+  private readonly tagValues = browserDemoMode === 'mixed' ? {} : demoTags;
   private generation = 1;
   private handlers = new Set<(event: BridgeEvent) => void>();
   private subtreeValues: Record<string, SubtreeEntry[]> = {
@@ -139,8 +186,8 @@ export class BrowserDevBridge implements VersionDockBridge {
         const filtered = command.payload.filter ? values.filter((commit) => commit.message.toLowerCase().includes(command.payload.filter!.toLowerCase())) : values;
         return { commits: filtered.slice(command.payload.skip, command.payload.skip + command.payload.limit), hasMore: false } satisfies HistoryPage;
       }
-      case 'branches': return branches[command.payload.repo_id] ?? [];
-      case 'tags': return tags[command.payload.repo_id] ?? [];
+      case 'branches': return this.branchValues[command.payload.repo_id] ?? [];
+      case 'tags': return this.tagValues[command.payload.repo_id] ?? [];
       case 'commitDetail': return this.commitDetail(command.payload.repo_id, command.payload.revision);
       case 'fileDiff': return this.diff(command.payload.relative_path);
       case 'conflicts': return [];

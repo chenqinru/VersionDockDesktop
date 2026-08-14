@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryWorkspace } from './HistoryWorkspace';
-import { buildDetailTree, collapseDetailTree, mergeBranches, splitVisibleBranches } from './HistoryWorkspace.helpers';
+import { buildDetailTree, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches } from './HistoryWorkspace.helpers';
+import { BranchSidebar } from './BranchSidebar';
 import { useAppStore } from '../store/appStore';
-import type { BootstrapData, BridgeCommand, WorkspaceSnapshot } from '../bindings/generated';
-import { MockBridge } from '../platform/bridge';
+import type { BootstrapData, WorkspaceSnapshot } from '../bindings/generated';
 
 const snapshot: WorkspaceSnapshot = {
   workspace: { id: 'workspace', name: 'Test', paths: ['/tmp/test'], lastOpenedAt: '', available: true },
@@ -25,42 +25,14 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
-  it('hides compare and remotes until both real capabilities are enabled', () => {
-    useAppStore.setState({ bootstrap: bootstrap(false, false), snapshot, selectedRepoId: 'repo' });
-    const { rerender } = render(<HistoryWorkspace />);
+  it('keeps history operation buttons out of the top filter bar', () => {
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo' });
+    render(<HistoryWorkspace />);
     expect(screen.queryByText('Compare')).not.toBeInTheDocument();
     expect(screen.queryByText('Remotes')).not.toBeInTheDocument();
-    useAppStore.setState({ bootstrap: bootstrap(true, true) });
-    rerender(<HistoryWorkspace />);
-    expect(screen.getByText('Compare')).toBeInTheDocument();
-    expect(screen.getByText('Remotes')).toBeInTheDocument();
-  });
-
-  it('loads remote metadata through the bridge without exposing a cwd', async () => {
-    const commands: BridgeCommand[] = [];
-    const bridge = new MockBridge((command) => {
-      commands.push(command);
-      if (command.type === 'remotes') return [{ name: 'origin', fetchUrl: 'https://example.test/repo.git', pushUrl: 'https://example.test/repo.git' }];
-      return [];
-    });
-    useAppStore.setState({ bridge, bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo' });
-    render(<HistoryWorkspace />);
-    fireEvent.click(screen.getByText('Remotes'));
-    await waitFor(() => expect(screen.getByText('origin')).toBeInTheDocument());
-    expect(commands).toContainEqual({ type: 'remotes', payload: { workspace_id: 'workspace', repo_id: 'repo' } });
-    expect(JSON.stringify(commands)).not.toContain('cwd');
-  });
-
-  it('requests branch comparison with repository-scoped identifiers', async () => {
-    const responder = vi.fn((command: BridgeCommand) => command.type === 'branchCompare' ? { base: 'main', target: 'feature', baseCommits: [], targetCommits: [], files: [] } : []);
-    useAppStore.setState({ bridge: new MockBridge(responder), bootstrap: bootstrap(true, false), snapshot, selectedRepoId: 'repo', branches: [
-      { name: 'main', current: true, remote: false, upstream: null, ahead: 0, behind: 0 },
-      { name: 'feature', current: false, remote: false, upstream: null, ahead: 0, behind: 0 },
-    ] });
-    render(<HistoryWorkspace />);
-    fireEvent.click(screen.getByText('Compare'));
-    fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
-    await waitFor(() => expect(responder).toHaveBeenCalledWith({ type: 'branchCompare', payload: { workspace_id: 'workspace', repo_id: 'repo', base: 'main', target: 'feature' } }));
+    expect(screen.queryByTitle('Fetch')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Pull')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Push')).not.toBeInTheDocument();
   });
 
   it('opens functional author and repository filter menus', () => {
@@ -77,6 +49,76 @@ describe('HistoryWorkspace capabilities', () => {
 });
 
 describe('HistoryWorkspace data helpers', () => {
+  it('groups remote namespaces and preserves mixed repository identity', () => {
+    const svnRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'svn', name: 'SVN', kind: 'svn' as const } };
+    const model = buildSidebarModel([snapshot.repositories[0], svnRepo], {
+      repo: [
+        { name: 'main', current: true, remote: false, remoteName: null, upstream: 'origin/main', ahead: 1, behind: 0 },
+        { name: 'company/remote/feature/ui', current: false, remote: true, remoteName: 'company/remote', upstream: null, ahead: 0, behind: 0 },
+      ],
+      svn: [{ name: 'trunk', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 2 }],
+    }, {
+      repo: [{ name: 'v1.0.0', hash: 'a', date: '' }],
+      svn: [{ name: 'v1.0.0', hash: 'r2', date: '' }],
+    });
+    expect(model.local.map((branch) => branch.name)).toEqual(['main', 'trunk']);
+    expect(model.remotes).toHaveLength(1);
+    expect(model.remotes[0].name).toBe('company/remote');
+    expect(model.remotes[0].branches[0].name).toBe('feature/ui');
+    expect(model.tags).toHaveLength(2);
+  });
+
+  it('filters branches, remote names, and tags with one search value', () => {
+    const model = buildSidebarModel(snapshot.repositories, {
+      repo: [{ name: 'feature/api', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+    }, { repo: [{ name: 'v1.0.0', hash: 'a', date: '' }] }, 'api');
+    expect(model.local.map((branch) => branch.name)).toEqual(['feature/api']);
+    expect(model.tags).toHaveLength(0);
+    expect(buildSidebarModel(snapshot.repositories, {}, { repo: [{ name: 'v1.0.0-api', hash: 'a', date: '' }] }, 'api').tags).toHaveLength(1);
+  });
+
+  it('uses single click for highlighting and double click for history filtering', () => {
+    const onRefFilter = vi.fn();
+    useAppStore.setState({ bootstrap: bootstrap(false, false), snapshot, selectedRepoId: 'repo', branchesByRepo: {
+      repo: [{ name: 'feature/ui', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+    }, tagsByRepo: { repo: [] } });
+    render(<BranchSidebar repoFilter={new Set()} refFilter={new Set()} onRepoFilter={vi.fn()} onRefFilter={onRefFilter} onCollapse={vi.fn()} />);
+    const row = screen.getByText('feature/ui');
+    fireEvent.click(row);
+    expect(onRefFilter).not.toHaveBeenCalled();
+    fireEvent.doubleClick(row);
+    expect(onRefFilter).toHaveBeenCalledWith('feature/ui');
+  });
+
+  it('keeps repository and branch filters single-select', () => {
+    const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
+    useAppStore.setState({
+      bootstrap: bootstrap(false, false),
+      snapshot: { ...snapshot, repositories: [snapshot.repositories[0], secondRepo] },
+      selectedRepoId: 'repo',
+      branchesByRepo: {
+        repo: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+        'repo-2': [{ name: 'feature/ui', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+      },
+      tagsByRepo: { repo: [], 'repo-2': [] },
+    });
+    render(<HistoryWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Repository' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Repo 2GIT' }));
+    expect(screen.getByRole('radio', { name: 'Repo 2GIT' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: 'RepoGIT' }));
+    expect(screen.getByRole('radio', { name: 'RepoGIT' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Repo 2GIT' })).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Branch / Tags' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'feature/ui' }));
+    expect(screen.getByRole('radio', { name: 'feature/ui' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: 'main' }));
+    expect(screen.getByRole('radio', { name: 'main' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'feature/ui' })).not.toBeChecked();
+  });
+
   it('merges branch instances and only exposes shared, current, or mainline branches by default', () => {
     const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
     const branches = {

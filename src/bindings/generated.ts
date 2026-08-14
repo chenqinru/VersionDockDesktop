@@ -10,6 +10,8 @@ export type AppStateSnapshot = {
 	activeTab: string,
 	fileViewMode: string,
 	externalEditor: ExternalEditor | null,
+	branchSidebarCollapsed?: boolean,
+	branchSidebarCollapsedSections?: string[],
 };
 
 export type BootstrapData = {
@@ -30,9 +32,12 @@ export type BranchInfo = {
 	name: string,
 	current: boolean,
 	remote: boolean,
+	remoteName?: string | null,
 	upstream: string | null,
 	ahead: number,
 	behind: number,
+	detachedTag?: string | null,
+	detachedHash?: string | null,
 };
 
 export type BranchOperation = { type: "create"; name: string; from: string | null } | { type: "checkout"; name: string } | { type: "rename"; old_name: string; new_name: string } | { type: "delete"; name: string; force: boolean };

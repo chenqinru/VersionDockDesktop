@@ -87,12 +87,14 @@ interface AppStore {
   setFileViewMode: (value: 'tree' | 'list') => void;
   setActiveTab: (value: 'changes' | 'shelf' | 'stash' | 'worktree' | 'subtree' | 'push') => void;
   setPanelSize: (key: 'commit' | 'branches' | 'detail', value: number) => void;
+  setBranchSidebarState: (collapsed: boolean, collapsedSections: string[]) => void;
   clearError: () => void;
 }
 
 const emptyState: AppStateSnapshot = {
   theme: 'system', language: 'system', lastWorkspaceId: null, recentWorkspaces: [],
   panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null,
+  branchSidebarCollapsed: false, branchSidebarCollapsedSections: [],
 };
 
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -237,7 +239,6 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (get().bootstrap?.capabilities.changelist) requests.push(get().loadChangelists(repoId));
         if (repo.meta.kind === 'git' && get().bootstrap?.capabilities.subtree) requests.push(get().loadSubtrees(repoId));
         for (const item of get().snapshot?.repositories ?? []) {
-          if (item.meta.kind !== 'git') continue;
           requests.push(bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId(), repo_id: item.meta.id } }).then((branches) => set((state) => ({
             branchesByRepo: { ...state.branchesByRepo, [item.meta.id]: branches },
             branches: item.meta.id === get().selectedRepoId ? branches : state.branches,
@@ -459,6 +460,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     setPanelSize: (key, value) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;
       bootstrap.state.panelSizes[key] = Math.round(value); set({ bootstrap: { ...bootstrap } }); persist();
+    },
+    setBranchSidebarState: (collapsed, collapsedSections) => {
+      const bootstrap = get().bootstrap; if (!bootstrap) return;
+      bootstrap.state.branchSidebarCollapsed = collapsed;
+      bootstrap.state.branchSidebarCollapsedSections = [...new Set(collapsedSections)];
+      set({ bootstrap: { ...bootstrap } }); persist();
     },
     clearError: () => set({ error: undefined }),
   };

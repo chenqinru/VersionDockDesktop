@@ -967,7 +967,9 @@ pub async fn branches(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Vec<BranchInfo>, DesktopError> {
-    ensure_git(repo)?;
+    if repo.kind == VcsKind::Svn {
+        return svn_branches(repo, token).await;
+    }
     let format = format!(
         "%(refname:short){FIELD}%(refname){FIELD}%(HEAD){FIELD}%(upstream:short){FIELD}%(upstream:track){RECORD}"
     );
@@ -983,6 +985,19 @@ pub async fn branches(
     )
     .await?
     .stdout_text();
+    let remote_names = git(vec!["remote".into()], repo, token)
+        .await
+        .map(|value| {
+            let mut names = value
+                .stdout_text()
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| line.trim().to_string())
+                .collect::<Vec<_>>();
+            names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+            names
+        })
+        .unwrap_or_default();
     Ok(raw
         .split(RECORD)
         .filter_map(|record| {
@@ -994,12 +1009,87 @@ pub async fn branches(
                 name: fields[0].into(),
                 current: fields[2] == "*",
                 remote: fields[1].starts_with("refs/remotes/"),
+                remote_name: remote_name_for_ref(fields[1], &remote_names),
                 upstream: (!fields[3].is_empty()).then(|| fields[3].into()),
                 ahead: parse_counter(fields[4], "ahead "),
                 behind: parse_counter(fields[4], "behind "),
+                detached_tag: None,
+                detached_hash: None,
             })
         })
         .collect())
+}
+
+fn remote_name_for_ref(ref_name: &str, remote_names: &[String]) -> Option<String> {
+    let value = ref_name.strip_prefix("refs/remotes/")?;
+    remote_names
+        .iter()
+        .find(|remote| value == remote.as_str() || value.starts_with(&format!("{remote}/")))
+        .cloned()
+        .or_else(|| value.split('/').next().map(str::to_string))
+}
+
+async fn svn_branches(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<BranchInfo>, DesktopError> {
+    let relative_url = svn_relative_url(repo, token).await?;
+    let (current_name, detached_tag) = svn_display_ref(&relative_url);
+    let behind = svn_incoming_revisions(repo, token).await;
+    let mut branches = vec![BranchInfo {
+        name: current_name.clone(),
+        current: true,
+        remote: false,
+        remote_name: None,
+        upstream: None,
+        ahead: 0,
+        behind,
+        detached_tag,
+        detached_hash: None,
+    }];
+
+    let add = |name: String, branches: &mut Vec<BranchInfo>| {
+        if branches
+            .iter()
+            .any(|branch| !branch.remote && branch.name == name)
+        {
+            return;
+        }
+        branches.push(BranchInfo {
+            current: name == current_name,
+            name,
+            remote: false,
+            remote_name: None,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            detached_tag: None,
+            detached_hash: None,
+        });
+    };
+
+    if svn(
+        vec!["ls".into(), "--xml".into(), "^/trunk".into()],
+        repo,
+        token,
+    )
+    .await
+    .is_ok()
+    {
+        add("trunk".into(), &mut branches);
+    }
+    let raw = svn(
+        vec!["ls".into(), "--xml".into(), "^/branches".into()],
+        repo,
+        token,
+    )
+    .await
+    .map(|value| value.stdout_text())
+    .unwrap_or_default();
+    for (name, _, _) in parse_svn_list_entries(&raw)? {
+        add(name, &mut branches);
+    }
+    Ok(branches)
 }
 
 pub async fn branch_operation(
@@ -1059,7 +1149,26 @@ pub async fn tags(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Vec<TagInfo>, DesktopError> {
-    ensure_git(repo)?;
+    if repo.kind == VcsKind::Svn {
+        let raw = svn(
+            vec!["ls".into(), "--xml".into(), "^/tags".into()],
+            repo,
+            token,
+        )
+        .await
+        .map(|value| value.stdout_text())
+        .unwrap_or_default();
+        return Ok(parse_svn_list_entries(&raw)?
+            .into_iter()
+            .map(|(name, revision, date)| TagInfo {
+                hash: revision
+                    .map(|value| format!("r{value}"))
+                    .unwrap_or_else(|| name.clone()),
+                name,
+                date,
+            })
+            .collect());
+    }
     let format =
         format!("%(refname:short){FIELD}%(objectname){FIELD}%(creatordate:iso-strict){RECORD}");
     let raw = git(
@@ -1084,6 +1193,122 @@ pub async fn tags(
             })
         })
         .collect())
+}
+
+async fn svn_relative_url(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    let value = svn(
+        vec!["info".into(), "--show-item".into(), "relative-url".into()],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text()
+    .trim()
+    .trim_start_matches("^/")
+    .trim_matches('/')
+    .to_string();
+    if value.is_empty() {
+        return Err(DesktopError::new(
+            "SVN_BRANCH_UNAVAILABLE",
+            "SVN working copy has no relative repository URL",
+            true,
+        ));
+    }
+    Ok(value)
+}
+
+fn svn_display_ref(relative_url: &str) -> (String, Option<String>) {
+    let relative_url = relative_url.trim_start_matches("^/").trim_matches('/');
+    if relative_url == "trunk" || relative_url.starts_with("trunk/") {
+        return ("trunk".into(), None);
+    }
+    if let Some(name) = relative_url.strip_prefix("branches/") {
+        return (name.split('/').next().unwrap_or(name).into(), None);
+    }
+    if let Some(name) = relative_url.strip_prefix("tags/") {
+        let name = name.split('/').next().unwrap_or(name);
+        return (format!("tags/{name}"), Some(name.into()));
+    }
+    (
+        relative_url.rsplit('/').next().unwrap_or("SVN").into(),
+        None,
+    )
+}
+
+fn parse_svn_list_entries(
+    raw: &str,
+) -> Result<Vec<(String, Option<String>, String)>, DesktopError> {
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let document = roxmltree::Document::parse(raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    Ok(document
+        .descendants()
+        .filter(|node| node.has_tag_name("entry"))
+        .filter_map(|entry| {
+            let name = entry
+                .children()
+                .find(|node| node.has_tag_name("name"))
+                .and_then(|node| node.text())?
+                .trim_end_matches('/')
+                .to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let commit = entry.children().find(|node| node.has_tag_name("commit"));
+            let revision = commit
+                .and_then(|node| node.attribute("revision"))
+                .map(str::to_string);
+            let date = commit
+                .and_then(|node| node.children().find(|child| child.has_tag_name("date")))
+                .and_then(|node| node.text())
+                .unwrap_or_default()
+                .to_string();
+            Some((name, revision, date))
+        })
+        .collect())
+}
+
+async fn svn_incoming_revisions(repo: &RepositoryMeta, token: &CancellationToken) -> u32 {
+    let revision = svn(
+        vec!["info".into(), "--show-item".into(), "revision".into()],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .and_then(|value| value.stdout_text().trim().parse::<u64>().ok());
+    let Some(revision) = revision else { return 0 };
+    let Some(start) = revision.checked_add(1) else {
+        return 0;
+    };
+    let raw = svn(
+        vec![
+            "log".into(),
+            "--xml".into(),
+            "-r".into(),
+            format!("{start}:HEAD"),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|value| value.stdout_text())
+    .unwrap_or_default();
+    roxmltree::Document::parse(&raw)
+        .ok()
+        .map(|document| {
+            document
+                .descendants()
+                .filter(|node| node.has_tag_name("logentry"))
+                .count()
+                .min(u32::MAX as usize) as u32
+        })
+        .unwrap_or(0)
 }
 
 pub async fn tag_operation(
@@ -2287,5 +2512,34 @@ mod tests {
         let result = make_diff("large.txt", vec![b'a'; DIFF_MAX_BYTES + 1]).unwrap();
         assert!(result.truncated);
         assert!(result.content.is_empty());
+    }
+
+    #[test]
+    fn keeps_remote_names_with_slashes_intact() {
+        let remotes = vec!["company/remote".into(), "origin".into()];
+        assert_eq!(
+            remote_name_for_ref("refs/remotes/company/remote/feature/ui", &remotes),
+            Some("company/remote".into())
+        );
+        assert_eq!(
+            remote_name_for_ref("refs/remotes/origin/main", &remotes),
+            Some("origin".into())
+        );
+    }
+
+    #[test]
+    fn parses_svn_branch_and_tag_listing_entries() {
+        let xml = r#"<lists><list><entry kind="dir"><name>release/</name><commit revision="42"><date>2026-08-13T08:00:00.000000Z</date></commit></entry><entry kind="dir"><name>v1.0.0/</name><commit revision="43"><date>2026-08-14T08:00:00.000000Z</date></commit></entry></list></lists>"#;
+        let entries = parse_svn_list_entries(xml).unwrap();
+        assert_eq!(entries[0].0, "release");
+        assert_eq!(entries[0].1.as_deref(), Some("42"));
+        assert_eq!(
+            svn_display_ref("^/branches/release/src"),
+            ("release".into(), None)
+        );
+        assert_eq!(
+            svn_display_ref("^/tags/v1.0.0"),
+            ("tags/v1.0.0".into(), Some("v1.0.0".into()))
+        );
     }
 }

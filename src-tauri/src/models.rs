@@ -428,6 +428,10 @@ pub struct AppStateSnapshot {
     pub active_tab: String,
     pub file_view_mode: String,
     pub external_editor: Option<ExternalEditor>,
+    #[serde(default)]
+    pub branch_sidebar_collapsed: bool,
+    #[serde(default)]
+    pub branch_sidebar_collapsed_sections: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
@@ -644,9 +648,15 @@ pub struct BranchInfo {
     pub name: String,
     pub current: bool,
     pub remote: bool,
+    #[serde(default)]
+    pub remote_name: Option<String>,
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
+    #[serde(default)]
+    pub detached_tag: Option<String>,
+    #[serde(default)]
+    pub detached_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
