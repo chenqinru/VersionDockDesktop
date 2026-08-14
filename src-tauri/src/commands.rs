@@ -143,13 +143,26 @@ async fn dispatch(
             relative_path,
             staged,
             revision,
+            from_revision,
+            to_revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit =
                 state.read_limit.acquire().await.map_err(|_| {
                     DesktopError::new("APP_CLOSING", "Application is closing", true)
                 })?;
-            json(vcs::diff(&repo, &relative_path, staged, revision, token).await?)
+            json(
+                vcs::diff(
+                    &repo,
+                    &relative_path,
+                    staged,
+                    revision,
+                    from_revision,
+                    to_revision,
+                    token,
+                )
+                .await?,
+            )
         }
         BridgeCommand::Stage {
             workspace_id,
@@ -239,6 +252,19 @@ async fn dispatch(
                     DesktopError::new("APP_CLOSING", "Application is closing", true)
                 })?;
             json(vcs::commit_detail(&repo, &revision, token).await?)
+        }
+        BridgeCommand::CommitMergeCommits {
+            workspace_id,
+            repo_id,
+            revision,
+            parents,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit =
+                state.read_limit.acquire().await.map_err(|_| {
+                    DesktopError::new("APP_CLOSING", "Application is closing", true)
+                })?;
+            json(vcs::merge_commits(&repo, &revision, &parents, token).await?)
         }
         BridgeCommand::UnpushedCommits {
             workspace_id,

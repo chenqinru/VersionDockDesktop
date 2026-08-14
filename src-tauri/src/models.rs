@@ -61,6 +61,8 @@ pub enum BridgeCommand {
         relative_path: String,
         staged: bool,
         revision: Option<String>,
+        from_revision: Option<String>,
+        to_revision: Option<String>,
     },
     Stage {
         workspace_id: String,
@@ -101,6 +103,12 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         revision: String,
+    },
+    CommitMergeCommits {
+        workspace_id: String,
+        repo_id: String,
+        revision: String,
+        parents: Vec<String>,
     },
     UnpushedCommits {
         workspace_id: String,
@@ -610,6 +618,26 @@ pub struct CommitDetail {
     pub commit: CommitNode,
     pub full_message: String,
     pub files: Vec<CommitFile>,
+    pub branches: CommitBranches,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitBranches {
+    pub local: Vec<String>,
+    pub remote: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeCommitSummary {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author: String,
+    pub author_date: String,
+    pub parent_index: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

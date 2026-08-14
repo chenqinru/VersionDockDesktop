@@ -6,8 +6,9 @@ import { useI18n } from '../i18n';
 import { useResizable } from '../hooks/useResizable';
 import { BranchSidebar } from './BranchSidebar';
 import { CommitGraph } from './CommitGraph';
+import { CommitDetailPanel } from './CommitDetailPanel';
 import { COMMIT_ROW_HEIGHT, layoutCommits } from './commitGraphLayout';
-import { buildDetailTree, collapseDetailTree, type DetailTree } from './HistoryWorkspace.helpers';
+import { commitKey } from '../history/commitDetails';
 import type { CommitNode } from '../bindings/generated';
 
 type FilterMenu = 'authors' | 'repos' | 'refs' | 'dates' | null;
@@ -31,12 +32,13 @@ function DateMenu({ from, to, setFrom, setTo }: { from: string; to: string; setF
 
 function refKind(ref: string) { if (ref.includes('tag:')) return 'tag'; if (ref.includes('HEAD')) return 'head'; if (ref.includes('origin/') || ref.includes('remotes/')) return 'remote'; return 'branch'; }
 function refLabel(ref: string) { return ref.replace('HEAD -> ', '').replace('tag: ', '').replace('refs/heads/', '').replace('refs/remotes/', ''); }
+function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date); }
 
 function CommitList({ history }: { history: CommitNode[] }) {
   const parent = useRef<HTMLDivElement>(null);
   const repos = useAppStore((state) => state.snapshot?.repositories ?? []);
   const hasMore = useAppStore((state) => state.historyHasMore);
-  const selected = useAppStore((state) => state.selectedCommit?.commit.hash);
+  const selected = useAppStore((state) => new Set(state.selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
   const selectCommit = useAppStore((state) => state.selectCommit);
   const loadHistory = useAppStore((state) => state.loadHistory);
   const commits = useMemo(() => layoutCommits(history), [history]);
@@ -45,30 +47,12 @@ function CommitList({ history }: { history: CommitNode[] }) {
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({ count: commits.length, getScrollElement: () => parent.current, estimateSize: () => COMMIT_ROW_HEIGHT, overscan: 12 });
   return <div className="commit-list" ref={parent} onScroll={(event) => { const element = event.currentTarget; if (hasMore && element.scrollHeight - element.scrollTop - element.clientHeight < 300) void loadHistory(false); }}><div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-    {virtualizer.getVirtualItems().map((item) => { const commit = commits[item.index]; const isSelected = selected === commit.hash; return <button className={`commit-row ${isSelected ? 'selected' : ''}`} key={`${commit.repoId}:${commit.hash}`} style={{ transform: `translateY(${item.start}px)` }} onClick={() => void selectCommit(commit)}>
+    {virtualizer.getVirtualItems().map((item) => { const commit = commits[item.index]; const isSelected = selected.has(commitKey(commit.repoId, commit.hash)); return <button className={`commit-row ${isSelected ? 'selected' : ''}`} key={`${commit.repoId}:${commit.hash}`} style={{ transform: `translateY(${item.start}px)` }} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)}>
       <span className="repo-stripe" style={{ background: repoColors[commit.repoId] ?? '#888' }} title={repoNames[commit.repoId]} /><CommitGraph commit={commit} selected={isSelected} />
       <span className="commit-subject"><span className="commit-refs">{commit.refs.map((ref) => <em className={refKind(ref)} key={ref}>{refLabel(ref)}</em>)}</span><span>{commit.message}</span></span>
       <span className="commit-author"><span className="mini-avatar">{commit.author.slice(0, 1).toUpperCase()}</span>{commit.author}</span><time>{formatDate(commit.committerDate)}</time>
     </button>; })}
   </div></div>;
-}
-
-function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date); }
-
-function DetailFileNode({ node, depth, openDiff, revision, repoId }: { node: DetailTree; depth: number; openDiff: (repoId: string, path: string, staged: boolean, revision?: string) => Promise<void>; revision: string; repoId: string }) { const [expanded, setExpanded] = useState(true); if (!node.file) return <div className="detail-tree-dir"><button style={{ paddingLeft: 8 + depth * 14 }} onClick={() => setExpanded(!expanded)}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><Codicon name={expanded ? 'folder-opened' : 'folder'} /><span>{node.name}</span><b>{node.fileCount}</b></button>{expanded && node.children.map((child) => <DetailFileNode key={child.path} node={child} depth={depth + 1} openDiff={openDiff} revision={revision} repoId={repoId} />)}</div>; const status = node.file.status.slice(0, 1).toUpperCase(); return <button className="detail-file-row" style={{ paddingLeft: 22 + depth * 14 }} onClick={() => void openDiff(repoId, node.file!.path, false, revision)}><Codicon name="file" /><span>{node.name}</span>{node.file.added !== null && <b className="added">+{node.file.added}</b>}{node.file.removed !== null && <b className="removed">−{node.file.removed}</b>}<em>{status}</em></button>; }
-
-function CommitDetailPanel() {
-  const detail = useAppStore((state) => state.selectedCommit);
-  const repo = useAppStore((state) => state.snapshot?.repositories.find((item) => item.meta.id === state.selectedCommit?.commit.repoId));
-  const openDiff = useAppStore((state) => state.openDiff);
-  const { t } = useI18n();
-  const [fileMode, setFileMode] = useState<'tree' | 'list'>('tree');
-  const tree = useMemo(() => buildDetailTree(detail?.files ?? []).map(collapseDetailTree), [detail?.files]);
-  if (!detail) return <aside className="commit-detail empty-detail"><Codicon name="git-commit" /><span>{t('Select a commit')}</span></aside>;
-  return <aside className="commit-detail">
-    <section className="detail-file-section"><div className="detail-files-title"><strong>{detail.files.length} {t('files')}</strong><span /><button className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => setFileMode('tree')}><Codicon name="list-tree" /></button><button className={fileMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setFileMode('list')}><Codicon name="list-flat" /></button></div><div className="detail-files">{fileMode === 'tree' ? <div className="detail-tree-root"><div className="detail-root-label"><i style={{ background: repo?.meta.color }} /><strong>{repo?.meta.name}</strong><b>{detail.files.length}</b></div>{tree.map((node) => <DetailFileNode key={node.path} node={node} depth={0} openDiff={openDiff} revision={detail.commit.hash} repoId={detail.commit.repoId} />)}</div> : detail.files.map((file) => <button key={file.path} className="detail-file-row detail-list-row" onClick={() => void openDiff(detail.commit.repoId, file.path, false, detail.commit.hash)}><Codicon name="file" /><span>{file.path}</span>{file.added !== null && <b className="added">+{file.added}</b>}{file.removed !== null && <b className="removed">−{file.removed}</b>}<em>{file.status.slice(0, 1).toUpperCase()}</em></button>)}</div></section>
-    <section className="detail-summary"><header className="detail-toolbar"><span><i style={{ background: repo?.meta.color }} />{repo?.meta.name}</span><button title={t('Copy')} onClick={() => void navigator.clipboard.writeText(detail.commit.hash)}><Codicon name="copy" /></button></header><h2>{detail.commit.message}</h2><div className="commit-meta"><span className="avatar">{detail.commit.author.slice(0, 1).toUpperCase()}</span><span><strong>{detail.commit.author}</strong><small>{detail.commit.email}</small></span><time>{formatDate(detail.commit.committerDate)}</time></div><div className="detail-footer"><div className="detail-refs">{detail.commit.refs.map((ref) => <em className={refKind(ref)} key={ref}>{refLabel(ref)}</em>)}</div><code>{detail.commit.shortHash}</code></div>{detail.fullMessage !== detail.commit.message && <pre className="full-message">{detail.fullMessage}</pre>}</section>
-  </aside>;
 }
 
 export function HistoryWorkspace() {
@@ -87,6 +71,7 @@ export function HistoryWorkspace() {
   const setFilter = useAppStore((state) => state.setHistoryFilter); const loadHistory = useAppStore((state) => state.loadHistory);
   const branchWidth = useAppStore((state) => state.bootstrap?.state.panelSizes.branches ?? 220); const detailWidth = useAppStore((state) => state.bootstrap?.state.panelSizes.detail ?? 360); const setPanelSize = useAppStore((state) => state.setPanelSize);
   const branchSidebarCollapsed = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsed ?? false); const collapsedSections = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsedSections ?? []); const setBranchSidebarState = useAppStore((state) => state.setBranchSidebarState);
+  const [detailSidebarCollapsed, setDetailSidebarCollapsed] = useState(false);
   const resizeBranches = useResizable(branchWidth, 190, 420, (value) => setPanelSize('branches', value)); const resizeDetail = useResizable(detailWidth, 300, 620, (value) => setPanelSize('detail', value), -1); const { t } = useI18n();
   const authorOptions = useMemo(() => [...new Set(allHistory.map((commit) => commit.author))].sort().map((author) => ({ id: author, label: author })), [allHistory]);
   const repoOptions = snapshotRepos.map((item) => ({ id: item.meta.id, label: item.meta.name, color: item.meta.color, detail: item.meta.kind.toUpperCase() }));
@@ -130,6 +115,6 @@ export function HistoryWorkspace() {
       <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!refs.size} open={menu === 'refs'} onClick={() => setMenu((current) => current === 'refs' ? null : 'refs')} />{menu === 'refs' && <CheckMenu title={`${t('Branch')} / ${t('Tags')}`} values={refOptions} selected={refs} toggle={selectOne(setRefs)} single clear={() => setRefs(new Set())} />}</div>
       <div ref={menu === 'dates' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="calendar" label={from || to ? `${from || '…'} → ${to || '…'}` : t('From to')} active={!!from || !!to} open={menu === 'dates'} onClick={() => setMenu((current) => current === 'dates' ? null : 'dates')} />{menu === 'dates' && <DateMenu from={from} to={to} setFrom={setFrom} setTo={setTo} />}</div><span />
     </div>
-    <div className="history-columns"><div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={repos} refFilter={refs} onRepoFilter={selectOne(setRepos)} onRefFilter={selectOne(setRefs)} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>{!branchSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeBranches} />}<div className="log-pane">{visibleHistory.length ? <CommitList history={visibleHistory} /> : <div className="empty-state"><Codicon name="history" />{t('No history')}</div>}</div><div className="inner-resize-handle" onPointerDown={resizeDetail} /><div className="detail-slot" style={{ width: detailWidth }}><CommitDetailPanel /></div></div>
+    <div className="history-columns"><div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={repos} refFilter={refs} onRepoFilter={selectOne(setRepos)} onRefFilter={selectOne(setRefs)} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>{!branchSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeBranches} />}<div className="log-pane">{visibleHistory.length ? <CommitList history={visibleHistory} /> : <div className="empty-state"><Codicon name="history" />{t('No history')}</div>}</div>{!detailSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeDetail} />}<div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <button className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></button> : <CommitDetailPanel onCollapse={() => setDetailSidebarCollapsed(true)} />}</div></div>
   </section>;
 }

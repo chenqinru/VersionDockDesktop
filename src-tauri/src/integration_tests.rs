@@ -243,6 +243,21 @@ fn command(program: &str, args: &[&str], cwd: &Path) {
     );
 }
 
+fn command_output(program: &str, args: &[&str], cwd: &Path) -> String {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{program} {:?}: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
 fn repo(path: &Path, kind: VcsKind) -> RepositoryMeta {
     RepositoryMeta {
         id: "integration".into(),
@@ -510,9 +525,17 @@ async fn real_git_core_workflow() {
         .await
         .unwrap();
     assert_eq!(status.files[0].status, "untracked");
-    let diff = vcs::diff(&repository, "hello world 中文.txt", false, None, &token)
-        .await
-        .unwrap();
+    let diff = vcs::diff(
+        &repository,
+        "hello world 中文.txt",
+        false,
+        None,
+        None,
+        None,
+        &token,
+    )
+    .await
+    .unwrap();
     assert!(!diff.binary);
     vcs::stage(&repository, &["hello world 中文.txt".into()], &token)
         .await
@@ -531,9 +554,17 @@ async fn real_git_core_workflow() {
         directory.path(),
     );
     std::fs::write(directory.path().join("hello world 中文.txt"), "one\ntwo\n").unwrap();
-    let diff = vcs::diff(&repository, "hello world 中文.txt", false, None, &token)
-        .await
-        .unwrap();
+    let diff = vcs::diff(
+        &repository,
+        "hello world 中文.txt",
+        false,
+        None,
+        None,
+        None,
+        &token,
+    )
+    .await
+    .unwrap();
     assert!(diff.content.contains("+two"));
     vcs::stage(&repository, &["hello world 中文.txt".into()], &token)
         .await
@@ -862,6 +893,89 @@ async fn real_git_core_workflow() {
 }
 
 #[tokio::test]
+async fn real_git_commit_detail_merge_refs_and_range_diff() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "base.txt"], directory.path());
+    command("git", &["commit", "-m", "base"], directory.path());
+    let base = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    command("git", &["switch", "-c", "feature/detail"], directory.path());
+    std::fs::write(directory.path().join("feature.txt"), "feature\n").unwrap();
+    command("git", &["add", "feature.txt"], directory.path());
+    command("git", &["commit", "-m", "feature detail"], directory.path());
+    command("git", &["switch", "main"], directory.path());
+    std::fs::write(directory.path().join("main.txt"), "main\n").unwrap();
+    command("git", &["add", "main.txt"], directory.path());
+    command("git", &["commit", "-m", "main detail"], directory.path());
+    command(
+        "git",
+        &["merge", "--no-ff", "feature/detail", "-m", "merge detail"],
+        directory.path(),
+    );
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+    let merge_hash = command_output("git", &["rev-parse", "HEAD"], directory.path());
+    let detail = vcs::commit_detail(&repository, &merge_hash, &token)
+        .await
+        .unwrap();
+    assert!(detail.commit.parents.len() >= 2);
+    assert!(detail.branches.local.iter().any(|branch| branch == "main"));
+    assert!(detail.files.iter().any(|file| file.path == "feature.txt"));
+
+    let merged = vcs::merge_commits(&repository, &merge_hash, &detail.commit.parents, &token)
+        .await
+        .unwrap();
+    assert!(merged
+        .iter()
+        .any(|commit| commit.message == "feature detail"));
+
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Create {
+            name: "v-detail".into(),
+            revision: Some(merge_hash.clone()),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    let tagged = vcs::commit_detail(&repository, &merge_hash, &token)
+        .await
+        .unwrap();
+    assert!(tagged.branches.tags.iter().any(|tag| tag == "v-detail"));
+
+    let range = vcs::diff(
+        &repository,
+        "feature.txt",
+        false,
+        None,
+        Some(base),
+        Some(merge_hash),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(range.content.contains("+feature"));
+}
+
+#[tokio::test]
 async fn real_svn_core_workflow() {
     if !available("svn") || !available("svnadmin") {
         eprintln!("SKIP: svn or svnadmin not available");
@@ -899,9 +1013,17 @@ async fn real_svn_core_workflow() {
     .await
     .unwrap();
     std::fs::write(checkout.join("中文 file.txt"), "one\ntwo\n").unwrap();
-    let diff = vcs::diff(&repository, "中文 file.txt", false, None, &token)
-        .await
-        .unwrap();
+    let diff = vcs::diff(
+        &repository,
+        "中文 file.txt",
+        false,
+        None,
+        None,
+        None,
+        &token,
+    )
+    .await
+    .unwrap();
     assert!(diff.content.contains("+two"));
     vcs::commit(
         &repository,
@@ -920,4 +1042,33 @@ async fn real_svn_core_workflow() {
         "SVN history: {:#?}",
         history.commits
     );
+    let first_revision = history
+        .commits
+        .iter()
+        .find(|commit| commit.message == "initial svn commit")
+        .map(|commit| commit.hash.clone())
+        .unwrap();
+    let second_revision = history
+        .commits
+        .iter()
+        .find(|commit| commit.message == "second svn commit")
+        .map(|commit| commit.hash.clone())
+        .unwrap();
+    let detail = vcs::commit_detail(&repository, &first_revision, &token)
+        .await
+        .unwrap();
+    assert_eq!(detail.commit.message, "initial svn commit");
+    assert!(detail.files.iter().any(|file| file.path == "中文 file.txt"));
+    let range = vcs::diff(
+        &repository,
+        "中文 file.txt",
+        false,
+        None,
+        Some(first_revision),
+        Some(second_revision),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(range.content.contains("+two"));
 }

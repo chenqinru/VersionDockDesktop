@@ -4,6 +4,7 @@ import { WorkspaceChooser } from './components/WorkspaceChooser';
 import { CommitPanel } from './components/CommitPanel';
 import { HistoryWorkspace } from './components/HistoryWorkspace';
 import { DiffWorkspace } from './components/DiffWorkspace';
+import { CommitChangesWorkspace } from './components/CommitChangesWorkspace';
 import { MergeWorkspace } from './components/MergeWorkspace';
 import { Codicon } from './components/Codicon';
 import { useAppStore } from './store/appStore';
@@ -64,7 +65,7 @@ export function App() {
         <main className="main-workspace">
           <div style={{ width: commitWidth }} className="commit-slot"><CommitPanel /></div>
           <div className="resize-handle" onPointerDown={resizeCommit} />
-          <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span></div> : mode === 'history' ? <HistoryWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : <MergeWorkspace />}</div>
+          <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span></div> : mode === 'history' ? <HistoryWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
         </main>
       )}
       {busy && <div className="busy-line" />}

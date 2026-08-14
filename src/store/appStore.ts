@@ -3,13 +3,17 @@ import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitNode, ConflictFile, DiffDocument,
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation,
-  UnpushedCommit,
+  UnpushedCommit, MergeCommitSummary,
 } from '../bindings/generated';
 import type { VersionDockBridge } from '../platform/bridge';
+import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
 
-export type WorkspaceMode = 'history' | 'diff' | 'merge';
+export type WorkspaceMode = 'history' | 'diff' | 'changes' | 'merge';
+export type CommitSelectionMode = 'single' | 'toggle' | 'range';
+export type DiffRange = { fromRevision: string; toRevision: string };
+export type CommitChangesModel = { commits: CommitNode[]; files: DetailFileTarget[] };
 
-interface AppStore {
+export interface AppStore {
   bridge?: VersionDockBridge;
   ready: boolean;
   busy: boolean;
@@ -17,15 +21,23 @@ interface AppStore {
   bootstrap?: BootstrapData;
   snapshot?: WorkspaceSnapshot;
   selectedRepoId?: string;
-  selectedFile?: { repoId: string; path: string; staged: boolean };
+  selectedFile?: { repoId: string; path: string; staged: boolean; revision?: string; fromRevision?: string; toRevision?: string };
   mode: WorkspaceMode;
   diff?: DiffDocument;
+  changesDiff?: DiffDocument;
+  changes?: CommitChangesModel;
   history: CommitNode[];
   historyHasMore: boolean;
   historyByRepo: Record<string, CommitNode[]>;
   historyHasMoreByRepo: Record<string, boolean>;
   historyFilter: string;
   selectedCommit?: CommitDetail;
+  selectedCommits: CommitNode[];
+  selectedPrimaryKey?: string;
+  selectedCommitDetails: Record<string, CommitDetail>;
+  selectedCommitLoading: Record<string, boolean>;
+  mergeCommits: Record<string, MergeCommitSummary[]>;
+  mergeCommitsLoading: Record<string, boolean>;
   branches: BranchInfo[];
   tags: TagInfo[];
   branchesByRepo: Record<string, BranchInfo[]>;
@@ -47,7 +59,9 @@ interface AppStore {
   removeRecent: (workspaceId: string) => Promise<void>;
   refresh: (silent?: boolean) => Promise<void>;
   selectRepo: (repoId: string, reload?: boolean) => Promise<void>;
-  openDiff: (repoId: string, path: string, staged: boolean, revision?: string) => Promise<void>;
+  openDiff: (repoId: string, path: string, staged: boolean, revision?: string, range?: DiffRange) => Promise<void>;
+  openCommitChanges: () => void;
+  loadChangesDiff: (target: DetailFileTarget) => Promise<void>;
   stage: (repoId: string, paths: string[]) => Promise<void>;
   unstage: (repoId: string, paths: string[]) => Promise<void>;
   discard: (repoId: string, paths: string[]) => Promise<void>;
@@ -56,7 +70,10 @@ interface AppStore {
   sync: (repoId: string, action: 'fetch' | 'pull' | 'push' | 'update') => Promise<void>;
   loadHistory: (reset?: boolean) => Promise<void>;
   setHistoryFilter: (value: string) => void;
-  selectCommit: (commit: CommitNode) => Promise<void>;
+  selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
+  loadCommitDetail: (commit: CommitNode) => Promise<CommitDetail>;
+  loadMergeCommits: (commit: CommitNode) => Promise<void>;
+  clearCommitSelection: () => void;
   branchOperation: (operation: object, repoId?: string) => Promise<void>;
   tagOperation: (operation: object, repoId?: string) => Promise<void>;
   loadStashes: (repoId?: string) => Promise<void>;
@@ -102,6 +119,8 @@ let watcherTimer: ReturnType<typeof setTimeout> | undefined;
 let workspaceRequestGeneration = 0;
 let watcherRefreshInFlight = false;
 let watcherRefreshQueued = false;
+let commitSelectionGeneration = 0;
+let changesDiffGeneration = 0;
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -137,8 +156,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     const workspaceChanged = current?.workspace.id !== snapshot.workspace.id;
     const selectedRepoId = snapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : snapshot.repositories[0]?.meta.id;
-    set(workspaceChanged
-      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, unpushedCommits: {} }
+      set(workspaceChanged
+      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {} }
       : { snapshot, selectedRepoId });
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     await get().loadConflicts();
@@ -162,7 +181,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, busy: false, mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, unpushedCommits: {}, remotes: {},
+    ready: false, busy: false, mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, unpushedCommits: {}, remotes: {},
 
     initialize: async (value) => {
       set({ bridge: value });
@@ -229,6 +248,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       set((state) => ({
         selectedRepoId: repoId,
         selectedCommit: undefined,
+        selectedCommits: [],
+        selectedPrimaryKey: undefined,
+        selectedCommitLoading: {},
+        mergeCommitsLoading: {},
+        changes: undefined,
+        changesDiff: undefined,
+        mode: 'history',
         branches: state.branchesByRepo[repoId] ?? [],
         tags: state.tagsByRepo[repoId] ?? [],
         comparison: undefined,
@@ -252,9 +278,23 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
     },
 
-    openDiff: async (repoId, path, staged, revision) => withBusy(async () => {
-      const diff = await bridge().request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: path, staged, revision: revision ?? null } });
-      set({ selectedFile: { repoId, path, staged }, diff, mode: 'diff' });
+    openDiff: async (repoId, path, staged, revision, range) => withBusy(async () => {
+      const diff = await bridge().request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: path, staged, revision: revision ?? null, from_revision: range?.fromRevision ?? null, to_revision: range?.toRevision ?? null } });
+      set({ selectedFile: { repoId, path, staged, revision, fromRevision: range?.fromRevision, toRevision: range?.toRevision }, diff, mode: 'diff' });
+    }),
+
+    openCommitChanges: () => {
+      const state = get();
+      if (!state.selectedCommits.length) return;
+      const files = buildCommitFileTargets(state.selectedCommits, state.selectedCommitDetails, state.snapshot?.repositories ?? []);
+      if (!files.length) return;
+      set({ changes: { commits: state.selectedCommits, files }, changesDiff: undefined, mode: 'changes' });
+    },
+
+    loadChangesDiff: async (target) => withBusy(async () => {
+      const generation = ++changesDiffGeneration;
+      const diff = await bridge().request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId(), repo_id: target.repoId, relative_path: target.path, staged: false, revision: target.toRevision ? null : target.commitHash, from_revision: target.fromRevision ?? null, to_revision: target.toRevision ?? null } });
+      if (generation === changesDiffGeneration) set({ changesDiff: diff });
     }),
 
     stage: async (repoId, paths) => withBusy(async () => {
@@ -321,10 +361,75 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     setHistoryFilter: (value) => set({ historyFilter: value }),
 
-    selectCommit: async (commit) => withBusy(async () => {
-      const detail = await bridge().request<CommitDetail>({ type: 'commitDetail', payload: { workspace_id: workspaceId(), repo_id: commit.repoId, revision: commit.hash } });
-      set({ selectedCommit: detail });
+    loadCommitDetail: async (commit) => {
+      const key = commitKey(commit.repoId, commit.hash);
+      const cached = get().selectedCommitDetails[key];
+      if (cached) return cached;
+      set((state) => ({ selectedCommitLoading: { ...state.selectedCommitLoading, [key]: true } }));
+      try {
+        const detail = await bridge().request<CommitDetail>({ type: 'commitDetail', payload: { workspace_id: workspaceId(), repo_id: commit.repoId, revision: commit.hash } });
+        set((state) => ({ selectedCommitDetails: { ...state.selectedCommitDetails, [key]: detail }, selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
+        return detail;
+      } catch (error) {
+        set((state) => ({ error: errorText(error), selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
+        throw error;
+      }
+    },
+
+    selectCommit: async (commit, mode = 'single', rangeSource) => withBusy(async () => {
+      const state = get();
+      const clickedKey = commitKey(commit.repoId, commit.hash);
+      const source = rangeSource ?? state.history;
+      let selected: CommitNode[];
+      if (mode === 'single') {
+        selected = [commit];
+      } else if (mode === 'toggle') {
+        const selectedKeys = new Set(state.selectedCommits.map((item) => commitKey(item.repoId, item.hash)));
+        if (selectedKeys.has(clickedKey)) selectedKeys.delete(clickedKey);
+        else selectedKeys.add(clickedKey);
+        selected = source.filter((item) => selectedKeys.has(commitKey(item.repoId, item.hash)));
+      } else {
+        const anchorKey = state.selectedPrimaryKey ?? (state.selectedCommits[0] ? commitKey(state.selectedCommits[0].repoId, state.selectedCommits[0].hash) : clickedKey);
+        const anchorIndex = source.findIndex((item) => commitKey(item.repoId, item.hash) === anchorKey);
+        const clickedIndex = source.findIndex((item) => commitKey(item.repoId, item.hash) === clickedKey);
+        if (anchorIndex < 0 || clickedIndex < 0) selected = [commit];
+        else {
+          const start = Math.min(anchorIndex, clickedIndex);
+          const end = Math.max(anchorIndex, clickedIndex);
+          selected = source.slice(start, end + 1);
+        }
+      }
+
+      const primary = selected.length ? (selected.find((item) => commitKey(item.repoId, item.hash) === clickedKey) ?? selected[selected.length - 1]) : undefined;
+      const primaryKey = primary ? commitKey(primary.repoId, primary.hash) : undefined;
+      const generation = ++commitSelectionGeneration;
+      const loading = Object.fromEntries(selected.filter((item) => !state.selectedCommitDetails[commitKey(item.repoId, item.hash)]).map((item) => [commitKey(item.repoId, item.hash), true]));
+      set({ selectedCommits: selected, selectedPrimaryKey: primaryKey, selectedCommit: primaryKey ? state.selectedCommitDetails[primaryKey] : undefined, selectedCommitLoading: loading, changes: undefined, changesDiff: undefined, mode: 'history' });
+      const missing = selected.filter((item) => !state.selectedCommitDetails[commitKey(item.repoId, item.hash)]);
+      const values = await Promise.all(missing.map(async (item) => ({ key: commitKey(item.repoId, item.hash), detail: await get().loadCommitDetail(item) })));
+      if (generation !== commitSelectionGeneration) return;
+      const details = { ...get().selectedCommitDetails };
+      for (const value of values) details[value.key] = value.detail;
+      set({ selectedCommitDetails: details, selectedCommit: primaryKey ? details[primaryKey] : undefined, selectedCommitLoading: {} });
+      if (primary?.parents.length && primary.parents.length >= 2) void get().loadMergeCommits(primary);
     }),
+
+    loadMergeCommits: async (commit) => {
+      const key = commitKey(commit.repoId, commit.hash);
+      if (get().mergeCommits[key] || get().mergeCommitsLoading[key] || commit.parents.length < 2) return;
+      set((state) => ({ mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: true } }));
+      try {
+        const values = await bridge().request<MergeCommitSummary[]>({ type: 'commitMergeCommits', payload: { workspace_id: workspaceId(), repo_id: commit.repoId, revision: commit.hash, parents: commit.parents } });
+        set((state) => ({ mergeCommits: { ...state.mergeCommits, [key]: values }, mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+      } catch (error) {
+        set((state) => ({ error: errorText(error), mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+      }
+    },
+
+    clearCommitSelection: () => {
+      commitSelectionGeneration += 1;
+      set({ selectedCommit: undefined, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommitLoading: {}, changes: undefined, changesDiff: undefined, mode: 'history' });
+    },
 
     branchOperation: async (operation, requestedRepoId) => withBusy(async () => {
       const repoId = requestedRepoId ?? get().selectedRepoId; if (!repoId) return;
@@ -434,7 +539,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       await get().refresh();
     }),
 
-    backToHistory: () => set({ mode: 'history', diff: undefined, merge: undefined }),
+    backToHistory: () => set({ mode: 'history', diff: undefined, changes: undefined, changesDiff: undefined, merge: undefined }),
 
     setTheme: async (theme) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;

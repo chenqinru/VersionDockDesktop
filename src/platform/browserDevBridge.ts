@@ -1,5 +1,6 @@
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
+  MergeCommitSummary,
   DiffDocument, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
   TagInfo, WorkspaceSnapshot, WorktreeEntry,
 } from '../bindings/generated';
@@ -9,6 +10,8 @@ const workspace = {
   id: 'browser-demo', name: 'multi-repo-browser-demo', paths: ['/browser-demo'],
   lastOpenedAt: '2026-08-13T08:00:00.000Z', available: true,
 };
+
+const browserDemoMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sidebar') === 'mixed' ? 'mixed' : 'git';
 
 const repository = (
   id: string, name: string, color: string, branch: string, files: RepositoryStatus['files'], ahead = 0, behind = 0,
@@ -47,7 +50,7 @@ const makeCommit = (repoId: string, hash: string, message: string, author: strin
 const histories: Record<string, CommitNode[]> = {
   admin: [
     makeCommit('admin', '06457b02', 'feat(infra): 增强参数配置模块查询与编辑功能', 'chenqinru', '2026-03-31T17:40:00+08:00', ['HEAD -> main', 'origin/main']),
-    makeCommit('admin', 'ba5f0012', 'Merge branch prod-task-center into main', 'chenqinru', '2026-03-31T10:02:00+08:00', []),
+    makeCommit('admin', 'ba5f0012', 'Merge branch prod-task-center into main', 'chenqinru', '2026-03-31T10:02:00+08:00', [], ['06457b02', 'cc813a40']),
     makeCommit('admin', 'cc813a40', 'feat: 增加路由实例通知响应拦截器', 'chenqinru', '2026-03-30T14:48:00+08:00', []),
   ],
   api: [
@@ -64,6 +67,15 @@ const histories: Record<string, CommitNode[]> = {
     makeCommit('transaction-works-admin', 'bbd092a1', 'feat: 增强文件预览组件', '叶子', '2025-10-30T17:21:00+08:00', []),
   ],
 };
+
+const mixedHistories: Record<string, CommitNode[]> = {
+  'mixed-git': histories.admin.map((commit) => ({ ...commit, repoId: 'mixed-git' })),
+  'mixed-api-git': histories.api.map((commit) => ({ ...commit, repoId: 'mixed-api-git' })),
+  'mixed-admin-svn': [makeCommit('mixed-admin-svn', 'r24', 'SVN 修订 24', 'chenqinru', '2026-08-10T11:36:00+08:00', ['HEAD'], ['r23'])],
+  'mixed-api-svn': [makeCommit('mixed-api-svn', 'r30', 'SVN 修订 30', 'ziye', '2026-08-09T16:20:00+08:00', ['HEAD'], ['r29'])],
+};
+
+const activeHistories = browserDemoMode === 'mixed' ? mixedHistories : histories;
 
 const branches: Record<string, BranchInfo[]> = Object.fromEntries(initialRepositories.map((repo) => {
   const values: BranchInfo[] = [
@@ -115,8 +127,6 @@ const demoTags: Record<string, TagInfo[]> = Object.fromEntries(initialRepositori
   ...versionNames.map((name, index) => ({ name, hash: `${repo.meta.id}-tag-${index}`, date: '2026-08-13T08:00:00.000Z' })),
 ]]));
 
-const browserDemoMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sidebar') === 'mixed' ? 'mixed' : 'git';
-
 const detailFiles: Record<string, CommitFile[]> = {
   admin: [
     { path: 'apps/web-antd/src/api/infra/config/index.ts', status: 'M', added: 11, removed: 2 },
@@ -127,6 +137,14 @@ const detailFiles: Record<string, CommitFile[]> = {
     { path: 'src/main/resources/application.yml', status: 'M', added: 4, removed: 2 },
   ],
 };
+
+const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mixed' ? {
+  ...detailFiles,
+  'mixed-git': detailFiles.admin,
+  'mixed-api-git': detailFiles.api,
+  'mixed-admin-svn': [{ path: 'src/admin/ConfigService.java', status: 'M', added: 9, removed: 2 }],
+  'mixed-api-svn': [{ path: 'src/api/ConfigService.java', status: 'M', added: 6, removed: 1 }],
+} : detailFiles;
 
 const initialState: AppStateSnapshot = {
   theme: 'dark', language: 'zhCn', lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
@@ -182,13 +200,14 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'workspaceRemoveRecent': return true;
       case 'repositoryStatus': return this.repositories.find((repo) => repo.meta.id === command.payload.repo_id);
       case 'history': {
-        const values = histories[command.payload.repo_id] ?? [];
+        const values = activeHistories[command.payload.repo_id] ?? [];
         const filtered = command.payload.filter ? values.filter((commit) => commit.message.toLowerCase().includes(command.payload.filter!.toLowerCase())) : values;
         return { commits: filtered.slice(command.payload.skip, command.payload.skip + command.payload.limit), hasMore: false } satisfies HistoryPage;
       }
       case 'branches': return this.branchValues[command.payload.repo_id] ?? [];
       case 'tags': return this.tagValues[command.payload.repo_id] ?? [];
       case 'commitDetail': return this.commitDetail(command.payload.repo_id, command.payload.revision);
+      case 'commitMergeCommits': return this.mergeCommits(command.payload.repo_id, command.payload.revision) satisfies MergeCommitSummary[];
       case 'fileDiff': return this.diff(command.payload.relative_path);
       case 'conflicts': return [];
       case 'stashes': return [{ reference: 'stash@{0}', hash: '7e32b010', branch: 'main', message: 'WIP: browser demo', date: '2026-08-13T08:00:00Z' }] satisfies StashEntry[];
@@ -199,8 +218,8 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'subtreeOperation': this.applySubtree(command.payload.repo_id, command.payload.operation); return true;
       case 'stage': this.updateFiles(command.payload.repo_id, command.payload.paths, true); return true;
       case 'unstage': this.updateFiles(command.payload.repo_id, command.payload.paths, false); return true;
-      case 'commit': return histories[command.payload.repo_id]?.[0]?.hash ?? 'browser-demo-commit';
-      case 'branchCompare': return { base: command.payload.base, target: command.payload.target, baseCommits: [], targetCommits: [], files: detailFiles[command.payload.repo_id] ?? [] };
+      case 'commit': return activeHistories[command.payload.repo_id]?.[0]?.hash ?? 'browser-demo-commit';
+      case 'branchCompare': return { base: command.payload.base, target: command.payload.target, baseCommits: [], targetCommits: [], files: activeDetailFiles[command.payload.repo_id] ?? [] };
       case 'conflictVersions': return { path: command.payload.relative_path, base: '', ours: '', theirs: '', working: '', language: 'text', fingerprint: 'browser-demo', binary: false };
       case 'sync': case 'branchOperation': case 'tagOperation': case 'stashOperation': case 'shelfOperation':
       case 'changelistOperation': case 'worktreeOperation': case 'remoteOperation': case 'systemOpen':
@@ -210,12 +229,27 @@ export class BrowserDevBridge implements VersionDockBridge {
   }
 
   private commitDetail(repoId: string, revision: string): CommitDetail {
-    const commit = (histories[repoId] ?? []).find((item) => item.hash === revision) ?? histories[repoId]?.[0] ?? histories.admin[0];
+    const values = activeHistories[repoId] ?? [];
+    const commit = values.find((item) => item.hash === revision) ?? values[0] ?? Object.values(activeHistories)[0]?.[0] ?? histories.admin[0];
     return {
       commit,
       fullMessage: `${commit.message}\n\n- 新增参数配置分页查询接口的筛选参数定义\n- 更新参数配置列表查询及导出接口请求参数类型\n- 将参数键值输入框调整为多行文本域以支持更长内容`,
-      files: detailFiles[repoId] ?? [{ path: 'README.md', status: 'M', added: 7, removed: 1 }],
+      files: activeDetailFiles[repoId] ?? [{ path: 'README.md', status: 'M', added: 7, removed: 1 }],
+      branches: {
+        local: commit.refs.filter((ref) => !ref.includes('/') && !ref.includes('HEAD') && !ref.startsWith('tag: ')),
+        remote: commit.refs.filter((ref) => ref.includes('origin/') || ref.includes('remotes/')),
+        tags: commit.refs.filter((ref) => ref.startsWith('tag: ')),
+      },
     };
+  }
+
+  private mergeCommits(repoId: string, revision: string): MergeCommitSummary[] {
+    const commit = (activeHistories[repoId] ?? []).find((item) => item.hash === revision);
+    if (!commit || commit.parents.length < 2) return [];
+    return [{
+      hash: `${repoId}-merged-commit`, shortHash: 'merged01', message: 'feat: merged branch changes',
+      author: commit.author, authorDate: commit.authorDate, parentIndex: 1,
+    }];
   }
 
   private diff(path: string): DiffDocument {

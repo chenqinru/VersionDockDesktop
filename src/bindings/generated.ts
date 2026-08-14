@@ -59,6 +59,8 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	relative_path: string,
 	staged: boolean,
 	revision: string | null,
+	from_revision: string | null,
+	to_revision: string | null,
 } } | { type: "stage"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -92,6 +94,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	workspace_id: string,
 	repo_id: string,
 	revision: string,
+} } | { type: "commitMergeCommits"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	revision: string,
+	parents: string[],
 } } | { type: "unpushedCommits"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -189,10 +196,17 @@ export type ChangelistEntry = {
 
 export type ChangelistOperation = { type: "create"; name: string } | { type: "rename"; changelist_id: string; name: string } | { type: "delete"; changelist_id: string } | { type: "assign"; changelist_id: string | null; paths: string[] };
 
+export type CommitBranches = {
+	local: string[],
+	remote: string[],
+	tags: string[],
+};
+
 export type CommitDetail = {
 	commit: CommitNode,
 	fullMessage: string,
 	files: CommitFile[],
+	branches: CommitBranches,
 };
 
 export type CommitFile = {
@@ -274,6 +288,15 @@ export type HistoryPage = {
 };
 
 export type LanguagePreference = "system" | "zhCn" | "en";
+
+export type MergeCommitSummary = {
+	hash: string,
+	shortHash: string,
+	message: string,
+	author: string,
+	authorDate: string,
+	parentIndex: number,
+};
 
 export type MergeVersions = {
 	path: string,

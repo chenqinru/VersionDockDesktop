@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { BootstrapData, BridgeCommand, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from './appStore';
 
@@ -27,9 +27,41 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, remotes: {}, mode: 'history', busy: false, error: undefined }));
+afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyHasMoreByRepo: {}, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, remotes: {}, mode: 'history', busy: false, error: undefined }));
 
 describe('appStore async lifecycle', () => {
+  it('supports single, toggle, and range commit selection with aggregated revision diffs', async () => {
+    const commits: CommitNode[] = [
+      { repoId: 'a', hash: 'a'.repeat(40), shortHash: 'aaaaaaaa', parents: ['b'.repeat(40)], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-03T00:00:00Z', committerDate: '2026-01-03T00:00:00Z', message: 'third', refs: [] },
+      { repoId: 'a', hash: 'b'.repeat(40), shortHash: 'bbbbbbbb', parents: ['c'.repeat(40)], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-02T00:00:00Z', committerDate: '2026-01-02T00:00:00Z', message: 'second', refs: [] },
+      { repoId: 'a', hash: 'c'.repeat(40), shortHash: 'cccccccc', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'first', refs: [] },
+    ];
+    const detail = (commit: CommitNode): CommitDetail => ({ commit, fullMessage: commit.message, branches: { local: ['main'], remote: ['origin/main'], tags: [] }, files: [{ path: `src/${commit.shortHash}.ts`, status: 'M', added: 2, removed: 1 }] });
+    const commands: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      commands.push(command);
+      if (command.type === 'commitDetail') return detail(commits.find((commit) => commit.hash === command.payload.revision)!);
+      if (command.type === 'fileDiff') return { path: command.payload.relative_path, content: 'diff', language: 'text', binary: false, truncated: false, lineCount: 1 };
+      return [];
+    });
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('a', 'Alpha')];
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a', history: commits });
+
+    await useAppStore.getState().selectCommit(commits[1]);
+    await useAppStore.getState().selectCommit(commits[0], 'range', commits);
+    expect(useAppStore.getState().selectedCommits.map((commit) => commit.hash)).toEqual([commits[0].hash, commits[1].hash]);
+    useAppStore.getState().openCommitChanges();
+    expect(useAppStore.getState().mode).toBe('changes');
+    const target = useAppStore.getState().changes!.files[0];
+    await useAppStore.getState().loadChangesDiff(target);
+    const rangeCommand = commands.find((command) => command.type === 'fileDiff' && command.payload.from_revision);
+    expect(rangeCommand).toMatchObject({ type: 'fileDiff', payload: { from_revision: 'c'.repeat(40), to_revision: 'a'.repeat(40) } });
+    expect(useAppStore.getState().changesDiff?.content).toBe('diff');
+    await useAppStore.getState().selectCommit(commits[2], 'toggle', commits);
+    expect(useAppStore.getState().selectedCommits.map((commit) => commit.hash)).toEqual([commits[0].hash, commits[1].hash, commits[2].hash]);
+  });
+
   it('does not let an older workspace response replace the newest workspace', async () => {
     const first = deferred<WorkspaceSnapshot>();
     const second = deferred<WorkspaceSnapshot>();

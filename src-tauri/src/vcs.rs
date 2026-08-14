@@ -6,11 +6,11 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     cli,
     models::{
-        BranchCompareResult, BranchInfo, BranchOperation, CommitDetail, CommitFile, CommitNode,
-        ConflictChoice, DesktopError, DiffDocument, HistoryPage, MergeVersions, RemoteInfo,
-        RemoteOperation, RepositoryMeta, StashEntry, StashOperation, SubtreeEntry,
-        SubtreeOperation, SubtreeState, SyncAction, TagInfo, TagOperation, UnpushedCommit, VcsKind,
-        WorktreeEntry, WorktreeOperation,
+        BranchCompareResult, BranchInfo, BranchOperation, CommitBranches, CommitDetail, CommitFile,
+        CommitNode, ConflictChoice, DesktopError, DiffDocument, HistoryPage, MergeCommitSummary,
+        MergeVersions, RemoteInfo, RemoteOperation, RepositoryMeta, StashEntry, StashOperation,
+        SubtreeEntry, SubtreeOperation, SubtreeState, SyncAction, TagInfo, TagOperation,
+        UnpushedCommit, VcsKind, WorktreeEntry, WorktreeOperation,
     },
     state::safe_relative,
 };
@@ -91,13 +91,47 @@ pub async fn diff(
     path: &str,
     staged: bool,
     revision: Option<String>,
+    from_revision: Option<String>,
+    to_revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<DiffDocument, DesktopError> {
     let root = Path::new(&repo.root_path);
     let safe = relative_path(root, path, false)?;
     let output = match repo.kind {
         VcsKind::Git => {
-            if let Some(value) = revision {
+            if from_revision.is_some() || to_revision.is_some() {
+                let from = from_revision.ok_or_else(|| {
+                    DesktopError::new(
+                        "INVALID_REVISION_RANGE",
+                        "Both range revisions are required",
+                        false,
+                    )
+                })?;
+                let to = to_revision.ok_or_else(|| {
+                    DesktopError::new(
+                        "INVALID_REVISION_RANGE",
+                        "Both range revisions are required",
+                        false,
+                    )
+                })?;
+                validate_revision(&from)?;
+                validate_revision(&to)?;
+                git(
+                    vec![
+                        "diff".into(),
+                        "--no-ext-diff".into(),
+                        "--no-color".into(),
+                        "--binary".into(),
+                        from,
+                        to,
+                        "--".into(),
+                        format!(":(literal){safe}"),
+                    ],
+                    repo,
+                    token,
+                )
+                .await?
+            } else if let Some(value) = revision {
                 validate_revision(&value)?;
                 git(
                     vec![
@@ -131,7 +165,25 @@ pub async fn diff(
         }
         VcsKind::Svn => {
             let mut args = vec!["diff".into()];
-            if let Some(value) = revision {
+            if from_revision.is_some() || to_revision.is_some() {
+                let from = from_revision.ok_or_else(|| {
+                    DesktopError::new(
+                        "INVALID_REVISION_RANGE",
+                        "Both range revisions are required",
+                        false,
+                    )
+                })?;
+                let to = to_revision.ok_or_else(|| {
+                    DesktopError::new(
+                        "INVALID_REVISION_RANGE",
+                        "Both range revisions are required",
+                        false,
+                    )
+                })?;
+                validate_svn_revision(&from)?;
+                validate_svn_revision(&to)?;
+                args.extend(["-r".into(), format!("{from}:{to}")]);
+            } else if let Some(value) = revision {
                 validate_svn_revision(&value)?;
                 args.extend(["-c".into(), value]);
             }
@@ -842,55 +894,50 @@ pub async fn commit_detail(
                 .ok_or_else(|| {
                     DesktopError::new("COMMIT_PARSE_FAILED", "Unable to parse commit", true)
                 })?;
-            let stats = git(
+            let stats_args = if let Some(parent) = commit.parents.first() {
+                vec![
+                    "diff".into(),
+                    "--numstat".into(),
+                    parent.clone(),
+                    revision.into(),
+                ]
+            } else {
                 vec![
                     "show".into(),
                     "--numstat".into(),
                     "--format=".into(),
                     revision.into(),
-                ],
-                repo,
-                token,
-            )
-            .await?
-            .stdout_text();
-            let statuses = git(
+                ]
+            };
+            let status_args = if let Some(parent) = commit.parents.first() {
+                vec![
+                    "diff".into(),
+                    "--name-status".into(),
+                    parent.clone(),
+                    revision.into(),
+                ]
+            } else {
                 vec![
                     "show".into(),
                     "--name-status".into(),
                     "--format=".into(),
                     revision.into(),
-                ],
-                repo,
-                token,
-            )
-            .await?
-            .stdout_text();
+                ]
+            };
+            let (stats, statuses) = tokio::try_join!(
+                async { Ok::<_, DesktopError>(git(stats_args, repo, token).await?.stdout_text()) },
+                async { Ok::<_, DesktopError>(git(status_args, repo, token).await?.stdout_text()) },
+            )?;
+            let branches = containing_branches(repo, &commit.hash, token).await?;
             Ok(CommitDetail {
                 commit,
                 full_message: full_message.trim().into(),
                 files: merge_git_files(&stats, &statuses),
+                branches,
             })
         }
         VcsKind::Svn => {
             validate_svn_revision(revision)?;
-            let page = svn_history(repo, 0, 1, None, token).await?;
-            let mut commit = page
-                .commits
-                .into_iter()
-                .find(|item| item.hash == revision)
-                .unwrap_or(CommitNode {
-                    repo_id: repo.id.clone(),
-                    hash: revision.into(),
-                    short_hash: format!("r{revision}"),
-                    parents: vec![],
-                    author: String::new(),
-                    email: String::new(),
-                    author_date: String::new(),
-                    committer_date: String::new(),
-                    message: format!("SVN revision {revision}"),
-                    refs: vec![],
-                });
             let raw = svn(
                 vec![
                     "log".into(),
@@ -909,16 +956,37 @@ pub async fn commit_detail(
             let entry = document
                 .descendants()
                 .find(|node| node.has_tag_name("logentry"));
+            let text = |name: &str| {
+                entry
+                    .and_then(|node| node.children().find(|child| child.has_tag_name(name)))
+                    .and_then(|node| node.text())
+                    .unwrap_or("")
+                    .to_string()
+            };
             let full_message = entry
                 .and_then(|node| node.children().find(|child| child.has_tag_name("msg")))
                 .and_then(|node| node.text())
                 .unwrap_or("")
                 .to_string();
-            commit.message = full_message
-                .lines()
-                .next()
-                .unwrap_or(&commit.message)
-                .into();
+            let message = full_message.lines().next().unwrap_or("").to_string();
+            let author = text("author");
+            let date = text("date");
+            let commit = CommitNode {
+                repo_id: repo.id.clone(),
+                hash: revision.into(),
+                short_hash: format!("r{revision}"),
+                parents: vec![],
+                author,
+                email: String::new(),
+                author_date: date.clone(),
+                committer_date: date,
+                message: if message.is_empty() {
+                    format!("SVN revision {revision}")
+                } else {
+                    message
+                },
+                refs: vec![],
+            };
             let files = document
                 .descendants()
                 .filter(|node| node.has_tag_name("path"))
@@ -935,9 +1003,117 @@ pub async fn commit_detail(
                 commit,
                 full_message,
                 files,
+                branches: CommitBranches::default(),
             })
         }
     }
+}
+
+pub async fn merge_commits(
+    repo: &RepositoryMeta,
+    revision: &str,
+    parents: &[String],
+    token: &CancellationToken,
+) -> Result<Vec<MergeCommitSummary>, DesktopError> {
+    if !matches!(repo.kind, VcsKind::Git) || parents.len() < 2 {
+        return Ok(Vec::new());
+    }
+    validate_revision(revision)?;
+    for parent in parents {
+        validate_revision(parent)?;
+    }
+
+    let mut result = Vec::new();
+    for (index, parent) in parents.iter().enumerate().skip(1) {
+        let raw = git(
+            vec![
+                "log".into(),
+                format!("{}..{}", parents[0], parent),
+                format!("--format=%H{FIELD}%h{FIELD}%an{FIELD}%aI{FIELD}%s"),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text();
+        for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+            let fields = line.split(FIELD).collect::<Vec<_>>();
+            if fields.len() < 5 {
+                continue;
+            }
+            result.push(MergeCommitSummary {
+                hash: fields[0].into(),
+                short_hash: fields[1].into(),
+                message: fields[4].into(),
+                author: fields[2].into(),
+                author_date: fields[3].into(),
+                parent_index: index as u32,
+            });
+        }
+    }
+    Ok(result)
+}
+
+async fn containing_branches(
+    repo: &RepositoryMeta,
+    revision: &str,
+    token: &CancellationToken,
+) -> Result<CommitBranches, DesktopError> {
+    if !matches!(repo.kind, VcsKind::Git) {
+        return Ok(CommitBranches::default());
+    }
+    let local = git(
+        vec![
+            "branch".into(),
+            "--contains".into(),
+            revision.into(),
+            "--format=%(refname:short)".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let remote = git(
+        vec![
+            "for-each-ref".into(),
+            "--contains".into(),
+            revision.into(),
+            "--format=%(refname:short)".into(),
+            "refs/remotes".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let tags = git(
+        vec![
+            "tag".into(),
+            "--contains".into(),
+            revision.into(),
+            "--format=%(refname:short)".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+
+    Ok(CommitBranches {
+        local: lines(&local),
+        remote: lines(&remote),
+        tags: lines(&tags),
+    })
+}
+
+fn lines(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 fn merge_git_files(stats: &str, statuses: &str) -> Vec<CommitFile> {
