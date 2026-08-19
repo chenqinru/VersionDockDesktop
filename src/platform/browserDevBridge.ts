@@ -352,6 +352,9 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'tags': return this.tagValues[command.payload.repo_id] ?? [];
       case 'commitDetail': return this.commitDetail(command.payload.repo_id, command.payload.revision);
       case 'commitMergeCommits': return this.mergeCommits(command.payload.repo_id, command.payload.revision) satisfies MergeCommitSummary[];
+      case 'commitMergeParentFiles': return [
+        { path: 'src/demo-parent-change.ts', status: 'M', added: 12, removed: 4 },
+      ] satisfies CommitFile[];
       case 'fileDiff': return this.diff(command.payload.relative_path);
       case 'conflicts': return [];
       case 'stashes': return [{ reference: 'stash@{0}', hash: '7e32b010', branch: 'main', message: 'WIP: browser demo', date: '2026-08-13T08:00:00Z' }] satisfies StashEntry[];
@@ -375,15 +378,25 @@ export class BrowserDevBridge implements VersionDockBridge {
   private commitDetail(repoId: string, revision: string): CommitDetail {
     const values = activeHistories[repoId] ?? [];
     const commit = values.find((item) => item.hash === revision) ?? values[0] ?? Object.values(activeHistories)[0]?.[0] ?? histories.admin[0];
+    const isMerge = commit.parents.length >= 2;
     return {
       commit,
       fullMessage: `${commit.message}\n\n- 新增参数配置分页查询接口的筛选参数定义\n- 更新参数配置列表查询及导出接口请求参数类型\n- 将参数键值输入框调整为多行文本域以支持更长内容`,
-      files: activeDetailFiles[repoId] ?? [{ path: 'README.md', status: 'M', added: 7, removed: 1 }],
+      files: isMerge ? [] : (activeDetailFiles[repoId] ?? [{ path: 'README.md', status: 'M', added: 7, removed: 1 }]),
       branches: {
         local: commit.refs.filter((ref) => !ref.includes('/') && !ref.includes('HEAD') && !ref.startsWith('tag: ')),
         remote: commit.refs.filter((ref) => ref.includes('origin/') || ref.includes('remotes/')),
         tags: commit.refs.filter((ref) => ref.startsWith('tag: ')),
       },
+      mergeParentChanges: isMerge ? commit.parents.map((parent, idx) => ({
+        hash: parent,
+        shortHash: parent.slice(0, 7),
+        message: idx === 1 ? 'feat: merged branch changes' : 'main branch updates',
+        authorName: commit.author,
+        authorDate: commit.authorDate,
+        parentIndex: idx,
+        fileCount: 1,
+      })) : [],
     };
   }
 

@@ -937,7 +937,38 @@ async fn real_git_commit_detail_merge_refs_and_range_diff() {
         .unwrap();
     assert!(detail.commit.parents.len() >= 2);
     assert!(detail.branches.local.iter().any(|branch| branch == "main"));
-    assert!(detail.files.iter().any(|file| file.path == "feature.txt"));
+    assert!(detail.files.is_empty());
+    assert!(detail
+        .merge_parent_changes
+        .iter()
+        .any(|change| change.message == "feature detail" && change.file_count == 1));
+
+    let feature_parent = detail
+        .merge_parent_changes
+        .iter()
+        .find(|change| change.message == "feature detail")
+        .unwrap();
+    let main_parent = detail
+        .merge_parent_changes
+        .iter()
+        .find(|change| change.message == "main detail")
+        .unwrap();
+
+    let feature_diff_files =
+        vcs::merge_parent_files(&repository, &merge_hash, &feature_parent.hash, &token)
+            .await
+            .unwrap();
+    assert!(feature_diff_files
+        .iter()
+        .any(|file| file.path == "main.txt"));
+
+    let main_diff_files =
+        vcs::merge_parent_files(&repository, &merge_hash, &main_parent.hash, &token)
+            .await
+            .unwrap();
+    assert!(main_diff_files
+        .iter()
+        .any(|file| file.path == "feature.txt"));
 
     let merged = vcs::merge_commits(&repository, &merge_hash, &detail.commit.parents, &token)
         .await

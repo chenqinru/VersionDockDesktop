@@ -266,6 +266,19 @@ async fn dispatch(
                 })?;
             json(vcs::merge_commits(&repo, &revision, &parents, token).await?)
         }
+        BridgeCommand::CommitMergeParentFiles {
+            workspace_id,
+            repo_id,
+            revision,
+            parent_hash,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit =
+                state.read_limit.acquire().await.map_err(|_| {
+                    DesktopError::new("APP_CLOSING", "Application is closing", true)
+                })?;
+            json(vcs::merge_parent_files(&repo, &revision, &parent_hash, token).await?)
+        }
         BridgeCommand::UnpushedCommits {
             workspace_id,
             repo_id,

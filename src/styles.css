@@ -502,19 +502,17 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .aggregate-repo > .codicon { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .aggregate-item .detail-message-card { margin-top: 5px; }
 .detail-loading { padding: 12px 8px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
-.detail-merge-section { margin-top: 9px; border-top: 1px solid var(--versiondock-border); }
-.detail-merge-section > header { height: 27px; display: flex; align-items: center; gap: 5px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.detail-merge-section > header strong { flex: 1; }
-.detail-merge-section > header b { min-width: 17px; padding: 0 4px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; text-align: center; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); line-height: 14px; }
-.merge-commit-row { width: 100%; min-height: 26px; display: flex; align-items: center; gap: 6px; padding: 3px 5px; text-align: left; }
-.merge-commit-row:hover, .merge-commit-row.expanded { background: var(--versiondock-hover); }
-.merge-commit-row code { color: var(--versiondock-muted); font: calc(10px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }
-.merge-commit-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.merge-commit-row > .codicon { flex: 0 0 auto; }
-.merge-commit-row .merge-commit-hash { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; overflow: visible; text-overflow: clip; }
-.merge-commit-row > .merge-commit-message { flex: 1; }
-.merge-commit-row small { max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
-.merge-file-list { margin-left: 15px; border-left: 1px solid var(--versiondock-border-soft); }
+.no-merge-conflicts { padding: 8px 10px 7px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; text-align: center; opacity: 0.72; }
+.merge-parent-group { margin-top: 4px; border-top: 1px solid var(--versiondock-border-soft); }
+.merge-parent-row { width: 100%; min-height: 24px; height: 24px; display: flex; align-items: center; gap: 5px; padding: 2px 8px; text-align: left; background: transparent; border: none; cursor: pointer; user-select: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.merge-parent-row:hover { background: var(--versiondock-hover); }
+.merge-parent-row[data-selected="true"] { background: var(--versiondock-selection, rgba(255, 255, 255, 0.08)); }
+.merge-parent-row .merge-chevron { width: 14px; flex: 0 0 14px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-muted); }
+.merge-parent-row .merge-commit-icon { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-muted); flex: 0 0 auto; }
+.merge-parent-title { font-weight: 600; color: var(--versiondock-text); flex: 0 0 auto; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.merge-parent-message { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.merge-parent-count { flex: 0 0 auto; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); padding: 0 4px; }
+.merge-parent-files { margin-left: 14px; margin-bottom: 3px; padding-left: 4px; }
 
 /* CommitDetail follows the plugin's compact 22px rows and 4px action rhythm. */
 .detail-files button { min-height: 0; }
@@ -530,28 +528,22 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-summary .detail-toolbar-label { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); gap: 4px; }
 .detail-single { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .detail-message-card { margin: 2px 0 3px; padding: 10px 12px; border: 0; }
-.detail-message-title { align-items: center; gap: 8px; }
-.detail-message-title strong { color: var(--versiondock-text); font: 400 calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); }
+.detail-message-title { display: flex; align-items: center; gap: 8px; }
+.detail-message-title strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-text); font: 400 calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); }
+.detail-message-title strong.expanded { white-space: normal; word-break: break-word; }
 .detail-message-title button { width: 18px; height: 18px; padding: 0; flex: 0 0 18px; }
 .detail-message-card pre { margin-top: 8px; padding-top: 0; border-top: 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); }
 .detail-refs { margin: 0; }
 .detail-refs em { height: 16px; padding: 0 6px; line-height: 16px; }
-.detail-repo-pill { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
+.detail-repo-pill { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); margin-left: 2px; }
+.detail-dir-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); margin-left: 4px; }
+.detail-line-stats { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
 .detail-aggregate-meta { display: flex; flex-direction: column; gap: 5px; }
 .detail-aggregate-meta-row { display: flex; justify-content: space-between; gap: 8px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .detail-aggregate-meta-row span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .detail-aggregate { min-width: 0; }
 .detail-aggregate .detail-message-card { min-width: 0; }
 .detail-aggregate .detail-message-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.detail-merge-section { margin-top: 6px; padding-top: 6px; display: flex; flex-direction: column; gap: 2px; }
-.detail-merge-section > header { height: auto; min-height: 16px; margin-bottom: 2px; }
-.merge-commit-row { min-height: 22px; padding: 2px 4px; }
-.merge-commit-icon { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.merge-file-list { margin-left: 16px; margin-bottom: 2px; padding-left: 6px; }
-.merge-file-list .detail-file-row { min-height: 18px; height: auto; padding: 1px 4px; gap: 4px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.merge-file-list .file-type-icon { width: 13px; height: 13px; flex: 0 0 13px; }
-.merge-file-list .file-type-icon .codicon { font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
-.merge-file-list .detail-file-row > em { font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; }
 
 /* Match CommitDetail's file-list metrics: 12px text, 14px file icons, and depth-based indents. */
 .detail-files { font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
@@ -561,13 +553,15 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-tree-dir > button { gap: 3px; padding-right: 10px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .detail-tree-dir > button > .codicon { width: 14px; flex: 0 0 14px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .detail-file-row { gap: 4px; padding-right: 10px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.detail-file-row.selected { background: var(--versiondock-selection, rgba(255, 255, 255, 0.08)); }
 .detail-tree-dir > .detail-file-row { gap: 4px; }
 .detail-list-row { padding-left: 4px; }
 .detail-file-row .file-type-icon { width: 14px; height: 14px; flex: 0 0 14px; }
 .detail-file-row .file-type-icon .codicon { font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }
 .detail-root-label b, .detail-directory-count { font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .detail-file-row > b { font: 400 calc(10px * var(--versiondock-ui-font-scale, 1))/1 var(--versiondock-code); }
-.detail-file-row > em { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; }
+.detail-file-row > em { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; margin-left: auto; }
+.detail-file-row:has(.detail-line-stats) > em { margin-left: 4px; }
 
 .changes-workspace { height: 100%; display: flex; flex-direction: column; background: var(--versiondock-bg); }
 .changes-workspace > header { height: 38px; flex: 0 0 38px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border-bottom: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }

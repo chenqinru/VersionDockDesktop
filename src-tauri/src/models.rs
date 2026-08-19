@@ -110,6 +110,12 @@ pub enum BridgeCommand {
         revision: String,
         parents: Vec<String>,
     },
+    CommitMergeParentFiles {
+        workspace_id: String,
+        repo_id: String,
+        revision: String,
+        parent_hash: String,
+    },
     UnpushedCommits {
         workspace_id: String,
         repo_id: String,
@@ -631,11 +637,25 @@ pub struct CommitFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct MergeParentChange {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author_name: String,
+    pub author_date: String,
+    pub parent_index: u32,
+    pub file_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct CommitDetail {
     pub commit: CommitNode,
     pub full_message: String,
     pub files: Vec<CommitFile>,
     pub branches: CommitBranches,
+    #[serde(default)]
+    pub merge_parent_changes: Vec<MergeParentChange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]

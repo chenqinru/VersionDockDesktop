@@ -100,6 +100,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	repo_id: string,
 	revision: string,
 	parents: string[],
+} } | { type: "commitMergeParentFiles"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	revision: string,
+	parent_hash: string,
 } } | { type: "unpushedCommits"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -208,6 +213,7 @@ export type CommitDetail = {
 	fullMessage: string,
 	files: CommitFile[],
 	branches: CommitBranches,
+	mergeParentChanges?: MergeParentChange[],
 };
 
 export type CommitFile = {
@@ -299,6 +305,16 @@ export type MergeCommitSummary = {
 	author: string,
 	authorDate: string,
 	parentIndex: number,
+};
+
+export type MergeParentChange = {
+	hash: string,
+	shortHash: string,
+	message: string,
+	authorName: string,
+	authorDate: string,
+	parentIndex: number,
+	fileCount: number,
 };
 
 export type MergeVersions = {

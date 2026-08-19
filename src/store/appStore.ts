@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type {
-  AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitNode, ConflictFile, DiffDocument,
+  AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument,
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation,
   UnpushedCommit, MergeCommitSummary,
@@ -71,6 +71,8 @@ export interface AppStore {
   selectedCommitLoading: Record<string, boolean>;
   mergeCommits: Record<string, MergeCommitSummary[]>;
   mergeCommitsLoading: Record<string, boolean>;
+  mergeParentFiles: Record<string, CommitFile[]>;
+  mergeParentFilesLoading: Record<string, boolean>;
   branches: BranchInfo[];
   tags: TagInfo[];
   branchesByRepo: Record<string, BranchInfo[]>;
@@ -106,6 +108,7 @@ export interface AppStore {
   selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
   loadCommitDetail: (commit: CommitNode) => Promise<CommitDetail>;
   loadMergeCommits: (commit: CommitNode) => Promise<void>;
+  loadMergeParentFiles: (repoId: string, revision: string, parentHash: string) => Promise<CommitFile[]>;
   clearCommitSelection: () => void;
   branchOperation: (operation: object, repoId?: string) => Promise<void>;
   tagOperation: (operation: object, repoId?: string) => Promise<void>;
@@ -191,7 +194,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = snapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : snapshot.repositories[0]?.meta.id;
       set(workspaceChanged
-      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {} }
+      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot, selectedRepoId });
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     await get().loadConflicts();
@@ -215,7 +218,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, busy: false, mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, unpushedCommits: {}, remotes: {},
+    ready: false, busy: false, mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, unpushedCommits: {}, remotes: {},
 
     initialize: async (value) => {
       set({ bridge: value });
@@ -459,6 +462,35 @@ export const useAppStore = create<AppStore>((set, get) => {
         set((state) => ({ mergeCommits: { ...state.mergeCommits, [key]: values }, mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
       } catch (error) {
         set((state) => ({ error: errorText(error), mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+      }
+    },
+
+    loadMergeParentFiles: async (repoId, revision, parentHash) => {
+      const key = `${repoId}\0${revision}\0${parentHash}`;
+      const cached = get().mergeParentFiles[key];
+      if (cached) return cached;
+      set((state) => ({ mergeParentFilesLoading: { ...state.mergeParentFilesLoading, [key]: true } }));
+      try {
+        const values = await bridge().request<CommitFile[]>({
+          type: 'commitMergeParentFiles',
+          payload: {
+            workspace_id: workspaceId(),
+            repo_id: repoId,
+            revision,
+            parent_hash: parentHash,
+          },
+        });
+        set((state) => ({
+          mergeParentFiles: { ...state.mergeParentFiles, [key]: values },
+          mergeParentFilesLoading: { ...state.mergeParentFilesLoading, [key]: false },
+        }));
+        return values;
+      } catch (error) {
+        set((state) => ({
+          error: errorText(error),
+          mergeParentFilesLoading: { ...state.mergeParentFilesLoading, [key]: false },
+        }));
+        throw error;
       }
     },
 

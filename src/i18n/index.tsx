@@ -25,6 +25,7 @@ const desktopEn: Messages = {
   'Remove from recent': 'Remove from recent', 'Path is unavailable': 'Path is unavailable', 'Operation failed': 'Operation failed', 'Working tree': 'Working tree',
   'Tree view': 'Tree view', 'List view': 'List view', 'Create tag': 'Create tag', 'Rename': 'Rename', 'Delete': 'Delete', 'Copy': 'Copy',
   'Open': 'Open', 'Reveal': 'Reveal', 'Reset': 'Reset', 'No history': 'No history', 'files': 'files', 'files changed': 'files changed', 'commits': 'commits', '{0} commit selected': '{0} commit selected', '{0} commits selected': '{0} commits selected', 'Remote': 'Remote', 'Local': 'Local', 'Aggregated commit selection': 'Aggregated commit selection', 'Selected time range': 'Selected time range', 'repositories involved': '{0} repositories involved', 'Merged commits': 'Merged commits', 'Loading...': 'Loading...', 'Loading files...': 'Loading files...', 'No commits found': 'No commits found', 'Open preview': 'Open preview', 'Open Changes': 'Open Changes', 'Close commit detail': 'Close commit detail', 'Show commit detail': 'Show commit detail', 'Expand': 'Expand', 'Collapse': 'Collapse', 'Resize commit detail': 'Resize commit detail', 'Expand commit messages by default': 'Expand commit messages by default', 'Collapse commit messages by default': 'Collapse commit messages by default',
+  'No merge conflicts': 'No merge conflicts', 'Changes from {0}': 'Changes from {0}', '{0} files': '{0} files', '{0} file': '{0} file', 'Click to expand': 'Click to expand', 'Click to collapse': 'Click to collapse', 'Click to open diff': 'Click to open diff',
   'Git and SVN are not installed': 'Git and SVN are not installed', 'Install at least one command-line tool to load repositories.': 'Install at least one command-line tool to load repositories.',
   'No repositories were found in this workspace.': 'No repositories were found in this workspace.', 'Force delete branch': 'Force delete branch',
   'Delete branch {0}?': 'Delete branch {0}?', 'Delete tag {0}?': 'Delete tag {0}?', 'Checkout branch {0}?': 'Checkout branch {0}?',
@@ -70,6 +71,7 @@ const desktopZh: Messages = {
   'Remove from recent': '从最近列表移除', 'Path is unavailable': '路径不可用', 'Operation failed': '操作失败', 'Working tree': '工作区',
   'Tree view': '树视图', 'List view': '平铺视图', 'Create tag': '创建标签', 'Rename': '重命名', 'Delete': '删除', 'Copy': '复制',
   'Open': '打开', 'Reveal': '在文件管理器中显示', 'Reset': '重置', 'No history': '暂无历史', 'files': '个文件', 'files changed': '个文件有变更', 'commits': '个提交', '{0} commit selected': '已选择 {0} 个提交', '{0} commits selected': '已选择 {0} 个提交', 'Remote': '远程', 'Local': '本地', 'Aggregated commit selection': '聚合提交选择', 'Selected time range': '所选时间范围', 'repositories involved': '涉及 {0} 个仓库', 'Merged commits': '合并的提交', 'Loading...': '加载中...', 'Loading files...': '正在加载文件...', 'No commits found': '没有找到提交', 'Open preview': '打开预览', 'Open Changes': '打开更改', 'Close commit detail': '关闭提交详情', 'Show commit detail': '显示提交详情', 'Expand': '展开', 'Collapse': '收起', 'Resize commit detail': '调整提交详情高度', 'Expand commit messages by default': '默认展开提交信息', 'Collapse commit messages by default': '默认收起提交信息',
+  'No merge conflicts': '无合并冲突', 'Changes from {0}': '来自 {0} 的变更', '{0} files': '{0} 个文件', '{0} file': '{0} 个文件', 'Click to expand': '点击展开', 'Click to collapse': '点击折叠', 'Click to open diff': '点击查看差异',
   'Git and SVN are not installed': '未安装 Git 和 SVN', 'Install at least one command-line tool to load repositories.': '请至少安装一个命令行工具以加载仓库。',
   'No repositories were found in this workspace.': '此工作区中未发现仓库。', 'Force delete branch': '强制删除分支',
   'Delete branch {0}?': '删除分支 {0}？', 'Delete tag {0}?': '删除标签 {0}？', 'Checkout branch {0}?': '切换到分支 {0}？',
@@ -99,7 +101,11 @@ export interface I18nContextValue {
   t: (message: string, ...args: Array<string | number>) => string;
 }
 
-export const I18nContext = createContext<I18nContextValue>({ language: 'en', preference: 'system', t: (message) => message });
+export const I18nContext = createContext<I18nContextValue>({
+  language: 'en',
+  preference: 'system',
+  t: (message, ...args) => args.reduce<string>((value, arg, index) => value.replaceAll(`{${index}}`, String(arg)), message),
+});
 export const useI18n = () => useContext(I18nContext);
 
 export function resolveLanguage(preference: LanguagePreference, systemLanguage = navigator.language): 'en' | 'zh-CN' {

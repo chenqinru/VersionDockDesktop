@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { useAppStore, type AppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
 import { branchColor } from './branchColor';
-import type { CommitDetail, CommitNode } from '../bindings/generated';
+import type { CommitDetail, CommitNode, MergeParentChange } from '../bindings/generated';
 
 type DetailTreeNode = { name: string; path: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
 
@@ -53,6 +53,19 @@ function refsFor(detail: CommitDetail): DetailRef[] {
   });
 }
 
+function sortTreeNodes(nodes: DetailTreeNode[]): DetailTreeNode[] {
+  return nodes
+    .map((node) => ({
+      ...node,
+      children: sortTreeNodes(node.children),
+    }))
+    .sort((left, right) => {
+      if (!left.file && right.file) return -1;
+      if (left.file && !right.file) return 1;
+      return left.name.localeCompare(right.name);
+    });
+}
+
 function buildTree(files: DetailFileTarget[]): DetailTreeNode[] {
   const root: DetailTreeNode[] = [];
   for (const file of files) {
@@ -72,7 +85,7 @@ function buildTree(files: DetailFileTarget[]): DetailTreeNode[] {
   const count = (node: DetailTreeNode): number => node.file ? 1 : node.children.reduce((total, child) => total + count(child), 0);
   const visit = (nodes: DetailTreeNode[]) => nodes.forEach((node) => { node.fileCount = count(node); visit(node.children); });
   visit(root);
-  return root;
+  return sortTreeNodes(root);
 }
 
 function collapseTree(node: DetailTreeNode): DetailTreeNode {
@@ -90,95 +103,352 @@ function openTarget(target: DetailFileTarget, openDiff: AppStore['openDiff']): v
   void openDiff(target.repoId, target.path, false, range ? undefined : target.commitHash, range);
 }
 
-function DetailTreeNodeView({ node, depth, openDiff, allExpanded, clearAllExpanded }: { node: DetailTreeNode; depth: number; openDiff: AppStore['openDiff']; allExpanded: boolean | null; clearAllExpanded: () => void }) {
+function isFileSelected(file: DetailFileTarget, selectedFile: AppStore['selectedFile']): boolean {
+  if (!selectedFile) return false;
+  return selectedFile.repoId === file.repoId
+    && selectedFile.path === file.path
+    && (selectedFile.fromRevision ?? null) === (file.fromRevision ?? null)
+    && (selectedFile.toRevision ?? null) === (file.toRevision ?? null);
+}
+
+function DetailTreeNodeView({
+  node,
+  depth,
+  openDiff,
+  selectedFile,
+  allExpanded,
+  clearAllExpanded,
+}: {
+  node: DetailTreeNode;
+  depth: number;
+  openDiff: AppStore['openDiff'];
+  selectedFile?: AppStore['selectedFile'];
+  allExpanded: boolean | null;
+  clearAllExpanded: () => void;
+}) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(true);
   if (node.file) {
     const file = node.file;
-    return <button className={`detail-file-row status-${statusClass(file.status)}`} style={{ paddingLeft: 18 + depth * 14 }} title={file.path} onClick={() => openTarget(file, openDiff)}>
-      <FileIcon name={node.name} />
-      <span className="detail-file-name">{node.name}</span>
-      {file.added !== null && <b className="added">+{file.added}</b>}
-      {file.removed !== null && <b className="removed">-{file.removed}</b>}
-      <em>{file.status.replace(/\d+$/, '').slice(0, 1).toUpperCase()}</em>
-    </button>;
+    const isSelected = isFileSelected(file, selectedFile);
+    return (
+      <button
+        type="button"
+        className={`detail-file-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''}`}
+        style={{ paddingLeft: 18 + depth * 14 }}
+        title={`${file.path}\n${t('Click to open diff')}`}
+        onClick={() => openTarget(file, openDiff)}
+      >
+        <FileIcon name={node.name} />
+        <span className="detail-file-name">{node.name}</span>
+        {(file.added !== null || file.removed !== null) && (
+          <span className="detail-line-stats">
+            {file.added !== null && <b className="added">+{file.added}</b>}
+            {file.removed !== null && <b className="removed">-{file.removed}</b>}
+          </span>
+        )}
+        <em>{file.status.replace(/\d+$/, '').slice(0, 1).toUpperCase()}</em>
+      </button>
+    );
   }
   const isExpanded = allExpanded ?? expanded;
-  return <div className="detail-tree-dir">
-    <button style={{ paddingLeft: depth * 14 }} title={node.path} onClick={() => { if (allExpanded !== null) clearAllExpanded(); setExpanded((value) => !value); }}>
-      <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name.split('/').pop() ?? node.name} folder open={isExpanded} /><span className="detail-node-label">{node.name}</span><b className="detail-directory-count">{node.fileCount}</b>
-    </button>
-    {isExpanded && node.children.map((child) => <DetailTreeNodeView key={child.path} node={child} depth={depth + 1} openDiff={openDiff} allExpanded={allExpanded} clearAllExpanded={clearAllExpanded} />)}
-  </div>;
+  return (
+    <div className="detail-tree-dir">
+      <button
+        type="button"
+        style={{ paddingLeft: depth * 14 }}
+        title={node.path}
+        onClick={() => {
+          if (allExpanded !== null) clearAllExpanded();
+          setExpanded((value) => !value);
+        }}
+      >
+        <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} />
+        <FileIcon name={node.name.split('/').pop() ?? node.name} folder open={isExpanded} />
+        <span className="detail-node-label">{node.name}</span>
+        <b className="detail-directory-count">{node.fileCount}</b>
+      </button>
+      {isExpanded && node.children.map((child) => (
+        <DetailTreeNodeView
+          key={child.path}
+          node={child}
+          depth={depth + 1}
+          openDiff={openDiff}
+          selectedFile={selectedFile}
+          allExpanded={allExpanded}
+          clearAllExpanded={clearAllExpanded}
+        />
+      ))}
+    </div>
+  );
 }
 
-function DetailRepoGroup({ files, repoName, repoColor, openDiff, allExpanded, clearAllExpanded }: { files: DetailFileTarget[]; repoName: string; repoColor?: string; openDiff: AppStore['openDiff']; allExpanded: boolean | null; clearAllExpanded: () => void }) {
+function DetailFlatFileRow({
+  file,
+  repoName,
+  showRepo,
+  selectedFile,
+  openDiff,
+}: {
+  file: DetailFileTarget;
+  repoName?: string;
+  showRepo?: boolean;
+  selectedFile?: AppStore['selectedFile'];
+  openDiff: AppStore['openDiff'];
+}) {
+  const { t } = useI18n();
+  const fileName = file.path.split('/').pop() ?? file.path;
+  const dir = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+  const isSelected = isFileSelected(file, selectedFile);
+  return (
+    <button
+      type="button"
+      key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
+      className={`detail-file-row detail-list-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''}`}
+      title={`${file.path}\n${t('Click to open diff')}`}
+      onClick={() => openTarget(file, openDiff)}
+    >
+      <FileIcon name={fileName} />
+      <span className="detail-file-name">{fileName}</span>
+      {dir && <span className="detail-dir-path">{dir}</span>}
+      {showRepo && repoName && <small className="detail-repo-pill">{repoName}</small>}
+      {(file.added !== null || file.removed !== null) && (
+        <span className="detail-line-stats">
+          {file.added !== null && <b className="added">+{file.added}</b>}
+          {file.removed !== null && <b className="removed">-{file.removed}</b>}
+        </span>
+      )}
+      <em>{file.status.replace(/\d+$/, '').slice(0, 1).toUpperCase()}</em>
+    </button>
+  );
+}
+
+function DetailRepoGroup({
+  files,
+  repoName,
+  repoColor,
+  openDiff,
+  selectedFile,
+  allExpanded,
+  clearAllExpanded,
+}: {
+  files: DetailFileTarget[];
+  repoName: string;
+  repoColor?: string;
+  openDiff: AppStore['openDiff'];
+  selectedFile?: AppStore['selectedFile'];
+  allExpanded: boolean | null;
+  clearAllExpanded: () => void;
+}) {
   const [expanded, setExpanded] = useState(true);
   const isExpanded = allExpanded ?? expanded;
-  return <div className="detail-repo-group">
-      <button className="detail-root-label" title={repoName} onClick={() => { if (allExpanded !== null) clearAllExpanded(); setExpanded((value) => !value); }}>
-      <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repoColor ?? 'var(--versiondock-accent)' }} /><strong>{repoName}</strong><b>{files.length}</b>
-    </button>
-    {isExpanded && buildTree(files).map((node) => <DetailTreeNodeView key={node.path} node={collapseTree(node)} depth={1} openDiff={openDiff} allExpanded={allExpanded} clearAllExpanded={clearAllExpanded} />)}
-  </div>;
+  return (
+    <div className="detail-repo-group">
+      <button
+        type="button"
+        className="detail-root-label"
+        title={repoName}
+        onClick={() => {
+          if (allExpanded !== null) clearAllExpanded();
+          setExpanded((value) => !value);
+        }}
+      >
+        <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} />
+        <i style={{ background: repoColor ?? 'var(--versiondock-accent)' }} />
+        <strong>{repoName}</strong>
+        <b>{files.length}</b>
+      </button>
+      {isExpanded && buildTree(files).map((node) => (
+        <DetailTreeNodeView
+          key={node.path}
+          node={collapseTree(node)}
+          depth={1}
+          openDiff={openDiff}
+          selectedFile={selectedFile}
+          allExpanded={allExpanded}
+          clearAllExpanded={clearAllExpanded}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MergeParentChangeGroup({
+  change,
+  commitHash,
+  repoId,
+  viewMode,
+  allExpanded,
+  clearAllExpanded,
+  selectedFile,
+  openDiff,
+}: {
+  change: MergeParentChange;
+  commitHash: string;
+  repoId: string;
+  viewMode: 'tree' | 'list';
+  allExpanded: boolean | null;
+  clearAllExpanded: () => void;
+  selectedFile?: AppStore['selectedFile'];
+  openDiff: AppStore['openDiff'];
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const loadParentFiles = useAppStore((state) => state.loadMergeParentFiles);
+  const cacheKey = `${repoId}\0${commitHash}\0${change.hash}`;
+  const files = useAppStore((state) => state.mergeParentFiles[cacheKey]);
+  const loading = useAppStore((state) => Boolean(state.mergeParentFilesLoading[cacheKey]));
+
+  const parentTargets: DetailFileTarget[] = useMemo(() => {
+    if (!files) return [];
+    return files.map((file) => ({
+      repoId,
+      commitHash,
+      path: file.path,
+      status: file.status,
+      added: file.added,
+      removed: file.removed,
+      fromRevision: change.hash,
+      toRevision: commitHash,
+    }));
+  }, [files, repoId, commitHash, change.hash]);
+
+  const toggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !files && !loading) {
+      void loadParentFiles(repoId, commitHash, change.hash);
+    }
+  };
+
+  return (
+    <div className="merge-parent-group">
+      <button
+        type="button"
+        className="merge-parent-row"
+        data-selected={expanded}
+        title={`${change.hash}\n${change.message}`}
+        onClick={toggle}
+      >
+        <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} className="merge-chevron" />
+        <Codicon name="git-commit" className="merge-commit-icon" />
+        <span className="merge-parent-title">{t('Changes from {0}', change.shortHash)}</span>
+        {change.message && <span className="merge-parent-message" title={change.message}>{change.message}</span>}
+        <span className="merge-parent-count">
+          {change.fileCount === 1 ? t('{0} file', change.fileCount) : t('{0} files', change.fileCount)}
+        </span>
+      </button>
+      {expanded && (
+        <div className="merge-parent-files">
+          {loading && <div className="detail-loading">{t('Loading files...')}</div>}
+          {!loading && files && files.length === 0 && <div className="detail-loading">{t('No changed files')}</div>}
+          {!loading && files && files.length > 0 && (
+            viewMode === 'tree' ? (
+              buildTree(parentTargets).map((node) => (
+                <DetailTreeNodeView
+                  key={node.path}
+                  node={collapseTree(node)}
+                  depth={0}
+                  openDiff={openDiff}
+                  selectedFile={selectedFile}
+                  allExpanded={allExpanded}
+                  clearAllExpanded={clearAllExpanded}
+                />
+              ))
+            ) : (
+              parentTargets.map((file) => (
+                <DetailFlatFileRow
+                  key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
+                  file={file}
+                  selectedFile={selectedFile}
+                  openDiff={openDiff}
+                />
+              ))
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function RefBadges({ detail }: { detail: CommitDetail }) {
-  return <div className="detail-refs">{refsFor(detail).map((ref) => <em className={ref.kind} key={`${ref.kind}:${ref.value}`}><Codicon name={ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : ref.kind === 'head' ? 'arrow-right' : 'git-branch'} />{refLabel(ref.value)}</em>)}</div>;
+  return (
+    <div className="detail-refs">
+      {refsFor(detail).map((ref) => (
+        <em className={ref.kind} key={`${ref.kind}:${ref.value}`}>
+          <Codicon name={ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : ref.kind === 'head' ? 'arrow-right' : 'git-branch'} />
+          {refLabel(ref.value)}
+        </em>
+      ))}
+    </div>
+  );
 }
 
-function CommitMessage({ detail, expanded, toggle }: { detail: CommitDetail; expanded: boolean; toggle: () => void }) {
+function CommitMessage({
+  detail,
+  expanded,
+  toggle,
+}: {
+  detail: CommitDetail;
+  expanded: boolean;
+  toggle: () => void;
+}) {
   const { t } = useI18n();
   const messageLines = detail.fullMessage.replace(/\r\n/g, '\n').split('\n');
+  const subject = messageLines[0]?.trim() || detail.commit.message.trim();
   const body = messageLines[0]?.trim() === detail.commit.message.trim()
     ? messageLines.slice(1).join('\n').replace(/^\s*\n/, '').trimEnd()
     : detail.fullMessage.trim();
   const hasBody = body.length > 0;
-  return <div className="detail-message-card">
-    <div className="detail-message-title"><strong>{detail.commit.message}</strong>{hasBody && <button title={expanded ? t('Collapse') : t('Expand')} onClick={toggle}><Codicon name={expanded ? 'chevron-up' : 'chevron-down'} /></button>}</div>
-    {expanded && hasBody && <pre>{body}</pre>}
-  </div>;
+
+  return (
+    <div className="detail-message-card">
+      <div className="detail-message-title">
+        <strong className={expanded ? 'expanded' : ''} title={subject}>
+          {subject}
+        </strong>
+        {hasBody && (
+          <button
+            type="button"
+            title={expanded ? t('Click to collapse') : t('Click to expand')}
+            onClick={toggle}
+          >
+            <Codicon name={expanded ? 'chevron-up' : 'chevron-down'} />
+          </button>
+        )}
+      </div>
+      {expanded && hasBody && <pre>{body}</pre>}
+    </div>
+  );
 }
 
 function AuthorMeta({ commit }: { commit: CommitNode }) {
-  return <div className="detail-author-meta"><span className="avatar" style={{ background: avatarColor(commit.email || commit.author) }}>{initials(commit.author)}</span><span className="detail-author-line"><strong>{commit.author}</strong><i>·</i><time>{formatDate(commit.authorDate || commit.committerDate)}</time><i>·</i><code><Codicon name="git-commit" />{commit.shortHash}</code></span></div>;
-}
-
-function MergeSection({ commit, details, files, openDiff, loadDetail }: { commit: CommitNode; details: Record<string, CommitDetail>; files: Record<string, DetailFileTarget[]>; openDiff: AppStore['openDiff']; loadDetail: AppStore['loadCommitDetail'] }) {
-  const { t } = useI18n();
-  const mergeValues = useAppStore((state) => state.mergeCommits[commitKey(commit.repoId, commit.hash)] ?? []);
-  const loading = useAppStore((state) => state.mergeCommitsLoading[commitKey(commit.repoId, commit.hash)]);
-  const [expandedHash, setExpandedHash] = useState<string>();
-  if (commit.parents.length < 2) return null;
-  return <section className="detail-merge-section">
-    <header><Codicon name="git-merge" /><strong>{t('Merged commits')}</strong><b>{mergeValues.length}</b></header>
-    {loading && <div className="detail-loading">{t('Loading...')}</div>}
-    {!loading && !mergeValues.length && <div className="detail-loading">{t('No commits found')}</div>}
-    {!loading && mergeValues.map((merge) => {
-      const expanded = expandedHash === merge.hash;
-      const key = commitKey(commit.repoId, merge.hash);
-      const detail = details[key];
-      const nestedCommit: CommitNode = detail?.commit ?? { repoId: commit.repoId, hash: merge.hash, shortHash: merge.shortHash, parents: [], author: merge.author, email: '', authorDate: merge.authorDate, committerDate: merge.authorDate, message: merge.message, refs: [] };
-      const nestedFiles = files[key] ?? [];
-      return <div key={merge.hash}>
-        <button className={`merge-commit-row ${expanded ? 'expanded' : ''}`} onClick={() => { setExpandedHash(expanded ? undefined : merge.hash); if (!detail) void loadDetail(nestedCommit); }}>
-          <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><span className="merge-commit-hash"><Codicon name="git-commit" className="merge-commit-icon" /><code>{merge.shortHash}</code></span><span className="merge-commit-message">{merge.message}</span><small>{merge.author}</small>
-        </button>
-        {expanded && detail && <div className="merge-file-list">{nestedFiles.length ? nestedFiles.map((file) => <button key={file.path} className={`detail-file-row status-${statusClass(file.status)}`} title={file.path} onClick={() => openTarget(file, openDiff)}><FileIcon name={file.path.split('/').pop() ?? file.path} /><span className="detail-file-name">{file.path.split('/').pop() ?? file.path}</span>{file.added !== null && <b className="added">+{file.added}</b>}{file.removed !== null && <b className="removed">-{file.removed}</b>}<em>{file.status.slice(0, 1).toUpperCase()}</em></button>) : <div className="detail-loading">{t('No changed files')}</div>}</div>}
-      </div>;
-    })}
-  </section>;
+  return (
+    <div className="detail-author-meta">
+      <span className="avatar" style={{ background: avatarColor(commit.email || commit.author) }}>
+        {initials(commit.author)}
+      </span>
+      <span className="detail-author-line">
+        <strong>{commit.author}</strong>
+        <i>·</i>
+        <time>{formatDate(commit.authorDate || commit.committerDate)}</time>
+        <i>·</i>
+        <code><Codicon name="git-commit" />{commit.shortHash}</code>
+      </span>
+    </div>
+  );
 }
 
 export function CommitDetailPanel({ onCollapse }: { onCollapse: () => void }) {
   const detail = useAppStore((state) => state.selectedCommit);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
+  const selectedFile = useAppStore((state) => state.selectedFile);
   const loading = useAppStore((state) => Object.values(state.selectedCommitLoading).some(Boolean));
   const repositories = useAppStore((state) => state.snapshot?.repositories ?? []);
   const openDiff = useAppStore((state) => state.openDiff);
   const openChanges = useAppStore((state) => state.openCommitChanges);
-  const loadMerge = useAppStore((state) => state.loadMergeCommits);
-  const loadDetail = useAppStore((state) => state.loadCommitDetail);
   const { t } = useI18n();
   const [fileMode, setFileMode] = useState<'tree' | 'list'>('tree');
   const [allTreeExpanded, setAllTreeExpanded] = useState<boolean | null>(null);
@@ -191,15 +461,6 @@ export function CommitDetailPanel({ onCollapse }: { onCollapse: () => void }) {
     for (const target of targets) groups.set(target.repoId, [...(groups.get(target.repoId) ?? []), target]);
     return groups;
   }, [targets]);
-  const mergeFiles = useMemo(() => {
-    const values: Record<string, DetailFileTarget[]> = {};
-    for (const [key, value] of Object.entries(selectedDetails)) values[key] = buildCommitFileTargets([value.commit], selectedDetails, repositories);
-    return values;
-  }, [repositories, selectedDetails]);
-
-  useEffect(() => {
-    if (detail && detail.commit.parents.length >= 2) void loadMerge(detail.commit);
-  }, [detail, loadMerge]);
 
   const resizeInfo = (event: React.PointerEvent) => {
     event.preventDefault();
@@ -212,29 +473,165 @@ export function CommitDetailPanel({ onCollapse }: { onCollapse: () => void }) {
     window.addEventListener('pointerup', up);
   };
 
-  if (!selectedCommits.length || (!detail && !loading)) return <aside className="commit-detail empty-detail"><Codicon name="git-commit" /><span>{t('Select a commit')}</span></aside>;
+  if (!selectedCommits.length || (!detail && !loading)) {
+    return (
+      <aside className="commit-detail empty-detail">
+        <Codicon name="git-commit" />
+        <span>{t('Select a commit')}</span>
+      </aside>
+    );
+  }
 
   const repoIds = [...targetsByRepo.keys()];
   const selectedPrimary = detail?.commit;
   const singleKey = selectedPrimary ? commitKey(selectedPrimary.repoId, selectedPrimary.hash) : '';
-  const key = singleKey;
+  const isMultiSelection = selectedCommits.length > 1;
+  const isMergeCommit = !isMultiSelection && Boolean(detail && detail.commit.parents.length >= 2);
+  const mergeParentChanges = (isMergeCommit && detail?.mergeParentChanges) ? detail.mergeParentChanges : [];
+
   const allMessagesExpanded = selectedCommits.length > 0 && selectedCommits.every((commit) => expandedMessages.has(commitKey(commit.repoId, commit.hash)));
   const toggleAllMessages = () => setExpandedMessages(allMessagesExpanded ? new Set() : new Set(selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
   const groupedTargets = repoIds.length > 1 ? [...targetsByRepo.entries()] : [[repoIds[0] ?? selectedPrimary?.repoId ?? '', targets]] as Array<[string, DetailFileTarget[]]>;
   const openPreview = () => { const target = targets[0]; if (target) openTarget(target, openDiff); };
 
-  return <aside className="commit-detail">
-    <section className="detail-file-section">
-      <div className="detail-files-title"><strong>{targets.length} {t('files')}</strong><span className="detail-files-spacer" />{fileMode === 'tree' && <><button title={t('Expand all')} onClick={() => setAllTreeExpanded(true)}><Codicon name="expand-all" /></button><button title={t('Collapse all')} onClick={() => setAllTreeExpanded(false)}><Codicon name="collapse-all" /></button><i className="detail-view-divider" /></>}<button className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); }}><Codicon name="list-tree" /></button><button className={fileMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); }}><Codicon name="list-flat" /></button></div>
-      <div className="detail-files">
-        {loading && !targets.length && <div className="detail-loading">{t('Loading files...')}</div>}
-        {fileMode === 'tree' ? groupedTargets.map(([repoId, files]) => <DetailRepoGroup key={repoId} files={files} repoName={repoMap.get(repoId)?.meta.name ?? repoId} repoColor={repoMap.get(repoId)?.meta.color} openDiff={openDiff} allExpanded={allTreeExpanded} clearAllExpanded={() => setAllTreeExpanded(null)} />) : targets.map((file) => <button key={`${file.repoId}:${file.path}`} className={`detail-file-row detail-list-row status-${statusClass(file.status)}`} onClick={() => openTarget(file, openDiff)}><FileIcon name={file.path.split('/').pop() ?? file.path} /><span className="detail-file-name">{file.path}</span>{selectedCommits.length > 1 && <small className="detail-repo-pill">{repoMap.get(file.repoId)?.meta.name ?? file.repoId}</small>}{file.added !== null && <b className="added">+{file.added}</b>}{file.removed !== null && <b className="removed">-{file.removed}</b>}<em>{file.status.slice(0, 1).toUpperCase()}</em></button>)}
-      </div>
-    </section>
-    <div className="detail-info-resize" role="separator" aria-label={t('Resize commit detail')} onPointerDown={resizeInfo}><i /></div>
-    <section className="detail-summary" style={infoHeight ? { height: infoHeight } : undefined}>
-      <header className="detail-toolbar"><span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}><Codicon name={selectedCommits.length > 1 ? 'git-commit' : 'repo'} />{selectedCommits.length > 1 ? t('Aggregated commit selection') : repoMap.get(selectedPrimary?.repoId ?? '')?.meta.name}</span><div className="detail-actions"><button disabled={!targets.length} title={t('Open preview')} onClick={openPreview}><Codicon name="open-preview" /></button><button title={t('Open Changes')} onClick={openChanges}><Codicon name="diff-multiple" /></button><button title={allMessagesExpanded ? t('Collapse commit messages by default') : t('Expand commit messages by default')} onClick={toggleAllMessages}><Codicon name={allMessagesExpanded ? 'collapse-all' : 'expand-all'} /></button><button title={t('Close commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></button></div></header>
-      {selectedCommits.length > 1 ? <div className="detail-aggregate"><div className="detail-aggregate-meta"><div className="detail-aggregate-meta-row"><span>{t('{0} commits selected', selectedCommits.length)}</span><span>{t('repositories involved', new Set(selectedCommits.map((commit) => commit.repoId)).size)}</span></div><div className="detail-aggregate-meta-row"><span>{t('Selected time range')}</span><span>{formatDate(selectedCommits[selectedCommits.length - 1]?.authorDate ?? '')} - {formatDate(selectedCommits[0]?.authorDate ?? '')}</span></div></div>{selectedCommits.map((commit) => { const value = selectedDetails[commitKey(commit.repoId, commit.hash)]; const key = commitKey(commit.repoId, commit.hash); const repo = repoMap.get(commit.repoId); return <article className="aggregate-item" key={key}><div className="aggregate-repo"><Codicon name="repo" /><span style={{ color: repo?.meta.color }}>{repo?.meta.name ?? commit.repoId}</span></div>{value ? <><CommitMessage detail={value} expanded={expandedMessages.has(key)} toggle={() => setExpandedMessages((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })} /><AuthorMeta commit={commit} /><RefBadges detail={value} /></> : <div className="detail-loading">{t('Loading files...')}</div>}</article>; })}</div> : detail && <div className="detail-single"><CommitMessage detail={detail} expanded={expandedMessages.has(singleKey)} toggle={() => setExpandedMessages((current) => { const next = new Set(current); if (next.has(singleKey)) next.delete(key); else next.add(key); return next; })} /><AuthorMeta commit={detail.commit} /><RefBadges detail={detail} /><MergeSection commit={detail.commit} details={selectedDetails} files={mergeFiles} openDiff={openDiff} loadDetail={loadDetail} /></div>}
-    </section>
-  </aside>;
+  return (
+    <aside className="commit-detail">
+      <section className="detail-file-section">
+        <div className="detail-files-title">
+          <strong>{targets.length} {t('files')}</strong>
+          <span className="detail-files-spacer" />
+          {fileMode === 'tree' && (
+            <>
+              <button type="button" title={t('Expand all')} onClick={() => setAllTreeExpanded(true)}><Codicon name="expand-all" /></button>
+              <button type="button" title={t('Collapse all')} onClick={() => setAllTreeExpanded(false)}><Codicon name="collapse-all" /></button>
+              <i className="detail-view-divider" />
+            </>
+          )}
+          <button type="button" className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); }}><Codicon name="list-tree" /></button>
+          <button type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); }}><Codicon name="list-flat" /></button>
+        </div>
+        <div className="detail-files">
+          {loading && !targets.length && <div className="detail-loading">{t('Loading files...')}</div>}
+          {!loading && isMergeCommit && targets.length === 0 && (
+            <div className="no-merge-conflicts">{t('No merge conflicts')}</div>
+          )}
+          {!loading && !isMergeCommit && targets.length === 0 && (
+            <div className="detail-loading">{t('No changed files')}</div>
+          )}
+          {!loading && targets.length > 0 && (
+            fileMode === 'tree' ? (
+              groupedTargets.map(([repoId, files]) => (
+                <DetailRepoGroup
+                  key={repoId}
+                  files={files}
+                  repoName={repoMap.get(repoId)?.meta.name ?? repoId}
+                  repoColor={repoMap.get(repoId)?.meta.color}
+                  openDiff={openDiff}
+                  selectedFile={selectedFile}
+                  allExpanded={allTreeExpanded}
+                  clearAllExpanded={() => setAllTreeExpanded(null)}
+                />
+              ))
+            ) : (
+              targets.map((file) => (
+                <DetailFlatFileRow
+                  key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
+                  file={file}
+                  repoName={repoMap.get(file.repoId)?.meta.name ?? file.repoId}
+                  showRepo={selectedCommits.length > 1}
+                  selectedFile={selectedFile}
+                  openDiff={openDiff}
+                />
+              ))
+            )
+          )}
+          {!loading && isMergeCommit && mergeParentChanges.map((parentChange) => (
+            <MergeParentChangeGroup
+              key={`${detail!.commit.repoId}:${detail!.commit.hash}:${parentChange.hash}`}
+              change={parentChange}
+              commitHash={detail!.commit.hash}
+              repoId={detail!.commit.repoId}
+              viewMode={fileMode}
+              allExpanded={allTreeExpanded}
+              clearAllExpanded={() => setAllTreeExpanded(null)}
+              selectedFile={selectedFile}
+              openDiff={openDiff}
+            />
+          ))}
+        </div>
+      </section>
+      <div className="detail-info-resize" role="separator" aria-label={t('Resize commit detail')} onPointerDown={resizeInfo}><i /></div>
+      <section className="detail-summary" style={infoHeight ? { height: infoHeight } : undefined}>
+        <header className="detail-toolbar">
+          <span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}>
+            <Codicon name={selectedCommits.length > 1 ? 'git-commit' : 'repo'} />
+            {selectedCommits.length > 1 ? t('Aggregated commit selection') : repoMap.get(selectedPrimary?.repoId ?? '')?.meta.name}
+          </span>
+          <div className="detail-actions">
+            <button type="button" disabled={!targets.length} title={t('Open preview')} onClick={openPreview}><Codicon name="open-preview" /></button>
+            <button type="button" title={t('Open Changes')} onClick={openChanges}><Codicon name="diff-multiple" /></button>
+            <button type="button" title={allMessagesExpanded ? t('Collapse commit messages by default') : t('Expand commit messages by default')} onClick={toggleAllMessages}><Codicon name={allMessagesExpanded ? 'collapse-all' : 'expand-all'} /></button>
+            <button type="button" title={t('Close commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></button>
+          </div>
+        </header>
+        {selectedCommits.length > 1 ? (
+          <div className="detail-aggregate">
+            <div className="detail-aggregate-meta">
+              <div className="detail-aggregate-meta-row">
+                <span>{t('{0} commits selected', selectedCommits.length)}</span>
+                <span>{t('{0} repositories involved', new Set(selectedCommits.map((commit) => commit.repoId)).size)}</span>
+              </div>
+              <div className="detail-aggregate-meta-row">
+                <span>{t('Selected time range')}</span>
+                <span>{formatDate(selectedCommits[selectedCommits.length - 1]?.authorDate ?? '')} - {formatDate(selectedCommits[0]?.authorDate ?? '')}</span>
+              </div>
+            </div>
+            {selectedCommits.map((commit) => {
+              const value = selectedDetails[commitKey(commit.repoId, commit.hash)];
+              const key = commitKey(commit.repoId, commit.hash);
+              const repo = repoMap.get(commit.repoId);
+              return (
+                <article className="aggregate-item" key={key}>
+                  <div className="aggregate-repo"><Codicon name="repo" /><span style={{ color: repo?.meta.color }}>{repo?.meta.name ?? commit.repoId}</span></div>
+                  {value ? (
+                    <>
+                      <CommitMessage
+                        detail={value}
+                        expanded={expandedMessages.has(key)}
+                        toggle={() => setExpandedMessages((current) => {
+                          const next = new Set(current);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        })}
+                      />
+                      <AuthorMeta commit={commit} />
+                      <RefBadges detail={value} />
+                    </>
+                  ) : (
+                    <div className="detail-loading">{t('Loading files...')}</div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : detail && (
+          <div className="detail-single">
+            <CommitMessage
+              detail={detail}
+              expanded={expandedMessages.has(singleKey)}
+              toggle={() => setExpandedMessages((current) => {
+                const next = new Set(current);
+                if (next.has(singleKey)) next.delete(singleKey);
+                else next.add(singleKey);
+                return next;
+              })}
+            />
+            <AuthorMeta commit={detail.commit} />
+            <RefBadges detail={detail} />
+          </div>
+        )}
+      </section>
+    </aside>
+  );
 }

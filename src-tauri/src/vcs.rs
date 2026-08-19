@@ -11,9 +11,9 @@ use crate::{
     models::{
         BranchCompareResult, BranchInfo, BranchOperation, CommitBranches, CommitDetail, CommitFile,
         CommitNode, ConflictChoice, DesktopError, DiffDocument, HistoryPage, MergeCommitSummary,
-        MergeVersions, RemoteInfo, RemoteOperation, RepositoryMeta, StashEntry, StashOperation,
-        SubtreeEntry, SubtreeOperation, SubtreeState, SyncAction, TagInfo, TagOperation,
-        UnpushedCommit, VcsKind, WorktreeEntry, WorktreeOperation,
+        MergeParentChange, MergeVersions, RemoteInfo, RemoteOperation, RepositoryMeta, StashEntry,
+        StashOperation, SubtreeEntry, SubtreeOperation, SubtreeState, SyncAction, TagInfo,
+        TagOperation, UnpushedCommit, VcsKind, WorktreeEntry, WorktreeOperation,
     },
     state::safe_relative,
 };
@@ -929,46 +929,79 @@ pub async fn commit_detail(
                 .ok_or_else(|| {
                     DesktopError::new("COMMIT_PARSE_FAILED", "Unable to parse commit", true)
                 })?;
-            let stats_args = if let Some(parent) = commit.parents.first() {
-                vec![
-                    "diff".into(),
-                    "--numstat".into(),
-                    parent.clone(),
-                    revision.into(),
-                ]
+            let is_merge = commit.parents.len() >= 2;
+            let (files, merge_parent_changes) = if is_merge {
+                let (combined_status, parent_changes) = tokio::try_join!(
+                    async {
+                        Ok::<String, DesktopError>(
+                            git(
+                                vec![
+                                    "diff-tree".into(),
+                                    "--no-commit-id".into(),
+                                    "-r".into(),
+                                    "--cc".into(),
+                                    "-M".into(),
+                                    "--name-status".into(),
+                                    revision.into(),
+                                ],
+                                repo,
+                                token,
+                            )
+                            .await?
+                            .stdout_text(),
+                        )
+                    },
+                    async { merge_parent_changes(repo, revision, &commit.parents, token).await },
+                )?;
+                (parse_combined_diff_files(&combined_status), parent_changes)
             } else {
-                vec![
-                    "show".into(),
-                    "--numstat".into(),
-                    "--format=".into(),
-                    revision.into(),
-                ]
+                let stats_args = if let Some(parent) = commit.parents.first() {
+                    vec![
+                        "diff".into(),
+                        "--numstat".into(),
+                        parent.clone(),
+                        revision.into(),
+                    ]
+                } else {
+                    vec![
+                        "show".into(),
+                        "--numstat".into(),
+                        "--format=".into(),
+                        revision.into(),
+                    ]
+                };
+                let status_args = if let Some(parent) = commit.parents.first() {
+                    vec![
+                        "diff".into(),
+                        "--name-status".into(),
+                        parent.clone(),
+                        revision.into(),
+                    ]
+                } else {
+                    vec![
+                        "show".into(),
+                        "--name-status".into(),
+                        "--format=".into(),
+                        revision.into(),
+                    ]
+                };
+                let (stats, statuses) = tokio::try_join!(
+                    async {
+                        Ok::<_, DesktopError>(git(stats_args, repo, token).await?.stdout_text())
+                    },
+                    async {
+                        Ok::<_, DesktopError>(git(status_args, repo, token).await?.stdout_text())
+                    },
+                )?;
+                (merge_git_files(&stats, &statuses), Vec::new())
             };
-            let status_args = if let Some(parent) = commit.parents.first() {
-                vec![
-                    "diff".into(),
-                    "--name-status".into(),
-                    parent.clone(),
-                    revision.into(),
-                ]
-            } else {
-                vec![
-                    "show".into(),
-                    "--name-status".into(),
-                    "--format=".into(),
-                    revision.into(),
-                ]
-            };
-            let (stats, statuses) = tokio::try_join!(
-                async { Ok::<_, DesktopError>(git(stats_args, repo, token).await?.stdout_text()) },
-                async { Ok::<_, DesktopError>(git(status_args, repo, token).await?.stdout_text()) },
-            )?;
             let branches = containing_branches(repo, &commit.hash, token).await?;
             Ok(CommitDetail {
                 commit,
                 full_message: full_message.trim().into(),
-                files: merge_git_files(&stats, &statuses),
+                files,
                 branches,
+                merge_parent_changes,
             })
         }
         VcsKind::Svn => {
@@ -1041,9 +1074,170 @@ pub async fn commit_detail(
                 full_message,
                 files,
                 branches: CommitBranches::default(),
+                merge_parent_changes: Vec::new(),
             })
         }
     }
+}
+
+fn normalize_combined_diff_status(code: &str) -> String {
+    let normalized = code.trim_end_matches(|c: char| c.is_ascii_digit());
+    if normalized.len() <= 1 {
+        return if normalized.is_empty() {
+            "M".into()
+        } else {
+            normalized.into()
+        };
+    }
+    if normalized.contains('R') {
+        return "R".into();
+    }
+    if normalized.contains('C') {
+        return "C".into();
+    }
+    if normalized.contains('D') {
+        return "D".into();
+    }
+    if normalized.contains('A') {
+        return "A".into();
+    }
+    "M".into()
+}
+
+fn parse_combined_diff_files(statuses: &str) -> Vec<CommitFile> {
+    statuses
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').filter(|s| !s.is_empty()).collect();
+            if fields.len() < 2 {
+                return None;
+            }
+            let raw_status = fields[0];
+            let path = fields[fields.len() - 1];
+            Some(CommitFile {
+                path: path.into(),
+                status: normalize_combined_diff_status(raw_status),
+                added: None,
+                removed: None,
+            })
+        })
+        .collect()
+}
+
+pub async fn merge_parent_changes(
+    repo: &RepositoryMeta,
+    revision: &str,
+    parents: &[String],
+    token: &CancellationToken,
+) -> Result<Vec<MergeParentChange>, DesktopError> {
+    if !matches!(repo.kind, VcsKind::Git) || parents.len() < 2 {
+        return Ok(Vec::new());
+    }
+    validate_revision(revision)?;
+    for parent in parents {
+        validate_revision(parent)?;
+    }
+
+    let mut changes = Vec::new();
+    for (index, parent) in parents.iter().enumerate() {
+        let (metadata, changed_paths) = tokio::try_join!(
+            async {
+                Ok::<String, DesktopError>(
+                    git(
+                        vec![
+                            "show".into(),
+                            "-s".into(),
+                            "--format=%h%x00%an%x00%aI%x00%s".into(),
+                            parent.clone(),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?
+                    .stdout_text(),
+                )
+            },
+            async {
+                Ok::<String, DesktopError>(
+                    git(
+                        vec![
+                            "diff".into(),
+                            "--name-only".into(),
+                            "-M".into(),
+                            parent.clone(),
+                            revision.into(),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?
+                    .stdout_text(),
+                )
+            }
+        )?;
+
+        let meta_parts: Vec<&str> = metadata.trim_end().split('\0').collect();
+        let short_hash = meta_parts
+            .first()
+            .copied()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&parent[..7.min(parent.len())])
+            .to_string();
+        let author_name = meta_parts.get(1).copied().unwrap_or("").to_string();
+        let author_date = meta_parts.get(2).copied().unwrap_or("").to_string();
+        let message = meta_parts
+            .get(3..)
+            .map(|p| p.join("\0"))
+            .unwrap_or_default();
+        let file_count = changed_paths
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count() as u32;
+
+        if file_count > 0 {
+            changes.push(MergeParentChange {
+                hash: parent.clone(),
+                short_hash,
+                message,
+                author_name,
+                author_date,
+                parent_index: index as u32,
+                file_count,
+            });
+        }
+    }
+    Ok(changes)
+}
+
+pub async fn merge_parent_files(
+    repo: &RepositoryMeta,
+    revision: &str,
+    parent_hash: &str,
+    token: &CancellationToken,
+) -> Result<Vec<CommitFile>, DesktopError> {
+    if !matches!(repo.kind, VcsKind::Git) {
+        return Ok(Vec::new());
+    }
+    validate_revision(revision)?;
+    validate_revision(parent_hash)?;
+
+    let stats_args = vec![
+        "diff".into(),
+        "--numstat".into(),
+        parent_hash.into(),
+        revision.into(),
+    ];
+    let status_args = vec![
+        "diff".into(),
+        "--name-status".into(),
+        parent_hash.into(),
+        revision.into(),
+    ];
+    let (stats, statuses) = tokio::try_join!(
+        async { Ok::<_, DesktopError>(git(stats_args, repo, token).await?.stdout_text()) },
+        async { Ok::<_, DesktopError>(git(status_args, repo, token).await?.stdout_text()) },
+    )?;
+    Ok(merge_git_files(&stats, &statuses))
 }
 
 pub async fn merge_commits(
