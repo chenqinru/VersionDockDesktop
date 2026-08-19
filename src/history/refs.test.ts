@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyRef, commitRefs, isPrimaryBranch, primaryBranchRef } from './refs';
+import { classifyRef, commitRefs, groupRefs, isPrimaryBranch, mergeLocalRemote, primaryBranchRef } from './refs';
 
 describe('history refs', () => {
   it('classifies local, remote, tag and HEAD refs', () => {
@@ -19,4 +19,20 @@ describe('history refs', () => {
     expect(isPrimaryBranch('prod/task-center')).toBe(true);
     expect(isPrimaryBranch('feature/main')).toBe(false);
   });
+
+  it('groups and merges matching local and remote refs into unified badges', () => {
+    const rawRefs = ['HEAD -> main', 'main', 'origin/main', 'tag: v1.0.0'];
+    const groups = groupRefs(rawRefs, 'git', ['origin']);
+    const merged = mergeLocalRemote(groups);
+
+    const mainMerged = merged.find((g) => g.label === 'main');
+    expect(mainMerged).toBeDefined();
+    expect(mainMerged?.isLocal).toBe(true);
+    expect(mainMerged?.isRemote).toBe(true);
+    expect(mainMerged?.remoteName).toBe('origin');
+
+    const tagGroup = merged.find((g) => g.isTag);
+    expect(tagGroup?.label).toBe('v1.0.0');
+  });
 });
+

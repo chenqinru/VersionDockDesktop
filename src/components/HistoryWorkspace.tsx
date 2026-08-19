@@ -9,8 +9,8 @@ import { CommitGraph } from './CommitGraph';
 import { CommitDetailPanel } from './CommitDetailPanel';
 import { COMMIT_ROW_HEIGHT, layoutCommits, type GraphCommit } from './commitGraphLayout';
 import { commitKey } from '../history/commitDetails';
-import { commitRefs, refIcon, type CommitRef } from '../history/refs';
-import { branchColor } from './branchColor';
+import { commitRefs, groupRefs, mergeLocalRemote, type CommitRef, type RefGroup } from '../history/refs';
+import { branchColor, headColor, isPrimaryBranch, primaryBranchColor, tagColor } from './branchColor';
 import type { CommitDetail, CommitNode } from '../bindings/generated';
 
 type FilterMenu = 'authors' | 'repos' | 'refs' | 'dates' | null;
@@ -170,12 +170,81 @@ function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { ope
   </div>}</div>;
 }
 
-function RefBadges({ refs, compact = false, selected = false }: { refs: CommitRef[]; compact?: boolean; selected?: boolean }) {
-  const shown = compact ? refs.slice(0, 2) : refs;
-  return <span className="commit-refs">{shown.map((ref) => {
-    const color = branchColor(ref.label, ref.isHead, ref.kind === 'tag');
-    return <em key={`${ref.kind}:${ref.value}`} className={`${ref.kind} ${selected ? 'selected' : ''}`} style={{ '--ref-color': color } as React.CSSProperties} title={ref.value}><Codicon name={refIcon(ref.kind)} />{ref.label}</em>;
-  })}{compact && refs.length > shown.length && <em className={`ref-overflow ${selected ? 'selected' : ''}`}>+{refs.length - shown.length}</em>}</span>;
+function RefBadgeIcon({ group }: { group: RefGroup }) {
+  if (group.isSvnRevision) return <Codicon name="versions" />;
+  if (group.isTag) return <Codicon name="tag" />;
+  if (group.isRemote) return <Codicon name="cloud" />;
+  if (group.isHead || group.isDetached) return <Codicon name="arrow-right" />;
+  return <Codicon name="git-branch" />;
+}
+
+function badgeColor(group: RefGroup): string {
+  if (group.isTag || group.isSvnRevision) return tagColor();
+  if (group.isHead || group.isDetached) return headColor();
+  if (isPrimaryBranch(group.label)) return primaryBranchColor();
+  return branchColor(group.label);
+}
+
+function RefBadges({
+  refs,
+  repoKind = 'git',
+  remoteNames = [],
+  isSelected = false,
+}: {
+  refs: string[];
+  repoKind?: 'git' | 'svn';
+  remoteNames?: readonly string[];
+  isSelected?: boolean;
+}) {
+  const allGroups = useMemo(
+    () => mergeLocalRemote(groupRefs(refs, repoKind, remoteNames)),
+    [refs, repoKind, remoteNames],
+  );
+  if (allGroups.length === 0) return null;
+
+  const headGroup = allGroups.find((g) => g.isHead && !g.isDetached && !g.isSvnRevision);
+  const remoteHeadGroups = allGroups.filter((g) => g.isRemoteHead);
+  const remoteHeadGroup = remoteHeadGroups.length === 1 ? remoteHeadGroups[0] : undefined;
+  const headAndRemoteHead = headGroup && remoteHeadGroup;
+  const otherGroups = allGroups.filter((g) => !(headAndRemoteHead && g.key === remoteHeadGroup.key));
+
+  const visible = otherGroups.slice(0, 2);
+  const overflow = otherGroups.slice(2);
+  const hc = headColor();
+
+  return (
+    <span className="commit-refs">
+      {visible.map((group) => {
+        const color = badgeColor(group);
+        return (
+          <em
+            key={group.key}
+            className={`${group.isTag ? 'tag' : group.isRemote ? 'remote' : group.isHead ? 'head' : group.isSvnRevision ? 'svn' : 'branch'} ${isSelected ? 'selected' : ''}`}
+            style={{ '--ref-color': color } as React.CSSProperties}
+            title={group.label}
+          >
+            <RefBadgeIcon group={group} />
+            <span className="ref-label">{group.remoteName && !group.isLocal ? `${group.remoteName}/${group.label}` : group.label}</span>
+          </em>
+        );
+      })}
+      {headGroup && (
+        <em
+          className={`head ${isSelected ? 'selected' : ''}`}
+          style={{ '--ref-color': hc } as React.CSSProperties}
+          title="HEAD"
+        >
+          {headAndRemoteHead ? <Codicon name="milestone" /> : <Codicon name="arrow-right" />}
+          <span className="ref-label">{headAndRemoteHead ? `${remoteHeadGroup!.remoteName}/HEAD & HEAD` : 'HEAD'}</span>
+        </em>
+      )}
+      {overflow.length > 0 && (
+        <em className={`ref-overflow ${isSelected ? 'selected' : ''}`} title={overflow.map((g) => g.label).join('\n')}>
+          +{overflow.length}
+        </em>
+      )}
+    </span>
+  );
 }
 
 type CommitWithIndicators = CommitNode & { incoming?: boolean; unpushed?: boolean };
@@ -204,12 +273,28 @@ function CommitPopover({ detail, anchor, onEnter, onLeave }: { detail: CommitDet
     <div className="popover-line"><Codicon name="git-commit" /><code>{detail.commit.shortHash}</code></div>
     <div className="popover-line"><span className="mini-avatar" style={{ background: avatarColor(detail.commit.email || detail.commit.author) }}>{initials(detail.commit.author)}</span><span>{detail.commit.author}</span><i>·</i><time>{formatDate(detail.commit.authorDate)}</time></div>
     <div className="popover-line"><Codicon name="diff" /><span>{detail.files.length} {detail.files.length === 1 ? t('file changed') : t('files changed')}</span>{added > 0 && <b className="added">+{added}</b>}{removed > 0 && <b className="removed">-{removed}</b>}</div>
-    <RefBadges refs={commitRefs(detail.commit)} />
+    <RefBadges refs={detail.commit.refs} />
     <small>{t('Click to view more details')}</small>
   </div>;
 }
 
-function CommitList({ history, expandedRepoIds, onToggleRepoName }: { history: CommitNode[]; expandedRepoIds: Set<string>; onToggleRepoName: (repoId: string) => void }) {
+function CommitList({
+  history,
+  expandedRepoIds,
+  onToggleRepoName,
+  repoKindById,
+  remoteNamesByRepo,
+  topologyCommits,
+  isFiltered,
+}: {
+  history: CommitNode[];
+  expandedRepoIds: Set<string>;
+  onToggleRepoName: (repoId: string) => void;
+  repoKindById: Record<string, 'git' | 'svn'>;
+  remoteNamesByRepo: Record<string, string[]>;
+  topologyCommits?: CommitNode[];
+  isFiltered?: boolean;
+}) {
   const { t } = useI18n();
   const parent = useRef<HTMLDivElement>(null);
   const repos = useAppStore((state) => state.snapshot?.repositories ?? []);
@@ -220,7 +305,10 @@ function CommitList({ history, expandedRepoIds, onToggleRepoName }: { history: C
   const openDiff = useAppStore((state) => state.openDiff);
   const openChanges = useAppStore((state) => state.openCommitChanges);
   const loadHistory = useAppStore((state) => state.loadHistory);
-  const commits = useMemo(() => layoutCommits(history), [history]);
+  const commits = useMemo(
+    () => layoutCommits(history, isFiltered, repoKindById, remoteNamesByRepo, topologyCommits),
+    [history, isFiltered, repoKindById, remoteNamesByRepo, topologyCommits],
+  );
   const repoMap = useMemo(() => new Map(repos.map((repo) => [repo.meta.id, repo])), [repos]);
   const repoBlocks = useMemo(() => {
     const blocks: Array<{ repoId: string; name: string; color: string; start: number; count: number }> = [];
@@ -232,18 +320,17 @@ function CommitList({ history, expandedRepoIds, onToggleRepoName }: { history: C
     }
     return blocks;
   }, [commits, repoMap]);
-  const gapAfter = useMemo(() => new Set(repoBlocks.filter((block) => block.start + block.count < commits.length).map((block) => block.start + block.count - 1)), [commits.length, repoBlocks]);
-  const rowStarts = useMemo(() => {
-    const starts: number[] = [];
-    let top = 0;
-    for (let index = 0; index < commits.length; index += 1) {
-      starts.push(top);
-      top += COMMIT_ROW_HEIGHT + (gapAfter.has(index) ? BLOCK_GAP : 0);
-    }
-    return starts;
-  }, [commits.length, gapAfter]);
+  const multiRepo = repos.length > 1;
+  const anyExpanded = expandedRepoIds.size > 0;
+  const labelColWidth = multiRepo ? (anyExpanded ? 110 : 8) : 0;
+
   // eslint-disable-next-line react-hooks/incompatible-library
-  const virtualizer = useVirtualizer({ count: commits.length, getScrollElement: () => parent.current, estimateSize: (index) => COMMIT_ROW_HEIGHT + (gapAfter.has(index) ? BLOCK_GAP : 0), overscan: 14 });
+  const virtualizer = useVirtualizer({
+    count: commits.length,
+    getScrollElement: () => parent.current,
+    estimateSize: () => COMMIT_ROW_HEIGHT,
+    overscan: 14,
+  });
   const [hoveredKey, setHoveredKey] = useState<string>();
   const [popover, setPopover] = useState<{ detail: CommitDetail; anchor: CommitPopoverAnchor }>();
   const hoveredKeyRef = useRef<string>();
@@ -282,24 +369,26 @@ function CommitList({ history, expandedRepoIds, onToggleRepoName }: { history: C
 
   return <div className="commit-list" ref={parent} onScroll={(event) => { const element = event.currentTarget; if (hasMore && element.scrollHeight - element.scrollTop - element.clientHeight < 300) void loadHistory(false); }}>
     <div className="commit-list-content" style={{ height: virtualizer.getTotalSize() }}>
-      {repoBlocks.map((block) => {
-        const endIndex = block.start + block.count - 1;
-        const start = rowStarts[block.start] ?? block.start * COMMIT_ROW_HEIGHT;
-        const end = (rowStarts[endIndex] ?? (start + (block.count - 1) * COMMIT_ROW_HEIGHT)) + COMMIT_ROW_HEIGHT;
+      {multiRepo && repoBlocks.map((block) => {
+        const blockTopPx = block.start * COMMIT_ROW_HEIGHT;
+        const blockHeightPx = block.count * COMMIT_ROW_HEIGHT;
+        const leadingGap = block.start > 0 ? BLOCK_GAP : 0;
+        const top = blockTopPx + leadingGap;
+        const height = Math.max(0, blockHeightPx - leadingGap);
         const expanded = expandedRepoIds.has(block.repoId);
-        return <button key={`${block.repoId}:${block.start}`} className={`repo-strip ${expanded ? 'expanded' : ''}`} style={{ top: start, height: end - start, '--repo-color': block.color } as React.CSSProperties} onClick={() => onToggleRepoName(block.repoId)} title={block.name}><span className="repo-strip-bar" />{expanded && <strong>{block.name}</strong>}</button>;
+        return <button key={`${block.repoId}:${block.start}`} className={`repo-strip ${expanded ? 'expanded' : ''}`} style={{ top, height, '--repo-color': block.color } as React.CSSProperties} onClick={() => onToggleRepoName(block.repoId)} title={block.name}><span className="repo-strip-bar" />{expanded && <strong>{block.name}</strong>}</button>;
       })}
       {virtualizer.getVirtualItems().map((item) => {
         const commit = commits[item.index] as GraphCommit & CommitWithIndicators;
         if (!commit) return null;
         const key = commitKey(commit.repoId, commit.hash);
         const isSelected = selected.has(key);
-        const refs = commitRefs(commit);
-        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''} ${expandedRepoIds.has(commit.repoId) ? 'project-expanded' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }} title={`${commit.hash}\n${commit.author}\n${formatDate(commit.authorDate)}`}>
-          <span className="repo-stripe" style={{ background: repoMap.get(commit.repoId)?.meta.color ?? 'var(--versiondock-muted)' }} title={repoMap.get(commit.repoId)?.meta.name} />
+        const isMergeCommit = commit.parents.length > 1;
+        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }} title={`${commit.hash}\n${commit.author}\n${formatDate(commit.authorDate)}`}>
+          {labelColWidth > 0 && <div style={{ width: labelColWidth, flexShrink: 0 }} />}
           <CommitGraph commit={commit} selected={isSelected} />
-          <RefBadges refs={refs} compact selected={isSelected} />
-          <span className="commit-subject-text">{commit.message}</span>
+          <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} />
+          <span className={`commit-subject-text ${isMergeCommit ? 'merge-commit' : ''}`}>{commit.message}</span>
           <span className="commit-author">
             {hoveredKey === key && <span className="commit-row-actions"><button title={t('Open preview')} onClick={(event) => { event.stopPropagation(); const file = useAppStore.getState().selectedCommitDetails[key]?.files[0]; if (file) void openDiff(commit.repoId, file.path, false, commit.hash); }}><Codicon name="open-preview" /></button><button title={t('Open Changes')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openChanges); }}><Codicon name="diff-multiple" /></button></span>}
             <span className={`commit-flow-indicators ${commit.incoming || commit.unpushed ? 'has-flow' : ''} ${commit.incoming && commit.unpushed ? 'has-both' : ''}`}>
@@ -346,6 +435,27 @@ export function HistoryWorkspace() {
   const [detailSidebarCollapsed, setDetailSidebarCollapsed] = useState(false);
   const resizeBranches = useResizable(branchWidth, 190, 420, (value) => setPanelSize('branches', value));
   const resizeDetail = useResizable(detailWidth, 300, 620, (value) => setPanelSize('detail', value), -1);
+
+  const remotes = useAppStore((state) => state.remotes);
+  const repoKindById = useMemo(() => {
+    const map: Record<string, 'git' | 'svn'> = {};
+    snapshotRepos.forEach((repo) => {
+      map[repo.meta.id] = (repo.meta.kind as 'git' | 'svn') ?? 'git';
+    });
+    return map;
+  }, [snapshotRepos]);
+  const remoteNamesByRepo = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    snapshotRepos.forEach((repo) => {
+      const list = remotes[repo.meta.id] ?? [];
+      map[repo.meta.id] = list.map((r) => r.name);
+    });
+    return map;
+  }, [snapshotRepos, remotes]);
+
+  const hasTopologyBreakingFilter = !!(historySearch.trim() || filters.author || filters.from || filters.to);
+  const hasBranchFilter = !!filters.ref;
+  const topologyCommits = !hasTopologyBreakingFilter && hasBranchFilter ? allHistory : undefined;
 
   const authorOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -411,7 +521,7 @@ export function HistoryWorkspace() {
     <div className="history-columns">
       <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} onRefFilter={(ref) => updateFilters({ ref })} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
       {!branchSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeBranches} />}
-      <div className="log-pane"><CommitList history={visibleHistory} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} /></div>
+      <div className="log-pane"><CommitList history={visibleHistory} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} /></div>
       {!detailSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeDetail} />}
       <div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <button className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></button> : <CommitDetailPanel onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
     </div>

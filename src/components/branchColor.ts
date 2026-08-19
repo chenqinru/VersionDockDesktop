@@ -1,16 +1,127 @@
-const DARK_PALETTE = [
-  '#6aaed0', '#cc6a9a', '#6ab86a', '#cc7070', '#8c70cc', '#cc7a50', '#4aaa9a', '#cc8060',
-  '#a0cc6a', '#6a8ecc', '#cc6ab0', '#7acc80', '#cc6060', '#6accc0', '#b870cc', '#6ab0d0',
-] as const;
+export const HEAD_COLOR_DARK = '#c9a84c';
+export const HEAD_COLOR_LIGHT = '#8a6914';
 
-const LIGHT_PALETTE = [
-  '#2e6898', '#962860', '#2a7828', '#963232', '#4a2e96', '#963818', '#1a7a6a', '#964018',
-  '#587818', '#2a4e98', '#962878', '#2a7840', '#982020', '#287878', '#6a2496', '#2a6890',
-] as const;
+export const TAG_COLOR_DARK = '#909090';
+export const TAG_COLOR_LIGHT = '#707070';
 
-const PRIMARY_BRANCH = /^(main|master|prod|develop|development|dev|trunk|release)(?:[/-].*)?$/i;
+export const PALETTE_DARK: readonly string[] = [
+  '#6aaed0', '#cc6a9a', '#6ab86a', '#cc7070',
+  '#8c70cc', '#cc7a50', '#4aaa9a', '#cc8060',
+  '#a0cc6a', '#6a8ecc', '#cc6ab0', '#7acc80',
+  '#cc6060', '#6accc0', '#b870cc', '#6ab0d0',
+];
 
-function normalizedBranchName(name: string): string {
+export const PALETTE_LIGHT: readonly string[] = [
+  '#2e6898', '#962860', '#2a7828', '#963232',
+  '#4a2e96', '#963818', '#1a7a6a', '#964018',
+  '#587818', '#2a4e98', '#962878', '#2a7840',
+  '#982020', '#287878', '#6a2496', '#2a6890',
+];
+
+const PRIMARY_BRANCH_PATTERN = /^(main|master|prod|production|develop|development|dev|trunk|release)(?:[/-].*)?$/i;
+
+export function isPrimaryBranch(name: string): boolean {
+  let branch = name;
+  if (branch.startsWith('refs/heads/')) {
+    branch = branch.slice('refs/heads/'.length);
+  } else if (branch.startsWith('refs/remotes/')) {
+    const remoteRef = branch.slice('refs/remotes/'.length);
+    const slash = remoteRef.indexOf('/');
+    branch = slash >= 0 ? remoteRef.slice(slash + 1) : remoteRef;
+  } else if (/^(origin|upstream|gitee|remotes)\//.test(branch)) {
+    branch = branch.slice(branch.indexOf('/') + 1);
+  }
+  return PRIMARY_BRANCH_PATTERN.test(branch.toLowerCase());
+}
+
+export function isDarkTheme(): boolean {
+  if (typeof document === 'undefined') return true;
+  return document.documentElement.dataset.theme !== 'light' && !document.body.classList.contains('vscode-light');
+}
+
+function parseColor(raw: string): [number, number, number] | null {
+  const s = raw.trim();
+  const hex = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(s);
+  if (hex) return [parseInt(hex[1], 16), parseInt(hex[2], 16), parseInt(hex[3], 16)];
+  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(s);
+  if (rgb) return [parseInt(rgb[1]), parseInt(rgb[2]), parseInt(rgb[3])];
+  return null;
+}
+
+function luminance(r: number, g: number, b: number): number {
+  const s = (c: number) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * s(r) + 0.7152 * s(g) + 0.0722 * s(b);
+}
+
+function toHex(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+export function darkenToThreshold(raw: string, threshold: number): string {
+  const rgb = parseColor(raw);
+  if (!rgb) return raw;
+  let [r, g, b] = rgb;
+  let lum = luminance(r, g, b);
+  while (lum > threshold) {
+    r = Math.round(r * 0.82);
+    g = Math.round(g * 0.82);
+    b = Math.round(b * 0.82);
+    lum = luminance(r, g, b);
+  }
+  return toHex(r, g, b);
+}
+
+export function lightenToThreshold(raw: string, threshold: number): string {
+  const rgb = parseColor(raw);
+  if (!rgb) return raw;
+  let [r, g, b] = rgb;
+  let lum = luminance(r, g, b);
+  while (lum < threshold) {
+    r = Math.min(255, Math.round(r * 1.15 + 8));
+    g = Math.min(255, Math.round(g * 1.15 + 8));
+    b = Math.min(255, Math.round(b * 1.15 + 8));
+    const next = luminance(r, g, b);
+    if (next === lum) break;
+    lum = next;
+  }
+  return toHex(r, g, b);
+}
+
+function readCssVar(...vars: string[]): string {
+  if (typeof document === 'undefined') return '';
+  for (const v of vars) {
+    const val = getComputedStyle(document.body).getPropertyValue(v).trim()
+      || getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+    if (val) return val;
+  }
+  return '';
+}
+
+export function primaryBranchColor(): string {
+  const raw = readCssVar('--versiondock-accent', '--vscode-button-background') || '#0078d4';
+  return isDarkTheme() ? lightenToThreshold(raw, 0.28) : darkenToThreshold(raw, 0.22);
+}
+
+export function readableAccentColor(raw: string): string {
+  return isDarkTheme() ? lightenToThreshold(raw, 0.18) : darkenToThreshold(raw, 0.3);
+}
+
+export function headColor(): string {
+  return isDarkTheme() ? HEAD_COLOR_DARK : HEAD_COLOR_LIGHT;
+}
+
+export function tagColor(): string {
+  return isDarkTheme() ? TAG_COLOR_DARK : TAG_COLOR_LIGHT;
+}
+
+export function currentPalette(): readonly string[] {
+  return isDarkTheme() ? PALETTE_DARK : PALETTE_LIGHT;
+}
+
+export function normalizeBranchName(name: string): string {
   if (name.startsWith('refs/heads/')) return name.slice('refs/heads/'.length);
   if (name.startsWith('refs/remotes/')) {
     const remoteRef = name.slice('refs/remotes/'.length);
@@ -21,36 +132,21 @@ function normalizedBranchName(name: string): string {
   return name;
 }
 
-export function primaryBranchColor(): string {
-  return 'var(--versiondock-accent)';
-}
-
-export function headColor(): string {
-  return 'var(--versiondock-warning)';
-}
-
-export function tagColor(): string {
-  return 'var(--versiondock-muted)';
+export function branchPaletteIndex(name: string): number {
+  const normalized = normalizeBranchName(name);
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i++) {
+    hash = (hash * 31 + normalized.charCodeAt(i)) >>> 0;
+  }
+  return hash % PALETTE_DARK.length;
 }
 
 export function branchColor(name: string, isHead = false, isTag = false): string {
-  const normalized = normalizedBranchName(name);
+  const normalized = normalizeBranchName(name);
   if (isTag) return tagColor();
-  if (PRIMARY_BRANCH.test(normalized)) return primaryBranchColor();
+  if (isPrimaryBranch(normalized)) return primaryBranchColor();
   if (isHead) return headColor();
-  let hash = 0;
-  for (const character of normalized) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  const palette = document.documentElement.dataset.theme === 'light' ? LIGHT_PALETTE : DARK_PALETTE;
-  return palette[hash % palette.length];
+  const palette = currentPalette();
+  return palette[branchPaletteIndex(normalized) % palette.length];
 }
 
-export function currentPalette(): readonly string[] {
-  return document.documentElement.dataset.theme === 'light' ? LIGHT_PALETTE : DARK_PALETTE;
-}
-
-export function branchPaletteIndex(name: string): number {
-  const normalized = normalizedBranchName(name);
-  let hash = 0;
-  for (const character of normalized) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return hash % DARK_PALETTE.length;
-}

@@ -701,6 +701,7 @@ async fn git_history(
     );
     let mut args = vec![
         "log".into(),
+        "--date-order".into(),
         "--all".into(),
         format!("--skip={skip}"),
         format!("--max-count={}", limit + 1),

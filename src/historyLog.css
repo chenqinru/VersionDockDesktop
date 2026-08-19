@@ -71,12 +71,9 @@
 .repo-strip-bar { width: 6px; height: 100%; flex: 0 0 6px; display: block; background: var(--repo-color); }
 .repo-strip strong { position: absolute; top: 0; left: 12px; right: 4px; height: 28px; overflow: hidden; color: var(--versiondock-text); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: .06em; line-height: 28px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .commit-row { position: absolute; left: 0; right: 0; z-index: 2; height: 28px; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 0; color: var(--versiondock-text); background: transparent; border: 0; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: left; }
-.commit-row.project-expanded { padding-left: 110px; }
-.commit-row.project-expanded > .repo-stripe { display: none; }
 .commit-row { cursor: pointer; }
 .commit-row:hover { background: var(--versiondock-hover); }
 .commit-row.selected { background: var(--versiondock-selected); }
-.repo-stripe { width: 6px; height: 100%; flex: 0 0 6px; }
 .commit-graph { flex: 0 0 auto; height: 28px; overflow: visible; }
 .commit-refs { min-width: 0; max-width: 42%; display: flex; align-items: center; gap: 3px; overflow: hidden; }
 .commit-refs em { min-width: 0; max-width: 150px; height: 17px; display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; overflow: hidden; padding: 0 5px; color: var(--ref-color, var(--versiondock-accent)); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 20%, transparent); border: 1px solid color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 55%, transparent); border-radius: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-style: normal; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
@@ -86,8 +83,10 @@
 .commit-refs em.svn { --ref-color: var(--versiondock-muted); }
 .commit-refs em.selected { color: var(--versiondock-bg); background: var(--ref-color, var(--versiondock-accent)); border-color: var(--ref-color, var(--versiondock-accent)); }
 .commit-refs em.ref-overflow { color: var(--versiondock-muted); background: transparent; border-color: var(--versiondock-border); }
-.commit-refs em.ref-overflow.selected { color: var(--versiondock-bg); background: var(--versiondock-accent); border-color: var(--versiondock-accent); }
+.commit-refs em.ref-overflow.selected { color: var(--versiondock-bg); background: var(--versiondock-accent); border-color: var(--versiondock-accent)); }
 .commit-subject-text { min-width: 60px; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-subject-text.merge-commit { color: var(--versiondock-muted); }
+.commit-row.selected .commit-subject-text.merge-commit { color: inherit; }
 .commit-author { width: 160px; min-width: 0; flex: 0 0 160px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; overflow: hidden; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: right; white-space: nowrap; }
 .commit-author-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mini-avatar { width: 18px; height: 18px; flex: 0 0 18px; display: grid; place-items: center; overflow: hidden; color: #fff; border-radius: 50%; font-size: calc(8px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; }
