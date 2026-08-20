@@ -194,7 +194,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = snapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : snapshot.repositories[0]?.meta.id;
       set(workspaceChanged
-      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
+      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot, selectedRepoId });
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     await get().loadConflicts();

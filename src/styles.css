@@ -42,6 +42,20 @@
   --vscode-gitDecoration-addedResourceForeground: var(--versiondock-success);
   --vscode-gitDecoration-modifiedResourceForeground: #e2c08d;
   --vscode-gitDecoration-deletedResourceForeground: var(--versiondock-danger);
+  --versiondock-badge-background: var(--versiondock-accent-bg);
+  --versiondock-badge-foreground: #ffffff;
+  --vscode-statusBarItem-remoteBackground: #16825d;
+  --vscode-statusBarItem-remoteForeground: #ffffff;
+  --vscode-inputValidation-warningBackground: color-mix(in srgb, var(--versiondock-warning) 20%, var(--versiondock-surface));
+  --vscode-inputValidation-warningForeground: var(--versiondock-warning);
+  --vscode-inputValidation-errorBackground: color-mix(in srgb, var(--versiondock-danger) 20%, var(--versiondock-surface));
+  --vscode-errorForeground: var(--versiondock-danger);
+  --vscode-button-secondaryBackground: var(--versiondock-surface-alt);
+  --vscode-button-secondaryForeground: var(--versiondock-text);
+  --vscode-menu-background: var(--versiondock-surface-alt);
+  --vscode-menu-border: var(--versiondock-border);
+  --vscode-menu-foreground: var(--versiondock-text);
+  --vscode-menu-separatorBackground: var(--versiondock-border-soft);
 }
 
 :root[data-theme="light"] {
