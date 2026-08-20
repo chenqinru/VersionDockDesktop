@@ -197,7 +197,14 @@ export const useAppStore = create<AppStore>((set, get) => {
       ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot, selectedRepoId });
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
-    await get().loadConflicts();
+    await Promise.all([
+      get().loadConflicts(),
+      get().loadStashes(),
+      get().loadShelves(),
+      get().loadWorktrees(),
+      get().loadSubtrees(),
+      get().loadUnpushedCommits(),
+    ]);
   };
 
   const refreshFromWatcher = async () => {
@@ -512,26 +519,51 @@ export const useAppStore = create<AppStore>((set, get) => {
     }),
 
     loadStashes: async (repoId) => {
-      const id = repoId ?? get().selectedRepoId; if (!id) return;
-      const values = await bridge().request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: workspaceId(), repo_id: id } });
-      set((state) => ({ stashes: { ...state.stashes, [id]: values } }));
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      if (!b || !wid) return;
+      if (repoId) {
+        const values = await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        set((state) => ({ stashes: { ...state.stashes, [repoId]: values } }));
+        return;
+      }
+      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
+      const values = await Promise.all(repositories.map(async (repo) => ({
+        repoId: repo.meta.id,
+        stashes: await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+      })));
+      set((state) => ({ stashes: values.reduce((next, value) => ({ ...next, [value.repoId]: value.stashes }), state.stashes) }));
     },
     stashOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'stashOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
       await Promise.all([get().loadStashes(repoId), get().refresh()]);
     }),
     loadShelves: async (repoId) => {
-      const id = repoId ?? get().selectedRepoId; if (!id) return;
-      const values = await bridge().request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: workspaceId(), repo_id: id } });
-      set((state) => ({ shelves: { ...state.shelves, [id]: values } }));
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      if (!b || !wid) return;
+      if (repoId) {
+        const values = await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        set((state) => ({ shelves: { ...state.shelves, [repoId]: values } }));
+        return;
+      }
+      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
+      const values = await Promise.all(repositories.map(async (repo) => ({
+        repoId: repo.meta.id,
+        shelves: await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+      })));
+      set((state) => ({ shelves: values.reduce((next, value) => ({ ...next, [value.repoId]: value.shelves }), state.shelves) }));
     },
     shelfOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'shelfOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
       await Promise.all([get().loadShelves(repoId), get().refresh()]);
     }),
     loadChangelists: async (repoId) => {
-      const id = repoId ?? get().selectedRepoId; if (!id) return;
-      const values = await bridge().request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: workspaceId(), repo_id: id } });
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      const id = repoId ?? get().selectedRepoId;
+      if (!b || !wid || !id) return;
+      const values = await b.request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: wid, repo_id: id } }).catch(() => []);
       set((state) => ({ changelists: { ...state.changelists, [id]: values } }));
     },
     changelistOperation: async (repoId, operation) => withBusy(async () => {
@@ -539,18 +571,40 @@ export const useAppStore = create<AppStore>((set, get) => {
       await get().loadChangelists(repoId);
     }),
     loadWorktrees: async (repoId) => {
-      const id = repoId ?? get().selectedRepoId; if (!id) return;
-      const values = await bridge().request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: workspaceId(), repo_id: id } });
-      set((state) => ({ worktrees: { ...state.worktrees, [id]: values } }));
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      if (!b || !wid) return;
+      if (repoId) {
+        const values = await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        set((state) => ({ worktrees: { ...state.worktrees, [repoId]: values } }));
+        return;
+      }
+      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
+      const values = await Promise.all(repositories.map(async (repo) => ({
+        repoId: repo.meta.id,
+        worktrees: await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+      })));
+      set((state) => ({ worktrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.worktrees }), state.worktrees) }));
     },
     worktreeOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'worktreeOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
       await Promise.all([get().loadWorktrees(repoId), get().refresh()]);
     }),
     loadSubtrees: async (repoId) => {
-      const id = repoId ?? get().selectedRepoId; if (!id) return;
-      const values = await bridge().request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: workspaceId(), repo_id: id } });
-      set((state) => ({ subtrees: { ...state.subtrees, [id]: values } }));
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      if (!b || !wid) return;
+      if (repoId) {
+        const values = await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        set((state) => ({ subtrees: { ...state.subtrees, [repoId]: values } }));
+        return;
+      }
+      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
+      const values = await Promise.all(repositories.map(async (repo) => ({
+        repoId: repo.meta.id,
+        subtrees: await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+      })));
+      set((state) => ({ subtrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.subtrees }), state.subtrees) }));
     },
     subtreeOperation: async (repoId, operation) => withBusy(async () => {
       const networkOperation = operation.type === 'add' || operation.type === 'pull' || operation.type === 'push';
@@ -558,10 +612,18 @@ export const useAppStore = create<AppStore>((set, get) => {
       await Promise.all([get().loadSubtrees(repoId), get().refresh()]);
     }),
     loadUnpushedCommits: async (repoId) => {
-      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git' && (!repoId || repo.meta.id === repoId));
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      if (!b || !wid) return;
+      if (repoId) {
+        const values = await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        set((state) => ({ unpushedCommits: { ...state.unpushedCommits, [repoId]: values } }));
+        return;
+      }
+      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
       const values = await Promise.all(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        commits: await bridge().request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: workspaceId(), repo_id: repo.meta.id } }),
+        commits: await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
       })));
       set((state) => ({ unpushedCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.unpushedCommits) }));
     },
@@ -584,8 +646,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     }),
 
     loadConflicts: async () => {
-      if (!get().snapshot) return;
-      const conflicts = await bridge().request<ConflictFile[]>({ type: 'conflicts', payload: { workspace_id: workspaceId() } });
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      if (!b || !wid) return;
+      const conflicts = await b.request<ConflictFile[]>({ type: 'conflicts', payload: { workspace_id: wid } }).catch(() => []);
       set({ conflicts });
     },
 
