@@ -633,6 +633,8 @@ async fn real_git_core_workflow() {
     let stashes = vcs::stashes(&repository, &token).await.unwrap();
     assert_eq!(stashes.len(), 1);
     assert_eq!(stashes[0].message, "integration stash");
+    assert_eq!(stashes[0].full_message, "integration stash");
+    assert_eq!(stashes[0].files.len(), 2);
     assert!(!directory.path().join("stash untracked.txt").exists());
     vcs::stash_operation(
         &repository,

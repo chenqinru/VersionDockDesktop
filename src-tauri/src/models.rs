@@ -741,14 +741,16 @@ pub struct TagInfo {
     pub date: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StashEntry {
     pub reference: String,
     pub hash: String,
     pub branch: String,
     pub message: String,
+    pub full_message: String,
     pub date: String,
+    pub files: Vec<ShelfFileEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]

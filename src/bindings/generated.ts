@@ -411,7 +411,9 @@ export type StashEntry = {
 	hash: string,
 	branch: string,
 	message: string,
+	fullMessage: string,
 	date: string,
+	files: ShelfFileEntry[],
 };
 
 export type StashOperation = { type: "create"; message: string; paths: string[]; include_untracked: boolean } | { type: "apply"; reference: string } | { type: "pop"; reference: string } | { type: "drop"; reference: string };

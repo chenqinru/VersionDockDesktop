@@ -11,9 +11,10 @@ use crate::{
     models::{
         BranchCompareResult, BranchInfo, BranchOperation, CommitBranches, CommitDetail, CommitFile,
         CommitNode, ConflictChoice, DesktopError, DiffDocument, HistoryPage, MergeCommitSummary,
-        MergeParentChange, MergeVersions, RemoteInfo, RemoteOperation, RepositoryMeta, StashEntry,
-        StashOperation, SubtreeEntry, SubtreeOperation, SubtreeState, SyncAction, TagInfo,
-        TagOperation, UnpushedCommit, VcsKind, WorktreeEntry, WorktreeOperation,
+        MergeParentChange, MergeVersions, RemoteInfo, RemoteOperation, RepositoryMeta,
+        ShelfFileEntry, StashEntry, StashOperation, SubtreeEntry, SubtreeOperation, SubtreeState,
+        SyncAction, TagInfo, TagOperation, UnpushedCommit, VcsKind, WorktreeEntry,
+        WorktreeOperation,
     },
     state::safe_relative,
 };
@@ -1756,12 +1757,57 @@ pub async fn tag_operation(
     Ok(())
 }
 
+fn parse_name_status_z(raw: &str) -> Vec<ShelfFileEntry> {
+    let mut files = Vec::new();
+    let parts: Vec<&str> = raw.split('\0').collect();
+    let mut i = 0;
+    while i < parts.len() {
+        let status_code = parts[i].trim();
+        if status_code.is_empty() {
+            i += 1;
+            continue;
+        }
+        if status_code.starts_with('R') || status_code.starts_with('C') {
+            if i + 2 < parts.len() {
+                let new_path = parts[i + 2];
+                if !new_path.is_empty() {
+                    files.push(ShelfFileEntry {
+                        path: new_path.to_string(),
+                        status: "renamed".to_string(),
+                    });
+                }
+                i += 3;
+                continue;
+            }
+        } else if i + 1 < parts.len() {
+            let path = parts[i + 1];
+            if !path.is_empty() {
+                let status = match status_code {
+                    "M" => "modified",
+                    "A" => "added",
+                    "D" => "deleted",
+                    "U" => "conflicted",
+                    _ => "modified",
+                };
+                files.push(ShelfFileEntry {
+                    path: path.to_string(),
+                    status: status.to_string(),
+                });
+            }
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    files
+}
+
 pub async fn stashes(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Vec<StashEntry>, DesktopError> {
     ensure_git(repo)?;
-    let format = format!("%gd{FIELD}%H{FIELD}%gs{FIELD}%cI{RECORD}");
+    let format = format!("%gd{FIELD}%H{FIELD}%s{FIELD}%B{FIELD}%cI{RECORD}");
     let raw = git(
         vec!["stash".into(), "list".into(), format!("--format={format}")],
         repo,
@@ -1769,28 +1815,111 @@ pub async fn stashes(
     )
     .await?
     .stdout_text();
-    Ok(raw
-        .split(RECORD)
-        .filter_map(|record| {
-            let fields = record.trim().split(FIELD).collect::<Vec<_>>();
-            if fields.len() < 4 || !valid_stash_ref(fields[0]) {
-                return None;
+    let mut entries = Vec::new();
+    for record in raw.split(RECORD) {
+        let fields = record.trim().split(FIELD).collect::<Vec<_>>();
+        if fields.len() < 5 || !valid_stash_ref(fields[0]) {
+            continue;
+        }
+        let reference = fields[0].trim().to_string();
+        let hash = fields[1].trim().to_string();
+        let subject = fields[2].trim();
+        let raw_body = fields[3].trim();
+        let date = fields[4].trim().to_string();
+
+        let (branch, message, full_message) =
+            if let Some(stripped) = subject.strip_prefix("WIP on ") {
+                let (b, m) = stripped
+                    .split_once(": ")
+                    .map(|(b, m)| (b.to_string(), m.to_string()))
+                    .unwrap_or_else(|| (String::new(), stripped.to_string()));
+                let prefix = format!("WIP on {b}: ");
+                let full = raw_body
+                    .strip_prefix(&prefix)
+                    .unwrap_or(raw_body)
+                    .trim()
+                    .to_string();
+                let full_msg = if full.is_empty() { m.clone() } else { full };
+                (b, m, full_msg)
+            } else if let Some(stripped) = subject.strip_prefix("On ") {
+                let (b, m) = stripped
+                    .split_once(": ")
+                    .map(|(b, m)| (b.to_string(), m.to_string()))
+                    .unwrap_or_else(|| (String::new(), stripped.to_string()));
+                let prefix = format!("On {b}: ");
+                let full = raw_body
+                    .strip_prefix(&prefix)
+                    .unwrap_or(raw_body)
+                    .trim()
+                    .to_string();
+                let full_msg = if full.is_empty() { m.clone() } else { full };
+                (b, m, full_msg)
+            } else {
+                (
+                    String::new(),
+                    subject.to_string(),
+                    if raw_body.is_empty() {
+                        subject.to_string()
+                    } else {
+                        raw_body.to_string()
+                    },
+                )
+            };
+
+        let mut files = Vec::new();
+        if let Ok(show_out) = git(
+            vec![
+                "stash".into(),
+                "show".into(),
+                "--name-status".into(),
+                "-z".into(),
+                reference.clone(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        {
+            files = parse_name_status_z(&show_out.stdout_text());
+        }
+
+        if let Ok(untracked_out) = git(
+            vec![
+                "ls-tree".into(),
+                "-r".into(),
+                "--name-only".into(),
+                "-z".into(),
+                format!("{reference}^3"),
+            ],
+            repo,
+            token,
+        )
+        .await
+        {
+            let tracked_set: std::collections::HashSet<String> =
+                files.iter().map(|f| f.path.clone()).collect();
+            for path in untracked_out.stdout_text().split('\0') {
+                let path = path.trim();
+                if !path.is_empty() && !tracked_set.contains(path) {
+                    files.push(ShelfFileEntry {
+                        path: path.to_string(),
+                        status: "untracked".to_string(),
+                    });
+                }
             }
-            let subject = fields[2].trim();
-            let (branch, message) = subject
-                .strip_prefix("On ")
-                .and_then(|value| value.split_once(": "))
-                .map(|(branch, message)| (branch.to_string(), message.to_string()))
-                .unwrap_or_else(|| (String::new(), subject.to_string()));
-            Some(StashEntry {
-                reference: fields[0].into(),
-                hash: fields[1].into(),
-                branch,
-                message,
-                date: fields[3].into(),
-            })
-        })
-        .collect())
+        }
+
+        entries.push(StashEntry {
+            reference,
+            hash,
+            branch,
+            message,
+            full_message,
+            date,
+            files,
+        });
+    }
+    Ok(entries)
 }
 
 pub async fn stash_operation(
