@@ -163,19 +163,22 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: bootstrap(false, false, true), subtrees: {} });
     rerender(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
     fireEvent.click(screen.getByTitle('Subtree'));
-    expect(screen.getByText('No registered subtrees')).toBeInTheDocument();
+    expect(screen.getByText('No subtrees registered')).toBeInTheDocument();
   });
 
-  it('renders registered Subtree details and gates pending entries to unregister only', () => {
-    const pending = [{ id: 'pending', prefix: 'vendor/api', remote: 'origin', branch: 'main', squash: true, state: 'pending' as const }];
-    const entryBridge = new MockBridge((command) => command.type === 'subtrees' ? pending : []);
-    useAppStore.setState({ bridge: entryBridge, bootstrap: bootstrap(false, false, true), snapshot: gitSnapshot, subtrees: { repo: pending } });
+  it('renders registered Subtree details and controls', () => {
+    const entry = [{ id: 'entry-1', prefix: 'vendor/api', remote: 'origin', branch: 'main', squash: true, state: 'active' as const }];
+    const entryBridge = new MockBridge((command) => command.type === 'subtrees' ? entry : []);
+    useAppStore.setState({ bridge: entryBridge, bootstrap: bootstrap(false, false, true), snapshot: gitSnapshot, subtrees: { repo: entry } });
     render(<BridgeContext.Provider value={entryBridge}><SubtreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
+    expect(screen.getByText('api')).toBeInTheDocument();
     expect(screen.getByText('vendor/api')).toBeInTheDocument();
-    expect(screen.getByText('origin · main · Squash')).toBeInTheDocument();
-    expect(screen.getByText('Unregister')).toBeInTheDocument();
-    expect(screen.queryByText('Pull')).not.toBeInTheDocument();
-    expect(screen.queryByText('Push')).not.toBeInTheDocument();
+    expect(screen.getByText('origin')).toBeInTheDocument();
+    expect(screen.getByText('main')).toBeInTheDocument();
+    expect(screen.getByText('squash')).toBeInTheDocument();
+    expect(screen.getByText('Up to date')).toBeInTheDocument();
+    expect(screen.getByTitle('Pull Subtree')).toBeInTheDocument();
+    expect(screen.getByTitle('More')).toBeInTheDocument();
   });
 
   it('loads Subtree entries once when their store update rerenders the panel', async () => {

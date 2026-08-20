@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use sha2::{Digest, Sha256};
@@ -2101,6 +2101,16 @@ pub async fn subtrees(
         .into_iter()
         .filter_map(|(id, record)| subtree_entry_from_config(id, record).ok())
         .collect::<Vec<_>>();
+
+    let existing_prefixes = entries
+        .iter()
+        .map(|e| e.prefix.clone())
+        .collect::<HashSet<_>>();
+
+    if let Ok(imported) = import_vscode_subtrees_if_needed(repo, &existing_prefixes, token).await {
+        entries.extend(imported);
+    }
+
     entries.sort_by(|left, right| {
         left.prefix
             .cmp(&right.prefix)
@@ -2260,7 +2270,7 @@ fn subtree_entry_from_config(
         _ => return Err(invalid_subtree_registry(&id)),
     };
     if !is_safe_subtree_relative_path(&prefix)
-        || validate_ref(&remote).is_err()
+        || validate_subtree_remote_str(&remote).is_err()
         || validate_ref(&branch).is_err()
         || subtree_id(&prefix) != id
     {
@@ -2300,13 +2310,17 @@ async fn persist_subtree(
     entry: &SubtreeEntry,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
+    let state_str = match entry.state {
+        SubtreeState::Active => "active",
+        SubtreeState::Pending => "pending",
+    };
     for (field, value) in [
         ("version", "1"),
         ("prefix", entry.prefix.as_str()),
         ("remote", entry.remote.as_str()),
         ("branch", entry.branch.as_str()),
         ("squash", if entry.squash { "true" } else { "false" }),
-        ("state", "pending"),
+        ("state", state_str),
     ] {
         if let Err(error) = git(
             vec![
@@ -2421,18 +2435,52 @@ fn validate_subtree_prefix(repo: &RepositoryMeta, value: &str) -> Result<(), Des
     Ok(())
 }
 
+fn validate_subtree_remote_str(value: &str) -> Result<(), DesktopError> {
+    if value.starts_with("http://")
+        || value.starts_with("https://")
+        || value.starts_with("ssh://")
+        || value.starts_with("git://")
+        || value.starts_with("file://")
+        || value.contains('@')
+    {
+        if value.is_empty()
+            || value.len() > 1024
+            || value.contains('\0')
+            || value.contains(['\r', '\n'])
+            || value.starts_with('-')
+        {
+            return Err(DesktopError::new(
+                "INVALID_SUBTREE_REMOTE",
+                "Subtree remote URL is invalid",
+                false,
+            ));
+        }
+        return Ok(());
+    }
+    validate_ref(value).map_err(|_| {
+        DesktopError::new(
+            "INVALID_SUBTREE_REMOTE",
+            "Subtree remote must be an existing Git remote name or valid repository URL",
+            false,
+        )
+    })
+}
+
 async fn validate_subtree_remote(
     repo: &RepositoryMeta,
     value: &str,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
-    validate_ref(value).map_err(|_| {
-        DesktopError::new(
-            "INVALID_SUBTREE_REMOTE",
-            "Subtree remote must be an existing Git remote name",
-            false,
-        )
-    })?;
+    validate_subtree_remote_str(value)?;
+    if value.starts_with("http://")
+        || value.starts_with("https://")
+        || value.starts_with("ssh://")
+        || value.starts_with("git://")
+        || value.starts_with("file://")
+        || value.contains('@')
+    {
+        return Ok(());
+    }
     git(
         vec!["remote".into(), "get-url".into(), value.into()],
         repo,
@@ -2447,6 +2495,161 @@ async fn validate_subtree_remote(
             true,
         )
     })
+}
+
+fn vscode_workspace_storage_dirs() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        let home_path = PathBuf::from(home);
+        candidates.push(home_path.join("Library/Application Support/Code/User/workspaceStorage"));
+        candidates.push(home_path.join("Library/Application Support/Cursor/User/workspaceStorage"));
+        candidates.push(home_path.join("Library/Application Support/Trae/User/workspaceStorage"));
+        candidates.push(
+            home_path.join("Library/Application Support/Code - Insiders/User/workspaceStorage"),
+        );
+        candidates
+            .push(home_path.join("Library/Application Support/VSCodium/User/workspaceStorage"));
+        candidates.push(home_path.join(".config/Code/User/workspaceStorage"));
+        candidates.push(home_path.join(".config/Cursor/User/workspaceStorage"));
+        candidates.push(home_path.join(".config/Trae/User/workspaceStorage"));
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let appdata_path = PathBuf::from(appdata);
+        candidates.push(appdata_path.join("Code/User/workspaceStorage"));
+        candidates.push(appdata_path.join("Cursor/User/workspaceStorage"));
+        candidates.push(appdata_path.join("Trae/User/workspaceStorage"));
+    }
+    candidates.push(PathBuf::from(
+        "/Volumes/WorkSSD/VSCode/Code/User/workspaceStorage",
+    ));
+    candidates.retain(|dir| dir.is_dir());
+    candidates
+}
+
+async fn extract_vscode_subtree_json(db_path: &Path) -> Vec<serde_json::Value> {
+    let mut results = Vec::new();
+    let output = tokio::process::Command::new("sqlite3")
+        .arg(db_path)
+        .arg("SELECT value FROM ItemTable WHERE key IN ('chenqinru.versiondock', 'versiondock.subtrees', 'RioNoir.gitcharm', 'gitcharm.subtrees');")
+        .output()
+        .await;
+    if let Ok(out) = output {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    if let Some(arr) = parsed
+                        .get("versiondock.subtrees")
+                        .or_else(|| parsed.get("gitcharm.subtrees"))
+                        .and_then(|v| v.as_array())
+                    {
+                        results.extend(arr.clone());
+                    } else if let Some(arr) = parsed.as_array() {
+                        results.extend(arr.clone());
+                    }
+                }
+            }
+        }
+    }
+    if results.is_empty() {
+        if let Ok(bytes) = std::fs::read(db_path) {
+            let haystack = String::from_utf8_lossy(&bytes);
+            for key_pattern in ["\"versiondock.subtrees\":[", "\"gitcharm.subtrees\":["] {
+                if let Some(idx) = haystack.find(key_pattern) {
+                    let slice = &haystack[idx + key_pattern.len() - 1..];
+                    if let Some(end_idx) = slice.find(']') {
+                        let json_str = &slice[..=end_idx];
+                        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(json_str) {
+                            results.extend(arr);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
+async fn import_vscode_subtrees_if_needed(
+    repo: &RepositoryMeta,
+    existing_prefixes: &HashSet<String>,
+    token: &CancellationToken,
+) -> Result<Vec<SubtreeEntry>, DesktopError> {
+    let mut imported = Vec::new();
+    let dirs = vscode_workspace_storage_dirs();
+    for base_dir in dirs {
+        let Ok(read_dir) = std::fs::read_dir(&base_dir) else {
+            continue;
+        };
+        for entry in read_dir.flatten() {
+            let db_path = entry.path().join("state.vscdb");
+            if !db_path.is_file() {
+                continue;
+            }
+            let values = extract_vscode_subtree_json(&db_path).await;
+            for val in values {
+                let Some(repo_id) = val.get("repoId").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(prefix) = val.get("prefix").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if existing_prefixes.contains(prefix) {
+                    continue;
+                }
+                let Some(repository) = val.get("repository").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let branch = val.get("ref").and_then(|v| v.as_str()).unwrap_or("main");
+                let squash = val
+                    .get("defaultSquash")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+
+                let clean_repo_id = repo_id
+                    .split("::")
+                    .next()
+                    .unwrap_or("")
+                    .trim_end_matches('/');
+                let clean_root_path = repo.root_path.trim_end_matches('/');
+                let repo_name = Path::new(clean_root_path).file_name();
+                let entry_repo_name = Path::new(clean_repo_id).file_name();
+
+                let repo_match = clean_repo_id == clean_root_path
+                    || clean_repo_id.contains(clean_root_path)
+                    || clean_root_path.contains(clean_repo_id)
+                    || (repo_name.is_some() && repo_name == entry_repo_name);
+
+                if repo_match
+                    && is_safe_subtree_relative_path(prefix)
+                    && std::path::Path::new(&repo.root_path).join(prefix).exists()
+                {
+                    let id = subtree_id(prefix);
+                    let subtree_entry = SubtreeEntry {
+                        id,
+                        prefix: prefix.to_string(),
+                        remote: repository.to_string(),
+                        branch: branch.to_string(),
+                        squash,
+                        state: SubtreeState::Active,
+                    };
+                    if !imported
+                        .iter()
+                        .any(|existing: &SubtreeEntry| existing.prefix == subtree_entry.prefix)
+                    {
+                        let _ = persist_subtree(repo, &subtree_entry, token).await;
+                        imported.push(subtree_entry);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(imported)
 }
 
 async fn ensure_active_subtree(
