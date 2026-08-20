@@ -695,12 +695,16 @@ async fn real_git_core_workflow() {
         .unwrap();
     assert_eq!(shelves.len(), 1);
     assert_eq!(shelves[0].name, "integration shelf");
-    assert!(shelves[0].files.contains(&"shelf untracked.txt".into()));
+    assert!(shelves[0]
+        .files
+        .iter()
+        .any(|f| f.path == "shelf untracked.txt"));
     shelf::operate(
         shelf_storage.path(),
         &repository,
         crate::models::ShelfOperation::Apply {
             shelf_id: shelves[0].id.clone(),
+            paths: None,
         },
         &token,
     )
@@ -1102,4 +1106,108 @@ async fn real_svn_core_workflow() {
     .await
     .unwrap();
     assert!(range.content.contains("+two"));
+}
+
+#[tokio::test]
+async fn test_vscode_shelf_import_and_backward_compatibility() {
+    let directory = tempfile::tempdir().unwrap();
+    let shelf_storage = tempfile::tempdir().unwrap();
+    let token = CancellationToken::new();
+    command("git", &["init", "-b", "main"], directory.path());
+    command("git", &["config", "user.name", "Test"], directory.path());
+    command(
+        "git",
+        &["config", "user.email", "test@example.com"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("file.txt"), "original\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "init"], directory.path());
+
+    let workspace = crate::models::WorkspaceDescriptor {
+        id: "workspace".into(),
+        name: "test".into(),
+        paths: vec![directory.path().to_string_lossy().into_owned()],
+        last_opened_at: "2026-08-20T00:00:00Z".into(),
+        available: true,
+    };
+    let repository = workspace::scan(&workspace).unwrap().remove(0);
+
+    // Create a mock vscode shelf directory under HOME/Library/Application Support/...
+    let local_shelf_dir = shelf_storage.path().join("shelves").join(&repository.id);
+    std::fs::create_dir_all(&local_shelf_dir).unwrap();
+
+    // Write a mock shelves.json matching VSCode extension format
+    let patch_content = "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-original\n+shelved_from_vscode\n";
+    std::fs::write(
+        local_shelf_dir.join("shelf-1785490774561-a14c6b2f878d.patch"),
+        patch_content,
+    )
+    .unwrap();
+
+    let vscode_json = r#"{
+        "shelves": [
+            {
+                "id": "shelf-1785490774561-a14c6b2f878d",
+                "name": "vscode test shelf",
+                "date": "2026-07-31T09:39:34.578Z",
+                "branch": "dev",
+                "files": [
+                    {
+                        "path": "file.txt",
+                        "status": "modified"
+                    }
+                ],
+                "patchFile": "shelf-1785490774561-a14c6b2f878d.patch"
+            }
+        ]
+    }"#;
+    std::fs::write(local_shelf_dir.join("shelves.json"), vscode_json).unwrap();
+
+    let shelves = shelf::list(shelf_storage.path(), &repository)
+        .await
+        .unwrap();
+    assert_eq!(shelves.len(), 1);
+    assert_eq!(shelves[0].id, "shelf-1785490774561-a14c6b2f878d");
+    assert_eq!(shelves[0].name, "vscode test shelf");
+    assert_eq!(shelves[0].branch.as_deref(), Some("dev"));
+    assert_eq!(shelves[0].created_at, "2026-07-31T09:39:34.578Z");
+    assert_eq!(shelves[0].files.len(), 1);
+    assert_eq!(shelves[0].files[0].path, "file.txt");
+    assert_eq!(shelves[0].files[0].status, "modified");
+
+    // Apply shelf
+    shelf::operate(
+        shelf_storage.path(),
+        &repository,
+        crate::models::ShelfOperation::Apply {
+            shelf_id: "shelf-1785490774561-a14c6b2f878d".into(),
+            paths: None,
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+        "shelved_from_vscode\n"
+    );
+
+    // Drop shelf
+    shelf::operate(
+        shelf_storage.path(),
+        &repository,
+        crate::models::ShelfOperation::Drop {
+            shelf_id: "shelf-1785490774561-a14c6b2f878d".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    assert!(shelf::list(shelf_storage.path(), &repository)
+        .await
+        .unwrap()
+        .is_empty());
 }

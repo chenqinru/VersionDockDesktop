@@ -395,10 +395,16 @@ export type ShelfEntry = {
 	id: string,
 	name: string,
 	createdAt: string,
-	files: string[],
+	branch?: string | null,
+	files: ShelfFileEntry[],
 };
 
-export type ShelfOperation = { type: "create"; name: string; paths: string[] } | { type: "apply"; shelf_id: string } | { type: "drop"; shelf_id: string };
+export type ShelfFileEntry = {
+	path: string,
+	status: string,
+};
+
+export type ShelfOperation = { type: "create"; name: string; paths: string[] } | { type: "apply"; shelf_id: string; paths?: string[] | null } | { type: "drop"; shelf_id: string };
 
 export type StashEntry = {
 	reference: string,

@@ -287,9 +287,18 @@ pub enum StashOperation {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ShelfOperation {
-    Create { name: String, paths: Vec<String> },
-    Apply { shelf_id: String },
-    Drop { shelf_id: String },
+    Create {
+        name: String,
+        paths: Vec<String>,
+    },
+    Apply {
+        shelf_id: String,
+        #[serde(default)]
+        paths: Option<Vec<String>>,
+    },
+    Drop {
+        shelf_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -742,13 +751,22 @@ pub struct StashEntry {
     pub date: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShelfFileEntry {
+    pub path: String,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ShelfEntry {
     pub id: String,
     pub name: String,
     pub created_at: String,
-    pub files: Vec<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    pub files: Vec<ShelfFileEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
