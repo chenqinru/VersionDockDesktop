@@ -1,4 +1,5 @@
 import type { BranchInfo, CommitFile, RepositoryStatus } from '../bindings/generated';
+import { branchRevisionRef, tagRevisionRef } from '../history/refs';
 
 type BranchInstance = { repoId: string; repo: RepositoryStatus; branch: BranchInfo };
 export type MergedBranch = { name: string; instances: BranchInstance[]; current: boolean; remote: boolean };
@@ -39,6 +40,41 @@ export type SidebarModel = {
   remotes: Array<{ name: string; branches: SidebarBranch[] }>;
   tags: SidebarTag[];
 };
+
+export type HistoryRefOption = {
+  id: string;
+  label: string;
+  icon: string;
+  repoIds: string[];
+  revisionsByRepo: Record<string, string>;
+};
+
+export function buildHistoryRefOptions(
+  repos: readonly RepositoryStatus[],
+  branchesByRepo: Readonly<Record<string, readonly BranchInfo[]>>,
+  tagsByRepo: Readonly<Record<string, ReadonlyArray<{ name: string }>>>,
+): HistoryRefOption[] {
+  const values = new Map<string, HistoryRefOption>();
+  const add = (id: string, icon: string, repoId: string, revision: string) => {
+    const current = values.get(id);
+    values.set(id, {
+      id,
+      label: id,
+      icon,
+      repoIds: current ? [...new Set([...current.repoIds, repoId])] : [repoId],
+      revisionsByRepo: { ...current?.revisionsByRepo, [repoId]: revision },
+    });
+  };
+  for (const repo of repos) {
+    for (const branch of branchesByRepo[repo.meta.id] ?? []) {
+      add(branch.name, branch.remote ? 'cloud' : 'git-branch', repo.meta.id, branchRevisionRef({ name: branch.name, isRemote: branch.remote }, repo.meta.kind));
+    }
+    for (const tag of tagsByRepo[repo.meta.id] ?? []) {
+      add(tag.name, 'tag', repo.meta.id, tagRevisionRef(tag.name, repo.meta.kind));
+    }
+  }
+  return [...values.values()].sort((left, right) => left.label.localeCompare(right.label));
+}
 
 function remoteNameFor(branch: BranchInfo): string {
   if (branch.remoteName) return branch.remoteName;

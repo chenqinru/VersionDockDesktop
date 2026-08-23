@@ -958,6 +958,17 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   const busy = useAppStore((state) => state.busy);
   const { t } = useI18n();
   const [checked, setChecked] = useState<Set<string>>(() => new Set<string>());
+  const [pushButtonHovered, setPushButtonHovered] = useState(false);
+  const [pushButtonPressed, setPushButtonPressed] = useState(false);
+
+  const pushButtonFeedback = {
+    onPointerEnter: () => setPushButtonHovered(true),
+    onPointerLeave: () => { setPushButtonHovered(false); setPushButtonPressed(false); },
+    onPointerDown: () => setPushButtonPressed(true),
+    onPointerUp: () => setPushButtonPressed(false),
+    onPointerCancel: () => setPushButtonPressed(false),
+    onBlur: () => { setPushButtonHovered(false); setPushButtonPressed(false); },
+  };
 
   useEffect(() => {
     void loadUnpushedCommits();
@@ -1082,7 +1093,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
           />
         </div>
         <div style={css.footer}>
-          <button data-primary-action-btn="" style={css.pushBtn(canPush && !busy)} disabled={!canPush || busy} onClick={() => void handlePush([solo])}>
+          <button data-primary-action-btn="" style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush([solo])} {...pushButtonFeedback}>
             <Codicon name="cloud-upload" style={{ marginRight: '6px' }} />
             {pushButtonLabel([solo])}
           </button>
@@ -1140,7 +1151,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
             })}
           </div>
         )}
-        <button data-primary-action-btn="" style={css.pushBtn(canPush && !busy)} disabled={!canPush || busy} onClick={() => void handlePush(pushableChecked)}>
+        <button data-primary-action-btn="" style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush(pushableChecked)} {...pushButtonFeedback}>
           <Codicon name="cloud-upload" style={{ marginRight: '6px' }} />
           {pushButtonLabel(pushableChecked)}
         </button>
@@ -1210,14 +1221,19 @@ const css = {
     padding: '0 3px', fontSize: '10px', minWidth: '14px', height: '14px',
     justifyContent: 'center', boxSizing: 'border-box' as const,
   } as React.CSSProperties,
-  pushBtn: (enabled: boolean): React.CSSProperties => ({
+  pushBtn: (enabled: boolean, hovered: boolean, pressed: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'var(--vscode-button-background, var(--versiondock-accent-bg))',
+    background: enabled && hovered
+      ? 'var(--vscode-button-hoverBackground, var(--versiondock-accent))'
+      : 'var(--vscode-button-background, var(--versiondock-accent-bg))',
     color: 'var(--vscode-button-foreground, #ffffff)',
     border: 'none', borderRadius: '3px', padding: '6px 12px',
     cursor: enabled ? 'pointer' : 'default',
     fontSize: '12px', fontFamily: 'var(--vscode-font-family, inherit)',
     opacity: enabled ? 1 : 0.45, width: '100%',
+    transform: enabled && pressed ? 'translateY(1px) scale(0.995)' : 'none',
+    filter: enabled && pressed ? 'brightness(0.92)' : 'none',
+    transition: 'background-color 80ms ease, transform 60ms ease, filter 60ms ease',
   }),
 };
 
@@ -1309,7 +1325,7 @@ const styles = {
   } as React.CSSProperties,
   loadingRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: '8px 12px', fontSize: '12px', color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))', fontStyle: 'italic' as const,
+    padding: '8px 12px', fontSize: '12px', color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))',
     textAlign: 'center' as const,
   } as React.CSSProperties,
   errorRow: {

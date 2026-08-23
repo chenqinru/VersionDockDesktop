@@ -98,6 +98,12 @@ pub enum BridgeCommand {
         skip: u32,
         limit: u32,
         filter: Option<String>,
+        revision: Option<String>,
+    },
+    HistoryTopology {
+        workspace_id: String,
+        repo_id: String,
+        svn_limit: u32,
     },
     CommitDetail {
         workspace_id: String,
@@ -452,11 +458,17 @@ pub struct AppStateSnapshot {
     pub panel_sizes: PanelSizes,
     pub active_tab: String,
     pub file_view_mode: String,
+    #[serde(default = "default_stash_view_mode")]
+    pub stash_view_mode: String,
     pub external_editor: Option<ExternalEditor>,
     #[serde(default)]
     pub branch_sidebar_collapsed: bool,
     #[serde(default)]
     pub branch_sidebar_collapsed_sections: Vec<String>,
+}
+
+fn default_stash_view_mode() -> String {
+    "tree".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
@@ -633,6 +645,16 @@ pub struct CommitNode {
     pub incoming: bool,
     #[serde(default)]
     pub unpushed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphCommitNode {
+    pub repo_id: String,
+    pub hash: String,
+    pub parents: Vec<String>,
+    pub committer_date: String,
+    pub refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

@@ -149,6 +149,19 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.queryByText('AI Commit Message')).not.toBeInTheDocument();
   });
 
+  it('persists a stash view mode independently from the changes view', () => {
+    const data = bootstrap(true);
+    data.state.activeTab = 'stash';
+    data.state.fileViewMode = 'tree';
+    data.state.stashViewMode = 'tree';
+    useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo' });
+    renderPanel();
+    fireEvent.click(screen.getByTitle('View options'));
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }));
+    expect(useAppStore.getState().bootstrap?.state.stashViewMode).toBe('list');
+    expect(useAppStore.getState().bootstrap?.state.fileViewMode).toBe('tree');
+  });
+
   it('shows shelf only after its storage and backend capability is enabled', () => {
     useAppStore.setState({ bootstrap: bootstrap(false, true) });
     renderPanel();

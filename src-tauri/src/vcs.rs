@@ -10,10 +10,10 @@ use crate::{
     cli,
     models::{
         BranchCompareResult, BranchInfo, BranchOperation, CommitBranches, CommitDetail, CommitFile,
-        CommitNode, ConflictChoice, DesktopError, DiffDocument, HistoryPage, MergeCommitSummary,
-        MergeParentChange, MergeVersions, RemoteInfo, RemoteOperation, RepositoryMeta,
-        ShelfFileEntry, StashEntry, StashOperation, SubtreeEntry, SubtreeOperation, SubtreeState,
-        SyncAction, TagInfo, TagOperation, UnpushedCommit, VcsKind, WorktreeEntry,
+        CommitNode, ConflictChoice, DesktopError, DiffDocument, GraphCommitNode, HistoryPage,
+        MergeCommitSummary, MergeParentChange, MergeVersions, RemoteInfo, RemoteOperation,
+        RepositoryMeta, ShelfFileEntry, StashEntry, StashOperation, SubtreeEntry, SubtreeOperation,
+        SubtreeState, SyncAction, TagInfo, TagOperation, UnpushedCommit, VcsKind, WorktreeEntry,
         WorktreeOperation,
     },
     state::safe_relative,
@@ -605,12 +605,24 @@ pub async fn history(
     skip: u32,
     limit: u32,
     filter: Option<String>,
+    revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<HistoryPage, DesktopError> {
-    let limit = limit.clamp(1, 500);
+    let limit = limit.clamp(1, 1_000);
     match repo.kind {
-        VcsKind::Git => git_history(repo, skip, limit, filter, token).await,
+        VcsKind::Git => git_history(repo, skip, limit, filter, revision, token).await,
         VcsKind::Svn => svn_history(repo, skip, limit, filter, token).await,
+    }
+}
+
+pub async fn history_topology(
+    repo: &RepositoryMeta,
+    svn_limit: u32,
+    token: &CancellationToken,
+) -> Result<Vec<GraphCommitNode>, DesktopError> {
+    match repo.kind {
+        VcsKind::Git => git_history_topology(repo, token).await,
+        VcsKind::Svn => svn_history_topology(repo, svn_limit.clamp(1, 5_000), token).await,
     }
 }
 
@@ -695,15 +707,31 @@ async fn git_history(
     skip: u32,
     limit: u32,
     filter: Option<String>,
+    revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<HistoryPage, DesktopError> {
+    if let Some(value) = revision.as_deref() {
+        validate_revision_or_ref(value)?;
+    }
     let format = format!(
         "%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}"
     );
+    let head_hash = git(
+        vec![
+            "rev-parse".into(),
+            "--verify".into(),
+            "--quiet".into(),
+            "HEAD".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|output| output.stdout_text().trim().to_string())
+    .unwrap_or_default();
     let mut args = vec![
         "log".into(),
         "--date-order".into(),
-        "--all".into(),
         format!("--skip={skip}"),
         format!("--max-count={}", limit + 1),
         format!("--format={format}"),
@@ -713,8 +741,28 @@ async fn git_history(
         args.push("--regexp-ignore-case".to_string());
         args.push(format!("--grep={}", value.trim()));
     }
-    let raw = git(args, repo, token).await?.stdout_text();
+    // Prioritize the checked-out history when tips share a timestamp, matching
+    // JetBrains and the VersionDock plugin. Unborn repositories have no HEAD.
+    if let Some(value) = revision {
+        args.push(value);
+    } else {
+        if !head_hash.is_empty() {
+            args.push("HEAD".into());
+        }
+        args.push("--exclude=refs/stash".into());
+        args.push("--exclude=refs/versiondock/ai-composer/*".into());
+        args.push("--all".into());
+    }
+    let (raw, refs_by_hash) = tokio::try_join!(
+        async { Ok::<_, DesktopError>(git(args, repo, token).await?.stdout_text()) },
+        git_decorated_refs(repo, &head_hash, token),
+    )?;
     let mut commits = parse_git_log(&repo.id, &raw);
+    for commit in &mut commits {
+        if let Some(refs) = refs_by_hash.get(&commit.hash) {
+            commit.refs = refs.clone();
+        }
+    }
     let unpushed = git_revision_hashes(repo, vec!["@{upstream}..HEAD".into()], token).await;
     let incoming = git_revision_hashes(repo, vec!["HEAD..@{upstream}".into()], token).await;
     for commit in &mut commits {
@@ -724,6 +772,111 @@ async fn git_history(
     let has_more = commits.len() > limit as usize;
     commits.truncate(limit as usize);
     Ok(HistoryPage { commits, has_more })
+}
+
+async fn git_history_topology(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<GraphCommitNode>, DesktopError> {
+    let format = format!("%H{FIELD}%P{FIELD}%cI{RECORD}");
+    let head_hash = git(
+        vec![
+            "rev-parse".into(),
+            "--verify".into(),
+            "--quiet".into(),
+            "HEAD".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|output| output.stdout_text().trim().to_string())
+    .unwrap_or_default();
+    let mut args = vec![
+        "log".into(),
+        "--date-order".into(),
+        format!("--format={format}"),
+        "--date=iso-strict".into(),
+    ];
+    if !head_hash.is_empty() {
+        args.push("HEAD".into());
+    }
+    args.push("--exclude=refs/stash".into());
+    args.push("--exclude=refs/versiondock/ai-composer/*".into());
+    args.push("--all".into());
+    let (raw, refs_by_hash) = tokio::try_join!(
+        async { Ok::<_, DesktopError>(git(args, repo, token).await?.stdout_text()) },
+        git_decorated_refs(repo, &head_hash, token),
+    )?;
+    Ok(raw
+        .split(RECORD)
+        .filter_map(|record| {
+            let fields = record.trim().split(FIELD).collect::<Vec<_>>();
+            if fields.len() < 3 || fields[0].is_empty() {
+                return None;
+            }
+            Some(GraphCommitNode {
+                repo_id: repo.id.clone(),
+                hash: fields[0].into(),
+                parents: fields[1].split_whitespace().map(String::from).collect(),
+                committer_date: fields[2].into(),
+                refs: refs_by_hash.get(fields[0]).cloned().unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+async fn git_decorated_refs(
+    repo: &RepositoryMeta,
+    head_hash: &str,
+    token: &CancellationToken,
+) -> Result<HashMap<String, Vec<String>>, DesktopError> {
+    let format = format!("%(objectname){FIELD}%(*objectname){FIELD}%(refname){FIELD}%(HEAD)");
+    let raw = git(
+        vec![
+            "for-each-ref".into(),
+            format!("--format={format}"),
+            "refs/heads/".into(),
+            "refs/remotes/".into(),
+            "refs/tags/".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let mut refs_by_hash: HashMap<String, Vec<String>> = HashMap::new();
+    let mut attached_head = false;
+    let mut add_ref = |hash: &str, reference: String| {
+        if hash.is_empty() || reference.is_empty() {
+            return;
+        }
+        let refs = refs_by_hash.entry(hash.to_string()).or_default();
+        if !refs.contains(&reference) {
+            refs.push(reference);
+        }
+    };
+    for line in raw.lines() {
+        let fields = line.split(FIELD).collect::<Vec<_>>();
+        if fields.len() < 4 {
+            continue;
+        }
+        let commit_hash = if fields[1].is_empty() {
+            fields[0]
+        } else {
+            fields[1]
+        };
+        let reference = fields[2];
+        add_ref(commit_hash, reference.to_string());
+        if fields[3].trim() == "*" {
+            attached_head = true;
+            add_ref(commit_hash, format!("HEAD -> {reference}"));
+        }
+    }
+    if !attached_head && !head_hash.is_empty() {
+        add_ref(head_hash, "HEAD".into());
+    }
+    Ok(refs_by_hash)
 }
 
 fn parse_git_log(repo_id: &str, raw: &str) -> Vec<CommitNode> {
@@ -900,6 +1053,57 @@ async fn svn_history(
     let has_more = commits.len() > limit as usize;
     commits.truncate(limit as usize);
     Ok(HistoryPage { commits, has_more })
+}
+
+async fn svn_history_topology(
+    repo: &RepositoryMeta,
+    limit: u32,
+    token: &CancellationToken,
+) -> Result<Vec<GraphCommitNode>, DesktopError> {
+    let raw = svn(
+        vec![
+            "log".into(),
+            "--xml".into(),
+            "-r".into(),
+            "HEAD:0".into(),
+            "--limit".into(),
+            limit.to_string(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let entries = document
+        .descendants()
+        .filter(|node| node.has_tag_name("logentry"))
+        .filter_map(|entry| {
+            let revision = entry.attribute("revision")?;
+            let date = entry
+                .children()
+                .find(|node| node.has_tag_name("date"))
+                .and_then(|node| node.text())
+                .unwrap_or("");
+            Some((revision.to_string(), date.to_string()))
+        })
+        .collect::<Vec<_>>();
+    Ok(entries
+        .iter()
+        .enumerate()
+        .map(|(index, (revision, date))| GraphCommitNode {
+            repo_id: repo.id.clone(),
+            hash: revision.clone(),
+            parents: Vec::new(),
+            committer_date: date.clone(),
+            refs: if index == 0 {
+                vec!["HEAD".into()]
+            } else {
+                Vec::new()
+            },
+        })
+        .collect())
 }
 
 pub async fn commit_detail(

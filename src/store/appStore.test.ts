@@ -27,7 +27,7 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyHasMoreByRepo: {}, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, remotes: {}, mode: 'history', busy: false, error: undefined }));
+afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, remotes: {}, mode: 'history', busy: false, error: undefined }));
 
 describe('appStore async lifecycle', () => {
   it('supports single, toggle, and range commit selection with aggregated revision diffs', async () => {
@@ -119,12 +119,44 @@ describe('appStore async lifecycle', () => {
     workspace.repositories = [repository('a', 'Alpha'), repository('b', 'Beta')];
     const bridge = new MockBridge((command) => {
       if (command.type === 'history') return { commits: [{ repoId: command.payload.repo_id, hash: command.payload.repo_id, shortHash: command.payload.repo_id, parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: command.payload.repo_id, refs: [] }], hasMore: false };
+      if (command.type === 'historyTopology') return [{ repoId: command.payload.repo_id, hash: `${command.payload.repo_id}-root`, parents: [], committerDate: '2025-01-01T00:00:00Z', refs: [] }];
       return [];
     });
     useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a' });
     await useAppStore.getState().loadHistory(true);
-    expect(useAppStore.getState().history.map((commit) => commit.repoId)).toEqual(['a', 'b']);
+    expect(useAppStore.getState().history.map((commit) => commit.repoId).sort()).toEqual(['a', 'b']);
     expect(Object.keys(useAppStore.getState().historyByRepo)).toEqual(['a', 'b']);
+    expect(useAppStore.getState().historyTopology.map((commit) => commit.repoId).sort()).toEqual(['a', 'b']);
+  });
+
+  it('applies the 100-commit page boundary after interleaving repositories', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('a', 'Alpha'), repository('b', 'Beta')];
+    const make = (repoId: string, index: number): CommitNode => ({
+      repoId, hash: `${repoId}-${index}`, shortHash: `${repoId}-${index}`, parents: [], author: 'Ada', email: '',
+      authorDate: new Date(Date.UTC(2026, 0, 1, 0, 0, 200 - index * 2 - (repoId === 'b' ? 1 : 0))).toISOString(),
+      committerDate: new Date(Date.UTC(2026, 0, 1, 0, 0, 200 - index * 2 - (repoId === 'b' ? 1 : 0))).toISOString(),
+      message: `${repoId}-${index}`, refs: [],
+    });
+    const histories = { a: Array.from({ length: 80 }, (_, index) => make('a', index)), b: Array.from({ length: 80 }, (_, index) => make('b', index)) };
+    const limits: number[] = [];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'history') {
+        limits.push(command.payload.limit);
+        const commits = histories[command.payload.repo_id as keyof typeof histories].slice(0, command.payload.limit);
+        return { commits, hasMore: commits.length < histories[command.payload.repo_id as keyof typeof histories].length };
+      }
+      if (command.type === 'historyTopology') return [];
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a' });
+    await useAppStore.getState().loadHistory(true);
+    expect(limits).toEqual([100, 100]);
+    expect(useAppStore.getState().history).toHaveLength(100);
+    expect(useAppStore.getState().historyHasMore).toBe(true);
+    await useAppStore.getState().loadHistory(false);
+    expect(limits).toEqual([100, 100, 200, 200]);
+    expect(useAppStore.getState().history).toHaveLength(160);
   });
 
   it('selects the first history commit and loads its detail when opening a repository', async () => {
@@ -154,6 +186,37 @@ describe('appStore async lifecycle', () => {
       b: [make('b', 'b-new', '2026-01-01T09:00:00Z'), make('b', 'b-old', '2026-01-01T07:00:00Z')],
     });
     expect(result.map((commit) => commit.hash)).toEqual(['a-new', 'b-new', 'a-old', 'b-old']);
+  });
+
+  it('uses a stable JetBrains-compatible tie break for equal commit timestamps', () => {
+    const make = (repoId: string, hash: string): CommitNode => ({
+      repoId, hash, shortHash: hash, parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T10:00:00Z', committerDate: '2026-01-01T10:00:00Z', message: hash, refs: [],
+    });
+    const historyByRepo = { a: [make('a', 'aaaaaaaa')], b: [make('b', 'bbbbbbbb')] };
+    expect(interleaveHistory(historyByRepo).map((commit) => commit.hash)).toEqual(
+      interleaveHistory({ b: historyByRepo.b, a: historyByRepo.a }).map((commit) => commit.hash),
+    );
+  });
+
+  it('loads a branch revision from the backend so its ancestor chain stays connected', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('a', 'Alpha'), repository('b', 'Beta')];
+    const commands: BridgeCommand[] = [];
+    const commits: CommitNode[] = [
+      { repoId: 'a', hash: 'feature', shortHash: 'feature', parents: ['root'], author: 'Ada', email: '', authorDate: '2026-01-02T00:00:00Z', committerDate: '2026-01-02T00:00:00Z', message: 'feature', refs: ['refs/heads/feature/x'] },
+      { repoId: 'a', hash: 'root', shortHash: 'root', parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'root', refs: [] },
+    ];
+    const bridge = new MockBridge((command) => {
+      commands.push(command);
+      if (command.type === 'history') return { commits, hasMore: false };
+      if (command.type === 'historyTopology') return commits.map(({ repoId, hash, parents, committerDate, refs }) => ({ repoId, hash, parents, committerDate, refs }));
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a', historyScope: { repoIds: ['a'], revisionsByRepo: { a: 'refs/heads/feature/x' } } });
+    await useAppStore.getState().loadHistory(true);
+    expect(commands.find((command) => command.type === 'history')).toMatchObject({ type: 'history', payload: { repo_id: 'a', revision: 'refs/heads/feature/x' } });
+    expect(commands.some((command) => command.type === 'history' && command.payload.repo_id === 'b')).toBe(false);
+    expect(useAppStore.getState().history.map((commit) => commit.hash)).toEqual(['feature', 'root']);
   });
 
   it('loads branch and tag refs for SVN repositories as well as Git', async () => {

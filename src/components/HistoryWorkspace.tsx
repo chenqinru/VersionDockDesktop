@@ -7,11 +7,12 @@ import { useResizable } from '../hooks/useResizable';
 import { BranchSidebar } from './BranchSidebar';
 import { CommitGraph } from './CommitGraph';
 import { CommitDetailPanel } from './CommitDetailPanel';
-import { COMMIT_ROW_HEIGHT, layoutCommits, type GraphCommit } from './commitGraphLayout';
+import { buildHistoryRefOptions } from './HistoryWorkspace.helpers';
+import { assignLanes, COMMIT_ROW_HEIGHT, layoutVisibleCommits, type GraphCommit } from './commitGraphLayout';
 import { commitKey } from '../history/commitDetails';
-import { commitRefs, groupRefs, mergeLocalRemote, type CommitRef, type RefGroup } from '../history/refs';
+import { formatRefLabel, groupRefs, mergeLocalRemote, type RefGroup } from '../history/refs';
 import { branchColor, headColor, isPrimaryBranch, primaryBranchColor, tagColor } from './branchColor';
-import type { CommitDetail, CommitNode } from '../bindings/generated';
+import type { CommitDetail, CommitNode, GraphCommitNode } from '../bindings/generated';
 
 type FilterMenu = 'authors' | 'repos' | 'refs' | 'dates' | null;
 type ViewFilters = { author: string; repoId: string; ref: string; from: string; to: string };
@@ -43,10 +44,6 @@ function parseYmd(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function refMatches(ref: CommitRef, value: string): boolean {
-  return ref.label === value || ref.label.endsWith(`/${value}`) || ref.value === value;
 }
 
 function ToggleFilter({ icon, leading, label, active, open, onClick }: { icon?: string; leading?: ReactNode; label: string; active: boolean; open: boolean; onClick: () => void }) {
@@ -196,6 +193,7 @@ function RefBadges({
   remoteNames?: readonly string[];
   isSelected?: boolean;
 }) {
+  const { t } = useI18n();
   const allGroups = useMemo(
     () => mergeLocalRemote(groupRefs(refs, repoKind, remoteNames)),
     [refs, repoKind, remoteNames],
@@ -224,7 +222,7 @@ function RefBadges({
             title={group.label}
           >
             <RefBadgeIcon group={group} />
-            <span className="ref-label">{group.remoteName && !group.isLocal ? `${group.remoteName}/${group.label}` : group.label}</span>
+            <span className="ref-label">{formatRefLabel(group, t('Remote'))}</span>
           </em>
         );
       })}
@@ -280,20 +278,26 @@ function CommitPopover({ detail, anchor, onEnter, onLeave }: { detail: CommitDet
 
 function CommitList({
   history,
+  loading,
   expandedRepoIds,
   onToggleRepoName,
   repoKindById,
   remoteNamesByRepo,
   topologyCommits,
   isFiltered,
+  hasRevisionFilter,
+  repoSortKeyById,
 }: {
   history: CommitNode[];
+  loading: boolean;
   expandedRepoIds: Set<string>;
   onToggleRepoName: (repoId: string) => void;
   repoKindById: Record<string, 'git' | 'svn'>;
   remoteNamesByRepo: Record<string, string[]>;
-  topologyCommits?: CommitNode[];
+  topologyCommits?: GraphCommitNode[];
   isFiltered?: boolean;
+  hasRevisionFilter?: boolean;
+  repoSortKeyById: Record<string, string>;
 }) {
   const { t } = useI18n();
   const parent = useRef<HTMLDivElement>(null);
@@ -305,10 +309,13 @@ function CommitList({
   const openDiff = useAppStore((state) => state.openDiff);
   const openChanges = useAppStore((state) => state.openCommitChanges);
   const loadHistory = useAppStore((state) => state.loadHistory);
-  const commits = useMemo(
-    () => layoutCommits(history, isFiltered, repoKindById, remoteNamesByRepo, topologyCommits),
-    [history, isFiltered, repoKindById, remoteNamesByRepo, topologyCommits],
-  );
+  const commits = useMemo(() => {
+    if (isFiltered) return assignLanes(history, true, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
+    if (hasRevisionFilter) return assignLanes(history, false, repoKindById, remoteNamesByRepo, topologyCommits, repoSortKeyById);
+    return topologyCommits?.length
+      ? layoutVisibleCommits(history, topologyCommits, repoKindById, remoteNamesByRepo, repoSortKeyById)
+      : assignLanes(history, false, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
+  }, [hasRevisionFilter, history, isFiltered, repoKindById, remoteNamesByRepo, repoSortKeyById, topologyCommits]);
   const repoMap = useMemo(() => new Map(repos.map((repo) => [repo.meta.id, repo])), [repos]);
   const repoBlocks = useMemo(() => {
     const blocks: Array<{ repoId: string; name: string; color: string; start: number; count: number }> = [];
@@ -367,7 +374,7 @@ function CommitList({
   };
   const allExpanded = repoBlocks.length > 0 && repoBlocks.every((block) => expandedRepoIds.has(block.repoId));
 
-  return <div className="commit-list" ref={parent} onScroll={(event) => { const element = event.currentTarget; if (hasMore && element.scrollHeight - element.scrollTop - element.clientHeight < 300) void loadHistory(false); }}>
+  return <div className="commit-list" ref={parent} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) void loadHistory(false); }}>
     <div className="commit-list-content" style={{ height: virtualizer.getTotalSize() }}>
       {multiRepo && repoBlocks.map((block) => {
         const blockTopPx = block.start * COMMIT_ROW_HEIGHT;
@@ -402,7 +409,8 @@ function CommitList({
       })}
     </div>
     {popover && <CommitPopover detail={popover.detail} anchor={popover.anchor} onEnter={() => { popoverActive.current = true; if (closeTimer.current) clearTimeout(closeTimer.current); }} onLeave={() => { popoverActive.current = false; setPopover(undefined); }} />}
-    {!commits.length && <div className="empty-state"><Codicon name="history" /><span>{t('No history')}</span></div>}
+    {loading && <div className="history-loading" role="status" aria-live="polite"><Codicon name="loading codicon-modifier-spin" /><span>{t('Loading commits…')}</span></div>}
+    {!loading && !commits.length && <div className="empty-state"><Codicon name="history" /><span>{t('No history')}</span></div>}
     {commits.length > 0 && allExpanded && <span className="sr-only">{t('Collapse project names')}</span>}
   </div>;
 }
@@ -418,11 +426,15 @@ export function HistoryWorkspace() {
   const activeFilter = useRef<HTMLDivElement>(null);
   const selectedRepoId = useAppStore((state) => state.selectedRepoId);
   const allHistory = useAppStore((state) => state.history);
-  const snapshotRepos = useAppStore((state) => state.snapshot?.repositories ?? []);
+  const historyTopology = useAppStore((state) => state.historyTopology);
+  const historyLoading = useAppStore((state) => state.historyLoading);
+  const allSnapshotRepos = useAppStore((state) => state.snapshot?.repositories ?? []);
+  const snapshotRepos = useMemo(() => allSnapshotRepos.filter((repo) => !repo.meta.isWorktree), [allSnapshotRepos]);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const tagsByRepo = useAppStore((state) => state.tagsByRepo);
   const historySearch = useAppStore((state) => state.historyFilter);
   const setHistorySearch = useAppStore((state) => state.setHistoryFilter);
+  const setHistoryScope = useAppStore((state) => state.setHistoryScope);
   const loadHistory = useAppStore((state) => state.loadHistory);
   const refresh = useAppStore((state) => state.refresh);
   const sync = useAppStore((state) => state.sync);
@@ -436,7 +448,6 @@ export function HistoryWorkspace() {
   const resizeBranches = useResizable(branchWidth, 190, 420, (value) => setPanelSize('branches', value));
   const resizeDetail = useResizable(detailWidth, 300, 620, (value) => setPanelSize('detail', value), -1);
 
-  const remotes = useAppStore((state) => state.remotes);
   const repoKindById = useMemo(() => {
     const map: Record<string, 'git' | 'svn'> = {};
     snapshotRepos.forEach((repo) => {
@@ -444,18 +455,26 @@ export function HistoryWorkspace() {
     });
     return map;
   }, [snapshotRepos]);
+  const repoSortKeyById = useMemo(() => Object.fromEntries(snapshotRepos.map((repo) => [
+    repo.meta.id,
+    `${repo.meta.rootPath}::${repo.meta.kind}`,
+  ])), [snapshotRepos]);
   const remoteNamesByRepo = useMemo(() => {
     const map: Record<string, string[]> = {};
     snapshotRepos.forEach((repo) => {
-      const list = remotes[repo.meta.id] ?? [];
-      map[repo.meta.id] = list.map((r) => r.name);
+      map[repo.meta.id] = [...new Set((branchesByRepo[repo.meta.id] ?? [])
+        .filter((branch) => branch.remote && branch.remoteName)
+        .map((branch) => branch.remoteName!))]
+        .sort((left, right) => right.length - left.length);
     });
     return map;
-  }, [snapshotRepos, remotes]);
+  }, [branchesByRepo, snapshotRepos]);
 
   const hasTopologyBreakingFilter = !!(historySearch.trim() || filters.author || filters.from || filters.to);
   const hasBranchFilter = !!filters.ref;
-  const topologyCommits = !hasTopologyBreakingFilter && hasBranchFilter ? allHistory : undefined;
+  const topologyCommits = !hasTopologyBreakingFilter
+    ? (historyTopology.length > 0 ? historyTopology : hasBranchFilter ? allHistory : undefined)
+    : undefined;
 
   const authorOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -463,11 +482,10 @@ export function HistoryWorkspace() {
     return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([author, count]) => ({ id: author, label: author, detail: String(count), icon: 'person' }));
   }, [allHistory]);
   const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repo.meta.name, color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
-  const refOptions = useMemo(() => {
-    const branches = Object.values(branchesByRepo).flat().filter((branch) => !branch.remote).map((branch) => ({ id: branch.name, label: branch.name, icon: 'git-branch' }));
-    const tags = Object.values(tagsByRepo).flat().map((tag) => ({ id: tag.name, label: tag.name, icon: 'tag' }));
-    return [...new Map([...branches, ...tags].map((value) => [value.id, value])).values()].sort((left, right) => left.label.localeCompare(right.label));
-  }, [branchesByRepo, tagsByRepo]);
+  const refOptions = useMemo(
+    () => buildHistoryRefOptions(snapshotRepos, branchesByRepo, tagsByRepo),
+    [branchesByRepo, snapshotRepos, tagsByRepo],
+  );
   const selectedRepo = repoOptions.find((option) => option.id === filters.repoId);
   const selectedRepoLabel = selectedRepo?.label ?? t('Repository');
   const selectedRefLabel = refOptions.find((option) => option.id === filters.ref)?.label ?? t('Branch / Tags');
@@ -477,14 +495,30 @@ export function HistoryWorkspace() {
     if (search && !`${commit.message} ${commit.hash} ${commit.author}`.toLowerCase().includes(search)) return false;
     if (filters.author && commit.author !== filters.author) return false;
     if (filters.repoId && commit.repoId !== filters.repoId) return false;
-    if (filters.ref && !commitRefs(commit).some((ref) => refMatches(ref, filters.ref))) return false;
     const date = Date.parse(commit.committerDate);
     if (filters.from && date < Date.parse(`${filters.from}T00:00:00`)) return false;
     if (filters.to && date > Date.parse(`${filters.to}T23:59:59`)) return false;
     return true;
   }), [allHistory, filters, historySearch]);
-  const updateFilters = (next: Partial<ViewFilters>) => setFilters((current) => ({ ...current, ...next }));
-  const clearFilters = () => setFilters(EMPTY_FILTERS);
+  const updateFilters = (next: Partial<ViewFilters>) => {
+    const updated = { ...filters, ...next };
+    setFilters(updated);
+    if (!Object.hasOwn(next, 'repoId') && !Object.hasOwn(next, 'ref')) return;
+    const selectedRef = refOptions.find((option) => option.id === updated.ref);
+    const repoIds = snapshotRepos
+      .map((repo) => repo.meta.id)
+      .filter((repoId) => (!updated.repoId || repoId === updated.repoId) && (!selectedRef || selectedRef.repoIds.includes(repoId)));
+    const revisionsByRepo = selectedRef
+      ? Object.fromEntries(repoIds.flatMap((repoId) => selectedRef.revisionsByRepo[repoId] ? [[repoId, selectedRef.revisionsByRepo[repoId]]] : []))
+      : {};
+    setHistoryScope({ repoIds: updated.repoId || selectedRef ? repoIds : null, revisionsByRepo });
+    queueMicrotask(() => void loadHistory(true).catch(() => undefined));
+  };
+  const clearFilters = () => {
+    setFilters(EMPTY_FILTERS);
+    setHistoryScope({ repoIds: null, revisionsByRepo: {} });
+    queueMicrotask(() => void loadHistory(true).catch(() => undefined));
+  };
   const fetchAndRefresh = async () => {
     await Promise.all(snapshotRepos.filter((repo) => repo.meta.kind === 'git').map((repo) => sync(repo.meta.id, 'fetch')));
     await refresh();
@@ -509,7 +543,7 @@ export function HistoryWorkspace() {
   if (!selectedRepoId) return <div className="workspace-empty"><Codicon name="repo" />{t('Select a repository')}</div>;
   return <section className="history-workspace">
     <div className="history-filters" onClick={(event) => event.stopPropagation()}>
-      <label className="commit-search"><Codicon name="search" /><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void loadHistory(true); }} placeholder={t('Search commits…')} />{historySearch && <button aria-label={t('Clear')} onClick={() => { setHistorySearch(''); queueMicrotask(() => void loadHistory(true)); }}><Codicon name="close" /></button>}</label>
+      <label className="commit-search"><Codicon name="search" /><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void loadHistory(true).catch(() => undefined); }} placeholder={t('Search commits…')} />{historySearch && <button aria-label={t('Clear')} onClick={() => { setHistorySearch(''); queueMicrotask(() => void loadHistory(true).catch(() => undefined)); }}><Codicon name="close" /></button>}</label>
       <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover title={t('Author')} values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} query={authorQuery} onQuery={setAuthorQuery} />}</div>
       <div ref={menu === 'repos' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon={selectedRepo ? undefined : 'repo'} leading={selectedRepo ? <span className="filter-repo-dot" style={{ background: selectedRepo.color }} /> : undefined} label={selectedRepoLabel} active={!!filters.repoId} open={menu === 'repos'} onClick={() => setMenu(menu === 'repos' ? null : 'repos')} />{menu === 'repos' && <FilterPopover title={t('Repository')} values={repoOptions} selected={filters.repoId} onSelect={(repoId) => { updateFilters({ repoId }); setMenu(null); }} onClear={() => updateFilters({ repoId: '' })} />}</div>
       <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor branch-filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!filters.ref} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <FilterPopover title={t('Branch / Tags')} values={refOptions} selected={filters.ref} onSelect={(ref) => { updateFilters({ ref }); setMenu(null); }} onClear={() => updateFilters({ ref: '' })} query={refQuery} onQuery={setRefQuery} />}</div>
@@ -521,7 +555,7 @@ export function HistoryWorkspace() {
     <div className="history-columns">
       <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} onRefFilter={(ref) => updateFilters({ ref })} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
       {!branchSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeBranches} />}
-      <div className="log-pane"><CommitList history={visibleHistory} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} /></div>
+      <div className="log-pane"><CommitList history={visibleHistory} loading={historyLoading} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} hasRevisionFilter={hasBranchFilter} repoSortKeyById={repoSortKeyById} /></div>
       {!detailSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeDetail} />}
       <div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <button className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></button> : <CommitDetailPanel onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
     </div>

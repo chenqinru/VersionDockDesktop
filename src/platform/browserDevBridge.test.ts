@@ -14,7 +14,7 @@ describe('BrowserDevBridge', () => {
 
   it('provides history, commit detail and memory-only mutations without cwd', async () => {
     const bridge = new BrowserDevBridge();
-    const page = await bridge.request<HistoryPage>({ type: 'history', payload: { workspace_id: 'browser-demo', repo_id: 'admin', skip: 0, limit: 100, filter: null } });
+    const page = await bridge.request<HistoryPage>({ type: 'history', payload: { workspace_id: 'browser-demo', repo_id: 'admin', skip: 0, limit: 100, filter: null, revision: null } });
     const detail = await bridge.request<CommitDetail>({ type: 'commitDetail', payload: { workspace_id: 'browser-demo', repo_id: 'admin', revision: page.commits[0].hash } });
     const command: BridgeCommand = { type: 'stage', payload: { workspace_id: 'browser-demo', repo_id: 'admin', paths: ['apps/web-antd/src/api/infra/config/index.ts'] } };
     await bridge.request(command);

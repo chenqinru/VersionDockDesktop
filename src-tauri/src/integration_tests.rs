@@ -578,10 +578,23 @@ async fn real_git_core_workflow() {
     vcs::commit(&repository, "second commit", false, &[], &token)
         .await
         .unwrap();
-    let history = vcs::history(&repository, 0, 20, None, &token)
+    let history = vcs::history(&repository, 0, 20, None, None, &token)
         .await
         .unwrap();
     assert_eq!(history.commits.len(), 2);
+    let topology = vcs::history_topology(&repository, 1_000, &token)
+        .await
+        .unwrap();
+    assert_eq!(topology.len(), 2);
+    assert_eq!(topology[0].hash, history.commits[0].hash);
+    assert!(topology[0]
+        .refs
+        .iter()
+        .any(|value| value == "refs/heads/main"));
+    assert!(topology[0]
+        .refs
+        .iter()
+        .any(|value| value == "HEAD -> refs/heads/main"));
     vcs::branch_operation(
         &repository,
         BranchOperation::Create {
@@ -597,6 +610,24 @@ async fn real_git_core_workflow() {
         .unwrap()
         .iter()
         .any(|branch| branch.current && branch.name == "feature/test"));
+    let feature_topology = vcs::history_topology(&repository, 1_000, &token)
+        .await
+        .unwrap();
+    assert!(feature_topology[0]
+        .refs
+        .iter()
+        .any(|value| value == "refs/heads/feature/test"));
+    let feature_history = vcs::history(
+        &repository,
+        0,
+        20,
+        None,
+        Some("refs/heads/feature/test".into()),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(feature_history.commits.len(), 2);
     vcs::tag_operation(
         &repository,
         TagOperation::Create {
@@ -1071,7 +1102,7 @@ async fn real_svn_core_workflow() {
     )
     .await
     .unwrap();
-    let history = vcs::history(&repository, 0, 20, None, &token)
+    let history = vcs::history(&repository, 0, 20, None, None, &token)
         .await
         .unwrap();
     assert!(
@@ -1079,6 +1110,11 @@ async fn real_svn_core_workflow() {
         "SVN history: {:#?}",
         history.commits
     );
+    let topology = vcs::history_topology(&repository, 1_000, &token)
+        .await
+        .unwrap();
+    assert!(topology.len() >= 2);
+    assert_eq!(topology[0].hash, history.commits[0].hash);
     let first_revision = history
         .commits
         .iter()

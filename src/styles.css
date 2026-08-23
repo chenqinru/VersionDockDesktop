@@ -266,7 +266,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .commit-resize-grip i { width: 32px; height: 2px; border-radius: 2px; background: var(--versiondock-border); }
 .commit-resize-grip:hover i, .commit-resize-grip:active i { background: var(--versiondock-accent); }
 .commit-targets { min-height: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; }
-.commit-targets > span { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-style: italic; }
+.commit-targets > span { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .commit-targets > em { height: 20px; padding: 1px 7px 1px 4px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid; border-radius: 10px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 16px; font-style: normal; }
 .commit-targets > em button { width: 12px; height: 12px; padding: 0; display: grid; place-items: center; color: inherit; }
 .commit-targets > em button .codicon { font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
@@ -360,6 +360,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 
 .branch-sidebar { height: 100%; overflow: auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); user-select: none; background: var(--versiondock-surface); }
 .branch-sidebar-header { position: sticky; top: 0; z-index: 4; height: 35px; display: flex; align-items: stretch; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); }
+.branch-loading { height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--vscode-progressBar-background, var(--versiondock-accent)); background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.history-loading { position: sticky; z-index: 5; top: 0; height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--vscode-progressBar-background, var(--versiondock-accent)); background: color-mix(in srgb, var(--versiondock-surface) 92%, transparent); border-bottom: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .branch-search { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; padding: 0 8px; background: var(--versiondock-input); color: var(--versiondock-muted); }
 .branch-search > .codicon { flex: 0 0 auto; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
 .branch-search input { min-width: 0; flex: 1; width: 100%; height: 100%; padding: 0 6px 0 0; border: 0; outline: 0; background: transparent; color: var(--versiondock-text); }
@@ -664,7 +666,7 @@ button.danger:not(:disabled):hover,
 .repo-inline-create { padding: 5px 7px; display: grid; gap: 4px; border-bottom: 1px solid var(--versiondock-border-soft); }
 .repo-inline-create > input { width: 100%; height: 26px; padding: 0 6px; border: 1px solid var(--versiondock-border); background: var(--versiondock-input); }
 .repo-inline-create label { display: flex; align-items: center; gap: 4px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
-.stash-empty { min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 6px; font-style: italic; }
+.stash-empty { min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .stash-row { min-height: 40px; padding: 4px 7px; }
 .stash-row > button { height: 23px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .subtree-list-glyph { color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }

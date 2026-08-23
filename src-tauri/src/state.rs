@@ -32,6 +32,9 @@ impl AppState {
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
+        if app.stash_view_mode != "list" && app.stash_view_mode != "tree" {
+            app.stash_view_mode = "tree".into();
+        }
         let mut arguments = std::env::args_os().skip(1);
         while let Some(argument) = arguments.next() {
             if argument == "--workspace" {

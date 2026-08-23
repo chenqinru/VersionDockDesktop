@@ -16,9 +16,11 @@ interface Props {
 type SectionKey = 'local' | `remote:${string}` | 'tags';
 
 export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter, onCollapse }: Props) {
-  const repos = useAppStore((state) => state.snapshot?.repositories ?? []);
+  const allRepos = useAppStore((state) => state.snapshot?.repositories ?? []);
+  const repos = useMemo(() => allRepos.filter((repo) => !repo.meta.isWorktree), [allRepos]);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const tagsByRepo = useAppStore((state) => state.tagsByRepo);
+  const loading = useAppStore((state) => state.historyLoading || state.branchesLoading);
   const tagOperation = useAppStore((state) => state.tagOperation);
   const persistedSections = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
   const sidebarCollapsed = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsed ?? false);
@@ -50,6 +52,11 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         <Codicon name="layout-sidebar-left" />
       </button>
     </div>
+
+    {loading && <div className="branch-loading" role="status" aria-live="polite">
+      <Codicon name="loading codicon-modifier-spin" />
+      <span>{t('Loading branches…')}</span>
+    </div>}
 
     {repos.length > 1 && <div className="branch-repo-list">
       {repos.map((repo) => <RepositoryRow
@@ -196,7 +203,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
   const instance = branch.instances.find((item) => item.branch.current) ?? branch.instances[0];
   const ahead = instance?.branch.ahead ?? 0;
   const behind = instance?.branch.behind ?? 0;
-  const isPrimary = /^(main|master|prod|develop|dev|release)(?:[/-].*)?$/i.test(branch.name);
+  const isPrimary = ['main', 'master', 'trunk', 'develop', 'dev', 'release'].includes(branch.name.toLowerCase());
   return <div
     className={`branch-ref-row ${branch.current ? 'head' : ''} ${selected ? 'filtered' : ''} ${active ? 'active' : ''}`}
     role="button"

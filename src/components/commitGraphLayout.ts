@@ -39,11 +39,6 @@ export type GraphCommit = LaidOutCommit;
 
 export type GraphCommitNode = Pick<CommitNode, 'hash' | 'repoId' | 'committerDate' | 'parents' | 'refs'>;
 
-interface LaneColor {
-  color: string;
-  paletteIndex: number;
-}
-
 interface LayoutRef {
   group: RefGroup;
   priority: number;
@@ -83,41 +78,6 @@ function commitKey(commit: Pick<GraphCommitNode, 'repoId' | 'hash'>): string {
 
 function parentKey(commit: Pick<GraphCommitNode, 'repoId'>, parentHash: string): string {
   return scopedKey(commit.repoId, parentHash);
-}
-
-function paletteDistance(left: number, right: number, size: number): number {
-  const distance = Math.abs(left - right);
-  return Math.min(distance, size - distance);
-}
-
-function pickPaletteIndex(preferred: number, usedIndices: Set<number>): number {
-  const paletteSize = currentPalette().length;
-  if (usedIndices.size === 0) return preferred;
-
-  let bestIndex = preferred;
-  let bestMinimumDistance = -1;
-  for (let index = 0; index < paletteSize; index++) {
-    let minimumDistance = paletteSize;
-    for (const usedIndex of usedIndices) {
-      minimumDistance = Math.min(
-        minimumDistance,
-        paletteDistance(index, usedIndex, paletteSize),
-      );
-    }
-
-    if (
-      minimumDistance > bestMinimumDistance
-      || (
-        minimumDistance === bestMinimumDistance
-        && paletteDistance(index, preferred, paletteSize)
-          < paletteDistance(bestIndex, preferred, paletteSize)
-      )
-    ) {
-      bestMinimumDistance = minimumDistance;
-      bestIndex = index;
-    }
-  }
-  return bestIndex;
 }
 
 function layoutRefPriority(group: RefGroup): number {
@@ -242,6 +202,7 @@ function buildPermanentLayout(
   commits: readonly GraphCommitNode[],
   repoKindById: Readonly<Record<string, 'git' | 'svn'>>,
   remoteNamesByRepo: Readonly<Record<string, readonly string[]>>,
+  repoSortKeyById: Readonly<Record<string, string>>,
 ): PermanentLayoutData {
   const rowByKey = new Map<string, number>();
   commits.forEach((commit, row) => rowByKey.set(commitKey(commit), row));
@@ -295,7 +256,9 @@ function buildPermanentLayout(
       { numeric: true },
     );
     if (nameOrder !== 0) return nameOrder;
-    const rootOrder = commits[leftRow].repoId.localeCompare(commits[rightRow].repoId);
+    const leftRoot = repoSortKeyById[commits[leftRow].repoId] ?? commits[leftRow].repoId;
+    const rightRoot = repoSortKeyById[commits[rightRow].repoId] ?? commits[rightRow].repoId;
+    const rootOrder = leftRoot.localeCompare(rightRoot);
     return rootOrder !== 0 ? rootOrder : leftRow - rightRow;
   });
 
@@ -339,8 +302,7 @@ function buildPermanentLayout(
   }
 
   const palette = currentPalette();
-  const usedPaletteIndices = new Set<number>();
-  const colorByHead = new Map<number, LaneColor>();
+  const colorByHead = new Map<number, string>();
   for (const headRow of importantHeads) {
     const commit = commits[headRow];
     const vcsKind = repoKindById[commit.repoId] ?? 'git';
@@ -357,20 +319,21 @@ function buildPermanentLayout(
       && !ref.isTag
       && !ref.isRemoteHead;
 
-    let laneColor: LaneColor;
+    let laneColor: string;
     if (isBranch && isPrimaryBranch(ref.label)) {
-      laneColor = { color: primaryBranchColor(), paletteIndex: -1 };
+      laneColor = primaryBranchColor();
     } else if (isHeadCommit) {
-      laneColor = { color: headColor(), paletteIndex: -2 };
+      laneColor = headColor();
     } else if (ref?.isTag) {
-      laneColor = { color: tagColor(), paletteIndex: -3 };
+      laneColor = tagColor();
     } else {
-      const preferred = ref === null
+      // Named branch colors must only depend on the branch name. Topology is
+      // loaded asynchronously, so collision-based colors would change when
+      // the permanent graph replaces the first visible commit batch.
+      const paletteIndex = ref === null
         ? (layoutIndex[headRow] - 1) % palette.length
         : branchPaletteIndex(ref.label);
-      const paletteIndex = pickPaletteIndex(preferred, usedPaletteIndices);
-      usedPaletteIndices.add(paletteIndex);
-      laneColor = { color: palette[paletteIndex], paletteIndex };
+      laneColor = palette[paletteIndex];
     }
     colorByHead.set(headRow, laneColor);
   }
@@ -378,7 +341,7 @@ function buildPermanentLayout(
   const nodeColor = (row: number): string => {
     const headRow = owningHead[row] >= 0 ? owningHead[row] : row;
     if (layoutIndex[row] === layoutIndex[headRow]) {
-      return colorByHead.get(headRow)?.color ?? anonymousLaneColor(layoutIndex[row]);
+      return colorByHead.get(headRow) ?? anonymousLaneColor(layoutIndex[row]);
     }
     return palette[(layoutIndex[row] - 1) % palette.length];
   };
@@ -401,6 +364,7 @@ export function assignLanes<T extends GraphCommitNode>(
   repoKindById: Readonly<Record<string, 'git' | 'svn'>> = {},
   remoteNamesByRepo: Readonly<Record<string, readonly string[]>> = {},
   topologyCommits?: readonly GraphCommitNode[],
+  repoSortKeyById: Readonly<Record<string, string>> = {},
 ): Array<T & GraphLayoutData> {
   if (commits.length === 0) return [];
 
@@ -432,12 +396,13 @@ export function assignLanes<T extends GraphCommitNode>(
     topologyCommits ?? commits,
     repoKindById,
     remoteNamesByRepo,
+    repoSortKeyById,
   );
   const needsFallback = commits.some((commit) => (
     !permanentLayout.layoutIndexByKey.has(commitKey(commit))
   ));
   const fallbackLayout = needsFallback
-    ? buildPermanentLayout(commits, repoKindById, remoteNamesByRepo)
+    ? buildPermanentLayout(commits, repoKindById, remoteNamesByRepo, repoSortKeyById)
     : permanentLayout;
   const fallbackOffset = permanentLayout.maxLayoutIndex;
   const layoutIndex = commits.map((commit) => {
@@ -613,6 +578,42 @@ export function layoutCommits<T extends GraphCommitNode>(
   repoKindById: Readonly<Record<string, 'git' | 'svn'>> = {},
   remoteNamesByRepo: Readonly<Record<string, readonly string[]>> = {},
   topologyCommits?: readonly GraphCommitNode[],
+  repoSortKeyById: Readonly<Record<string, string>> = {},
 ): Array<T & GraphLayoutData> {
-  return assignLanes(commits, isFiltered, repoKindById, remoteNamesByRepo, topologyCommits);
+  return assignLanes(commits, isFiltered, repoKindById, remoteNamesByRepo, topologyCommits, repoSortKeyById);
+}
+
+/**
+ * VersionDock lays out the complete graph first, then projects that exact row
+ * layout onto the paginated visible prefix. Rebuilding graphLines from only
+ * the visible page changes boundary arrows and crossing lanes.
+ */
+export function layoutVisibleCommits<T extends GraphCommitNode>(
+  commits: readonly T[],
+  topologyCommits: readonly GraphCommitNode[],
+  repoKindById: Readonly<Record<string, 'git' | 'svn'>> = {},
+  remoteNamesByRepo: Readonly<Record<string, readonly string[]>> = {},
+  repoSortKeyById: Readonly<Record<string, string>> = {},
+): Array<T & GraphLayoutData> {
+  if (commits.length === 0) return [];
+  const laidOutTopology = assignLanes(topologyCommits, false, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
+  if (laidOutTopology.length < commits.length) {
+    return assignLanes(commits, false, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
+  }
+  const topologyRowByKey = new Map<string, number>();
+  laidOutTopology.forEach((commit, row) => topologyRowByKey.set(commitKey(commit), row));
+  const matchesVisiblePrefix = commits.every((commit, row) => topologyRowByKey.get(commitKey(commit)) === row);
+  if (!matchesVisiblePrefix) {
+    return assignLanes(commits, false, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
+  }
+  const layoutByKey = new Map<string, GraphLayoutData>();
+  for (const commit of laidOutTopology) {
+    layoutByKey.set(commitKey(commit), {
+      lane: commit.lane,
+      totalLanes: commit.totalLanes,
+      graphLines: commit.graphLines,
+      dotColor: commit.dotColor,
+    });
+  }
+  return commits.map((commit) => ({ ...commit, ...layoutByKey.get(commitKey(commit))! }));
 }

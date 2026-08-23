@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryWorkspace } from './HistoryWorkspace';
-import { buildDetailTree, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches } from './HistoryWorkspace.helpers';
+import { formatRefLabel } from '../history/refs';
+import { buildDetailTree, buildHistoryRefOptions, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches } from './HistoryWorkspace.helpers';
 import { BranchSidebar } from './BranchSidebar';
 import { useAppStore } from '../store/appStore';
 import type { BootstrapData, WorkspaceSnapshot } from '../bindings/generated';
@@ -21,7 +22,7 @@ const bootstrap = (compare: boolean, remoteManagement: boolean): BootstrapData =
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparison: undefined });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparison: undefined });
 });
 
 describe('HistoryWorkspace capabilities', () => {
@@ -46,9 +47,36 @@ describe('HistoryWorkspace capabilities', () => {
     fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
     expect(screen.getAllByText('Repo').length).toBeGreaterThan(0);
   });
+
+  it('shows non-blocking loading feedback and formats merged local/remote refs', () => {
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', historyLoading: true,
+      history: [{ repoId: 'repo', hash: 'abc', shortHash: 'abc', parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: refs', refs: ['main', 'origin/main'] }],
+      remotes: { repo: [{ name: 'origin', fetchUrl: 'https://example.test/repo.git', pushUrl: 'https://example.test/repo.git' }] },
+    });
+    render(<HistoryWorkspace />);
+    expect(screen.getByText('Loading branches…')).toBeInTheDocument();
+    expect(screen.getByText('Loading commits…')).toBeInTheDocument();
+  });
+
+  it('formats a merged local and remote ref without translation placeholders', () => {
+    expect(formatRefLabel({ key: 'main', label: 'main', remoteName: 'origin', isHead: false, isLocal: true, isRemote: true, isTag: false, isDetached: false, isRemoteHead: false, isSvnRevision: false }, 'Remote')).toBe('origin & main');
+  });
 });
 
 describe('HistoryWorkspace data helpers', () => {
+  it('maps local, remote, and tag filters to unambiguous full Git refs', () => {
+    const options = buildHistoryRefOptions(snapshot.repositories, {
+      repo: [
+        { name: 'feature/ui', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'origin/main', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
+      ],
+    }, { repo: [{ name: 'v1.0.0' }] });
+    expect(options.find((option) => option.id === 'feature/ui')?.revisionsByRepo.repo).toBe('refs/heads/feature/ui');
+    expect(options.find((option) => option.id === 'origin/main')?.revisionsByRepo.repo).toBe('refs/remotes/origin/main');
+    expect(options.find((option) => option.id === 'v1.0.0')?.revisionsByRepo.repo).toBe('refs/tags/v1.0.0');
+  });
+
   it('groups remote namespaces and preserves mixed repository identity', () => {
     const svnRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'svn', name: 'SVN', kind: 'svn' as const } };
     const model = buildSidebarModel([snapshot.repositories[0], svnRepo], {

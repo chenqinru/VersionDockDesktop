@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CommitNode } from '../bindings/generated';
-import { assignLanes, layoutCommits, LONG_EDGE_MIN_ROWS } from './commitGraphLayout';
+import { assignLanes, layoutCommits, layoutVisibleCommits, LONG_EDGE_MIN_ROWS } from './commitGraphLayout';
+import { branchPaletteIndex, isPrimaryBranch } from './branchColor';
 
 const commit = (repoId: string, hash: string, parents: string[]): CommitNode => ({
   repoId,
@@ -21,6 +22,12 @@ const refCommit = (repoId: string, hash: string, parents: string[], refs: string
 });
 
 describe('commitGraphLayout', () => {
+  it('uses VersionDock exact primary-branch names', () => {
+    expect(isPrimaryBranch('main')).toBe(true);
+    expect(isPrimaryBranch('release')).toBe(true);
+    expect(isPrimaryBranch('prod')).toBe(false);
+    expect(isPrimaryBranch('release/candidate')).toBe(false);
+  });
   it('lays out a single linear commit branch correctly', () => {
     const list = [
       refCommit('repo', 'c3', ['c2'], ['HEAD -> main']),
@@ -117,6 +124,35 @@ describe('commitGraphLayout', () => {
     expect(laidOut).toHaveLength(2);
     expect(laidOut[0].hash).toBe('main-head');
     expect(laidOut[0].dotColor).toBeDefined();
+  });
+
+  it('projects exact full-topology lines onto the visible prefix', () => {
+    const topology = [
+      refCommit('repo', 'head', ['middle'], ['HEAD -> main']),
+      commit('repo', 'middle', ['root']),
+      commit('repo', 'root', []),
+    ];
+    const visible = topology.slice(0, 2);
+    const rebuiltPage = assignLanes(visible);
+    const projectedPage = layoutVisibleCommits(visible, topology);
+    expect(rebuiltPage[1].graphLines.some((line) => line.type === 'fork-out')).toBe(false);
+    expect(projectedPage[1].graphLines.some((line) => line.type === 'fork-out')).toBe(true);
+    expect(projectedPage).toEqual(assignLanes(topology).slice(0, 2).map((layout, index) => ({ ...visible[index], ...layout })));
+  });
+
+  it('keeps a named branch color stable when another graph head appears', () => {
+    const feature = refCommit('repo', 'feature-head', ['root'], ['feature/x']);
+    const root = commit('repo', 'root', []);
+    const collisionName = Array.from({ length: 1_000 }, (_, index) => `feature/a-${index}`)
+      .find((name) => branchPaletteIndex(name) === branchPaletteIndex('feature/x'))!;
+    const initial = assignLanes([feature, root], false, { repo: 'git' });
+    const expanded = assignLanes([
+      refCommit('repo', 'other-head', ['root'], [collisionName]),
+      feature,
+      root,
+    ], false, { repo: 'git' });
+    expect(expanded.find((item) => item.hash === feature.hash)?.dotColor)
+      .toBe(initial.find((item) => item.hash === feature.hash)?.dotColor);
   });
 
   it('preserves repoId across multi-repository interleaved commits', () => {

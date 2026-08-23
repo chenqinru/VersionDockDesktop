@@ -524,7 +524,6 @@ const css = {
     padding: '16px 12px',
     fontSize: '12px',
     color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))',
-    fontStyle: 'italic' as const,
     textAlign: 'center' as const,
   },
   errorRow: {

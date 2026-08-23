@@ -233,13 +233,26 @@ async fn dispatch(
             skip,
             limit,
             filter,
+            revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit =
                 state.read_limit.acquire().await.map_err(|_| {
                     DesktopError::new("APP_CLOSING", "Application is closing", true)
                 })?;
-            json(vcs::history(&repo, skip, limit, filter, token).await?)
+            json(vcs::history(&repo, skip, limit, filter, revision, token).await?)
+        }
+        BridgeCommand::HistoryTopology {
+            workspace_id,
+            repo_id,
+            svn_limit,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit =
+                state.read_limit.acquire().await.map_err(|_| {
+                    DesktopError::new("APP_CLOSING", "Application is closing", true)
+                })?;
+            json(vcs::history_topology(&repo, svn_limit, token).await?)
         }
         BridgeCommand::CommitDetail {
             workspace_id,

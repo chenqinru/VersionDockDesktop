@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type {
-  AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument,
+  AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation,
   UnpushedCommit, MergeCommitSummary,
@@ -12,38 +12,92 @@ export type WorkspaceMode = 'history' | 'diff' | 'changes' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
 export type DiffRange = { fromRevision: string; toRevision: string };
 export type CommitChangesModel = { commits: CommitNode[]; files: DetailFileTarget[] };
+export type HistoryScope = {
+  repoIds: string[] | null;
+  revisionsByRepo: Record<string, string>;
+};
 
-function compareHistoryHeads(left: CommitNode, right: CommitNode): number {
-  const leftTime = Date.parse(left.committerDate);
-  const rightTime = Date.parse(right.committerDate);
+const HISTORY_PAGE_SIZE = 100;
+const HISTORY_MAX_COMMITS = 1_000;
+
+interface LogCandidate<T extends GraphCommitNode> {
+  commit: T;
+  logIndex: number;
+  insertionOrder: number;
+}
+
+function javaHashMapCapacity(size: number): number {
+  let capacity = 16;
+  while (size > capacity * 0.75) capacity *= 2;
+  return capacity;
+}
+
+function javaStringHash(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (Math.imul(31, hash) + value.charCodeAt(index)) | 0;
+  }
+  return hash;
+}
+
+function javaHashBucket(value: string, capacity: number): number {
+  const hash = javaStringHash(value);
+  return (hash ^ (hash >>> 16)) & (capacity - 1);
+}
+
+function compareLogCandidates<T extends GraphCommitNode>(
+  left: LogCandidate<T>,
+  right: LogCandidate<T>,
+  hashCapacity: number,
+): number {
+  const leftTime = Date.parse(left.commit.committerDate);
+  const rightTime = Date.parse(right.commit.committerDate);
   if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return rightTime - leftTime;
   if (Number.isFinite(rightTime) !== Number.isFinite(leftTime)) return Number.isFinite(rightTime) ? 1 : -1;
-  const byRepo = left.repoId.localeCompare(right.repoId);
-  return byRepo !== 0 ? byRepo : right.hash.localeCompare(left.hash);
+
+  // Match JetBrains' Java HashMap traversal for equal timestamps without
+  // depending on object insertion order in the browser.
+  const byBucket = javaHashBucket(right.commit.hash, hashCapacity)
+    - javaHashBucket(left.commit.hash, hashCapacity);
+  if (byBucket !== 0) return byBucket;
+  return right.insertionOrder - left.insertionOrder;
 }
 
 /** Merge each repository's already-topological log without reordering a repo's parent chain. */
-export function interleaveHistory(historyByRepo: Record<string, CommitNode[]>): CommitNode[] {
+function interleaveLogs<T extends GraphCommitNode>(historyByRepo: Record<string, T[]>): T[] {
   const logs = Object.values(historyByRepo);
   const positions = logs.map(() => 0);
   const total = logs.reduce((count, log) => count + log.length, 0);
-  const result: CommitNode[] = [];
-  while (result.length < total) {
-    let selectedIndex = -1;
-    let selected: CommitNode | undefined;
-    for (let index = 0; index < logs.length; index += 1) {
-      const candidate = logs[index][positions[index]];
-      if (!candidate) continue;
-      if (!selected || compareHistoryHeads(candidate, selected) < 0) {
-        selected = candidate;
+  const result: T[] = [];
+  const active: Array<LogCandidate<T>> = [];
+  let nextInsertionOrder = 0;
+  for (let logIndex = 0; logIndex < logs.length; logIndex += 1) {
+    const commit = logs[logIndex][0];
+    if (commit) active.push({ commit, logIndex, insertionOrder: nextInsertionOrder++ });
+  }
+  const hashCapacity = javaHashMapCapacity(active.length);
+  while (active.length > 0 && result.length < total) {
+    let selectedIndex = 0;
+    for (let index = 1; index < active.length; index += 1) {
+      if (compareLogCandidates(active[index], active[selectedIndex], hashCapacity) < 0) {
         selectedIndex = index;
       }
     }
-    if (!selected || selectedIndex < 0) break;
-    result.push(selected);
-    positions[selectedIndex] += 1;
+    const selected = active[selectedIndex];
+    result.push(selected.commit);
+    positions[selected.logIndex] += 1;
+    const nextCommit = logs[selected.logIndex][positions[selected.logIndex]];
+    if (nextCommit) {
+      active[selectedIndex] = { commit: nextCommit, logIndex: selected.logIndex, insertionOrder: nextInsertionOrder++ };
+    } else {
+      active.splice(selectedIndex, 1);
+    }
   }
   return result;
+}
+
+export function interleaveHistory(historyByRepo: Record<string, CommitNode[]>): CommitNode[] {
+  return interleaveLogs(historyByRepo);
 }
 
 export interface AppStore {
@@ -62,7 +116,12 @@ export interface AppStore {
   history: CommitNode[];
   historyHasMore: boolean;
   historyByRepo: Record<string, CommitNode[]>;
+  historyTopology: GraphCommitNode[];
+  historyTopologyByRepo: Record<string, GraphCommitNode[]>;
   historyHasMoreByRepo: Record<string, boolean>;
+  historyLoading: boolean;
+  branchesLoading: boolean;
+  historyScope: HistoryScope;
   historyFilter: string;
   selectedCommit?: CommitDetail;
   selectedCommits: CommitNode[];
@@ -105,6 +164,7 @@ export interface AppStore {
   sync: (repoId: string, action: 'fetch' | 'pull' | 'push' | 'update') => Promise<void>;
   loadHistory: (reset?: boolean) => Promise<void>;
   setHistoryFilter: (value: string) => void;
+  setHistoryScope: (scope: HistoryScope) => void;
   selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
   loadCommitDetail: (commit: CommitNode) => Promise<CommitDetail>;
   loadMergeCommits: (commit: CommitNode) => Promise<void>;
@@ -139,6 +199,7 @@ export interface AppStore {
   setUiFontSize: (value: UiFontSizePreference) => void;
   setExternalEditor: (executable: string, args: string[]) => void;
   setFileViewMode: (value: 'tree' | 'list') => void;
+  setStashViewMode: (value: 'tree' | 'list') => void;
   setActiveTab: (value: 'changes' | 'shelf' | 'stash' | 'worktree' | 'subtree' | 'push') => void;
   setPanelSize: (key: 'commit' | 'branches' | 'detail', value: number) => void;
   setBranchSidebarState: (collapsed: boolean, collapsedSections: string[]) => void;
@@ -147,7 +208,7 @@ export interface AppStore {
 
 const emptyState: AppStateSnapshot = {
   theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [],
-  panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null,
+  panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', externalEditor: null,
   branchSidebarCollapsed: false, branchSidebarCollapsedSections: [],
 };
 
@@ -158,6 +219,7 @@ let watcherRefreshInFlight = false;
 let watcherRefreshQueued = false;
 let commitSelectionGeneration = 0;
 let changesDiffGeneration = 0;
+let historyRequestGeneration = 0;
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -194,7 +256,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = snapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : snapshot.repositories[0]?.meta.id;
       set(workspaceChanged
-      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyHasMoreByRepo: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
+      ? { snapshot, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot, selectedRepoId });
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     await Promise.all([
@@ -225,7 +287,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, busy: false, mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, unpushedCommits: {}, remotes: {},
+    ready: false, busy: false, mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, unpushedCommits: {}, remotes: {},
 
     initialize: async (value) => {
       set({ bridge: value });
@@ -289,22 +351,26 @@ export const useAppStore = create<AppStore>((set, get) => {
     selectRepo: async (repoId, reload = false) => {
       const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
       if (!repo) return;
+      const repoChanged = get().selectedRepoId !== repoId;
       set((state) => ({
         selectedRepoId: repoId,
-        selectedCommit: undefined,
-        selectedCommits: [],
-        selectedPrimaryKey: undefined,
-        selectedCommitLoading: {},
-        mergeCommitsLoading: {},
-        changes: undefined,
-        changesDiff: undefined,
-        mode: 'history',
+        ...(repoChanged ? {
+          selectedCommit: undefined,
+          selectedCommits: [],
+          selectedPrimaryKey: undefined,
+          selectedCommitLoading: {},
+          mergeCommitsLoading: {},
+          changes: undefined,
+          changesDiff: undefined,
+          mode: 'history' as const,
+        } : {}),
         branches: state.branchesByRepo[repoId] ?? [],
         tags: state.tagsByRepo[repoId] ?? [],
         comparison: undefined,
       }));
       if (!reload && Object.keys(get().historyByRepo).length > 0) return;
       await withBusy(async () => {
+        set({ branchesLoading: true });
         const requests: Promise<unknown>[] = [get().loadHistory(true)];
         if (get().bootstrap?.capabilities.changelist) requests.push(get().loadChangelists(repoId));
         if (repo.meta.kind === 'git' && get().bootstrap?.capabilities.subtree) requests.push(get().loadSubtrees(repoId));
@@ -318,7 +384,11 @@ export const useAppStore = create<AppStore>((set, get) => {
             tags: item.meta.id === get().selectedRepoId ? tags : state.tags,
           }))));
         }
-        await Promise.all(requests);
+        try {
+          await Promise.all(requests);
+        } finally {
+          set({ branchesLoading: false });
+        }
         const firstCommit = get().history[0];
         if (firstCommit && !get().selectedCommits.length) await get().selectCommit(firstCommit);
       });
@@ -384,28 +454,64 @@ export const useAppStore = create<AppStore>((set, get) => {
     }),
 
     loadHistory: async (reset = false) => {
-      const repos = get().snapshot?.repositories ?? [];
-      if (!repos.length) return;
-      const requestWorkspace = workspaceId();
-      const currentByRepo = reset ? {} : get().historyByRepo;
-      const targets = reset ? repos : repos.filter((repo) => get().historyHasMoreByRepo[repo.meta.id] !== false);
-      const pages = await Promise.all(targets.map(async (repo) => {
-        const existing = currentByRepo[repo.meta.id] ?? [];
-        const page = await bridge().request<HistoryPage>({ type: 'history', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, skip: existing.length, limit: 100, filter: get().historyFilter || null } });
-        return { repoId: repo.meta.id, page, existing };
-      }));
-      if (get().snapshot?.workspace.id !== requestWorkspace) return;
-      const nextByRepo = { ...currentByRepo };
-      const nextHasMore = reset ? {} as Record<string, boolean> : { ...get().historyHasMoreByRepo };
-      for (const { repoId, page, existing } of pages) {
-        nextByRepo[repoId] = [...existing, ...page.commits];
-        nextHasMore[repoId] = page.hasMore;
+      const allRepos = (get().snapshot?.repositories ?? []).filter((repo) => !repo.meta.isWorktree);
+      const scope = get().historyScope;
+      const repoIds = scope.repoIds ? new Set(scope.repoIds) : null;
+      const repos = repoIds ? allRepos.filter((repo) => repoIds.has(repo.meta.id)) : allRepos;
+      if (!repos.length) {
+        if (reset) set({ history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMore: false, historyHasMoreByRepo: {}, historyLoading: false });
+        return;
       }
-      const history = interleaveHistory(nextByRepo);
-      set({ historyByRepo: nextByRepo, historyHasMoreByRepo: nextHasMore, history, historyHasMore: Object.values(nextHasMore).some(Boolean) });
+      if (!reset && get().historyLoading) return;
+      if (!reset && get().history.length >= HISTORY_MAX_COMMITS) {
+        set({ historyHasMore: false });
+        return;
+      }
+      const requestGeneration = reset ? ++historyRequestGeneration : historyRequestGeneration;
+      const requestWorkspace = workspaceId();
+      const visibleLimit = Math.min((reset ? 0 : get().history.length) + HISTORY_PAGE_SIZE, HISTORY_MAX_COMMITS);
+      set({ historyLoading: true });
+      try {
+        // VersionDock fetches the prefix needed from every repository, merges
+        // those logs, and only then applies the workspace-wide page boundary.
+        const pagesPromise = Promise.all(repos.map(async (repo) => {
+          const page = await bridge().request<HistoryPage>({ type: 'history', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, skip: 0, limit: visibleLimit, filter: get().historyFilter || null, revision: scope.revisionsByRepo[repo.meta.id] ?? null } });
+          return { repoId: repo.meta.id, page };
+        }));
+        const topologyPromise = reset && !get().historyFilter
+          ? Promise.all(repos.map(async (repo) => ({
+            repoId: repo.meta.id,
+            commits: await bridge().request<GraphCommitNode[]>({ type: 'historyTopology', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, svn_limit: 1000 } }).catch(() => []),
+          })))
+          : Promise.resolve(undefined);
+        const [pages, topology] = await Promise.all([pagesPromise, topologyPromise]);
+        if (requestGeneration !== historyRequestGeneration || get().snapshot?.workspace.id !== requestWorkspace) return;
+        const nextByRepo: Record<string, CommitNode[]> = {};
+        const nextHasMore: Record<string, boolean> = {};
+        for (const { repoId, page } of pages) {
+          nextByRepo[repoId] = page.commits;
+          nextHasMore[repoId] = page.hasMore;
+        }
+        const mergedHistory = interleaveHistory(nextByRepo);
+        const history = mergedHistory.slice(0, visibleLimit);
+        const historyHasMore = visibleLimit < HISTORY_MAX_COMMITS
+          && (mergedHistory.length > visibleLimit || Object.values(nextHasMore).some(Boolean));
+        if (topology) {
+          const historyTopologyByRepo = Object.fromEntries(topology.map((item) => [item.repoId, item.commits]));
+          set({ historyByRepo: nextByRepo, historyHasMoreByRepo: nextHasMore, history, historyHasMore, historyTopologyByRepo, historyTopology: interleaveLogs(historyTopologyByRepo) });
+        } else {
+          set({ historyByRepo: nextByRepo, historyHasMoreByRepo: nextHasMore, history, historyHasMore });
+        }
+      } catch (error) {
+        set({ error: errorText(error) });
+        throw error;
+      } finally {
+        if (requestGeneration === historyRequestGeneration) set({ historyLoading: false });
+      }
     },
 
     setHistoryFilter: (value) => set({ historyFilter: value }),
+    setHistoryScope: (historyScope) => set({ historyScope }),
 
     loadCommitDetail: async (commit) => {
       const key = commitKey(commit.repoId, commit.hash);
@@ -693,6 +799,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     setFileViewMode: (fileViewMode) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;
       bootstrap.state.fileViewMode = fileViewMode; set({ bootstrap: { ...bootstrap } }); persist();
+    },
+    setStashViewMode: (stashViewMode) => {
+      const bootstrap = get().bootstrap; if (!bootstrap) return;
+      bootstrap.state.stashViewMode = stashViewMode; set({ bootstrap: { ...bootstrap } }); persist();
     },
     setActiveTab: (activeTab) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;

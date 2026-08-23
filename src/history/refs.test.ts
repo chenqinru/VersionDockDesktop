@@ -14,9 +14,10 @@ describe('history refs', () => {
     expect(commitRefs({ refs: ['main', 'origin/main'] }).map((ref) => ref.label)).toEqual(['main', 'origin/main']);
   });
 
-  it('recognizes primary branch families used by the reference panel', () => {
+  it('recognizes only the exact primary branch names used by VersionDock', () => {
     expect(isPrimaryBranch('main')).toBe(true);
-    expect(isPrimaryBranch('prod/task-center')).toBe(true);
+    expect(isPrimaryBranch('prod/task-center')).toBe(false);
+    expect(isPrimaryBranch('release/candidate')).toBe(false);
     expect(isPrimaryBranch('feature/main')).toBe(false);
   });
 
@@ -35,4 +36,3 @@ describe('history refs', () => {
     expect(tagGroup?.label).toBe('v1.0.0');
   });
 });
-

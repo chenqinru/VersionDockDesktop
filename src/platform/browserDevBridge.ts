@@ -1,7 +1,7 @@
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
   MergeCommitSummary,
-  DiffDocument, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
+  DiffDocument, GraphCommitNode, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
   TagInfo, WorkspaceSnapshot, WorktreeEntry,
 } from '../bindings/generated';
 import type { BridgeEvent, RequestOptions, VersionDockBridge } from './bridge';
@@ -345,9 +345,22 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'repositoryStatus': return this.repositories.find((repo) => repo.meta.id === command.payload.repo_id);
       case 'history': {
         const values = activeHistories[command.payload.repo_id] ?? [];
-        const filtered = command.payload.filter ? values.filter((commit) => commit.message.toLowerCase().includes(command.payload.filter!.toLowerCase())) : values;
+        const revision = command.payload.revision?.replace(/^refs\/(?:heads|tags)\//, '');
+        const head = revision ? values.find((commit) => commit.refs.some((ref) => ref.replace(/^HEAD -> /, '').replace(/^refs\/(?:heads|tags)\//, '').replace(/^tag: /, '') === revision)) : undefined;
+        const reachable = new Set<string>();
+        const byHash = new Map(values.map((commit) => [commit.hash, commit]));
+        const pending = head ? [head.hash] : [];
+        while (pending.length) {
+          const hash = pending.pop()!;
+          if (reachable.has(hash)) continue;
+          reachable.add(hash);
+          pending.push(...(byHash.get(hash)?.parents ?? []));
+        }
+        const scoped = head ? values.filter((commit) => reachable.has(commit.hash)) : values;
+        const filtered = command.payload.filter ? scoped.filter((commit) => commit.message.toLowerCase().includes(command.payload.filter!.toLowerCase())) : scoped;
         return { commits: filtered.slice(command.payload.skip, command.payload.skip + command.payload.limit), hasMore: false } satisfies HistoryPage;
       }
+      case 'historyTopology': return (activeHistories[command.payload.repo_id] ?? []).map(({ repoId, hash, parents, committerDate, refs }) => ({ repoId, hash, parents, committerDate, refs })) satisfies GraphCommitNode[];
       case 'branches': return this.branchValues[command.payload.repo_id] ?? [];
       case 'tags': return this.tagValues[command.payload.repo_id] ?? [];
       case 'commitDetail': return this.commitDetail(command.payload.repo_id, command.payload.revision);

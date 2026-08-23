@@ -10,6 +10,7 @@ export type AppStateSnapshot = {
 	panelSizes: PanelSizes,
 	activeTab: string,
 	fileViewMode: string,
+	stashViewMode?: string,
 	externalEditor: ExternalEditor | null,
 	branchSidebarCollapsed?: boolean,
 	branchSidebarCollapsedSections?: string[],
@@ -91,6 +92,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	skip: number,
 	limit: number,
 	filter: string | null,
+	revision: string | null,
+} } | { type: "historyTopology"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	svn_limit: number,
 } } | { type: "commitDetail"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -289,6 +295,14 @@ export type FileChange = {
 	staged: boolean,
 	unstaged: boolean,
 	conflicted: boolean,
+};
+
+export type GraphCommitNode = {
+	repoId: string,
+	hash: string,
+	parents: string[],
+	committerDate: string,
+	refs: string[],
 };
 
 export type HistoryPage = {

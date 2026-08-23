@@ -814,7 +814,6 @@ const css = {
     padding: '16px 12px',
     fontSize: '12px',
     color: 'var(--versiondock-muted, var(--vscode-descriptionForeground, #888))',
-    fontStyle: 'italic' as const,
     textAlign: 'center' as const,
     display: 'flex',
     alignItems: 'center',

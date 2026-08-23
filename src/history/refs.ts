@@ -14,6 +14,12 @@ export interface RefGroup {
   isSvnRevision?: boolean; // SVN HEAD/BASE revision marker, not a Git ref
 }
 
+export function formatRefLabel(group: RefGroup, remoteFallback: string): string {
+  if (group.isLocal && group.isRemote) return `${group.remoteName || remoteFallback} & ${group.label}`;
+  if (group.remoteName) return `${group.remoteName}/${group.label}`;
+  return group.label;
+}
+
 export function splitRemoteRefName(
   refName: string,
   remoteNames: readonly string[] = [],
@@ -325,4 +331,3 @@ export function refIcon(kind: CommitRefKind): string {
   if (kind === 'svn') return 'versions';
   return 'git-branch';
 }
-

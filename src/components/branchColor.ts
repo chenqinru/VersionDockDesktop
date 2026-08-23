@@ -18,7 +18,7 @@ export const PALETTE_LIGHT: readonly string[] = [
   '#982020', '#287878', '#6a2496', '#2a6890',
 ];
 
-const PRIMARY_BRANCH_PATTERN = /^(main|master|prod|production|develop|development|dev|trunk|release)(?:[/-].*)?$/i;
+const PRIMARY_BRANCHES = new Set(['main', 'master', 'trunk', 'develop', 'dev', 'release']);
 
 export function isPrimaryBranch(name: string): boolean {
   let branch = name;
@@ -28,10 +28,8 @@ export function isPrimaryBranch(name: string): boolean {
     const remoteRef = branch.slice('refs/remotes/'.length);
     const slash = remoteRef.indexOf('/');
     branch = slash >= 0 ? remoteRef.slice(slash + 1) : remoteRef;
-  } else if (/^(origin|upstream|gitee|remotes)\//.test(branch)) {
-    branch = branch.slice(branch.indexOf('/') + 1);
   }
-  return PRIMARY_BRANCH_PATTERN.test(branch.toLowerCase());
+  return PRIMARY_BRANCHES.has(branch.toLowerCase());
 }
 
 export function isDarkTheme(): boolean {
@@ -128,7 +126,6 @@ export function normalizeBranchName(name: string): string {
     const slash = remoteRef.indexOf('/');
     return slash >= 0 ? remoteRef.slice(slash + 1) : remoteRef;
   }
-  if (/^(origin|upstream|gitee|remotes)\//.test(name)) return name.slice(name.indexOf('/') + 1);
   return name;
 }
 
@@ -149,4 +146,3 @@ export function branchColor(name: string, isHead = false, isTag = false): string
   const palette = currentPalette();
   return palette[branchPaletteIndex(normalized) % palette.length];
 }
-
