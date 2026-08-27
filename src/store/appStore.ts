@@ -5,7 +5,7 @@ import type {
   WorkspaceSnapshot, WorkspaceDescriptor, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
 } from '../bindings/generated';
-import { BridgeError, type VersionDockBridge } from '../platform/bridge';
+import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
 
 export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'merge';
@@ -16,6 +16,18 @@ export type HistoryScope = {
   repoIds: string[] | null;
   revisionsByRepo: Record<string, string>;
 };
+
+export interface AppNotification {
+  id: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  title: string;
+  message: string;
+  timestamp: number;
+  read: boolean;
+  actionLabel?: string;
+  actionKey?: 'pullAll' | 'pushAll' | 'openConflicts' | 'openIdentity' | 'refresh';
+  actionData?: any;
+}
 
 const HISTORY_PAGE_SIZE = 100;
 
@@ -157,6 +169,9 @@ export interface AppStore {
   error?: string;
   errorDetails?: string;
   notice?: string;
+  notifications: AppNotification[];
+  identityPanelRepoId: string | null;
+  remoteManagerRepoId: string | null;
   bootstrap?: BootstrapData;
   tabs: WorkspaceSnapshot['workspace'][];
   activeTabId: string | null;
@@ -295,6 +310,15 @@ export interface AppStore {
   updateSettings: (patch: Partial<DesktopSettings>) => Promise<void>;
   clearError: () => void;
   clearNotice: () => void;
+  addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => void;
+  markNotificationAsRead: (id: string) => void;
+  markAllNotificationsAsRead: () => void;
+  removeNotification: (id: string) => void;
+  clearNotifications: () => void;
+  openIdentityPanel: (repoId?: string) => void;
+  closeIdentityPanel: () => void;
+  openRemoteManager: (repoId?: string) => void;
+  closeRemoteManager: () => void;
 }
 
 const emptyState: AppStateSnapshot = {
@@ -349,7 +373,15 @@ function projectSnapshot(snapshot: WorkspaceSnapshot, repositories: RepositorySt
 export const useAppStore = create<AppStore>((set, get) => {
   const withBusy = async (operation: () => Promise<void>, domain = 'workspace') => {
     set((state) => ({ busy: true, error: undefined, operations: { ...state.operations, [domain]: (state.operations[domain] ?? 0) + 1 } }));
-    try { await operation(); } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) set({ error: errorText(error), errorDetails: errorDetails(error) }); } finally {
+    try {
+      await operation();
+    } catch (error) {
+      if (!isAbortError(error)) {
+        const msg = errorText(error);
+        set({ error: msg, errorDetails: errorDetails(error) });
+        get().addNotification({ type: 'error', title: 'Operation failed', message: msg });
+      }
+    } finally {
       set((state) => {
         const operations = { ...state.operations };
         const remaining = Math.max(0, (operations[domain] ?? 1) - 1);
@@ -515,6 +547,14 @@ export const useAppStore = create<AppStore>((set, get) => {
       const unpushed = preferences.notifyUnpushedCommits && counts.unpushed > previous.unpushed;
       if (!incoming && !unpushed) continue;
       const body = incoming ? `${repo.meta.name}: ${counts.incoming} incoming commits` : `${repo.meta.name}: ${counts.unpushed} unpushed commits`;
+      get().addNotification({
+        type: incoming ? 'info' : 'warning',
+        title: incoming ? 'Incoming Commits' : 'Unpushed Commits',
+        message: body,
+        actionLabel: incoming ? 'Pull' : 'Push',
+        actionKey: incoming ? 'pullAll' : 'pushAll',
+        actionData: { repoId: repo.meta.id },
+      });
       if (!await bridge().notify('VersionDock Desktop', body)) set({ notice: body });
     }
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
@@ -555,7 +595,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, busy: false, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {},
+    ready: false, busy: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {},
 
     operations: {},
 
@@ -984,7 +1024,13 @@ export const useAppStore = create<AppStore>((set, get) => {
         await applySnapshot(snapshot, !silent);
       };
       if (silent) {
-        try { await operation(); } catch (error) { set({ error: errorText(error) }); }
+        try {
+          await operation();
+        } catch (error) {
+          if (!isAbortError(error)) {
+            set({ error: errorText(error) });
+          }
+        }
       } else {
         await withBusy(operation, 'workspace');
       }
@@ -1174,8 +1220,10 @@ export const useAppStore = create<AppStore>((set, get) => {
           set({ historyByRepo: nextByRepo, historyHasMoreByRepo: nextHasMore, history, historyHasMore });
         }
       } catch (error) {
-        set({ error: errorText(error) });
-        throw error;
+        if (!isAbortError(error)) {
+          set({ error: errorText(error) });
+          throw error;
+        }
       } finally {
         if (requestGeneration === historyRequestGeneration) set({ historyLoading: false });
       }
@@ -1194,7 +1242,11 @@ export const useAppStore = create<AppStore>((set, get) => {
         set((state) => ({ selectedCommitDetails: { ...state.selectedCommitDetails, [key]: detail }, selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
         return detail;
       } catch (error) {
-        set((state) => ({ error: errorText(error), selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
+        if (!isAbortError(error)) {
+          set((state) => ({ error: errorText(error), selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
+          throw error;
+        }
+        set((state) => ({ selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
         throw error;
       }
     },
@@ -1245,7 +1297,11 @@ export const useAppStore = create<AppStore>((set, get) => {
         const values = await bridge().request<MergeCommitSummary[]>({ type: 'commitMergeCommits', payload: { workspace_id: workspaceId(), repo_id: commit.repoId, revision: commit.hash, parents: commit.parents } });
         set((state) => ({ mergeCommits: { ...state.mergeCommits, [key]: values }, mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
       } catch (error) {
-        set((state) => ({ error: errorText(error), mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+        if (!isAbortError(error)) {
+          set((state) => ({ error: errorText(error), mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+        } else {
+          set((state) => ({ mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+        }
       }
     },
 
@@ -1270,8 +1326,14 @@ export const useAppStore = create<AppStore>((set, get) => {
         }));
         return values;
       } catch (error) {
+        if (!isAbortError(error)) {
+          set((state) => ({
+            error: errorText(error),
+            mergeParentFilesLoading: { ...state.mergeParentFilesLoading, [key]: false },
+          }));
+          throw error;
+        }
         set((state) => ({
-          error: errorText(error),
           mergeParentFilesLoading: { ...state.mergeParentFilesLoading, [key]: false },
         }));
         throw error;
@@ -1589,6 +1651,44 @@ export const useAppStore = create<AppStore>((set, get) => {
     updateSettings,
     clearError: () => set({ error: undefined, errorDetails: undefined }),
     clearNotice: () => set({ notice: undefined }),
+    addNotification: (notification) => {
+      const id = crypto.randomUUID();
+      const item: AppNotification = {
+        id,
+        timestamp: Date.now(),
+        read: false,
+        ...notification,
+      };
+      set((state) => ({
+        notifications: [item, ...state.notifications].slice(0, 100),
+      }));
+    },
+    markNotificationAsRead: (id) => {
+      set((state) => ({
+        notifications: state.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
+      }));
+    },
+    markAllNotificationsAsRead: () => {
+      set((state) => ({
+        notifications: state.notifications.map((n) => ({ ...n, read: true })),
+      }));
+    },
+    removeNotification: (id) => {
+      set((state) => ({
+        notifications: state.notifications.filter((n) => n.id !== id),
+      }));
+    },
+    clearNotifications: () => set({ notifications: [] }),
+    openIdentityPanel: (repoId) => {
+      const targetRepoId = repoId ?? get().selectedRepoId ?? get().snapshot?.repositories[0]?.meta.id ?? null;
+      set({ identityPanelRepoId: targetRepoId });
+    },
+    closeIdentityPanel: () => set({ identityPanelRepoId: null }),
+    openRemoteManager: (repoId) => {
+      const targetRepoId = repoId ?? get().selectedRepoId ?? get().snapshot?.repositories[0]?.meta.id ?? null;
+      set({ remoteManagerRepoId: targetRepoId });
+    },
+    closeRemoteManager: () => set({ remoteManagerRepoId: null }),
   };
 });
 

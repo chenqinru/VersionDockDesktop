@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
-import { IdentityPanel } from './IdentityPanel';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
@@ -157,7 +156,7 @@ export function CommitPanel() {
   const [saveMenu, setSaveMenu] = useState(false);
   const [viewMenu, setViewMenu] = useState(false);
   const [settings, setSettings] = useState(false);
-  const [identity, setIdentity] = useState(false);
+  const openIdentityPanel = useAppStore((state) => state.openIdentityPanel);
   const [ignoreManager, setIgnoreManager] = useState<{ repoId: string; directory: string }>();
   const [changelistManagerRepoId, setChangelistManagerRepoId] = useState<string>();
   const selectedRepo = snapshot?.repositories.find((repo) => repo.meta.id === useAppStore.getState().selectedRepoId) ?? snapshot?.repositories[0];
@@ -384,7 +383,7 @@ export function CommitPanel() {
         else await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'sync', path: entry.path, recursive: true });
       } break;
       case 'delete': await confirmDelete(repo, files); break;
-      case 'manage': setIdentity(true); break;
+      case 'manage': openIdentityPanel(repo.meta.id); break;
       case 'view-log': await selectRepo(repo.meta.id, true); break;
       case 'hide-repo': {
         const currentSettings = useAppStore.getState().bootstrap?.state.settings;
@@ -441,8 +440,8 @@ export function CommitPanel() {
     };
   }, [commitMenu, saveMenu, viewMenu]);
 
-  const panelToolbar = <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span />{selectedRepo?.toolAvailable !== false && <button className={identity ? 'selected' : ''} title={selectedRepo?.meta.kind === 'git' ? 'Git Identity' : 'SVN Account'} onClick={() => setIdentity(true)}><Codicon name="account" /></button>}<button disabled={busy} title={t('Fetch')} onClick={() => void Promise.all(gitRepos.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>;
-  const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{identity && selectedRepo && <IdentityPanel repoId={selectedRepo.meta.id} close={() => setIdentity(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
+  const panelToolbar = <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span /><button disabled={busy} title={t('Fetch')} onClick={() => void Promise.all(gitRepos.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>;
+  const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
 

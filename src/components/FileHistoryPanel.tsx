@@ -8,6 +8,7 @@ import { ContextMenu } from './ContextMenu';
 import { DiffPlaceholder } from './DiffPlaceholder';
 import { SourceCodeView } from './SourceCodeView';
 import { UnifiedDiffView } from './UnifiedDiffView';
+import { isAbortError } from '../platform/bridge';
 
 export function FileHistoryPanel() {
   const bridge = useBridge();
@@ -40,7 +41,7 @@ export function FileHistoryPanel() {
     });
     void bridge.request<FileHistoryPage>({ type: 'fileHistory', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: target.path, cursor: null, limit: 100 } }, { signal: controller.signal })
       .then((page) => { if (active) { setEntries(page.entries); setCursor(page.nextCursor); setSelected(page.entries[0]); } })
-      .catch((reason) => { if (active && reason?.name !== 'AbortError') setError(String(reason)); })
+      .catch((reason) => { if (active && !isAbortError(reason)) setError(String(reason)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
   }, [bridge, target, workspaceId]);
@@ -55,7 +56,7 @@ export function FileHistoryPanel() {
     const contentRevision = deleted ? selected.previousRevision! : selected.revision;
     const content = bridge.request<FileRevisionDocument>({ type: 'fileRevisionContent', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: contentPath, revision: contentRevision } }, { signal: controller.signal });
     const comparison = selected.previousRevision ? bridge.request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: selected.path, staged: false, revision: null, from_revision: selected.previousRevision, to_revision: selected.revision } }, { signal: controller.signal }).catch(() => undefined) : Promise.resolve(undefined);
-    void Promise.all([content, comparison]).then(([value, difference]) => { if (active) { setDocument(value); setDiff(difference); } }).catch((reason) => { if (active && reason?.name !== 'AbortError') setError(String(reason)); }).finally(() => { if (active) setLoading(false); });
+    void Promise.all([content, comparison]).then(([value, difference]) => { if (active) { setDocument(value); setDiff(difference); } }).catch((reason) => { if (active && !isAbortError(reason)) setError(String(reason)); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
   }, [bridge, selected, target, workspaceId]);
 

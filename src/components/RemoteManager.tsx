@@ -7,64 +7,303 @@ import { ContextMenu } from './ContextMenu';
 import type { RemoteInfo } from '../bindings/generated';
 
 export function RemoteManager({ repoId, close }: { repoId: string; close: () => void }) {
+  const snapshot = useAppStore((state) => state.snapshot);
+  const repo = snapshot?.repositories.find((r) => r.meta.id === repoId);
   const values = useAppStore((state) => state.remotes[repoId] ?? []);
   const load = useAppStore((state) => state.loadRemotes);
   const operate = useAppStore((state) => state.remoteOperation);
   const busy = useAppStore((state) => state.busy);
+
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [context, setContext] = useState<{ x: number; y: number; remote: RemoteInfo }>();
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+
   const popover = useRef<HTMLElement>(null);
   const { t } = useI18n();
-  useEffect(() => { void load(repoId); }, [load, repoId]);
+
   useEffect(() => {
-    const handleOutsideInteraction = (event: Event) => {
-      const target = event.target;
-      if (target instanceof Node && popover.current?.contains(target)) return;
-      close();
-    };
+    void load(repoId);
+  }, [load, repoId]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      close();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+      }
     };
-    document.addEventListener('pointerdown', handleOutsideInteraction, true);
-    document.addEventListener('focusin', handleOutsideInteraction, true);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener('pointerdown', handleOutsideInteraction, true);
-      document.removeEventListener('focusin', handleOutsideInteraction, true);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [close]);
+
   const add = () => {
     if (!name.trim() || !url.trim()) return;
     void operate(repoId, { type: 'add', name: name.trim(), url: url.trim() });
-    setName(''); setUrl('');
+    setName('');
+    setUrl('');
   };
+
+  const showCopyHint = (text: string) => {
+    setCopyFeedback(text);
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
+  const handleCopy = async (text: string, label: string) => {
+    await navigator.clipboard?.writeText(text).catch(() => undefined);
+    showCopyHint(`${label} ${t('copied') || 'copied'}`);
+  };
+
+  const handleRename = async (remote: RemoteInfo) => {
+    const next = await promptDialog({
+      title: t('Rename'),
+      message: remote.name,
+      inputLabel: t('Remote name'),
+      initialValue: remote.name,
+    });
+    if (next && next !== remote.name) {
+      await operate(repoId, { type: 'rename', old_name: remote.name, new_name: next });
+    }
+  };
+
+  const handleSetFetchUrl = async (remote: RemoteInfo) => {
+    const next = await promptDialog({
+      title: t('Set fetch URL'),
+      message: remote.name,
+      inputLabel: t('Fetch URL'),
+      initialValue: remote.fetchUrl,
+    });
+    if (next) {
+      await operate(repoId, { type: 'setUrl', name: remote.name, url: next, push: false });
+    }
+  };
+
+  const handleSetPushUrl = async (remote: RemoteInfo) => {
+    const next = await promptDialog({
+      title: t('Set push URL'),
+      message: remote.name,
+      inputLabel: t('Push URL'),
+      initialValue: remote.pushUrl,
+    });
+    if (next) {
+      await operate(repoId, { type: 'setUrl', name: remote.name, url: next, push: true });
+    }
+  };
+
+  const handlePrune = async (remote: RemoteInfo) => {
+    await operate(repoId, { type: 'prune', name: remote.name });
+  };
+
+  const handleDelete = async (remote: RemoteInfo) => {
+    const confirmed = await confirmDialog({
+      title: t('Delete'),
+      message: `${t('Remove remote {0}?', remote.name)}\n${remote.fetchUrl}`,
+      danger: true,
+    });
+    if (confirmed) {
+      await operate(repoId, { type: 'remove', name: remote.name });
+    }
+  };
+
   const runContext = async (id: string) => {
     const remote = context?.remote;
     if (!remote) return;
-    if (id === 'copy-fetch') await navigator.clipboard?.writeText(remote.fetchUrl).catch(() => undefined);
-    if (id === 'copy-push') await navigator.clipboard?.writeText(remote.pushUrl).catch(() => undefined);
-    if (id === 'rename') { const next = await promptDialog({ title: t('Rename'), message: remote.name, inputLabel: t('Remote name'), initialValue: remote.name }); if (next && next !== remote.name) await operate(repoId, { type: 'rename', old_name: remote.name, new_name: next }); }
-    if (id === 'fetch-url') { const next = await promptDialog({ title: t('Set fetch URL'), message: remote.name, inputLabel: t('Fetch URL'), initialValue: remote.fetchUrl }); if (next) await operate(repoId, { type: 'setUrl', name: remote.name, url: next, push: false }); }
-    if (id === 'push-url') { const next = await promptDialog({ title: t('Set push URL'), message: remote.name, inputLabel: t('Push URL'), initialValue: remote.pushUrl }); if (next) await operate(repoId, { type: 'setUrl', name: remote.name, url: next, push: true }); }
-    if (id === 'prune') await operate(repoId, { type: 'prune', name: remote.name });
-    if (id === 'delete' && await confirmDialog({ title: t('Delete'), message: `${t('Remove remote {0}?', remote.name)}\n${remote.fetchUrl}`, danger: true })) await operate(repoId, { type: 'remove', name: remote.name });
+    if (id === 'copy-fetch') await handleCopy(remote.fetchUrl, t('Fetch URL'));
+    if (id === 'copy-push') await handleCopy(remote.pushUrl, t('Push URL'));
+    if (id === 'rename') await handleRename(remote);
+    if (id === 'fetch-url') await handleSetFetchUrl(remote);
+    if (id === 'push-url') await handleSetPushUrl(remote);
+    if (id === 'prune') await handlePrune(remote);
+    if (id === 'delete') await handleDelete(remote);
     setContext(undefined);
   };
-  return <section ref={popover} className="remote-popover" role="dialog" aria-label={t('Remotes')}>
-    <header><Codicon name="remote" /><strong>{t('Remotes')}</strong><button title={t('Close')} onClick={close}><Codicon name="close" /></button></header>
-    <div className="remote-add"><input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('Remote name')} /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder={t('Remote URL')} onKeyDown={(event) => { if (event.key === 'Enter') add(); }} /><button disabled={busy || !name.trim() || !url.trim()} onClick={add}><Codicon name="add" />{t('Add')}</button></div>
-    <div className="remote-list">{values.length === 0 && <div className="compare-empty">{t('No remotes')}</div>}{values.map((remote) => <article key={remote.name} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, remote }); }}>
-      <Codicon name="cloud" /><span><strong>{remote.name}</strong><small title={remote.fetchUrl}>{t('Fetch URL')}: {remote.fetchUrl}</small><small title={remote.pushUrl}>{t('Push URL')}: {remote.pushUrl}</small></span>
-      <button title={t('Rename')} onClick={() => void promptDialog({ title: t('Rename'), message: remote.name, inputLabel: t('Remote name'), initialValue: remote.name }).then((next) => { if (next && next !== remote.name) return operate(repoId, { type: 'rename', old_name: remote.name, new_name: next }); })}><Codicon name="edit" /></button>
-      <button title={t('Set fetch URL')} onClick={() => void promptDialog({ title: t('Set fetch URL'), message: remote.name, inputLabel: t('Fetch URL'), initialValue: remote.fetchUrl }).then((next) => { if (next) return operate(repoId, { type: 'setUrl', name: remote.name, url: next, push: false }); })}><Codicon name="link" /></button>
-      <button title={t('Set push URL')} onClick={() => void promptDialog({ title: t('Set push URL'), message: remote.name, inputLabel: t('Push URL'), initialValue: remote.pushUrl }).then((next) => { if (next) return operate(repoId, { type: 'setUrl', name: remote.name, url: next, push: true }); })}><Codicon name="cloud-upload" /></button>
-      <button title={t('Prune')} onClick={() => void operate(repoId, { type: 'prune', name: remote.name })}><Codicon name="refresh" /></button>
-      <button className="danger" title={t('Delete')} onClick={() => void confirmDialog({ title: t('Delete'), message: `${t('Remove remote {0}?', remote.name)}\n${remote.fetchUrl}`, danger: true }).then((confirmed) => { if (confirmed) return operate(repoId, { type: 'remove', name: remote.name }); })}><Codicon name="trash" /></button>
-    </article>)}</div>
-    {context && <ContextMenu x={context.x} y={context.y} items={[{ id: 'rename', label: t('Rename'), icon: 'edit' }, { id: 'fetch-url', label: t('Set fetch URL'), icon: 'link' }, { id: 'push-url', label: t('Set push URL'), icon: 'cloud-upload' }, { id: 'copy-fetch', label: t('Copy Fetch URL'), icon: 'copy' }, { id: 'copy-push', label: t('Copy Push URL'), icon: 'copy' }, { separator: true }, { id: 'prune', label: t('Prune'), icon: 'refresh' }, { id: 'delete', label: t('Delete'), icon: 'trash', danger: true }]} onSelect={(id) => void runContext(id)} onClose={() => setContext(undefined)} />}
-  </section>;
+
+  return (
+    <div
+      className="modal-backdrop remote-manager-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+    >
+      <section
+        ref={popover}
+        className="modal-panel remote-manager-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('Manage Remotes')}
+      >
+        <header className="modal-header">
+          <div className="modal-header-title">
+            <Codicon name="remote-explorer" />
+            <strong>{t('Manage Remotes')}</strong>
+            {repo && <span className="modal-repo-badge">{repo.meta.name}</span>}
+          </div>
+          <button
+            type="button"
+            className="modal-close-btn"
+            title={t('Close')}
+            onClick={close}
+          >
+            <Codicon name="close" />
+          </button>
+        </header>
+
+        <div className="modal-body remote-manager-body">
+          {/* 添加远程表单 */}
+          <div className="remote-add-card">
+            <div className="remote-section-title">{t('Add Remote')}</div>
+            <div className="remote-add-row">
+              <input
+                className="remote-input-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={t('Remote name (e.g. origin, upstream)')}
+              />
+              <input
+                className="remote-input-url"
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder={t('Remote URL (git@... or https://...)')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') add();
+                }}
+              />
+              <button
+                type="button"
+                className="primary remote-add-btn"
+                disabled={busy || !name.trim() || !url.trim()}
+                onClick={add}
+              >
+                <Codicon name="add" />
+                <span>{t('Add')}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 远程仓库列表 */}
+          <div className="remote-list-card">
+            <div className="remote-section-title">{t('REMOTES')}</div>
+            {values.length === 0 ? (
+              <div className="remote-list-empty">
+                <Codicon name="cloud" />
+                <span>{t('No remotes configured')}</span>
+              </div>
+            ) : (
+              <div className="remote-list">
+                {values.map((remote) => (
+                  <article
+                    key={remote.name}
+                    className="remote-list-item"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContext({ x: event.clientX, y: event.clientY, remote });
+                    }}
+                  >
+                    <div className="remote-item-icon">
+                      <Codicon name="cloud" />
+                    </div>
+
+                    <div className="remote-item-info">
+                      <div className="remote-item-header">
+                        <strong className="remote-item-name">{remote.name}</strong>
+                      </div>
+                      <div className="remote-item-urls">
+                        <div
+                          className="remote-url-row"
+                          title={remote.fetchUrl}
+                          onClick={() => handleCopy(remote.fetchUrl, t('Fetch URL'))}
+                        >
+                          <span className="url-tag">{t('Fetch URL')}:</span>
+                          <span className="url-text">{remote.fetchUrl}</span>
+                          <Codicon name="copy" className="copy-icon" />
+                        </div>
+                        {remote.pushUrl !== remote.fetchUrl && (
+                          <div
+                            className="remote-url-row"
+                            title={remote.pushUrl}
+                            onClick={() => handleCopy(remote.pushUrl, t('Push URL'))}
+                          >
+                            <span className="url-tag">{t('Push URL')}:</span>
+                            <span className="url-text">{remote.pushUrl}</span>
+                            <Codicon name="copy" className="copy-icon" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="remote-item-actions">
+                      <button
+                        type="button"
+                        className="remote-action-icon-btn"
+                        title={t('Rename')}
+                        onClick={() => handleRename(remote)}
+                      >
+                        <Codicon name="edit" />
+                      </button>
+                      <button
+                        type="button"
+                        className="remote-action-icon-btn"
+                        title={t('Set fetch URL')}
+                        onClick={() => handleSetFetchUrl(remote)}
+                      >
+                        <Codicon name="link" />
+                      </button>
+                      <button
+                        type="button"
+                        className="remote-action-icon-btn"
+                        title={t('Set push URL')}
+                        onClick={() => handleSetPushUrl(remote)}
+                      >
+                        <Codicon name="cloud-upload" />
+                      </button>
+                      <button
+                        type="button"
+                        className="remote-action-icon-btn"
+                        title={t('Prune')}
+                        onClick={() => handlePrune(remote)}
+                      >
+                        <Codicon name="refresh" />
+                      </button>
+                      <button
+                        type="button"
+                        className="remote-action-icon-btn danger"
+                        title={t('Delete')}
+                        onClick={() => handleDelete(remote)}
+                      >
+                        <Codicon name="trash" />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {copyFeedback && <div className="modal-toast">{copyFeedback}</div>}
+
+        {context && (
+          <ContextMenu
+            x={context.x}
+            y={context.y}
+            items={[
+              { id: 'rename', label: t('Rename'), icon: 'edit' },
+              { id: 'fetch-url', label: t('Set fetch URL'), icon: 'link' },
+              { id: 'push-url', label: t('Set push URL'), icon: 'cloud-upload' },
+              { id: 'copy-fetch', label: t('Copy Fetch URL'), icon: 'copy' },
+              { id: 'copy-push', label: t('Copy Push URL'), icon: 'copy' },
+              { separator: true },
+              { id: 'prune', label: t('Prune'), icon: 'refresh' },
+              { id: 'delete', label: t('Delete'), icon: 'trash', danger: true },
+            ]}
+            onSelect={(id) => void runContext(id)}
+            onClose={() => setContext(undefined)}
+          />
+        )}
+      </section>
+    </div>
+  );
 }

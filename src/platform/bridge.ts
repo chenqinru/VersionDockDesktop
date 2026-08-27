@@ -31,6 +31,28 @@ export interface VersionDockBridge {
   };
 }
 
+export function isAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (typeof error === 'object') {
+    const candidate = error as { name?: string; code?: string | number; message?: string };
+    if (candidate.name === 'AbortError') return true;
+    if (candidate.code === 'ABORT_ERR' || candidate.code === 20) return true;
+    if (typeof candidate.message === 'string' && (
+      candidate.message.includes('Operation aborted') ||
+      candidate.message.includes('The user aborted a request') ||
+      candidate.message.includes('AbortError') ||
+      candidate.message.includes('BodyStreamBuffer was aborted')
+    )) {
+      return true;
+    }
+  }
+  if (typeof error === 'string') {
+    return error.includes('Operation aborted') || error.includes('AbortError');
+  }
+  return false;
+}
+
 export class BridgeError extends Error implements DesktopError {
   code: string;
   command: string | null;
@@ -139,7 +161,7 @@ export class TauriBridge implements VersionDockBridge {
 
       return response.result as T;
     } catch (error) {
-      if (error instanceof BridgeError || (error instanceof DOMException && error.name === 'AbortError')) throw error;
+      if (isAbortError(error) || error instanceof BridgeError) throw error;
       throw new BridgeError({
         code: 'BRIDGE_INVOKE_FAILED',
         message: error instanceof Error ? error.message : String(error),

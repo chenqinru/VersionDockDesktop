@@ -1679,7 +1679,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 
 .history-workspace { position: relative; }
 .history-filters button.selected { color: var(--versiondock-accent); background: var(--versiondock-hover); }
-.remote-popover { position: absolute; z-index: 90; top: 38px; right: 8px; width: min(720px, calc(100% - 16px)); max-height: min(520px, calc(100% - 48px)); display: flex; flex-direction: column; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 8px 24px #0008; }.remote-popover > header { flex: 0 0 34px; display: flex; align-items: center; gap: 7px; padding: 0 7px; border-bottom: 1px solid var(--versiondock-border); }.remote-popover > header strong { flex: 1; }.remote-popover > header button { width: 26px; height: 26px; }.remote-add { display: grid; grid-template-columns: 120px minmax(220px, 1fr) auto; gap: 5px; padding: 7px; border-bottom: 1px solid var(--versiondock-border); }.remote-add input { min-width: 0; height: 28px; padding: 0 7px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); }.remote-add button { padding: 0 9px; display: flex; align-items: center; gap: 5px; background: var(--versiondock-accent-bg); color: white; }.remote-list { min-height: 0; overflow: auto; }.remote-list article { min-height: 54px; display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-top: 1px solid var(--versiondock-border-soft); }.remote-list article > span { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }.remote-list article small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font: calc(10px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }.remote-list article > button { width: 27px; height: 27px; border: 1px solid var(--versiondock-border); }.remote-list .danger { color: var(--versiondock-danger); }
 .compare-workspace { min-width: 0; height: 100%; flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--versiondock-bg); }
 .compare-header { position: relative; min-width: 0; height: 30px; flex: 0 0 30px; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
 .compare-header > strong { flex: 0 0 auto; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; }
@@ -1812,8 +1811,547 @@ button.danger:not(:disabled):hover,
 .file-history-diff { min-width: 0; min-height: 0; flex: 1; }
 .file-history-diff .unified-diff-virtual { min-width: 640px; }
 .file-history-diff.inline .unified-diff-virtual { min-width: 500px; }
-.error-row { color: var(--versiondock-danger); padding: 12px; }
-.identity-backdrop{position:fixed;inset:0;z-index:9200;background:rgba(0,0,0,.38);display:grid;place-items:center}.identity-panel{width:min(620px,calc(100vw - 48px));max-height:calc(100vh - 60px);overflow:auto;background:var(--vscode-editor-background,var(--versiondock-panel));border:1px solid var(--versiondock-border);box-shadow:0 18px 54px rgba(0,0,0,.4)}.identity-panel>header{height:42px;display:flex;align-items:center;gap:9px;padding:0 12px;border-bottom:1px solid var(--versiondock-border)}.identity-panel>header span{flex:1;color:var(--versiondock-muted)}.identity-content{padding:16px;display:grid;gap:12px}.identity-content label{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:10px}.identity-effective{display:grid;gap:4px;padding:10px;background:var(--vscode-textBlockQuote-background,rgba(127,127,127,.1));border-left:3px solid var(--versiondock-accent)}.identity-effective.invalid{border-color:var(--versiondock-danger)}.identity-sources{display:grid;gap:3px;color:var(--versiondock-muted)}.identity-content form{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:7px;align-items:end}.identity-content form strong{grid-column:1/-1}.identity-profiles{display:grid;gap:5px}.identity-profiles article{display:flex;align-items:center;padding:7px;border:1px solid var(--versiondock-border)}.identity-profiles article span{display:grid;flex:1}.identity-profiles small{color:var(--versiondock-muted)}.identity-actions{display:flex;gap:7px}.success-row{color:var(--versiondock-success,#4ec9b0);padding:8px}
+.error-row { color: var(--versiondock-danger); padding: 8px 12px; display: flex; align-items: center; gap: 6px; border-radius: 4px; background: rgba(244, 135, 113, 0.1); }
+.success-row { color: var(--versiondock-success, #4ec9b0); padding: 8px 12px; display: flex; align-items: center; gap: 6px; border-radius: 4px; background: rgba(78, 201, 176, 0.1); }
+
+/* ──────────────── 通用模态对话框系统 ──────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9200;
+  background: rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal-panel {
+  width: min(680px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-editor-background, var(--versiondock-surface-alt, #1e1e1e));
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 6px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  animation: modal-fade-in 0.16s ease-out;
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-header {
+  height: 40px;
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  background: var(--versiondock-surface, #252526);
+  border-bottom: 1px solid var(--versiondock-border, #3c3c3c);
+  user-select: none;
+}
+
+.modal-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text, #cccccc);
+}
+
+.modal-header-title .codicon {
+  color: var(--versiondock-accent, #007acc);
+}
+
+.modal-repo-badge {
+  padding: 1px 7px;
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  border-radius: 3px;
+  background: var(--versiondock-hover, rgba(255, 255, 255, 0.08));
+  color: var(--versiondock-muted, #858585);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+}
+
+.modal-close-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--versiondock-muted, #858585);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.modal-close-btn:hover {
+  background: var(--versiondock-hover, rgba(255, 255, 255, 0.1));
+  color: var(--versiondock-text, #ffffff);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-toast {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  background: var(--versiondock-accent-bg, #0e639c);
+  color: #ffffff;
+  border-radius: 4px;
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  animation: modal-fade-in 0.15s ease-out;
+}
+
+/* ──────────────── Remote Manager ──────────────── */
+.remote-manager-modal {
+  width: min(720px, calc(100vw - 48px));
+}
+
+.remote-section-title {
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--versiondock-muted, #858585);
+  margin-bottom: 8px;
+}
+
+.remote-add-card {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  background: var(--versiondock-surface, #252526);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 6px;
+}
+
+.remote-add-row {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.remote-add-row input {
+  height: 30px;
+  padding: 0 10px;
+  background: var(--versiondock-input, #3c3c3c);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 4px;
+  color: var(--versiondock-text, #cccccc);
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+}
+
+.remote-add-row input:focus {
+  border-color: var(--versiondock-accent, #007acc);
+  outline: none;
+}
+
+.remote-add-btn {
+  height: 30px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px;
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.remote-list-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.remote-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.remote-list-empty {
+  padding: 28px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--versiondock-muted, #858585);
+  background: var(--versiondock-surface, #252526);
+  border: 1px dashed var(--versiondock-border, #3c3c3c);
+  border-radius: 6px;
+}
+
+.remote-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--versiondock-surface, #252526);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 6px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.remote-list-item:hover {
+  border-color: var(--versiondock-border-strong, #555555);
+  background: var(--versiondock-hover, rgba(255, 255, 255, 0.04));
+}
+
+.remote-item-icon {
+  font-size: 18px;
+  color: var(--versiondock-accent, #007acc);
+}
+
+.remote-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.remote-item-name {
+  font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text, #ffffff);
+}
+
+.remote-item-urls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.remote-url-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.remote-url-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.remote-url-row .url-tag {
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-muted, #858585);
+  flex-shrink: 0;
+}
+
+.remote-url-row .url-text {
+  font-family: var(--versiondock-code, monospace);
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-text, #cccccc);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-url-row .copy-icon {
+  font-size: 11px;
+  color: var(--versiondock-faint, #666);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.remote-url-row:hover .copy-icon {
+  opacity: 1;
+}
+
+.remote-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.remote-action-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--versiondock-muted, #858585);
+  cursor: pointer;
+}
+
+.remote-action-icon-btn:hover {
+  background: var(--versiondock-hover, rgba(255, 255, 255, 0.08));
+  border-color: var(--versiondock-border, #3c3c3c);
+  color: var(--versiondock-text, #ffffff);
+}
+
+.remote-action-icon-btn.danger:hover {
+  background: rgba(244, 135, 113, 0.15);
+  border-color: var(--versiondock-danger, #f48771);
+  color: var(--versiondock-danger, #f48771);
+}
+
+/* ──────────────── Identity Panel ──────────────── */
+.identity-panel {
+  width: min(640px, calc(100vw - 48px));
+}
+
+.identity-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.identity-effective-card {
+  padding: 12px 14px;
+  background: var(--versiondock-surface, #252526);
+  border-left: 4px solid var(--versiondock-accent, #007acc);
+  border-radius: 0 6px 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.identity-effective-card.invalid {
+  border-left-color: var(--versiondock-warning, #d7ba7d);
+}
+
+.effective-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-muted, #858585);
+}
+
+.effective-name {
+  font-size: calc(14px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text, #ffffff);
+}
+
+.identity-form-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.identity-label-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-title {
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-muted, #858585);
+}
+
+.field-hint {
+  font-weight: normal;
+  color: var(--versiondock-faint, #666);
+}
+
+.identity-select,
+.identity-input {
+  height: 32px;
+  padding: 0 10px;
+  background: var(--versiondock-input, #3c3c3c);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 4px;
+  color: var(--versiondock-text, #cccccc);
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+}
+
+.identity-select:focus,
+.identity-input:focus {
+  border-color: var(--versiondock-accent, #007acc);
+  outline: none;
+}
+
+.identity-sources-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--versiondock-surface, #252526);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 4px;
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+}
+
+.identity-source-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.identity-source-item.muted {
+  color: var(--versiondock-faint, #666);
+}
+
+.identity-source-item .source-tag {
+  font-weight: 600;
+  color: var(--versiondock-muted, #858585);
+}
+
+.identity-source-item .source-val {
+  color: var(--versiondock-text, #cccccc);
+}
+
+.identity-add-section {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  background: var(--versiondock-surface, #252526);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 6px;
+}
+
+.identity-section-title {
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--versiondock-muted, #858585);
+  margin-bottom: 8px;
+}
+
+.identity-inputs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.identity-inputs-grid input {
+  height: 30px;
+  padding: 0 10px;
+  background: var(--versiondock-input, #3c3c3c);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 4px;
+  color: var(--versiondock-text, #cccccc);
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+}
+
+.identity-inputs-grid input:focus {
+  border-color: var(--versiondock-accent, #007acc);
+  outline: none;
+}
+
+.identity-save-btn {
+  height: 30px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px;
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.identity-profiles-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.identity-profiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.identity-profile-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--versiondock-surface, #252526);
+  border: 1px solid var(--versiondock-border, #3c3c3c);
+  border-radius: 4px;
+}
+
+.profile-item-icon {
+  font-size: 16px;
+  color: var(--versiondock-accent, #007acc);
+}
+
+.profile-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profile-item-label {
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-text, #ffffff);
+}
+
+.profile-item-detail {
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted, #858585);
+}
+
+.profile-delete-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--versiondock-muted, #858585);
+  cursor: pointer;
+}
+
+.profile-delete-btn:hover {
+  background: rgba(244, 135, 113, 0.15);
+  color: var(--versiondock-danger, #f48771);
+}
+
+.identity-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
 .ignore-dialog textarea{min-height:240px;resize:vertical;font-family:var(--vscode-editor-font-family,monospace)}
 .diff-content-context { min-width: 0; min-height: 0; flex: 1; display: flex; overflow: hidden; }
 .diff-content-context > .code-view { flex: 1; }
@@ -1861,3 +2399,524 @@ button.danger:not(:disabled):hover,
 .worktree-diff-panel > div > button:hover { background: var(--versiondock-hover); }
 .worktree-diff-panel > div > button span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .worktree-diff-panel > div > button em { min-width: 18px; text-align: center; }
+
+/* ===== 现代底部状态栏与通知中心 ===== */
+.app-statusbar {
+  height: 24px;
+  flex: 0 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--versiondock-surface-alt);
+  border-top: 1px solid var(--versiondock-border-soft);
+  user-select: none;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  z-index: 15;
+  padding: 0 4px;
+}
+
+.statusbar-left, .statusbar-right {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: 2px;
+}
+
+.statusbar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 3px;
+  color: var(--versiondock-muted);
+  font-size: inherit;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.statusbar-item:hover, .statusbar-item.active {
+  color: var(--versiondock-text);
+  background: var(--versiondock-hover);
+}
+
+.statusbar-item.branch-status-item {
+  color: var(--versiondock-text);
+  background: transparent;
+}
+
+.statusbar-item.branch-status-item.has-behind {
+  color: var(--versiondock-accent);
+}
+
+.statusbar-item.branch-status-item.has-ahead {
+  color: var(--versiondock-success);
+}
+
+.statusbar-item.branch-status-item:hover,
+.statusbar-item.branch-status-item.active {
+  background: transparent !important;
+  color: var(--versiondock-text);
+}
+
+.statusbar-item.branch-status-item.has-behind:hover,
+.statusbar-item.branch-status-item.has-behind.active {
+  background: transparent !important;
+  color: var(--versiondock-accent) !important;
+}
+
+.statusbar-item.branch-status-item.has-ahead:hover,
+.statusbar-item.branch-status-item.has-ahead.active {
+  background: transparent !important;
+  color: var(--versiondock-success) !important;
+}
+
+.statusbar-item.branch-status-item.warning-bg:hover,
+.statusbar-item.branch-status-item.warning-bg.active {
+  background: var(--versiondock-warning) !important;
+  color: #000000 !important;
+}
+
+.statusbar-item:hover .statusbar-counter.pull,
+.statusbar-item.active .statusbar-counter.pull {
+  color: var(--versiondock-accent);
+}
+
+.statusbar-item:hover .statusbar-counter.push,
+.statusbar-item.active .statusbar-counter.push {
+  color: var(--versiondock-success);
+}
+
+.statusbar-item:hover .statusbar-counter.conflict,
+.statusbar-item.active .statusbar-counter.conflict {
+  color: var(--versiondock-danger);
+}
+
+.statusbar-item:hover .statusbar-dirty-dot,
+.statusbar-item.active .statusbar-dirty-dot {
+  color: var(--versiondock-warning);
+}
+
+.statusbar-item.warning-bg {
+  background: var(--versiondock-warning);
+  color: #000000;
+  font-weight: 500;
+}
+
+.statusbar-item.warning-bg:hover {
+  background: color-mix(in srgb, var(--versiondock-warning) 85%, #fff);
+}
+
+.statusbar-dirty-dot {
+  color: var(--versiondock-warning);
+  font-size: 8px;
+  margin-left: 1px;
+}
+
+.statusbar-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10.5px;
+  margin-left: 2px;
+}
+
+.statusbar-counter.pull {
+  color: var(--versiondock-accent);
+}
+
+.statusbar-counter.push {
+  color: var(--versiondock-success);
+}
+
+.statusbar-counter.conflict {
+  color: var(--versiondock-danger);
+  font-weight: bold;
+}
+
+.notification-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notification-status-badge {
+  position: absolute;
+  top: -4px;
+  right: -7px;
+  min-width: 13px;
+  height: 13px;
+  line-height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--versiondock-danger);
+  color: #ffffff;
+  font-size: 8.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* ===== 状态栏 Popover 菜单通用浮层 ===== */
+.statusbar-popover, .statusbar-submenu {
+  background: var(--versiondock-surface-alt);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  display: flex;
+  flex-direction: column;
+  min-width: 280px;
+  max-width: 440px;
+  max-height: 440px;
+  box-sizing: border-box;
+  user-select: none;
+  animation: statusbar-popover-in 0.12s cubic-bezier(0, 0, 0.2, 1);
+}
+
+@keyframes statusbar-popover-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.statusbar-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  background: var(--versiondock-surface);
+  border-bottom: 1px solid var(--versiondock-border-soft);
+  color: var(--versiondock-text);
+  font-weight: 600;
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+}
+
+.statusbar-popover-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 432px;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.statusbar-popover-loading, .statusbar-popover-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px 12px;
+  color: var(--versiondock-muted);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+}
+
+.statusbar-popover-error {
+  padding: 10px 12px;
+  color: var(--versiondock-danger);
+  background: color-mix(in srgb, var(--versiondock-danger) 10%, transparent);
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  border-bottom: 1px solid var(--versiondock-border-soft);
+}
+
+.statusbar-menu-section {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+}
+
+.statusbar-menu-section.warning-section {
+  background: color-mix(in srgb, var(--versiondock-danger) 8%, transparent);
+  border-bottom: 1px solid var(--versiondock-border-soft);
+}
+
+.statusbar-menu-divider {
+  height: 1px;
+  background: var(--versiondock-border-soft);
+  margin: 3px 0;
+}
+
+.statusbar-menu-group-header {
+  padding: 6px 12px 2px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--versiondock-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.statusbar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  border-radius: 0;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.statusbar-menu-item:hover, .statusbar-menu-item.submenu-open {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+}
+
+.statusbar-menu-item.active-ref {
+  background: color-mix(in srgb, var(--versiondock-accent) 14%, transparent);
+  color: var(--versiondock-accent);
+  font-weight: 500;
+}
+
+.statusbar-menu-item.danger {
+  color: var(--versiondock-danger);
+}
+
+.statusbar-menu-item.danger-sub {
+  color: var(--versiondock-warning);
+  padding-left: 20px;
+}
+
+.statusbar-menu-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.statusbar-menu-item-title {
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusbar-menu-item-desc {
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.submenu-arrow {
+  font-size: 11px;
+  color: var(--versiondock-faint);
+  margin-left: auto;
+}
+
+.statusbar-badge {
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
+  color: var(--versiondock-accent);
+  font-weight: 600;
+}
+
+/* ===== 账号身份 Popover 样式 ===== */
+.statusbar-effective-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--versiondock-surface) 65%, transparent);
+  border-bottom: 1px solid var(--versiondock-border-soft);
+}
+
+.statusbar-effective-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--versiondock-muted);
+}
+
+.statusbar-effective-name {
+  font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-text);
+  font-weight: 600;
+}
+
+.statusbar-effective-email {
+  font-size: 11px;
+  color: var(--versiondock-muted);
+}
+
+/* ===== 通知中心 Popover 样式 ===== */
+.notification-header {
+  justify-content: space-between;
+}
+
+.notification-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notification-badge {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--versiondock-accent-bg);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.notification-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.notification-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  color: var(--versiondock-muted);
+}
+
+.notification-action-btn:hover {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+}
+
+.notification-list {
+  padding: 0;
+  max-height: 400px;
+}
+
+.notification-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--versiondock-faint);
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+}
+
+.notification-empty .codicon {
+  font-size: 24px;
+}
+
+.notification-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--versiondock-border-soft);
+  transition: background-color 0.12s ease;
+  cursor: pointer;
+}
+
+.notification-item:hover {
+  background: var(--versiondock-hover);
+}
+
+.notification-item.unread {
+  background: color-mix(in srgb, var(--versiondock-surface) 40%, transparent);
+}
+
+.notification-item.unread::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--versiondock-accent);
+}
+
+.notification-item-icon {
+  flex: 0 0 16px;
+  margin-top: 2px;
+}
+
+.notification-item-icon.error { color: var(--versiondock-danger); }
+.notification-item-icon.warning { color: var(--versiondock-warning); }
+.notification-item-icon.success { color: var(--versiondock-success); }
+.notification-item-icon.info { color: var(--versiondock-accent); }
+
+.notification-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notification-item-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.notification-item-title {
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-item-time {
+  font-size: 10px;
+  color: var(--versiondock-faint);
+  flex-shrink: 0;
+}
+
+.notification-item-msg {
+  margin: 0;
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.notification-item-action-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--versiondock-accent-bg);
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.notification-item-action-btn:hover {
+  opacity: 0.9;
+}
+
+.notification-item-dismiss {
+  opacity: 0;
+  flex: 0 0 16px;
+  color: var(--versiondock-faint);
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.notification-item:hover .notification-item-dismiss {
+  opacity: 1;
+}
+
+.notification-item-dismiss:hover {
+  color: var(--versiondock-text);
+}

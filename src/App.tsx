@@ -15,6 +15,10 @@ import { useResizable } from './hooks/useResizable';
 import { useBridge } from './platform/context';
 import { DialogHost } from './components/DialogHost';
 import { FileHistoryPanel } from './components/FileHistoryPanel';
+import { StatusBar } from './components/StatusBar/StatusBar';
+import { IdentityPanel } from './components/IdentityPanel';
+import { RemoteManager } from './components/RemoteManager';
+import { isAbortError } from './platform/bridge';
 
 const UI_FONT_SIZE = {
   minimum: { pixels: '11px', scale: '0.8461538462' },
@@ -39,6 +43,10 @@ export function App() {
   const clearNotice = useAppStore((state) => state.clearNotice);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const setPanelSize = useAppStore((state) => state.setPanelSize);
+  const identityPanelRepoId = useAppStore((state) => state.identityPanelRepoId);
+  const closeIdentityPanel = useAppStore((state) => state.closeIdentityPanel);
+  const remoteManagerRepoId = useAppStore((state) => state.remoteManagerRepoId);
+  const closeRemoteManager = useAppStore((state) => state.closeRemoteManager);
   const [pluginMessages, setPluginMessages] = useState<Record<string, string>>({});
   const [dropActive, setDropActive] = useState(false);
   const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
@@ -122,7 +130,7 @@ export function App() {
         </main>
       )}
       {busy && <div className="busy-line" />}
-      {error && (
+      {error && !isAbortError(error) && (
         <div className="toast error" role="alert">
           <div className="toast-icon">
             <Codicon name="error" />
@@ -161,8 +169,11 @@ export function App() {
         </div>
       )}
       {dropActive && <div className="drop-overlay"><Codicon name="folder-opened" /><strong>{t('Drop folders anywhere in this window')}</strong></div>}
+      <StatusBar />
       <DialogHost />
       <FileHistoryPanel />
+      {identityPanelRepoId && <IdentityPanel repoId={identityPanelRepoId} close={closeIdentityPanel} />}
+      {remoteManagerRepoId && <RemoteManager repoId={remoteManagerRepoId} close={closeRemoteManager} />}
     </div>
   </I18nContext.Provider>;
 }

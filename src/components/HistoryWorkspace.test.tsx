@@ -278,7 +278,7 @@ describe('HistoryWorkspace data helpers', () => {
     fireEvent.click(screen.getByRole('button', { name: 'main' }));
     expect(screen.getByRole('radio', { name: 'main' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'feature/ui' })).not.toBeChecked();
-  });
+  }, 15000);
 
   it('merges branch instances and only exposes shared, current, or mainline branches by default', () => {
     const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };

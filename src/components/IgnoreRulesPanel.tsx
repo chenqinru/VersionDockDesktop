@@ -4,6 +4,7 @@ import { useBridge } from '../platform/context';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
+import { isAbortError } from '../platform/bridge';
 
 export function IgnoreRulesPanel({ repoId, directory = '', close }: { repoId: string; directory?: string; close: () => void }) {
   const bridge = useBridge();
@@ -18,7 +19,7 @@ export function IgnoreRulesPanel({ repoId, directory = '', close }: { repoId: st
     const controller = new AbortController();
     void bridge.request<IgnoreRules>({ type: 'ignoreRules', payload: { workspace_id: workspaceId, repo_id: repoId, directory } }, { signal: controller.signal })
       .then((value) => { setRules(value); setText(value.patterns.join('\n')); })
-      .catch((reason) => { if (reason?.name !== 'AbortError') setError(String(reason)); });
+      .catch((reason) => { if (!isAbortError(reason)) setError(String(reason)); });
     return () => controller.abort();
   }, [bridge, directory, repoId, workspaceId]);
   if (!workspaceId) return null;
