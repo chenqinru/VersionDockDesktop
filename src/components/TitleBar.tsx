@@ -62,6 +62,25 @@ export function TitleBar() {
   };
 
   const [menuPos, setMenuPos] = useState({ left: platform === 'macos' ? 84 : 12, top: 38 });
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    tabId: string;
+  } | null>(null);
+
+  const closeOtherTabs = useAppStore((state) => state.closeOtherTabs);
+
+  useEffect(() => {
+    if (!contextMenu?.visible) return;
+    const handleCloseMenu = () => setContextMenu(null);
+    document.addEventListener('pointerdown', handleCloseMenu);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setContextMenu(null); });
+    return () => {
+      document.removeEventListener('pointerdown', handleCloseMenu);
+    };
+  }, [contextMenu?.visible]);
 
   const toggleNewTabMenu = () => {
     if (!newTabMenuOpen && addAnchorRef.current) {
@@ -72,21 +91,57 @@ export function TitleBar() {
     setNewTabMenuOpen((prev) => !prev);
   };
 
+  const handleTabDragEnd = (event: React.DragEvent, tabId: string, paths: string[]) => {
+    setDraggingTabId(null);
+    const { clientX, clientY, screenX, screenY } = event;
+    const isOutOfWindow =
+      clientX < -20 ||
+      clientX > window.innerWidth + 20 ||
+      clientY < -20 ||
+      clientY > window.innerHeight + 20 ||
+      clientY > 80;
+
+    if (isOutOfWindow) {
+      void bridge.openInNewWindow(paths, {
+        x: Math.max(0, screenX - 120),
+        y: Math.max(0, screenY - 20),
+      });
+      void closeTab(tabId);
+    }
+  };
+
   return (
     <>
-      <header className={`titlebar ${platform}`}>
-        {platform === 'macos' && <div className="titlebar-macos-spacer" />}
+      <header className={`titlebar ${platform}`} data-tauri-drag-region>
+        {platform === 'macos' && <div className="titlebar-macos-spacer" data-tauri-drag-region />}
         <div className="titlebar-tabs-track">
           <div className="titlebar-tabs" role="tablist">
             {tabs.map((tab) => {
               const isActive = tab.id === activeTabId;
+              const isDragging = tab.id === draggingTabId;
               return (
                 <div
                   key={tab.id}
                   role="tab"
                   aria-selected={isActive}
-                  className={`titlebar-tab ${isActive ? 'active' : ''}`}
+                  draggable={true}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('text/plain', tab.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                    setDraggingTabId(tab.id);
+                  }}
+                  onDragEnd={(event) => handleTabDragEnd(event, tab.id, tab.paths)}
+                  className={`titlebar-tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''}`}
                   onClick={() => { void switchTab(tab.id); }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({
+                      visible: true,
+                      x: event.clientX,
+                      y: event.clientY,
+                      tabId: tab.id,
+                    });
+                  }}
                   onAuxClick={(event) => {
                     if (event.button === 1) {
                       event.preventDefault();
@@ -127,6 +182,7 @@ export function TitleBar() {
         </div>
         <div
           className="titlebar-drag"
+          data-tauri-drag-region
           onPointerDown={(event) => { if (event.button === 0) void bridge.window.startDragging(); }}
           onDoubleClick={() => void bridge.window.toggleMaximize()}
         />
@@ -144,6 +200,63 @@ export function TitleBar() {
           </div>
         )}
       </header>
+
+      {contextMenu?.visible && (
+        <div
+          className="tab-context-menu"
+          style={{
+            position: 'fixed',
+            top: contextMenu.y,
+            left: contextMenu.x,
+            zIndex: 1000,
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {(() => {
+            const targetTab = tabs.find((t) => t.id === contextMenu.tabId);
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (targetTab) {
+                      void bridge.openInNewWindow(targetTab.paths);
+                      void closeTab(targetTab.id);
+                    }
+                    setContextMenu(null);
+                  }}
+                >
+                  <Codicon name="window" />
+                  <span>{t('Open in New Window')}</span>
+                </button>
+                <div className="tab-context-menu-divider" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void closeTab(contextMenu.tabId);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Codicon name="close" />
+                  <span>{t('Close Tab')}</span>
+                </button>
+                {tabs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void closeOtherTabs(contextMenu.tabId);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Codicon name="close-all" />
+                    <span>{t('Close Other Tabs')}</span>
+                  </button>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {newTabMenuOpen && (
         <aside
@@ -187,32 +300,61 @@ export function TitleBar() {
                   const isOpened = tabs.some((t) => t.id === workspace.id);
                   const isCurrentActive = workspace.id === activeTabId;
                   return (
-                    <button
+                    <div
                       key={workspace.id}
-                      type="button"
-                      role="menuitem"
-                      className={`workspace-menu-item ${isCurrentActive ? 'active' : ''} ${isOpened ? 'opened' : ''} ${workspace.available ? '' : 'unavailable'}`}
-                      disabled={!workspace.available || busy}
-                      onClick={() => void handleOpenRecent(workspace.paths)}
+                      className={`workspace-menu-item-row-wrap ${isCurrentActive ? 'active' : ''}`}
                     >
-                      <div className="workspace-menu-item-icon">
-                        <Codicon name={workspace.available ? (isOpened ? 'folder' : 'folder') : 'warning'} />
-                      </div>
-                      <div className="workspace-menu-item-info">
-                        <div className="workspace-menu-item-row">
-                          <span className="workspace-menu-item-name">{workspace.name}</span>
-                          {isOpened && <span className="workspace-menu-tag">{t('Open')}</span>}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={`workspace-menu-item ${isCurrentActive ? 'active' : ''} ${isOpened ? 'opened' : ''} ${workspace.available ? '' : 'unavailable'}`}
+                        disabled={!workspace.available || busy}
+                        onClick={(event) => {
+                          if (event.metaKey || event.ctrlKey) {
+                            void bridge.openInNewWindow(workspace.paths);
+                            setNewTabMenuOpen(false);
+                          } else {
+                            void handleOpenRecent(workspace.paths);
+                          }
+                        }}
+                      >
+                        <div className="workspace-menu-item-icon">
+                          <Codicon name={workspace.available ? 'folder' : 'warning'} />
                         </div>
-                        <span className="workspace-menu-item-path" title={workspace.paths.join(' · ')}>
-                          {workspace.paths.join(' · ')}
-                        </span>
-                      </div>
-                      {isCurrentActive && (
-                        <div className="workspace-menu-item-check">
-                          <Codicon name="check" />
+                        <div className="workspace-menu-item-info">
+                          <div className="workspace-menu-item-row">
+                            <span className="workspace-menu-item-name">{workspace.name}</span>
+                            {isOpened && <span className="workspace-menu-tag">{t('Open')}</span>}
+                          </div>
+                          <span className="workspace-menu-item-path" title={workspace.paths.join(' · ')}>
+                            {workspace.paths.join(' · ')}
+                          </span>
                         </div>
-                      )}
-                    </button>
+                        {isCurrentActive && (
+                          <div className="workspace-menu-item-check">
+                            <Codicon name="check" />
+                          </div>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="workspace-menu-item-open-window"
+                        aria-label={t('Open in New Window')}
+                        title={t('Open in New Window')}
+                        disabled={!workspace.available || busy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void bridge.focusWorkspaceAcrossWindows(workspace.paths).then((focused) => {
+                            if (!focused) {
+                              void bridge.openInNewWindow(workspace.paths);
+                            }
+                          });
+                          setNewTabMenuOpen(false);
+                        }}
+                      >
+                        <Codicon name="window" />
+                      </button>
+                    </div>
                   );
                 })}
               </div>

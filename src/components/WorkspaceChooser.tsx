@@ -13,9 +13,30 @@ export function WorkspaceChooser() {
   const bridge = useBridge();
   const [filterText, setFilterText] = useState('');
 
-  const choose = async () => {
+  const choose = async (openInNew = false) => {
     const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
-    if (paths.length) await openWorkspace(paths);
+    if (paths.length) {
+      if (openInNew) {
+        const focused = await bridge.focusWorkspaceAcrossWindows(paths);
+        if (!focused) {
+          await bridge.openInNewWindow(paths);
+        }
+      } else {
+        await openWorkspace(paths);
+      }
+    }
+  };
+
+  const handleRecentClick = (event: React.MouseEvent, paths: string[]) => {
+    if (event.metaKey || event.ctrlKey) {
+      void bridge.focusWorkspaceAcrossWindows(paths).then((focused) => {
+        if (!focused) {
+          void bridge.openInNewWindow(paths);
+        }
+      });
+    } else {
+      void openWorkspace(paths);
+    }
   };
 
   const filteredRecent = useMemo(() => {
@@ -24,7 +45,7 @@ export function WorkspaceChooser() {
     return recent.filter((w) => w.name.toLowerCase().includes(q) || w.paths.some((p) => p.toLowerCase().includes(q)));
   }, [recent, filterText]);
 
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  const isMac = bridge.platform() === 'macos';
 
   return (
     <main className="welcome-container">
@@ -50,7 +71,7 @@ export function WorkspaceChooser() {
               type="button"
               className="welcome-action-btn primary"
               disabled={busy}
-              onClick={() => void choose()}
+              onClick={(event) => void choose(event.metaKey || event.ctrlKey)}
             >
               <div className="welcome-action-icon">
                 <Codicon name="folder-opened" />
@@ -135,7 +156,7 @@ export function WorkspaceChooser() {
                       type="button"
                       className="recent-card-btn"
                       disabled={!workspace.available || busy}
-                      onClick={() => void openWorkspace(workspace.paths)}
+                      onClick={(event) => handleRecentClick(event, workspace.paths)}
                     >
                       <div className="recent-card-icon">
                         <Codicon name={workspace.available ? 'folder' : 'warning'} />
@@ -148,18 +169,33 @@ export function WorkspaceChooser() {
                         {!workspace.available && <span className="recent-card-badge">{t('Path is unavailable')}</span>}
                       </div>
                     </button>
-                    <button
-                      type="button"
-                      className="recent-card-remove"
-                      title={t('Remove from recent')}
-                      aria-label={t('Remove from recent')}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void removeRecent(workspace.id);
-                      }}
-                    >
-                      <Codicon name="close" />
-                    </button>
+                    <div className="recent-card-actions">
+                      <button
+                        type="button"
+                        className="recent-card-action-btn"
+                        title={t('Open in New Window')}
+                        aria-label={t('Open in New Window')}
+                        disabled={!workspace.available || busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void bridge.openInNewWindow(workspace.paths);
+                        }}
+                      >
+                        <Codicon name="window" />
+                      </button>
+                      <button
+                        type="button"
+                        className="recent-card-action-btn remove"
+                        title={t('Remove from recent')}
+                        aria-label={t('Remove from recent')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void removeRecent(workspace.id);
+                        }}
+                      >
+                        <Codicon name="close" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

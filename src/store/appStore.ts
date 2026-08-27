@@ -479,16 +479,18 @@ export const useAppStore = create<AppStore>((set, get) => {
 
   const persistTabs = (tabs: WorkspaceSnapshot['workspace'][], activeId: string | null) => {
     const current = get().bootstrap;
-    if (!current) return;
-    const openWorkspaceIds = tabs.map((item) => item.id);
-    const updatedState: AppStateSnapshot = {
-      ...current.state,
-      openWorkspaceIds,
-      activeWorkspaceId: activeId,
-      lastWorkspaceId: activeId,
-    };
-    set({ bootstrap: { ...current, state: updatedState } });
-    bridge().send({ type: 'saveAppState', payload: { state: updatedState } });
+    if (current) {
+      const openWorkspaceIds = tabs.map((item) => item.id);
+      const updatedState: AppStateSnapshot = {
+        ...current.state,
+        openWorkspaceIds,
+        activeWorkspaceId: activeId,
+        lastWorkspaceId: activeId,
+      };
+      set({ bootstrap: { ...current, state: updatedState } });
+      bridge().send({ type: 'saveAppState', payload: { state: updatedState } });
+    }
+    void bridge().syncWindowTabs(tabs.map((item) => item.paths));
   };
 
   const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true) => {
@@ -566,6 +568,14 @@ export const useAppStore = create<AppStore>((set, get) => {
           watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
         }
       });
+      void value.onFocusTab((focusPaths) => {
+        const targetTab = get().tabs.find((tab) =>
+          tab.paths.length === focusPaths.length && tab.paths.every((p, i) => p === focusPaths[i])
+        );
+        if (targetTab) {
+          void get().switchTab(targetTab.id);
+        }
+      });
       await withBusy(async () => {
         const loaded = await value.request<BootstrapData>({ type: 'bootstrap' });
         const bootstrap = loaded.state.settings?.resetViewLocationsOnStartup
@@ -593,6 +603,15 @@ export const useAppStore = create<AppStore>((set, get) => {
           await get().switchTab(existingTab.id);
         }
         return;
+      }
+
+      try {
+        const focusedOther = await bridge().focusWorkspaceAcrossWindows(paths);
+        if (focusedOther) {
+          return;
+        }
+      } catch {
+        // ignore cross-window focus error and fallback to opening in current window
       }
 
       const currentActiveId = get().activeTabId;
@@ -881,6 +900,22 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     restoreTabsOnStartup: async () => {
+      if (typeof window !== 'undefined' && window.location.search) {
+        const params = new URLSearchParams(window.location.search);
+        const encodedPaths = params.get('workspacePaths');
+        if (encodedPaths) {
+          try {
+            const paths = JSON.parse(encodedPaths) as string[];
+            if (Array.isArray(paths) && paths.length > 0) {
+              await get().openWorkspace(paths, true);
+              return;
+            }
+          } catch {
+            // ignore malformed parameter
+          }
+        }
+      }
+
       const state = get().bootstrap?.state;
       if (!state) return;
       const recent = state.recentWorkspaces ?? [];

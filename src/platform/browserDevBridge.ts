@@ -323,6 +323,21 @@ export class BrowserDevBridge implements VersionDockBridge {
   send(command: BridgeCommand): void { void this.request(command); }
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
   async notify(): Promise<boolean> { return false; }
+  async openInNewWindow(paths?: string[]): Promise<void> {
+    if (typeof window !== 'undefined') {
+      const url = paths && paths.length > 0 ? `/?workspacePaths=${encodeURIComponent(JSON.stringify(paths))}` : '/';
+      window.open(url, '_blank');
+    }
+  }
+  async syncWindowTabs(): Promise<void> {
+    return Promise.resolve();
+  }
+  async focusWorkspaceAcrossWindows(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+  async onFocusTab(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
 
   async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {
     if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');

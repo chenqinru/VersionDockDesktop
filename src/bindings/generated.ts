@@ -68,6 +68,18 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	workspace_id: string,
 } } | { type: "workspaceRefresh"; payload: {
 	workspace_id: string,
+} } | { type: "windowOpenNew"; payload: {
+	paths: string[] | null,
+	x: number | null,
+	y: number | null,
+	width: number | null,
+	height: number | null,
+} } | { type: "windowSyncTabs"; payload: {
+	window_label: string,
+	workspace_paths: string[][],
+} } | { type: "windowFocusWorkspace"; payload: {
+	current_window_label: string,
+	paths: string[],
 } } | { type: "repositoryStatus"; payload: {
 	workspace_id: string,
 	repo_id: string,

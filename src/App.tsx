@@ -92,11 +92,22 @@ export function App() {
           event.preventDefault();
           void useAppStore.getState().closeTab(activeId);
         }
+      } else if (isCmdOrCtrl && event.shiftKey && event.key.toLowerCase() === 'n' && !event.altKey) {
+        event.preventDefault();
+        void bridge.openInNewWindow();
+      } else if (isCmdOrCtrl && event.shiftKey && event.key.toLowerCase() === 'o' && !event.altKey) {
+        event.preventDefault();
+        void (async () => {
+          const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
+          if (paths.length) {
+            await bridge.openInNewWindow(paths);
+          }
+        })();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [bridge, t]);
 
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);
 

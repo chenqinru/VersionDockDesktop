@@ -17,6 +17,10 @@ export interface VersionDockBridge {
   platform(): 'macos' | 'windows' | 'linux';
   selectWorkspaceFolders(title: string): Promise<string[]>;
   notify(title: string, body: string): Promise<boolean>;
+  openInNewWindow(paths?: string[], position?: { x: number; y: number }): Promise<void>;
+  syncWindowTabs(workspacePaths: string[][]): Promise<void>;
+  focusWorkspaceAcrossWindows(paths: string[]): Promise<boolean>;
+  onFocusTab(handler: (paths: string[]) => void): Promise<() => void>;
   window: {
     startDragging(): Promise<void>;
     toggleMaximize(): Promise<void>;
@@ -55,10 +59,10 @@ export class BridgeError extends Error implements DesktopError {
   }
 }
 
+let requestSequence = 0;
 function requestId(): string {
-  return typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  requestSequence += 1;
+  return `req-${Date.now()}-${requestSequence}`;
 }
 
 export class TauriBridge implements VersionDockBridge {
@@ -98,39 +102,58 @@ export class TauriBridge implements VersionDockBridge {
     const id = requestId();
     const timeoutMs = options.timeoutMs ?? 120_000;
     const { invoke } = await import('@tauri-apps/api/core');
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let aborted = false;
 
-    const cancel = async () => {
-      aborted = true;
-      try { await invoke('bridge_cancel', { requestId: id }); } catch { /* app may be closing */ }
-    };
-    const onAbort = () => { void cancel(); };
-    options.signal?.addEventListener('abort', onAbort, { once: true });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => {
+        void invoke('bridge_cancel', { requestId: id }).catch(() => undefined);
+        reject(new BridgeError({
+          code: 'REQUEST_TIMEOUT',
+          message: `Request timed out after ${timeoutMs}ms`,
+          command: null,
+          exitCode: null,
+          stderr: null,
+          recoverable: true,
+        }));
+      }, timeoutMs);
+      options.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        void invoke('bridge_cancel', { requestId: id }).catch(() => undefined);
+        reject(new DOMException('Operation aborted', 'AbortError'));
+      }, { once: true });
+    });
 
     try {
-      if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
       const response = await Promise.race([
-        invoke<ResponseEnvelope>('bridge_request', { envelope: { requestId: id, command } }),
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
-            void cancel();
-            reject(new BridgeError({ code: 'REQUEST_TIMEOUT', message: `Request timed out after ${timeoutMs}ms`, command: null, exitCode: null, stderr: null, recoverable: true }));
-          }, timeoutMs);
+        invoke<ResponseEnvelope>('bridge_request', {
+          envelope: {
+            requestId: id,
+            command,
+          },
         }),
+        timeoutPromise,
       ]);
-      if (response.error) throw new BridgeError(response.error);
-      if (aborted) throw new DOMException('Operation aborted', 'AbortError');
+
+      if (response.error) {
+        throw new BridgeError(response.error);
+      }
+
       return response.result as T;
-    } finally {
-      if (timeout) clearTimeout(timeout);
-      options.signal?.removeEventListener('abort', onAbort);
+    } catch (error) {
+      if (error instanceof BridgeError || (error instanceof DOMException && error.name === 'AbortError')) throw error;
+      throw new BridgeError({
+        code: 'BRIDGE_INVOKE_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+        command: null,
+        exitCode: null,
+        stderr: null,
+        recoverable: false,
+      });
     }
   }
 
   subscribe(handler: (event: BridgeEvent) => void): () => void {
     this.handlers.add(handler);
-    return () => this.handlers.delete(handler);
+    return () => { this.handlers.delete(handler); };
   }
 
   getState<T>(): T | undefined { return this.state as T | undefined; }
@@ -151,6 +174,44 @@ export class TauriBridge implements VersionDockBridge {
       return true;
     } catch { return false; }
   }
+  async openInNewWindow(paths?: string[], position?: { x: number; y: number }): Promise<void> {
+    await this.request({
+      type: 'windowOpenNew',
+      payload: {
+        paths: paths ?? null,
+        x: position?.x ?? null,
+        y: position?.y ?? null,
+        width: null,
+        height: null,
+      },
+    });
+  }
+  async syncWindowTabs(workspacePaths: string[][]): Promise<void> {
+    const win = (await import('@tauri-apps/api/window')).getCurrentWindow();
+    await this.request({
+      type: 'windowSyncTabs',
+      payload: {
+        window_label: win.label,
+        workspace_paths: workspacePaths,
+      },
+    });
+  }
+  async focusWorkspaceAcrossWindows(paths: string[]): Promise<boolean> {
+    const win = (await import('@tauri-apps/api/window')).getCurrentWindow();
+    return this.request<boolean>({
+      type: 'windowFocusWorkspace',
+      payload: {
+        current_window_label: win.label,
+        paths,
+      },
+    });
+  }
+  async onFocusTab(handler: (paths: string[]) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<string[]>('versiondock://focus-tab', ({ payload }) => {
+      handler(payload);
+    });
+  }
 }
 
 export class MockBridge implements VersionDockBridge {
@@ -164,6 +225,18 @@ export class MockBridge implements VersionDockBridge {
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }
   async selectWorkspaceFolders(): Promise<string[]> { return []; }
   async notify(): Promise<boolean> { return false; }
+  async openInNewWindow(): Promise<void> {
+    return Promise.resolve();
+  }
+  async syncWindowTabs(): Promise<void> {
+    return Promise.resolve();
+  }
+  async focusWorkspaceAcrossWindows(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+  async onFocusTab(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined,
     isMaximized: async () => false, onDragDrop: async () => () => undefined,

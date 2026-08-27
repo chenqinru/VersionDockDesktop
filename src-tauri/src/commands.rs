@@ -480,6 +480,115 @@ async fn dispatch(
             state.watch_workspace(&descriptor, &settings, app.clone())?;
             json(snapshot)
         }
+        BridgeCommand::WindowOpenNew {
+            paths,
+            x,
+            y,
+            width,
+            height,
+        } => {
+            let label = format!("window-{}", uuid::Uuid::new_v4().simple());
+            let mut url_path = String::from("index.html");
+            if let Some(paths) = &paths {
+                if !paths.is_empty() {
+                    let encoded = serde_json::to_string(paths).unwrap_or_default();
+                    url_path = format!("index.html?workspacePaths={}", url_encode(&encoded));
+                }
+            }
+
+            let builder = tauri::WebviewWindowBuilder::new(
+                app,
+                &label,
+                tauri::WebviewUrl::App(url_path.into()),
+            )
+            .title(" ")
+            .inner_size(width.unwrap_or(1440.0), height.unwrap_or(900.0))
+            .min_inner_size(1024.0, 680.0)
+            .resizable(true);
+
+            #[cfg(target_os = "macos")]
+            let builder = builder
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true);
+
+            #[cfg(target_os = "linux")]
+            let builder = builder.decorations(false);
+
+            #[cfg(target_os = "windows")]
+            let builder = builder.decorations(true);
+
+            let builder = if let (Some(x), Some(y)) = (x, y) {
+                builder.position(x, y)
+            } else {
+                builder.center()
+            };
+
+            let window = builder.build().map_err(|err| {
+                DesktopError::new(
+                    "WINDOW_CREATE_FAILED",
+                    format!("Failed to create window: {err}"),
+                    true,
+                )
+            })?;
+
+            #[cfg(target_os = "windows")]
+            {
+                use tauri_plugin_window_controls::WindowControlsExt;
+                let _ = window.set_title_bar_height(38);
+                let _ = window.set_title_bar_overlay(true);
+            }
+
+            let _ = window.show();
+            let _ = window.set_focus();
+
+            json(label)
+        }
+        BridgeCommand::WindowSyncTabs {
+            window_label,
+            workspace_paths,
+        } => {
+            let mut map = state.window_workspaces.lock().unwrap();
+            map.insert(window_label, workspace_paths);
+            json(true)
+        }
+        BridgeCommand::WindowFocusWorkspace {
+            current_window_label,
+            paths,
+        } => {
+            use tauri::{Emitter, Manager};
+            let mut target_window_label: Option<String> = None;
+            {
+                let mut map = state.window_workspaces.lock().unwrap();
+                // 清理已经销毁的窗口
+                map.retain(|label, _| app.get_webview_window(label).is_some());
+
+                for (label, workspaces) in map.iter() {
+                    if label != &current_window_label {
+                        for ws in workspaces {
+                            if paths_match(ws, &paths) {
+                                target_window_label = Some(label.clone());
+                                break;
+                            }
+                        }
+                        if target_window_label.is_some() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(target_label) = target_window_label {
+                if let Some(window) = app.get_webview_window(&target_label) {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.emit("versiondock://focus-tab", &paths);
+                    return json(true);
+                }
+            }
+
+            json(false)
+        }
         BridgeCommand::RepositoryStatus {
             workspace_id,
             repo_id,
@@ -1448,6 +1557,32 @@ where
 fn json<T: serde::Serialize>(value: T) -> Result<serde_json::Value, DesktopError> {
     serde_json::to_value(value)
         .map_err(|error| DesktopError::new("SERIALIZATION_FAILED", error.to_string(), false))
+}
+
+fn url_encode(input: &str) -> String {
+    let mut encoded = String::new();
+    for byte in input.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                encoded.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    encoded
+}
+
+fn paths_match(a: &[String], b: &[String]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut a_sorted = a.to_vec();
+    let mut b_sorted = b.to_vec();
+    a_sorted.sort();
+    b_sorted.sort();
+    a_sorted == b_sorted
 }
 
 #[cfg(test)]

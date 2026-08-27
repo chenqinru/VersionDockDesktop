@@ -58,6 +58,21 @@ pub enum BridgeCommand {
     WorkspaceRefresh {
         workspace_id: String,
     },
+    WindowOpenNew {
+        paths: Option<Vec<String>>,
+        x: Option<f64>,
+        y: Option<f64>,
+        width: Option<f64>,
+        height: Option<f64>,
+    },
+    WindowSyncTabs {
+        window_label: String,
+        workspace_paths: Vec<Vec<String>>,
+    },
+    WindowFocusWorkspace {
+        current_window_label: String,
+        paths: Vec<String>,
+    },
     RepositoryStatus {
         workspace_id: String,
         repo_id: String,

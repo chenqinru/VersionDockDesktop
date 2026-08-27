@@ -24,6 +24,7 @@ pub struct AppState {
     pub cancellations: Mutex<HashMap<String, CancellationToken>>,
     pub read_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
     watchers: std::sync::Mutex<Vec<RecommendedWatcher>>,
     generation: AtomicU32,
 }
@@ -87,6 +88,7 @@ impl AppState {
             cancellations: Mutex::new(HashMap::new()),
             read_limit: Semaphore::new(4),
             write_locks: Mutex::new(HashMap::new()),
+            window_workspaces: std::sync::Mutex::new(HashMap::new()),
             watchers: std::sync::Mutex::new(Vec::new()),
             generation: AtomicU32::new(1),
         }
