@@ -27,7 +27,7 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', busy: false, error: undefined }));
+afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', busy: false, error: undefined }));
 
 describe('appStore async lifecycle', () => {
   it('supports single, toggle, and range commit selection with aggregated revision diffs', async () => {
@@ -297,5 +297,70 @@ describe('appStore async lifecycle', () => {
     expect(commands[0]).toEqual({ type: 'subtreeOperation', payload: { workspace_id: 'workspace', repo_id: 'repo', operation: { type: 'pull', subtree_id: 'entry' } } });
     expect(commands[0]).not.toHaveProperty('cwd');
     expect(useAppStore.getState().subtrees.repo).toEqual(entries);
+  });
+
+  it('manages multiple workspace tabs with session state isolation, switching, and closing', async () => {
+    const ws1 = snapshot('ws-1', 1);
+    ws1.repositories = [repository('repo-1', 'Project 1')];
+    const ws2 = snapshot('ws-2', 1);
+    ws2.repositories = [repository('repo-2', 'Project 2')];
+
+    const commands: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      commands.push(command);
+      if (command.type === 'workspaceOpen') {
+        return command.payload.paths[0] === '/tmp/ws-1' ? ws1 : ws2;
+      }
+      if (command.type === 'workspaceRefresh') {
+        return command.payload.workspace_id === 'ws-1' ? ws1 : ws2;
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'branches') return [];
+      if (command.type === 'tags') return [];
+      if (command.type === 'conflicts') return [];
+      return [];
+    });
+
+    useAppStore.setState({ bridge, bootstrap });
+
+    // 1. 打开第一个工作区
+    await useAppStore.getState().openWorkspace(['/tmp/ws-1']);
+    expect(useAppStore.getState().tabs.length).toBe(1);
+    expect(useAppStore.getState().activeTabId).toBe('ws-1');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('ws-1');
+
+    // 修改第一个工作区的状态（如历史筛选器）
+    useAppStore.getState().setHistoryFilter('filter-1');
+    expect(useAppStore.getState().historyFilter).toBe('filter-1');
+
+    // 2. 打开第二个工作区
+    await useAppStore.getState().openWorkspace(['/tmp/ws-2']);
+    expect(useAppStore.getState().tabs.length).toBe(2);
+    expect(useAppStore.getState().activeTabId).toBe('ws-2');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('ws-2');
+    expect(useAppStore.getState().historyFilter).toBe('');
+
+    // 3. 再次尝试打开 ws-1 路径，应该直接聚焦并恢复状态而不会产生重复 Tab
+    await useAppStore.getState().openWorkspace(['/tmp/ws-1']);
+    expect(useAppStore.getState().tabs.length).toBe(2);
+    expect(useAppStore.getState().activeTabId).toBe('ws-1');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('ws-1');
+    expect(useAppStore.getState().historyFilter).toBe('filter-1');
+
+    // 4. 测试 reorderTabs
+    useAppStore.getState().reorderTabs(0, 1);
+    expect(useAppStore.getState().tabs.map((t) => t.id)).toEqual(['ws-2', 'ws-1']);
+
+    // 5. 关闭当前激活的 ws-1 标签页，应自动切换激活剩余的 ws-2
+    await useAppStore.getState().closeTab('ws-1');
+    expect(useAppStore.getState().tabs.length).toBe(1);
+    expect(useAppStore.getState().activeTabId).toBe('ws-2');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('ws-2');
+
+    // 6. 关闭最后一个标签页，应清空工作区回到欢迎页
+    await useAppStore.getState().closeTab('ws-2');
+    expect(useAppStore.getState().tabs.length).toBe(0);
+    expect(useAppStore.getState().activeTabId).toBeNull();
+    expect(useAppStore.getState().snapshot).toBeUndefined();
   });
 });

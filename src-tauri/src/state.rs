@@ -64,10 +64,22 @@ impl AppState {
                             .retain(|item| item.id != descriptor.id);
                         app.recent_workspaces.insert(0, descriptor.clone());
                         app.recent_workspaces.truncate(10);
-                        app.last_workspace_id = Some(descriptor.id);
+                        app.last_workspace_id = Some(descriptor.id.clone());
+                        app.active_workspace_id = Some(descriptor.id.clone());
+                        if !app.open_workspace_ids.contains(&descriptor.id) {
+                            app.open_workspace_ids.insert(0, descriptor.id);
+                        }
                     }
                 }
             }
+        }
+        if app.open_workspace_ids.is_empty() {
+            if let Some(last_id) = &app.last_workspace_id {
+                app.open_workspace_ids.push(last_id.clone());
+            }
+        }
+        if app.active_workspace_id.is_none() {
+            app.active_workspace_id = app.last_workspace_id.clone();
         }
         Self {
             config_dir,
@@ -312,6 +324,15 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
         layout,
         last_workspace_id: value
             .get("lastWorkspaceId")
+            .and_then(|item| item.as_str())
+            .map(str::to_string),
+        open_workspace_ids: value
+            .get("openWorkspaceIds")
+            .cloned()
+            .and_then(|item| serde_json::from_value(item).ok())
+            .unwrap_or_default(),
+        active_workspace_id: value
+            .get("activeWorkspaceId")
             .and_then(|item| item.as_str())
             .map(str::to_string),
         recent_workspaces: value

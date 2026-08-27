@@ -6,6 +6,8 @@ export type AppStateSnapshot = {
 	settings?: DesktopSettings,
 	layout?: LayoutState,
 	lastWorkspaceId: string | null,
+	openWorkspaceIds?: string[],
+	activeWorkspaceId?: string | null,
 	recentWorkspaces: WorkspaceDescriptor[],
 	theme?: ThemePreference | null,
 	language?: LanguagePreference | null,

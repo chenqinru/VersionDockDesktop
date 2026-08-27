@@ -816,6 +816,12 @@ pub struct AppStateSnapshot {
     #[specta(optional)]
     pub layout: LayoutState,
     pub last_workspace_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub open_workspace_ids: Vec<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub active_workspace_id: Option<String>,
     pub recent_workspaces: Vec<WorkspaceDescriptor>,
     #[serde(default)]
     #[specta(optional)]

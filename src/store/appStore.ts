@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
-  WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
+  WorkspaceSnapshot, WorkspaceDescriptor, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
 } from '../bindings/generated';
 import { BridgeError, type VersionDockBridge } from '../platform/bridge';
@@ -99,6 +99,56 @@ export function interleaveHistory(historyByRepo: Record<string, CommitNode[]>): 
   return interleaveLogs(historyByRepo);
 }
 
+export interface WorkspaceSessionState {
+  snapshot: WorkspaceSnapshot;
+  allRepositories: RepositoryStatus[];
+  selectedRepoId?: string;
+  selectedFile?: { repoId: string; path: string; staged: boolean; revision?: string; fromRevision?: string; toRevision?: string };
+  fileHistoryTarget?: { repoId: string; path: string };
+  mode: WorkspaceMode;
+  diff?: DiffDocument;
+  changesDiff?: DiffDocument;
+  changes?: CommitChangesModel;
+  history: CommitNode[];
+  historyHasMore: boolean;
+  historyByRepo: Record<string, CommitNode[]>;
+  historyTopology: GraphCommitNode[];
+  historyTopologyByRepo: Record<string, GraphCommitNode[]>;
+  historyHasMoreByRepo: Record<string, boolean>;
+  historyLoading: boolean;
+  branchesLoading: boolean;
+  historyScope: HistoryScope;
+  historyFilter: string;
+  selectedCommit?: CommitDetail;
+  selectedCommits: CommitNode[];
+  selectedPrimaryKey?: string;
+  selectedCommitDetails: Record<string, CommitDetail>;
+  selectedCommitLoading: Record<string, boolean>;
+  mergeCommits: Record<string, MergeCommitSummary[]>;
+  mergeCommitsLoading: Record<string, boolean>;
+  mergeParentFiles: Record<string, CommitFile[]>;
+  mergeParentFilesLoading: Record<string, boolean>;
+  branches: BranchInfo[];
+  tags: TagInfo[];
+  branchesByRepo: Record<string, BranchInfo[]>;
+  tagsByRepo: Record<string, TagInfo[]>;
+  conflicts: ConflictFile[];
+  merge?: MergeVersions;
+  mergeResult: string;
+  stashes: Record<string, StashEntry[]>;
+  shelves: Record<string, ShelfEntry[]>;
+  changelists: Record<string, ChangelistEntry[]>;
+  worktrees: Record<string, WorktreeEntry[]>;
+  worktreeDiff?: WorktreeDiffResult & { repoId: string; source?: 'worktree' | 'repository' };
+  subtrees: Record<string, SubtreeEntry[]>;
+  submodules: Record<string, SubmoduleEntry[]>;
+  unpushedCommits: Record<string, UnpushedCommit[]>;
+  comparisonTarget?: { repoId: string; target: string };
+  comparison?: BranchCompareResult;
+  remotes: Record<string, RemoteInfo[]>;
+  lastSyncedAt?: number;
+}
+
 export interface AppStore {
   bridge?: VersionDockBridge;
   ready: boolean;
@@ -108,6 +158,9 @@ export interface AppStore {
   errorDetails?: string;
   notice?: string;
   bootstrap?: BootstrapData;
+  tabs: WorkspaceSnapshot['workspace'][];
+  activeTabId: string | null;
+  sessions: Record<string, WorkspaceSessionState>;
   snapshot?: WorkspaceSnapshot;
   allRepositories: RepositoryStatus[];
   selectedRepoId?: string;
@@ -155,7 +208,13 @@ export interface AppStore {
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
   initialize: (bridge: VersionDockBridge) => Promise<void>;
-  openWorkspace: (paths: string[]) => Promise<void>;
+  openWorkspace: (paths: string[], focus?: boolean) => Promise<void>;
+  switchTab: (workspaceId: string) => Promise<void>;
+  closeTab: (workspaceId: string) => Promise<void>;
+  closeOtherTabs: (workspaceId: string) => Promise<void>;
+  closeAllTabs: () => Promise<void>;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
+  restoreTabsOnStartup: () => Promise<void>;
   restoreLastWorkspace: () => Promise<void>;
   removeRecent: (workspaceId: string) => Promise<void>;
   refresh: (silent?: boolean) => Promise<void>;
@@ -248,7 +307,7 @@ const emptyState: AppStateSnapshot = {
     maximumGraphCommits: 1000, projectColors: {}, externalEditor: null,
   },
   layout: { panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
-  lastWorkspaceId: null, recentWorkspaces: [],
+  lastWorkspaceId: null, openWorkspaceIds: [], activeWorkspaceId: null, recentWorkspaces: [],
 };
 
 let watcherTimer: ReturnType<typeof setTimeout> | undefined;
@@ -365,6 +424,73 @@ export const useAppStore = create<AppStore>((set, get) => {
     bridge().send({ type: 'updateLayout', payload: { layout: next } });
   };
 
+  const extractCurrentSession = (state: AppStore): WorkspaceSessionState | undefined => {
+    if (!state.snapshot) return undefined;
+    return {
+      snapshot: state.snapshot,
+      allRepositories: state.allRepositories,
+      selectedRepoId: state.selectedRepoId,
+      selectedFile: state.selectedFile,
+      fileHistoryTarget: state.fileHistoryTarget,
+      mode: state.mode,
+      diff: state.diff,
+      changesDiff: state.changesDiff,
+      changes: state.changes,
+      history: state.history,
+      historyHasMore: state.historyHasMore,
+      historyByRepo: state.historyByRepo,
+      historyTopology: state.historyTopology,
+      historyTopologyByRepo: state.historyTopologyByRepo,
+      historyHasMoreByRepo: state.historyHasMoreByRepo,
+      historyLoading: state.historyLoading,
+      branchesLoading: state.branchesLoading,
+      historyScope: state.historyScope,
+      historyFilter: state.historyFilter,
+      selectedCommit: state.selectedCommit,
+      selectedCommits: state.selectedCommits,
+      selectedPrimaryKey: state.selectedPrimaryKey,
+      selectedCommitDetails: state.selectedCommitDetails,
+      selectedCommitLoading: state.selectedCommitLoading,
+      mergeCommits: state.mergeCommits,
+      mergeCommitsLoading: state.mergeCommitsLoading,
+      mergeParentFiles: state.mergeParentFiles,
+      mergeParentFilesLoading: state.mergeParentFilesLoading,
+      branches: state.branches,
+      tags: state.tags,
+      branchesByRepo: state.branchesByRepo,
+      tagsByRepo: state.tagsByRepo,
+      conflicts: state.conflicts,
+      merge: state.merge,
+      mergeResult: state.mergeResult,
+      stashes: state.stashes,
+      shelves: state.shelves,
+      changelists: state.changelists,
+      worktrees: state.worktrees,
+      worktreeDiff: state.worktreeDiff,
+      subtrees: state.subtrees,
+      submodules: state.submodules,
+      unpushedCommits: state.unpushedCommits,
+      comparisonTarget: state.comparisonTarget,
+      comparison: state.comparison,
+      remotes: state.remotes,
+      lastSyncedAt: Date.now(),
+    };
+  };
+
+  const persistTabs = (tabs: WorkspaceSnapshot['workspace'][], activeId: string | null) => {
+    const current = get().bootstrap;
+    if (!current) return;
+    const openWorkspaceIds = tabs.map((item) => item.id);
+    const updatedState: AppStateSnapshot = {
+      ...current.state,
+      openWorkspaceIds,
+      activeWorkspaceId: activeId,
+      lastWorkspaceId: activeId,
+    };
+    set({ bootstrap: { ...current, state: updatedState } });
+    bridge().send({ type: 'saveAppState', payload: { state: updatedState } });
+  };
+
   const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true) => {
     const current = get().snapshot;
     if (current?.workspace.id === snapshot.workspace.id && current.generation > snapshot.generation) return;
@@ -375,7 +501,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
       set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
+      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId });
     for (const repo of visibleSnapshot.repositories) {
       const counts = { incoming: repo.behind, unpushed: repo.ahead };
@@ -393,6 +519,15 @@ export const useAppStore = create<AppStore>((set, get) => {
     const requests: Promise<void>[] = [get().loadConflicts()];
     if (workspaceChanged || reloadRepository) requests.push(get().loadStashes(), get().loadShelves(), get().loadWorktrees(), get().loadSubtrees(), get().loadSubmodules(), get().loadUnpushedCommits());
     await Promise.all(requests);
+    const activeSession = extractCurrentSession(get());
+    if (activeSession) {
+      set((state) => ({
+        sessions: {
+          ...state.sessions,
+          [snapshot.workspace.id]: activeSession,
+        },
+      }));
+    }
   };
 
   const refreshFromWatcher = async () => {
@@ -418,7 +553,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, busy: false, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {},
+    ready: false, busy: false, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {},
 
     operations: {},
 
@@ -438,7 +573,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           : loaded;
         value.setState(bootstrap.state);
         set({ bootstrap, ready: true });
-        await get().restoreLastWorkspace();
+        await get().restoreTabsOnStartup();
         restartAutoRefresh();
         if (bootstrap.state.settings?.fetchOnStartup && get().snapshot) {
           const gitRepos = get().snapshot?.repositories.filter((repo) => repo.meta.kind === 'git' && repo.toolAvailable !== false) ?? [];
@@ -448,23 +583,339 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ ready: true });
     },
 
-    openWorkspace: async (paths) => withBusy(async () => {
+    openWorkspace: async (paths, focus = true) => withBusy(async () => {
       if (!paths.length) return;
+      const existingTab = get().tabs.find((tab) =>
+        tab.paths.length === paths.length && tab.paths.every((p, i) => p === paths[i])
+      );
+      if (existingTab && get().sessions[existingTab.id]) {
+        if (focus) {
+          await get().switchTab(existingTab.id);
+        }
+        return;
+      }
+
+      const currentActiveId = get().activeTabId;
+      if (currentActiveId) {
+        const currentSession = extractCurrentSession(get());
+        if (currentSession) {
+          set((state) => ({
+            sessions: { ...state.sessions, [currentActiveId]: currentSession },
+          }));
+        }
+      }
+
       cancelRequests();
       const controller = beginRequest('workspace');
       const requestGeneration = ++workspaceRequestGeneration;
       const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths } }, { signal: controller.signal });
       if (requestGeneration !== workspaceRequestGeneration) return;
       const current = get().bootstrap ?? { state: emptyState, tools: snapshot.tools, capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false } };
-      const bootstrap = { ...current, state: { ...current.state, recentWorkspaces: [snapshot.workspace, ...current.state.recentWorkspaces.filter((item) => item.id !== snapshot.workspace.id)].slice(0, 10), lastWorkspaceId: snapshot.workspace.id } };
-      set({ bootstrap });
+      
+      const workspaceDescriptor = snapshot.workspace;
+      const filteredTabs = get().tabs.filter((item) => item.id !== workspaceDescriptor.id);
+      const nextTabs = [...filteredTabs, workspaceDescriptor];
+      const recentWorkspaces = [workspaceDescriptor, ...current.state.recentWorkspaces.filter((item) => item.id !== workspaceDescriptor.id)].slice(0, 10);
+      const nextBootstrap: BootstrapData = {
+        ...current,
+        state: {
+          ...current.state,
+          recentWorkspaces,
+          openWorkspaceIds: nextTabs.map((t) => t.id),
+          activeWorkspaceId: workspaceDescriptor.id,
+          lastWorkspaceId: workspaceDescriptor.id,
+        },
+      };
+
+      set({
+        bootstrap: nextBootstrap,
+        tabs: nextTabs,
+        activeTabId: workspaceDescriptor.id,
+      });
+
+      persistTabs(nextTabs, workspaceDescriptor.id);
       await applySnapshot(snapshot);
     }, 'workspace'),
 
-    restoreLastWorkspace: async () => {
+    switchTab: async (workspaceId: string) => {
+      if (get().activeTabId === workspaceId && get().snapshot) return;
+      const targetTab = get().tabs.find((t) => t.id === workspaceId);
+      if (!targetTab) return;
+
+      const currentActiveId = get().activeTabId;
+      if (currentActiveId && currentActiveId !== workspaceId) {
+        const currentSession = extractCurrentSession(get());
+        if (currentSession) {
+          set((state) => ({
+            sessions: { ...state.sessions, [currentActiveId]: currentSession },
+          }));
+        }
+      }
+
+      const cachedSession = get().sessions[workspaceId];
+      if (cachedSession) {
+        set({
+          activeTabId: workspaceId,
+          snapshot: cachedSession.snapshot,
+          allRepositories: cachedSession.allRepositories,
+          selectedRepoId: cachedSession.selectedRepoId,
+          selectedFile: cachedSession.selectedFile,
+          fileHistoryTarget: cachedSession.fileHistoryTarget,
+          mode: cachedSession.mode,
+          diff: cachedSession.diff,
+          changesDiff: cachedSession.changesDiff,
+          changes: cachedSession.changes,
+          history: cachedSession.history,
+          historyHasMore: cachedSession.historyHasMore,
+          historyByRepo: cachedSession.historyByRepo,
+          historyTopology: cachedSession.historyTopology,
+          historyTopologyByRepo: cachedSession.historyTopologyByRepo,
+          historyHasMoreByRepo: cachedSession.historyHasMoreByRepo,
+          historyLoading: cachedSession.historyLoading,
+          branchesLoading: cachedSession.branchesLoading,
+          historyScope: cachedSession.historyScope,
+          historyFilter: cachedSession.historyFilter,
+          selectedCommit: cachedSession.selectedCommit,
+          selectedCommits: cachedSession.selectedCommits,
+          selectedPrimaryKey: cachedSession.selectedPrimaryKey,
+          selectedCommitDetails: cachedSession.selectedCommitDetails,
+          selectedCommitLoading: cachedSession.selectedCommitLoading,
+          mergeCommits: cachedSession.mergeCommits,
+          mergeCommitsLoading: cachedSession.mergeCommitsLoading,
+          mergeParentFiles: cachedSession.mergeParentFiles,
+          mergeParentFilesLoading: cachedSession.mergeParentFilesLoading,
+          branches: cachedSession.branches,
+          tags: cachedSession.tags,
+          branchesByRepo: cachedSession.branchesByRepo,
+          tagsByRepo: cachedSession.tagsByRepo,
+          conflicts: cachedSession.conflicts,
+          merge: cachedSession.merge,
+          mergeResult: cachedSession.mergeResult,
+          stashes: cachedSession.stashes,
+          shelves: cachedSession.shelves,
+          changelists: cachedSession.changelists,
+          worktrees: cachedSession.worktrees,
+          worktreeDiff: cachedSession.worktreeDiff,
+          subtrees: cachedSession.subtrees,
+          submodules: cachedSession.submodules,
+          unpushedCommits: cachedSession.unpushedCommits,
+          comparisonTarget: cachedSession.comparisonTarget,
+          comparison: cachedSession.comparison,
+          remotes: cachedSession.remotes,
+        });
+        persistTabs(get().tabs, workspaceId);
+        void get().refresh(true);
+      } else {
+        await withBusy(async () => {
+          cancelRequests();
+          const controller = beginRequest('workspace');
+          const requestGeneration = ++workspaceRequestGeneration;
+          const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths: targetTab.paths } }, { signal: controller.signal });
+          if (requestGeneration !== workspaceRequestGeneration) return;
+          set({ activeTabId: workspaceId });
+          persistTabs(get().tabs, workspaceId);
+          await applySnapshot(snapshot);
+        }, 'workspace');
+      }
+    },
+
+    closeTab: async (workspaceId: string) => {
+      const currentTabs = get().tabs;
+      const tabIndex = currentTabs.findIndex((t) => t.id === workspaceId);
+      if (tabIndex === -1) return;
+
+      const nextTabs = currentTabs.filter((t) => t.id !== workspaceId);
+      const nextSessions = { ...get().sessions };
+      delete nextSessions[workspaceId];
+
+      if (get().activeTabId === workspaceId) {
+        if (nextTabs.length > 0) {
+          const nextActiveIndex = Math.min(tabIndex, nextTabs.length - 1);
+          const nextActiveTab = nextTabs[nextActiveIndex];
+          set({
+            tabs: nextTabs,
+            sessions: nextSessions,
+          });
+          await get().switchTab(nextActiveTab.id);
+        } else {
+          set({
+            tabs: nextTabs,
+            activeTabId: null,
+            sessions: nextSessions,
+            snapshot: undefined,
+            allRepositories: [],
+            selectedRepoId: undefined,
+            selectedFile: undefined,
+            fileHistoryTarget: undefined,
+            mode: 'history',
+            diff: undefined,
+            changesDiff: undefined,
+            changes: undefined,
+            history: [],
+            historyHasMore: false,
+            historyByRepo: {},
+            historyTopology: [],
+            historyTopologyByRepo: {},
+            historyHasMoreByRepo: {},
+            historyLoading: false,
+            branchesLoading: false,
+            historyScope: { repoIds: null, revisionsByRepo: {} },
+            historyFilter: '',
+            selectedCommit: undefined,
+            selectedCommits: [],
+            selectedPrimaryKey: undefined,
+            selectedCommitDetails: {},
+            selectedCommitLoading: {},
+            mergeCommits: {},
+            mergeCommitsLoading: {},
+            mergeParentFiles: {},
+            mergeParentFilesLoading: {},
+            branches: [],
+            tags: [],
+            branchesByRepo: {},
+            tagsByRepo: {},
+            conflicts: [],
+            merge: undefined,
+            mergeResult: '',
+            stashes: {},
+            shelves: {},
+            changelists: {},
+            worktrees: {},
+            worktreeDiff: undefined,
+            subtrees: {},
+            submodules: {},
+            unpushedCommits: {},
+            comparisonTarget: undefined,
+            comparison: undefined,
+            remotes: {},
+          });
+          persistTabs(nextTabs, null);
+        }
+      } else {
+        set({
+          tabs: nextTabs,
+          sessions: nextSessions,
+        });
+        persistTabs(nextTabs, get().activeTabId);
+      }
+    },
+
+    closeOtherTabs: async (workspaceId: string) => {
+      const targetTab = get().tabs.find((t) => t.id === workspaceId);
+      if (!targetTab) return;
+      const nextTabs = [targetTab];
+      const nextSessions: Record<string, WorkspaceSessionState> = {};
+      if (get().sessions[workspaceId]) {
+        nextSessions[workspaceId] = get().sessions[workspaceId];
+      }
+      set({ tabs: nextTabs, sessions: nextSessions });
+      if (get().activeTabId !== workspaceId) {
+        await get().switchTab(workspaceId);
+      } else {
+        persistTabs(nextTabs, workspaceId);
+      }
+    },
+
+    closeAllTabs: async () => {
+      set({
+        tabs: [],
+        activeTabId: null,
+        sessions: {},
+        snapshot: undefined,
+        allRepositories: [],
+        selectedRepoId: undefined,
+        selectedFile: undefined,
+        fileHistoryTarget: undefined,
+        mode: 'history',
+        diff: undefined,
+        changesDiff: undefined,
+        changes: undefined,
+        history: [],
+        historyHasMore: false,
+        historyByRepo: {},
+        historyTopology: [],
+        historyTopologyByRepo: {},
+        historyHasMoreByRepo: {},
+        historyLoading: false,
+        branchesLoading: false,
+        historyScope: { repoIds: null, revisionsByRepo: {} },
+        historyFilter: '',
+        selectedCommit: undefined,
+        selectedCommits: [],
+        selectedPrimaryKey: undefined,
+        selectedCommitDetails: {},
+        selectedCommitLoading: {},
+        mergeCommits: {},
+        mergeCommitsLoading: {},
+        mergeParentFiles: {},
+        mergeParentFilesLoading: {},
+        branches: [],
+        tags: [],
+        branchesByRepo: {},
+        tagsByRepo: {},
+        conflicts: [],
+        merge: undefined,
+        mergeResult: '',
+        stashes: {},
+        shelves: {},
+        changelists: {},
+        worktrees: {},
+        worktreeDiff: undefined,
+        subtrees: {},
+        submodules: {},
+        unpushedCommits: {},
+        comparisonTarget: undefined,
+        comparison: undefined,
+        remotes: {},
+      });
+      persistTabs([], null);
+    },
+
+    reorderTabs: (fromIndex: number, toIndex: number) => {
+      const currentTabs = [...get().tabs];
+      if (fromIndex < 0 || fromIndex >= currentTabs.length || toIndex < 0 || toIndex >= currentTabs.length) return;
+      const [moved] = currentTabs.splice(fromIndex, 1);
+      currentTabs.splice(toIndex, 0, moved);
+      set({ tabs: currentTabs });
+      persistTabs(currentTabs, get().activeTabId);
+    },
+
+    restoreTabsOnStartup: async () => {
       const state = get().bootstrap?.state;
-      const recent = state?.recentWorkspaces.find((item) => item.id === state.lastWorkspaceId && item.available);
-      if (recent) await get().openWorkspace(recent.paths);
+      if (!state) return;
+      const recent = state.recentWorkspaces ?? [];
+      const openIds = state.openWorkspaceIds ?? [];
+      let initialTabs: WorkspaceDescriptor[] = [];
+
+      if (openIds.length > 0) {
+        initialTabs = openIds
+          .map((id) => recent.find((item) => item.id === id && item.available))
+          .filter((item): item is WorkspaceDescriptor => Boolean(item));
+      }
+
+      if (initialTabs.length === 0) {
+        const lastId = state.activeWorkspaceId ?? state.lastWorkspaceId;
+        const lastWorkspace = recent.find((item) => item.id === lastId && item.available);
+        if (lastWorkspace) {
+          initialTabs = [lastWorkspace];
+        }
+      }
+
+      if (initialTabs.length > 0) {
+        const targetActiveId = (state.activeWorkspaceId && initialTabs.some((t) => t.id === state.activeWorkspaceId))
+          ? state.activeWorkspaceId
+          : (state.lastWorkspaceId && initialTabs.some((t) => t.id === state.lastWorkspaceId))
+          ? state.lastWorkspaceId
+          : initialTabs[0].id;
+
+        set({ tabs: initialTabs, activeTabId: targetActiveId });
+        const targetWorkspace = initialTabs.find((t) => t.id === targetActiveId) ?? initialTabs[0];
+        await get().openWorkspace(targetWorkspace.paths, true);
+      }
+    },
+
+    restoreLastWorkspace: async () => {
+      await get().restoreTabsOnStartup();
     },
 
     removeRecent: async (id) => withBusy(async () => {
@@ -472,7 +923,20 @@ export const useAppStore = create<AppStore>((set, get) => {
       const current = get().bootstrap;
       if (current) {
         const nextLastWorkspaceId = current.state.lastWorkspaceId === id ? null : current.state.lastWorkspaceId;
-        set({ bootstrap: { ...current, state: { ...current.state, recentWorkspaces: current.state.recentWorkspaces.filter((item) => item.id !== id), lastWorkspaceId: nextLastWorkspaceId } } });
+        const nextActiveId = current.state.activeWorkspaceId === id ? null : current.state.activeWorkspaceId;
+        const nextOpenIds = current.state.openWorkspaceIds?.filter((item) => item !== id) ?? [];
+        set({
+          bootstrap: {
+            ...current,
+            state: {
+              ...current.state,
+              recentWorkspaces: current.state.recentWorkspaces.filter((item) => item.id !== id),
+              openWorkspaceIds: nextOpenIds,
+              activeWorkspaceId: nextActiveId,
+              lastWorkspaceId: nextLastWorkspaceId,
+            },
+          },
+        });
       }
     }, 'workspace'),
 

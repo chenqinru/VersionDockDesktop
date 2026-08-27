@@ -1555,5 +1555,7 @@
   "medium": "中",
   "{0} (Index ↔ HEAD)": "{0}（暂存区 ↔ HEAD）",
   "{0} (Working Tree ↔ Index)": "{0}（工作区 ↔ 暂存区）",
-  "Commits were created, but final workspace restoration failed: {0}. Recover with: {1}": "提交已创建，但恢复最终工作区状态失败：{0}。可使用以下命令恢复：{1}"
+  "Commits were created, but final workspace restoration failed: {0}. Recover with: {1}": "提交已创建，但恢复最终工作区状态失败：{0}。可使用以下命令恢复：{1}",
+  "New Tab": "新建标签页",
+  "Close tab": "关闭标签页"
 }

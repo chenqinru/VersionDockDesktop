@@ -1555,5 +1555,7 @@
   "medium": "medium",
   "{0} (Index ↔ HEAD)": "{0} (Index ↔ HEAD)",
   "{0} (Working Tree ↔ Index)": "{0} (Working Tree ↔ Index)",
-  "Commits were created, but final workspace restoration failed: {0}. Recover with: {1}": "Commits were created, but final workspace restoration failed: {0}. Recover with: {1}"
+  "Commits were created, but final workspace restoration failed: {0}. Recover with: {1}": "Commits were created, but final workspace restoration failed: {0}. Recover with: {1}",
+  "New Tab": "New Tab",
+  "Close tab": "Close tab"
 }

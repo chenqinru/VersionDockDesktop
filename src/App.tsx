@@ -83,6 +83,21 @@ export function App() {
     return () => { dispose?.(); window.removeEventListener('dragover', over); window.removeEventListener('dragleave', leave); window.removeEventListener('drop', leave); };
   }, [bridge, openWorkspace]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isCmdOrCtrl = event.metaKey || event.ctrlKey;
+      if (isCmdOrCtrl && event.key.toLowerCase() === 'w' && !event.shiftKey && !event.altKey) {
+        const activeId = useAppStore.getState().activeTabId;
+        if (activeId) {
+          event.preventDefault();
+          void useAppStore.getState().closeTab(activeId);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);
 
   return <I18nContext.Provider value={{ language, preference: languagePreference, t }}>
@@ -96,8 +111,44 @@ export function App() {
         </main>
       )}
       {busy && <div className="busy-line" />}
-      {error && <div className="toast error"><Codicon name="error" /><span><strong>{t('Operation failed')}</strong>{error}{errorDetails && <details><summary>Technical details</summary><pre>{errorDetails}</pre></details>}</span><button onClick={clearError}><Codicon name="close" /></button></div>}
-      {notice && <div className="toast"><Codicon name="bell" /><span><strong>VersionDock Desktop</strong>{notice}</span><button onClick={clearNotice}><Codicon name="close" /></button></div>}
+      {error && (
+        <div className="toast error" role="alert">
+          <div className="toast-icon">
+            <Codicon name="error" />
+          </div>
+          <div className="toast-content">
+            <div className="toast-header">
+              <strong className="toast-title">{t('Operation failed')}</strong>
+            </div>
+            <div className="toast-message">{error}</div>
+            {errorDetails && (
+              <details className="toast-details">
+                <summary>Technical details</summary>
+                <pre>{errorDetails}</pre>
+              </details>
+            )}
+          </div>
+          <button type="button" className="toast-close" aria-label={t('Close')} title={t('Close')} onClick={clearError}>
+            <Codicon name="close" />
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className="toast info" role="status">
+          <div className="toast-icon">
+            <Codicon name="bell" />
+          </div>
+          <div className="toast-content">
+            <div className="toast-header">
+              <strong className="toast-title">VersionDock Desktop</strong>
+            </div>
+            <div className="toast-message">{notice}</div>
+          </div>
+          <button type="button" className="toast-close" aria-label={t('Close')} title={t('Close')} onClick={clearNotice}>
+            <Codicon name="close" />
+          </button>
+        </div>
+      )}
       {dropActive && <div className="drop-overlay"><Codicon name="folder-opened" /><strong>{t('Drop folders anywhere in this window')}</strong></div>}
       <DialogHost />
       <FileHistoryPanel />
