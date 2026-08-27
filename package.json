@@ -20,6 +20,7 @@
     "bindings:check": "node scripts/check-bindings.mjs",
     "check:independence": "node scripts/check-independence.mjs",
     "check:window": "node scripts/check-window-config.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
     "check": "npm run check:independence && npm run check:window && npm run typecheck && npm run lint && npm run test && npm run build && cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
