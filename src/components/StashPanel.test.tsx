@@ -188,4 +188,16 @@ describe('StashPanel', () => {
       'src/components/LoginModal.tsx',
     );
   });
+
+  it('opens a stash file diff from a file click without inventing a file context menu', () => {
+    const onOpenFileDiff = vi.fn();
+    const bridge = new MockBridge(() => []);
+    useAppStore.setState({ bridge, snapshot, stashes: { 'repo-1': sampleStashes } });
+    render(<BridgeContext.Provider value={bridge}><StashPanel repos={[gitRepo1]} viewMode="list" expansion={{ sequence: 1, expanded: true }} onOpenFileDiff={onOpenFileDiff} /></BridgeContext.Provider>);
+    const row = screen.getByText('LoginModal.tsx').closest('div[title*="click to open diff"]')!;
+    fireEvent.click(row);
+    expect(onOpenFileDiff).toHaveBeenCalledWith('repo-1', 'stash@{0}', 'src/components/LoginModal.tsx');
+    fireEvent.contextMenu(row);
+    expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
+  });
 });

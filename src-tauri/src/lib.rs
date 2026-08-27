@@ -1,9 +1,17 @@
+#![allow(
+    clippy::field_reassign_with_default,
+    clippy::large_enum_variant,
+    clippy::result_large_err
+)]
+
 mod changelist;
 mod cli;
 mod commands;
+mod identity;
 mod models;
 mod shelf;
 mod state;
+mod svn_account;
 mod vcs;
 mod workspace;
 
@@ -19,6 +27,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_system_symbols::init())
         .plugin(tauri_plugin_window_controls::init())

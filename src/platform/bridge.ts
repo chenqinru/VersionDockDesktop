@@ -1,4 +1,4 @@
-import type { BridgeCommand, DesktopError, ProgressEvent, ResponseEnvelope, WorkspaceEvent } from '../bindings/generated';
+import type { BridgeCommand, DesktopError, ProgressEvent, RepositoryEvent, ResponseEnvelope, WorkspaceEvent } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
 export interface RequestOptions {
@@ -6,7 +6,7 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export type BridgeEvent = ProgressEvent | WorkspaceEvent | { type: 'native-unavailable' };
+export type BridgeEvent = ProgressEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
 
 export interface VersionDockBridge {
   send(command: BridgeCommand): void;
@@ -16,6 +16,7 @@ export interface VersionDockBridge {
   setState<T>(state: T): void;
   platform(): 'macos' | 'windows' | 'linux';
   selectWorkspaceFolders(title: string): Promise<string[]>;
+  notify(title: string, body: string): Promise<boolean>;
   window: {
     startDragging(): Promise<void>;
     toggleMaximize(): Promise<void>;
@@ -32,6 +33,11 @@ export class BridgeError extends Error implements DesktopError {
   exitCode: number | null;
   stderr: string | null;
   recoverable: boolean;
+  operation?: string | null;
+  workspaceId?: string | null;
+  repositoryId?: string | null;
+  subject?: string | null;
+  hint?: string | null;
 
   constructor(error: DesktopError) {
     super(error.message);
@@ -41,6 +47,11 @@ export class BridgeError extends Error implements DesktopError {
     this.exitCode = error.exitCode;
     this.stderr = error.stderr;
     this.recoverable = error.recoverable;
+    this.operation = error.operation;
+    this.workspaceId = error.workspaceId;
+    this.repositoryId = error.repositoryId;
+    this.subject = error.subject;
+    this.hint = error.hint;
   }
 }
 
@@ -69,7 +80,7 @@ export class TauriBridge implements VersionDockBridge {
 
   async initialize(): Promise<void> {
     const { listen } = await import('@tauri-apps/api/event');
-    this.unlisten = await listen<ProgressEvent | WorkspaceEvent>('versiondock://event', ({ payload }) => {
+    this.unlisten = await listen<ProgressEvent | WorkspaceEvent | RepositoryEvent>('versiondock://event', ({ payload }) => {
       this.handlers.forEach((handler) => handler(payload));
     });
   }
@@ -130,6 +141,16 @@ export class TauriBridge implements VersionDockBridge {
     const value = await open({ directory: true, multiple: true, title });
     return !value ? [] : Array.isArray(value) ? value : [value];
   }
+  async notify(title: string, body: string): Promise<boolean> {
+    try {
+      const notifications = await import('@tauri-apps/plugin-notification');
+      let allowed = await notifications.isPermissionGranted();
+      if (!allowed) allowed = (await notifications.requestPermission()) === 'granted';
+      if (!allowed) return false;
+      notifications.sendNotification({ title, body });
+      return true;
+    } catch { return false; }
+  }
 }
 
 export class MockBridge implements VersionDockBridge {
@@ -142,6 +163,7 @@ export class MockBridge implements VersionDockBridge {
   setState<T>(state: T): void { this.state = state; }
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }
   async selectWorkspaceFolders(): Promise<string[]> { return []; }
+  async notify(): Promise<boolean> { return false; }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined,
     isMaximized: async () => false, onDragDrop: async () => () => undefined,

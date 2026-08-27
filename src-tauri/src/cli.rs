@@ -121,8 +121,9 @@ pub async fn run(
     };
     if !status.success() {
         let stderr = redact(&String::from_utf8_lossy(&result.stderr));
+        let (code, hint) = classify_failure(program, &stderr);
         return Err(DesktopError {
-            code: "COMMAND_FAILED".into(),
+            code: code.into(),
             message: stderr
                 .lines()
                 .next()
@@ -132,9 +133,78 @@ pub async fn run(
             exit_code: result.exit_code,
             stderr: Some(truncate_text(&stderr, 16 * 1024)),
             recoverable: true,
+            operation: None,
+            workspace_id: None,
+            repository_id: None,
+            subject: None,
+            hint: hint.map(str::to_string),
         });
     }
     Ok(result)
+}
+
+fn classify_failure(program: &str, stderr: &str) -> (&'static str, Option<&'static str>) {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("authentication failed")
+        || lower.contains("authorization failed")
+        || lower.contains("could not read username")
+        || lower.contains("could not read password")
+    {
+        return (
+            if program == "svn" {
+                "SVN_AUTH_FAILED"
+            } else {
+                "GIT_AUTH_FAILED"
+            },
+            Some("Check the selected account or system credential cache"),
+        );
+    }
+    if lower.contains("certificate")
+        && (lower.contains("verification") || lower.contains("issuer") || lower.contains("trust"))
+    {
+        return (
+            "CERTIFICATE_ERROR",
+            Some("Review and trust the server certificate with the system client"),
+        );
+    }
+    if lower.contains("out of date") || lower.contains("out-of-date") {
+        return (
+            "SVN_OUT_OF_DATE",
+            Some("Update the working copy and resolve conflicts before retrying"),
+        );
+    }
+    if lower.contains("working copy locked") || lower.contains("is already locked") {
+        return (
+            "SVN_WORKING_COPY_LOCKED",
+            Some("Run SVN cleanup after ensuring no other SVN operation is active"),
+        );
+    }
+    if lower.contains("no upstream") || lower.contains("has no upstream branch") {
+        return (
+            "UPSTREAM_MISSING",
+            Some("Configure an upstream branch before synchronizing"),
+        );
+    }
+    if lower.contains("non-fast-forward")
+        || lower.contains("fetch first")
+        || lower.contains("rejected")
+    {
+        return (
+            "REMOTE_REJECTED",
+            Some("Fetch remote changes and review branch divergence before retrying"),
+        );
+    }
+    if lower.contains("could not resolve host")
+        || lower.contains("connection timed out")
+        || lower.contains("connection refused")
+        || lower.contains("network is unreachable")
+    {
+        return (
+            "NETWORK_ERROR",
+            Some("Check network connectivity, proxy settings and the remote URL"),
+        );
+    }
+    ("COMMAND_FAILED", None)
 }
 
 async fn read_capped<R: AsyncRead + Unpin>(
@@ -225,6 +295,31 @@ mod tests {
         assert_eq!(
             value,
             "ok https://<redacted>@example.test/repo\n<redacted>\n<redacted>"
+        );
+    }
+
+    #[test]
+    fn classifies_recoverable_git_and_svn_failures() {
+        assert_eq!(
+            classify_failure("git", "fatal: could not read Username"),
+            (
+                "GIT_AUTH_FAILED",
+                Some("Check the selected account or system credential cache")
+            )
+        );
+        assert_eq!(
+            classify_failure("svn", "E155004: Working copy locked"),
+            (
+                "SVN_WORKING_COPY_LOCKED",
+                Some("Run SVN cleanup after ensuring no other SVN operation is active")
+            )
+        );
+        assert_eq!(
+            classify_failure("git", "rejected non-fast-forward"),
+            (
+                "REMOTE_REJECTED",
+                Some("Fetch remote changes and review branch divergence before retrying")
+            )
         );
     }
 

@@ -2,7 +2,7 @@ import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
   MergeCommitSummary,
   DiffDocument, GraphCommitNode, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
-  TagInfo, WorkspaceSnapshot, WorktreeEntry,
+  TagInfo, WorkspaceSnapshot, WorktreeEntry, SubmoduleEntry,
 } from '../bindings/generated';
 import type { BridgeEvent, RequestOptions, VersionDockBridge } from './bridge';
 
@@ -291,9 +291,9 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 } : detailFiles;
 
 const initialState: AppStateSnapshot = {
-  theme: 'dark', language: 'zhCn', lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
-  panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', uiFontSize: 'standard', externalEditor: null,
-  branchSidebarCollapsed: false, branchSidebarCollapsedSections: [],
+  schemaVersion: 3, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
+  settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
+  layout: { panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
 };
 
 export class BrowserDevBridge implements VersionDockBridge {
@@ -322,6 +322,7 @@ export class BrowserDevBridge implements VersionDockBridge {
   setState<T>(state: T): void { this.state = structuredClone(state as AppStateSnapshot); }
   send(command: BridgeCommand): void { void this.request(command); }
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
+  async notify(): Promise<boolean> { return false; }
 
   async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {
     if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
@@ -340,6 +341,8 @@ export class BrowserDevBridge implements VersionDockBridge {
         capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: true, compare: true, remoteManagement: true },
       } satisfies BootstrapData;
       case 'saveAppState': this.state = structuredClone(command.payload.state); return true;
+      case 'updateSettings': this.state.settings = structuredClone(command.payload.settings); return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: true } };
+      case 'updateLayout': this.state.layout = structuredClone(command.payload.layout); return command.payload.layout;
       case 'workspaceOpen': case 'workspaceRefresh': this.generation += 1; return this.snapshot();
       case 'workspaceRemoveRecent': return true;
       case 'repositoryStatus': return this.repositories.find((repo) => repo.meta.id === command.payload.repo_id);
@@ -369,21 +372,37 @@ export class BrowserDevBridge implements VersionDockBridge {
         { path: 'src/demo-parent-change.ts', status: 'M', added: 12, removed: 4 },
       ] satisfies CommitFile[];
       case 'fileDiff': return this.diff(command.payload.relative_path);
+      case 'stashFileDiff': case 'shelfFileDiff': return this.diff(command.payload.relative_path);
+      case 'fileHistory': return { entries: (activeHistories[command.payload.repo_id] ?? []).slice(Number(command.payload.cursor ?? 0), Number(command.payload.cursor ?? 0) + command.payload.limit).map((commit, index) => ({ revision: commit.hash, previousRevision: commit.parents[0] ?? null, path: command.payload.relative_path, previousPath: null, author: commit.author, date: commit.committerDate, message: commit.message, status: index === 0 ? 'M' : 'A' })), nextCursor: null };
+      case 'fileRevisionContent': return { revision: command.payload.revision, path: command.payload.relative_path, content: `// Browser demo content for ${command.payload.relative_path}\n`, binary: false, truncated: false };
+      case 'gitIdentity': return { profiles: [], selectedProfileId: null, local: { userName: 'VersionDock Demo', email: 'demo@example.test', source: 'local', profileId: null, valid: true }, global: null, effective: { userName: 'VersionDock Demo', email: 'demo@example.test', source: 'local', profileId: null, valid: true } };
+      case 'gitProfileOperation': return { profiles: [], selectedProfileId: null, local: null, global: null, effective: { userName: '', email: '', source: 'missing', profileId: null, valid: false } };
+      case 'svnAccount': case 'svnAccountOperation': return { repositoryRoot: 'file:///browser-demo', username: null, passwordStored: false, secureStorageAvailable: false, passwordStdinSupported: true, connectionOk: null };
       case 'conflicts': return [];
       case 'stashes': return [{ reference: 'stash@{0}', hash: '7e32b010', branch: 'main', message: 'WIP: browser demo', fullMessage: 'WIP: browser demo\n\nDetailed demo body', date: '2026-08-13T08:00:00Z', files: [{ path: 'src/demo.ts', status: 'modified' }] }] satisfies StashEntry[];
       case 'shelves': return [{ id: 'shelf-demo', name: '浏览器演示搁置', createdAt: '2026-08-13T08:00:00Z', branch: 'main', files: [{ path: 'src/demo.ts', status: 'modified' }] }] satisfies ShelfEntry[];
       case 'worktrees': return [{ path: `/browser-demo/${command.payload.repo_id}`, head: '06457b02', branch: this.repositories.find((repo) => repo.meta.id === command.payload.repo_id)?.branch ?? 'main', bare: false, detached: false, locked: false, lockReason: null, prunable: false, main: true }] satisfies WorktreeEntry[];
+      case 'worktreeDiff': return { path: command.payload.path, baseRef: command.payload.base_ref, currentRef: 'main', files: [] };
+      case 'worktreeFileDiff': return this.diff(command.payload.relative_path);
       case 'subtrees': return this.subtreeValues[command.payload.repo_id] ?? [];
+      case 'submodules': return [] satisfies SubmoduleEntry[];
       case 'remotes': return [{ name: 'origin', fetchUrl: 'https://example.test/versiondock/demo.git', pushUrl: 'https://example.test/versiondock/demo.git' }] satisfies RemoteInfo[];
       case 'subtreeOperation': this.applySubtree(command.payload.repo_id, command.payload.operation); return true;
+      case 'unpushedOperation': return true;
+      case 'createPatch': return { fileName: `versiondock-${command.payload.revisions.length}.patch`, content: 'From browser demo\n' };
       case 'stage': this.updateFiles(command.payload.repo_id, command.payload.paths, true); return true;
       case 'unstage': this.updateFiles(command.payload.repo_id, command.payload.paths, false); return true;
+      case 'deletePaths': this.repositories = this.repositories.map((repo) => repo.meta.id === command.payload.repo_id ? { ...repo, files: repo.files.filter((file) => !command.payload.paths.includes(file.path)) } : repo); return true;
+      case 'addIgnore': return { directory: '', source: '.gitignore', patterns: [command.payload.relative_path] };
+      case 'ignoreRules': return { directory: command.payload.directory, source: '.gitignore', patterns: [] };
+      case 'updateIgnoreRules': return true;
       case 'commit': return activeHistories[command.payload.repo_id]?.[0]?.hash ?? 'browser-demo-commit';
+      case 'batchCommit': return command.payload.targets.map((target) => ({ repoId: target.repoId, committed: true, revision: activeHistories[target.repoId]?.[0]?.hash ?? 'browser-demo-commit', pushed: command.payload.push, error: null }));
       case 'branchCompare': return { base: command.payload.base, target: command.payload.target, baseCommits: [], targetCommits: [], files: activeDetailFiles[command.payload.repo_id] ?? [] };
       case 'conflictVersions': return { path: command.payload.relative_path, base: '', ours: '', theirs: '', working: '', language: 'text', fingerprint: 'browser-demo', binary: false };
       case 'sync': case 'branchOperation': case 'tagOperation': case 'stashOperation': case 'shelfOperation':
-      case 'changelistOperation': case 'worktreeOperation': case 'remoteOperation': case 'systemOpen':
-      case 'conflictSave': case 'conflictAccept': return true;
+      case 'changelistOperation': case 'worktreeOperation': case 'openWorktree': case 'remoteOperation': case 'svnOperation': case 'submoduleOperation': case 'historyOperation': case 'systemOpen':
+      case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': return true;
       case 'changelists': return [];
     }
   }
@@ -435,6 +454,8 @@ export class BrowserDevBridge implements VersionDockBridge {
   private applySubtree(repoId: string, operation: Extract<BridgeCommand, { type: 'subtreeOperation' }>['payload']['operation']): void {
     const values = this.subtreeValues[repoId] ?? [];
     if (operation.type === 'add') this.subtreeValues[repoId] = [...values, { id: `browser-${Date.now()}`, prefix: operation.prefix, remote: operation.remote, branch: operation.branch, squash: operation.squash, state: 'active' }];
-    if (operation.type === 'remove') this.subtreeValues[repoId] = values.filter((entry) => entry.id !== operation.subtree_id);
+    if (operation.type === 'register') this.subtreeValues[repoId] = [...values, { id: `browser-${Date.now()}`, prefix: operation.prefix, remote: operation.remote, branch: operation.branch, squash: operation.squash, state: 'active' }];
+    if (operation.type === 'edit') this.subtreeValues[repoId] = values.map((entry) => entry.id === operation.subtree_id ? { ...entry, prefix: operation.prefix, remote: operation.remote, branch: operation.branch, squash: operation.squash } : entry);
+    if (operation.type === 'deleteRegistry') this.subtreeValues[repoId] = values.filter((entry) => entry.id !== operation.subtree_id);
   }
 }

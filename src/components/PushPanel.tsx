@@ -5,6 +5,7 @@ import { useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { branchColor, readableAccentColor } from './branchColor';
+import { confirmDialog, promptDialog } from './dialogService';
 
 export interface PushCommitFile {
   path: string;
@@ -705,6 +706,7 @@ function RepoSection({
   const [ctxMenu, setCtxMenu] = useState<CommitCtxMenuState | null>(null);
   const [hovered, setHovered] = useState(false);
   const { t } = useI18n();
+  const unpushedOperation = useAppStore((state) => state.unpushedOperation);
 
   const rawName = repo.meta.name ?? baseNameFromPath(repo.meta.id) ?? repo.meta.id;
   const repoName = rawName;
@@ -799,6 +801,15 @@ function RepoSection({
     if (!(event.target as HTMLElement).closest('[data-commit-row]')) {
       setMultiSelectHashes(new Set());
     }
+  };
+  const operate = async (operation: Parameters<typeof unpushedOperation>[1]) => {
+    await unpushedOperation(repo.meta.id, operation);
+    setMultiSelectHashes(new Set());
+  };
+  const confirmRewrite = async (title: string, hashes: string[], action: () => Promise<void>) => {
+    const selectedCommits = commits.filter((commit) => hashes.includes(commit.hash));
+    const message = `${selectedCommits.map((commit) => `${commit.shortHash} ${commit.message}`).join('\n')}\n\n${t('History rewriting requires a clean working tree and can require a force push.')}`;
+    if (await confirmDialog({ title, message, danger: true })) await action();
   };
 
   return (
@@ -929,13 +940,13 @@ function RepoSection({
       {ctxMenu && (
         <CommitContextMenu
           state={ctxMenu}
-          onSquash={() => setMultiSelectHashes(new Set())}
-          onDropCommits={() => setMultiSelectHashes(new Set())}
-          onRevertCommits={() => setMultiSelectHashes(new Set())}
-          onEditMsg={() => {}}
-          onUndo={() => onUndoCommit(repo.meta.id)}
-          onRevertSingle={() => {}}
-          onDropSingle={() => {}}
+          onSquash={() => { const hashes = ctxMenu.selectedHashes; const initial = commits.filter((commit) => hashes.includes(commit.hash)).map((commit) => commit.message).reverse().join('\n\n'); void promptDialog({ title: t('Squash {0} commits…', hashes.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: initial }).then((message) => { if (message) return confirmRewrite(t('Squash commits?'), hashes, () => operate({ type: 'squash', hashes, message })); }); }}
+          onDropCommits={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Drop {0} commits?', hashes.length), hashes, () => operate({ type: 'drop', hashes })); }}
+          onRevertCommits={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Revert {0} commits?', hashes.length), hashes, () => operate({ type: 'revert', hashes })); }}
+          onEditMsg={() => { const commit = commits.find((item) => item.hash === ctxMenu.singleHash); if (commit) void promptDialog({ title: t('Edit Commit Message…'), message: commit.shortHash, inputLabel: t('Commit message'), initialValue: commit.message }).then((message) => { if (message) return operate({ type: 'editMessage', hash: commit.hash, message }); }); }}
+          onUndo={() => { void confirmRewrite(t('Undo HEAD commit?'), ctxMenu.selectedHashes, () => operate({ type: 'undoHead' })); }}
+          onRevertSingle={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Revert commit?'), hashes, () => operate({ type: 'revert', hashes })); }}
+          onDropSingle={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Drop commit?'), hashes, () => operate({ type: 'drop', hashes })); }}
           onViewInLog={() => {
             if (ctxMenu.singleHash) onOpenInLog(ctxMenu.singleHash, repo.meta.id);
           }}
@@ -1018,7 +1029,16 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   };
 
   const handleUndoCommit = async (repoId: string) => {
-    await loadUnpushedCommits(repoId);
+    const repo = repos.find((candidate) => candidate.meta.id === repoId);
+    const head = unpushedMap[repoId]?.[0];
+    if (!repo || !head) return;
+    const confirmed = await confirmDialog({
+      title: t('Undo Commit'),
+      message: `${head.shortHash} ${head.message}\n\n${t('The commit will be removed from history. Its file changes will remain staged.')}`,
+      danger: true,
+    });
+    if (!confirmed) return;
+    await useAppStore.getState().unpushedOperation(repoId, { type: 'undoHead' });
   };
 
   const requestCommitFiles = async (repoId: string, hash: string): Promise<PushCommitFile[]> => {
@@ -1084,7 +1104,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
             commits={unpushedMap[solo.meta.id] ?? []}
             checked={false}
             canCheck={false}
-            onToggle={() => {}}
+            onToggle={toggleRepo}
             onOpenInLog={handleOpenInLog}
             onUndoCommit={handleUndoCommit}
             onRequestCommitFiles={requestCommitFiles}

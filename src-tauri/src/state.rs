@@ -13,7 +13,10 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use crate::models::{AppStateSnapshot, DesktopError, WorkspaceDescriptor};
+use crate::models::{
+    AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState,
+    ThemePreference, UiFontSizePreference, WorkspaceDescriptor,
+};
 
 pub struct AppState {
     pub config_dir: PathBuf,
@@ -30,10 +33,15 @@ impl AppState {
         let state_path = config_dir.join("state.json");
         let mut app: AppStateSnapshot = std::fs::read(&state_path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| migrate_state(&bytes))
             .unwrap_or_default();
-        if app.stash_view_mode != "list" && app.stash_view_mode != "tree" {
-            app.stash_view_mode = "tree".into();
+        app.schema_version = 3;
+        app.settings = app.settings.normalize();
+        if app.layout.stash_view_mode != "list" && app.layout.stash_view_mode != "tree" {
+            app.layout.stash_view_mode = "tree".into();
+        }
+        if app.layout.file_view_mode != "list" && app.layout.file_view_mode != "tree" {
+            app.layout.file_view_mode = "tree".into();
         }
         let mut arguments = std::env::args_os().skip(1);
         while let Some(argument) = arguments.next() {
@@ -153,6 +161,7 @@ impl AppState {
     pub fn watch_workspace(
         &self,
         workspace: &WorkspaceDescriptor,
+        settings: &DesktopSettings,
         app: AppHandle,
     ) -> Result<(), DesktopError> {
         let mut watchers = self.watchers.lock().map_err(|_| {
@@ -164,41 +173,50 @@ impl AppState {
         })?;
         watchers.clear();
         let last_emit = Arc::new(std::sync::Mutex::new(
-            std::time::Instant::now() - std::time::Duration::from_secs(1),
+            HashMap::<String, std::time::Instant>::new(),
         ));
+        let generation = self.next_generation();
         for root in &workspace.paths {
             let workspace_id = workspace.id.clone();
             let last_emit = last_emit.clone();
             let app = app.clone();
+            let ignored = settings.ignored_folders.clone();
             let mut watcher =
                 notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
                     let Ok(event) = result else {
                         return;
                     };
-                    if event.paths.iter().all(|path| {
-                        path.components().any(|part| {
-                            part.as_os_str() == "target"
-                                || part.as_os_str() == "node_modules"
-                                || part.as_os_str() == "dist"
-                                || part.as_os_str() == ".git"
-                                || part.as_os_str() == ".svn"
+                    let vcs_metadata = event.paths.iter().any(|path| {
+                        path.components()
+                            .any(|part| part.as_os_str() == ".git" || part.as_os_str() == ".svn")
+                    });
+                    if !vcs_metadata
+                        && event.paths.iter().all(|path| {
+                            path.components().any(|part| {
+                                ignored
+                                    .iter()
+                                    .any(|item| item == &part.as_os_str().to_string_lossy())
+                            })
                         })
-                    }) {
+                    {
                         return;
                     }
+                    let reason = watcher_reason(&event.paths);
                     let Ok(mut last) = last_emit.lock() else {
                         return;
                     };
-                    if last.elapsed() < std::time::Duration::from_millis(300) {
+                    if last.get(reason).is_some_and(|instant| {
+                        instant.elapsed() < std::time::Duration::from_millis(300)
+                    }) {
                         return;
                     }
-                    *last = std::time::Instant::now();
+                    last.insert(reason.into(), std::time::Instant::now());
                     let _ = app.emit(
                         "versiondock://event",
                         crate::models::WorkspaceEvent {
                             workspace_id: workspace_id.clone(),
-                            generation: 0,
-                            reason: "file-change".into(),
+                            generation,
+                            reason: reason.into(),
                         },
                     );
                 })
@@ -214,6 +232,104 @@ impl AppState {
         }
         Ok(())
     }
+}
+
+fn watcher_reason(paths: &[PathBuf]) -> &'static str {
+    if paths.iter().any(|path| {
+        let value = path.to_string_lossy().replace('\\', "/");
+        value.ends_with("/.git/HEAD")
+            || value.contains("/.git/refs/")
+            || value.ends_with("/.git/packed-refs")
+    }) {
+        "refs"
+    } else if paths.iter().any(|path| {
+        let value = path.to_string_lossy().replace('\\', "/");
+        value.ends_with("/.git/index") || value.ends_with("/.svn/wc.db")
+    }) {
+        "status"
+    } else {
+        "worktree"
+    }
+}
+
+fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if value
+        .get("schemaVersion")
+        .and_then(|item| item.as_u64())
+        .unwrap_or(0)
+        >= 3
+    {
+        let mut current = serde_json::from_value::<AppStateSnapshot>(value).ok()?;
+        current.schema_version = 3;
+        return Some(current);
+    }
+    let mut settings = DesktopSettings::default();
+    settings.theme = serde_json::from_value(value.get("theme").cloned().unwrap_or_default())
+        .unwrap_or(ThemePreference::System);
+    settings.language = serde_json::from_value(value.get("language").cloned().unwrap_or_default())
+        .unwrap_or(LanguagePreference::System);
+    settings.ui_font_size =
+        serde_json::from_value(value.get("uiFontSize").cloned().unwrap_or_default())
+            .unwrap_or(UiFontSizePreference::Standard);
+    settings.external_editor = value
+        .get("externalEditor")
+        .cloned()
+        .and_then(|item| serde_json::from_value(item).ok());
+    let mut layout = LayoutState::default();
+    layout.panel_sizes = value
+        .get("panelSizes")
+        .cloned()
+        .and_then(|item| serde_json::from_value(item).ok())
+        .unwrap_or_default();
+    layout.active_tab = value
+        .get("activeTab")
+        .and_then(|item| item.as_str())
+        .unwrap_or("changes")
+        .into();
+    layout.file_view_mode = value
+        .get("fileViewMode")
+        .and_then(|item| item.as_str())
+        .unwrap_or("tree")
+        .into();
+    layout.stash_view_mode = value
+        .get("stashViewMode")
+        .and_then(|item| item.as_str())
+        .unwrap_or("tree")
+        .into();
+    layout.branch_sidebar_collapsed = value
+        .get("branchSidebarCollapsed")
+        .and_then(|item| item.as_bool())
+        .unwrap_or(false);
+    layout.branch_sidebar_collapsed_sections = value
+        .get("branchSidebarCollapsedSections")
+        .cloned()
+        .and_then(|item| serde_json::from_value(item).ok())
+        .unwrap_or_default();
+    Some(AppStateSnapshot {
+        schema_version: 3,
+        settings: settings.normalize(),
+        layout,
+        last_workspace_id: value
+            .get("lastWorkspaceId")
+            .and_then(|item| item.as_str())
+            .map(str::to_string),
+        recent_workspaces: value
+            .get("recentWorkspaces")
+            .cloned()
+            .and_then(|item| serde_json::from_value(item).ok())
+            .unwrap_or_default(),
+        theme: None,
+        language: None,
+        ui_font_size: None,
+        panel_sizes: None,
+        active_tab: None,
+        file_view_mode: None,
+        stash_view_mode: None,
+        external_editor: None,
+        branch_sidebar_collapsed: None,
+        branch_sidebar_collapsed_sections: None,
+    })
 }
 
 pub fn workspace_id(paths: &[String]) -> String {
@@ -317,5 +433,68 @@ mod tests {
         let outside = tempdir().unwrap();
         symlink(outside.path(), root.path().join("link")).unwrap();
         assert!(safe_relative(root.path(), "link/file.txt", false).is_err());
+    }
+
+    #[test]
+    fn migrates_legacy_state_and_normalizes_settings() {
+        let legacy = br##"{
+          "theme":"dark","language":"zhCn","uiFontSize":"large",
+          "lastWorkspaceId":null,"recentWorkspaces":[],
+          "panelSizes":{"commit":400,"branches":230,"detail":390},
+          "activeTab":"stash","fileViewMode":"list","stashViewMode":"list",
+          "externalEditor":{"executable":"/usr/bin/code","args":["{path}"]},
+          "branchSidebarCollapsed":true,"branchSidebarCollapsedSections":["tags"]
+        }"##;
+        let state = migrate_state(legacy).unwrap();
+        assert_eq!(state.schema_version, 3);
+        assert!(matches!(state.settings.theme, ThemePreference::Dark));
+        assert_eq!(state.layout.active_tab, "stash");
+        assert_eq!(state.layout.panel_sizes.commit, 400);
+        assert_eq!(
+            state.settings.external_editor.unwrap().executable,
+            "/usr/bin/code"
+        );
+
+        let settings = crate::models::DesktopSettings {
+            repository_scan_depth: 99,
+            maximum_graph_commits: 2,
+            ignored_folders: vec![
+                " node_modules ".into(),
+                "../escape".into(),
+                "node_modules".into(),
+            ],
+            project_colors: [
+                ("ok".into(), "#4ec9b0".into()),
+                ("bad".into(), "red".into()),
+            ]
+            .into(),
+            ..Default::default()
+        }
+        .normalize();
+        assert_eq!(settings.repository_scan_depth, 10);
+        assert_eq!(settings.maximum_graph_commits, 100);
+        assert_eq!(settings.ignored_folders, vec!["node_modules"]);
+        assert_eq!(settings.project_colors.len(), 1);
+    }
+
+    #[test]
+    fn classifies_vcs_metadata_watcher_events() {
+        assert_eq!(watcher_reason(&[PathBuf::from("/repo/.git/HEAD")]), "refs");
+        assert_eq!(
+            watcher_reason(&[PathBuf::from("/repo/.git/refs/heads/main")]),
+            "refs"
+        );
+        assert_eq!(
+            watcher_reason(&[PathBuf::from("/repo/.git/index")]),
+            "status"
+        );
+        assert_eq!(
+            watcher_reason(&[PathBuf::from("/repo/.svn/wc.db")]),
+            "status"
+        );
+        assert_eq!(
+            watcher_reason(&[PathBuf::from("/repo/src/main.rs")]),
+            "worktree"
+        );
     }
 }

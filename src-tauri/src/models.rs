@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +43,12 @@ pub enum BridgeCommand {
     SaveAppState {
         state: AppStateSnapshot,
     },
+    UpdateSettings {
+        settings: DesktopSettings,
+    },
+    UpdateLayout {
+        layout: LayoutState,
+    },
     WorkspaceOpen {
         paths: Vec<String>,
     },
@@ -64,6 +71,18 @@ pub enum BridgeCommand {
         from_revision: Option<String>,
         to_revision: Option<String>,
     },
+    StashFileDiff {
+        workspace_id: String,
+        repo_id: String,
+        reference: String,
+        relative_path: String,
+    },
+    ShelfFileDiff {
+        workspace_id: String,
+        repo_id: String,
+        shelf_id: String,
+        relative_path: String,
+    },
     Stage {
         workspace_id: String,
         repo_id: String,
@@ -79,12 +98,38 @@ pub enum BridgeCommand {
         repo_id: String,
         paths: Vec<String>,
     },
+    DeletePaths {
+        workspace_id: String,
+        repo_id: String,
+        paths: Vec<String>,
+    },
+    AddIgnore {
+        workspace_id: String,
+        repo_id: String,
+        relative_path: String,
+    },
+    IgnoreRules {
+        workspace_id: String,
+        repo_id: String,
+        directory: String,
+    },
+    UpdateIgnoreRules {
+        workspace_id: String,
+        repo_id: String,
+        directory: String,
+        patterns: Vec<String>,
+    },
     Commit {
         workspace_id: String,
         repo_id: String,
         message: String,
         amend: bool,
         paths: Vec<String>,
+    },
+    BatchCommit {
+        workspace_id: String,
+        targets: Vec<BatchCommitTarget>,
+        push: bool,
     },
     Sync {
         workspace_id: String,
@@ -125,6 +170,21 @@ pub enum BridgeCommand {
     UnpushedCommits {
         workspace_id: String,
         repo_id: String,
+    },
+    UnpushedOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: UnpushedOperation,
+    },
+    HistoryOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: HistoryOperation,
+    },
+    CreatePatch {
+        workspace_id: String,
+        repo_id: String,
+        revisions: Vec<String>,
     },
     Branches {
         workspace_id: String,
@@ -187,6 +247,36 @@ pub enum BridgeCommand {
         repo_id: String,
         operation: WorktreeOperation,
     },
+    OpenWorktree {
+        workspace_id: String,
+        repo_id: String,
+        path: String,
+        reveal: bool,
+    },
+    WorktreeDiff {
+        workspace_id: String,
+        repo_id: String,
+        path: String,
+        base_ref: String,
+    },
+    WorktreeFileDiff {
+        workspace_id: String,
+        repo_id: String,
+        path: String,
+        base_ref: String,
+        relative_path: String,
+    },
+    BranchWorkingDiff {
+        workspace_id: String,
+        repo_id: String,
+        base_ref: String,
+    },
+    BranchWorkingFileDiff {
+        workspace_id: String,
+        repo_id: String,
+        base_ref: String,
+        relative_path: String,
+    },
     Subtrees {
         workspace_id: String,
         repo_id: String,
@@ -195,6 +285,15 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         operation: SubtreeOperation,
+    },
+    Submodules {
+        workspace_id: String,
+        repo_id: String,
+    },
+    SubmoduleOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: SubmoduleOperation,
     },
     BranchCompare {
         workspace_id: String,
@@ -232,6 +331,74 @@ pub enum BridgeCommand {
         relative_path: String,
         choice: ConflictChoice,
     },
+    AbortRepositoryOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: String,
+    },
+    GitIdentity {
+        workspace_id: String,
+        repo_id: String,
+    },
+    GitProfileOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: GitProfileOperation,
+    },
+    SvnAccount {
+        workspace_id: String,
+        repo_id: String,
+    },
+    SvnAccountOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: SvnAccountOperation,
+    },
+    SvnOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: SvnOperation,
+    },
+    FileHistory {
+        workspace_id: String,
+        repo_id: String,
+        relative_path: String,
+        cursor: Option<String>,
+        limit: u32,
+    },
+    FileRevisionContent {
+        workspace_id: String,
+        repo_id: String,
+        relative_path: String,
+        revision: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchCommitTarget {
+    pub repo_id: String,
+    pub message: String,
+    pub amend: bool,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryOperationResult {
+    pub repo_id: String,
+    pub committed: bool,
+    pub revision: Option<String>,
+    pub pushed: bool,
+    pub error: Option<DesktopError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoreRules {
+    pub directory: String,
+    pub source: String,
+    pub patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -248,6 +415,8 @@ pub enum SyncAction {
 pub enum BranchOperation {
     Create { name: String, from: Option<String> },
     Checkout { name: String },
+    Merge { name: String },
+    Rebase { name: String },
     Rename { old_name: String, new_name: String },
     Delete { name: String, force: bool },
 }
@@ -263,6 +432,9 @@ pub enum TagOperation {
         name: String,
     },
     Checkout {
+        name: String,
+    },
+    Merge {
         name: String,
     },
     Push {
@@ -351,8 +523,68 @@ pub enum SubtreeOperation {
     Push {
         subtree_id: String,
     },
-    Remove {
+    Register {
+        prefix: String,
+        remote: String,
+        branch: String,
+        squash: bool,
+    },
+    Edit {
         subtree_id: String,
+        prefix: String,
+        remote: String,
+        branch: String,
+        squash: bool,
+    },
+    DeleteRegistry {
+        subtree_id: String,
+    },
+    RemoveFiles {
+        subtree_id: String,
+    },
+    Split {
+        subtree_id: String,
+        branch: Option<String>,
+    },
+    Merge {
+        subtree_id: String,
+        revision: String,
+        squash: bool,
+        message: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmoduleEntry {
+    pub path: String,
+    pub url: String,
+    pub initialized: bool,
+    pub revision: Option<String>,
+    pub branch: Option<String>,
+    pub dirty: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SubmoduleOperation {
+    Init {
+        path: String,
+        recursive: bool,
+    },
+    Update {
+        path: String,
+        init: bool,
+        recursive: bool,
+        remote: bool,
+    },
+    Deinit {
+        path: String,
+        force: bool,
+    },
+    Sync {
+        path: String,
+        recursive: bool,
     },
 }
 
@@ -369,6 +601,112 @@ pub enum ConflictChoice {
     Mine,
     Theirs,
     Working,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GitProfileOperation {
+    Save { profile: GitProfile },
+    Delete { profile_id: String },
+    Select { profile_id: Option<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitProfile {
+    pub id: String,
+    pub label: String,
+    pub user_name: String,
+    pub email: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum GitIdentitySource {
+    Custom,
+    Local,
+    Global,
+    Missing,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveGitIdentity {
+    pub user_name: String,
+    pub email: String,
+    pub source: GitIdentitySource,
+    pub profile_id: Option<String>,
+    pub valid: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentityState {
+    pub profiles: Vec<GitProfile>,
+    pub selected_profile_id: Option<String>,
+    pub local: Option<EffectiveGitIdentity>,
+    pub global: Option<EffectiveGitIdentity>,
+    pub effective: EffectiveGitIdentity,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SvnAccountOperation {
+    Save {
+        username: String,
+        password: Option<String>,
+    },
+    Delete,
+    Test,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SvnOperation {
+    Cleanup {
+        break_locks: bool,
+        remove_unversioned: bool,
+        remove_ignored: bool,
+        include_externals: bool,
+    },
+    ResolveWorking {
+        paths: Vec<String>,
+    },
+    Lock {
+        paths: Vec<String>,
+        message: Option<String>,
+        force: bool,
+    },
+    Unlock {
+        paths: Vec<String>,
+        force: bool,
+    },
+    Relocate {
+        from_url: String,
+        to_url: String,
+    },
+    Switch {
+        url: String,
+        revision: Option<String>,
+        ignore_ancestry: bool,
+    },
+    Copy {
+        source_url: String,
+        destination_url: String,
+        revision: Option<String>,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SvnAccountState {
+    pub repository_root: String,
+    pub username: Option<String>,
+    pub password_stored: bool,
+    pub secure_storage_available: bool,
+    pub password_stdin_supported: bool,
+    pub connection_ok: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -404,6 +742,16 @@ pub struct DesktopError {
     pub exit_code: Option<i32>,
     pub stderr: Option<String>,
     pub recoverable: bool,
+    #[specta(optional)]
+    pub operation: Option<String>,
+    #[specta(optional)]
+    pub workspace_id: Option<String>,
+    #[specta(optional)]
+    pub repository_id: Option<String>,
+    #[specta(optional)]
+    pub subject: Option<String>,
+    #[specta(optional)]
+    pub hint: Option<String>,
 }
 
 impl DesktopError {
@@ -415,7 +763,17 @@ impl DesktopError {
             exit_code: None,
             stderr: None,
             recoverable,
+            operation: None,
+            workspace_id: None,
+            repository_id: None,
+            subject: None,
+            hint: None,
         }
+    }
+
+    pub fn hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
     }
 }
 
@@ -449,26 +807,220 @@ pub struct RepositoryEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStateSnapshot {
-    pub theme: ThemePreference,
-    pub language: LanguagePreference,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
-    pub ui_font_size: UiFontSizePreference,
+    #[specta(optional)]
+    pub settings: DesktopSettings,
+    #[serde(default)]
+    #[specta(optional)]
+    pub layout: LayoutState,
     pub last_workspace_id: Option<String>,
     pub recent_workspaces: Vec<WorkspaceDescriptor>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub theme: Option<ThemePreference>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub language: Option<LanguagePreference>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub ui_font_size: Option<UiFontSizePreference>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub panel_sizes: Option<PanelSizes>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub active_tab: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub file_view_mode: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub stash_view_mode: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub external_editor: Option<ExternalEditor>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub branch_sidebar_collapsed: Option<bool>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub branch_sidebar_collapsed_sections: Option<Vec<String>>,
+}
+
+fn default_schema_version() -> u32 {
+    3
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopSettings {
+    pub theme: ThemePreference,
+    pub language: LanguagePreference,
+    pub ui_font_size: UiFontSizePreference,
+    pub changes_display_mode: ChangesDisplayMode,
+    pub default_commit_action: DefaultCommitAction,
+    pub default_save_action: DefaultSaveAction,
+    pub prompt_before_adding_untracked: bool,
+    pub suppress_diverged_warning: bool,
+    pub auto_refresh_interval: u32,
+    pub fetch_on_startup: bool,
+    pub reset_view_locations_on_startup: bool,
+    pub notify_incoming_commits: bool,
+    pub notify_unpushed_commits: bool,
+    pub repository_scan_depth: u32,
+    pub ignored_folders: Vec<String>,
+    pub maximum_graph_commits: u32,
+    pub project_colors: BTreeMap<String, String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub hidden_repository_ids: Vec<String>,
+    pub external_editor: Option<ExternalEditor>,
+}
+
+impl Default for DesktopSettings {
+    fn default() -> Self {
+        Self {
+            theme: ThemePreference::System,
+            language: LanguagePreference::System,
+            ui_font_size: UiFontSizePreference::Standard,
+            changes_display_mode: ChangesDisplayMode::Simplified,
+            default_commit_action: DefaultCommitAction::Commit,
+            default_save_action: DefaultSaveAction::Stash,
+            prompt_before_adding_untracked: true,
+            suppress_diverged_warning: false,
+            auto_refresh_interval: 0,
+            fetch_on_startup: false,
+            reset_view_locations_on_startup: false,
+            notify_incoming_commits: false,
+            notify_unpushed_commits: false,
+            repository_scan_depth: 4,
+            ignored_folders: vec![
+                ".git".into(),
+                ".svn".into(),
+                ".hg".into(),
+                "node_modules".into(),
+                "vendor".into(),
+                "dist".into(),
+                "build".into(),
+                "out".into(),
+                ".next".into(),
+                ".nuxt".into(),
+                ".turbo".into(),
+                "target".into(),
+            ],
+            maximum_graph_commits: 1_000,
+            project_colors: BTreeMap::new(),
+            hidden_repository_ids: Vec::new(),
+            external_editor: None,
+        }
+    }
+}
+
+impl DesktopSettings {
+    pub fn normalize(mut self) -> Self {
+        self.repository_scan_depth = self.repository_scan_depth.min(10);
+        self.maximum_graph_commits = self.maximum_graph_commits.clamp(100, 10_000);
+        self.auto_refresh_interval = self.auto_refresh_interval.min(86_400);
+        self.ignored_folders = self
+            .ignored_folders
+            .into_iter()
+            .map(|value| value.trim().replace('\\', "/"))
+            .filter(|value| {
+                !value.is_empty()
+                    && !value.contains('\0')
+                    && !value.split('/').any(|part| part == "..")
+            })
+            .collect();
+        self.ignored_folders.sort();
+        self.ignored_folders.dedup();
+        self.project_colors.retain(|_, value| is_color(value));
+        self.hidden_repository_ids = self
+            .hidden_repository_ids
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty() && !value.chars().any(char::is_control))
+            .collect();
+        self.hidden_repository_ids.sort();
+        self.hidden_repository_ids.dedup();
+        if let Some(editor) = &mut self.external_editor {
+            editor.executable = editor.executable.trim().to_string();
+            if editor.executable.is_empty() {
+                self.external_editor = None;
+            }
+        }
+        self
+    }
+}
+
+fn is_color(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangesDisplayMode {
+    #[default]
+    Simplified,
+    Changelists,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DefaultCommitAction {
+    #[default]
+    Commit,
+    CommitAndPush,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DefaultSaveAction {
+    #[default]
+    Stash,
+    Shelf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutState {
     pub panel_sizes: PanelSizes,
     pub active_tab: String,
     pub file_view_mode: String,
-    #[serde(default = "default_stash_view_mode")]
     pub stash_view_mode: String,
-    pub external_editor: Option<ExternalEditor>,
-    #[serde(default)]
     pub branch_sidebar_collapsed: bool,
-    #[serde(default)]
     pub branch_sidebar_collapsed_sections: Vec<String>,
 }
 
-fn default_stash_view_mode() -> String {
-    "tree".into()
+impl Default for LayoutState {
+    fn default() -> Self {
+        Self {
+            panel_sizes: PanelSizes::default(),
+            active_tab: "changes".into(),
+            file_view_mode: "tree".into(),
+            stash_view_mode: "tree".into(),
+            branch_sidebar_collapsed: false,
+            branch_sidebar_collapsed_sections: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsEffects {
+    pub rescan_workspace: bool,
+    pub reload_history: bool,
+    pub restart_auto_refresh: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsUpdateResult {
+    pub settings: DesktopSettings,
+    pub effects: SettingsEffects,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
@@ -542,8 +1094,42 @@ pub struct DesktopCapabilities {
     pub changelist: bool,
     pub worktree: bool,
     pub subtree: bool,
+    #[specta(optional)]
+    pub submodule: bool,
     pub compare: bool,
     pub remote_management: bool,
+    #[specta(optional)]
+    pub identity: bool,
+    #[specta(optional)]
+    pub svn_account: bool,
+    #[specta(optional)]
+    pub file_history: bool,
+    #[specta(optional)]
+    pub secure_credentials: bool,
+    #[specta(optional)]
+    pub system_notifications: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCapabilities {
+    pub status: bool,
+    pub diff: bool,
+    pub commit: bool,
+    pub sync: bool,
+    pub history: bool,
+    pub conflict: bool,
+    pub stash: bool,
+    pub shelf: bool,
+    pub changelist: bool,
+    pub worktree: bool,
+    pub subtree: bool,
+    pub submodule: bool,
+    pub compare: bool,
+    pub remote_management: bool,
+    pub identity: bool,
+    pub svn_account: bool,
+    pub file_history: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -605,6 +1191,12 @@ pub struct RepositoryStatus {
     pub files: Vec<FileChange>,
     pub conflicts: u32,
     pub operation: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub capabilities: RepositoryCapabilities,
+    #[serde(default)]
+    #[specta(optional)]
+    pub tool_available: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -615,6 +1207,12 @@ pub struct FileChange {
     pub staged: bool,
     pub unstaged: bool,
     pub conflicted: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub conflict_type: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub submodule: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -717,6 +1315,36 @@ pub struct HistoryPage {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct FileHistoryEntry {
+    pub revision: String,
+    pub previous_revision: Option<String>,
+    pub path: String,
+    pub previous_path: Option<String>,
+    pub author: String,
+    pub date: String,
+    pub message: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileHistoryPage {
+    pub entries: Vec<FileHistoryEntry>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRevisionDocument {
+    pub revision: String,
+    pub path: String,
+    pub content: String,
+    pub binary: bool,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct UnpushedCommit {
     pub hash: String,
     pub short_hash: String,
@@ -726,6 +1354,76 @@ pub struct UnpushedCommit {
     pub files_changed: u32,
     pub additions: u32,
     pub deletions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum UnpushedOperation {
+    Revert {
+        hashes: Vec<String>,
+    },
+    UndoHead,
+    Drop {
+        hashes: Vec<String>,
+    },
+    Squash {
+        hashes: Vec<String>,
+        message: String,
+    },
+    EditMessage {
+        hash: String,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum HistoryOperation {
+    Checkout {
+        revision: String,
+    },
+    CherryPick {
+        revision: String,
+    },
+    Revert {
+        revisions: Vec<String>,
+    },
+    Reset {
+        revision: String,
+        mode: String,
+    },
+    CheckoutFile {
+        revision: String,
+        path: String,
+    },
+    RevertFile {
+        revision: String,
+        path: String,
+    },
+    ApplyPaths {
+        entries: Vec<CommitPathOperationEntry>,
+    },
+    RevertPaths {
+        entries: Vec<CommitPathOperationEntry>,
+    },
+    SvnUpdateTo {
+        revision: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitPathOperationEntry {
+    pub revision: String,
+    pub path: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchDocument {
+    pub file_name: String,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -817,6 +1515,15 @@ pub struct WorktreeEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorktreeDiffResult {
+    pub path: String,
+    pub base_ref: String,
+    pub current_ref: String,
+    pub files: Vec<CommitFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct SubtreeEntry {
     pub id: String,
     pub prefix: String,
@@ -843,6 +1550,12 @@ pub struct ConflictFile {
     pub path: String,
     pub kind: VcsKind,
     pub binary: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub conflict_type: String,
+    #[serde(default)]
+    #[specta(optional)]
+    pub actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

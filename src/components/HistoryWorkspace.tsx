@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useResizable } from '../hooks/useResizable';
 import { BranchSidebar } from './BranchSidebar';
+import { BranchComparePanel } from './BranchComparePanel';
 import { CommitGraph } from './CommitGraph';
 import { CommitDetailPanel } from './CommitDetailPanel';
 import { buildHistoryRefOptions } from './HistoryWorkspace.helpers';
@@ -13,6 +14,9 @@ import { commitKey } from '../history/commitDetails';
 import { formatRefLabel, groupRefs, mergeLocalRemote, type RefGroup } from '../history/refs';
 import { branchColor, headColor, isPrimaryBranch, primaryBranchColor, tagColor } from './branchColor';
 import type { CommitDetail, CommitNode, GraphCommitNode } from '../bindings/generated';
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { CommitSearch, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
 
 type FilterMenu = 'authors' | 'repos' | 'refs' | 'dates' | null;
 type ViewFilters = { author: string; repoId: string; ref: string; from: string; to: string };
@@ -34,122 +38,6 @@ function initials(value: string): string {
 
 function avatarColor(value: string): string {
   return branchColor(value || 'author');
-}
-
-function toYmd(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function parseYmd(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function ToggleFilter({ icon, leading, label, active, open, onClick }: { icon?: string; leading?: ReactNode; label: string; active: boolean; open: boolean; onClick: () => void }) {
-  return <button className={`filter-button ${active ? 'active' : ''} ${open ? 'open' : ''}`} onClick={onClick} aria-expanded={open}>{leading ?? (icon ? <Codicon name={icon} /> : null)}<span>{label}</span>{active && <i />}{open ? <Codicon name="chevron-up" /> : <Codicon name="chevron-down" />}</button>;
-}
-
-function FilterPopover({ title, values, selected, onSelect, onClear, query, onQuery }: {
-  title: string;
-  values: Array<{ id: string; label: string; color?: string; detail?: string; icon?: string }>;
-  selected: string;
-  onSelect: (value: string) => void;
-  onClear: () => void;
-  query?: string;
-  onQuery?: (value: string) => void;
-}) {
-  const { t } = useI18n();
-  const displayed = query?.trim()
-    ? values.filter((value) => `${value.label} ${value.detail ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
-    : values;
-  const radioGroup = `filter-${title}`;
-  const allLabel = title === t('Author') ? t('All authors') : title === t('Repository') ? t('All repositories') : t('All branches & tags');
-  return <div className="filter-popover" data-selection-mode="single">
-    <header><strong>{title}</strong><button disabled={!selected} onClick={onClear}>{t('Clear')}</button></header>
-    {onQuery && <label className="popover-search"><Codicon name="search" /><input autoFocus value={query ?? ''} onChange={(event) => onQuery(event.target.value)} placeholder={t('Filter…')} /></label>}
-    <div className="filter-options">
-      <label><input name={radioGroup} aria-label={allLabel} type="radio" checked={!selected} onChange={onClear} /><span>{allLabel}</span>{!selected && <Codicon name="check" />}</label>
-      {displayed.map((value) => <label key={value.id} title={value.detail}>
-        <input name={radioGroup} aria-label={`${value.label}${value.detail ?? ''}`} type="radio" checked={selected === value.id} onChange={() => onSelect(value.id)} />
-        {value.color && <i style={{ background: value.color }} />}
-        {value.icon && <Codicon name={value.icon} />}
-        <span><span className="filter-option-name">{value.label}</span>{value.detail && <small>{value.detail}</small>}</span>
-        {selected === value.id && <Codicon name="check" />}
-      </label>)}
-      {!displayed.length && <div className="filter-empty">{t('No matches')}</div>}
-    </div>
-  </div>;
-}
-
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-
-function shiftMonth(value: { year: number; month: number }, delta: number) {
-  const next = new Date(value.year, value.month + delta, 1);
-  return { year: next.getFullYear(), month: next.getMonth() };
-}
-
-function CalendarMonth({ year, month, from, to, hovered, onDay, onHover }: { year: number; month: number; from: Date | null; to: Date | null; hovered: Date | null; onDay: (date: Date) => void; onHover: (date: Date | null) => void }) {
-  const firstDay = new Date(year, month, 1).getDay();
-  const days = new Date(year, month + 1, 0).getDate();
-  const cells: Array<Date | null> = Array.from({ length: firstDay }, () => null);
-  for (let day = 1; day <= days; day += 1) cells.push(new Date(year, month, day));
-  const end = hovered ?? to;
-  const low = from && end && from <= end ? from : end;
-  const high = from && end && from <= end ? end : from;
-  return <div className="calendar-month">
-    <div className="calendar-weekdays">{WEEKDAYS.map((day) => <span key={day}>{day}</span>)}</div>
-    <div className="calendar-grid">
-      {cells.map((date, index) => date ? (() => {
-        const ymd = toYmd(date);
-        const edge = ymd === (from && toYmd(from)) || ymd === (to && toYmd(to)) || ymd === (hovered && toYmd(hovered));
-        const inRange = !!(low && high && date > low && date < high);
-        return <button key={ymd} className={`${edge ? 'edge' : ''} ${inRange ? 'in-range' : ''}`} onClick={() => onDay(date)} onMouseEnter={() => onHover(date)} onMouseLeave={() => onHover(null)}>{date.getDate()}</button>;
-      })() : <span key={`empty-${index}`} />)}
-    </div>
-  </div>;
-}
-
-function DatePopover({ from, to, onChange, onClear }: { from: string; to: string; onChange: (from: string, to: string) => void; onClear: () => void }) {
-  const { t } = useI18n();
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [horizontalOffset, setHorizontalOffset] = useState(0);
-  const today = new Date();
-  const fromDate = parseYmd(from);
-  const toDate = parseYmd(to);
-  const [left, setLeft] = useState(() => { const date = fromDate ?? new Date(today.getFullYear(), today.getMonth() - 1, 1); return { year: date.getFullYear(), month: date.getMonth() }; });
-  const [right, setRight] = useState(() => { const date = toDate ?? new Date(today.getFullYear(), today.getMonth(), 1); return { year: date.getFullYear(), month: date.getMonth() }; });
-  const [hovered, setHovered] = useState<Date | null>(null);
-  useLayoutEffect(() => {
-    const reposition = () => {
-      const element = popoverRef.current;
-      if (!element) return;
-      const rect = element.getBoundingClientRect();
-      const margin = 8;
-      const shiftLeft = rect.right > window.innerWidth - margin ? window.innerWidth - margin - rect.right : 0;
-      const shiftRight = rect.left < margin ? margin - rect.left : 0;
-      const nextOffset = Math.round((shiftLeft || shiftRight) * 100) / 100;
-      setHorizontalOffset((current) => current === nextOffset ? current : nextOffset);
-    };
-    reposition();
-    window.addEventListener('resize', reposition);
-    return () => window.removeEventListener('resize', reposition);
-  }, []);
-  const choose = (date: Date) => {
-    const value = toYmd(date);
-    if (!from || to) { onChange(value, ''); return; }
-    if (fromDate && date < fromDate) onChange(value, from);
-    else onChange(from, value);
-  };
-  return <div ref={popoverRef} className="date-popover filter-popover" style={{ '--date-popover-offset': `${horizontalOffset}px` } as React.CSSProperties}>
-    <header><strong>{t('Date range')}</strong><button disabled={!from && !to} onClick={onClear}>{t('Clear')}</button></header>
-    <div className="calendar-panes">
-      <div className="calendar-pane"><div className="calendar-nav"><button onClick={() => setLeft(shiftMonth(left, -1))}><Codicon name="chevron-left" /></button><strong>{MONTH_NAMES[left.month]} {left.year}</strong><button onClick={() => setLeft(shiftMonth(left, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...left} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} /></div>
-      <i className="calendar-divider" />
-      <div className="calendar-pane"><div className="calendar-nav"><button onClick={() => setRight(shiftMonth(right, -1))}><Codicon name="chevron-left" /></button><strong>{MONTH_NAMES[right.month]} {right.year}</strong><button onClick={() => setRight(shiftMonth(right, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...right} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} /></div>
-    </div>
-  </div>;
 }
 
 function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { open: boolean; onToggle: () => void; onFetch: () => void; expanded: boolean; onToggleExpanded: () => void }) {
@@ -287,6 +175,9 @@ function CommitList({
   isFiltered,
   hasRevisionFilter,
   repoSortKeyById,
+  hasMoreOverride,
+  onLoadMore,
+  singleRepository = false,
 }: {
   history: CommitNode[];
   loading: boolean;
@@ -298,17 +189,27 @@ function CommitList({
   isFiltered?: boolean;
   hasRevisionFilter?: boolean;
   repoSortKeyById: Record<string, string>;
+  hasMoreOverride?: boolean;
+  onLoadMore?: () => void;
+  singleRepository?: boolean;
 }) {
   const { t } = useI18n();
   const parent = useRef<HTMLDivElement>(null);
   const repos = useAppStore((state) => state.snapshot?.repositories ?? []);
-  const hasMore = useAppStore((state) => state.historyHasMore);
+  const storeHasMore = useAppStore((state) => state.historyHasMore);
+  const hasMore = hasMoreOverride ?? storeHasMore;
   const selected = useAppStore((state) => new Set(state.selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
+  const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectCommit = useAppStore((state) => state.selectCommit);
   const loadCommitDetail = useAppStore((state) => state.loadCommitDetail);
-  const openDiff = useAppStore((state) => state.openDiff);
+  const openCommitDetail = useAppStore((state) => state.openCommitDetail);
   const openChanges = useAppStore((state) => state.openCommitChanges);
   const loadHistory = useAppStore((state) => state.loadHistory);
+  const historyOperation = useAppStore((state) => state.historyOperation);
+  const unpushedOperation = useAppStore((state) => state.unpushedOperation);
+  const branchOperation = useAppStore((state) => state.branchOperation);
+  const tagOperation = useAppStore((state) => state.tagOperation);
+  const createPatch = useAppStore((state) => state.createPatch);
   const commits = useMemo(() => {
     if (isFiltered) return assignLanes(history, true, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
     if (hasRevisionFilter) return assignLanes(history, false, repoKindById, remoteNamesByRepo, topologyCommits, repoSortKeyById);
@@ -327,7 +228,7 @@ function CommitList({
     }
     return blocks;
   }, [commits, repoMap]);
-  const multiRepo = repos.length > 1;
+  const multiRepo = !singleRepository && repos.length > 1;
   const anyExpanded = expandedRepoIds.size > 0;
   const labelColWidth = multiRepo ? (anyExpanded ? 110 : 8) : 0;
 
@@ -339,6 +240,7 @@ function CommitList({
     overscan: 14,
   });
   const [hoveredKey, setHoveredKey] = useState<string>();
+  const [context, setContext] = useState<{ x: number; y: number; commit: CommitNode }>();
   const [popover, setPopover] = useState<{ detail: CommitDetail; anchor: CommitPopoverAnchor }>();
   const hoveredKeyRef = useRef<string>();
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -373,8 +275,84 @@ function CommitList({
     closeTimer.current = setTimeout(() => { if (!popoverActive.current) setPopover(undefined); }, 140);
   };
   const allExpanded = repoBlocks.length > 0 && repoBlocks.every((block) => expandedRepoIds.has(block.repoId));
+  const virtualItems = virtualizer.getVirtualItems();
+  const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: index * COMMIT_ROW_HEIGHT }));
+  const contextItems = (commit: CommitNode): ContextMenuEntry[] => {
+    const git = repoKindById[commit.repoId] !== 'svn';
+    const selection = selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
+    if (selection.length > 1) {
+      const allUnpushed = selection.every((item) => item.unpushed);
+      return [
+        { id: 'patch-multi', label: t('Create Patch...'), icon: 'diff' },
+        ...(git ? [{ id: 'cherry-pick-multi', label: t('Cherry-Pick All'), icon: 'git-commit' } as ContextMenuEntry, { separator: true } as ContextMenuEntry, { id: 'revert-multi', label: t('Revert Commits'), icon: 'discard' } as ContextMenuEntry] : []),
+        ...(allUnpushed ? [{ separator: true } as ContextMenuEntry, { id: 'drop-multi', label: t('Drop Commits'), icon: 'trash', danger: true } as ContextMenuEntry, { id: 'squash-multi', label: t('Squash {0} Commits...', selection.length), icon: 'fold-down' } as ContextMenuEntry] : []),
+      ];
+    }
+    const hasTags = commit.refs.some((ref) => ref.startsWith('refs/tags/') || ref.startsWith('tag: '));
+    const items: ContextMenuEntry[] = [
+      { id: 'copy', label: t('Copy Revision Number'), icon: 'copy' },
+      { separator: true },
+      { id: 'branch', label: t('New Branch...'), icon: 'git-branch' },
+      { id: hasTags ? 'manage-tags' : 'tag', label: t(hasTags ? 'Manage Tags...' : 'New Tag...'), icon: 'tag' },
+      { separator: true },
+      { id: git ? 'checkout' : 'svn-update', label: t(git ? 'Checkout Revision' : 'Update to Revision'), icon: 'arrow-right' },
+      { separator: true },
+      { id: 'patch', label: t('Create Patch...'), icon: 'diff' },
+    ];
+    if (!git) return items;
+    items.push(
+      { id: 'cherry-pick', label: t('Cherry-Pick'), icon: 'git-commit' },
+      { separator: true },
+      { id: 'reset', label: t('Reset Current Branch to Here...'), icon: 'history', danger: true },
+      { id: 'revert', label: t('Revert Commit'), icon: 'discard' },
+    );
+    if (commit.unpushed) items.push(
+      { separator: true },
+      ...(commits[0]?.hash === commit.hash ? [{ id: 'edit', label: t('Edit Commit Message…'), icon: 'edit' } as ContextMenuEntry, { id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', danger: true } as ContextMenuEntry] : []),
+      { id: 'drop', label: t('Drop Commit'), icon: 'trash', danger: true },
+    );
+    return items;
+  };
+  const runContext = async (id: string) => {
+    const commit = context?.commit;
+    if (!commit) return;
+    const selection = selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
+    const index = new Map(commits.map((item, position) => [commitKey(item.repoId, item.hash), position]));
+    const oldestFirst = [...selection].sort((left, right) => (index.get(commitKey(right.repoId, right.hash)) ?? 0) - (index.get(commitKey(left.repoId, left.hash)) ?? 0));
+    const newestFirst = [...selection].sort((left, right) => (index.get(commitKey(left.repoId, left.hash)) ?? 0) - (index.get(commitKey(right.repoId, right.hash)) ?? 0));
+    if (id === 'copy') await navigator.clipboard?.writeText(commit.hash).catch(() => undefined);
+    if (id === 'patch' || id === 'patch-multi') {
+      const patch = await createPatch(commit.repoId, selection.map((item) => item.hash));
+      const url = URL.createObjectURL(new Blob([patch.content], { type: 'text/x-patch;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = patch.fileName; link.click(); URL.revokeObjectURL(url);
+    }
+    if (id === 'branch') { const name = await promptDialog({ title: t('New Branch'), message: commit.shortHash, inputLabel: t('Branch name') }); if (name) await branchOperation({ type: 'create', name, from: commit.hash }, commit.repoId); }
+    if (id === 'tag') { const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') }); if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId); }
+    if (id === 'manage-tags') {
+      const tags = commit.refs.flatMap((ref) => ref.startsWith('refs/tags/') ? [ref.slice('refs/tags/'.length)] : ref.startsWith('tag: ') ? [ref.slice('tag: '.length).replace(/^refs\/tags\//, '')] : []);
+      const action = await choiceDialog({ title: t('Manage Tags...'), message: commit.shortHash, choices: [{ id: 'create', label: t('New Tag...'), icon: 'add' }, ...tags.map((name) => ({ id: `delete:${name}`, label: t('Delete tag "{0}"', name), icon: 'trash', danger: true }))] });
+      if (action === 'create') { const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') }); if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId); }
+      if (action?.startsWith('delete:')) await tagOperation({ type: 'delete', name: action.slice('delete:'.length) }, commit.repoId);
+    }
+    if (id === 'checkout' && await confirmDialog({ title: t('Checkout revision?'), message: `${commit.shortHash} ${commit.message}\n\n${t('The repository will enter detached HEAD state.')}` })) await historyOperation(commit.repoId, { type: 'checkout', revision: commit.hash });
+    if (id === 'svn-update' && await confirmDialog({ title: t('Update to SVN revision?'), message: `r${commit.hash}` })) await historyOperation(commit.repoId, { type: 'svnUpdateTo', revision: commit.hash });
+    if (id === 'cherry-pick' && await confirmDialog({ title: t('Cherry-pick commit?'), message: `${commit.shortHash} ${commit.message}` })) await historyOperation(commit.repoId, { type: 'cherryPick', revision: commit.hash });
+    if (id === 'cherry-pick-multi' && await confirmDialog({ title: t('Cherry-Pick All'), message: oldestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n') })) for (const item of oldestFirst) await historyOperation(commit.repoId, { type: 'cherryPick', revision: item.hash });
+    if (id === 'revert' && await confirmDialog({ title: t('Revert commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('A new inverse commit will be created.')}`, danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: [commit.hash] });
+    if (id === 'revert-multi' && await confirmDialog({ title: t('Revert Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: newestFirst.map((item) => item.hash) });
+    if (id === 'reset') {
+      const mode = await choiceDialog({ title: t('Reset Current Branch to Here...'), message: `${commit.shortHash} ${commit.message}`, danger: true, choices: [{ id: 'soft', label: t('Soft'), description: t('Keep staged and unstaged changes'), icon: 'arrow-down' }, { id: 'mixed', label: t('Mixed'), description: t('Keep unstaged changes, unstage staged changes'), icon: 'discard' }, { id: 'hard', label: t('Hard'), description: t('Discard all changes'), icon: 'warning', danger: true }] });
+      if (mode && await confirmDialog({ title: t('Reset {0}?', mode), message: `${commit.shortHash} ${commit.message}\n\n${t(mode === 'hard' ? 'All working tree and index changes will be discarded.' : 'Commits after this revision will be removed from the current branch.')}`, danger: true })) await historyOperation(commit.repoId, { type: 'reset', revision: commit.hash, mode });
+    }
+    if (id === 'edit') { const message = await promptDialog({ title: t('Edit Commit Message'), message: commit.shortHash, inputLabel: t('Commit message'), initialValue: commit.message }); if (message) await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message }); }
+    if (id === 'undo' && await confirmDialog({ title: t('Undo Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('Changes remain staged.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'undoHead' });
+    if (id === 'drop' && await confirmDialog({ title: t('Drop Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('This rewrites local history and may require force push.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: [commit.hash] });
+    if (id === 'drop-multi' && await confirmDialog({ title: t('Drop Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: newestFirst.map((item) => item.hash) });
+    if (id === 'squash-multi') { const message = await promptDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n') }); if (message) await unpushedOperation(commit.repoId, { type: 'squash', hashes: newestFirst.map((item) => item.hash), message }); }
+    setContext(undefined);
+  };
 
-  return <div className="commit-list" ref={parent} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) void loadHistory(false); }}>
+  return <div className="commit-list" ref={parent} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) { if (onLoadMore) onLoadMore(); else void loadHistory(false); } }}>
     <div className="commit-list-content" style={{ height: virtualizer.getTotalSize() }}>
       {multiRepo && repoBlocks.map((block) => {
         const blockTopPx = block.start * COMMIT_ROW_HEIGHT;
@@ -385,19 +363,19 @@ function CommitList({
         const expanded = expandedRepoIds.has(block.repoId);
         return <button key={`${block.repoId}:${block.start}`} className={`repo-strip ${expanded ? 'expanded' : ''}`} style={{ top, height, '--repo-color': block.color } as React.CSSProperties} onClick={() => onToggleRepoName(block.repoId)} title={block.name}><span className="repo-strip-bar" />{expanded && <strong>{block.name}</strong>}</button>;
       })}
-      {virtualizer.getVirtualItems().map((item) => {
+      {renderedItems.map((item) => {
         const commit = commits[item.index] as GraphCommit & CommitWithIndicators;
         if (!commit) return null;
         const key = commitKey(commit.repoId, commit.hash);
         const isSelected = selected.has(key);
         const isMergeCommit = commit.parents.length > 1;
-        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }} title={`${commit.hash}\n${commit.author}\n${formatDate(commit.authorDate)}`}>
+        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, commit }); if (!isSelected) void selectCommit(commit, 'single', commits); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }} title={`${commit.hash}\n${commit.author}\n${formatDate(commit.authorDate)}`}>
           {labelColWidth > 0 && <div style={{ width: labelColWidth, flexShrink: 0 }} />}
           <CommitGraph commit={commit} selected={isSelected} />
           <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} />
           <span className={`commit-subject-text ${isMergeCommit ? 'merge-commit' : ''}`}>{commit.message}</span>
           <span className="commit-author">
-            {hoveredKey === key && <span className="commit-row-actions"><button title={t('Open preview')} onClick={(event) => { event.stopPropagation(); const file = useAppStore.getState().selectedCommitDetails[key]?.files[0]; if (file) void openDiff(commit.repoId, file.path, false, commit.hash); }}><Codicon name="open-preview" /></button><button title={t('Open Changes')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openChanges); }}><Codicon name="diff-multiple" /></button></span>}
+            {hoveredKey === key && <span className="commit-row-actions"><button title={t('Open Commit Detail')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openCommitDetail); }}><Codicon name="open-preview" /></button><button title={t('Open Changes')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openChanges); }}><Codicon name="diff-multiple" /></button></span>}
             <span className={`commit-flow-indicators ${commit.incoming || commit.unpushed ? 'has-flow' : ''} ${commit.incoming && commit.unpushed ? 'has-both' : ''}`}>
               {commit.incoming && <span title={t('Not pulled')}><Codicon name="arrow-down" className="commit-flow-icon incoming" /></span>}
               {commit.unpushed && <span title={t('Not pushed')}><Codicon name="arrow-up" className="commit-flow-icon unpushed" /></span>}
@@ -409,6 +387,7 @@ function CommitList({
       })}
     </div>
     {popover && <CommitPopover detail={popover.detail} anchor={popover.anchor} onEnter={() => { popoverActive.current = true; if (closeTimer.current) clearTimeout(closeTimer.current); }} onLeave={() => { popoverActive.current = false; setPopover(undefined); }} />}
+    {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context.commit)} onSelect={(id) => void runContext(id)} onClose={() => setContext(undefined)} />}
     {loading && <div className="history-loading" role="status" aria-live="polite"><Codicon name="loading codicon-modifier-spin" /><span>{t('Loading commits…')}</span></div>}
     {!loading && !commits.length && <div className="empty-state"><Codicon name="history" /><span>{t('No history')}</span></div>}
     {commits.length > 0 && allExpanded && <span className="sr-only">{t('Collapse project names')}</span>}
@@ -438,13 +417,16 @@ export function HistoryWorkspace() {
   const loadHistory = useAppStore((state) => state.loadHistory);
   const refresh = useAppStore((state) => state.refresh);
   const sync = useAppStore((state) => state.sync);
-  const branchWidth = useAppStore((state) => state.bootstrap?.state.panelSizes.branches ?? 220);
-  const detailWidth = useAppStore((state) => state.bootstrap?.state.panelSizes.detail ?? 380);
+  const branchWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.branches ?? state.bootstrap?.state.panelSizes?.branches ?? 220);
+  const detailWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.detail ?? state.bootstrap?.state.panelSizes?.detail ?? 380);
   const setPanelSize = useAppStore((state) => state.setPanelSize);
-  const branchSidebarCollapsed = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsed ?? false);
-  const collapsedSections = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
+  const branchSidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
+  const collapsedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
   const setBranchSidebarState = useAppStore((state) => state.setBranchSidebarState);
   const [detailSidebarCollapsed, setDetailSidebarCollapsed] = useState(false);
+  const compareTarget = useAppStore((state) => state.comparisonTarget);
+  const openBranchComparison = useAppStore((state) => state.openBranchComparison);
+  const closeBranchComparison = useAppStore((state) => state.closeBranchComparison);
   const resizeBranches = useResizable(branchWidth, 190, 420, (value) => setPanelSize('branches', value));
   const resizeDetail = useResizable(detailWidth, 300, 620, (value) => setPanelSize('detail', value), -1);
 
@@ -542,8 +524,8 @@ export function HistoryWorkspace() {
 
   if (!selectedRepoId) return <div className="workspace-empty"><Codicon name="repo" />{t('Select a repository')}</div>;
   return <section className="history-workspace">
-    <div className="history-filters" onClick={(event) => event.stopPropagation()}>
-      <label className="commit-search"><Codicon name="search" /><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void loadHistory(true).catch(() => undefined); }} placeholder={t('Search commits…')} />{historySearch && <button aria-label={t('Clear')} onClick={() => { setHistorySearch(''); queueMicrotask(() => void loadHistory(true).catch(() => undefined)); }}><Codicon name="close" /></button>}</label>
+    {!compareTarget && <div className="history-filters" onClick={(event) => event.stopPropagation()}>
+      <CommitSearch value={historySearch} onChange={setHistorySearch} onSubmit={() => void loadHistory(true).catch(() => undefined)} onClear={() => queueMicrotask(() => void loadHistory(true).catch(() => undefined))} />
       <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover title={t('Author')} values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} query={authorQuery} onQuery={setAuthorQuery} />}</div>
       <div ref={menu === 'repos' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon={selectedRepo ? undefined : 'repo'} leading={selectedRepo ? <span className="filter-repo-dot" style={{ background: selectedRepo.color }} /> : undefined} label={selectedRepoLabel} active={!!filters.repoId} open={menu === 'repos'} onClick={() => setMenu(menu === 'repos' ? null : 'repos')} />{menu === 'repos' && <FilterPopover title={t('Repository')} values={repoOptions} selected={filters.repoId} onSelect={(repoId) => { updateFilters({ repoId }); setMenu(null); }} onClear={() => updateFilters({ repoId: '' })} />}</div>
       <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor branch-filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!filters.ref} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <FilterPopover title={t('Branch / Tags')} values={refOptions} selected={filters.ref} onSelect={(ref) => { updateFilters({ ref }); setMenu(null); }} onClear={() => updateFilters({ ref: '' })} query={refQuery} onQuery={setRefQuery} />}</div>
@@ -551,11 +533,17 @@ export function HistoryWorkspace() {
       <span className="history-filter-spacer" />
       {filterActive && <button className="history-clear-filters" title={t('Clear all filters')} onClick={clearFilters}><Codicon name="clear-all" /></button>}
       <MoreMenu open={moreOpen} onToggle={() => setMoreOpen((value) => !value)} onFetch={() => void fetchAndRefresh()} expanded={expandedRepoIds.size > 0 && expandedRepoIds.size === new Set(allHistory.map((commit) => commit.repoId)).size} onToggleExpanded={toggleRepoNames} />
-    </div>
+    </div>}
     <div className="history-columns">
-      <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} onRefFilter={(ref) => updateFilters({ ref })} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
+      <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} onRefFilter={(ref) => updateFilters({ ref })} onCompare={openBranchComparison} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
       {!branchSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeBranches} />}
-      <div className="log-pane"><CommitList history={visibleHistory} loading={historyLoading} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} hasRevisionFilter={hasBranchFilter} repoSortKeyById={repoSortKeyById} /></div>
+      <div className="log-pane">{compareTarget ? <BranchComparePanel
+        key={`${compareTarget.repoId}:${compareTarget.target}`}
+        repoId={compareTarget.repoId}
+        initialTarget={compareTarget.target}
+        close={closeBranchComparison}
+        renderCommits={(commits) => <CommitList history={commits} loading={false} expandedRepoIds={new Set()} onToggleRepoName={() => undefined} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} isFiltered repoSortKeyById={repoSortKeyById} hasMoreOverride={false} singleRepository />}
+      /> : <CommitList history={visibleHistory} loading={historyLoading} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} hasRevisionFilter={hasBranchFilter} repoSortKeyById={repoSortKeyById} />}</div>
       {!detailSidebarCollapsed && <div className="inner-resize-handle" onPointerDown={resizeDetail} />}
       <div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <button className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></button> : <CommitDetailPanel onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
     </div>

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WorktreePanel } from './WorktreePanel';
 import { useAppStore } from '../store/appStore';
@@ -50,7 +50,7 @@ const snapshot = {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ worktrees: {}, busy: false, snapshot: undefined, bridge: undefined });
+  useAppStore.setState({ worktrees: {}, worktreeDiff: undefined, busy: false, snapshot: undefined, bridge: undefined });
 });
 
 describe('WorktreePanel', () => {
@@ -108,5 +108,24 @@ describe('WorktreePanel', () => {
     );
 
     expect(screen.getByText('No worktrees')).toBeInTheDocument();
+  });
+
+  it('matches the original worktree context menu without adding a diff entry', () => {
+    const linked = { ...sampleWorktrees[0], path: '/tmp/managed-linked', branch: 'feature/worktree', main: false };
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'worktreeDiff') return { path: command.payload.path, baseRef: command.payload.base_ref, currentRef: 'feature/worktree', files: [{ path: 'src/file.ts', status: 'M', added: 2, removed: 1 }] };
+      if (command.type === 'worktrees') return [sampleWorktrees[0], linked];
+      return true;
+    });
+    useAppStore.setState({ bridge, snapshot, worktrees: { 'repo-1': [sampleWorktrees[0], linked] } });
+    render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
+    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    expect(screen.getByText('Open in New Window')).toBeInTheDocument();
+    expect(screen.getByText('Open in File Manager')).toBeInTheDocument();
+    expect(screen.getByText('Lock')).toBeInTheDocument();
+    expect(screen.getByText('Remove Worktree')).toBeInTheDocument();
+    expect(screen.getByText('Force Remove')).toBeInTheDocument();
+    expect(screen.queryByText('Open Worktree')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show Worktree Diff')).not.toBeInTheDocument();
   });
 });

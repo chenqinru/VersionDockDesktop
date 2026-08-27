@@ -10,6 +10,7 @@
 - `src/webview/mergeEditor`、`src/webview/conflicts`：冲突列表、ours/base/theirs 与结果编辑流程。
 - `src/webview/shared`：Codicon、Shiki、主题变量、路径/日期/分支的纯前端语义。
 - `src/host/types`、`src/host/git`、`src/host/svn`、`src/host/vcs`：数据结构、Git literal pathspec、Git/SVN 参数与解析规则、路径边界和错误语义。
+- `src/host/git/GitProfileService.ts`、`src/host/svn/SvnService.ts`：Identity 解析优先级、命令级 identity 注入、SVN stdin 凭据与认证错误语义；Desktop 版本使用独立 Rust 实现。
 - `l10n`、`media/codicons`、`media/icons`：翻译、Codicons 与应用标志。
 
 ## 已重写

@@ -4,6 +4,7 @@ import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
+import { confirmDialog } from './dialogService';
 import type { RepositoryStatus, ShelfEntry, ShelfFileEntry } from '../bindings/generated';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -119,12 +120,14 @@ function FileRow({
   entry,
   depth = 0,
   onUnshelveFile,
+  onOpenFileDiff,
 }: {
   file: ShelfFile;
   repoId: string;
   entry: ShelfEntry;
   depth?: number;
   onUnshelveFile: (repoId: string, shelveId: string, filePath: string) => void;
+  onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const { t } = useI18n();
@@ -147,11 +150,12 @@ function FileRow({
         gap: '3px',
         paddingLeft,
         paddingRight: '8px',
-        cursor: 'default',
+        cursor: onOpenFileDiff ? 'pointer' : 'default',
         background: hovered
           ? 'var(--vscode-list-hoverBackground, var(--versiondock-list-hover, rgba(255,255,255,0.06)))'
           : 'transparent',
       }}
+      onClick={() => onOpenFileDiff?.(repoId, entry.id, file.path)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       title={file.path}
@@ -243,6 +247,7 @@ function TreeDirNode({
   entry,
   expansion,
   onUnshelveFile,
+  onOpenFileDiff,
 }: {
   node: TreeDir;
   depth: number;
@@ -250,6 +255,7 @@ function TreeDirNode({
   entry: ShelfEntry;
   expansion: ExpansionCommand;
   onUnshelveFile: (repoId: string, shelveId: string, filePath: string) => void;
+  onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
@@ -341,6 +347,7 @@ function TreeDirNode({
               entry={entry}
               expansion={expansion}
               onUnshelveFile={onUnshelveFile}
+              onOpenFileDiff={onOpenFileDiff}
             />
           ) : (
             <FileRow
@@ -350,6 +357,7 @@ function TreeDirNode({
               entry={entry}
               depth={depth + 1}
               onUnshelveFile={onUnshelveFile}
+              onOpenFileDiff={onOpenFileDiff}
             />
           ),
         )}
@@ -366,6 +374,7 @@ function ShelfRow({
   expansion,
   onUnshelve,
   onUnshelveFile,
+  onOpenFileDiff,
   onDrop,
 }: {
   entry: ShelfEntry;
@@ -374,6 +383,7 @@ function ShelfRow({
   expansion: ExpansionCommand;
   onUnshelve: (repoId: string, shelveId: string) => void;
   onUnshelveFile: (repoId: string, shelveId: string, filePath: string) => void;
+  onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
   onDrop: (repoId: string, shelveId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -496,6 +506,7 @@ function ShelfRow({
                     entry={entry}
                     expansion={expansion}
                     onUnshelveFile={onUnshelveFile}
+                    onOpenFileDiff={onOpenFileDiff}
                   />
                 ) : (
                   <FileRow
@@ -505,6 +516,7 @@ function ShelfRow({
                     entry={entry}
                     depth={0}
                     onUnshelveFile={onUnshelveFile}
+                    onOpenFileDiff={onOpenFileDiff}
                   />
                 ),
               )
@@ -515,6 +527,7 @@ function ShelfRow({
                   repoId={repoId}
                   entry={entry}
                   onUnshelveFile={onUnshelveFile}
+                  onOpenFileDiff={onOpenFileDiff}
                 />
               ))}
         </div>
@@ -653,11 +666,13 @@ export function ShelfPanel({
   repos,
   viewMode = 'tree',
   expansion = { sequence: 0, expanded: false },
+  onOpenFileDiff,
 }: {
   repos: RepositoryStatus[];
   selectedPaths?: Map<string, string[]>;
   viewMode?: 'tree' | 'list';
   expansion?: ExpansionCommand;
+  onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
 }) {
   const shelves = useAppStore((state) => state.shelves);
   const loadShelves = useAppStore((state) => state.loadShelves);
@@ -689,7 +704,7 @@ export function ShelfPanel({
   const handleDrop = async (repoId: string, shelveId: string) => {
     const entry = (shelves[repoId] ?? []).find((s) => s.id === shelveId);
     const title = entry?.name ?? shelveId;
-    if (confirm(t('Drop shelf {0}?', title))) {
+    if (await confirmDialog({ title: t('Drop shelf {0}?', title), message: title, danger: true })) {
       await shelfOperation(repoId, { type: 'drop', shelf_id: shelveId });
     }
   };
@@ -737,6 +752,7 @@ export function ShelfPanel({
                     expansion={expansion}
                     onUnshelve={handleUnshelve}
                     onUnshelveFile={handleUnshelveFile}
+                    onOpenFileDiff={onOpenFileDiff}
                     onDrop={handleDrop}
                   />
                 ))

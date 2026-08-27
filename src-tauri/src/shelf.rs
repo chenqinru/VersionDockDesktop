@@ -5,7 +5,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli,
-    models::{DesktopError, RepositoryMeta, ShelfEntry, ShelfFileEntry, ShelfOperation, VcsKind},
+    models::{
+        DesktopError, DiffDocument, RepositoryMeta, ShelfEntry, ShelfFileEntry, ShelfOperation,
+        VcsKind,
+    },
     state::safe_relative,
 };
 
@@ -107,6 +110,62 @@ pub async fn operate(
         }
         ShelfOperation::Drop { shelf_id } => drop_shelf(config_dir, repo, &shelf_id).await,
     }
+}
+
+pub async fn file_diff(
+    config_dir: &Path,
+    repo: &RepositoryMeta,
+    shelf_id: &str,
+    relative_path: &str,
+) -> Result<DiffDocument, DesktopError> {
+    ensure_git(repo)?;
+    validate_id(shelf_id)?;
+    safe_relative(Path::new(&repo.root_path), relative_path, false)?;
+    let index = read_index(config_dir, repo).await?;
+    let entry = index
+        .shelves
+        .iter()
+        .find(|entry| entry.id == shelf_id)
+        .ok_or_else(|| DesktopError::new("SHELF_NOT_FOUND", "Shelf not found", true))?;
+    if !entry.files.iter().any(|item| match item {
+        ShelfFileItem::Detailed(file) => file.path == relative_path,
+        ShelfFileItem::Simple(path) => path == relative_path,
+    }) {
+        return Err(DesktopError::new(
+            "SHELF_FILE_NOT_FOUND",
+            "Shelf file not found",
+            true,
+        ));
+    }
+    let bytes = tokio::fs::read(get_patch_path(&shelf_dir(config_dir, repo), entry))
+        .await
+        .map_err(storage_error)?;
+    let patch = String::from_utf8_lossy(&bytes);
+    let header_a = format!("diff --git a/{relative_path} b/{relative_path}");
+    let header_b = format!("diff --git \"a/{relative_path}\" \"b/{relative_path}\"");
+    let start = patch
+        .find(&header_a)
+        .or_else(|| patch.find(&header_b))
+        .ok_or_else(|| {
+            DesktopError::new("SHELF_DIFF_NOT_FOUND", "Shelf diff section not found", true)
+        })?;
+    let remainder = &patch[start..];
+    let end = remainder[1..]
+        .find("\ndiff --git ")
+        .map(|index| index + 1)
+        .unwrap_or(remainder.len());
+    let content = remainder[..end].to_string();
+    let line_count = content.lines().count();
+    let truncated = content.len() > 5 * 1024 * 1024 || line_count > 50_000;
+    Ok(DiffDocument {
+        path: relative_path.into(),
+        content: if truncated { String::new() } else { content },
+        language: crate::vcs::language_for(relative_path),
+        binary: remainder[..end].contains("GIT binary patch")
+            || remainder[..end].contains("Binary files"),
+        truncated,
+        line_count: line_count.min(u32::MAX as usize) as u32,
+    })
 }
 
 async fn create(

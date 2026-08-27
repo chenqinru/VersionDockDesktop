@@ -40,6 +40,7 @@ export function branchRevisionRef(branch: { name: string; fullName?: string; isR
     if (branch.fullName?.startsWith('refs/')) return branch.fullName;
     return branch.isRemote ? `refs/remotes/${branch.name}` : `refs/heads/${branch.name}`;
   }
+  if (branch.name === 'SVN') return 'HEAD';
   if (branch.name === 'trunk' || branch.name.startsWith('branches/') || branch.name.startsWith('tags/')) {
     return branch.name;
   }

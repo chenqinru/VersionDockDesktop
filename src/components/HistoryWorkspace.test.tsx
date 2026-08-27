@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryWorkspace } from './HistoryWorkspace';
 import { formatRefLabel } from '../history/refs';
+import { commitKey } from '../history/commitDetails';
 import { buildDetailTree, buildHistoryRefOptions, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches } from './HistoryWorkspace.helpers';
 import { BranchSidebar } from './BranchSidebar';
 import { useAppStore } from '../store/appStore';
@@ -22,7 +23,7 @@ const bootstrap = (compare: boolean, remoteManagement: boolean): BootstrapData =
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparison: undefined });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined });
 });
 
 describe('HistoryWorkspace capabilities', () => {
@@ -43,9 +44,91 @@ describe('HistoryWorkspace capabilities', () => {
     });
     render(<HistoryWorkspace />);
     fireEvent.click(screen.getByRole('button', { name: /Author/ }));
-    expect(screen.getByText('Ada')).toBeInTheDocument();
+    expect(screen.getAllByText('Ada').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
     expect(screen.getAllByText('Repo').length).toBeGreaterThan(0);
+  });
+
+  it('provides commit, branch, tag, and repository context menus', () => {
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo',
+      history: [{ repoId: 'repo', hash: 'abcdef1234567', shortHash: 'abcdef1', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: context menu', refs: ['HEAD -> main'], unpushed: true }],
+      branchesByRepo: { repo: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 1, behind: 0 }] },
+      tagsByRepo: { repo: [{ name: 'v1', hash: 'abcdef1234567', date: '' }] },
+    });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feat: context menu').closest('.commit-row')!);
+    expect(screen.getByText('Copy Revision Number')).toBeInTheDocument();
+    expect(screen.getByText('New Branch...')).toBeInTheDocument();
+    expect(screen.getByText('Cherry-Pick')).toBeInTheDocument();
+    fireEvent.click(document.body);
+  });
+
+  it('uses the row action to open commit details rather than previewing the first file', async () => {
+    const commit = { repoId: 'repo', hash: 'abcdef1234567', shortHash: 'abcdef1', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: inspect detail', refs: ['HEAD -> main'] };
+    const detail = { commit, fullMessage: `${commit.message}\n\nFull commit body`, branches: { local: ['main'], remote: [], tags: [] }, files: [{ path: 'src/detail.ts', status: 'M', added: 2, removed: 1 }] };
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit],
+      selectedCommit: detail,
+      selectedCommits: [commit],
+      selectedCommitDetails: { [commitKey('repo', 'abcdef1234567')]: detail },
+      mode: 'history',
+    });
+    render(<HistoryWorkspace />);
+    const row = screen.getAllByText('feat: inspect detail').find((element) => element.classList.contains('commit-subject-text'))!.closest('.commit-row')!;
+    fireEvent.mouseEnter(row);
+    const action = row.querySelector<HTMLButtonElement>('button[title="Open Commit Detail"]');
+    expect(action).not.toBeNull();
+    expect(row.querySelector('button[title="Open preview"]')).toBeNull();
+    fireEvent.click(action!);
+    await waitFor(() => expect(useAppStore.getState().mode).toBe('commit-detail'));
+    expect(useAppStore.getState().diff).toBeUndefined();
+  });
+
+  it('opens branch comparison in the main content area instead of nesting a full workspace in the sidebar', async () => {
+    const selectCommit = vi.fn().mockResolvedValue(undefined);
+    const targetCommit = { repoId: 'repo', hash: 'target1234567', shortHash: 'target1', parents: ['base'], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-02T00:00:00Z', committerDate: '2026-01-02T00:00:00Z', message: 'feat: target-only change', refs: ['feature/ui'] };
+    const baseCommit = { ...targetCommit, hash: 'base123456789', shortHash: 'base123', message: 'fix: base-only change', refs: ['main'] };
+    const compareBranches = vi.fn().mockImplementation(async () => {
+      useAppStore.setState({ comparison: { base: 'main', target: 'feature/ui', baseCommits: [baseCommit], targetCommits: [targetCommit], files: [] } });
+    });
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo',
+      branchesByRepo: { repo: [
+        { name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'feature/ui', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+      ] },
+      tagsByRepo: { repo: [] },
+      compareBranches,
+      selectCommit,
+    });
+
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feature/ui').closest('.branch-ref-row')!);
+    fireEvent.click(screen.getByText('Compare with Current'));
+
+    expect(document.querySelector('.branch-sidebar .compare-workspace')).not.toBeInTheDocument();
+    expect(document.querySelector('.log-pane > .compare-workspace')).toBeInTheDocument();
+    expect(document.querySelector('.history-columns > .detail-slot')).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelectorAll('.compare-pane')).toHaveLength(2));
+    expect(document.querySelectorAll('.compare-pane-filters.history-filters')).toHaveLength(2);
+    expect(document.querySelectorAll('.compare-pane-filters .commit-search')).toHaveLength(2);
+    expect(document.querySelectorAll('.compare-pane-filters .filter-button')).toHaveLength(4);
+    expect(document.querySelector('.compare-pane-filters select')).not.toBeInTheDocument();
+    expect(document.querySelector('.compare-pane-filters input[type="date"]')).not.toBeInTheDocument();
+    const firstFilterBar = document.querySelector('.compare-pane-filters')!;
+    const filterButtons = firstFilterBar.querySelectorAll<HTMLButtonElement>('.filter-button');
+    fireEvent.click(filterButtons[0]);
+    expect(firstFilterBar.querySelector('.popover-search')).toBeInTheDocument();
+    fireEvent.click(filterButtons[0]);
+    fireEvent.click(filterButtons[1]);
+    expect(firstFilterBar.querySelector('.calendar-panes')).toBeInTheDocument();
+    expect(screen.getByText('feat: target-only change')).toBeInTheDocument();
+    expect(screen.getByText('fix: base-only change')).toBeInTheDocument();
+    expect(screen.queryByText('Changed files')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('feat: target-only change'));
+    expect(selectCommit).toHaveBeenCalledWith(expect.objectContaining({ hash: targetCommit.hash }), 'single', [expect.objectContaining({ hash: targetCommit.hash })]);
+    expect(compareBranches).toHaveBeenCalledWith('repo', 'main', 'feature/ui');
   });
 
   it('shows non-blocking loading feedback and formats merged local/remote refs', () => {
@@ -128,12 +211,35 @@ describe('HistoryWorkspace data helpers', () => {
     useAppStore.setState({ bootstrap: bootstrap(false, false), snapshot, selectedRepoId: 'repo', branchesByRepo: {
       repo: [{ name: 'feature/ui', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
     }, tagsByRepo: { repo: [] } });
-    render(<BranchSidebar repoFilter={new Set()} refFilter={new Set()} onRepoFilter={vi.fn()} onRefFilter={onRefFilter} onCollapse={vi.fn()} />);
+    render(<BranchSidebar repoFilter={new Set()} refFilter={new Set()} onRepoFilter={vi.fn()} onRefFilter={onRefFilter} onCompare={vi.fn()} onCollapse={vi.fn()} />);
     const row = screen.getByText('feature/ui');
     fireEvent.click(row);
     expect(onRefFilter).not.toHaveBeenCalled();
     fireEvent.doubleClick(row);
-    expect(onRefFilter).toHaveBeenCalledWith('feature/ui');
+    expect(onRefFilter).toHaveBeenCalledWith('refs/heads/feature/ui');
+  });
+
+  it('opens a remote branch working-tree comparison with its unambiguous full ref', () => {
+    const loadBranchWorkingDiff = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({
+      bootstrap: bootstrap(false, false),
+      snapshot,
+      selectedRepoId: 'repo',
+      branchesByRepo: {
+        repo: [
+          { name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+          { name: 'origin/feature/ui', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
+        ],
+      },
+      tagsByRepo: { repo: [] },
+      loadBranchWorkingDiff,
+    });
+    render(<BranchSidebar repoFilter={new Set()} refFilter={new Set()} onRepoFilter={vi.fn()} onRefFilter={vi.fn()} onCompare={vi.fn()} onCollapse={vi.fn()} />);
+
+    fireEvent.contextMenu(screen.getByText('feature/ui').closest('.branch-ref-row')!);
+    fireEvent.click(screen.getByText('Show Diff with Working Tree'));
+
+    expect(loadBranchWorkingDiff).toHaveBeenCalledWith('repo', 'refs/remotes/origin/feature/ui');
   });
 
   it('keeps repository and branch filters single-select and closes after selection', () => {

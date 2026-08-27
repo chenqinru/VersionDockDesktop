@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ShelfPanel } from './ShelfPanel';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, ShelfEntry } from '../bindings/generated';
@@ -125,5 +125,17 @@ describe('ShelfPanel', () => {
       type: 'apply',
       shelf_id: 'shelf-1',
     });
+  });
+
+  it('opens a real shelf file diff from a file click without inventing a file context menu', () => {
+    const onOpenFileDiff = vi.fn();
+    const bridge = new MockBridge(() => []);
+    useAppStore.setState({ bridge, snapshot, shelves: { repo: sampleShelves } });
+    render(<BridgeContext.Provider value={bridge}><ShelfPanel repos={[gitRepo]} viewMode="list" expansion={{ sequence: 1, expanded: true }} onOpenFileDiff={onOpenFileDiff} /></BridgeContext.Provider>);
+    const row = screen.getByText('ShelfPanel.tsx').closest('div[title="src/components/ShelfPanel.tsx"]')!;
+    fireEvent.click(row);
+    expect(onOpenFileDiff).toHaveBeenCalledWith('repo', 'shelf-1', 'src/components/ShelfPanel.tsx');
+    fireEvent.contextMenu(row);
+    expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
   });
 });

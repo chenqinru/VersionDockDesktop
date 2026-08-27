@@ -8,6 +8,8 @@ const args = ['tauri', 'dev'];
 
 if (existsSync(platformConfig)) args.push('--config', platformConfig);
 args.push('--config', 'src-tauri/tauri.dev.conf.json');
+const appArgs = process.argv.slice(2);
+if (appArgs.length > 0) args.push('--', '--', ...appArgs);
 
 const child = spawn(npmCommand, args, { stdio: 'inherit' });
 child.on('error', (error) => { console.error(error); process.exitCode = 1; });

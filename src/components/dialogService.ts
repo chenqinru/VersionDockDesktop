@@ -1,0 +1,34 @@
+export type DialogRequest = {
+  kind: 'confirm' | 'prompt' | 'choice';
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  inputLabel?: string;
+  initialValue?: string;
+  choices?: Array<{ id: string; label: string; description?: string; icon?: string; danger?: boolean }>;
+  resolve: (value: boolean | string | null) => void;
+};
+
+let current: DialogRequest | undefined;
+export const dialogListeners = new Set<(request: DialogRequest | undefined) => void>();
+
+export function currentDialog() { return current; }
+
+export function publishDialog(request: DialogRequest | undefined) {
+  current = request;
+  dialogListeners.forEach((listener) => listener(request));
+}
+
+export function confirmDialog(options: Omit<DialogRequest, 'kind' | 'resolve' | 'inputLabel' | 'initialValue' | 'choices'>): Promise<boolean> {
+  return new Promise((resolve) => publishDialog({ ...options, kind: 'confirm', resolve: (value) => resolve(value === true) }));
+}
+
+export function promptDialog(options: Omit<DialogRequest, 'kind' | 'resolve'>): Promise<string | null> {
+  return new Promise((resolve) => publishDialog({ ...options, kind: 'prompt', resolve: (value) => resolve(typeof value === 'string' ? value : null) }));
+}
+
+export function choiceDialog(options: Omit<DialogRequest, 'kind' | 'resolve' | 'inputLabel' | 'initialValue' | 'confirmLabel'> & { choices: NonNullable<DialogRequest['choices']> }): Promise<string | null> {
+  return new Promise((resolve) => publishDialog({ ...options, kind: 'choice', resolve: (value) => resolve(typeof value === 'string' ? value : null) }));
+}

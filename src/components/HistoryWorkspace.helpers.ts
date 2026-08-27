@@ -100,10 +100,10 @@ function mergeSidebarBranches(
       if (branch.remote !== remote) continue;
       const name = branchBaseName(branch);
       const remoteName = remote ? remoteNameFor(branch) : undefined;
-      const ref = remote ? branch.name : name;
+      const ref = branchRevisionRef({ name: branch.name, isRemote: branch.remote }, repo.meta.kind);
       const searchable = `${branch.name} ${name} ${remoteName ?? ''}`.toLowerCase();
       if (needle && !searchable.includes(needle)) continue;
-      const key = remote ? `remote:${remoteName}:${name}` : `local:${name}`;
+      const key = remote ? `remote:${repo.meta.kind}:${remoteName}:${name}` : `local:${repo.meta.kind}:${name}`;
       const existing = values.get(key);
       if (existing) {
         if (!existing.repoIds.includes(repo.meta.id)) existing.repoIds.push(repo.meta.id);

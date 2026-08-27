@@ -5,6 +5,7 @@ import { useI18n } from '../i18n';
 import { branchColor, readableAccentColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, SubtreeEntry as BoundSubtreeEntry } from '../bindings/generated';
+import { confirmDialog, promptDialog } from './dialogService';
 
 export interface NormalizedSubtreeEntry {
   id: string;
@@ -413,6 +414,8 @@ export function SubtreePanel({
   const { t } = useI18n();
   const storeSubtrees = useAppStore((state) => state.subtrees);
   const loadSubtrees = useAppStore((state) => state.loadSubtrees);
+  const subtreeOperation = useAppStore((state) => state.subtreeOperation);
+  const systemOpen = useAppStore((state) => state.systemOpen);
 
   useEffect(() => {
     if (!explicitEntries && repos.length > 0) {
@@ -454,6 +457,131 @@ export function SubtreePanel({
     }));
   }, [resolvedEntries, resolvedRepoMetas]);
 
+  const entryById = (entryId: string) => resolvedEntries.find((entry) => entry.id === entryId);
+  const askRegistration = async (repoId: string, existing?: NormalizedSubtreeEntry, registerOnly = false) => {
+    const prefix = await promptDialog({
+      title: registerOnly ? t('Register Existing Directory') : existing ? t('Edit Registry') : t('Add Subtree'),
+      message: t(registerOnly ? 'The directory must already exist inside this repository.' : 'Use a repository-relative prefix without parent traversal.'),
+      inputLabel: t('Prefix'),
+      initialValue: existing?.prefix ?? '',
+    });
+    if (!prefix) return;
+    const remote = await promptDialog({
+      title: t('Subtree Repository'),
+      message: t('Enter an existing Git remote name or a supported repository URL.'),
+      inputLabel: t('Remote'),
+      initialValue: existing?.repository ?? 'origin',
+    });
+    if (!remote) return;
+    const branch = await promptDialog({
+      title: t('Subtree Branch'),
+      message: t('Branch or tag used for pull and push operations.'),
+      inputLabel: t('Branch'),
+      initialValue: existing?.ref ?? 'main',
+    });
+    if (!branch) return;
+    const squash = await confirmDialog({
+      title: t('Subtree History Mode'),
+      message: t('Use squash mode? Choose Full History to preserve the complete imported history.'),
+      confirmLabel: t('Squash'),
+      cancelLabel: t('Full History'),
+    });
+    if (existing) {
+      await subtreeOperation(repoId, { type: 'edit', subtree_id: existing.id, prefix, remote, branch, squash });
+    } else if (registerOnly) {
+      await subtreeOperation(repoId, { type: 'register', prefix, remote, branch, squash });
+    } else {
+      await subtreeOperation(repoId, { type: 'add', prefix, remote, branch, squash });
+    }
+  };
+
+  const defaultAdd = (repoId?: string) => {
+    const id = repoId ?? resolvedRepoMetas[0]?.id;
+    if (id) void askRegistration(id);
+  };
+  const defaultRegister = (repoId?: string) => {
+    const id = repoId ?? resolvedRepoMetas[0]?.id;
+    if (id) void askRegistration(id, undefined, true);
+  };
+  const defaultPull = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (entry) void subtreeOperation(entry.repoId, { type: 'pull', subtree_id: entry.id });
+  };
+  const defaultPush = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (!entry) return;
+    void confirmDialog({
+      title: t('Push Subtree'),
+      message: `${entry.prefix}\n→ ${entry.repository} ${entry.ref}\n\n${t('This pushes subtree history only, not the parent repository.')}`,
+      danger: true,
+    }).then((confirmed) => {
+      if (confirmed) return subtreeOperation(entry.repoId, { type: 'push', subtree_id: entry.id });
+    });
+  };
+  const defaultSplit = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (!entry) return;
+    const defaultBranch = `subtree/${entry.name.replace(/\s+/g, '-').toLowerCase()}`;
+    void promptDialog({
+      title: t('Split Subtree'),
+      message: t('Create a local branch from the subtree history.'),
+      inputLabel: t('Branch'),
+      initialValue: entry.lastSplitBranch ?? defaultBranch,
+    }).then((branch) => {
+      if (branch) return subtreeOperation(entry.repoId, { type: 'split', subtree_id: entry.id, branch });
+    });
+  };
+  const defaultMerge = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (!entry) return;
+    void promptDialog({
+      title: t('Merge Subtree'),
+      message: t('Enter the commit, branch, or tag to merge into the subtree prefix.'),
+      inputLabel: t('Revision'),
+      initialValue: entry.ref,
+    }).then(async (revision) => {
+      if (!revision) return;
+      const message = await promptDialog({
+        title: t('Subtree Merge Message'),
+        message: `${revision}\n→ ${entry.prefix}`,
+        inputLabel: t('Commit message'),
+        initialValue: t('Merge subtree {0}', entry.name),
+      });
+      if (!message) return;
+      await subtreeOperation(entry.repoId, { type: 'merge', subtree_id: entry.id, revision, squash: entry.defaultSquash, message });
+    });
+  };
+  const defaultRemove = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (!entry) return;
+    void confirmDialog({
+      title: t('Remove Subtree Files'),
+      message: `${entry.prefix}\n\n${t('All tracked files under this prefix will be staged for deletion. The registry entry is retained.')}`,
+      danger: true,
+    }).then((confirmed) => {
+      if (confirmed) return subtreeOperation(entry.repoId, { type: 'removeFiles', subtree_id: entry.id });
+    });
+  };
+  const defaultEdit = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (entry) void askRegistration(entry.repoId, entry);
+  };
+  const defaultDeleteRegistry = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (!entry) return;
+    void confirmDialog({
+      title: t('Delete Registry'),
+      message: `${entry.prefix}\n\n${t('Only VersionDock registration metadata will be deleted. Subtree files and Git history remain unchanged.')}`,
+      danger: true,
+    }).then((confirmed) => {
+      if (confirmed) return subtreeOperation(entry.repoId, { type: 'deleteRegistry', subtree_id: entry.id });
+    });
+  };
+  const defaultReveal = (entryId: string) => {
+    const entry = entryById(entryId);
+    if (entry) void systemOpen(entry.repoId, entry.prefix, true);
+  };
+
   if (externalLoading && resolvedEntries.length === 0) return <div style={css.empty}>{t('Loading...')}</div>;
   if (externalError) {
     return (
@@ -480,16 +608,16 @@ export function SubtreePanel({
           activeOps={activeOps}
           statuses={statuses}
           multiRepo={multiRepo}
-          onAdd={onAdd}
-          onRegister={onRegister}
-          onPull={onPull}
-          onPush={onPush}
-          onSplit={onSplit}
-          onMerge={onMerge}
-          onRemove={onRemove}
-          onEdit={onEdit}
-          onDeleteRegistry={onDeleteRegistry}
-          onReveal={onReveal}
+          onAdd={onAdd ?? defaultAdd}
+          onRegister={onRegister ?? defaultRegister}
+          onPull={onPull ?? defaultPull}
+          onPush={onPush ?? defaultPush}
+          onSplit={onSplit ?? defaultSplit}
+          onMerge={onMerge ?? defaultMerge}
+          onRemove={onRemove ?? defaultRemove}
+          onEdit={onEdit ?? defaultEdit}
+          onDeleteRegistry={onDeleteRegistry ?? defaultDeleteRegistry}
+          onReveal={onReveal ?? defaultReveal}
         />
       ))}
     </div>

@@ -5,6 +5,7 @@ import { CommitPanel } from './components/CommitPanel';
 import { HistoryWorkspace } from './components/HistoryWorkspace';
 import { DiffWorkspace } from './components/DiffWorkspace';
 import { CommitChangesWorkspace } from './components/CommitChangesWorkspace';
+import { CommitDetailWorkspace } from './components/CommitDetailWorkspace';
 import { MergeWorkspace } from './components/MergeWorkspace';
 import { Codicon } from './components/Codicon';
 import { useAppStore } from './store/appStore';
@@ -12,6 +13,8 @@ import { createTranslator, I18nContext, resolveLanguage } from './i18n';
 import { applyTheme, resolveTheme } from './theme';
 import { useResizable } from './hooks/useResizable';
 import { useBridge } from './platform/context';
+import { DialogHost } from './components/DialogHost';
+import { FileHistoryPanel } from './components/FileHistoryPanel';
 
 const UI_FONT_SIZE = {
   minimum: { pixels: '11px', scale: '0.8461538462' },
@@ -26,22 +29,27 @@ export function App() {
   const bootstrap = useAppStore((state) => state.bootstrap);
   const snapshot = useAppStore((state) => state.snapshot);
   const mode = useAppStore((state) => state.mode);
+  const comparisonTarget = useAppStore((state) => state.comparisonTarget);
   const ready = useAppStore((state) => state.ready);
   const busy = useAppStore((state) => state.busy);
   const error = useAppStore((state) => state.error);
   const clearError = useAppStore((state) => state.clearError);
+  const errorDetails = useAppStore((state) => state.errorDetails);
+  const notice = useAppStore((state) => state.notice);
+  const clearNotice = useAppStore((state) => state.clearNotice);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const setPanelSize = useAppStore((state) => state.setPanelSize);
   const [pluginMessages, setPluginMessages] = useState<Record<string, string>>({});
   const [dropActive, setDropActive] = useState(false);
-  const themePreference = bootstrap?.state.theme ?? 'system';
-  const languagePreference = bootstrap?.state.language ?? 'system';
-  const uiFontSize = bootstrap?.state.uiFontSize ?? 'standard';
+  const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
+  const languagePreference = bootstrap?.state.settings?.language ?? bootstrap?.state.language ?? 'system';
+  const uiFontSize = bootstrap?.state.settings?.uiFontSize ?? bootstrap?.state.uiFontSize ?? 'standard';
   const language = resolveLanguage(languagePreference);
   const t = useMemo(() => createTranslator(language, pluginMessages), [language, pluginMessages]);
-  const commitWidth = bootstrap?.state.panelSizes.commit ?? 360;
+  const commitWidth = bootstrap?.state.layout?.panelSizes.commit ?? bootstrap?.state.panelSizes?.commit ?? 360;
   const missingTools = snapshot && !snapshot.tools.git && !snapshot.tools.svn;
   const noRepositories = snapshot && !snapshot.repositories.length;
+  const comparisonDiffOpen = mode === 'diff' && Boolean(comparisonTarget);
   const resizeCommit = useResizable(commitWidth, 280, 620, (value) => setPanelSize('commit', value));
 
   useEffect(() => {
@@ -84,12 +92,15 @@ export function App() {
         <main className="main-workspace">
           <div style={{ width: commitWidth }} className="commit-slot"><CommitPanel /></div>
           <div className="resize-handle" onPointerDown={resizeCommit} />
-          <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span></div> : mode === 'history' ? <HistoryWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
+          <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span></div> : mode === 'history' || comparisonDiffOpen ? <><HistoryWorkspace />{comparisonDiffOpen && <div className="comparison-diff-overlay"><DiffWorkspace /></div>}</> : mode === 'commit-detail' ? <CommitDetailWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
         </main>
       )}
       {busy && <div className="busy-line" />}
-      {error && <div className="toast error"><Codicon name="error" /><span><strong>{t('Operation failed')}</strong>{error}</span><button onClick={clearError}><Codicon name="close" /></button></div>}
+      {error && <div className="toast error"><Codicon name="error" /><span><strong>{t('Operation failed')}</strong>{error}{errorDetails && <details><summary>Technical details</summary><pre>{errorDetails}</pre></details>}</span><button onClick={clearError}><Codicon name="close" /></button></div>}
+      {notice && <div className="toast"><Codicon name="bell" /><span><strong>VersionDock Desktop</strong>{notice}</span><button onClick={clearNotice}><Codicon name="close" /></button></div>}
       {dropActive && <div className="drop-overlay"><Codicon name="folder-opened" /><strong>{t('Drop folders anywhere in this window')}</strong></div>}
+      <DialogHost />
+      <FileHistoryPanel />
     </div>
   </I18nContext.Provider>;
 }

@@ -27,7 +27,7 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, remotes: {}, mode: 'history', busy: false, error: undefined }));
+afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', busy: false, error: undefined }));
 
 describe('appStore async lifecycle', () => {
   it('supports single, toggle, and range commit selection with aggregated revision diffs', async () => {
@@ -60,6 +60,31 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().changesDiff?.content).toBe('diff');
     await useAppStore.getState().selectCommit(commits[2], 'toggle', commits);
     expect(useAppStore.getState().selectedCommits.map((commit) => commit.hash)).toEqual([commits[0].hash, commits[1].hash, commits[2].hash]);
+  });
+
+  it('preserves branch comparison while opening and closing a file diff', async () => {
+    const bridge = new MockBridge((command) => command.type === 'fileDiff'
+      ? { path: command.payload.relative_path, content: 'diff --git a/src/file.ts b/src/file.ts', language: 'typescript', binary: false, truncated: false, lineCount: 1 }
+      : []);
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'repo' });
+    useAppStore.getState().openBranchComparison('repo', 'feature/ui');
+    useAppStore.setState({ comparison: { base: 'main', target: 'feature/ui', baseCommits: [], targetCommits: [], files: [] } });
+
+    await useAppStore.getState().openDiff('repo', 'src/file.ts', false, 'abcdef');
+
+    expect(useAppStore.getState()).toMatchObject({
+      mode: 'diff',
+      comparisonTarget: { repoId: 'repo', target: 'feature/ui' },
+      comparison: { base: 'main', target: 'feature/ui' },
+    });
+    useAppStore.getState().backToHistory();
+    expect(useAppStore.getState()).toMatchObject({
+      mode: 'history',
+      comparisonTarget: { repoId: 'repo', target: 'feature/ui' },
+      comparison: { base: 'main', target: 'feature/ui' },
+    });
   });
 
   it('does not let an older workspace response replace the newest workspace', async () => {
@@ -112,6 +137,24 @@ describe('appStore async lifecycle', () => {
     response.resolve(snapshot('workspace', 2));
     await refreshing;
     expect(useAppStore.getState()).toMatchObject({ mode: 'diff', busy: false });
+  });
+
+  it('loads branch-to-working-tree differences without changing the commit-panel tab', async () => {
+    const commands: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      commands.push(command);
+      if (command.type === 'branchWorkingDiff') return { path: '/tmp/repo', baseRef: command.payload.base_ref, currentRef: 'main', files: [{ path: 'src/file.ts', status: 'M', added: 1, removed: 1 }] };
+      return [];
+    });
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, state: { ...bootstrap.state, activeTab: 'stash' } }, snapshot: workspace, selectedRepoId: 'repo' });
+
+    await useAppStore.getState().loadBranchWorkingDiff('repo', 'refs/remotes/origin/feature');
+
+    expect(commands[0]).toEqual({ type: 'branchWorkingDiff', payload: { workspace_id: 'workspace', repo_id: 'repo', base_ref: 'refs/remotes/origin/feature' } });
+    expect(useAppStore.getState().bootstrap?.state.activeTab).toBe('stash');
+    expect(useAppStore.getState().worktreeDiff).toMatchObject({ repoId: 'repo', source: 'repository', currentRef: 'main' });
   });
 
   it('aggregates history from every repository without losing repository scope', async () => {

@@ -10,8 +10,8 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     cli,
     models::{
-        DesktopError, FileChange, RepositoryMeta, RepositoryStatus, ToolAvailability, VcsKind,
-        WorkspaceDescriptor, WorkspaceSnapshot,
+        DesktopError, DesktopSettings, FileChange, RepositoryCapabilities, RepositoryMeta,
+        RepositoryStatus, ToolAvailability, VcsKind, WorkspaceDescriptor, WorkspaceSnapshot,
     },
     state::{canonical_directory, workspace_id},
 };
@@ -98,10 +98,11 @@ pub fn descriptor(paths: Vec<String>) -> Result<WorkspaceDescriptor, DesktopErro
 pub async fn snapshot(
     workspace: WorkspaceDescriptor,
     generation: u32,
+    settings: &DesktopSettings,
     token: &CancellationToken,
 ) -> Result<WorkspaceSnapshot, DesktopError> {
     let tools = tool_availability(token).await;
-    let metas = scan(&workspace)?;
+    let metas = scan(&workspace, settings)?;
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
     let mut tasks = tokio::task::JoinSet::new();
     for (index, meta) in metas.into_iter().enumerate() {
@@ -113,10 +114,14 @@ pub async fn snapshot(
                 .acquire_owned()
                 .await
                 .map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true))?;
+            let tool_available = match meta.kind {
+                VcsKind::Git => tools.git,
+                VcsKind::Svn => tools.svn,
+            };
             let status = match meta.kind {
                 VcsKind::Git if tools.git => git_status(meta, &token).await,
                 VcsKind::Svn if tools.svn => svn_status(meta, &token).await,
-                _ => Ok(empty_status(meta)),
+                _ => Ok(empty_status(meta, tool_available)),
             }?;
             Ok::<_, DesktopError>((index, status))
         });
@@ -139,12 +144,23 @@ pub async fn snapshot(
     })
 }
 
-pub fn scan(workspace: &WorkspaceDescriptor) -> Result<Vec<RepositoryMeta>, DesktopError> {
+pub fn scan(
+    workspace: &WorkspaceDescriptor,
+    settings: &DesktopSettings,
+) -> Result<Vec<RepositoryMeta>, DesktopError> {
     let mut discovered = Vec::<(PathBuf, VcsKind)>::new();
     let mut seen = HashSet::new();
     for root in &workspace.paths {
         let root = canonical_directory(root)?;
-        walk(&root, &root, 0, 4, &mut discovered, &mut seen)?;
+        walk(
+            &root,
+            &root,
+            0,
+            settings.repository_scan_depth as usize,
+            &settings.ignored_folders,
+            &mut discovered,
+            &mut seen,
+        )?;
     }
     discovered.sort_by(|left, right| {
         left.0
@@ -186,7 +202,11 @@ pub fn scan(workspace: &WorkspaceDescriptor) -> Result<Vec<RepositoryMeta>, Desk
                     .unwrap_or("repository")
                     .to_string(),
                 root_path: path.to_string_lossy().into_owned(),
-                color: COLORS[index % COLORS.len()].into(),
+                color: settings
+                    .project_colors
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| COLORS[index % COLORS.len()].into()),
                 kind: *kind,
                 parent_repo_id: parent.map(|(_, _, candidate_id)| candidate_id.clone()),
                 depth,
@@ -201,11 +221,12 @@ fn walk(
     root: &Path,
     current: &Path,
     depth: usize,
-    svn_depth: usize,
+    max_depth: usize,
+    ignored_folders: &[String],
     result: &mut Vec<(PathBuf, VcsKind)>,
     seen: &mut HashSet<String>,
 ) -> Result<(), DesktopError> {
-    if depth <= 1 && current.join(".git").exists() {
+    if depth <= max_depth && current.join(".git").exists() {
         let key = format!("{}::git", current.display());
         if seen.insert(key) {
             result.push((current.to_path_buf(), VcsKind::Git));
@@ -219,7 +240,7 @@ fn walk(
         }
         return Ok(());
     }
-    if depth >= svn_depth {
+    if depth >= max_depth {
         return Ok(());
     }
     for entry in std::fs::read_dir(current)
@@ -237,7 +258,16 @@ fn walk(
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        if SKIP.contains(&name.as_str()) {
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .ok()
+            .map(|path| path.to_string_lossy().replace('\\', "/"));
+        if SKIP.contains(&name.as_str())
+            || ignored_folders
+                .iter()
+                .any(|ignored| ignored == &name || relative.as_ref() == Some(ignored))
+        {
             continue;
         }
         let child = entry.path();
@@ -246,8 +276,16 @@ fn walk(
             .map(|suffix| suffix.components().count())
             .unwrap_or(depth + 1);
         let has_git = child.join(".git").exists();
-        if next_depth <= 1 || !has_git {
-            walk(root, &child, next_depth, svn_depth, result, seen)?;
+        if next_depth <= max_depth || !has_git {
+            walk(
+                root,
+                &child,
+                next_depth,
+                max_depth,
+                ignored_folders,
+                result,
+                seen,
+            )?;
         }
     }
     Ok(())
@@ -295,7 +333,7 @@ pub fn repository(
     workspace: &WorkspaceDescriptor,
     repo_id_value: &str,
 ) -> Result<RepositoryMeta, DesktopError> {
-    scan(workspace)?
+    scan(workspace, &DesktopSettings::default())?
         .into_iter()
         .find(|meta| meta.id == repo_id_value)
         .ok_or_else(|| {
@@ -334,6 +372,7 @@ pub async fn git_status(
     let mut fields = raw.split('\0').filter(|value| !value.is_empty());
     let header = fields.next().unwrap_or("## HEAD");
     let (branch, ahead, behind) = parse_git_header(header);
+    let submodule_paths = declared_submodule_paths(root);
     let mut files = Vec::new();
     while let Some(record) = fields.next() {
         if record.len() < 3 {
@@ -346,12 +385,19 @@ pub async fn git_status(
             let _original_path = fields.next();
         }
         let conflicted = matches!(xy, b"DD" | b"AU" | b"UD" | b"UA" | b"DU" | b"AA" | b"UU");
+        let submodule = submodule_paths.contains(&path);
         files.push(FileChange {
             path,
-            status: status_label(xy).into(),
+            status: if submodule {
+                "submodule".into()
+            } else {
+                status_label(xy).into()
+            },
             staged: xy[0] != b' ' && xy[0] != b'?' && !conflicted,
             unstaged: xy[1] != b' ' && !conflicted || xy == b"??",
             conflicted,
+            conflict_type: conflicted.then(|| "text".into()),
+            submodule,
         });
     }
     let revision = cli::run(
@@ -375,6 +421,8 @@ pub async fn git_status(
         files,
         conflicts,
         operation: git_operation(root),
+        capabilities: repository_capabilities(VcsKind::Git, true),
+        tool_available: true,
     })
 }
 
@@ -407,7 +455,18 @@ pub async fn svn_status(
             continue;
         };
         let item = status.attribute("item").unwrap_or("modified");
-        let conflicted = item == "conflicted" || status.attribute("props") == Some("conflicted");
+        let conflict_type = if status.attribute("tree-conflicted") == Some("true") {
+            Some("tree".to_string())
+        } else if item == "obstructed" {
+            Some("obstruction".to_string())
+        } else if status.attribute("props") == Some("conflicted") {
+            Some("property".to_string())
+        } else if item == "conflicted" {
+            Some("text".to_string())
+        } else {
+            None
+        };
+        let conflicted = conflict_type.is_some();
         if item == "normal" && !conflicted {
             continue;
         }
@@ -417,6 +476,8 @@ pub async fn svn_status(
             staged: false,
             unstaged: true,
             conflicted,
+            conflict_type,
+            submodule: false,
         });
     }
     let info = cli::run(
@@ -457,10 +518,13 @@ pub async fn svn_status(
         files,
         conflicts,
         operation: None,
+        capabilities: repository_capabilities(VcsKind::Svn, true),
+        tool_available: true,
     })
 }
 
-fn empty_status(meta: RepositoryMeta) -> RepositoryStatus {
+fn empty_status(meta: RepositoryMeta, tool_available: bool) -> RepositoryStatus {
+    let kind = meta.kind;
     RepositoryStatus {
         meta,
         branch: String::new(),
@@ -470,6 +534,46 @@ fn empty_status(meta: RepositoryMeta) -> RepositoryStatus {
         files: vec![],
         conflicts: 0,
         operation: None,
+        capabilities: repository_capabilities(kind, tool_available),
+        tool_available,
+    }
+}
+
+fn repository_capabilities(kind: VcsKind, tool_available: bool) -> RepositoryCapabilities {
+    if !tool_available {
+        return RepositoryCapabilities::default();
+    }
+    match kind {
+        VcsKind::Git => RepositoryCapabilities {
+            status: true,
+            diff: true,
+            commit: true,
+            sync: true,
+            history: true,
+            conflict: true,
+            stash: true,
+            shelf: true,
+            changelist: true,
+            worktree: true,
+            subtree: true,
+            submodule: true,
+            compare: true,
+            remote_management: true,
+            identity: true,
+            svn_account: false,
+            file_history: true,
+        },
+        VcsKind::Svn => RepositoryCapabilities {
+            status: true,
+            diff: true,
+            commit: true,
+            sync: true,
+            history: true,
+            conflict: true,
+            svn_account: true,
+            file_history: true,
+            ..RepositoryCapabilities::default()
+        },
     }
 }
 
@@ -533,6 +637,23 @@ fn status_label(xy: &[u8]) -> &'static str {
     }
 }
 
+fn declared_submodule_paths(root: &Path) -> HashSet<String> {
+    let Ok(contents) = std::fs::read_to_string(root.join(".gitmodules")) else {
+        return HashSet::new();
+    };
+    contents
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(key, _)| key.trim() == "path")
+        .map(|(_, value)| value.trim().replace('\\', "/"))
+        .filter(|value| {
+            !value.is_empty()
+                && !Path::new(value).is_absolute()
+                && !value.split('/').any(|part| part == "..")
+        })
+        .collect()
+}
+
 fn git_operation(root: &Path) -> Option<String> {
     let git = root.join(".git");
     let git_dir = if git.is_dir() {
@@ -559,21 +680,28 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn scan_uses_git_depth_one_and_svn_depth_four() {
+    fn scan_uses_configured_depth_for_git_and_svn() {
         let root = tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("a/.git")).unwrap();
         std::fs::create_dir_all(root.path().join("a/deep/.git")).unwrap();
         std::fs::create_dir_all(root.path().join("one/two/three/.svn")).unwrap();
         let path = root.path().to_string_lossy().into_owned();
         let ws = descriptor(vec![path]).unwrap();
-        let repos = scan(&ws).unwrap();
+        let repos = scan(&ws, &DesktopSettings::default()).unwrap();
         assert!(repos
             .iter()
             .any(|repo| repo.name == "a" && repo.kind == VcsKind::Git));
         assert!(repos
             .iter()
             .any(|repo| repo.name == "three" && repo.kind == VcsKind::Svn));
-        assert!(!repos.iter().any(|repo| repo.name == "deep"));
+        assert!(repos.iter().any(|repo| repo.name == "deep"));
+        let settings = DesktopSettings {
+            repository_scan_depth: 1,
+            ..DesktopSettings::default()
+        };
+        let shallow = scan(&ws, &settings).unwrap();
+        assert!(!shallow.iter().any(|repo| repo.name == "deep"));
+        assert!(!shallow.iter().any(|repo| repo.name == "three"));
     }
 
     #[test]
@@ -587,7 +715,7 @@ mod tests {
         )
         .unwrap();
         let ws = descriptor(vec![root.path().to_string_lossy().into_owned()]).unwrap();
-        let repos = scan(&ws).unwrap();
+        let repos = scan(&ws, &DesktopSettings::default()).unwrap();
         assert!(repos
             .iter()
             .any(|repo| repo.name == "deep" && repo.is_submodule));

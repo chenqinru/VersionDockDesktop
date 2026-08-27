@@ -4,6 +4,7 @@ import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
+import { confirmDialog } from './dialogService';
 import type { RepositoryStatus, ShelfFileEntry, StashEntry } from '../bindings/generated';
 
 export type StashItem = StashEntry;
@@ -614,8 +615,8 @@ export function StashPanel({
     void stashOperation(repoId, { type: 'pop', reference });
   };
 
-  const handleDrop = (repoId: string, reference: string) => {
-    if (confirm(t('Drop stash {0}?', reference))) {
+  const handleDrop = async (repoId: string, reference: string) => {
+    if (await confirmDialog({ title: t('Drop stash {0}?', reference), message: reference, danger: true })) {
       void stashOperation(repoId, { type: 'drop', reference });
     }
   };

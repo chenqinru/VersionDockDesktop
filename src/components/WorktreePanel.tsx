@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Codicon } from './Codicon';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
+import { confirmDialog, promptDialog } from './dialogService';
 import { branchColor, headColor, readableAccentColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, WorktreeEntry as BoundWorktreeEntry } from '../bindings/generated';
+import { FileIcon } from './FileIcon';
 
 export interface NormalizedWorktreeEntry {
   path: string;
@@ -40,9 +42,27 @@ export interface WorktreePanelProps {
   onPrune?: (repoId: string) => void;
   onOpenInExplorer?: (repoId: string, worktreePath: string) => void;
   onOpenInNewWindow?: (worktreePath: string) => void;
-  onOpenInOS?: (worktreePath: string) => void;
+  onOpenInOS?: (repoId: string, worktreePath: string) => void;
   onAddToWorkspace?: (worktreePath: string) => void;
   onRequestCreate?: (repoId: string) => void;
+}
+
+function WorktreeDiffView() {
+  const value = useAppStore((state) => state.worktreeDiff);
+  const close = useAppStore((state) => state.closeWorktreeDiff);
+  const openDiff = useAppStore((state) => state.openWorktreeFileDiff);
+  const openBranchDiff = useAppStore((state) => state.openBranchWorkingFileDiff);
+  const [context, setContext] = useState<{ x: number; y: number; path: string }>();
+  const { t } = useI18n();
+  if (!value) return null;
+  const show = (path: string) => value.source === 'repository'
+    ? void openBranchDiff(value.repoId, value.baseRef, path)
+    : void openDiff(value.repoId, value.path, value.baseRef, path);
+  return <section className="worktree-diff-panel">
+    <header><button onClick={close}><Codicon name="arrow-left" />{t('Back to Worktrees')}</button><strong>{value.baseRef} ↔ {value.currentRef}</strong><span>{value.files.length} {t('files')}</span></header>
+    <div>{value.files.length === 0 ? <div className="empty-state"><Codicon name="diff" />{t('No worktree differences')}</div> : value.files.map((file) => <button key={`${file.status}:${file.path}`} onClick={() => show(file.path)} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, path: file.path }); }}><FileIcon name={file.path.split('/').pop() ?? file.path} /><span>{file.path}</span>{file.added !== null && <b className="added">+{file.added}</b>}{file.removed !== null && <b className="removed">-{file.removed}</b>}<em>{file.status}</em></button>)}</div>
+    {context && <ContextMenu x={context.x} y={context.y} items={[{ id: 'diff', label: t('Show Diff'), icon: 'diff' }]} onSelect={() => { show(context.path); setContext(undefined); }} onClose={() => setContext(undefined)} />}
+  </section>;
 }
 
 function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry): NormalizedWorktreeEntry {
@@ -73,10 +93,8 @@ function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry): No
 
 function ctxItems(entry: NormalizedWorktreeEntry, t: (key: string, ...args: Array<string | number>) => string): ContextMenuEntry[] {
   const items: ContextMenuEntry[] = [
-    ...(entry.isInWorkspace ? [{ id: 'explorer', label: t('Reveal in Explorer'), icon: 'folder-opened' } as ContextMenuEntry] : []),
-    { id: 'newwindow', label: t('Open in New Window'), icon: 'link-external' },
-    { id: 'os', label: t('Open in File Manager'), icon: 'folder' },
-    ...(!entry.isInWorkspace ? [{ id: 'add-to-workspace', label: t('Add Folder to Workspace'), icon: 'add' } as ContextMenuEntry] : []),
+    { id: 'open', label: t('Open in New Window'), icon: 'link-external' },
+    { id: 'os', label: t('Open in File Manager'), icon: 'folder-opened' },
   ];
   if (!entry.isMain) {
     items.push(
@@ -101,9 +119,8 @@ function WorktreeRow({
   onLock,
   onUnlock,
   onOpenInExplorer,
-  onOpenInNewWindow,
   onOpenInOS,
-  onAddToWorkspace,
+  onCompare,
 }: {
   entry: NormalizedWorktreeEntry;
   repoId: string;
@@ -111,9 +128,8 @@ function WorktreeRow({
   onLock?: WorktreePanelProps['onLock'];
   onUnlock?: WorktreePanelProps['onUnlock'];
   onOpenInExplorer?: WorktreePanelProps['onOpenInExplorer'];
-  onOpenInNewWindow?: WorktreePanelProps['onOpenInNewWindow'];
   onOpenInOS?: WorktreePanelProps['onOpenInOS'];
-  onAddToWorkspace?: WorktreePanelProps['onAddToWorkspace'];
+  onCompare?: (repoId: string, entry: NormalizedWorktreeEntry) => void;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
@@ -160,34 +176,14 @@ function WorktreeRow({
         </div>
         {hovered && !entry.isMain && (
           <div style={row.actions}>
-            {!entry.isInWorkspace && onAddToWorkspace && (
+            {onOpenInExplorer && (
               <button
                 data-action-btn=""
                 style={row.btn}
-                title={t('Add Folder to Workspace')}
-                onClick={(e) => { e.stopPropagation(); onAddToWorkspace(entry.path); }}
-              >
-                <Codicon name="add" />
-              </button>
-            )}
-            {entry.isInWorkspace && onOpenInExplorer && (
-              <button
-                data-action-btn=""
-                style={row.btn}
-                title={t('Reveal in Explorer')}
+                title="Open Worktree"
                 onClick={(e) => { e.stopPropagation(); onOpenInExplorer(repoId, entry.path); }}
               >
                 <Codicon name="folder-opened" />
-              </button>
-            )}
-            {onOpenInNewWindow && (
-              <button
-                data-action-btn=""
-                style={row.btn}
-                title={t('Open in New Window')}
-                onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(entry.path); }}
-              >
-                <Codicon name="link-external" />
               </button>
             )}
             {entry.isLocked ? (
@@ -234,10 +230,9 @@ function WorktreeRow({
           items={ctxItems(entry, t)}
           onSelect={(id) => {
             setCtxMenu(null);
-            if (id === 'explorer') onOpenInExplorer?.(repoId, entry.path);
-            if (id === 'newwindow') onOpenInNewWindow?.(entry.path);
-            if (id === 'os') onOpenInOS?.(entry.path);
-            if (id === 'add-to-workspace') onAddToWorkspace?.(entry.path);
+            if (id === 'open') onOpenInExplorer?.(repoId, entry.path);
+            if (id === 'os') onOpenInOS?.(repoId, entry.path);
+            if (id === 'diff') onCompare?.(repoId, entry);
             if (id === 'lock') onLock?.(repoId, entry.path);
             if (id === 'unlock') onUnlock?.(repoId, entry.path);
             if (id === 'delete') onDelete?.(repoId, entry.path, false);
@@ -260,10 +255,9 @@ function RepoSection({
   onUnlock,
   onPrune,
   onOpenInExplorer,
-  onOpenInNewWindow,
   onOpenInOS,
-  onAddToWorkspace,
   onRequestCreate,
+  onCompare,
 }: {
   repo: RepoWorktrees;
   multiRepo: boolean;
@@ -272,10 +266,9 @@ function RepoSection({
   onUnlock?: WorktreePanelProps['onUnlock'];
   onPrune?: WorktreePanelProps['onPrune'];
   onOpenInExplorer?: WorktreePanelProps['onOpenInExplorer'];
-  onOpenInNewWindow?: WorktreePanelProps['onOpenInNewWindow'];
   onOpenInOS?: WorktreePanelProps['onOpenInOS'];
-  onAddToWorkspace?: WorktreePanelProps['onAddToWorkspace'];
   onRequestCreate?: WorktreePanelProps['onRequestCreate'];
+  onCompare?: (repoId: string, entry: NormalizedWorktreeEntry) => void;
 }) {
   const { t } = useI18n();
   const hasPrunable = repo.worktrees.some((w) => w.isPrunable);
@@ -323,9 +316,8 @@ function RepoSection({
             onLock={onLock}
             onUnlock={onUnlock}
             onOpenInExplorer={onOpenInExplorer}
-            onOpenInNewWindow={onOpenInNewWindow}
             onOpenInOS={onOpenInOS}
-            onAddToWorkspace={onAddToWorkspace}
+            onCompare={onCompare}
           />
         ))
       )}
@@ -362,16 +354,16 @@ export function WorktreePanel({
   onUnlock,
   onPrune,
   onOpenInExplorer,
-  onOpenInNewWindow,
   onOpenInOS,
-  onAddToWorkspace,
   onRequestCreate,
 }: WorktreePanelProps) {
   const { t } = useI18n();
   const storeWorktrees = useAppStore((state) => state.worktrees);
   const loadWorktrees = useAppStore((state) => state.loadWorktrees);
   const worktreeOperation = useAppStore((state) => state.worktreeOperation);
-  const systemOpen = useAppStore((state) => state.systemOpen);
+  const openWorktree = useAppStore((state) => state.openWorktree);
+  const loadWorktreeDiff = useAppStore((state) => state.loadWorktreeDiff);
+  const worktreeDiff = useAppStore((state) => state.worktreeDiff);
 
   useEffect(() => {
     if (!customRepos && repos.length > 0) {
@@ -381,8 +373,8 @@ export function WorktreePanel({
     }
   }, [customRepos, loadWorktrees, repos]);
 
-  const defaultDelete = (repoId: string, worktreePath: string, force: boolean) => {
-    if (confirm(force ? t('Force remove worktree {0}?', worktreePath) : t('Remove worktree {0}?', worktreePath))) {
+  const defaultDelete = async (repoId: string, worktreePath: string, force: boolean) => {
+    if (await confirmDialog({ title: force ? t('Force remove worktree {0}?', worktreePath) : t('Remove worktree {0}?', worktreePath), message: worktreePath, danger: force })) {
       void worktreeOperation(repoId, { type: 'remove', path: worktreePath, force });
     }
   };
@@ -399,19 +391,18 @@ export function WorktreePanel({
     void worktreeOperation(repoId, { type: 'prune' });
   };
 
-  const defaultCreate = (repoId: string) => {
-    const branch = prompt(t('Branch name'));
+  const defaultCreate = async (repoId: string) => {
+    const branch = await promptDialog({ title: t('Create new branch'), message: t('Branch name'), inputLabel: t('Branch name') });
     if (!branch?.trim()) return;
-    const newBranch = confirm(t('Create new branch'));
+    const newBranch = await confirmDialog({ title: t('Create new branch'), message: branch.trim() });
     void worktreeOperation(repoId, { type: 'create', branch: branch.trim(), new_branch: newBranch });
   };
-
-  const defaultOpenInOS = (worktreePath: string) => {
-    const matchedRepo = repos.find((r) => worktreePath.startsWith(r.meta.rootPath));
-    if (matchedRepo) {
-      void systemOpen(matchedRepo.meta.id, worktreePath, true);
-    }
+  const defaultCompare = (repoId: string, entry: NormalizedWorktreeEntry) => {
+    void loadWorktreeDiff(repoId, entry.path, 'HEAD');
   };
+
+  const defaultOpen = (repoId: string, worktreePath: string) => { void openWorktree(repoId, worktreePath, false); };
+  const defaultOpenInOS = (repoId: string, worktreePath: string) => { void openWorktree(repoId, worktreePath, true); };
 
   const resolvedRepos: RepoWorktrees[] = customRepos ?? repos.map((r) => {
     const list = storeWorktrees[r.meta.id] ?? [];
@@ -438,6 +429,7 @@ export function WorktreePanel({
 
   const allEmpty = resolvedRepos.every((r) => r.worktrees.length === 0);
 
+  if (worktreeDiff) return <WorktreeDiffView />;
   return (
     <div style={css.root}>
       {allEmpty && resolvedRepos.length === 0 ? (
@@ -452,11 +444,10 @@ export function WorktreePanel({
             onLock={onLock ?? defaultLock}
             onUnlock={onUnlock ?? defaultUnlock}
             onPrune={onPrune ?? defaultPrune}
-            onOpenInExplorer={onOpenInExplorer}
-            onOpenInNewWindow={onOpenInNewWindow}
+            onOpenInExplorer={onOpenInExplorer ?? defaultOpen}
             onOpenInOS={onOpenInOS ?? defaultOpenInOS}
-            onAddToWorkspace={onAddToWorkspace}
             onRequestCreate={onRequestCreate ?? defaultCreate}
+            onCompare={defaultCompare}
           />
         ))
       )}

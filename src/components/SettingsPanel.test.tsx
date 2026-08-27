@@ -7,15 +7,11 @@ import { useAppStore } from '../store/appStore';
 import { SettingsPanel } from './SettingsPanel';
 
 const state = (): AppStateSnapshot => ({
-  theme: 'system',
-  language: 'system',
-  uiFontSize: 'standard',
+  schemaVersion: 3,
+  settings: { theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: ['node_modules'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
+  layout: { panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
   lastWorkspaceId: null,
   recentWorkspaces: [],
-  panelSizes: { commit: 360, branches: 220, detail: 360 },
-  activeTab: 'changes',
-  fileViewMode: 'tree',
-  externalEditor: null,
 });
 
 const bootstrap = (): BootstrapData => ({
@@ -26,13 +22,11 @@ const bootstrap = (): BootstrapData => ({
 
 const renderPanel = (onClose = vi.fn()) => {
   const commands: BridgeCommand[] = [];
-  let persisted = bootstrap();
+  const persisted = bootstrap();
   const bridge = new MockBridge((command) => {
     commands.push(command);
-    if (command.type === 'saveAppState') {
-      persisted = { ...persisted, state: structuredClone(command.payload.state) };
-      return true;
-    }
+    if (command.type === 'updateSettings') { persisted.state.settings = structuredClone(command.payload.settings); return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: false } }; }
+    if (command.type === 'updateLayout') { persisted.state.layout = structuredClone(command.payload.layout); return command.payload.layout; }
     if (command.type === 'bootstrap') return persisted;
     return true;
   });
@@ -62,7 +56,8 @@ describe('SettingsPanel', () => {
     expect(Array.from(fontSize.querySelectorAll('option')).map((option) => option.value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
     fireEvent.change(fontSize, { target: { value: 'maximum' } });
 
-    expect(useAppStore.getState().bootstrap?.state).toMatchObject({ theme: 'dark', language: 'zhCn', fileViewMode: 'list', uiFontSize: 'maximum' });
+    expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'dark', language: 'zhCn', uiFontSize: 'maximum' });
+    expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ fileViewMode: 'list' });
   });
 
   it('saves external editor arguments and restores null when the executable is cleared', async () => {
@@ -74,16 +69,16 @@ describe('SettingsPanel', () => {
     fireEvent.change(argumentsField, { target: { value: '--reuse-window\n{path}' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(useAppStore.getState().bootstrap?.state.externalEditor).toEqual({ executable: '/usr/local/bin/code', args: ['--reuse-window', '{path}'] });
-    await waitFor(() => expect(commands.some((command) => command.type === 'saveAppState')).toBe(true), { timeout: 500 });
+    expect(useAppStore.getState().bootstrap?.state.settings?.externalEditor).toEqual({ executable: '/usr/local/bin/code', args: ['--reuse-window', '{path}'] });
+    await waitFor(() => expect(commands.some((command) => command.type === 'updateSettings')).toBe(true), { timeout: 500 });
     await expect(bridge.request<BootstrapData>({ type: 'bootstrap' })).resolves.toMatchObject({
-      state: { externalEditor: { executable: '/usr/local/bin/code', args: ['--reuse-window', '{path}'] } },
+      state: { settings: { externalEditor: { executable: '/usr/local/bin/code', args: ['--reuse-window', '{path}'] } } },
     });
 
     const updatedExecutable = screen.getByRole('textbox', { name: 'Executable path' });
     fireEvent.change(updatedExecutable, { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(useAppStore.getState().bootstrap?.state.externalEditor).toBeNull();
+    expect(useAppStore.getState().bootstrap?.state.settings?.externalEditor).toBeNull();
   });
 
   it('closes from the close button and Escape', () => {
@@ -107,40 +102,36 @@ describe('SettingsPanel', () => {
     expect(dialog.querySelector('.settings-nav')).toBeInTheDocument();
     expect(dialog.querySelector('.settings-content')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Settings categories' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Editor integration' })).toHaveAttribute('href', '#settings-section-editor-title');
-    expect(document.getElementById('settings-section-editor-title')).toHaveTextContent('Editor integration');
+    expect(screen.getByRole('link', { name: 'External editor' })).toHaveAttribute('href', '#settings-section-external-editor-title');
     for (const link of screen.getByRole('navigation', { name: 'Settings categories' }).querySelectorAll('a')) {
       const target = link.getAttribute('href')?.slice(1);
       expect(target).toBeTruthy();
       expect(document.getElementById(target ?? '')).toHaveClass('settings-section-title');
       expect(document.getElementById(target ?? '')?.querySelector('.codicon')).toBeInTheDocument();
     }
-    fireEvent.click(screen.getByRole('link', { name: 'Editor integration' }));
-    expect(screen.getByRole('link', { name: 'Editor integration' })).toHaveClass('active');
+    fireEvent.click(screen.getByRole('link', { name: 'External editor' }));
+    expect(screen.getByRole('link', { name: 'External editor' })).toHaveClass('active');
     expect(screen.getByRole('region', { name: 'Changes and commit' })).toContainElement(screen.getByLabelText('Suppress diverged branch warning'));
-    expect(screen.getByRole('region', { name: 'Editor integration' })).toContainElement(screen.getByLabelText('Git annotations'));
-    expect(screen.getByRole('region', { name: 'AI settings' })).toContainElement(screen.getByLabelText('AI provider'));
-    expect(screen.getByRole('region', { name: 'AI prompts' })).toContainElement(screen.getByLabelText('Commit message prompt'));
+    expect(screen.queryByText('AI settings')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Git annotations')).not.toBeInTheDocument();
   });
 
-  it('shows all plugin settings that Desktop does not implement as disabled controls', () => {
+  it('persists supported Desktop settings and hides AI/editor-only settings', async () => {
     const { commands } = renderPanel();
-    const unsupportedLabels = [
+    const supportedLabels = [
       'Changes display mode', 'Default commit action', 'Default save action', 'Prompt before adding untracked files',
       'Auto-refresh interval', 'Fetch on startup', 'Reset view locations on startup', 'Notify on incoming commits', 'Notify on unpushed commits',
-      'Repository scan depth', 'Ignored folders', 'Maximum graph commits', 'Project colors',
-      'Suppress diverged branch warning', 'Git annotations', 'Git ghost text',
-      'AI provider', 'AI model', 'AI API URL', 'AI API key', 'AI max input tokens', 'AI max output tokens',
-      'Commit message prompt', 'AI merge conflict prompt', 'Commit explanation prompt', 'AI commit composer prompt', 'AI code review prompt',
+      'Repository scan depth', 'Ignored folders', 'Maximum graph commits',
+      'Suppress diverged branch warning',
     ];
 
-    for (const label of unsupportedLabels) expect(screen.getByLabelText(label)).toBeDisabled();
-    expect(screen.getAllByText('Not implemented in Desktop')).toHaveLength(unsupportedLabels.length);
-    expect(screen.queryByRole('option', { name: 'GitHub Copilot' })).not.toBeInTheDocument();
+    for (const label of supportedLabels) expect(screen.getByLabelText(label)).toBeEnabled();
+    expect(screen.queryByLabelText('AI provider')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Git ghost text')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Auto-refresh interval'), { target: { value: '30' } });
     fireEvent.click(screen.getByLabelText('Fetch on startup'));
-    expect(useAppStore.getState().bootstrap?.state).toMatchObject({ theme: 'system', language: 'system', fileViewMode: 'tree' });
-    expect(commands.some((command) => command.type === 'saveAppState')).toBe(false);
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ autoRefreshInterval: 30, fetchOnStartup: true }));
+    expect(commands.some((command) => command.type === 'updateSettings')).toBe(true);
   });
 });

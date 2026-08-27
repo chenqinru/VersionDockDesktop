@@ -18,7 +18,7 @@ const renderPanel = () => render(<BridgeContext.Provider value={bridge}><CommitP
 const gitRepo: RepositoryStatus = { meta: { id: 'repo', name: 'Repository', rootPath: '/tmp/repo', color: '#4ec9b0', kind: 'git', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false }, branch: 'main', revision: 'abc', ahead: 0, behind: 0, files: [], conflicts: 0, operation: null };
 const gitSnapshot: WorkspaceSnapshot = { workspace: { id: 'workspace', name: 'Workspace', paths: ['/tmp/repo'], lastOpenedAt: '', available: true }, generation: 1, tools: { git: true, svn: true, svnadmin: true }, repositories: [gitRepo] };
 
-afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {} }); });
+afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, mode: 'history' }); });
 
 describe('CommitPanel capabilities and file view', () => {
   it('compacts single-child directory chains while preserving file paths', () => {
@@ -117,7 +117,11 @@ describe('CommitPanel capabilities and file view', () => {
   it('commits selected files across repositories and unstages excluded indexed files', async () => {
     const commands: string[] = [];
     const multiBridge = new MockBridge((command) => {
-      commands.push(command.type === 'unstage' ? `unstage:${command.payload.repo_id}:${command.payload.paths.join(',')}` : command.type === 'commit' ? `commit:${command.payload.repo_id}:${command.payload.paths.join(',')}` : command.type);
+      commands.push(command.type === 'unstage' ? `unstage:${command.payload.repo_id}:${command.payload.paths.join(',')}` : command.type);
+      if (command.type === 'batchCommit') {
+        for (const target of command.payload.targets) commands.push(`commit:${target.repoId}:${target.paths.join(',')}`);
+        return command.payload.targets.map((target) => ({ repoId: target.repoId, committed: true, revision: 'abc', pushed: false, error: null }));
+      }
       if (command.type === 'workspaceRefresh') return { ...gitSnapshot, repositories: [] };
       return [];
     });
@@ -151,15 +155,13 @@ describe('CommitPanel capabilities and file view', () => {
 
   it('persists a stash view mode independently from the changes view', () => {
     const data = bootstrap(true);
-    data.state.activeTab = 'stash';
-    data.state.fileViewMode = 'tree';
-    data.state.stashViewMode = 'tree';
+    data.state.layout = { panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'stash', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
     useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo' });
     renderPanel();
     fireEvent.click(screen.getByTitle('View options'));
     fireEvent.click(screen.getByRole('button', { name: 'List view' }));
-    expect(useAppStore.getState().bootstrap?.state.stashViewMode).toBe('list');
-    expect(useAppStore.getState().bootstrap?.state.fileViewMode).toBe('tree');
+    expect(useAppStore.getState().bootstrap?.state.layout?.stashViewMode).toBe('list');
+    expect(useAppStore.getState().bootstrap?.state.layout?.fileViewMode).toBe('tree');
   });
 
   it('shows shelf only after its storage and backend capability is enabled', () => {
@@ -214,6 +216,57 @@ describe('CommitPanel capabilities and file view', () => {
     expect(tabs).toEqual(['Changes', 'Shelf', 'Stash', 'Worktrees', 'Subtree', 'Push']);
   });
 
+  it('shows a branch-to-working-tree diff across the whole commit panel instead of the Worktrees tab', async () => {
+    const requests: string[] = [];
+    const diffBridge = new MockBridge((command) => {
+      requests.push(command.type);
+      if (command.type === 'branchWorkingFileDiff') return { path: command.payload.relative_path, content: 'diff --git a/file b/file', language: 'diff', binary: false, truncated: false, lineCount: 1 };
+      if (command.type === 'updateLayout') return command.payload.layout;
+      return true;
+    });
+    const data = bootstrap(false, false, false, true);
+    data.state.activeTab = 'worktree';
+    useAppStore.setState({
+      bridge: diffBridge,
+      bootstrap: data,
+      snapshot: gitSnapshot,
+      selectedRepoId: 'repo',
+      worktreeDiff: {
+        repoId: 'repo',
+        source: 'repository',
+        path: '/tmp/repo',
+        baseRef: 'refs/remotes/origin/feature',
+        currentRef: 'main',
+        files: [
+          { path: 'src/alpha.ts', status: 'M', added: 2, removed: 1 },
+          { path: 'src/nested/beta.ts', status: 'A', added: 4, removed: 0 },
+        ],
+      },
+    });
+
+    const { container } = render(<BridgeContext.Provider value={diffBridge}><CommitPanel /></BridgeContext.Provider>);
+    expect(container.querySelector('.branch-working-diff-panel')).toBeInTheDocument();
+    expect(screen.getByTitle('VersionDock Commit')).toBeInTheDocument();
+    expect(screen.getByTitle('Fetch')).toBeInTheDocument();
+    expect(screen.getByTitle('Refresh')).toBeInTheDocument();
+    expect(screen.getByTitle('Settings')).toBeInTheDocument();
+    expect(container.querySelector('.commit-tabs')).not.toBeInTheDocument();
+    expect(screen.getByText('refs/remotes/origin/feature vs Working Tree')).toBeInTheDocument();
+    expect(screen.getByTitle('src')).toHaveTextContent('2');
+
+    fireEvent.click(screen.getByText('alpha.ts'));
+    await waitFor(() => expect(requests).toContain('branchWorkingFileDiff'));
+
+    fireEvent.contextMenu(screen.getByText('beta.ts').closest('.branch-working-file-row')!);
+    expect(screen.getByText('Show Diff')).toBeInTheDocument();
+    expect(screen.getByText('Open file')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    fireEvent.click(screen.getByTitle('Back to Changes'));
+    expect(useAppStore.getState().worktreeDiff).toBeUndefined();
+    expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('changes');
+  });
+
   it('keeps the real push tab visible while AI stays hidden', async () => {
     const pushBridge = new MockBridge((command) => command.type === 'unpushedCommits' ? [{ hash: 'abc', shortHash: 'abc', message: 'local commit', author: 'Test', date: '2026-08-13T00:00:00Z', filesChanged: 1, additions: 2, deletions: 0 }] : []);
     useAppStore.setState({ bridge: pushBridge, bootstrap: { ...bootstrap(false), state: { ...bootstrap(false).state, activeTab: 'push' } }, snapshot: { ...gitSnapshot, repositories: [{ ...gitRepo, ahead: 1 }] }, selectedRepoId: 'repo', unpushedCommits: {} });
@@ -222,5 +275,51 @@ describe('CommitPanel capabilities and file view', () => {
     await waitFor(() => expect(screen.getByText('local commit')).toBeInTheDocument());
     expect(screen.queryByText('AI Commit Message')).not.toBeInTheDocument();
     expect(screen.queryByText('AI Code Review')).not.toBeInTheDocument();
+  });
+
+  it('matches the VersionDock file, folder, and repository context menus', async () => {
+    const diffRequests: boolean[] = [];
+    const menuBridge = new MockBridge((command) => {
+      if (command.type === 'fileDiff') {
+        diffRequests.push(command.payload.staged);
+        return { path: command.payload.relative_path, content: 'diff --git a/file b/file', language: 'diff', binary: false, truncated: false, lineCount: 1 };
+      }
+      if (command.type === 'workspaceRefresh') return { ...gitSnapshot, repositories: [changedRepo] };
+      return true;
+    });
+    const changedRepo = { ...gitRepo, files: [
+      { path: 'src/file.ts', status: 'modified', staged: true, unstaged: true, conflicted: false },
+      { path: 'src/new.ts', status: 'untracked', staged: false, unstaged: true, conflicted: false },
+    ] };
+    useAppStore.setState({ bridge: menuBridge, bootstrap: bootstrap(false, true), snapshot: { ...gitSnapshot, repositories: [changedRepo] }, selectedRepoId: 'repo' });
+    const { container } = render(<BridgeContext.Provider value={menuBridge}><CommitPanel /></BridgeContext.Provider>);
+
+    fireEvent.contextMenu(screen.getByTitle('src/file.ts').closest('.file-row')!);
+    expect(screen.getByText('Show Diff')).toBeInTheDocument();
+    expect(screen.getByText('Rollback')).toBeInTheDocument();
+    expect(screen.getByText('Shelve')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Show Diff'));
+    await waitFor(() => expect(diffRequests).toEqual([false]));
+
+    fireEvent.contextMenu(screen.getByTitle('src').closest('.directory-row')!);
+    expect(screen.getByText('Rollback')).toBeInTheDocument();
+    expect(screen.getByText('Shelve Changes')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    fireEvent.contextMenu(container.querySelector('.repo-heading')!);
+    expect(screen.getByText('Manage Repository')).toBeInTheDocument();
+    expect(screen.getByText('View Git Log')).toBeInTheDocument();
+  });
+
+  it('matches VersionDock by keeping a gitlink menu minimal and adding no Submodule tab', () => {
+    const submoduleRepo = { ...gitRepo, files: [{ path: 'vendor/module', status: 'submodule', staged: false, unstaged: true, conflicted: false, submodule: true }] };
+    useAppStore.setState({ bridge, bootstrap: bootstrap(true, true, true, true), snapshot: { ...gitSnapshot, repositories: [submoduleRepo] }, selectedRepoId: 'repo', submodules: { repo: [{ path: 'vendor/module', url: 'https://example.test/module.git', initialized: true, revision: 'abcdef1', branch: 'main', dirty: true }] } });
+    const { container } = render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
+    expect(Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('title'))).not.toContain('Submodules');
+    fireEvent.contextMenu(screen.getByTitle('vendor/module').closest('.file-row')!);
+    expect(screen.getByText('Stage')).toBeInTheDocument();
+    expect(screen.getByText('Refresh')).toBeInTheDocument();
+    expect(screen.queryByText('Update Submodule')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
   });
 });

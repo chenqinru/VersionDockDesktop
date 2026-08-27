@@ -4,30 +4,37 @@ import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { buildSidebarModel, type SidebarBranch, type SidebarTag } from './HistoryWorkspace.helpers';
 import type { RepositoryStatus } from '../bindings/generated';
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
 
 interface Props {
   repoFilter: Set<string>;
   refFilter: Set<string>;
   onRepoFilter: (repoId: string) => void;
   onRefFilter: (ref: string) => void;
+  onCompare: (repoId: string, target: string) => void;
   onCollapse: () => void;
 }
 
 type SectionKey = 'local' | `remote:${string}` | 'tags';
 
-export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter, onCollapse }: Props) {
+export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter, onCompare, onCollapse }: Props) {
   const allRepos = useAppStore((state) => state.snapshot?.repositories ?? []);
   const repos = useMemo(() => allRepos.filter((repo) => !repo.meta.isWorktree), [allRepos]);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const tagsByRepo = useAppStore((state) => state.tagsByRepo);
   const loading = useAppStore((state) => state.historyLoading || state.branchesLoading);
   const tagOperation = useAppStore((state) => state.tagOperation);
-  const persistedSections = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
-  const sidebarCollapsed = useAppStore((state) => state.bootstrap?.state.branchSidebarCollapsed ?? false);
+  const persistedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
+  const sidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
   const setBranchSidebarState = useAppStore((state) => state.setBranchSidebarState);
   const [filter, setFilter] = useState('');
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set(persistedSections));
+  const [context, setContext] = useState<{ x: number; y: number; kind: 'branch' | 'tag'; branch?: SidebarBranch; tag?: SidebarTag }>();
+  const branchOperation = useAppStore((state) => state.branchOperation);
+  const sync = useAppStore((state) => state.sync);
+  const loadBranchWorkingDiff = useAppStore((state) => state.loadBranchWorkingDiff);
   const { t } = useI18n();
 
   const visibleRepos = repoFilter.size ? repos.filter((repo) => repoFilter.has(repo.meta.id)) : repos;
@@ -88,6 +95,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         active={activeItem === `branch:${branch.key}`}
         onClick={() => setActiveItem(`branch:${branch.key}`)}
         onDoubleClick={() => onRefFilter(branch.ref)}
+        onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, kind: 'branch', branch }); }}
       />)}
     </SidebarSection>
 
@@ -111,6 +119,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           active={activeItem === `branch:${branch.key}`}
           onClick={() => setActiveItem(`branch:${branch.key}`)}
           onDoubleClick={() => onRefFilter(branch.ref)}
+          onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, kind: 'branch', branch }); }}
         />)}
       </SidebarSection>;
     })}
@@ -135,8 +144,75 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           const instance = tag.instances.find(({ repo }) => repo.meta.kind === 'git');
           if (instance) void tagOperation({ type: 'checkout', name: tag.name }, instance.repo.meta.id);
         }}
+        onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, kind: 'tag', tag }); }}
       />)}
     </SidebarSection>}
+    {context && <ContextMenu x={context.x} y={context.y} items={((): ContextMenuEntry[] => {
+      if (context.kind === 'tag') {
+        const tag = context.tag!;
+        const svn = tag.vcsKind === 'svn';
+        const detached = tag.instances.some(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name));
+        return [
+          { id: 'tag-checkout', label: t(svn ? 'Switch to "{0}"' : 'Checkout "{0}"', tag.name), icon: 'arrow-right' },
+          { separator: true },
+          { id: 'tag-merge', label: t(svn ? 'Merge tag into working copy' : 'Merge into current'), icon: 'git-merge' },
+          ...(!svn ? [{ id: 'tag-push', label: t('Push to remote...'), icon: 'cloud-upload' } as ContextMenuEntry] : []),
+          ...(!detached ? [{ separator: true } as ContextMenuEntry, { id: 'tag-delete', label: t(svn ? 'Delete SVN tag' : 'Delete tag'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
+        ];
+      }
+      const branch = context.branch!;
+      const svn = branch.vcsKind === 'svn';
+      return [
+        { id: 'checkout', label: t(svn ? "Switch to '{0}'" : "Checkout '{0}'", branch.name), icon: 'arrow-right' },
+        { separator: true },
+        ...(!svn && !branch.current ? [
+          { id: 'compare-current', label: t('Compare with Current'), icon: 'git-compare' } as ContextMenuEntry,
+          { id: 'diff-working', label: t('Show Diff with Working Tree'), icon: 'diff-multiple' } as ContextMenuEntry,
+          { separator: true } as ContextMenuEntry,
+        ] : []),
+        { id: 'merge', label: t(svn ? 'Merge into working copy' : 'Merge into current'), icon: 'git-merge' },
+        ...(!svn ? [{ id: 'rebase', label: t("Rebase onto '{0}'", branch.name), icon: 'repo-forked' } as ContextMenuEntry] : []),
+        ...(!branch.remote ? [
+          { separator: true } as ContextMenuEntry,
+          { id: 'pull', label: t(svn ? 'Update' : 'Pull'), icon: 'cloud-download' } as ContextMenuEntry,
+          ...(!svn ? [{ id: 'push', label: t('Push...'), icon: 'cloud-upload' } as ContextMenuEntry] : []),
+        ] : []),
+        ...(!branch.current && !branch.remote ? [{ separator: true } as ContextMenuEntry, { id: 'delete', label: t(svn ? 'Delete SVN branch' : 'Delete branch'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
+      ];
+    })()} onSelect={(id) => { void (async () => {
+      if (context.kind === 'branch' && context.branch) {
+        const branch = context.branch;
+        const instance = branch.instances.find((item) => item.branch.current) ?? branch.instances[0];
+        if (!instance) return;
+        const target = branch.vcsKind === 'svn' ? branch.ref : instance.branch.name;
+        if (id === 'checkout') for (const item of branch.instances) await branchOperation({ type: 'checkout', name: branch.vcsKind === 'svn' ? branch.ref : item.branch.name }, item.repoId);
+        if (id === 'compare-current') onCompare(instance.repoId, instance.branch.name);
+        if (id === 'diff-working') await loadBranchWorkingDiff(instance.repoId, instance.branch.remote ? `refs/remotes/${instance.branch.name}` : `refs/heads/${instance.branch.name}`);
+        if (id === 'merge') await branchOperation({ type: 'merge', name: target }, instance.repoId);
+        if (id === 'rebase') await branchOperation({ type: 'rebase', name: target }, instance.repoId);
+        if (id === 'pull') await sync(instance.repoId, branch.vcsKind === 'svn' ? 'update' : 'pull');
+        if (id === 'push') await sync(instance.repoId, 'push');
+        if (id === 'delete') {
+          const mode = await choiceDialog({
+            title: t(branch.vcsKind === 'svn' ? 'Delete SVN branch' : 'Delete branch'),
+            message: `${branch.name}\n${t('{0} repositories', branch.repoIds.length)}`,
+            danger: true,
+            choices: branch.vcsKind === 'svn'
+              ? [{ id: 'delete', label: t('Delete'), icon: 'trash', danger: true }]
+              : [{ id: 'delete', label: t('Delete'), icon: 'trash', danger: true }, { id: 'force', label: t('Force Delete'), icon: 'warning', danger: true }],
+          });
+          if (mode) for (const item of branch.instances.filter((candidate) => !candidate.branch.current)) await branchOperation({ type: 'delete', name: branch.vcsKind === 'svn' ? branch.ref : item.branch.name, force: mode === 'force' }, item.repoId);
+        }
+      }
+      if (context.kind === 'tag' && context.tag) {
+        const tag = context.tag;
+        if (id === 'tag-checkout') for (const instance of tag.instances) await tagOperation({ type: 'checkout', name: tag.name }, instance.repo.meta.id);
+        if (id === 'tag-merge') { const instance = tag.instances[0]; if (instance) await tagOperation({ type: 'merge', name: tag.name }, instance.repo.meta.id); }
+        if (id === 'tag-delete' && await confirmDialog({ title: t('Delete tag?'), message: `${tag.name}\n${t('{0} repositories', tag.repoIds.length)}`, danger: true })) for (const instance of tag.instances) await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
+        if (id === 'tag-push') { const remote = await promptDialog({ title: t('Push Tag'), message: tag.name, inputLabel: t('Remote'), initialValue: 'origin' }); if (remote) for (const instance of tag.instances.filter((item) => item.repo.meta.kind === 'git')) await tagOperation({ type: 'push', name: tag.name, remote }, instance.repo.meta.id); }
+      }
+      setContext(undefined);
+    })(); }} onClose={() => setContext(undefined)} />}
   </aside>;
 }
 
@@ -189,7 +265,7 @@ function SidebarSection({ icon, title, count, collapsed, onToggle, children }: {
   </section>;
 }
 
-function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, active, onClick, onDoubleClick }: {
+function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, active, onClick, onDoubleClick, onContextMenu }: {
   branch: SidebarBranch;
   repoColors: Record<string, string>;
   multiRepo: boolean;
@@ -198,6 +274,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
   active: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const headCount = branch.instances.filter((instance) => instance.branch.current).length;
   const instance = branch.instances.find((item) => item.branch.current) ?? branch.instances[0];
@@ -211,6 +288,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
     aria-pressed={active}
     onClick={onClick}
     onDoubleClick={onDoubleClick}
+    onContextMenu={onContextMenu}
     onKeyDown={(event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
@@ -226,7 +304,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
   </div>;
 }
 
-function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, detached, onClick, onDoubleClick }: {
+function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, detached, onClick, onDoubleClick, onContextMenu }: {
   tag: SidebarTag;
   repoColors: Record<string, string>;
   multiRepo: boolean;
@@ -235,6 +313,7 @@ function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, detached, o
   detached: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
 }) {
   return <div
     className={`branch-ref-row tag-row ${active ? 'active' : ''} ${detached ? 'head' : ''}`}
@@ -243,6 +322,7 @@ function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, detached, o
     aria-pressed={active}
     onClick={onClick}
     onDoubleClick={onDoubleClick}
+    onContextMenu={onContextMenu}
     onKeyDown={(event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();

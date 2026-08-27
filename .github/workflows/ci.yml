@@ -26,9 +26,17 @@ jobs:
       - name: Linux system dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf subversion
+      - name: macOS SVN tools
+        if: runner.os == 'macOS'
+        run: brew install subversion
+      - name: Windows SVN tools
+        if: runner.os == 'Windows'
+        run: choco install subversion -y --no-progress
       - name: Install dependencies
         run: npm ci
       - name: Static checks and tests
         run: npm run check
+        env:
+          VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
       - name: Build bundle
         run: npm run tauri:build

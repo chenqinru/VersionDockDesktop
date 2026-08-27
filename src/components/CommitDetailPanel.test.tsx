@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommitDetailPanel } from './CommitDetailPanel';
+import { DialogHost } from './DialogHost';
+import { publishDialog } from './dialogService';
 import { useAppStore } from '../store/appStore';
+import { commitKey } from '../history/commitDetails';
 import type { CommitDetail, CommitNode, WorkspaceSnapshot } from '../bindings/generated';
 
 const snapshot: WorkspaceSnapshot = {
@@ -54,8 +57,30 @@ const mergeDetail: CommitDetail = {
   ],
 };
 
+const directoryCommit: CommitNode = {
+  ...mergeCommit,
+  hash: 'directory1234567890',
+  shortHash: 'director',
+  parents: ['directory-parent'],
+  message: 'feat: directory actions',
+};
+
+const directoryDetail: CommitDetail = {
+  commit: directoryCommit,
+  fullMessage: directoryCommit.message,
+  branches: { local: ['main'], remote: [], tags: [] },
+  files: [
+    { path: 'src/alpha.ts', status: 'M', added: 2, removed: 1 },
+    { path: 'src/nested/beta.ts', status: 'A', added: 4, removed: 0 },
+    { path: 'README.md', status: 'M', added: 1, removed: 1 },
+  ],
+};
+
+const originalHistoryOperation = useAppStore.getState().historyOperation;
+
 afterEach(() => {
   cleanup();
+  publishDialog(undefined);
   useAppStore.setState({
     snapshot: undefined,
     selectedCommit: undefined,
@@ -64,10 +89,73 @@ afterEach(() => {
     selectedCommitLoading: {},
     mergeParentFiles: {},
     mergeParentFilesLoading: {},
+    historyOperation: originalHistoryOperation,
+    mode: 'history',
   });
 });
 
 describe('CommitDetailPanel merge commits', () => {
+  it('shows only restore and cherry-pick actions on directories and applies every descendant file', async () => {
+    const historyOperation = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({
+      snapshot,
+      selectedCommit: directoryDetail,
+      selectedCommits: [directoryCommit],
+      selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: directoryDetail },
+      historyOperation,
+    });
+
+    render(<><CommitDetailPanel onCollapse={vi.fn()} /><DialogHost /></>);
+
+    fireEvent.contextMenu(screen.getByTitle('src'));
+    expect(screen.getByText('Revert Selected Changes')).toBeInTheDocument();
+    expect(screen.getByText('Cherry-Pick Selected Changes')).toBeInTheDocument();
+    expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
+    expect(screen.queryByText('Open file')).not.toBeInTheDocument();
+    expect(screen.queryByText('File history')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Revert Selected Changes'));
+    expect(screen.getByRole('dialog')).toHaveTextContent('2 files');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(historyOperation).toHaveBeenCalledWith('repo-1', {
+      type: 'revertPaths',
+      entries: [
+        { revision: directoryCommit.hash, path: 'src/alpha.ts', status: 'M' },
+        { revision: directoryCommit.hash, path: 'src/nested/beta.ts', status: 'A' },
+      ],
+    }));
+
+    fireEvent.contextMenu(screen.getByTitle('Repo 1'));
+    expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Cherry-Pick Selected Changes'));
+    expect(screen.getByRole('dialog')).toHaveTextContent('3 files');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(historyOperation).toHaveBeenLastCalledWith('repo-1', {
+      type: 'applyPaths',
+      entries: [
+        { revision: directoryCommit.hash, path: 'src/alpha.ts', status: 'M' },
+        { revision: directoryCommit.hash, path: 'src/nested/beta.ts', status: 'A' },
+        { revision: directoryCommit.hash, path: 'README.md', status: 'M' },
+      ],
+    }));
+  });
+
+  it('opens the commit-detail workspace instead of previewing the first changed file', () => {
+    useAppStore.setState({
+      snapshot,
+      selectedCommit: mergeDetail,
+      selectedCommits: [mergeCommit],
+      selectedCommitDetails: { 'repo-1:merge1234567890': mergeDetail },
+      mode: 'history',
+    });
+
+    render(<CommitDetailPanel onCollapse={vi.fn()} />);
+
+    expect(screen.queryByTitle('Open preview')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Open Commit Detail'));
+    expect(useAppStore.getState().mode).toBe('commit-detail');
+  });
+
   it('renders "No merge conflicts" and merge parent change groups for merge commits with empty combined diff', () => {
     useAppStore.setState({
       snapshot,

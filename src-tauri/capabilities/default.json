@@ -17,6 +17,7 @@
     "dialog:allow-open",
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",
+    "notification:default",
     "os:default",
     "window-controls:default",
     "window-state:default"
