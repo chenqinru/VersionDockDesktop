@@ -42,7 +42,7 @@ if ((Test-Path -LiteralPath $svnExecutable) -and (Test-Path -LiteralPath $svnAdm
   exit 0
 }
 
-$buildRoot = Join-Path $env:RUNNER_TEMP "versiondock-svn-build"
+$buildRoot = Join-Path $env:RUNNER_TEMP ("versiondock-svn-build-{0}" -f [guid]::NewGuid().ToString("N"))
 $sourceArchive = Join-Path $buildRoot "subversion.zip"
 $vcpkgArchive = Join-Path $buildRoot "vcpkg.zip"
 $sourceParent = Join-Path $buildRoot "source"
@@ -71,6 +71,7 @@ $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer
 $visualStudioRoot = & $vswhere -property installationPath -latest
 Import-Module (Join-Path $visualStudioRoot "Common7\Tools\Microsoft.VisualStudio.DevShell.dll")
 Enter-VsDevShell -VsInstallPath $visualStudioRoot -SkipAutomaticLocation -DevCmdArguments "-arch=x64"
+$env:VCPKG_ROOT = $vcpkgRoot
 
 & (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") -disableMetrics
 Assert-NativeSuccess "vcpkg bootstrap"
@@ -86,27 +87,52 @@ try {
   Pop-Location
 }
 
-cmake `
-  -S $sourceDirectory `
-  -B $buildDirectory `
-  -G Ninja `
-  -DCMAKE_BUILD_TYPE=Release `
-  -DBUILD_SHARED_LIBS=ON `
-  -DSVN_ENABLE_TESTS=OFF `
-  -DSVN_ENABLE_RA_SERF=ON `
-  -DSVN_ENABLE_NLS=OFF `
-  -DSVN_ENABLE_TUI=OFF `
-  -DCMAKE_INSTALL_PREFIX=$installStaging `
-  -DCMAKE_TOOLCHAIN_FILE="$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
-  -DVCPKG_TARGET_TRIPLET=x64-windows
+$cmakeToolchain = Join-Path $vcpkgRoot "scripts\buildsystems\vcpkg.cmake"
+$cmakeConfigureArguments = @(
+  "-S"
+  $sourceDirectory
+  "-B"
+  $buildDirectory
+  "-G"
+  "Ninja"
+  "-DCMAKE_BUILD_TYPE:STRING=Release"
+  "-DBUILD_SHARED_LIBS:BOOL=ON"
+  "-DSVN_ENABLE_TESTS:BOOL=OFF"
+  "-DSVN_ENABLE_RA_SERF:BOOL=ON"
+  "-DSVN_ENABLE_NLS:BOOL=OFF"
+  "-DSVN_ENABLE_TUI:BOOL=OFF"
+  "-DCMAKE_INSTALL_PREFIX:PATH=$installStaging"
+  "-DCMAKE_TOOLCHAIN_FILE:FILEPATH=$cmakeToolchain"
+  "-DVCPKG_TARGET_TRIPLET:STRING=x64-windows"
+)
+& cmake @cmakeConfigureArguments
 Assert-NativeSuccess "Subversion CMake configuration"
 
-cmake --build $buildDirectory --config Release --parallel
+$cmakeBuildArguments = @("--build", $buildDirectory, "--config", "Release", "--parallel")
+& cmake @cmakeBuildArguments
 Assert-NativeSuccess "Subversion build"
-cmake --install $buildDirectory --config Release
+$cmakeInstallArguments = @(
+  "--install"
+  $buildDirectory
+  "--config"
+  "Release"
+  "--prefix"
+  $installStaging
+)
+& cmake @cmakeInstallArguments
 Assert-NativeSuccess "Subversion installation"
 
 $installedBin = Join-Path $installStaging "bin"
+if (-not (Test-Path -LiteralPath $installedBin -PathType Container)) {
+  throw "Subversion installation did not create the expected bin directory: $installedBin"
+}
+foreach ($requiredExecutable in @("svn.exe", "svnadmin.exe")) {
+  $installedExecutable = Join-Path $installedBin $requiredExecutable
+  if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) {
+    throw "Subversion installation is missing required executable: $installedExecutable"
+  }
+}
+
 $vcpkgBin = Join-Path $vcpkgRoot "installed\x64-windows\bin"
 $appLocal = Join-Path $vcpkgRoot "scripts\buildsystems\msbuild\applocal.ps1"
 & $appLocal -targetBinary (Join-Path $installedBin "svn.exe") -installedDir $vcpkgBin

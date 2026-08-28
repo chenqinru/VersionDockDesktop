@@ -120,7 +120,7 @@ jobs:
           path: ${{ runner.temp }}/versiondock-svn
           key: windows-svn-x64-r1935602-vcpkg-e99d87dc-${{ hashFiles('scripts/setup-windows-svn.ps1') }}
 
-      - name: Build Unicode-capable Windows SVN
+      - name: Prepare Unicode-capable Windows SVN
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
