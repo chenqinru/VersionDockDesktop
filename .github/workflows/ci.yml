@@ -8,72 +8,125 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> src-tauri/target
+
+      - name: Install Linux system dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
+
+      - name: Check frontend and project metadata
+        run: npm run check:frontend
+
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+
+      - name: Lint Rust
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+  platform:
+    name: Test and bundle (${{ matrix.name }})
+    needs: quality
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-          - os: windows-latest
-          - os: ubuntu-24.04
+          - name: macOS universal
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundle-args: --target universal-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            rust-targets: ''
+            bundle-args: ''
+          - name: Linux x64
+            os: ubuntu-24.04
+            rust-targets: ''
+            bundle-args: ''
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> src-tauri/target
 
-      - name: Linux system dependencies
+      - name: Install Linux system dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev subversion
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf subversion
 
-      - name: macOS SVN tools
+      - name: Install macOS SVN tools
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: brew install subversion
 
-      - name: Windows SVN tools
+      - name: Install Windows SVN tools
         if: runner.os == 'Windows'
         run: |
-          choco install svn -y --no-progress
-          $paths = @(
-            "C:\Program Files\SilkSVN\bin",
-            "C:\Program Files (x86)\SilkSVN\bin",
-            "C:\Program Files\TortoiseSVN\bin",
-            "C:\Program Files (x86)\TortoiseSVN\bin",
-            "C:\Program Files\VisualSVN\bin",
-            "C:\ProgramData\chocolatey\bin",
-            "C:\ProgramData\chocolatey\lib\svn\tools"
-          )
-          foreach ($p in $paths) {
-            if (Test-Path $p) {
-              $p | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              $env:PATH = "$p;$env:PATH"
-            }
-          }
-          $found = (Get-ChildItem -Path "C:\Program Files", "C:\Program Files (x86)", "C:\ProgramData" -Filter "svn.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
-          if ($found) {
-            $dir = $found.DirectoryName
-            $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-            $env:PATH = "$dir;$env:PATH"
-          }
-          where.exe svn
-          svn --version
+          choco install sliksvn --version=1.14.5 -y --no-progress
+          $svnPath = "C:\Program Files\SlikSvn\bin"
+          $svnPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$svnPath;$env:PATH"
+          svn --version --quiet
+          svnadmin --version --quiet
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: npm ci
 
-      - name: Static checks and tests
-        run: npm run check
+      - name: Run Git and SVN integration tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
         env:
           VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
+
+      - name: Build native bundles
+        run: npm run tauri:build -- --ci ${{ matrix.bundle-args }}

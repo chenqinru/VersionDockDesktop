@@ -44,8 +44,8 @@ pub fn resolve_executable(program: &str) -> std::path::PathBuf {
         };
 
         let common_dirs = [
-            r"C:\Program Files\SilkSVN\bin",
-            r"C:\Program Files (x86)\SilkSVN\bin",
+            r"C:\Program Files\SlikSvn\bin",
+            r"C:\Program Files (x86)\SlikSvn\bin",
             r"C:\Program Files\TortoiseSVN\bin",
             r"C:\Program Files (x86)\TortoiseSVN\bin",
             r"C:\Program Files\VisualSVN\bin",

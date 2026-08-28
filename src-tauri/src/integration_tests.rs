@@ -26,6 +26,29 @@ fn available(program: &str) -> bool {
     available
 }
 
+fn svn_file_url(path: &Path) -> String {
+    url::Url::from_file_path(path)
+        .expect("SVN repository path must be absolute")
+        .into()
+}
+
+#[test]
+fn svn_file_urls_are_canonical_and_percent_encoded() {
+    let directory = tempdir().unwrap();
+    let repository_path = directory.path().join("repository path");
+    std::fs::create_dir(&repository_path).unwrap();
+
+    let value = svn_file_url(&repository_path);
+
+    assert!(value.starts_with("file:///"));
+    assert!(value.contains("repository%20path"));
+    assert!(!value.contains('\\'));
+    assert_eq!(
+        url::Url::parse(&value).unwrap().to_file_path().unwrap(),
+        repository_path
+    );
+}
+
 #[tokio::test]
 async fn real_git_file_history_follows_rename_and_loads_revision_content() {
     if !available("git") {
@@ -184,7 +207,7 @@ async fn real_git_and_svn_untracked_files_produce_visible_diffs() {
             "svn",
             &[
                 "checkout",
-                &format!("file://{}", repository_dir.path().display()),
+                &svn_file_url(repository_dir.path()),
                 checkout.to_str().unwrap(),
             ],
             checkout_parent.path(),
@@ -215,7 +238,7 @@ async fn real_svn_file_history_loads_revisions_and_content() {
         &["create", repository_dir.path().to_str().unwrap()],
         checkout_parent.path(),
     );
-    let url = format!("file://{}", repository_dir.path().to_string_lossy());
+    let url = svn_file_url(repository_dir.path());
     let checkout = checkout_parent.path().join("工作 副本");
     command(
         "svn",
@@ -1246,7 +1269,7 @@ async fn real_svn_advanced_working_copy_operations() {
         &["create", repository_dir.path().to_str().unwrap()],
         working_parent.path(),
     );
-    let repository_url = format!("file://{}", repository_dir.path().display());
+    let repository_url = svn_file_url(repository_dir.path());
     command(
         "svn",
         &[
@@ -2089,14 +2112,14 @@ async fn real_svn_core_workflow() {
         return;
     }
     let directory = tempdir().unwrap();
-    let repository_path = directory.path().join("repository");
+    let repository_path = directory.path().join("repository path");
     let checkout = directory.path().join("checkout");
     command(
         "svnadmin",
         &["create", repository_path.to_str().unwrap()],
         directory.path(),
     );
-    let url = format!("file://{}", repository_path.display());
+    let url = svn_file_url(&repository_path);
     command(
         "svn",
         &["checkout", &url, checkout.to_str().unwrap()],

@@ -36,7 +36,7 @@ npm run dev
 npm run check
 ```
 
-该命令执行独立性扫描、TypeScript、ESLint、Vitest、Vite build、Rust fmt、Clippy 和 Cargo tests。Rust 测试会在本机工具可用时创建真实临时 Git/SVN 仓库；测试数据不写入用户仓库。
+该命令校验项目版本元数据，并执行独立性扫描、TypeScript、ESLint、Vitest、Vite build、Rust fmt、Clippy 和 Cargo tests。Rust 测试会在本机工具可用时创建真实临时 Git/SVN 仓库；测试数据不写入用户仓库。
 
 生成并校验 Rust → TypeScript 契约：
 
@@ -51,11 +51,11 @@ npm run bindings:check
 npm run tauri:build
 ```
 
-- macOS：`.app`、`.dmg`
+- macOS：Apple Silicon 与 Intel 通用的 `.app`、`.dmg`
 - Windows：NSIS/MSI（以 Tauri 构建机配置为准）
 - Linux：AppImage、deb、rpm
 
-`.github/workflows/ci.yml` 在三平台运行静态检查、测试和 bundle 构建。CI 构建成功不等同于各平台已完成视觉运行验收。
+`.github/workflows/ci.yml` 先运行一次前端与 Rust 质量门禁，再在 macOS、Windows、Linux 分别运行真实 Git/SVN 集成测试和原生 bundle 构建。`.github/workflows/release.yml` 会在发布前重复完整门禁，并校验 Git tag 与项目版本一致。CI 构建成功不等同于各平台已完成视觉运行验收。
 
 ## 安全边界
 

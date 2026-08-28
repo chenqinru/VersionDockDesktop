@@ -13,6 +13,7 @@ const packageJsonPath = path.join(rootDir, 'package.json');
 const packageLockJsonPath = path.join(rootDir, 'package-lock.json');
 const tauriConfPath = path.join(rootDir, 'src-tauri', 'tauri.conf.json');
 const cargoTomlPath = path.join(rootDir, 'src-tauri', 'Cargo.toml');
+const cargoLockPath = path.join(rootDir, 'src-tauri', 'Cargo.lock');
 
 // ANSI 颜色输出辅助函数
 const colors = {
@@ -170,6 +171,17 @@ function updateFiles(currentVersion, newVersion) {
     if (updatedCargo !== cargoContent) {
       fs.writeFileSync(cargoTomlPath, updatedCargo, 'utf8');
       updatedFiles.push('src-tauri/Cargo.toml');
+    }
+  }
+
+  // 5. 更新 Cargo.lock 中当前应用包的版本，保证 CI 可以使用 --locked。
+  if (fs.existsSync(cargoLockPath)) {
+    let cargoLockContent = fs.readFileSync(cargoLockPath, 'utf8');
+    const packagePattern = /(\[\[package\]\]\s+name\s*=\s*"versiondock-desktop"\s+version\s*=\s*")([^"]+)(")/;
+    if (packagePattern.test(cargoLockContent)) {
+      cargoLockContent = cargoLockContent.replace(packagePattern, `$1${newVersion}$3`);
+      fs.writeFileSync(cargoLockPath, cargoLockContent, 'utf8');
+      updatedFiles.push('src-tauri/Cargo.lock');
     }
   }
 

@@ -7,51 +7,132 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-          - os: windows-latest
-          - os: ubuntu-24.04
-    runs-on: ${{ matrix.os }}
+  verify:
+    name: Verify release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> src-tauri/target
 
-      - name: Linux system dependencies
+      - name: Install Linux system dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev subversion
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
+
+      - name: Run complete release checks
+        run: npm run check
+        env:
+          VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
+
+      - name: Verify release version
+        id: version
+        run: node scripts/check-version.mjs
+
+  publish:
+    name: Publish (${{ matrix.name }})
+    needs: verify
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundle-args: --target universal-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            rust-targets: ''
+            bundle-args: ''
+          - name: Linux x64
+            os: ubuntu-24.04
+            rust-targets: ''
+            bundle-args: ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> src-tauri/target
+
+      - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and Publish Release
-        uses: tauri-apps/tauri-action@v0
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: 'VersionDock Desktop v__VERSION__'
-          releaseBody: 'See assets below to download VersionDock Desktop for your operating system.'
-          releaseDraft: false
-          prerelease: false
+          tagName: v${{ needs.verify.outputs.version }}
+          releaseName: VersionDock Desktop v${{ needs.verify.outputs.version }}
+          releaseBody: See assets below to download VersionDock Desktop for your operating system.
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: true
+          prerelease: ${{ needs.verify.outputs.prerelease }}
+          args: ${{ matrix.bundle-args }}
+
+  finalize:
+    name: Finalize release
+    needs:
+      - verify
+      - publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish completed draft
+        run: gh release edit "v${{ needs.verify.outputs.version }}" --draft=false --prerelease=${{ needs.verify.outputs.prerelease }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}

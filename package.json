@@ -18,11 +18,14 @@
     "build": "npm run bindings:check && vite build",
     "bindings": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings -- --nocapture",
     "bindings:check": "node scripts/check-bindings.mjs",
+    "check:metadata": "node scripts/check-version.mjs",
     "check:independence": "node scripts/check-independence.mjs",
     "check:window": "node scripts/check-window-config.mjs",
     "version:bump": "node scripts/bump-version.mjs",
     "icons:generate": "node scripts/generate-icons.mjs",
-    "check": "npm run check:independence && npm run check:window && npm run typecheck && npm run lint && npm run test && npm run build && cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
+    "check:frontend": "npm run check:metadata && npm run check:independence && npm run check:window && npm run typecheck && npm run lint && npm run test && npm run build",
+    "check:rust": "cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "check": "npm run check:frontend && npm run check:rust"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",
