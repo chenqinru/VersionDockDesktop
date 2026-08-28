@@ -779,10 +779,1124 @@ body.is-tab-drop-target * {
   margin: 3px 4px;
   background: var(--versiondock-border-soft);
 }
-.settings-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--versiondock-bg) 42%, transparent); animation: settings-fade-in .12s ease-out; }
-.settings-modal { width: min(900px, calc(100vw - 24px)); height: min(700px, calc(100vh - 48px)); max-height: calc(100vh - 48px); overflow: hidden; display: flex; flex-direction: column; padding: 12px 14px 14px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 12px 34px #0009; animation: settings-modal-in .14s ease-out; }
-.settings-heading { display: flex; align-items: center; font-weight: 600; margin-bottom: 10px; }.settings-heading span { flex: 1; }.settings-heading button { width: 24px; height: 24px; }.settings-modal .settings-heading { position: relative; min-height: 30px; flex: 0 0 30px; margin: 0; }.settings-modal .settings-heading .settings-title { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; gap: 7px; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); line-height: 18px; white-space: nowrap; }.settings-modal .settings-heading .settings-title .codicon { color: var(--versiondock-accent); font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }.settings-modal .settings-heading button { margin-left: auto; border: 1px solid transparent; }.settings-modal .settings-heading button:hover { background: var(--versiondock-hover); border-color: var(--versiondock-border); }
-.settings-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 14px; border-top: 1px solid var(--versiondock-border-soft); padding-top: 10px; }.settings-nav { min-width: 0; padding-right: 10px; border-right: 1px solid var(--versiondock-border-soft); }.settings-nav a { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 8px; color: var(--versiondock-muted); text-decoration: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 16px; }.settings-nav a:hover, .settings-nav a.active { color: var(--versiondock-text); background: var(--versiondock-hover); }.settings-nav a.active { box-shadow: inset 2px 0 var(--versiondock-accent); color: var(--versiondock-accent); }.settings-nav .codicon { flex: 0 0 14px; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }.settings-nav span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.settings-content { min-width: 0; min-height: 0; overflow: auto; padding: 0 4px 4px 0; scroll-behavior: smooth; }.settings-section { display: grid; gap: 5px; scroll-margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--versiondock-border-soft); }.settings-section:first-child { padding-top: 0; border-top: 0; }.settings-section + .settings-section { margin-top: 12px; }.settings-section-title { height: 24px; display: flex; align-items: center; gap: 6px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 16px; letter-spacing: .04em; text-transform: uppercase; }.settings-section-title .codicon { font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-accent); }.settings-field { min-height: 42px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 150px); align-items: center; gap: 10px; }.settings-label, .settings-input-field { min-width: 0; display: flex; flex-direction: column; gap: 2px; }.settings-label strong, .settings-label-text { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; line-height: 16px; }.settings-label small, .settings-help { color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); line-height: 14px; }.settings-field select { width: 100%; height: 27px; padding: 0 5px; border: 1px solid var(--versiondock-border); background: var(--versiondock-input); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }.settings-field select:focus, .settings-input-field input:focus, .settings-input-field textarea:focus { border-color: var(--versiondock-accent); outline: 1px solid color-mix(in srgb, var(--versiondock-accent) 45%, transparent); outline-offset: -1px; }.settings-editor { gap: 7px; }.settings-editor form { display: grid; gap: 7px; }.settings-input-field input, .settings-input-field textarea { width: 100%; padding: 5px 6px; color: inherit; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); font: calc(11px * var(--versiondock-ui-font-scale, 1))/calc(16px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }.settings-input-field input { height: 28px; }.settings-input-field textarea { min-height: 64px; resize: vertical; }.settings-editor-actions { display: flex; justify-content: flex-end; }.settings-editor-actions button { min-width: 58px; height: 27px; padding: 0 10px; background: var(--versiondock-accent-bg); color: white; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }.settings-editor-actions button:disabled { opacity: .5; cursor: default; }.settings-editor-actions button:not(:disabled):hover { background: var(--versiondock-accent); }.settings-block { display: grid; gap: 5px; padding: 4px 0 5px; }.settings-block textarea { width: 100%; min-height: 48px; padding: 5px 6px; resize: vertical; color: inherit; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); font: calc(11px * var(--versiondock-ui-font-scale, 1))/calc(16px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }.settings-toggle { min-height: 42px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }.settings-toggle > input { width: 14px; height: 14px; margin: 0 4px; accent-color: var(--versiondock-accent-bg); }.settings-number { min-width: 0; display: flex !important; flex-direction: row !important; align-items: center; gap: 5px !important; }.settings-number input { width: 100%; height: 27px; padding: 0 5px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }.settings-number small { flex: 0 0 auto; }.settings-unsupported em { display: block; color: var(--versiondock-warning); font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-style: normal; line-height: 13px; }.settings-unsupported select:disabled, .settings-unsupported input:disabled, .settings-unsupported textarea:disabled { color: var(--versiondock-muted); background: color-mix(in srgb, var(--versiondock-input) 75%, var(--versiondock-surface)); border-color: var(--versiondock-border-soft); opacity: .78; }
+/* ==========================================================================
+   Modern macOS Settings Modal & Controls
+   ========================================================================== */
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--versiondock-bg, #181818) 50%, rgba(0, 0, 0, 0.55));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: settings-fade-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-modal {
+  width: min(860px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--versiondock-surface-alt, #1f1f1f);
+  border: 1px solid color-mix(in srgb, var(--versiondock-border) 80%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px color-mix(in srgb, var(--versiondock-border) 40%, transparent);
+  animation: settings-modal-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--versiondock-text);
+}
+
+/* 顶部标题栏 */
+.settings-heading {
+  position: relative;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  background: var(--versiondock-surface);
+  border-bottom: 1px solid var(--versiondock-border-soft);
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.settings-heading .settings-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text);
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.settings-heading .settings-title .codicon {
+  color: var(--versiondock-accent);
+  font-size: calc(14px * var(--versiondock-ui-font-scale, 1));
+  display: inline-flex;
+  align-items: center;
+}
+
+.settings-close-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--versiondock-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-close-btn:hover {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+  border-color: var(--versiondock-border-soft);
+}
+
+/* 双栏布局 */
+.settings-layout {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  background: var(--versiondock-surface-alt);
+}
+
+/* 左侧侧边栏 */
+.settings-sidebar {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  gap: 10px;
+  background: color-mix(in srgb, var(--versiondock-bg) 65%, var(--versiondock-surface-alt));
+  border-right: 1px solid var(--versiondock-border-soft);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 搜索框 */
+.settings-search-wrapper {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.settings-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--versiondock-muted);
+  font-size: calc(12.5px * var(--versiondock-ui-font-scale, 1));
+  pointer-events: none;
+}
+
+.settings-search-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 24px 0 28px;
+  background: var(--versiondock-input);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  transition: all 0.15s ease;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.settings-search-input:focus {
+  border-color: var(--versiondock-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
+}
+
+.settings-search-clear {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--versiondock-muted) 35%, transparent);
+  border: none;
+  color: var(--versiondock-text);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.settings-search-clear:hover {
+  background: color-mix(in srgb, var(--versiondock-muted) 60%, transparent);
+}
+
+/* 侧边栏导航列表 */
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--versiondock-muted);
+  text-decoration: none;
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 450;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+}
+
+.settings-nav-item.active {
+  background: var(--versiondock-accent-bg, #007acc);
+  color: #ffffff;
+  font-weight: 550;
+}
+
+.settings-nav-icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.settings-nav-item.active .settings-nav-icon-badge .codicon {
+  color: #ffffff;
+}
+
+.settings-nav-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右侧内容主视窗 */
+.settings-content {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  background: var(--versiondock-surface-alt);
+}
+
+.settings-category-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-section-title {
+  display: none;
+}
+
+/* 分组内嵌卡片 Grouped Inset Cards (第一版经典质感) */
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border-soft);
+  border-radius: 9px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.settings-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--versiondock-border-soft);
+  background: color-mix(in srgb, var(--versiondock-surface-alt) 40%, var(--versiondock-surface));
+}
+
+.settings-card-title {
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text);
+}
+
+.settings-card-desc {
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+}
+
+.settings-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 行样式 */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 14px;
+  gap: 14px;
+  box-sizing: border-box;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--versiondock-border-soft);
+}
+
+.settings-row-block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-label strong {
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  color: var(--versiondock-text);
+  line-height: 1.35;
+}
+
+.settings-label small {
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+  line-height: 1.35;
+}
+
+/* 原生隐藏 select 保持测试与 a11y 兼容 */
+.settings-hidden-native-select {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* 现代 macOS 风格自定义下拉菜单 Custom Select */
+.settings-custom-select {
+  position: relative;
+  min-width: 140px;
+  max-width: 220px;
+}
+
+.settings-custom-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  background: var(--versiondock-input);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.settings-custom-select-trigger:hover {
+  background: var(--versiondock-hover);
+  border-color: var(--versiondock-accent);
+}
+
+.settings-custom-select-trigger.open,
+.settings-custom-select-trigger:focus {
+  border-color: var(--versiondock-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
+}
+
+.settings-custom-select-val {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 450;
+}
+
+.settings-custom-select-trigger .codicon {
+  font-size: 12px;
+  color: var(--versiondock-muted);
+  flex-shrink: 0;
+}
+
+.settings-custom-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 260px;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 120;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-custom-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  cursor: pointer;
+  text-align: left;
+  outline: none;
+  transition: background-color 0.1s ease;
+  box-sizing: border-box;
+}
+
+.settings-custom-select-option:hover {
+  background: var(--versiondock-hover);
+}
+
+.settings-custom-select-option.active {
+  color: var(--versiondock-accent);
+  font-weight: 600;
+}
+
+.settings-custom-select-option .codicon-check {
+  font-size: 11px;
+  color: var(--versiondock-accent);
+}
+
+/* 隐藏的原生 input 保持测试与 a11y 兼容 */
+.settings-hidden-native-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* 现代 macOS 风格自定义数字调节步进器 Custom Stepper */
+.settings-custom-stepper {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  background: var(--versiondock-input);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-custom-stepper:focus-within {
+  border-color: var(--versiondock-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
+}
+
+.settings-stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--versiondock-muted);
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.settings-stepper-btn:hover:not(:disabled) {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+}
+
+.settings-stepper-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--versiondock-accent) 20%, transparent);
+  color: var(--versiondock-accent);
+}
+
+.settings-stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.settings-stepper-btn .codicon {
+  font-size: 11px;
+}
+
+.settings-stepper-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-left: 1px solid var(--versiondock-border-soft);
+  border-right: 1px solid var(--versiondock-border-soft);
+  height: 100%;
+  background: color-mix(in srgb, var(--versiondock-surface) 60%, var(--versiondock-input));
+}
+
+.settings-stepper-input {
+  width: 36px;
+  height: 100%;
+  padding: 0;
+  text-align: center;
+  border: none;
+  background: transparent;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 550;
+  outline: none;
+}
+
+.settings-stepper-suffix {
+  color: var(--versiondock-muted);
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  padding-right: 4px;
+  user-select: none;
+}
+
+/* 隐藏原生 textarea 保持测试与 a11y 兼容 */
+.settings-hidden-native-textarea {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* 现代 macOS 风格忽略目录标签列表与输入器 */
+.settings-tags-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 8px;
+  background: var(--versiondock-input);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.settings-tags-empty {
+  color: var(--versiondock-muted);
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-style: italic;
+  padding: 2px 4px;
+}
+
+.settings-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 8px;
+  background: color-mix(in srgb, var(--versiondock-accent) 14%, var(--versiondock-surface));
+  border: 1px solid color-mix(in srgb, var(--versiondock-accent) 32%, var(--versiondock-border));
+  border-radius: 5px;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-family: var(--versiondock-code, monospace);
+  line-height: 1;
+  transition: all 0.12s ease;
+}
+
+.settings-tag-chip:hover {
+  background: color-mix(in srgb, var(--versiondock-accent) 22%, var(--versiondock-surface));
+  border-color: var(--versiondock-accent);
+}
+
+.settings-tag-icon {
+  font-size: 12px;
+  color: var(--versiondock-accent);
+  opacity: 0.85;
+}
+
+.settings-tag-text {
+  user-select: text;
+}
+
+.settings-tag-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: var(--versiondock-muted);
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.settings-tag-remove-btn:hover {
+  background: color-mix(in srgb, var(--versiondock-danger, #f43f5e) 25%, transparent);
+  color: var(--versiondock-danger, #f43f5e);
+}
+
+.settings-tag-remove-btn .codicon {
+  font-size: 10px;
+}
+
+.settings-tag-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.settings-tag-input-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.settings-tag-input-icon {
+  position: absolute;
+  left: 9px;
+  font-size: 12.5px;
+  color: var(--versiondock-muted);
+  pointer-events: none;
+}
+
+.settings-tag-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 10px 0 28px;
+  background: var(--versiondock-input);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-tag-input:focus {
+  border-color: var(--versiondock-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
+}
+
+.settings-tag-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--versiondock-border);
+  background: var(--versiondock-surface);
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+}
+
+.settings-tag-add-btn:hover:not(:disabled) {
+  background: var(--versiondock-hover);
+  border-color: var(--versiondock-accent);
+  color: var(--versiondock-accent);
+}
+
+.settings-tag-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.settings-tag-add-btn .codicon {
+  font-size: 12px;
+}
+
+/* Switch 现代滑动开关 (第一版经典质感) */
+.settings-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.settings-switch-track {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  background-color: color-mix(in srgb, var(--versiondock-input) 80%, var(--versiondock-border));
+  border: 1px solid var(--versiondock-border);
+  border-radius: 12px;
+  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+  box-sizing: border-box;
+}
+
+.settings-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background-color: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-switch input:checked + .settings-switch-track {
+  background-color: var(--versiondock-accent-bg, #007acc);
+  border-color: var(--versiondock-accent-bg, #007acc);
+}
+
+.settings-switch input:checked + .settings-switch-track .settings-switch-thumb {
+  transform: translateX(16px);
+}
+
+.settings-switch.mini .settings-switch-track {
+  width: 32px;
+  height: 18px;
+}
+
+.settings-switch.mini .settings-switch-thumb {
+  top: 1.5px;
+  left: 1.5px;
+  width: 13px;
+  height: 13px;
+}
+
+.settings-switch.mini input:checked + .settings-switch-track .settings-switch-thumb {
+  transform: translateX(14px);
+}
+
+/* 主题分段视觉预览选择器 (第一版经典质感) */
+.settings-theme-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.settings-theme-hidden-select {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.settings-theme-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+
+.settings-theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 10px;
+  background: var(--versiondock-input);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.settings-theme-card:hover {
+  background: var(--versiondock-hover);
+  transform: translateY(-1px);
+}
+
+.settings-theme-card.active {
+  background: color-mix(in srgb, var(--versiondock-accent) 12%, var(--versiondock-surface));
+  border-color: var(--versiondock-accent);
+}
+
+.settings-theme-mock {
+  width: 100%;
+  height: 56px;
+  border-radius: 5px;
+  border: 1px solid var(--versiondock-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.mock-window-bar {
+  height: 12px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  background: rgba(128, 128, 128, 0.15);
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.mock-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.mock-dot.red { background: #ff5f56; }
+.mock-dot.yellow { background: #ffbd2e; }
+.mock-dot.green { background: #27c93f; }
+
+.mock-window-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+}
+
+/* 浅色预览 */
+.theme-preview-light { background: #f3f3f3; }
+.theme-preview-light .mock-sidebar { background: #e6e6e6; border-right: 1px solid #d4d4d4; }
+.theme-preview-light .mock-main { background: #ffffff; }
+
+/* 深色预览 */
+.theme-preview-dark { background: #1e1e1e; }
+.theme-preview-dark .mock-sidebar { background: #252526; border-right: 1px solid #333333; }
+.theme-preview-dark .mock-main { background: #1e1e1e; }
+
+/* 系统预览 (第一版经典对角线) */
+.theme-preview-system { background: linear-gradient(135deg, #ffffff 50%, #1e1e1e 50%); }
+.theme-preview-system .mock-sidebar { background: linear-gradient(135deg, #e6e6e6 50%, #252526 50%); border-right: 1px solid #444; }
+.theme-preview-system .mock-main { background: transparent; }
+
+.settings-theme-caption {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  color: var(--versiondock-text);
+}
+
+/* 仓库列表管理卡片 */
+.settings-repo-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-repo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  min-height: 40px;
+}
+
+.settings-repo-row + .settings-repo-row {
+  border-top: 1px solid var(--versiondock-border-soft);
+}
+
+.settings-repo-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-repo-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
+}
+
+.settings-repo-icon {
+  color: var(--versiondock-muted);
+}
+
+.settings-repo-name {
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  color: var(--versiondock-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-repo-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-color-picker-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.settings-color-picker-badge input[type="color"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.settings-color-picker-preview {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--versiondock-surface);
+  box-shadow: 0 0 0 1px var(--versiondock-border);
+  transition: transform 0.12s ease;
+}
+
+.settings-color-picker-preview:hover {
+  transform: scale(1.15);
+}
+
+/* 关于与更新 Hero 卡片 */
+.settings-about-hero-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border-soft);
+  border-radius: 9px;
+  text-align: center;
+  gap: 16px;
+}
+
+.settings-about-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-about-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  object-fit: contain;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.settings-about-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-about-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-about-app-name {
+  font-size: calc(15px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 650;
+  color: var(--versiondock-text);
+}
+
+.settings-about-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  background: color-mix(in srgb, var(--versiondock-accent) 20%, transparent);
+  color: var(--versiondock-accent);
+  border: 1px solid color-mix(in srgb, var(--versiondock-accent) 40%, transparent);
+}
+
+.settings-about-desc {
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+}
+
+/* 搜索结果列表 */
+.settings-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 现代 macOS 搜索结果空状态 */
+.settings-search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 24px;
+  gap: 12px;
+  text-align: center;
+  color: var(--versiondock-muted);
+}
+
+.settings-search-empty-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--versiondock-accent) 12%, var(--versiondock-surface));
+  border: 1px solid color-mix(in srgb, var(--versiondock-accent) 24%, var(--versiondock-border));
+  color: var(--versiondock-accent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  margin-bottom: 4px;
+}
+
+.settings-search-empty-badge .codicon {
+  font-size: 22px;
+}
+
+.settings-search-empty-title {
+  margin: 0;
+  font-size: calc(13.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text);
+  letter-spacing: -0.01em;
+  max-width: 360px;
+  word-break: break-word;
+}
+
+.settings-search-empty-desc {
+  margin: 0;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+  max-width: 320px;
+  line-height: 1.45;
+}
+
+.settings-search-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 14px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border);
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-search-empty-btn:hover {
+  background: var(--versiondock-hover);
+  border-color: var(--versiondock-accent);
+  color: var(--versiondock-accent);
+}
+
+.settings-search-empty-btn .codicon {
+  font-size: 11px;
+}
+
+.settings-scroll-spacer {
+  height: 280px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .main-workspace { min-height: 0; flex: 1; display: flex; }.commit-slot { flex: 0 0 auto; min-width: 0; }.workspace-slot { position: relative; min-width: 0; flex: 1; overflow: hidden; }
 .comparison-diff-overlay { position: absolute; z-index: 80; inset: 0; overflow: hidden; background: var(--versiondock-bg); }
 .resize-handle { flex: 0 0 4px; margin-left: -2px; margin-right: -2px; position: relative; z-index: 10; cursor: col-resize; }.resize-handle:hover { background: var(--versiondock-accent); }
@@ -1448,18 +2562,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 @keyframes menu-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes workspace-menu-in { from { opacity: 0; } to { opacity: 1; } }
 .settings-section-title { scroll-margin-top: 2px; }
-.settings-scroll-spacer { height: calc(100% - 4px); flex: 0 0 auto; }
-.settings-field > input { width: 100%; height: 27px; padding: 0 5px; color: inherit; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); font: calc(11px * var(--versiondock-ui-font-scale, 1))/calc(16px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }
-.settings-field:has(> select) { position: relative; }
-.settings-field > select { height: 29px; padding: 0 28px 0 8px; appearance: none; -webkit-appearance: none; border-radius: 3px; background: var(--versiondock-input); transition: border-color .12s ease, background-color .12s ease, box-shadow .12s ease; }
-.settings-field:has(> select)::after { content: ""; position: absolute; right: 11px; top: 50%; width: 6px; height: 6px; border-right: 1px solid var(--versiondock-muted); border-bottom: 1px solid var(--versiondock-muted); transform: translateY(-70%) rotate(45deg); pointer-events: none; }
-.settings-field:has(> select):hover::after { border-color: var(--versiondock-accent); }
-.settings-field > select:not(:disabled):hover { background: var(--versiondock-hover); border-color: color-mix(in srgb, var(--versiondock-accent) 55%, var(--versiondock-border)); }
-.settings-field > select:focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 12%, transparent); }
-.settings-field > select:disabled { cursor: default; }
-.settings-field > select option { color: var(--versiondock-text); background: var(--versiondock-surface-alt); }
-.settings-unsupported:has(> select)::after { opacity: .45; }
-.settings-field > input:focus { border-color: var(--versiondock-accent); outline: 1px solid color-mix(in srgb, var(--versiondock-accent) 45%, transparent); outline-offset: -1px; }
 @keyframes settings-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes settings-modal-in { from { opacity: 0; transform: translateY(5px) scale(.99); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
@@ -3222,7 +4324,7 @@ button.danger:not(:disabled):hover,
 .about-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 2000;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -3847,27 +4949,30 @@ button.danger:not(:disabled):hover,
 
 /* 外部编辑器下拉选择框组件 */
 .settings-editor-dropdown-field {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);
+  display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 14px;
+  gap: 16px;
   min-height: 48px;
+  box-sizing: border-box;
 }
 
 .editor-dropdown-container {
   position: relative;
-  width: 100%;
+  width: 220px;
+  max-width: 100%;
 }
 
 .editor-dropdown-trigger {
   width: 100%;
-  height: 32px;
+  height: 30px;
   padding: 0 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--versiondock-input);
   border: 1px solid var(--versiondock-border);
   color: var(--versiondock-text);
@@ -3875,6 +4980,7 @@ button.danger:not(:disabled):hover,
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
+  box-sizing: border-box;
 }
 
 .editor-dropdown-trigger:hover {
@@ -3884,7 +4990,7 @@ button.danger:not(:disabled):hover,
 
 .editor-dropdown-trigger:focus-visible {
   border-color: var(--versiondock-accent);
-  outline: 1px solid color-mix(in srgb, var(--versiondock-accent) 45%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
 }
 
 .editor-dropdown-trigger-val {
@@ -3913,20 +5019,21 @@ button.danger:not(:disabled):hover,
 .editor-dropdown-menu {
   position: absolute;
   top: calc(100% + 4px);
+  left: 0;
   right: 0;
   width: 100%;
-  min-width: 210px;
   max-height: 280px;
   overflow-y: auto;
-  background: var(--versiondock-surface-alt);
+  background: var(--versiondock-surface);
   border: 1px solid var(--versiondock-border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
   z-index: 1000;
   padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  box-sizing: border-box;
 }
 
 .editor-dropdown-item {
@@ -3934,15 +5041,16 @@ button.danger:not(:disabled):hover,
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 32px;
+  height: 30px;
   padding: 0 8px;
-  border-radius: 4px;
+  border-radius: 5px;
   border: none;
   background: transparent;
   color: var(--versiondock-text);
   cursor: pointer;
   transition: background-color 0.12s ease;
   text-align: left;
+  box-sizing: border-box;
 }
 
 .editor-dropdown-item:hover {
@@ -3971,11 +5079,9 @@ button.danger:not(:disabled):hover,
 }
 
 .editor-custom-form {
-  margin-top: 8px;
-  padding: 10px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--versiondock-surface-alt) 60%, transparent);
-  border: 1px dashed var(--versiondock-border);
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--versiondock-border-soft);
+  background: color-mix(in srgb, var(--versiondock-surface-alt) 25%, transparent);
 }
 
 .editor-custom-inline {

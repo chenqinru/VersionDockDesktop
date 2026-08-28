@@ -51,10 +51,13 @@ describe('SettingsPanel', () => {
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), { target: { value: 'dark' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'zhCn' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'File view' }), { target: { value: 'list' } });
     const fontSize = screen.getByRole('combobox', { name: 'UI font size' });
     expect(Array.from(fontSize.querySelectorAll('option')).map((option) => option.value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
     fireEvent.change(fontSize, { target: { value: 'maximum' } });
+
+    // 切换至 Changes and commit 分类
+    fireEvent.click(screen.getByRole('link', { name: 'Changes and commit' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'File view' }), { target: { value: 'list' } });
 
     expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'dark', language: 'zhCn', uiFontSize: 'maximum' });
     expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ fileViewMode: 'list' });
@@ -77,6 +80,9 @@ describe('SettingsPanel', () => {
 
   it('saves external editor configuration and restores null when set to system default', async () => {
     const { bridge, commands } = renderPanel();
+    // 切换至 External editor 分类
+    fireEvent.click(screen.getByRole('link', { name: 'External editor' }));
+
     const trigger = screen.getByRole('button', { name: /External editor/i });
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('option', { name: 'Custom' }));
@@ -120,14 +126,19 @@ describe('SettingsPanel', () => {
     expect(dialog.querySelector('.settings-nav')).toBeInTheDocument();
     expect(dialog.querySelector('.settings-content')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Settings categories' })).toBeInTheDocument();
+
     for (const link of screen.getByRole('navigation', { name: 'Settings categories' }).querySelectorAll('a')) {
+      fireEvent.click(link);
       const target = link.getAttribute('href')?.slice(1);
       expect(target).toBeTruthy();
       expect(document.getElementById(target ?? '')).toHaveClass('settings-section-title');
       expect(document.getElementById(target ?? '')?.querySelector('.codicon')).toBeInTheDocument();
     }
+
     fireEvent.click(screen.getByRole('link', { name: 'External editor' }));
     expect(screen.getByRole('link', { name: 'External editor' })).toHaveClass('active');
+
+    fireEvent.click(screen.getByRole('link', { name: 'Changes and commit' }));
     expect(screen.getByRole('region', { name: 'Changes and commit' })).toContainElement(screen.getByLabelText('Suppress diverged branch warning'));
     expect(screen.queryByText('AI settings')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Git annotations')).not.toBeInTheDocument();
@@ -141,6 +152,7 @@ describe('SettingsPanel', () => {
       </I18nContext.Provider>,
     );
 
+    fireEvent.click(screen.getByRole('link', { name: '仓库与历史' }));
     expect(screen.getByText('可见仓库')).toBeInTheDocument();
     expect(screen.getByText('隐藏的仓库仍会被扫描，可在此恢复显示。')).toBeInTheDocument();
   });
@@ -151,6 +163,7 @@ describe('SettingsPanel', () => {
     expect(screen.queryByLabelText('Enable Copilot')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Git ghost text')).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('link', { name: 'Refresh and startup' }));
     fireEvent.change(screen.getByLabelText('Auto-refresh interval'), { target: { value: '30' } });
     fireEvent.click(screen.getByLabelText('Fetch on startup'));
     await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ autoRefreshInterval: 30, fetchOnStartup: true }));
@@ -160,6 +173,9 @@ describe('SettingsPanel', () => {
   it('selects external editor options via dropdown and supports custom editor configuration', async () => {
     const { commands } = renderPanel();
     
+    // 切换至 External editor 分类
+    fireEvent.click(screen.getByRole('link', { name: 'External editor' }));
+
     // 打开下拉框
     const trigger = screen.getByRole('button', { name: /External editor/i });
     fireEvent.click(trigger);

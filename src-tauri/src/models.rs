@@ -1006,6 +1006,7 @@ impl DesktopSettings {
         self.repository_scan_depth = self.repository_scan_depth.min(10);
         self.maximum_graph_commits = self.maximum_graph_commits.clamp(100, 10_000);
         self.auto_refresh_interval = self.auto_refresh_interval.min(86_400);
+        let mut seen = std::collections::HashSet::new();
         self.ignored_folders = self
             .ignored_folders
             .into_iter()
@@ -1014,10 +1015,9 @@ impl DesktopSettings {
                 !value.is_empty()
                     && !value.contains('\0')
                     && !value.split('/').any(|part| part == "..")
+                    && seen.insert(value.clone())
             })
             .collect();
-        self.ignored_folders.sort();
-        self.ignored_folders.dedup();
         self.project_colors.retain(|_, value| is_color(value));
         self.hidden_repository_ids = self
             .hidden_repository_ids
