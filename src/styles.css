@@ -182,11 +182,10 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   cursor: grabbing;
 }
 
-body.is-dragging-tab,
-body.is-dragging-tab * { cursor: grabbing !important; user-select: none !important; }
-
-body.is-dragging-tab.is-detaching-tab,
-body.is-dragging-tab.is-detaching-tab * { cursor: copy !important; }
+.titlebar-tab.drag-over {
+  border-color: var(--versiondock-primary);
+  background: var(--versiondock-selection);
+}
 
 .titlebar-tab-snap-placeholder {
   display: flex;
@@ -198,15 +197,15 @@ body.is-dragging-tab.is-detaching-tab * { cursor: copy !important; }
   padding: 0 10px;
   box-sizing: border-box;
   border-radius: 6px;
-  border: 1px dashed color-mix(in srgb, var(--versiondock-accent) 58%, var(--versiondock-border));
-  background: color-mix(in srgb, var(--versiondock-surface) 62%, transparent);
-  color: var(--versiondock-muted);
+  border: 1px dashed var(--versiondock-primary);
+  background: var(--versiondock-selection);
+  color: var(--versiondock-text);
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  opacity: .52;
+  opacity: 0.85;
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
-  animation: tabSnapIn 120ms ease-out;
+  animation: tabSnapIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .titlebar-tab-ghost-close {
@@ -218,11 +217,12 @@ body.is-dragging-tab.is-detaching-tab * { cursor: copy !important; }
   margin-left: 2px;
   flex: 0 0 18px;
   font-size: 11px;
+  opacity: 0.6;
 }
 
 @keyframes tabSnapIn {
   from { opacity: 0; transform: scale(.94); }
-  to { opacity: .52; transform: scale(1); }
+  to { opacity: .85; transform: scale(1); }
 }
 
 .titlebar-tabs-track.tab-snap-active {

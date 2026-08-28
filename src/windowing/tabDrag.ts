@@ -55,7 +55,7 @@ export function tabSnapInsertionIndex(
   const inSnapZone = point.screenX >= target.x - TAB_SNAP_MARGIN
     && point.screenX <= target.x + target.width + TAB_SNAP_MARGIN
     && point.screenY >= target.y - TAB_SNAP_MARGIN
-    && point.screenY <= target.y + TAB_BAR_HEIGHT + TAB_SNAP_MARGIN;
+    && point.screenY <= target.y + Math.max(TAB_BAR_HEIGHT + TAB_SNAP_MARGIN, 120);
   if (!inSnapZone) return null;
   const localX = point.screenX - target.x;
   const index = tabMidpoints.findIndex((midpoint) => localX < midpoint);
