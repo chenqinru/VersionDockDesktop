@@ -21,9 +21,56 @@ mod integration_tests;
 use state::AppState;
 use tauri::Manager;
 
+#[cfg(target_os = "macos")]
+fn application_menu(
+    app: &tauri::AppHandle<tauri::Wry>,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem};
+
+    let menu = Menu::default(app)?;
+    let first_item = menu.items()?.into_iter().next().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the macOS default application menu is missing",
+        )
+    })?;
+    let application_submenu = first_item.as_submenu().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the first macOS menu item is not the application submenu",
+        )
+    })?;
+    let package = app.package_info();
+    let about = PredefinedMenuItem::about(
+        app,
+        None,
+        Some(AboutMetadata {
+            name: Some(package.name.clone()),
+            version: Some(package.version.to_string()),
+            copyright: app.config().bundle.copyright.clone(),
+            authors: app
+                .config()
+                .bundle
+                .publisher
+                .clone()
+                .map(|value| vec![value]),
+            icon: app.default_window_icon().cloned(),
+            ..Default::default()
+        }),
+    )?;
+
+    application_submenu.remove_at(0)?;
+    application_submenu.insert(&about, 0)?;
+    Ok(menu)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(application_menu);
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())

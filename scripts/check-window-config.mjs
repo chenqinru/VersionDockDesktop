@@ -31,4 +31,16 @@ if (development.app?.windows) {
   throw new Error('tauri.dev.conf.json must not replace app.windows; keep platform window definitions in the platform config files.');
 }
 
+if ('productName' in development) {
+  throw new Error('Development builds must inherit the release product name instead of overriding it.');
+}
+
+if (!development.identifier || development.identifier === base.identifier) {
+  throw new Error('Development builds must keep a separate application identifier.');
+}
+
+if (base.bundle?.icon?.[0] !== 'icons/128x128@2x.png') {
+  throw new Error('The highest-resolution PNG must remain the default native window and About icon.');
+}
+
 console.log('Tauri window configuration uses macOS overlay, Windows overlay plugin, and Linux custom controls.');
