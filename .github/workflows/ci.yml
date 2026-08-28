@@ -67,18 +67,21 @@ jobs:
         include:
           - name: macOS universal
             os: macos-latest
+            timeout: 45
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             bundle-args: --target universal-apple-darwin
           - name: Windows x64
             os: windows-latest
+            timeout: 75
             rust-targets: ''
             bundle-args: ''
           - name: Linux x64
             os: ubuntu-24.04
+            timeout: 45
             rust-targets: ''
             bundle-args: ''
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -110,11 +113,20 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: brew install subversion
 
-      - name: Install Windows SVN tools
+      - name: Cache Unicode-capable Windows SVN
         if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/versiondock-svn
+          key: windows-svn-x64-r1935602-vcpkg-e99d87dc-${{ hashFiles('scripts/setup-windows-svn.ps1') }}
+
+      - name: Build Unicode-capable Windows SVN
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          choco install tortoisesvn --version=1.14.9.29743 -y --no-progress
-          $svnPath = "C:\Program Files\TortoiseSVN\bin"
+          $svnCache = Join-Path $env:RUNNER_TEMP "versiondock-svn"
+          ./scripts/setup-windows-svn.ps1 -CacheRoot $svnCache
+          $svnPath = (Resolve-Path (Join-Path $svnCache "runtime/bin")).Path
           $svnPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           $env:PATH = "$svnPath;$env:PATH"
           where.exe svn
@@ -144,8 +156,10 @@ jobs:
           Set-Content -LiteralPath $unicodeFile -Value "unicode path" -Encoding utf8NoBOM
           svn add $unicodeFile
           Assert-NativeSuccess "svn add"
-          svn status $workingCopy
-          Assert-NativeSuccess "svn status"
+          svn commit $unicodeFile -m "unicode path smoke"
+          Assert-NativeSuccess "svn commit"
+          svn log $unicodeFile --limit 1
+          Assert-NativeSuccess "svn log"
 
       - name: Install frontend dependencies
         run: npm ci

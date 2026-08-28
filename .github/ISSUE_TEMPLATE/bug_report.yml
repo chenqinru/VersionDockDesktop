@@ -1,0 +1,59 @@
+name: 🐛 Bug Report
+description: Report a bug or issue in VersionDock Desktop
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug in VersionDock Desktop! Please search existing issues first.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the problem...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide detailed steps to reproduce the issue.
+      placeholder: |
+        1. Open VersionDock Desktop...
+        2. Open workspace...
+        3. Perform action...
+        4. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Info
+      description: Your system and application environment.
+      value: |
+        - OS: [e.g. macOS 14.5 (Apple Silicon/Intel) / Windows 11 / Ubuntu 22.04]
+        - VersionDock Desktop Version: [e.g. 0.1.0]
+        - Git Version: [e.g. 2.43.0]
+        - SVN Version: [e.g. 1.14.5]
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output or Screenshots
+      description: Paste any console or terminal error logs, or attach screenshots.
+      render: shell

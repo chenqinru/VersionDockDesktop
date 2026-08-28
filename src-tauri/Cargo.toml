@@ -1,10 +1,15 @@
 [package]
 name = "versiondock-desktop"
 version = "0.1.0"
-description = "Independent Git and SVN desktop workbench"
+description = "Independent Git and SVN desktop workbench built with Tauri 2, Rust and React"
 authors = ["chenqinru"]
 edition = "2021"
 license = "GPL-3.0-only"
+repository = "https://github.com/chenqinru/VersionDockDesktop"
+homepage = "https://github.com/chenqinru/VersionDockDesktop"
+readme = "../README.md"
+keywords = ["git", "svn", "tauri", "desktop", "vcs"]
+categories = ["development-tools"]
 
 [lib]
 name = "versiondock_desktop_lib"

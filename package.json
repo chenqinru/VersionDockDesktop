@@ -1,8 +1,37 @@
 {
   "name": "versiondock-desktop",
   "version": "0.1.0",
+  "description": "Independent Git and SVN desktop workbench built with Tauri 2, Rust and React",
   "private": true,
   "license": "GPL-3.0-only",
+  "author": {
+    "name": "chenqinru",
+    "url": "https://github.com/chenqinru"
+  },
+  "homepage": "https://github.com/chenqinru/VersionDockDesktop#readme",
+  "bugs": {
+    "url": "https://github.com/chenqinru/VersionDockDesktop/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chenqinru/VersionDockDesktop.git"
+  },
+  "keywords": [
+    "git",
+    "svn",
+    "tauri",
+    "rust",
+    "react",
+    "desktop",
+    "vcs",
+    "version-control",
+    "source-control",
+    "git-graph",
+    "merge-editor",
+    "changelist",
+    "shelve",
+    "stash"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite",

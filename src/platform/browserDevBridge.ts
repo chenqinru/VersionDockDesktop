@@ -34,7 +34,7 @@ const initialRepositories: RepositoryStatus[] = [
     { path: 'apps/web-antd/src/views/infra/config/data.ts', status: 'modified', staged: true, unstaged: true, conflicted: false },
   ], 1),
   repository('api', 'API', '#61afef', 'prod', [
-    { path: 'youth-module-system/src/main/java/ConfigService.java', status: 'modified', staged: false, unstaged: true, conflicted: false },
+    { path: 'apps/service-api/src/main/java/ConfigService.java', status: 'modified', staged: false, unstaged: true, conflicted: false },
   ], 0, 2),
   repository('sentry-admin', 'SENTRY-ADMIN', '#dcdcaa', 'main', []),
   repository('system-admin', 'SYSTEM-ADMIN', '#c678dd', 'prod', [
@@ -50,22 +50,22 @@ const makeCommit = (repoId: string, hash: string, message: string, author: strin
 
 const histories: Record<string, CommitNode[]> = {
   admin: [
-    makeCommit('admin', '06457b02', 'feat(infra): 增强参数配置模块查询与编辑功能', 'chenqinru', '2026-03-31T17:40:00+08:00', ['HEAD -> main', 'origin/main']),
-    makeCommit('admin', 'ba5f0012', 'Merge branch prod-task-center into main', 'chenqinru', '2026-03-31T10:02:00+08:00', [], ['06457b02', 'cc813a40']),
-    makeCommit('admin', 'cc813a40', 'feat: 增加路由实例通知响应拦截器', 'chenqinru', '2026-03-30T14:48:00+08:00', []),
+    makeCommit('admin', '06457b02', 'feat(infra): enhance configuration query and edit capabilities', 'chenqinru', '2026-03-31T17:40:00+08:00', ['HEAD -> main', 'origin/main']),
+    makeCommit('admin', 'ba5f0012', 'Merge branch feat/task-center into main', 'chenqinru', '2026-03-31T10:02:00+08:00', [], ['06457b02', 'cc813a40']),
+    makeCommit('admin', 'cc813a40', 'feat(router): add response interceptor for route notifications', 'chenqinru', '2026-03-30T14:48:00+08:00', []),
   ],
   api: [
-    makeCommit('api', '27889852', 'chore(ci): 统一 Runner 并优化构建流程', '278898052', '2026-06-30T21:27:00+08:00', ['origin/prod', 'prod']),
-    makeCommit('api', '1a1fd3ce', 'feat(bpm): 流程模型新增通用配置功能', 'ziye', '2026-03-30T14:48:00+08:00', []),
+    makeCommit('api', '27889852', 'chore(ci): standardize runner configuration and build workflow', 'alex', '2026-06-30T21:27:00+08:00', ['origin/prod', 'prod']),
+    makeCommit('api', '1a1fd3ce', 'feat(workflow): add general configuration support for model definitions', 'sarah', '2026-03-30T14:48:00+08:00', []),
   ],
   'sentry-admin': [
-    makeCommit('sentry-admin', '92a31c01', 'refactor: 移除冗余业务模块', 'ziye', '2025-11-11T17:31:00+08:00', ['origin/dev-ziye']),
+    makeCommit('sentry-admin', '92a31c01', 'refactor: remove deprecated telemetry modules', 'sarah', '2025-11-11T17:31:00+08:00', ['origin/feat/telemetry-cleanup']),
   ],
   'system-admin': [
-    makeCommit('system-admin', 'fed41c22', 'chore(ci): 更新 pnpm 版本以确保构建环境一致性', 'chenqinru', '2026-05-08T16:10:00+08:00', ['main', 'origin/main', 'origin/HEAD']),
+    makeCommit('system-admin', 'fed41c22', 'chore(ci): bump pnpm version to align build environment', 'chenqinru', '2026-05-08T16:10:00+08:00', ['main', 'origin/main', 'origin/HEAD']),
   ],
   'transaction-works-admin': [
-    makeCommit('transaction-works-admin', 'bbd092a1', 'feat: 增强文件预览组件', '叶子', '2025-10-30T17:21:00+08:00', []),
+    makeCommit('transaction-works-admin', 'bbd092a1', 'feat: enhance file preview component integration', 'jordan', '2025-10-30T17:21:00+08:00', []),
   ],
 };
 
@@ -87,45 +87,45 @@ function createDemoHistory(repoId: string, branch: string, authors: string[]): C
     const author = authors[index % authors.length];
     const message = mergeIndexes.has(index)
       ? `Merge branch '${index % 2 ? 'feature/phase2-dev' : 'prod'}' into ${branch}`
-      : `${index % 3 === 0 ? 'feat' : index % 3 === 1 ? 'fix' : 'refactor'}(${repoId}): ${index % 2 ? '优化提交日志和项目配置展示' : '完善业务模块查询与编辑能力'}`;
+      : `${index % 3 === 0 ? 'feat' : index % 3 === 1 ? 'fix' : 'refactor'}(${repoId}): ${index % 2 ? 'optimize commit log and workspace rendering' : 'improve module queries and state management'}`;
     return { ...makeCommit(repoId, hash, message, author, date, refs, parents), incoming: index % 9 === 5, unpushed: index % 13 === 0 };
   });
 }
 
-const officeRulesMessages = [
-  'feat(office-rules): 新增即发年月字段并更新通讯录标题和组织架构名称',
-  'feat(office-rules): 调整制度统计卡片样式并支持点击筛选',
-  'fix(office-rules): 卡片 hover 改用分类间色蓝底白字',
-  'fix(office-rules): 制度卡片 hover 改为紫底白字',
-  'fix(office-rules): 卡片 hover 改为文字颜色加深',
-  'fix(office-rules): 卡片 hover 改为阴影提高，避免位移截断顶部',
-  'fix(office-rules): 废止状态标签红并修复卡片 hover 顶边被截断',
-  'fix(office-rules): 回退状态强调样式，卡片仅加粗区分',
-  'feat(office-rules): 制度查询新增横向并优化状态样式区分',
-  'fix(office-rules): 废止与版本变更后同步刷新制度统计',
-  'refactor(office-rules): 移除当前展示版本列与版本号表单字段',
-  'feat(office-rules): 列表增加当前展示版本列',
-  'refactor(office-rules): 列表表序号并移除制度编号字段',
-  'feat(office-rules): 制度管理顶部增加状态统计条',
-  'feat(office-rules): 优化制度列表字段、操作列与编辑弹窗体验',
-  'fix(teacher): 岗位责任书为空时不展示查看责任书按钮',
-  'style(responsibility-preview): 收紧当前岗位责任文本字号与行距',
-  'feat(contacts): 部门通讯录布局与岗位责任预览交互优化',
-  'style(teacher): 优化代码格式，调整选项获取方式并重新添加从数组时长字段',
-  'feat(teacher): 移除正式入职时间和参加工会活动情况字段，新增最新处理时间排序功能',
-  'feat(bpm-my): 我发起的列表区分已结束与进行中，近3天有更新时突出显示',
-  'style(workspace): 加宽我的面板顶部统计卡片',
-  'feat(bpm-copy): 菜单角标与工作台抄送计数改为仅统计未读',
-  'feat(bpm-copy): 抄送列表支持已读状态并突出显示未读选项',
-  'feat(menu): 我发起的菜单角标与工作台进行中数量保持一致',
-  'style(workspace): 统一我的待办、通知公告与我的消息列表字体与配色',
-  'feat(workspace): 最新消息改名为我的消息并增加更新红点',
-  'feat(workspace): 通知公告有更新时间标题显示红点，点击后清除',
-  'feat(workspace): 我的面板改版，顶栏统计可跳转并优化列表布局',
-  'feat(common-ui): 常用功能卡片样式改版',
-  'feat(common-ui): 工作台头部支持统计项展示与点击',
-  'refactor(notify): 将“我的站内信”文案统一为“我的消息”',
-  'feat(menu): 我的待办与抄送的菜单增加计数角标',
+const standardDemoMessages = [
+  'feat(settings): add dynamic property filtering and update layout schema',
+  'feat(analytics): adjust statistical metrics cards with filter triggers',
+  'fix(ui): customize card hover palette and elevation contrast',
+  'fix(theme): optimize dark mode badge contrast and border radius',
+  'fix(style): refine hover transition timing on action buttons',
+  'fix(components): prevent top boundary clipping during modal popups',
+  'fix(badge): correct status tag variant and update badge indicators',
+  'fix(history): emphasize revert status and improve row contrast',
+  'feat(query): add horizontal scrolling for wide query tables',
+  'fix(cache): refresh store state following schema migration',
+  'refactor(schema): remove deprecated display version properties',
+  'feat(views): introduce active version column to revision list',
+  'refactor(grid): clean up table column indexes and identifiers',
+  'feat(dashboard): add status overview ribbon to main header',
+  'feat(dialog): streamline dialog actions and edit form UX',
+  'fix(action): hide trigger button when target entity is empty',
+  'style(typography): tighten monospace font scale and line height',
+  'feat(navigation): optimize tree layout and sidebar breadcrumbs',
+  'style(formatter): standardize code formatting and array duration helper',
+  'feat(filters): add sort by latest updated timestamp',
+  'feat(tasks): separate completed and active jobs in task list',
+  'style(layout): widen top statistical summary panels',
+  'feat(notifications): only count unread items for badge indicator',
+  'feat(notifications): support mark-as-read state in notification center',
+  'feat(menu): sync sidebar badge counters with pending task count',
+  'style(theme): harmonize font and color palette across list views',
+  'feat(messages): add real-time unread dot indicators',
+  'feat(announcements): clear notification dot on item click',
+  'feat(workspace): redesign dashboard header with navigation shortcuts',
+  'feat(widgets): update common utility widget styles',
+  'feat(metrics): support click-to-filter on dashboard counters',
+  'refactor(i18n): unify notification terminology across localizations',
+  'feat(badge): add badge indicators for pending work items',
 ] as const;
 
 function createOfficeRulesHistory(): CommitNode[] {
@@ -148,7 +148,7 @@ function createOfficeRulesHistory(): CommitNode[] {
     return -1;
   };
   const leadRows = [
-    { message: 'chore(config): 忽略 Rebel 配置文件', author: 'chenqinru', date: '2026-08-14T18:01:00+08:00', refs: ['chenqinru', 'HEAD -> chenqinru'] },
+    { message: 'chore(config): ignore local environment override files', author: 'chenqinru', date: '2026-08-14T18:01:00+08:00', refs: ['main', 'HEAD -> main'] },
   ] as const;
   const start = new Date('2026-08-14T17:32:00+08:00');
   return Array.from({ length: count }, (_, index) => {
@@ -167,12 +167,12 @@ function createOfficeRulesHistory(): CommitNode[] {
     if (index === 1) refs.push('origin/feat/phase2-dev');
     if (index === 17) refs.push('origin/prod');
     if (index === 22) refs.push('prod');
-    if (index === 30) refs.push('origin/dev-ziye');
+    if (index === 30) refs.push('origin/feat/query-builder');
     if (index === 40) refs.push('tag: v1.0.0');
-    const author = lead?.author ?? (index % 9 === 0 ? 'chenqinru' : index % 7 === 0 ? 'huguoliang' : 'ziye');
+    const author = lead?.author ?? (index % 9 === 0 ? 'chenqinru' : index % 7 === 0 ? 'alex' : 'sarah');
     const message = lead?.message ?? (mergeIndexes.has(index)
-      ? `Merge branch '${index % 2 ? 'main' : 'prod'}' into feat/office-rules`
-      : officeRulesMessages[(index - leadRows.length) % officeRulesMessages.length]);
+      ? `Merge branch '${index % 2 ? 'main' : 'prod'}' into feat/workspace-analytics`
+      : standardDemoMessages[(index - leadRows.length) % standardDemoMessages.length]);
     return { ...makeCommit('transaction-works-admin', hash, message, author, date, refs, parents), incoming: index % 11 === 4, unpushed: index % 17 === 0 };
   });
 }
@@ -182,33 +182,32 @@ function createSvnHistory(repoId: string, branch: string, author: string): Commi
     const revision = 7453 - index;
     const parents = index === 41 ? [] : [`r${revision - 1}`];
     const date = new Date(Date.UTC(2026, 7, 13, 8, 50) - index * 1000 * 60 * 125).toISOString();
-    return makeCommit(repoId, `r${revision}`, index === 0 ? `SVN 修订 ${revision}` : `feat(${branch}): 完善业务配置与列表展示`, author, date, index === 0 ? ['HEAD'] : [], parents);
+    return makeCommit(repoId, `r${revision}`, index === 0 ? `SVN revision ${revision}` : `feat(${branch}): update service config and table schema`, author, date, index === 0 ? ['HEAD'] : [], parents);
   });
 }
 
 const demoHistories: Record<string, CommitNode[]> = Object.fromEntries([
-  ['admin', createDemoHistory('admin', 'main', ['chenqinru', 'ziye', 'huguoliang'])],
-  ['api', createDemoHistory('api', 'prod', ['ziye', 'huguoliang', 'chenqinru'])],
-  ['sentry-admin', createDemoHistory('sentry-admin', 'main', ['ziye', 'xih'])],
-  ['system-admin', createDemoHistory('system-admin', 'prod', ['chenqinru', 'ziye'])],
+  ['admin', createDemoHistory('admin', 'main', ['chenqinru', 'sarah', 'alex'])],
+  ['api', createDemoHistory('api', 'prod', ['sarah', 'alex', 'chenqinru'])],
+  ['sentry-admin', createDemoHistory('sentry-admin', 'main', ['sarah', 'jordan'])],
+  ['system-admin', createDemoHistory('system-admin', 'prod', ['chenqinru', 'sarah'])],
   ['transaction-works-admin', createOfficeRulesHistory()],
 ]);
 
 const mixedHistories: Record<string, CommitNode[]> = {
-  'mixed-git': createDemoHistory('mixed-git', 'main', ['chenqinru', 'ziye']),
-  'mixed-api-git': createDemoHistory('mixed-api-git', 'main', ['ziye', 'huguoliang']),
-  'mixed-admin-svn': createSvnHistory('mixed-admin-svn', 'admin_code', 'xih'),
-  'mixed-api-svn': createSvnHistory('mixed-api-svn', 'api', 'xih'),
+  'mixed-git': createDemoHistory('mixed-git', 'main', ['chenqinru', 'sarah']),
+  'mixed-api-git': createDemoHistory('mixed-api-git', 'main', ['sarah', 'alex']),
+  'mixed-admin-svn': createSvnHistory('mixed-admin-svn', 'admin_code', 'jordan'),
+  'mixed-api-svn': createSvnHistory('mixed-api-svn', 'api', 'jordan'),
 };
 
 const activeHistories = browserDemoMode === 'mixed' ? mixedHistories : demoHistories;
 
 const demoLocalBranchNames = [
-  'prod', 'main', 'chenqinru', 'bpm-feature', 'bpm-listener', 'cqr', 'data-permission1', 'data-permission2',
-  'DataPermission', 'demo1', 'dev-remote', 'dev-ziye', 'feat/work-report-push', 'file-type-handler',
-  'fleet-local-history', 'HealthCheck', 'hugl', 'prod_sys', 'prod-metadata', 'prod-redis-dqueue',
-  'prod-task-center', 'prod-ziye', 'RedisDelay', 'resilience4j', 'rocketmq', 'send-mail', 'send-sms',
-  'sentry', 'task-center', 'test', 'transaction-works-task-center', 'upgrade', 'upload-task', 'upload-validate',
+  'prod', 'main', 'feat/auth-service', 'feat/event-listener', 'feat/data-permissions',
+  'feat/remote-sync', 'feat/export-pdf', 'feat/local-history', 'feat/health-check',
+  'feat/metadata-sync', 'feat/delay-queue', 'feat/task-center', 'feat/messaging',
+  'feat/telemetry', 'feat/file-uploader', 'release/v1.0.0', 'release/v1.1.0',
 ];
 
 const branches: Record<string, BranchInfo[]> = Object.fromEntries(initialRepositories.map((repo) => {
@@ -230,7 +229,7 @@ const branches: Record<string, BranchInfo[]> = Object.fromEntries(initialReposit
 }));
 
 const mixedRepositories: RepositoryStatus[] = [
-  { ...initialRepositories[0], meta: { ...initialRepositories[0].meta, id: 'mixed-git', name: 'GHCWBX' } },
+  { ...initialRepositories[0], meta: { ...initialRepositories[0].meta, id: 'mixed-git', name: 'CORE-WEB' } },
   { ...initialRepositories[1], meta: { ...initialRepositories[1].meta, id: 'mixed-api-git', name: 'API' } },
   svnRepository('mixed-admin-svn', 'ADMIN', '#d19a66', 'admin_code', '24', 24),
   svnRepository('mixed-api-svn', 'API', '#c678dd', 'api', '30', 30),
@@ -261,7 +260,7 @@ const tags: Record<string, TagInfo[]> = Object.fromEntries(initialRepositories.m
   { name: 'v1.0.0', hash: histories[repo.meta.id][0].hash, date: histories[repo.meta.id][0].committerDate },
 ]]));
 
-const versionNames = ['prod/v0.0.2', 'prod/v0.0.3', 'prod/v1.0.0', 'prod/v1.0.1', 'prod/v1.0.2', 'test/v0.0.1', 'test/v1.0.0', 'test/v1.0.1', 'v0.0.1', 'v0.0.2', 'v1.0.0-bate', 'v1.0.1', 'v1.7.1', 'v1.7.2', 'v1.7.3', 'v1.8.0', 'v1.8.1', 'v1.8.2', 'v1.8.3', 'v1.9.0', 'v2.0.0', 'v2.0.1', 'v2.1.0'];
+const versionNames = ['prod/v0.0.2', 'prod/v0.0.3', 'prod/v1.0.0', 'prod/v1.0.1', 'prod/v1.0.2', 'test/v0.0.1', 'test/v1.0.0', 'test/v1.0.1', 'v0.0.1', 'v0.0.2', 'v1.0.0-beta', 'v1.0.1', 'v1.7.1', 'v1.7.2', 'v1.7.3', 'v1.8.0', 'v1.8.1', 'v1.8.2', 'v1.8.3', 'v1.9.0', 'v2.0.0', 'v2.0.1', 'v2.1.0'];
 const demoTags: Record<string, TagInfo[]> = Object.fromEntries(initialRepositories.map((repo) => [repo.meta.id, [
   ...(tags[repo.meta.id] ?? []),
   ...versionNames.map((name, index) => ({ name, hash: `${repo.meta.id}-tag-${index}`, date: '2026-08-13T08:00:00.000Z' })),
@@ -273,13 +272,13 @@ const detailFiles: Record<string, CommitFile[]> = {
     { path: 'apps/web-antd/src/views/infra/config/data.ts', status: 'M', added: 11, removed: 1 },
   ],
   api: [
-    { path: 'src/main/java/cn/versiondock/api/ConfigService.java', status: 'M', added: 18, removed: 4 },
-    { path: 'src/main/resources/application.yml', status: 'M', added: 4, removed: 2 },
+    { path: 'apps/service-api/src/main/java/cn/versiondock/api/ConfigService.java', status: 'M', added: 18, removed: 4 },
+    { path: 'apps/service-api/src/main/resources/application.yml', status: 'M', added: 4, removed: 2 },
   ],
   'transaction-works-admin': [
-    { path: 'apps/web-antd/src/views/service/office-service/rules/data.ts', status: 'M', added: 6, removed: 2 },
-    { path: 'apps/web-antd/src/views/service/personnel/contacts/modules/dept-sider.vue', status: 'M', added: 2, removed: 2 },
-    { path: 'apps/web-antd/src/views/service/personnel/contacts/index.vue', status: 'M', added: 1, removed: 1 },
+    { path: 'apps/web-antd/src/views/service/analytics/data.ts', status: 'M', added: 6, removed: 2 },
+    { path: 'apps/web-antd/src/views/service/dashboard/modules/chart-card.vue', status: 'M', added: 2, removed: 2 },
+    { path: 'apps/web-antd/src/views/service/dashboard/index.vue', status: 'M', added: 1, removed: 1 },
   ],
 };
 

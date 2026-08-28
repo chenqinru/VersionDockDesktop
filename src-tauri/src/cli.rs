@@ -34,24 +34,6 @@ pub fn resolve_executable(program: &str) -> std::path::PathBuf {
         } else {
             format!("{program}.exe")
         };
-        let preferred_svn_dirs = [
-            r"C:\Program Files\TortoiseSVN\bin",
-            r"C:\Program Files (x86)\TortoiseSVN\bin",
-            r"C:\Program Files\VisualSVN\bin",
-            r"C:\Program Files (x86)\VisualSVN\bin",
-        ];
-        let is_svn = matches!(program, "svn" | "svn.exe" | "svnadmin" | "svnadmin.exe");
-        if is_svn {
-            // SlikSVN replaces non-ASCII command-line arguments with `?` on Windows.
-            // Prefer clients that preserve Unicode paths even when SlikSVN is on PATH.
-            for dir in preferred_svn_dirs {
-                let candidate = PathBuf::from(dir).join(&exe_name);
-                if candidate.exists() {
-                    return candidate;
-                }
-            }
-        }
-
         if let Ok(output) = std::process::Command::new(program)
             .arg("--version")
             .output()
@@ -64,6 +46,10 @@ pub fn resolve_executable(program: &str) -> std::path::PathBuf {
         let fallback_dirs = [
             r"C:\Program Files\SlikSvn\bin",
             r"C:\Program Files (x86)\SlikSvn\bin",
+            r"C:\Program Files\TortoiseSVN\bin",
+            r"C:\Program Files (x86)\TortoiseSVN\bin",
+            r"C:\Program Files\VisualSVN\bin",
+            r"C:\Program Files (x86)\VisualSVN\bin",
             r"C:\ProgramData\chocolatey\bin",
             r"C:\ProgramData\chocolatey\lib\svn\tools",
         ];
