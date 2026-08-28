@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import type { DefaultCommitAction, DefaultSaveAction, ExternalEditor, LanguagePreference, ThemePreference, UiFontSizePreference } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
+import { EditorIcon } from './EditorIcons';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -14,6 +15,7 @@ const settingsCategories = [
   { id: 'settings-section-refresh-title', icon: 'sync', label: 'Refresh and startup' },
   { id: 'settings-section-repository-title', icon: 'repo', label: 'Repository and history' },
   { id: 'settings-section-external-editor-title', icon: 'terminal', label: 'External editor' },
+  { id: 'settings-section-about-title', icon: 'info', label: 'About and updates' },
 ] as const;
 type SettingsCategoryId = typeof settingsCategories[number]['id'];
 
@@ -30,6 +32,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const externalEditor = settings?.externalEditor;
   const repositories = useAppStore((state) => state.allRepositories);
   const updateSettings = useAppStore((state) => state.updateSettings);
+  const openAbout = useAppStore((state) => state.openAbout);
   const setTheme = useAppStore((state) => state.setTheme);
   const setLanguage = useAppStore((state) => state.setLanguage);
   const setUiFontSize = useAppStore((state) => state.setUiFontSize);
@@ -175,6 +178,45 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </SettingsSection>
 
             <ExternalEditorSettings id="settings-section-external-editor" editor={externalEditor} save={setExternalEditor} />
+
+            <SettingsSection id="settings-section-about" icon="info" title={t('About and updates')}>
+              <SettingToggle
+                label={t('Check for updates automatically')}
+                description={t('Automatically check for new VersionDock releases on startup.')}
+                checked={settings?.autoCheckUpdates ?? true}
+                onChange={(value) => void updateSettings({ autoCheckUpdates: value })}
+              />
+              <div className="settings-block">
+                <span className="settings-label">
+                  <strong>VersionDock Desktop v0.1.0</strong>
+                  <small>{t('Independent Git & SVN Workbench')}</small>
+                </span>
+                <div className="settings-about-actions">
+                  <button
+                    type="button"
+                    className="settings-action-btn primary"
+                    onClick={() => {
+                      onClose();
+                      openAbout('about');
+                    }}
+                  >
+                    <Codicon name="info" />
+                    <span>{t('About VersionDock & Check Updates')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    onClick={() => {
+                      onClose();
+                      openAbout('changelog');
+                    }}
+                  >
+                    <Codicon name="history" />
+                    <span>{t('View Release Notes')}</span>
+                  </button>
+                </div>
+              </div>
+            </SettingsSection>
             <div className="settings-scroll-spacer" aria-hidden="true" />
           </div>
         </div>
@@ -211,15 +253,94 @@ function SettingToggle({ label, description, checked, onChange }: { label: strin
   return <label className="settings-toggle"><SettingLabel label={label} description={description} /><input aria-label={label} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>;
 }
 
-function ExternalEditorSettings({ id, editor, save }: { id: string; editor: ExternalEditor | null | undefined; save: (executable: string, args: string[]) => void }) {
-  const [executable, setExecutable] = useState(editor?.executable ?? '');
-  const [args, setArgs] = useState(editor?.args.join('\n') ?? '');
-  const { t } = useI18n();
+interface EditorOption {
+  id: string;
+  name: string;
+  executable: string;
+  args: string[];
+}
 
-  const canSave = executable.trim() !== (editor?.executable ?? '') || args !== (editor?.args.join('\n') ?? '');
-  const submit = () => {
-    if (!canSave) return;
-    save(executable, args.split('\n').filter((argument) => argument.length > 0));
+const EDITOR_OPTIONS: EditorOption[] = [
+  { id: 'vscode', name: 'Visual Studio Code', executable: 'code', args: ['--reuse-window', '{path}'] },
+  { id: 'cursor', name: 'Cursor', executable: 'cursor', args: ['--reuse-window', '{path}'] },
+  { id: 'windsurf', name: 'Windsurf', executable: 'windsurf', args: ['--reuse-window', '{path}'] },
+  { id: 'sublime', name: 'Sublime Text', executable: 'subl', args: ['{path}'] },
+  { id: 'webstorm', name: 'WebStorm', executable: 'webstorm', args: ['{path}'] },
+  { id: 'idea', name: 'IntelliJ IDEA', executable: 'idea', args: ['{path}'] },
+];
+
+function ExternalEditorSettings({ id, editor, save }: { id: string; editor: ExternalEditor | null | undefined; save: (executable: string, args: string[]) => void }) {
+  const { t } = useI18n();
+  const bridge = useAppStore((state) => state.bridge);
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const detectedMode = useMemo(() => {
+    if (!editor?.executable || !editor.executable.trim()) return 'none';
+    const match = EDITOR_OPTIONS.find(
+      (opt) => opt.executable === editor.executable.trim() && opt.args.join('\n') === editor.args.join('\n'),
+    );
+    return match ? match.id : 'custom';
+  }, [editor]);
+
+  const [activeOverrideMode, setActiveOverrideMode] = useState<string | null>(null);
+  const selectedMode = activeOverrideMode ?? detectedMode;
+
+  const [customExecutable, setCustomExecutable] = useState(editor?.executable ?? '');
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent | globalThis.MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelect = (mode: string) => {
+    setIsOpen(false);
+    setActiveOverrideMode(mode);
+    if (mode === 'none') {
+      save('', []);
+    } else if (mode === 'custom') {
+      setCustomExecutable(editor?.executable ?? '');
+    } else {
+      const option = EDITOR_OPTIONS.find((opt) => opt.id === mode);
+      if (option) {
+        save(option.executable, option.args);
+      }
+    }
+  };
+
+  const persist = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      save('', []);
+      return;
+    }
+    const execLower = trimmed.toLowerCase();
+    const defaultArgs =
+      execLower.includes('code') || execLower.includes('cursor') || execLower.includes('windsurf')
+        ? ['--reuse-window', '{path}']
+        : ['{path}'];
+    save(trimmed, defaultArgs);
+  };
+
+  const handleBrowse = async () => {
+    if (!bridge) return;
+    const selected = await bridge.selectExecutable(t('Select editor application'));
+    if (selected) {
+      setCustomExecutable(selected);
+      persist(selected);
+    }
+  };
+
+  const getSelectedLabel = () => {
+    if (selectedMode === 'none') return t('System default');
+    if (selectedMode === 'custom') return t('Custom');
+    const option = EDITOR_OPTIONS.find((opt) => opt.id === selectedMode);
+    return option ? option.name : t('Custom');
   };
 
   return (
@@ -228,20 +349,107 @@ function ExternalEditorSettings({ id, editor, save }: { id: string; editor: Exte
         <Codicon name="terminal" />
         <span>{t('External editor')}</span>
       </div>
-      <form onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        <label className="settings-input-field">
-          <span className="settings-label-text">{t('Executable path')}</span>
-          <input aria-label={t('Executable path')} value={executable} onChange={(event) => setExecutable(event.target.value)} placeholder={t('Executable path')} />
+
+      <div className="settings-editor-dropdown-field">
+        <label className="settings-label" id="external-editor-dropdown-label">
+          <strong>{t('External editor')}</strong>
+          <small>{t('Choose an editor to open files directly from VersionDock.')}</small>
         </label>
-        <label className="settings-input-field">
-          <span className="settings-label-text">{t('Arguments')}</span>
-          <textarea aria-label={t('Arguments')} value={args} onChange={(event) => setArgs(event.target.value)} placeholder={t('One argument per line')} />
-        </label>
-        <small className="settings-help">{t('Available placeholders: {path}, {relativePath}, {repo}')}</small>
-        <div className="settings-editor-actions">
-          <button type="submit" disabled={!canSave}>{t('Save')}</button>
+
+        <div className="editor-dropdown-container" ref={dropdownRef}>
+          <button
+            type="button"
+            className="editor-dropdown-trigger"
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+            aria-labelledby="external-editor-dropdown-label"
+            onClick={() => setIsOpen((prev) => !prev)}
+          >
+            <div className="editor-dropdown-trigger-val">
+              <span className="editor-icon-box"><EditorIcon id={selectedMode} size={18} /></span>
+              <span className="editor-name-text">{getSelectedLabel()}</span>
+            </div>
+            <Codicon name={isOpen ? 'chevron-up' : 'chevron-down'} />
+          </button>
+
+          {isOpen && (
+            <div className="editor-dropdown-menu" role="listbox" tabIndex={-1}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={selectedMode === 'none'}
+                className={`editor-dropdown-item ${selectedMode === 'none' ? 'active' : ''}`}
+                onClick={() => handleSelect('none')}
+              >
+                <span className="editor-icon-box"><EditorIcon id="none" size={18} /></span>
+                <span className="editor-item-name">{t('System default')}</span>
+                {selectedMode === 'none' && <Codicon name="check" />}
+              </button>
+
+              <div className="editor-dropdown-divider" />
+
+              {EDITOR_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedMode === opt.id}
+                  className={`editor-dropdown-item ${selectedMode === opt.id ? 'active' : ''}`}
+                  onClick={() => handleSelect(opt.id)}
+                >
+                  <span className="editor-icon-box"><EditorIcon id={opt.id} size={18} /></span>
+                  <span className="editor-item-name">{opt.name}</span>
+                  {selectedMode === opt.id && <Codicon name="check" />}
+                </button>
+              ))}
+
+              <div className="editor-dropdown-divider" />
+
+              <button
+                type="button"
+                role="option"
+                aria-selected={selectedMode === 'custom'}
+                className={`editor-dropdown-item ${selectedMode === 'custom' ? 'active' : ''}`}
+                onClick={() => handleSelect('custom')}
+              >
+                <span className="editor-icon-box"><EditorIcon id="custom" size={18} /></span>
+                <span className="editor-item-name">{t('Custom')}</span>
+                {selectedMode === 'custom' && <Codicon name="check" />}
+              </button>
+            </div>
+          )}
         </div>
-      </form>
+      </div>
+
+      {selectedMode === 'custom' && (
+        <div className="editor-custom-form">
+          <label className="settings-input-field">
+            <span className="settings-label-text">{t('Editor path or command')}</span>
+            <div className="editor-input-with-browse">
+              <input
+                aria-label={t('Editor path or command')}
+                value={customExecutable}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setCustomExecutable(next);
+                  persist(next);
+                }}
+                placeholder={t('e.g. zed, nvim, or choose application')}
+                autoFocus
+              />
+              <button
+                type="button"
+                className="editor-browse-btn"
+                title={t('Browse application path')}
+                onClick={() => void handleBrowse()}
+              >
+                <Codicon name="folder-opened" />
+                <span>{t('Browse...')}</span>
+              </button>
+            </div>
+          </label>
+        </div>
+      )}
     </section>
   );
 }

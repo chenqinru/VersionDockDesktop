@@ -8,6 +8,7 @@ export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const removeRecent = useAppStore((state) => state.removeRecent);
+  const openAbout = useAppStore((state) => state.openAbout);
   const busy = useAppStore((state) => state.busy);
   const { t } = useI18n();
   const bridge = useBridge();
@@ -53,7 +54,14 @@ export function WorkspaceChooser() {
             <div className="welcome-brand-text">
               <div className="welcome-title-row">
                 <h1>VersionDock</h1>
-                <span className="welcome-version-badge">Desktop</span>
+                <button
+                  type="button"
+                  className="welcome-version-badge clickable"
+                  title={t('About VersionDock & Check Updates')}
+                  onClick={() => openAbout('about')}
+                >
+                  v0.1.0
+                </button>
               </div>
               <p className="welcome-tagline">{t('Unified Git & SVN Desktop Client')}</p>
             </div>

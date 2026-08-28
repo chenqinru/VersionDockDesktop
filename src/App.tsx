@@ -18,6 +18,7 @@ import { FileHistoryPanel } from './components/FileHistoryPanel';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { IdentityPanel } from './components/IdentityPanel';
 import { RemoteManager } from './components/RemoteManager';
+import { AboutDialog } from './components/AboutDialog';
 import { isAbortError } from './platform/bridge';
 
 const UI_FONT_SIZE = {
@@ -47,6 +48,9 @@ export function App() {
   const closeIdentityPanel = useAppStore((state) => state.closeIdentityPanel);
   const remoteManagerRepoId = useAppStore((state) => state.remoteManagerRepoId);
   const closeRemoteManager = useAppStore((state) => state.closeRemoteManager);
+  const aboutOpen = useAppStore((state) => state.aboutOpen);
+  const aboutInitialTab = useAppStore((state) => state.aboutInitialTab);
+  const closeAbout = useAppStore((state) => state.closeAbout);
   const [pluginMessages, setPluginMessages] = useState<Record<string, string>>({});
   const [dropActive, setDropActive] = useState(false);
   const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
@@ -190,6 +194,7 @@ export function App() {
       <FileHistoryPanel />
       {identityPanelRepoId && <IdentityPanel repoId={identityPanelRepoId} close={closeIdentityPanel} />}
       {remoteManagerRepoId && <RemoteManager repoId={remoteManagerRepoId} close={closeRemoteManager} />}
+      {aboutOpen && <AboutDialog onClose={closeAbout} initialTab={aboutInitialTab} />}
     </div>
   </I18nContext.Provider>;
 }

@@ -325,6 +325,7 @@ export class BrowserDevBridge implements VersionDockBridge {
   setState<T>(state: T): void { this.state = structuredClone(state as AppStateSnapshot); }
   send(command: BridgeCommand): void { void this.request(command); }
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
+  async selectExecutable(): Promise<string | null> { return '/usr/local/bin/zed'; }
   async notify(): Promise<boolean> { return false; }
   async openInNewWindow(paths?: string[], _position?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string> {
     if (typeof window !== 'undefined') {

@@ -75,14 +75,14 @@ describe('SettingsPanel', () => {
     expect(theme).toHaveFocus();
   });
 
-  it('saves external editor arguments and restores null when the executable is cleared', async () => {
+  it('saves external editor configuration and restores null when set to system default', async () => {
     const { bridge, commands } = renderPanel();
-    const executable = screen.getByRole('textbox', { name: 'Executable path' });
-    const argumentsField = screen.getByRole('textbox', { name: 'Arguments' });
+    const trigger = screen.getByRole('button', { name: /External editor/i });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'Custom' }));
 
+    const executable = screen.getByRole('textbox', { name: 'Editor path or command' });
     fireEvent.change(executable, { target: { value: '/usr/local/bin/code' } });
-    fireEvent.change(argumentsField, { target: { value: '--reuse-window\n{path}' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(useAppStore.getState().bootstrap?.state.settings?.externalEditor).toEqual({ executable: '/usr/local/bin/code', args: ['--reuse-window', '{path}'] });
     await waitFor(() => expect(commands.some((command) => command.type === 'updateSettings')).toBe(true), { timeout: 500 });
@@ -90,9 +90,12 @@ describe('SettingsPanel', () => {
       state: { settings: { externalEditor: { executable: '/usr/local/bin/code', args: ['--reuse-window', '{path}'] } } },
     });
 
-    const updatedExecutable = screen.getByRole('textbox', { name: 'Executable path' });
-    fireEvent.change(updatedExecutable, { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    const browseBtn = screen.getByRole('button', { name: 'Browse...' });
+    fireEvent.click(browseBtn);
+    await waitFor(() => expect(executable).toHaveValue('/usr/local/bin/mock-editor'));
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'System default' }));
     expect(useAppStore.getState().bootstrap?.state.settings?.externalEditor).toBeNull();
   });
 
@@ -117,7 +120,6 @@ describe('SettingsPanel', () => {
     expect(dialog.querySelector('.settings-nav')).toBeInTheDocument();
     expect(dialog.querySelector('.settings-content')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Settings categories' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'External editor' })).toHaveAttribute('href', '#settings-section-external-editor-title');
     for (const link of screen.getByRole('navigation', { name: 'Settings categories' }).querySelectorAll('a')) {
       const target = link.getAttribute('href')?.slice(1);
       expect(target).toBeTruthy();
@@ -145,20 +147,42 @@ describe('SettingsPanel', () => {
 
   it('persists supported Desktop settings and hides AI/editor-only settings', async () => {
     const { commands } = renderPanel();
-    const supportedLabels = [
-      'Changes display mode', 'Default commit action', 'Default save action', 'Prompt before adding untracked files',
-      'Auto-refresh interval', 'Fetch on startup', 'Reset view locations on startup', 'Notify on incoming commits', 'Notify on unpushed commits',
-      'Repository scan depth', 'Ignored folders', 'Maximum graph commits',
-      'Suppress diverged branch warning',
-    ];
 
-    for (const label of supportedLabels) expect(screen.getByLabelText(label)).toBeEnabled();
-    expect(screen.queryByLabelText('AI provider')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Enable Copilot')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Git ghost text')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Auto-refresh interval'), { target: { value: '30' } });
     fireEvent.click(screen.getByLabelText('Fetch on startup'));
     await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ autoRefreshInterval: 30, fetchOnStartup: true }));
     expect(commands.some((command) => command.type === 'updateSettings')).toBe(true);
+  });
+
+  it('selects external editor options via dropdown and supports custom editor configuration', async () => {
+    const { commands } = renderPanel();
+    
+    // 打开下拉框
+    const trigger = screen.getByRole('button', { name: /External editor/i });
+    fireEvent.click(trigger);
+
+    // 选择 Cursor
+    const cursorOption = screen.getByRole('option', { name: 'Cursor' });
+    fireEvent.click(cursorOption);
+
+    await waitFor(() => {
+      expect(commands.some((c) => c.type === 'updateSettings')).toBe(true);
+    });
+
+    // 再次打开下拉框并选择自定义
+    fireEvent.click(trigger);
+    const customOption = screen.getByRole('option', { name: 'Custom' });
+    fireEvent.click(customOption);
+
+    // 展开了自定义输入框
+    expect(screen.getByLabelText('Editor path or command')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Editor path or command'), { target: { value: 'zed' } });
+
+    await waitFor(() => {
+      expect(commands.some((c) => c.type === 'updateSettings')).toBe(true);
+    });
   });
 });

@@ -949,6 +949,15 @@ pub struct DesktopSettings {
     #[specta(optional)]
     pub hidden_repository_ids: Vec<String>,
     pub external_editor: Option<ExternalEditor>,
+    #[serde(default = "default_auto_check_updates")]
+    pub auto_check_updates: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub skipped_update_version: Option<String>,
+}
+
+fn default_auto_check_updates() -> bool {
+    true
 }
 
 impl Default for DesktopSettings {
@@ -967,6 +976,8 @@ impl Default for DesktopSettings {
             reset_view_locations_on_startup: false,
             notify_incoming_commits: false,
             notify_unpushed_commits: false,
+            auto_check_updates: true,
+            skipped_update_version: None,
             repository_scan_depth: 4,
             ignored_folders: vec![
                 ".git".into(),

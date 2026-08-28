@@ -31,6 +31,7 @@ export interface VersionDockBridge {
   setState<T>(state: T): void;
   platform(): 'macos' | 'windows' | 'linux';
   selectWorkspaceFolders(title: string): Promise<string[]>;
+  selectExecutable(title: string): Promise<string | null>;
   notify(title: string, body: string): Promise<boolean>;
   openInNewWindow(paths?: string[], placement?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string>;
   transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting?: boolean): Promise<boolean>;
@@ -272,6 +273,15 @@ export class TauriBridge implements VersionDockBridge {
     const value = await open({ directory: true, multiple: true, title });
     return !value ? [] : Array.isArray(value) ? value : [value];
   }
+  async selectExecutable(title: string): Promise<string | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const value = await open({
+      directory: false,
+      multiple: false,
+      title,
+    });
+    return typeof value === 'string' ? value : null;
+  }
   async notify(title: string, body: string): Promise<boolean> {
     try {
       const notifications = await import('@tauri-apps/plugin-notification');
@@ -417,6 +427,7 @@ export class MockBridge implements VersionDockBridge {
   setState<T>(state: T): void { this.state = state; }
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }
   async selectWorkspaceFolders(): Promise<string[]> { return []; }
+  async selectExecutable(): Promise<string | null> { return Promise.resolve('/usr/local/bin/mock-editor'); }
   async notify(): Promise<boolean> { return false; }
   async openInNewWindow(): Promise<string> {
     return Promise.resolve('mock-window-new');

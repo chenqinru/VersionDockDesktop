@@ -8,6 +8,7 @@ import type {
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
+import { checkAppUpdate, type AppUpdateCheckResult } from '../services/updater';
 
 export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
@@ -183,6 +184,13 @@ export interface AppStore {
   errorDetails?: string;
   notice?: string;
   notifications: AppNotification[];
+  aboutOpen: boolean;
+  aboutInitialTab: 'about' | 'changelog';
+  openAbout: (tab?: 'about' | 'changelog') => void;
+  closeAbout: () => void;
+  updateAvailableInfo: AppUpdateCheckResult | null;
+  setUpdateAvailableInfo: (info: AppUpdateCheckResult | null) => void;
+  checkUpdateSilently: () => Promise<void>;
   identityPanelRepoId: string | null;
   remoteManagerRepoId: string | null;
   bootstrap?: BootstrapData;
@@ -610,9 +618,28 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, busy: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {},
+    ready: false, busy: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {},
 
     operations: {},
+
+    openAbout: (tab = 'about') => set({ aboutOpen: true, aboutInitialTab: tab }),
+    closeAbout: () => set({ aboutOpen: false }),
+    setUpdateAvailableInfo: (info) => set({ updateAvailableInfo: info }),
+    checkUpdateSilently: async () => {
+      try {
+        const settings = get().bootstrap?.state.settings;
+        if (settings?.autoCheckUpdates === false) return;
+        const result = await checkAppUpdate();
+        if (result.available && result.latestVersion) {
+          if (settings?.skippedUpdateVersion === result.latestVersion) {
+            return;
+          }
+          set({ updateAvailableInfo: result });
+        }
+      } catch {
+        // 静默检查异常捕获
+      }
+    },
 
     initialize: async (value) => {
       set({ bridge: value });
@@ -651,6 +678,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({ error: undefined, errorDetails: undefined });
       }
       set({ ready: true });
+      void get().checkUpdateSilently();
     },
 
     openWorkspace: async (paths, focus = true, options = {}) => {

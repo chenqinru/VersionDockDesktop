@@ -475,6 +475,8 @@ export type DesktopSettings = {
 	projectColors: { [key in string]: string },
 	hiddenRepositoryIds?: string[],
 	externalEditor: ExternalEditor | null,
+	autoCheckUpdates?: boolean,
+	skippedUpdateVersion?: string | null,
 };
 
 export type DiffDocument = {

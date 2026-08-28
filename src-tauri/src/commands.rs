@@ -1797,10 +1797,18 @@ fn launch_external_editor(
     target: &Path,
 ) -> Result<(), DesktopError> {
     let (executable, args) = external_editor_command(editor, repo, relative_path, target)?;
-    let mut child = tokio::process::Command::new(executable)
-        .args(args)
-        .current_dir(&repo.root_path)
-        .kill_on_drop(false)
+    let mut command = if cfg!(target_os = "macos") && executable.ends_with(".app") {
+        let mut cmd = tokio::process::Command::new("open");
+        cmd.arg("-a").arg(&executable).args(args);
+        cmd
+    } else {
+        let mut cmd = tokio::process::Command::new(executable);
+        cmd.args(args);
+        cmd
+    };
+    command.current_dir(&repo.root_path);
+    command.kill_on_drop(false);
+    let mut child = command
         .spawn()
         .map_err(|error| DesktopError::new("EXTERNAL_EDITOR_FAILED", error.to_string(), true))?;
     tauri::async_runtime::spawn(async move {

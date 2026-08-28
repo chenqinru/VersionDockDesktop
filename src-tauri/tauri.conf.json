@@ -26,7 +26,15 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://github.com https://api.github.com https://objects.githubusercontent.com; img-src 'self' asset: http://asset.localhost data: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZEQTM5QzFFNDk2NDc5MTQKUldRVWVXUkpIcHlqL2MzOXRlajB1RTFEWVRDNVpvYzBBaE1oUjZQb01TSXBXNkJ5OTcvb2pBUmIK",
+      "endpoints": [
+        "https://github.com/chenqinru/VersionDockDesktop/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
