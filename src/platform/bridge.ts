@@ -61,9 +61,12 @@ export interface TabDragPayload {
   sourceWindowLabel: string;
   tabId: string;
   tabName: string;
+  tabWidth: number;
   paths: string[];
   screenX: number;
   screenY: number;
+  targetWindowLabel?: string | null;
+  targetClientX?: number | null;
 }
 
 export function isAbortError(error: unknown): boolean {

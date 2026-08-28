@@ -57,6 +57,10 @@ export function TitleBar() {
   const transferringTabsRef = useRef(new Set<string>());
   const windowLabelRef = useRef('');
   const activeTabDragRef = useRef<ActiveTabDrag | null>(null);
+  const remoteDragTabIdRef = useRef<string | null>(null);
+  const nativeRemoteTrackingTabIdRef = useRef<string | null>(null);
+  const importingRemoteTabIdRef = useRef<string | null>(null);
+  const remoteTabRectsRef = useRef<Array<{ left: number; right: number; width: number }> | null>(null);
   const remoteDropTargetRef = useRef(false);
   const suppressClickRef = useRef<string | null>(null);
   const bridge = useBridge();
@@ -153,6 +157,7 @@ export function TitleBar() {
   const [windowLabel, setWindowLabel] = useState<string>('');
   const [remoteDragState, setRemoteDragState] = useState<TabDragPayload | null>(null);
   const [snapInsertionIndex, setSnapInsertionIndex] = useState<number | null>(null);
+  const [remoteDropSlotLeft, setRemoteDropSlotLeft] = useState<number | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -180,6 +185,18 @@ export function TitleBar() {
     void bridge.onImportTab(({ transfer }) => {
       void (async () => {
         const insertionIndex = snapInsertionIndexRef.current ?? useAppStore.getState().tabs.length;
+        importingRemoteTabIdRef.current = transfer.tabId;
+        snapInsertionIndexRef.current = null;
+        remoteDragTabIdRef.current = null;
+        remoteTabRectsRef.current = null;
+        setSnapInsertionIndex(null);
+        setRemoteDropSlotLeft(null);
+        setRemoteDragState(null);
+        document.body.classList.remove('is-tab-drop-target');
+        if (remoteDropTargetRef.current) {
+          remoteDropTargetRef.current = false;
+          void bridge.window.setCursorIcon('default');
+        }
         const accepted = await openWorkspace(transfer.paths, true, {
           skipCrossWindowFocus: true,
           insertionIndex,
@@ -193,10 +210,24 @@ export function TitleBar() {
     });
 
     void bridge.onTabDragState((state) => {
+      if (state && importingRemoteTabIdRef.current === state.tabId) return;
+      if (!state) importingRemoteTabIdRef.current = null;
+      const nativeTargetSpecified = state?.targetWindowLabel !== undefined;
+      if (state && nativeTargetSpecified) {
+        nativeRemoteTrackingTabIdRef.current = state.tabId;
+      } else if (state && nativeRemoteTrackingTabIdRef.current === state.tabId) {
+        return;
+      }
       setRemoteDragState(state);
-      if (!state || state.sourceWindowLabel === windowLabelRef.current) {
+      const targetsThisWindow = !nativeTargetSpecified
+        || state?.targetWindowLabel === windowLabelRef.current;
+      if (!state || state.sourceWindowLabel === windowLabelRef.current || !targetsThisWindow) {
+        remoteDragTabIdRef.current = null;
+        if (!state) nativeRemoteTrackingTabIdRef.current = null;
+        remoteTabRectsRef.current = null;
         snapInsertionIndexRef.current = null;
         setSnapInsertionIndex(null);
+        setRemoteDropSlotLeft(null);
         document.body.classList.remove('is-tab-drop-target');
         if (remoteDropTargetRef.current) {
           remoteDropTargetRef.current = false;
@@ -204,37 +235,56 @@ export function TitleBar() {
         }
         return;
       }
-      const midpoints = Array.from(tabsRef.current?.querySelectorAll<HTMLElement>('.titlebar-tab') ?? [])
-        .map((element) => {
-          const rect = element.getBoundingClientRect();
-          return rect.left + rect.width / 2;
-        });
-      let insertionIndex = tabSnapInsertionIndex(
-        { screenX: state.screenX, screenY: state.screenY },
-        { x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight },
-        midpoints,
-      );
-      if (insertionIndex === null) {
-        const winX = window.screenX;
-        const winY = window.screenY;
-        const winW = window.outerWidth;
-        const winH = window.outerHeight;
-        if (
-          state.screenX >= winX - 25 &&
-          state.screenX <= winX + winW + 25 &&
-          state.screenY >= winY - 25 &&
-          state.screenY <= winY + Math.max(winH, 200)
-        ) {
-          insertionIndex = useAppStore.getState().tabs.length;
-        }
+      if (remoteDragTabIdRef.current !== state.tabId || !remoteTabRectsRef.current) {
+        remoteDragTabIdRef.current = state.tabId;
+        const tabsElement = tabsRef.current;
+        const tabsRect = tabsElement?.getBoundingClientRect();
+        remoteTabRectsRef.current = Array.from(tabsElement?.querySelectorAll<HTMLElement>('.titlebar-tab') ?? [])
+          .map((element) => {
+            if (element.offsetWidth > 0) {
+              return {
+                left: element.offsetLeft,
+                right: element.offsetLeft + element.offsetWidth,
+                width: element.offsetWidth,
+              };
+            }
+            // JSDOM and a few non-layout hosts do not expose offset metrics.
+            // Rects are only a fallback; native Tauri always uses the
+            // transform-independent offset coordinates above.
+            const rect = element.getBoundingClientRect();
+            const left = rect.left - (tabsRect?.left ?? 0) + (tabsElement?.scrollLeft ?? 0);
+            return { left, right: left + rect.width, width: rect.width };
+          });
       }
+      const remoteTabRects = remoteTabRectsRef.current;
+      const tabsRect = tabsRef.current?.getBoundingClientRect();
+      const scrollLeft = tabsRef.current?.scrollLeft ?? 0;
+      const tabMidpoints = remoteTabRects.map((rect) => (tabsRect?.left ?? 0) + rect.left - scrollLeft + rect.width / 2);
+      const insertionIndex = nativeTargetSpecified && state.targetClientX !== null && state.targetClientX !== undefined
+        ? (() => {
+            const index = tabMidpoints.findIndex((midpoint) => state.targetClientX! < midpoint);
+            return index === -1 ? tabMidpoints.length : index;
+          })()
+        : tabSnapInsertionIndex(
+            { screenX: state.screenX, screenY: state.screenY },
+            { x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight },
+            tabMidpoints,
+          );
       snapInsertionIndexRef.current = insertionIndex;
       setSnapInsertionIndex(insertionIndex);
+      if (insertionIndex === null || !tabsRef.current) {
+        setRemoteDropSlotLeft(null);
+      } else {
+        const contentLeft = insertionIndex < remoteTabRects.length
+          ? remoteTabRects[insertionIndex].left
+          : (remoteTabRects.at(-1)?.right ?? 0) + (remoteTabRects.length > 0 ? 4 : 0);
+        setRemoteDropSlotLeft(contentLeft);
+      }
       const isDropTarget = insertionIndex !== null;
       document.body.classList.toggle('is-tab-drop-target', isDropTarget);
       if (remoteDropTargetRef.current !== isDropTarget) {
         remoteDropTargetRef.current = isDropTarget;
-        void bridge.window.setCursorIcon(isDropTarget ? 'copy' : 'default');
+        void bridge.window.setCursorIcon(isDropTarget ? 'grabbing' : 'default');
       }
     }).then((unlisten) => {
       if (disposed) unlisten();
@@ -254,15 +304,6 @@ export function TitleBar() {
       }
     };
   }, [bridge, openWorkspace]);
-
-  useEffect(() => {
-    if (snapInsertionIndex === null) return;
-    const frame = requestAnimationFrame(() => {
-      tabsRef.current?.querySelector<HTMLElement>('.titlebar-tab-snap-placeholder')
-        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [snapInsertionIndex]);
 
   const completeTransfer = async (
     tab: WorkspaceDescriptor,
@@ -378,6 +419,7 @@ export function TitleBar() {
         sourceWindowLabel: windowLabelRef.current,
         tabId: tab.id,
         tabName: tab.name,
+        tabWidth,
         paths: tab.paths,
         ...point,
       });
@@ -403,11 +445,21 @@ export function TitleBar() {
       const deltaX = Math.max(minDeltaX, Math.min(pointer.clientX - drag.startClientX, maxDeltaX));
       const draggedCenter = originalRect.left + deltaX + tabWidth / 2;
       const midpoints = drag.tabRects.map((rect) => rect.left + rect.width / 2);
-      let insertionIndex = midpoints.findIndex((midpoint) => draggedCenter < midpoint);
-      if (insertionIndex === -1) insertionIndex = drag.tabRects.length;
-      let targetIndex = insertionIndex;
-      if (drag.originalIndex < targetIndex) targetIndex -= 1;
-      drag.targetIndex = Math.max(0, Math.min(targetIndex, drag.tabRects.length - 1));
+      const reachedLeftBoundary = deltaX < 0 && deltaX <= minDeltaX + 0.5;
+      const reachedRightBoundary = deltaX > 0 && deltaX >= maxDeltaX - 0.5;
+      if (reachedLeftBoundary) {
+        drag.targetIndex = 0;
+      } else if (reachedRightBoundary) {
+        drag.targetIndex = drag.tabRects.length - 1;
+      } else {
+        let insertionIndex = midpoints.findIndex((midpoint) => (
+          deltaX < 0 ? draggedCenter <= midpoint : draggedCenter < midpoint
+        ));
+        if (insertionIndex === -1) insertionIndex = drag.tabRects.length;
+        let targetIndex = insertionIndex;
+        if (drag.originalIndex < targetIndex) targetIndex -= 1;
+        drag.targetIndex = Math.max(0, Math.min(targetIndex, drag.tabRects.length - 1));
+      }
       setLocalTabDragLayout({
         tabId: tab.id,
         originalIndex: drag.originalIndex,
@@ -445,8 +497,13 @@ export function TitleBar() {
       if (detaching && !drag.previewPrepared) {
         drag.previewPrepared = true;
         void tabDragPreviewWindow.prepare(
-          tab.name,
-          tabWidth,
+          {
+            sourceWindowLabel: windowLabelRef.current,
+            tabId: tab.id,
+            tabName: tab.name,
+            tabWidth,
+            paths: tab.paths,
+          },
           point,
           document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
         );
@@ -469,7 +526,8 @@ export function TitleBar() {
         detaching,
       });
       const now = performance.now();
-      if (now - drag.lastBroadcastAt >= 32) {
+      const nativePreviewOwnsTracking = '__TAURI_INTERNALS__' in window && drag.previewPrepared;
+      if (!nativePreviewOwnsTracking && now - drag.lastBroadcastAt >= 32) {
         drag.lastBroadcastAt = now;
         publishDrag(point);
       }
@@ -511,15 +569,18 @@ export function TitleBar() {
       }
       const started = drag.started;
       cleanup();
-      void bridge.broadcastTabDragState(null);
       if (!started) return;
       suppressClickRef.current = tab.id;
       setTimeout(() => {
         if (suppressClickRef.current === tab.id) suppressClickRef.current = null;
       });
-      if (!detaching) return;
+      if (!detaching) {
+        void bridge.broadcastTabDragState(null);
+        return;
+      }
 
-      void transferTabWithImmediateVisualRemoval(tab, point, drag.sourceBounds, true);
+      void transferTabWithImmediateVisualRemoval(tab, point, drag.sourceBounds, true)
+        .finally(() => { void bridge.broadcastTabDragState(null); });
     };
 
     function finish(pointer: PointerEvent) { end(pointer, false); }
@@ -529,6 +590,14 @@ export function TitleBar() {
     window.addEventListener('pointerup', finish, true);
     window.addEventListener('pointercancel', cancel, true);
   };
+
+  const remoteInsertionActive = snapInsertionIndex !== null
+    && remoteDragState !== null
+    && remoteDragState.sourceWindowLabel !== windowLabel;
+  const remoteTabWidth = remoteDragState
+    ? Math.max(110, Math.min(remoteDragState.tabWidth, 220))
+    : 0;
+  const remoteTabShiftX = remoteInsertionActive ? remoteTabWidth + 4 : 0;
 
   return (
     <>
@@ -540,6 +609,9 @@ export function TitleBar() {
               const isActive = tab.id === activeTabId;
               const isDragging = tab.id === draggingTabId;
               const isLocalDragging = localTabDragLayout?.tabId === tab.id;
+              const isRemoteShifting = !localTabDragLayout
+                && remoteInsertionActive
+                && index >= snapInsertionIndex;
               let dragTranslateX = 0;
               if (localTabDragLayout) {
                 if (isLocalDragging) {
@@ -557,24 +629,19 @@ export function TitleBar() {
                 ) {
                   dragTranslateX = localTabDragLayout.shiftX;
                 }
+              } else if (isRemoteShifting) {
+                dragTranslateX = remoteTabShiftX;
               }
               return (
                 <Fragment key={tab.id}>
-                  {snapInsertionIndex === index && remoteDragState && remoteDragState.sourceWindowLabel !== windowLabel && (
-                    <div className="titlebar-tab-snap-placeholder" aria-hidden="true">
-                      <Codicon name="folder-opened" className="titlebar-tab-icon" />
-                      <span className="titlebar-tab-title">{remoteDragState.tabName}</span>
-                      <span className="titlebar-tab-ghost-close"><Codicon name="close" /></span>
-                    </div>
-                  )}
                   <div
                     key={tab.id}
                     data-tab-id={tab.id}
                     role="tab"
                     aria-selected={isActive}
                     onPointerDown={(event) => beginTabPointerDrag(event, tab)}
-                    className={`titlebar-tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isLocalDragging ? 'local-dragging' : ''} ${dragTranslateX !== 0 && !isLocalDragging ? 'reorder-shifting' : ''}`}
-                    style={localTabDragLayout ? {
+                    className={`titlebar-tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isLocalDragging ? 'local-dragging' : ''} ${dragTranslateX !== 0 && !isLocalDragging ? 'reorder-shifting' : ''} ${isRemoteShifting ? 'remote-reorder-shifting' : ''}`}
+                    style={localTabDragLayout || isRemoteShifting ? {
                       transform: `translate3d(${dragTranslateX}px, 0, 0)${isLocalDragging ? ' scale(1.025)' : ''}`,
                     } : undefined}
                     onClick={(event) => {
@@ -622,23 +689,30 @@ export function TitleBar() {
               );
             })}
 
-            {snapInsertionIndex === tabs.filter((tab) => !pendingTransferTabIds.has(tab.id)).length && remoteDragState && remoteDragState.sourceWindowLabel !== windowLabel && (
-              <div className="titlebar-tab-snap-placeholder" aria-hidden="true">
-                <Codicon name="folder-opened" className="titlebar-tab-icon" />
-                <span className="titlebar-tab-title">{remoteDragState.tabName}</span>
-                <span className="titlebar-tab-ghost-close"><Codicon name="close" /></span>
-              </div>
+            {remoteInsertionActive && remoteDropSlotLeft !== null && (
+              <div
+                className="titlebar-remote-drop-slot"
+                style={{ left: remoteDropSlotLeft, width: remoteTabWidth }}
+                aria-hidden="true"
+              />
+            )}
+            {remoteInsertionActive && (
+              <div
+                className="titlebar-remote-end-spacer"
+                style={{ width: remoteTabShiftX }}
+                aria-hidden="true"
+              />
             )}
           </div>
           <button
             ref={addAnchorRef}
             type="button"
-            className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null ? 'drag-hidden' : ''}`}
+            className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null || remoteInsertionActive ? 'drag-hidden' : ''}`}
             aria-label={t('New Tab')}
-            aria-hidden={draggingTabId !== null}
+            aria-hidden={draggingTabId !== null || remoteInsertionActive}
             title={t('Open Another Workspace')}
             disabled={busy}
-            tabIndex={draggingTabId !== null ? -1 : undefined}
+            tabIndex={draggingTabId !== null || remoteInsertionActive ? -1 : undefined}
             onClick={toggleNewTabMenu}
           >
             <Codicon name="plus" />

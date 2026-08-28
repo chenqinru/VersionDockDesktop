@@ -1,4 +1,5 @@
 import type { ScreenPoint } from './tabDrag';
+import type { TabDragPayload } from '../platform/bridge';
 
 interface NativePreviewWindow {
   close(): Promise<void>;
@@ -11,7 +12,11 @@ export class TabDragPreviewWindow {
   private preview: NativePreviewWindow | null = null;
   private active = false;
 
-  async prepare(tabName: string, width: number, point: ScreenPoint, theme: 'light' | 'dark'): Promise<void> {
+  async prepare(
+    drag: Omit<TabDragPayload, 'screenX' | 'screenY'>,
+    point: ScreenPoint,
+    theme: 'light' | 'dark',
+  ): Promise<void> {
     this.active = false;
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
     const token = ++this.token;
@@ -26,12 +31,13 @@ export class TabDragPreviewWindow {
       ]);
       if (token !== this.token) return;
       const label = `tab-drag-preview-${Date.now()}-${token}`;
-      const query = new URLSearchParams({ name: tabName, theme });
+      const width = Math.max(110, Math.min(drag.tabWidth, 220));
+      const query = new URLSearchParams({ name: drag.tabName, theme });
       const preview = new WebviewWindow(label, {
         url: `tab-drag-preview.html?${query}`,
-        x: point.screenX - Math.max(110, Math.min(width, 220)) / 2,
+        x: point.screenX - width / 2,
         y: point.screenY - 14,
-        width: Math.max(110, Math.min(width, 220)),
+        width,
         height: 28,
         decorations: false,
         resizable: false,
@@ -52,7 +58,13 @@ export class TabDragPreviewWindow {
       }
       this.preview = preview;
       await preview.setIgnoreCursorEvents(true);
-      await invoke('follow_tab_drag_preview', { label });
+      await invoke('follow_tab_drag_preview', {
+        label,
+        tabId: drag.tabId,
+        tabName: drag.tabName,
+        tabWidth: width,
+        paths: drag.paths,
+      });
       if (this.active) await preview.show();
     } catch (error) {
       console.warn('Unable to create tab drag preview window', error);

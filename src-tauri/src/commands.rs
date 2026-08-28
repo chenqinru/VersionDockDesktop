@@ -24,8 +24,20 @@ pub async fn bridge_cancel(
 }
 
 #[tauri::command]
-pub fn follow_tab_drag_preview(app: AppHandle, label: String) {
+pub fn follow_tab_drag_preview(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    label: String,
+    tab_id: String,
+    tab_name: String,
+    tab_width: f64,
+    paths: Vec<String>,
+) {
+    let source_window_label = window.label().to_string();
     tauri::async_runtime::spawn(async move {
+        let mut last_broadcast = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_millis(16))
+            .unwrap_or_else(std::time::Instant::now);
         loop {
             let Some(preview) = app.get_webview_window(&label) else {
                 break;
@@ -34,6 +46,58 @@ pub fn follow_tab_drag_preview(app: AppHandle, label: String) {
                 let x = (cursor.x - f64::from(size.width) / 2.0).round() as i32;
                 let y = (cursor.y - f64::from(size.height) / 2.0).round() as i32;
                 let _ = preview.set_position(tauri::PhysicalPosition::new(x, y));
+                if last_broadcast.elapsed() >= std::time::Duration::from_millis(16) {
+                    let scale = preview.scale_factor().unwrap_or(1.0).max(f64::EPSILON);
+                    let mut target_window_label: Option<String> = None;
+                    let mut target_client_x: Option<f64> = None;
+                    for (window_label, window) in app.webview_windows() {
+                        if window_label == source_window_label
+                            || window_label.starts_with("tab-drag-preview-")
+                            || !window.is_visible().unwrap_or(false)
+                            || window.is_minimized().unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        if let (Ok(position), Ok(window_size), Ok(window_scale)) = (
+                            window.outer_position(),
+                            window.outer_size(),
+                            window.scale_factor(),
+                        ) {
+                            let window_scale = window_scale.max(f64::EPSILON);
+                            let window_x = f64::from(position.x) / window_scale;
+                            let window_y = f64::from(position.y) / window_scale;
+                            let window_width = f64::from(window_size.width) / window_scale;
+                            let point_x = cursor.x / window_scale;
+                            let point_y = cursor.y / window_scale;
+                            if point_in_tab_snap_zone(
+                                point_x,
+                                point_y,
+                                window_x,
+                                window_y,
+                                window_width,
+                            ) {
+                                target_client_x = Some(point_x - window_x);
+                                target_window_label = Some(window_label);
+                                break;
+                            }
+                        }
+                    }
+                    let _ = app.emit(
+                        "versiondock://tab-drag-state",
+                        serde_json::json!({
+                            "sourceWindowLabel": source_window_label,
+                            "tabId": tab_id,
+                            "tabName": tab_name,
+                            "tabWidth": tab_width,
+                            "paths": paths,
+                            "screenX": cursor.x / scale,
+                            "screenY": cursor.y / scale,
+                            "targetWindowLabel": target_window_label,
+                            "targetClientX": target_client_x,
+                        }),
+                    );
+                    last_broadcast = std::time::Instant::now();
+                }
             }
             tokio::time::sleep(std::time::Duration::from_millis(8)).await;
         }

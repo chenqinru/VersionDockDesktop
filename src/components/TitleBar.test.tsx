@@ -144,9 +144,95 @@ describe('TitleBar tab dragging', () => {
     expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['second', 'first']);
   });
 
-  it('shows the plus cursor when another window tab can drop into this title bar', async () => {
+  it('moves the second tab into the first position at the left drag boundary', () => {
+    const workspaces = [
+      { ...workspace, id: 'first', name: 'First', paths: ['/tmp/first'] },
+      { ...workspace, id: 'second', name: 'Second', paths: ['/tmp/second'] },
+    ];
+    Object.defineProperties(window, {
+      screenX: { configurable: true, value: 100 },
+      screenY: { configurable: true, value: 80 },
+      outerWidth: { configurable: true, value: 1200 },
+      outerHeight: { configurable: true, value: 800 },
+    });
+    useAppStore.setState({ tabs: workspaces, activeTabId: 'second', busy: false });
+    render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+
+    const renderedTabs = screen.getAllByRole('tab');
+    renderedTabs.forEach((tab, index) => {
+      Object.assign(tab, {
+        getBoundingClientRect: () => ({ left: index * 110, right: index * 110 + 100, top: 0, bottom: 28, width: 100, height: 28, x: index * 110, y: 0, toJSON: () => undefined }),
+        setPointerCapture: vi.fn(),
+        hasPointerCapture: vi.fn(() => false),
+        releasePointerCapture: vi.fn(),
+      });
+    });
+
+    fireEvent.pointerDown(renderedTabs[1], { button: 0, pointerId: 6, screenX: 260, screenY: 110, clientX: 160, clientY: 30 });
+    fireEvent.pointerMove(window, { pointerId: 6, screenX: 150, screenY: 110, clientX: 50, clientY: 30 });
+
+    expect(renderedTabs[1]).toHaveStyle({ transform: 'translate3d(-110px, 0, 0) scale(1.025)' });
+    expect(renderedTabs[0]).toHaveStyle({ transform: 'translate3d(110px, 0, 0)' });
+
+    fireEvent.pointerUp(window, { pointerId: 6, screenX: 150, screenY: 110, clientX: 50, clientY: 30 });
+    expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['second', 'first']);
+  });
+
+  it('moves a wider middle tab to either end of a variable-width tab strip', () => {
+    const workspaces = [
+      { ...workspace, id: 'first', name: 'First', paths: ['/tmp/first'] },
+      { ...workspace, id: 'middle', name: 'Middle', paths: ['/tmp/middle'] },
+      { ...workspace, id: 'last', name: 'Last', paths: ['/tmp/last'] },
+    ];
+    Object.defineProperties(window, {
+      screenX: { configurable: true, value: 100 },
+      screenY: { configurable: true, value: 80 },
+      outerWidth: { configurable: true, value: 1200 },
+      outerHeight: { configurable: true, value: 800 },
+    });
+    useAppStore.setState({ tabs: workspaces, activeTabId: 'middle', busy: false });
+    const { unmount } = render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+
+    const rects = [
+      { left: 0, width: 100 },
+      { left: 110, width: 160 },
+      { left: 280, width: 120 },
+    ];
+    const attachGeometry = () => {
+      const renderedTabs = screen.getAllByRole('tab');
+      renderedTabs.forEach((tab, index) => {
+        const rect = rects[index];
+        Object.assign(tab, {
+          getBoundingClientRect: () => ({ left: rect.left, right: rect.left + rect.width, top: 0, bottom: 28, width: rect.width, height: 28, x: rect.left, y: 0, toJSON: () => undefined }),
+          setPointerCapture: vi.fn(),
+          hasPointerCapture: vi.fn(() => false),
+          releasePointerCapture: vi.fn(),
+        });
+      });
+      return renderedTabs;
+    };
+
+    let renderedTabs = attachGeometry();
+    fireEvent.pointerDown(renderedTabs[1], { button: 0, pointerId: 8, screenX: 290, screenY: 110, clientX: 190, clientY: 30 });
+    fireEvent.pointerMove(window, { pointerId: 8, screenX: 180, screenY: 110, clientX: 80, clientY: 30 });
+    fireEvent.pointerUp(window, { pointerId: 8, screenX: 180, screenY: 110, clientX: 80, clientY: 30 });
+    expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['middle', 'first', 'last']);
+
+    unmount();
+    useAppStore.setState({ tabs: workspaces, activeTabId: 'middle', busy: false });
+    render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+    renderedTabs = attachGeometry();
+    fireEvent.pointerDown(renderedTabs[1], { button: 0, pointerId: 9, screenX: 290, screenY: 110, clientX: 190, clientY: 30 });
+    fireEvent.pointerMove(window, { pointerId: 9, screenX: 420, screenY: 110, clientX: 320, clientY: 30 });
+    fireEvent.pointerUp(window, { pointerId: 9, screenX: 420, screenY: 110, clientX: 320, clientY: 30 });
+    expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['first', 'last', 'middle']);
+  });
+
+  it('opens and animates a reorder slot when another window tab moves across this title bar', async () => {
     let dragStateHandler: ((state: TabDragPayload | null) => void) | undefined;
     const targetBridge = new MockBridge(() => []) as VersionDockBridge;
+    const setCursorIcon = vi.fn(async () => undefined);
+    targetBridge.window = { ...targetBridge.window, setCursorIcon };
     targetBridge.getWindowLabel = async () => 'window-target';
     targetBridge.onTabDragState = async (handler) => {
       dragStateHandler = handler;
@@ -158,24 +244,90 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, busy: false });
+    const secondWorkspace = { ...workspace, id: 'second', name: 'Second', paths: ['/tmp/second'] };
+    useAppStore.setState({ tabs: [workspace, secondWorkspace], activeTabId: workspace.id, busy: false });
     render(<BridgeContext.Provider value={targetBridge}><TitleBar /></BridgeContext.Provider>);
     await waitFor(() => expect(dragStateHandler).toBeDefined());
+    const renderedTabs = screen.getAllByRole('tab');
+    renderedTabs.forEach((tab, index) => {
+      Object.defineProperties(tab, {
+        offsetLeft: { configurable: true, value: index * 110 + 37 },
+        offsetWidth: { configurable: true, value: 100 },
+      });
+      Object.assign(tab, {
+        // Simulate a rect polluted by the previous remote transform. Native
+        // insertion geometry must ignore it and use offsetLeft/offsetWidth.
+        getBoundingClientRect: () => ({ left: index * 110 + 144, right: index * 110 + 244, top: 0, bottom: 28, width: 100, height: 28, x: index * 110 + 144, y: 0, toJSON: () => undefined }),
+      });
+    });
+    const tabsElement = document.querySelector('.titlebar-tabs') as HTMLElement;
+    Object.assign(tabsElement, {
+      getBoundingClientRect: () => ({ left: 0, right: 220, top: 0, bottom: 38, width: 220, height: 38, x: 0, y: 0, toJSON: () => undefined }),
+      scrollLeft: 37,
+    });
+    const addButton = screen.getByRole('button', { name: 'New Tab' });
 
     act(() => {
       dragStateHandler?.({
         sourceWindowLabel: 'window-source',
         tabId: 'remote-tab',
         tabName: 'Remote',
+        tabWidth: 140,
         paths: ['/tmp/remote'],
-        screenX: 420,
-        screenY: 100,
+        screenX: 9_999,
+        screenY: 9_999,
+        targetWindowLabel: 'window-target',
+        targetClientX: 10,
       });
     });
     expect(document.body).toHaveClass('is-tab-drop-target');
+    expect(setCursorIcon).toHaveBeenCalledWith('grabbing');
+    expect(renderedTabs[0]).toHaveClass('remote-reorder-shifting');
+    expect(renderedTabs[0]).toHaveStyle({ transform: 'translate3d(144px, 0, 0)' });
+    expect(renderedTabs[1]).toHaveStyle({ transform: 'translate3d(144px, 0, 0)' });
+    expect(document.querySelector('.titlebar-remote-drop-slot')).toHaveStyle({ left: '37px', width: '140px' });
+    expect(document.querySelector('.titlebar-remote-end-spacer')).toHaveStyle({ width: '144px' });
+    expect(tabsElement.scrollLeft).toBe(37);
+    expect(addButton).toHaveClass('drag-hidden');
+
+    act(() => {
+      dragStateHandler?.({
+        sourceWindowLabel: 'window-source',
+        tabId: 'remote-tab',
+        tabName: 'Remote',
+        tabWidth: 140,
+        paths: ['/tmp/remote'],
+        screenX: 9_999,
+        screenY: 9_999,
+      });
+    });
+    expect(document.body).toHaveClass('is-tab-drop-target');
+    expect(renderedTabs[0]).toHaveStyle({ transform: 'translate3d(144px, 0, 0)' });
+
+    act(() => {
+      dragStateHandler?.({
+        sourceWindowLabel: 'window-source',
+        tabId: 'remote-tab',
+        tabName: 'Remote',
+        tabWidth: 140,
+        paths: ['/tmp/remote'],
+        screenX: 9_999,
+        screenY: 9_999,
+        targetWindowLabel: 'window-target',
+        targetClientX: 120,
+      });
+    });
+    expect(renderedTabs[0]).not.toHaveClass('remote-reorder-shifting');
+    expect(renderedTabs[0].style.transform).toBe('');
+    expect(renderedTabs[1]).toHaveStyle({ transform: 'translate3d(144px, 0, 0)' });
+    expect(document.querySelector('.titlebar-remote-drop-slot')).toHaveStyle({ left: '147px' });
+    expect(tabsElement.scrollLeft).toBe(37);
 
     act(() => dragStateHandler?.(null));
     expect(document.body).not.toHaveClass('is-tab-drop-target');
+    expect(renderedTabs[1].style.transform).toBe('');
+    expect(document.querySelector('.titlebar-remote-end-spacer')).not.toBeInTheDocument();
+    expect(addButton).not.toHaveClass('drag-hidden');
   });
 
   it('hides the source tab immediately but keeps ownership until the destination acknowledges', async () => {
@@ -183,6 +335,7 @@ describe('TitleBar tab dragging', () => {
     const transferCompleted = new Promise<boolean>((resolve) => { acceptTransfer = resolve; });
     const transferBridge = new MockBridge(() => []) as VersionDockBridge;
     transferBridge.transferTab = async () => transferCompleted;
+    transferBridge.broadcastTabDragState = vi.fn(async () => undefined);
     Object.defineProperties(window, {
       screenX: { configurable: true, value: 100 },
       screenY: { configurable: true, value: 80 },
@@ -204,7 +357,9 @@ describe('TitleBar tab dragging', () => {
 
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(useAppStore.getState().tabs).toEqual([workspace]);
+    expect(transferBridge.broadcastTabDragState).not.toHaveBeenCalledWith(null);
     await act(async () => acceptTransfer?.(true));
     await waitFor(() => expect(useAppStore.getState().tabs).toEqual([]));
+    await waitFor(() => expect(transferBridge.broadcastTabDragState).toHaveBeenCalledWith(null));
   });
 });
