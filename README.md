@@ -17,7 +17,7 @@ Subtree、Identity Profile、SVN 账号管理和 File History 均由仓库级 ca
 
 ## 开发
 
-要求：Node.js 20+、Rust stable、系统 WebView；Git 与 SVN 按需安装。
+要求：Node.js 20+、Rust stable、系统 WebView；Git 与 SVN 按需安装。Windows 需要处理中文等非 ASCII 路径时，应使用 TortoiseSVN 或 VisualSVN CLI；SlikSVN 会破坏这类命令行参数。
 
 ```bash
 npm install
