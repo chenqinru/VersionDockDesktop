@@ -113,9 +113,10 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: brew install subversion
 
-      - name: Cache Unicode-capable Windows SVN
+      - name: Restore Unicode-capable Windows SVN cache
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        id: windows-svn-cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/versiondock-svn
           key: windows-svn-x64-r1935602-vcpkg-e99d87dc-${{ hashFiles('scripts/setup-windows-svn.ps1') }}
@@ -160,6 +161,13 @@ jobs:
           Assert-NativeSuccess "svn commit"
           svn log $unicodeFile --limit 1
           Assert-NativeSuccess "svn log"
+
+      - name: Save verified Windows SVN cache
+        if: runner.os == 'Windows' && steps.windows-svn-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/versiondock-svn
+          key: ${{ steps.windows-svn-cache.outputs.cache-primary-key }}
 
       - name: Install frontend dependencies
         run: npm ci
