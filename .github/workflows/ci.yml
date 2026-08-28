@@ -46,8 +46,29 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install svn -y --no-progress
-          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "C:\Program Files\TortoiseSVN\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $paths = @(
+            "C:\Program Files\SilkSVN\bin",
+            "C:\Program Files (x86)\SilkSVN\bin",
+            "C:\Program Files\TortoiseSVN\bin",
+            "C:\Program Files (x86)\TortoiseSVN\bin",
+            "C:\Program Files\VisualSVN\bin",
+            "C:\ProgramData\chocolatey\bin",
+            "C:\ProgramData\chocolatey\lib\svn\tools"
+          )
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              $p | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              $env:PATH = "$p;$env:PATH"
+            }
+          }
+          $found = (Get-ChildItem -Path "C:\Program Files", "C:\Program Files (x86)", "C:\ProgramData" -Filter "svn.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if ($found) {
+            $dir = $found.DirectoryName
+            $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $env:PATH = "$dir;$env:PATH"
+          }
+          where.exe svn
+          svn --version
 
       - name: Install dependencies
         run: npm ci

@@ -13,7 +13,8 @@ use crate::{
 };
 
 fn available(program: &str) -> bool {
-    let available = Command::new(program)
+    let resolved = crate::cli::resolve_executable(program);
+    let available = Command::new(&resolved)
         .arg("--version")
         .output()
         .map(|value| value.status.success())
@@ -455,7 +456,8 @@ fn read_text(path: impl AsRef<Path>) -> String {
 }
 
 fn command(program: &str, args: &[&str], cwd: &Path) {
-    let output = Command::new(program)
+    let resolved = crate::cli::resolve_executable(program);
+    let output = Command::new(&resolved)
         .args(args)
         .current_dir(cwd)
         .output()
@@ -469,7 +471,8 @@ fn command(program: &str, args: &[&str], cwd: &Path) {
 }
 
 fn command_output(program: &str, args: &[&str], cwd: &Path) -> String {
-    let output = Command::new(program)
+    let resolved = crate::cli::resolve_executable(program);
+    let output = Command::new(&resolved)
         .args(args)
         .current_dir(cwd)
         .output()

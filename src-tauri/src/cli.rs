@@ -25,6 +25,45 @@ impl CommandOutput {
     }
 }
 
+pub fn resolve_executable(program: &str) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::PathBuf;
+        if let Ok(output) = std::process::Command::new(program)
+            .arg("--version")
+            .output()
+        {
+            if output.status.success() {
+                return PathBuf::from(program);
+            }
+        }
+        let exe_name = if program.ends_with(".exe") {
+            program.to_string()
+        } else {
+            format!("{program}.exe")
+        };
+
+        let common_dirs = [
+            r"C:\Program Files\SilkSVN\bin",
+            r"C:\Program Files (x86)\SilkSVN\bin",
+            r"C:\Program Files\TortoiseSVN\bin",
+            r"C:\Program Files (x86)\TortoiseSVN\bin",
+            r"C:\Program Files\VisualSVN\bin",
+            r"C:\Program Files (x86)\VisualSVN\bin",
+            r"C:\ProgramData\chocolatey\bin",
+            r"C:\ProgramData\chocolatey\lib\svn\tools",
+        ];
+
+        for dir in common_dirs {
+            let candidate = PathBuf::from(dir).join(&exe_name);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    std::path::PathBuf::from(program)
+}
+
 pub async fn run(
     program: &str,
     args: &[String],
@@ -33,7 +72,8 @@ pub async fn run(
     timeout: Duration,
     cancellation: &CancellationToken,
 ) -> Result<CommandOutput, DesktopError> {
-    let mut command = Command::new(program);
+    let resolved = resolve_executable(program);
+    let mut command = Command::new(&resolved);
     command
         .args(args)
         .current_dir(cwd)
