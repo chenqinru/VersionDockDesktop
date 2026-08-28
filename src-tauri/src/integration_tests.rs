@@ -168,10 +168,7 @@ async fn real_git_and_svn_untracked_files_produce_visible_diffs() {
         vcs::update_ignore_rules(&repository, "", &["/custom/".into()], &token)
             .await
             .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(directory.path().join(".gitignore")).unwrap(),
-            "/custom/\n"
-        );
+        assert_eq!(read_text(directory.path().join(".gitignore")), "/custom/\n");
     }
     if available("svn") && available("svnadmin") {
         let repository_dir = tempdir().unwrap();
@@ -398,7 +395,7 @@ async fn real_git_discard_restores_tracked_and_removes_untracked_files() {
     .unwrap();
 
     assert_eq!(
-        std::fs::read_to_string(directory.path().join("tracked.txt")).unwrap(),
+        read_text(directory.path().join("tracked.txt")),
         "original\n"
     );
     assert!(!directory.path().join("untracked.txt").exists());
@@ -451,6 +448,10 @@ async fn real_git_lists_only_unpushed_commits() {
     assert_eq!(commits[0].message, "local only");
     assert_eq!(commits[0].files_changed, 1);
     assert_eq!(commits[0].additions, 2);
+}
+
+fn read_text(path: impl AsRef<Path>) -> String {
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
 }
 
 fn command(program: &str, args: &[&str], cwd: &Path) {
@@ -697,10 +698,7 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
     )
     .await
     .unwrap();
-    assert_eq!(
-        std::fs::read_to_string(directory.path().join("value.txt")).unwrap(),
-        "second\n"
-    );
+    assert_eq!(read_text(directory.path().join("value.txt")), "second\n");
     command("git", &["reset", "--hard", "HEAD"], directory.path());
 
     std::fs::write(directory.path().join("reset.txt"), "reset\n").unwrap();
@@ -838,12 +836,12 @@ async fn real_git_commit_path_batches_apply_and_revert_directory_scopes() {
     .await
     .unwrap();
     assert_eq!(
-        std::fs::read_to_string(directory.path().join("scope/modified.txt")).unwrap(),
+        read_text(directory.path().join("scope/modified.txt")),
         "base modified\n"
     );
     assert!(!directory.path().join("scope/added.txt").exists());
     assert_eq!(
-        std::fs::read_to_string(directory.path().join("scope/deleted.txt")).unwrap(),
+        read_text(directory.path().join("scope/deleted.txt")),
         "base deleted\n"
     );
     assert!(directory.path().join("scope/renamed-old.txt").exists());
@@ -870,11 +868,11 @@ async fn real_git_commit_path_batches_apply_and_revert_directory_scopes() {
     .await
     .unwrap();
     assert_eq!(
-        std::fs::read_to_string(directory.path().join("scope/modified.txt")).unwrap(),
+        read_text(directory.path().join("scope/modified.txt")),
         "commit modified\n"
     );
     assert_eq!(
-        std::fs::read_to_string(directory.path().join("scope/added.txt")).unwrap(),
+        read_text(directory.path().join("scope/added.txt")),
         "commit added\n"
     );
     assert!(!directory.path().join("scope/deleted.txt").exists());
@@ -897,7 +895,7 @@ async fn real_git_commit_path_batches_apply_and_revert_directory_scopes() {
     .unwrap_err();
     assert_eq!(error.code, "INVALID_COMMIT_PATH_OPERATION");
     assert_eq!(
-        std::fs::read_to_string(directory.path().join("scope/modified.txt")).unwrap(),
+        read_text(directory.path().join("scope/modified.txt")),
         "must stay\n"
     );
 }
@@ -986,7 +984,7 @@ async fn real_git_subtree_registry_and_operations() {
     .await
     .unwrap();
     assert_eq!(
-        std::fs::read_to_string(parent.path().join("vendor/library/library.txt")).unwrap(),
+        read_text(parent.path().join("vendor/library/library.txt")),
         "one\n"
     );
     let entries = vcs::subtrees(&repository, &token).await.unwrap();
@@ -1024,7 +1022,7 @@ async fn real_git_subtree_registry_and_operations() {
     .await
     .unwrap();
     assert_eq!(
-        std::fs::read_to_string(parent.path().join("vendor/library/library.txt")).unwrap(),
+        read_text(parent.path().join("vendor/library/library.txt")),
         "one\ntwo\n"
     );
     command(
@@ -1424,7 +1422,7 @@ async fn real_git_submodule_lifecycle_supports_uninitialized_modules() {
     .await
     .unwrap();
     assert_eq!(
-        std::fs::read_to_string(parent.path().join("vendor/中文 module/module.txt")).unwrap(),
+        read_text(parent.path().join("vendor/中文 module/module.txt")),
         "one\n"
     );
 
@@ -1444,7 +1442,7 @@ async fn real_git_submodule_lifecycle_supports_uninitialized_modules() {
     .await
     .unwrap();
     assert_eq!(
-        std::fs::read_to_string(parent.path().join("vendor/中文 module/module.txt")).unwrap(),
+        read_text(parent.path().join("vendor/中文 module/module.txt")),
         "one\ntwo\n"
     );
     let parent_status = workspace::git_status(repository.clone(), &token)
@@ -2268,7 +2266,7 @@ async fn test_vscode_shelf_import_and_backward_compatibility() {
     .unwrap();
 
     assert_eq!(
-        std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+        read_text(directory.path().join("file.txt")),
         "shelved_from_vscode\n"
     );
 
