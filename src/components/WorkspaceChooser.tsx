@@ -17,10 +17,7 @@ export function WorkspaceChooser() {
     const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
     if (paths.length) {
       if (openInNew) {
-        const focused = await bridge.focusWorkspaceAcrossWindows(paths);
-        if (!focused) {
-          await bridge.openInNewWindow(paths);
-        }
+        await bridge.openInNewWindow(paths);
       } else {
         await openWorkspace(paths);
       }
@@ -29,11 +26,7 @@ export function WorkspaceChooser() {
 
   const handleRecentClick = (event: React.MouseEvent, paths: string[]) => {
     if (event.metaKey || event.ctrlKey) {
-      void bridge.focusWorkspaceAcrossWindows(paths).then((focused) => {
-        if (!focused) {
-          void bridge.openInNewWindow(paths);
-        }
-      });
+      void bridge.openInNewWindow(paths);
     } else {
       void openWorkspace(paths);
     }
@@ -81,6 +74,21 @@ export function WorkspaceChooser() {
                 <span className="welcome-action-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
               </div>
               <span className="welcome-action-shortcut">{isMac ? '⌘ O' : 'Ctrl+O'}</span>
+            </button>
+            <button
+              type="button"
+              className="welcome-action-btn"
+              disabled={busy}
+              onClick={() => void choose(true)}
+            >
+              <div className="welcome-action-icon">
+                <Codicon name="window" />
+              </div>
+              <div className="welcome-action-text">
+                <span className="welcome-action-title">{t('Open in New Window')}</span>
+                <span className="welcome-action-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
+              </div>
+              <span className="welcome-action-shortcut">{isMac ? '⇧⌘ O' : 'Ctrl+Shift+O'}</span>
             </button>
           </div>
 

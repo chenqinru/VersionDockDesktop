@@ -31,12 +31,12 @@ const renderPanel = (onClose = vi.fn()) => {
     return true;
   });
   useAppStore.setState({ bridge, bootstrap: bootstrap(), ready: true });
-  render(
+  const view = render(
     <I18nContext.Provider value={{ language: 'en', preference: 'system', t: createTranslator('en') }}>
       <SettingsPanel onClose={onClose} />
     </I18nContext.Provider>,
   );
-  return { bridge, commands, onClose };
+  return { bridge, commands, onClose, ...view };
 };
 
 afterEach(() => {
@@ -58,6 +58,21 @@ describe('SettingsPanel', () => {
 
     expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'dark', language: 'zhCn', uiFontSize: 'maximum' });
     expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ fileViewMode: 'list' });
+  });
+
+  it('does not steal focus from a select when the parent rerenders', () => {
+    const { rerender } = renderPanel();
+    const theme = screen.getByRole('combobox', { name: 'Theme' });
+    theme.focus();
+    expect(theme).toHaveFocus();
+
+    rerender(
+      <I18nContext.Provider value={{ language: 'en', preference: 'system', t: createTranslator('en') }}>
+        <SettingsPanel onClose={vi.fn()} />
+      </I18nContext.Provider>,
+    );
+
+    expect(theme).toHaveFocus();
   });
 
   it('saves external editor arguments and restores null when the executable is cleared', async () => {
@@ -114,6 +129,18 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('region', { name: 'Changes and commit' })).toContainElement(screen.getByLabelText('Suppress diverged branch warning'));
     expect(screen.queryByText('AI settings')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Git annotations')).not.toBeInTheDocument();
+  });
+
+  it('localizes the visible repositories section', () => {
+    const { rerender } = renderPanel();
+    rerender(
+      <I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t: createTranslator('zh-CN') }}>
+        <SettingsPanel onClose={vi.fn()} />
+      </I18nContext.Provider>,
+    );
+
+    expect(screen.getByText('可见仓库')).toBeInTheDocument();
+    expect(screen.getByText('隐藏的仓库仍会被扫描，可在此恢复显示。')).toBeInTheDocument();
   });
 
   it('persists supported Desktop settings and hides AI/editor-only settings', async () => {

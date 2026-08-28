@@ -17,6 +17,7 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { IgnoreRulesPanel } from './IgnoreRulesPanel';
 import { ChangelistManager } from './ChangelistManager';
 import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
+import { ConflictBanner } from './ConflictBanner';
 
 const emptyRepositories: RepositoryStatus[] = [];
 
@@ -472,10 +473,81 @@ export function CommitPanel() {
       </div>
       <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Push')} className={tab === 'push' ? 'active' : ''} onClick={() => { setTab('push'); void useAppStore.getState().loadUnpushedCommits(); }}><Codicon name="cloud-upload" />{tab === 'push' && <span>{t('Push')}</span>}{totalToPush > 0 && <b>{totalToPush}</b>}</button>}</div>
       {tab === 'push' ? <PushPanel repos={gitRepos} /> : tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={shelfViewMode} expansion={shelfExpansion} onOpenFileDiff={(repoId, shelfId, path) => void openShelfDiff(repoId, shelfId, path)} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={stashViewMode} expansion={stashExpansion} onOpenFileDiff={(repoId, reference, path) => void openStashDiff(repoId, reference, path)} /> : <>
-      {conflicts.length > 0 && (
-        <button className="conflict-banner" onClick={() => { const conflict = conflicts[0]; if (!conflict.conflictType || ['text', 'binary'].includes(conflict.conflictType)) void openMerge(conflict); else void confirmDialog({ title: t('{0} conflict', conflict.conflictType), message: `${conflict.path}\n${t('Mark the current working-copy state as resolved?')}`, danger: true }).then((yes) => { if (yes) return resolveConflict(conflict, 'working'); }); }}><Codicon name="warning" /><span><strong>{t('Resolve conflicts')}</strong><small>{conflicts.length} {t('Conflicts')}{conflicts[0].conflictType ? ` · ${t(conflicts[0].conflictType)}` : ''}</small></span><Codicon name="chevron-right" /></button>
-      )}
-      {activeOperationRepo?.operation && <button className="conflict-banner" onClick={() => void confirmDialog({ title: t('Abort {0}?', activeOperationRepo.operation!), message: `${activeOperationRepo.meta.name}\n${t('This can discard the in-progress operation state.')}`, danger: true }).then((yes) => { if (yes) return abortRepositoryOperation(activeOperationRepo.meta.id, activeOperationRepo.operation!); })}><Codicon name="debug-stop" /><span><strong>{activeOperationRepo.operation}</strong><small>{activeOperationRepo.meta.name}</small></span><span>{t('Abort')}</span></button>}
+      {conflicts.length > 0 ? (
+        <ConflictBanner
+          summary={(() => {
+            const conflictRepos = repos.filter((r) => r.files.some((f) => f.conflicted) || r.conflicts > 0);
+            const repoCount = conflictRepos.length || 1;
+            const fileCount = conflicts.length;
+            const repoSummary = repoCount === 1 ? t('{0} repository', repoCount) : t('{0} repositories', repoCount);
+            const fileSummary = fileCount === 1 ? t('{0} unresolved conflict file', fileCount) : t('{0} unresolved conflict files', fileCount);
+            return `${repoSummary} · ${fileSummary}`;
+          })()}
+          actions={[
+            {
+              id: 'resolve',
+              label: t('Resolve Conflicts'),
+              title: t('Open the conflicts panel to resolve files'),
+              tone: 'primary',
+              onClick: () => {
+                const conflict = conflicts[0];
+                if (!conflict.conflictType || ['text', 'binary'].includes(conflict.conflictType)) {
+                  void openMerge(conflict);
+                } else {
+                  void confirmDialog({
+                    title: t('{0} conflict', conflict.conflictType),
+                    message: `${conflict.path}\n${t('Mark the current working-copy state as resolved?')}`,
+                    danger: true,
+                  }).then((yes) => {
+                    if (yes) return resolveConflict(conflict, 'working');
+                  });
+                }
+              },
+            },
+            ...(activeOperationRepo?.operation
+              ? [
+                  {
+                    id: 'abort',
+                    label: activeOperationRepo.operation === 'rebase' ? t('Abort Rebase') : t('Abort Merge'),
+                    title: t('Abort {0}?', activeOperationRepo.operation),
+                    tone: 'danger' as const,
+                    onClick: () => {
+                      void confirmDialog({
+                        title: t('Abort {0}?', activeOperationRepo.operation!),
+                        message: `${activeOperationRepo.meta.name}\n${t('This can discard the in-progress operation state.')}`,
+                        danger: true,
+                      }).then((yes) => {
+                        if (yes) return abortRepositoryOperation(activeOperationRepo.meta.id, activeOperationRepo.operation!);
+                      });
+                    },
+                  },
+                ]
+              : []),
+          ]}
+        />
+      ) : activeOperationRepo?.operation ? (
+        <ConflictBanner
+          title={activeOperationRepo.operation === 'rebase' ? t('Rebase in progress') : t('Merge in progress')}
+          summary={activeOperationRepo.meta.name}
+          actions={[
+            {
+              id: 'abort',
+              label: activeOperationRepo.operation === 'rebase' ? t('Abort Rebase') : t('Abort Merge'),
+              title: t('Abort {0}?', activeOperationRepo.operation),
+              tone: 'danger',
+              onClick: () => {
+                void confirmDialog({
+                  title: t('Abort {0}?', activeOperationRepo.operation!),
+                  message: `${activeOperationRepo.meta.name}\n${t('This can discard the in-progress operation state.')}`,
+                  danger: true,
+                }).then((yes) => {
+                  if (yes) return abortRepositoryOperation(activeOperationRepo.meta.id, activeOperationRepo.operation!);
+                });
+              },
+            },
+          ]}
+        />
+      ) : null}
       <div className="changes-scroll">
         {!repos.length && <div className="empty-state"><Codicon name="source-control" />{t('No repositories found')}</div>}
         {repos.map((repo) => { const fileProps = { selected, setFiles, onFile: (file: FileChange) => void openDiff(repo.meta.id, file.path, file.staged && !file.unstaged), onContext: (event: React.MouseEvent, file: FileChange) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'file' as const, repo, files: [file], path: file.path }); }, onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'folder' as const, repo, files, path: folderPath }); }, onRepoContext: (event: React.MouseEvent) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'repo' as const, repo, files: repo.files }); }, viewMode: viewMode as 'tree' | 'list', expansion }; return <div key={repo.meta.id} onMouseDown={() => void selectRepo(repo.meta.id)}>{changelistEnabled && repo.meta.kind === 'git' ? <ChangelistRepoFiles repo={repo} entries={changelists[repo.meta.id] ?? []} {...fileProps} /> : <RepoFiles repo={repo} {...fileProps} />}</div>; })}

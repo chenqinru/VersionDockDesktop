@@ -162,6 +162,7 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   color: var(--versiondock-muted);
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
   cursor: pointer;
+  touch-action: none;
   user-select: none;
   transition: all 0.12s ease;
   position: relative;
@@ -178,6 +179,54 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
 .titlebar-tab.dragging {
   opacity: 0.35;
   transform: scale(0.96);
+  cursor: grabbing;
+}
+
+body.is-dragging-tab,
+body.is-dragging-tab * { cursor: grabbing !important; user-select: none !important; }
+
+body.is-dragging-tab.is-detaching-tab,
+body.is-dragging-tab.is-detaching-tab * { cursor: copy !important; }
+
+.titlebar-tab-snap-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  min-width: 110px;
+  max-width: 220px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  border: 1px dashed color-mix(in srgb, var(--versiondock-accent) 58%, var(--versiondock-border));
+  background: color-mix(in srgb, var(--versiondock-surface) 62%, transparent);
+  color: var(--versiondock-muted);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  opacity: .52;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  animation: tabSnapIn 120ms ease-out;
+}
+
+.titlebar-tab-ghost-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  flex: 0 0 18px;
+  font-size: 11px;
+}
+
+@keyframes tabSnapIn {
+  from { opacity: 0; transform: scale(.94); }
+  to { opacity: .52; transform: scale(1); }
+}
+
+.titlebar-tabs-track.tab-snap-active {
+  background: color-mix(in srgb, var(--versiondock-accent) 4%, transparent);
 }
 
 .titlebar-tab.active {
@@ -619,6 +668,8 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   margin: 3px 4px;
   background: var(--versiondock-border-soft);
 }
+.settings-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--versiondock-bg) 42%, transparent); animation: settings-fade-in .12s ease-out; }
+.settings-modal { width: min(900px, calc(100vw - 24px)); height: min(700px, calc(100vh - 48px)); max-height: calc(100vh - 48px); overflow: hidden; display: flex; flex-direction: column; padding: 12px 14px 14px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 12px 34px #0009; animation: settings-modal-in .14s ease-out; }
 .settings-heading { display: flex; align-items: center; font-weight: 600; margin-bottom: 10px; }.settings-heading span { flex: 1; }.settings-heading button { width: 24px; height: 24px; }.settings-modal .settings-heading { position: relative; min-height: 30px; flex: 0 0 30px; margin: 0; }.settings-modal .settings-heading .settings-title { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; gap: 7px; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); line-height: 18px; white-space: nowrap; }.settings-modal .settings-heading .settings-title .codicon { color: var(--versiondock-accent); font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }.settings-modal .settings-heading button { margin-left: auto; border: 1px solid transparent; }.settings-modal .settings-heading button:hover { background: var(--versiondock-hover); border-color: var(--versiondock-border); }
 .settings-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 14px; border-top: 1px solid var(--versiondock-border-soft); padding-top: 10px; }.settings-nav { min-width: 0; padding-right: 10px; border-right: 1px solid var(--versiondock-border-soft); }.settings-nav a { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 8px; color: var(--versiondock-muted); text-decoration: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 16px; }.settings-nav a:hover, .settings-nav a.active { color: var(--versiondock-text); background: var(--versiondock-hover); }.settings-nav a.active { box-shadow: inset 2px 0 var(--versiondock-accent); color: var(--versiondock-accent); }.settings-nav .codicon { flex: 0 0 14px; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }.settings-nav span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.settings-content { min-width: 0; min-height: 0; overflow: auto; padding: 0 4px 4px 0; scroll-behavior: smooth; }.settings-section { display: grid; gap: 5px; scroll-margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--versiondock-border-soft); }.settings-section:first-child { padding-top: 0; border-top: 0; }.settings-section + .settings-section { margin-top: 12px; }.settings-section-title { height: 24px; display: flex; align-items: center; gap: 6px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 16px; letter-spacing: .04em; text-transform: uppercase; }.settings-section-title .codicon { font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-accent); }.settings-field { min-height: 42px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 150px); align-items: center; gap: 10px; }.settings-label, .settings-input-field { min-width: 0; display: flex; flex-direction: column; gap: 2px; }.settings-label strong, .settings-label-text { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; line-height: 16px; }.settings-label small, .settings-help { color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); line-height: 14px; }.settings-field select { width: 100%; height: 27px; padding: 0 5px; border: 1px solid var(--versiondock-border); background: var(--versiondock-input); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }.settings-field select:focus, .settings-input-field input:focus, .settings-input-field textarea:focus { border-color: var(--versiondock-accent); outline: 1px solid color-mix(in srgb, var(--versiondock-accent) 45%, transparent); outline-offset: -1px; }.settings-editor { gap: 7px; }.settings-editor form { display: grid; gap: 7px; }.settings-input-field input, .settings-input-field textarea { width: 100%; padding: 5px 6px; color: inherit; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); font: calc(11px * var(--versiondock-ui-font-scale, 1))/calc(16px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }.settings-input-field input { height: 28px; }.settings-input-field textarea { min-height: 64px; resize: vertical; }.settings-editor-actions { display: flex; justify-content: flex-end; }.settings-editor-actions button { min-width: 58px; height: 27px; padding: 0 10px; background: var(--versiondock-accent-bg); color: white; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }.settings-editor-actions button:disabled { opacity: .5; cursor: default; }.settings-editor-actions button:not(:disabled):hover { background: var(--versiondock-accent); }.settings-block { display: grid; gap: 5px; padding: 4px 0 5px; }.settings-block textarea { width: 100%; min-height: 48px; padding: 5px 6px; resize: vertical; color: inherit; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); font: calc(11px * var(--versiondock-ui-font-scale, 1))/calc(16px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }.settings-toggle { min-height: 42px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }.settings-toggle > input { width: 14px; height: 14px; margin: 0 4px; accent-color: var(--versiondock-accent-bg); }.settings-number { min-width: 0; display: flex !important; flex-direction: row !important; align-items: center; gap: 5px !important; }.settings-number input { width: 100%; height: 27px; padding: 0 5px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }.settings-number small { flex: 0 0 auto; }.settings-unsupported em { display: block; color: var(--versiondock-warning); font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-style: normal; line-height: 13px; }.settings-unsupported select:disabled, .settings-unsupported input:disabled, .settings-unsupported textarea:disabled { color: var(--versiondock-muted); background: color-mix(in srgb, var(--versiondock-input) 75%, var(--versiondock-surface)); border-color: var(--versiondock-border-soft); opacity: .78; }
 .main-workspace { min-height: 0; flex: 1; display: flex; }.commit-slot { flex: 0 0 auto; min-width: 0; }.workspace-slot { position: relative; min-width: 0; flex: 1; overflow: hidden; }
@@ -626,7 +677,125 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
 .resize-handle { flex: 0 0 4px; margin-left: -2px; margin-right: -2px; position: relative; z-index: 10; cursor: col-resize; }.resize-handle:hover { background: var(--versiondock-accent); }
 body.is-resizing { cursor: col-resize; user-select: none; }
 .commit-panel { width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--versiondock-surface); border-right: 1px solid var(--versiondock-border); }
-.conflict-banner { margin: 6px; min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: color-mix(in srgb, var(--versiondock-warning) 14%, var(--versiondock-surface)); border: 1px solid color-mix(in srgb, var(--versiondock-warning) 45%, var(--versiondock-border)); }.conflict-banner > .codicon:first-child { color: var(--versiondock-warning); }.conflict-banner span { flex: 1; text-align: left; display: flex; flex-direction: column; }.conflict-banner small { color: var(--versiondock-muted); }
+.vd-conflict-banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 9px 7px 10px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  overflow: hidden;
+  color: var(--versiondock-text);
+  background: color-mix(in srgb, var(--versiondock-warning, #cca700) 8%, var(--versiondock-surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--versiondock-warning, #cca700) 24%, var(--versiondock-border));
+  font-family: inherit;
+}
+
+.vd-conflict-banner::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--versiondock-warning, #cca700);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--versiondock-warning, #cca700) 55%, transparent);
+}
+
+.vd-conflict-banner__signal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 6px;
+  color: var(--versiondock-warning, #cca700);
+  background: color-mix(in srgb, var(--versiondock-warning, #cca700) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--versiondock-warning, #cca700) 25%, transparent);
+}
+
+.vd-conflict-banner__copy {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 110px;
+  line-height: 1.25;
+}
+
+.vd-conflict-banner__title {
+  overflow: hidden;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vd-conflict-banner__summary {
+  overflow: hidden;
+  color: var(--versiondock-muted);
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vd-conflict-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.vd-conflict-banner__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 25px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.vd-conflict-banner__action:hover {
+  transform: translateY(-1px);
+}
+
+.vd-conflict-banner__action:active {
+  transform: translateY(0);
+}
+
+.vd-conflict-banner__action--primary {
+  color: #ffffff;
+  background: var(--versiondock-accent-bg);
+  border: 1px solid transparent;
+}
+
+.vd-conflict-banner__action--primary:hover {
+  background: var(--versiondock-accent-bg);
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--versiondock-accent-bg) 35%, transparent);
+}
+
+.vd-conflict-banner__action--danger {
+  color: #ffffff;
+  background: var(--versiondock-danger);
+  border: 1px solid transparent;
+}
+
+.vd-conflict-banner__action--danger:hover {
+  background: var(--versiondock-danger);
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--versiondock-danger) 26%, transparent);
+}
 .changes-actions { height: 30px; display: flex; gap: 4px; padding: 3px 6px; border-bottom: 1px solid var(--versiondock-border-soft); }.changes-actions > span { flex: 1; }.changes-actions button { padding: 0 7px; display: flex; align-items: center; gap: 4px; }.changes-actions button:hover, .changes-actions button.selected { background: var(--versiondock-hover); color: var(--versiondock-accent); }
 .changes-scroll { flex: 1; overflow: auto; min-height: 0; }.repo-change-group { border-bottom: 1px solid var(--versiondock-border-soft); }.repo-heading { width: 100%; height: 30px; padding: 0 7px; display: flex; align-items: center; gap: 5px; text-align: left; }.repo-heading:hover { background: var(--versiondock-hover); }.repo-heading i { width: 7px; height: 7px; border-radius: 50%; }.repo-heading strong { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); letter-spacing: .5px; overflow: hidden; text-overflow: ellipsis; }.repo-heading .branch-chip { display: inline-flex; gap: 3px; padding: 1px 4px; border: 1px solid color-mix(in srgb, var(--versiondock-accent) 50%, transparent); color: var(--versiondock-accent); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.repo-heading > b { margin-left: auto; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .file-row { height: 27px; display: flex; align-items: center; padding: 0 7px 0 18px; gap: 5px; }.file-row:hover { background: var(--versiondock-hover); }.file-row input { width: 14px; height: 14px; accent-color: var(--versiondock-accent-bg); margin: 0; }.file-row button { min-width: 0; flex: 1; height: 100%; padding: 0; display: flex; align-items: center; gap: 5px; text-align: left; }.file-row .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.file-row small { color: var(--versiondock-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.status-mark { width: 14px; text-align: center; font-weight: 600; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); color: #e2c08d; }.status-added, .status-untracked { color: var(--versiondock-success); }.status-deleted, .conflicted .status-mark { color: var(--versiondock-danger); }.staged-dot { width: 5px; height: 5px; background: var(--versiondock-success); border-radius: 50%; }
@@ -1220,7 +1389,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .commit-tabs b { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 5px; border-radius: 8px; line-height: 16px; text-align: center; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); color: var(--versiondock-badge-foreground, #ffffff); flex-shrink: 0; }
 
 .commit-panel { background: var(--versiondock-bg); }
-.conflict-banner { margin: 6px 6px 5px; min-height: 43px; }
 .changes-actions { flex: 0 0 29px; height: 29px; padding: 2px 6px; background: var(--versiondock-bg); }
 .changes-actions button { color: var(--versiondock-muted); }
 .changes-scroll { background: var(--versiondock-surface); }
@@ -1770,7 +1938,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .commit-action > button:not(:disabled):hover { background: color-mix(in srgb, #fff 10%, var(--versiondock-accent-bg)); }
 button.danger:not(:disabled):hover,
 .remote-list .danger:not(:disabled):hover { color: #fff; background: color-mix(in srgb, var(--versiondock-danger) 72%, var(--versiondock-surface)); border-color: var(--versiondock-danger); }
-.conflict-banner:hover { background: color-mix(in srgb, var(--versiondock-warning) 22%, var(--versiondock-surface)); }
 .stash-repo > header { height: 28px; padding: 0 6px; }
 .stash-repo > header strong { font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); letter-spacing: .055em; text-transform: uppercase; }
 .stash-repo > header button { width: 23px; height: 23px; padding: 0; justify-content: center; border: 0; }
@@ -2472,10 +2639,44 @@ button.danger:not(:disabled):hover,
   color: var(--versiondock-success) !important;
 }
 
+.statusbar-item.branch-status-item.warning-bg,
+.statusbar-item.warning-bg {
+  background: var(--vscode-statusBarItem-warningBackground, #7a5e00) !important;
+  color: #ffffff !important;
+  font-weight: 500;
+  border-radius: 2px;
+  padding: 0 6px;
+  gap: 4px;
+}
+
 .statusbar-item.branch-status-item.warning-bg:hover,
-.statusbar-item.branch-status-item.warning-bg.active {
-  background: var(--versiondock-warning) !important;
-  color: #000000 !important;
+.statusbar-item.branch-status-item.warning-bg.active,
+.statusbar-item.warning-bg:hover,
+.statusbar-item.warning-bg.active {
+  background: #8e6e00 !important;
+  color: #ffffff !important;
+}
+
+.statusbar-item.warning-bg *,
+.statusbar-item.branch-status-item.warning-bg * {
+  color: #ffffff !important;
+}
+
+.statusbar-item.warning-bg .statusbar-dirty-dot,
+.statusbar-item.branch-status-item.warning-bg .statusbar-dirty-dot {
+  color: #ffffff !important;
+  font-size: 8px;
+  margin: 0 1px;
+  opacity: 0.95;
+}
+
+.statusbar-item.warning-bg .statusbar-counter,
+.statusbar-item.branch-status-item.warning-bg .statusbar-counter {
+  color: #ffffff !important;
+  font-weight: 600;
+  background: transparent !important;
+  padding: 0;
+  gap: 2px;
 }
 
 .statusbar-item:hover .statusbar-counter.pull,
@@ -2496,16 +2697,6 @@ button.danger:not(:disabled):hover,
 .statusbar-item:hover .statusbar-dirty-dot,
 .statusbar-item.active .statusbar-dirty-dot {
   color: var(--versiondock-warning);
-}
-
-.statusbar-item.warning-bg {
-  background: var(--versiondock-warning);
-  color: #000000;
-  font-weight: 500;
-}
-
-.statusbar-item.warning-bg:hover {
-  background: color-mix(in srgb, var(--versiondock-warning) 85%, #fff);
 }
 
 .statusbar-dirty-dot {

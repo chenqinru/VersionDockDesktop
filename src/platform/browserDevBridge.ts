@@ -3,8 +3,9 @@ import type {
   MergeCommitSummary,
   DiffDocument, GraphCommitNode, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
   TagInfo, WorkspaceSnapshot, WorktreeEntry, SubmoduleEntry,
+  WindowTabTransfer,
 } from '../bindings/generated';
-import type { BridgeEvent, RequestOptions, VersionDockBridge } from './bridge';
+import type { BridgeEvent, NewWindowPlacement, RequestOptions, VersionDockBridge } from './bridge';
 
 const workspace = {
   id: 'browser-demo', name: 'multi-repo-browser-demo', paths: ['/browser-demo'],
@@ -323,19 +324,51 @@ export class BrowserDevBridge implements VersionDockBridge {
   send(command: BridgeCommand): void { void this.request(command); }
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
   async notify(): Promise<boolean> { return false; }
-  async openInNewWindow(paths?: string[]): Promise<void> {
+  async openInNewWindow(paths?: string[], _position?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string> {
     if (typeof window !== 'undefined') {
-      const url = paths && paths.length > 0 ? `/?workspacePaths=${encodeURIComponent(JSON.stringify(paths))}` : '/';
+      const params = new URLSearchParams({ window: 'new' });
+      if (paths && paths.length > 0) params.set('workspacePaths', JSON.stringify(paths));
+      if (transfer) params.set('tabTransfer', JSON.stringify(transfer));
+      const url = `/?${params.toString()}`;
       window.open(url, '_blank');
     }
+    return 'browser-window-new';
+  }
+  async transferTab(transfer: WindowTabTransfer, _point: { screenX: number; screenY: number }, placement: NewWindowPlacement): Promise<boolean> {
+    await this.openInNewWindow(transfer.paths, placement, transfer);
+    return true;
   }
   async syncWindowTabs(): Promise<void> {
+    return Promise.resolve();
+  }
+  async syncWindowBounds(): Promise<void> {
     return Promise.resolve();
   }
   async focusWorkspaceAcrossWindows(): Promise<boolean> {
     return Promise.resolve(false);
   }
   async onFocusTab(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
+  async windowTabDrop(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+  async onImportTab(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
+  async completeTabTransfer(): Promise<void> {
+    return Promise.resolve();
+  }
+  async onTabTransferCompleted(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
+  async getWindowLabel(): Promise<string> {
+    return 'main';
+  }
+  async broadcastTabDragState(): Promise<void> {
+    return Promise.resolve();
+  }
+  async onTabDragState(): Promise<() => void> {
     return Promise.resolve(() => undefined);
   }
 

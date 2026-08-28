@@ -38,6 +38,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   useEffect(() => {
     closeButton.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -168,7 +171,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <label className="settings-block"><span className="settings-label"><strong>{t('Ignored folders')}</strong><small>{t('Folder names or workspace-relative paths skipped during repository scanning.')}</small></span><textarea aria-label={t('Ignored folders')} value={(settings?.ignoredFolders ?? []).join('\n')} onChange={(event) => void updateSettings({ ignoredFolders: event.target.value.split('\n') })} /></label>
               <SettingNumber label={t('Maximum graph commits')} description={t('Maximum commits to load in the history graph.')} value={settings?.maximumGraphCommits ?? 1000} min={100} max={10000} onChange={(value) => void updateSettings({ maximumGraphCommits: value })} />
               <div className="settings-block"><span className="settings-label"><strong>{t('Project colors')}</strong><small>{t('Map workspace or repository names to graph colors.')}</small></span><div className="settings-color-list">{repositories.map((repo) => <label key={repo.meta.id} className="settings-color-row"><span>{repo.meta.name}</span><input aria-label={`${t('Project colors')}: ${repo.meta.name}`} type="color" value={settings?.projectColors[repo.meta.id] ?? repo.meta.color} onChange={(event) => void updateSettings({ projectColors: { ...(settings?.projectColors ?? {}), [repo.meta.id]: event.target.value } })} /></label>)}</div></div>
-              <div className="settings-block"><span className="settings-label"><strong>Visible repositories</strong><small>Hidden repositories remain scanned and can be restored here.</small></span><div className="settings-color-list">{repositories.map((repo) => { const hidden = new Set(settings?.hiddenRepositoryIds ?? []); return <label key={repo.meta.id} className="settings-color-row"><span>{repo.meta.name}</span><input aria-label={`Visible repository: ${repo.meta.name}`} type="checkbox" checked={!hidden.has(repo.meta.id)} onChange={(event) => { const next = new Set(hidden); if (event.target.checked) next.delete(repo.meta.id); else next.add(repo.meta.id); void updateSettings({ hiddenRepositoryIds: [...next] }); }} /></label>; })}</div></div>
+              <div className="settings-block"><span className="settings-label"><strong>{t('Visible repositories')}</strong><small>{t('Hidden repositories remain scanned and can be restored here.')}</small></span><div className="settings-color-list">{repositories.map((repo) => { const hidden = new Set(settings?.hiddenRepositoryIds ?? []); return <label key={repo.meta.id} className="settings-color-row"><span>{repo.meta.name}</span><input aria-label={t('Visible repository: {0}', repo.meta.name)} type="checkbox" checked={!hidden.has(repo.meta.id)} onChange={(event) => { const next = new Set(hidden); if (event.target.checked) next.delete(repo.meta.id); else next.add(repo.meta.id); void updateSettings({ hiddenRepositoryIds: [...next] }); }} /></label>; })}</div></div>
             </SettingsSection>
 
             <ExternalEditorSettings id="settings-section-external-editor" editor={externalEditor} save={setExternalEditor} />

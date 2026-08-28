@@ -18,6 +18,34 @@ pub struct ResponseEnvelope {
     pub error: Option<DesktopError>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowTabTransfer {
+    pub transfer_id: String,
+    pub source_window_label: String,
+    pub tab_id: String,
+    pub tab_name: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowTabImport {
+    pub transfer: WindowTabTransfer,
+    pub screen_x: f64,
+    pub screen_y: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowTabTransferCompleted {
+    pub transfer_id: String,
+    pub source_window_label: String,
+    pub tab_id: String,
+    pub target_window_label: String,
+    pub accepted: bool,
+}
+
 impl ResponseEnvelope {
     pub fn success<T: Serialize>(request_id: String, value: T) -> Self {
         Self {
@@ -64,14 +92,32 @@ pub enum BridgeCommand {
         y: Option<f64>,
         width: Option<f64>,
         height: Option<f64>,
+        transfer: Option<WindowTabTransfer>,
     },
     WindowSyncTabs {
-        window_label: String,
         workspace_paths: Vec<Vec<String>>,
+        active_workspace_id: Option<String>,
     },
     WindowFocusWorkspace {
-        current_window_label: String,
         paths: Vec<String>,
+    },
+    WindowTabDrop {
+        transfer: WindowTabTransfer,
+        screen_x: f64,
+        screen_y: f64,
+    },
+    WindowCompleteTabTransfer {
+        transfer_id: String,
+        source_window_label: String,
+        tab_id: String,
+        target_window_label: String,
+        accepted: bool,
+    },
+    WindowSyncBounds {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
     },
     RepositoryStatus {
         workspace_id: String,

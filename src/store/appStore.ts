@@ -4,6 +4,7 @@ import type {
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
   WorkspaceSnapshot, WorkspaceDescriptor, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
+  WindowTabTransfer,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
@@ -16,6 +17,18 @@ export type HistoryScope = {
   repoIds: string[] | null;
   revisionsByRepo: Record<string, string>;
 };
+
+export interface OpenWorkspaceOptions {
+  skipCrossWindowFocus?: boolean;
+  insertionIndex?: number;
+}
+
+export function workspacePathsEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((path, index) => path === sortedRight[index]);
+}
 
 export interface AppNotification {
   id: string;
@@ -223,7 +236,7 @@ export interface AppStore {
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
   initialize: (bridge: VersionDockBridge) => Promise<void>;
-  openWorkspace: (paths: string[], focus?: boolean) => Promise<void>;
+  openWorkspace: (paths: string[], focus?: boolean, options?: OpenWorkspaceOptions) => Promise<boolean>;
   switchTab: (workspaceId: string) => Promise<void>;
   closeTab: (workspaceId: string) => Promise<void>;
   closeOtherTabs: (workspaceId: string) => Promise<void>;
@@ -509,7 +522,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     };
   };
 
-  const persistTabs = (tabs: WorkspaceSnapshot['workspace'][], activeId: string | null) => {
+  const persistTabs = async (tabs: WorkspaceSnapshot['workspace'][], activeId: string | null) => {
     const current = get().bootstrap;
     if (current) {
       const openWorkspaceIds = tabs.map((item) => item.id);
@@ -520,9 +533,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         lastWorkspaceId: activeId,
       };
       set({ bootstrap: { ...current, state: updatedState } });
-      bridge().send({ type: 'saveAppState', payload: { state: updatedState } });
     }
-    void bridge().syncWindowTabs(tabs.map((item) => item.paths));
+    await bridge().syncWindowTabs(tabs.map((item) => item.paths), activeId);
   };
 
   const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true) => {
@@ -534,7 +546,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const visibleSnapshot = projectSnapshot(snapshot, allRepositories, settings());
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
-      set(workspaceChanged
+    set(workspaceChanged
       ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId });
     for (const repo of visibleSnapshot.repositories) {
@@ -561,14 +573,16 @@ export const useAppStore = create<AppStore>((set, get) => {
     const requests: Promise<void>[] = [get().loadConflicts()];
     if (workspaceChanged || reloadRepository) requests.push(get().loadStashes(), get().loadShelves(), get().loadWorktrees(), get().loadSubtrees(), get().loadSubmodules(), get().loadUnpushedCommits());
     await Promise.all(requests);
-    const activeSession = extractCurrentSession(get());
-    if (activeSession) {
-      set((state) => ({
-        sessions: {
-          ...state.sessions,
-          [snapshot.workspace.id]: activeSession,
-        },
-      }));
+    if (get().snapshot?.workspace.id === snapshot.workspace.id) {
+      const activeSession = extractCurrentSession(get());
+      if (activeSession) {
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [snapshot.workspace.id]: activeSession,
+          },
+        }));
+      }
     }
   };
 
@@ -633,25 +647,33 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ ready: true });
     },
 
-    openWorkspace: async (paths, focus = true) => withBusy(async () => {
+    openWorkspace: async (paths, focus = true, options = {}) => {
+      let opened = false;
+      await withBusy(async () => {
       if (!paths.length) return;
-      const existingTab = get().tabs.find((tab) =>
-        tab.paths.length === paths.length && tab.paths.every((p, i) => p === paths[i])
-      );
-      if (existingTab && get().sessions[existingTab.id]) {
+      const existingTab = get().tabs.find((tab) => workspacePathsEqual(tab.paths, paths));
+      if (existingTab) {
+        if (options.insertionIndex !== undefined) {
+          const currentIndex = get().tabs.findIndex((tab) => tab.id === existingTab.id);
+          const targetIndex = Math.max(0, Math.min(options.insertionIndex, get().tabs.length - 1));
+          if (currentIndex !== targetIndex) get().reorderTabs(currentIndex, targetIndex);
+        }
         if (focus) {
           await get().switchTab(existingTab.id);
         }
+        opened = true;
         return;
       }
 
-      try {
-        const focusedOther = await bridge().focusWorkspaceAcrossWindows(paths);
-        if (focusedOther) {
-          return;
+      if (!options.skipCrossWindowFocus) {
+        try {
+          const focusedOther = await bridge().focusWorkspaceAcrossWindows(paths);
+          if (focusedOther) {
+            return;
+          }
+        } catch {
+          // ignore cross-window focus error and fallback to opening in current window
         }
-      } catch {
-        // ignore cross-window focus error and fallback to opening in current window
       }
 
       const currentActiveId = get().activeTabId;
@@ -673,7 +695,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       
       const workspaceDescriptor = snapshot.workspace;
       const filteredTabs = get().tabs.filter((item) => item.id !== workspaceDescriptor.id);
-      const nextTabs = [...filteredTabs, workspaceDescriptor];
+      const insertionIndex = options.insertionIndex === undefined
+        ? filteredTabs.length
+        : Math.max(0, Math.min(options.insertionIndex, filteredTabs.length));
+      const nextTabs = [...filteredTabs];
+      nextTabs.splice(insertionIndex, 0, workspaceDescriptor);
       const recentWorkspaces = [workspaceDescriptor, ...current.state.recentWorkspaces.filter((item) => item.id !== workspaceDescriptor.id)].slice(0, 10);
       const nextBootstrap: BootstrapData = {
         ...current,
@@ -692,14 +718,25 @@ export const useAppStore = create<AppStore>((set, get) => {
         activeTabId: workspaceDescriptor.id,
       });
 
-      persistTabs(nextTabs, workspaceDescriptor.id);
+      await persistTabs(nextTabs, workspaceDescriptor.id);
       await applySnapshot(snapshot);
-    }, 'workspace'),
+      opened = get().tabs.some((tab) => tab.id === workspaceDescriptor.id);
+      }, 'workspace');
+      return opened;
+    },
 
     switchTab: async (workspaceId: string) => {
       if (get().activeTabId === workspaceId && get().snapshot) return;
       const targetTab = get().tabs.find((t) => t.id === workspaceId);
       if (!targetTab) return;
+
+      cancelRequests();
+      workspaceRequestGeneration += 1;
+      historyRequestGeneration += 1;
+      changesDiffGeneration += 1;
+      commitSelectionGeneration += 1;
+      comparisonRequestGeneration += 1;
+      branchWorkingDiffGeneration += 1;
 
       const currentActiveId = get().activeTabId;
       if (currentActiveId && currentActiveId !== workspaceId) {
@@ -730,19 +767,19 @@ export const useAppStore = create<AppStore>((set, get) => {
           historyTopology: cachedSession.historyTopology,
           historyTopologyByRepo: cachedSession.historyTopologyByRepo,
           historyHasMoreByRepo: cachedSession.historyHasMoreByRepo,
-          historyLoading: cachedSession.historyLoading,
-          branchesLoading: cachedSession.branchesLoading,
+          historyLoading: false,
+          branchesLoading: false,
           historyScope: cachedSession.historyScope,
           historyFilter: cachedSession.historyFilter,
           selectedCommit: cachedSession.selectedCommit,
           selectedCommits: cachedSession.selectedCommits,
           selectedPrimaryKey: cachedSession.selectedPrimaryKey,
           selectedCommitDetails: cachedSession.selectedCommitDetails,
-          selectedCommitLoading: cachedSession.selectedCommitLoading,
+          selectedCommitLoading: {},
           mergeCommits: cachedSession.mergeCommits,
-          mergeCommitsLoading: cachedSession.mergeCommitsLoading,
+          mergeCommitsLoading: {},
           mergeParentFiles: cachedSession.mergeParentFiles,
-          mergeParentFilesLoading: cachedSession.mergeParentFilesLoading,
+          mergeParentFilesLoading: {},
           branches: cachedSession.branches,
           tags: cachedSession.tags,
           branchesByRepo: cachedSession.branchesByRepo,
@@ -762,18 +799,16 @@ export const useAppStore = create<AppStore>((set, get) => {
           comparison: cachedSession.comparison,
           remotes: cachedSession.remotes,
         });
-        persistTabs(get().tabs, workspaceId);
-        void get().refresh(true);
+        await persistTabs(get().tabs, workspaceId);
       } else {
         await withBusy(async () => {
-          cancelRequests();
           const controller = beginRequest('workspace');
           const requestGeneration = ++workspaceRequestGeneration;
           const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths: targetTab.paths } }, { signal: controller.signal });
           if (requestGeneration !== workspaceRequestGeneration) return;
           set({ activeTabId: workspaceId });
-          persistTabs(get().tabs, workspaceId);
-          await applySnapshot(snapshot);
+          await persistTabs(get().tabs, workspaceId);
+          await applySnapshot(snapshot, true);
         }, 'workspace');
       }
     },
@@ -848,14 +883,14 @@ export const useAppStore = create<AppStore>((set, get) => {
             comparison: undefined,
             remotes: {},
           });
-          persistTabs(nextTabs, null);
+          await persistTabs(nextTabs, null);
         }
       } else {
         set({
           tabs: nextTabs,
           sessions: nextSessions,
         });
-        persistTabs(nextTabs, get().activeTabId);
+        await persistTabs(nextTabs, get().activeTabId);
       }
     },
 
@@ -871,7 +906,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (get().activeTabId !== workspaceId) {
         await get().switchTab(workspaceId);
       } else {
-        persistTabs(nextTabs, workspaceId);
+        await persistTabs(nextTabs, workspaceId);
       }
     },
 
@@ -927,7 +962,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         comparison: undefined,
         remotes: {},
       });
-      persistTabs([], null);
+      await persistTabs([], null);
     },
 
     reorderTabs: (fromIndex: number, toIndex: number) => {
@@ -936,24 +971,47 @@ export const useAppStore = create<AppStore>((set, get) => {
       const [moved] = currentTabs.splice(fromIndex, 1);
       currentTabs.splice(toIndex, 0, moved);
       set({ tabs: currentTabs });
-      persistTabs(currentTabs, get().activeTabId);
+      void persistTabs(currentTabs, get().activeTabId).catch(() => undefined);
     },
 
     restoreTabsOnStartup: async () => {
+      const currentWindowLabel = await bridge().getWindowLabel();
       if (typeof window !== 'undefined' && window.location.search) {
         const params = new URLSearchParams(window.location.search);
         const encodedPaths = params.get('workspacePaths');
+        const encodedTransfer = params.get('tabTransfer');
+        const clearStartupParameters = () => {
+          params.delete('workspacePaths');
+          params.delete('tabTransfer');
+          params.delete('window');
+          const query = params.toString();
+          window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+        };
         if (encodedPaths) {
+          let transfer: WindowTabTransfer | null = null;
           try {
+            if (encodedTransfer) transfer = JSON.parse(encodedTransfer) as WindowTabTransfer;
             const paths = JSON.parse(encodedPaths) as string[];
             if (Array.isArray(paths) && paths.length > 0) {
-              await get().openWorkspace(paths, true);
+              const accepted = await get().openWorkspace(paths, true, { skipCrossWindowFocus: true });
+              if (transfer) {
+                await bridge().completeTabTransfer(transfer, currentWindowLabel, accepted);
+              }
+              clearStartupParameters();
               return;
             }
           } catch {
-            // ignore malformed parameter
+            if (transfer) {
+              await bridge().completeTabTransfer(transfer, currentWindowLabel, false).catch(() => undefined);
+            }
           }
         }
+        clearStartupParameters();
+      }
+
+      if (currentWindowLabel !== 'main') {
+        await persistTabs([], null);
+        return;
       }
 
       const state = get().bootstrap?.state;
@@ -1067,15 +1125,22 @@ export const useAppStore = create<AppStore>((set, get) => {
         const requests: Promise<unknown>[] = [get().loadHistory(true)];
         if (get().bootstrap?.capabilities.changelist && repo.capabilities?.changelist !== false) requests.push(get().loadChangelists(repoId));
         if (repo.meta.kind === 'git' && get().bootstrap?.capabilities.subtree && repo.capabilities?.subtree !== false) requests.push(get().loadSubtrees(repoId));
+        const currentWorkspace = workspaceId();
         for (const item of get().snapshot?.repositories ?? []) {
-          requests.push(bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId(), repo_id: item.meta.id } }).then((branches) => set((state) => ({
-            branchesByRepo: { ...state.branchesByRepo, [item.meta.id]: branches },
-            branches: item.meta.id === get().selectedRepoId ? branches : state.branches,
-          }))));
-          requests.push(bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId(), repo_id: item.meta.id } }).then((tags) => set((state) => ({
-            tagsByRepo: { ...state.tagsByRepo, [item.meta.id]: tags },
-            tags: item.meta.id === get().selectedRepoId ? tags : state.tags,
-          }))));
+          requests.push(bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }).then((branches) => {
+            if (get().snapshot?.workspace.id !== currentWorkspace) return;
+            set((state) => ({
+              branchesByRepo: { ...state.branchesByRepo, [item.meta.id]: branches },
+              branches: item.meta.id === get().selectedRepoId ? branches : state.branches,
+            }));
+          }));
+          requests.push(bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }).then((tags) => {
+            if (get().snapshot?.workspace.id !== currentWorkspace) return;
+            set((state) => ({
+              tagsByRepo: { ...state.tagsByRepo, [item.meta.id]: tags },
+              tags: item.meta.id === get().selectedRepoId ? tags : state.tags,
+            }));
+          }));
         }
         try {
           await Promise.all(requests);
@@ -1367,6 +1432,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!b || !wid) return;
       if (repoId) {
         const values = await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        if (get().snapshot?.workspace.id !== wid) return;
         set((state) => ({ stashes: { ...state.stashes, [repoId]: values } }));
         return;
       }
@@ -1375,6 +1441,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         repoId: repo.meta.id,
         stashes: await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
       })));
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ stashes: values.reduce((next, value) => ({ ...next, [value.repoId]: value.stashes }), state.stashes) }));
     },
     stashOperation: async (repoId, operation) => withBusy(async () => {
@@ -1387,6 +1454,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!b || !wid) return;
       if (repoId) {
         const values = await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        if (get().snapshot?.workspace.id !== wid) return;
         set((state) => ({ shelves: { ...state.shelves, [repoId]: values } }));
         return;
       }
@@ -1395,6 +1463,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         repoId: repo.meta.id,
         shelves: await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
       })));
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ shelves: values.reduce((next, value) => ({ ...next, [value.repoId]: value.shelves }), state.shelves) }));
     },
     shelfOperation: async (repoId, operation) => withBusy(async () => {
@@ -1407,6 +1476,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const id = repoId ?? get().selectedRepoId;
       if (!b || !wid || !id) return;
       const values = await b.request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: wid, repo_id: id } }).catch(() => []);
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ changelists: { ...state.changelists, [id]: values } }));
     },
     changelistOperation: async (repoId, operation) => withBusy(async () => {
@@ -1419,6 +1489,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!b || !wid) return;
       if (repoId) {
         const values = await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        if (get().snapshot?.workspace.id !== wid) return;
         set((state) => ({ worktrees: { ...state.worktrees, [repoId]: values } }));
         return;
       }
@@ -1427,6 +1498,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         repoId: repo.meta.id,
         worktrees: await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
       })));
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ worktrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.worktrees }), state.worktrees) }));
     },
     worktreeOperation: async (repoId, operation) => withBusy(async () => {
@@ -1437,11 +1509,15 @@ export const useAppStore = create<AppStore>((set, get) => {
       await bridge().request({ type: 'openWorktree', payload: { workspace_id: workspaceId(), repo_id: repoId, path, reveal } });
     }, `worktree:${repoId}`),
     loadWorktreeDiff: async (repoId, path, baseRef = 'HEAD') => withBusy(async () => {
+      const wid = get().snapshot?.workspace.id;
       const result = await bridge().request<WorktreeDiffResult>({ type: 'worktreeDiff', payload: { workspace_id: workspaceId(), repo_id: repoId, path, base_ref: baseRef } });
+      if (get().snapshot?.workspace.id !== wid) return;
       set({ worktreeDiff: { ...result, repoId, source: 'worktree' } });
     }, `worktree:${repoId}`),
     openWorktreeFileDiff: async (repoId, path, baseRef, relativePath) => withBusy(async () => {
+      const wid = get().snapshot?.workspace.id;
       const diff = await bridge().request<DiffDocument>({ type: 'worktreeFileDiff', payload: { workspace_id: workspaceId(), repo_id: repoId, path, base_ref: baseRef, relative_path: relativePath } });
+      if (get().snapshot?.workspace.id !== wid) return;
       set({ selectedFile: { repoId, path: relativePath, staged: false, fromRevision: baseRef, toRevision: 'WORKTREE' }, diff, mode: 'diff' });
     }, `diff:${repoId}`),
     loadBranchWorkingDiff: async (repoId, baseRef) => withBusy(async () => {
@@ -1453,7 +1529,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ worktreeDiff: { ...result, repoId, source: 'repository' } });
     }, `diff:${repoId}`),
     openBranchWorkingFileDiff: async (repoId, baseRef, relativePath) => withBusy(async () => {
+      const wid = get().snapshot?.workspace.id;
       const diff = await bridge().request<DiffDocument>({ type: 'branchWorkingFileDiff', payload: { workspace_id: workspaceId(), repo_id: repoId, base_ref: baseRef, relative_path: relativePath } });
+      if (get().snapshot?.workspace.id !== wid) return;
       set({ selectedFile: { repoId, path: relativePath, staged: false, fromRevision: baseRef, toRevision: 'WORKING' }, diff, mode: 'diff' });
     }, `diff:${repoId}`),
     closeWorktreeDiff: () => {
@@ -1467,6 +1545,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!b || !wid) return;
       if (repoId) {
         const values = await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        if (get().snapshot?.workspace.id !== wid) return;
         set((state) => ({ subtrees: { ...state.subtrees, [repoId]: values } }));
         return;
       }
@@ -1475,6 +1554,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         repoId: repo.meta.id,
         subtrees: await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
       })));
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ subtrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.subtrees }), state.subtrees) }));
     },
     subtreeOperation: async (repoId, operation) => withBusy(async () => {
@@ -1491,6 +1571,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         repoId: repo.meta.id,
         submodules: await b.request<SubmoduleEntry[]>({ type: 'submodules', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
       })));
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ submodules: values.reduce((next, value) => ({ ...next, [value.repoId]: value.submodules }), state.submodules) }));
     },
     submoduleOperation: async (repoId, operation) => withBusy(async () => {
@@ -1503,6 +1584,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!b || !wid) return;
       if (repoId) {
         const values = await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        if (get().snapshot?.workspace.id !== wid) return;
         set((state) => ({ unpushedCommits: { ...state.unpushedCommits, [repoId]: values } }));
         return;
       }
@@ -1511,6 +1593,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         repoId: repo.meta.id,
         commits: await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
       })));
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ unpushedCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.unpushedCommits) }));
     },
     unpushedOperation: async (repoId, operation) => withBusy(async () => {
@@ -1575,6 +1658,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       const conflicts = await b.request<ConflictFile[]>({ type: 'conflicts', payload: { workspace_id: wid } }).catch(() => []);
+      if (get().snapshot?.workspace.id !== wid) return;
       set({ conflicts });
     },
 

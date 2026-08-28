@@ -111,11 +111,17 @@ export function App() {
             await bridge.openInNewWindow(paths);
           }
         })();
+      } else if (isCmdOrCtrl && event.key.toLowerCase() === 'o' && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        void (async () => {
+          const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
+          if (paths.length) await openWorkspace(paths);
+        })();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [bridge, t]);
+  }, [bridge, openWorkspace, t]);
 
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);
 

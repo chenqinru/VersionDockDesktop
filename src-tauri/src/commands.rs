@@ -1,13 +1,14 @@
 use std::path::Path;
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{
     changelist, identity,
     models::{
         BootstrapData, BridgeCommand, ConflictFile, DesktopCapabilities, DesktopError,
-        ProgressEvent, RequestEnvelope, ResponseEnvelope, VcsKind,
+        ProgressEvent, RequestEnvelope, ResponseEnvelope, VcsKind, WindowTabImport,
+        WindowTabTransferCompleted,
     },
     shelf,
     state::AppState,
@@ -26,6 +27,7 @@ pub async fn bridge_cancel(
 pub async fn bridge_request(
     envelope: RequestEnvelope,
     app: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<ResponseEnvelope, DesktopError> {
     let request_id = envelope.request_id.clone();
@@ -42,7 +44,7 @@ pub async fn bridge_request(
             total: None,
         },
     );
-    let mut result = dispatch(envelope.command, &app, &state, &token).await;
+    let mut result = dispatch(envelope.command, &app, &window, &state, &token).await;
     if let Err(error) = &mut result {
         error
             .operation
@@ -376,6 +378,7 @@ fn command_error_context(
 async fn dispatch(
     command: BridgeCommand,
     app: &AppHandle,
+    invoking_window: &tauri::WebviewWindow,
     state: &AppState,
     token: &tokio_util::sync::CancellationToken,
 ) -> Result<serde_json::Value, DesktopError> {
@@ -486,25 +489,54 @@ async fn dispatch(
             y,
             width,
             height,
+            transfer,
         } => {
+            if transfer
+                .as_ref()
+                .is_some_and(|value| value.source_window_label != invoking_window.label())
+            {
+                return Err(DesktopError::new(
+                    "TAB_TRANSFER_SOURCE_MISMATCH",
+                    "The tab transfer source does not match the invoking window",
+                    false,
+                ));
+            }
             let label = format!("window-{}", uuid::Uuid::new_v4().simple());
-            let mut url_path = String::from("index.html");
+            let mut query = vec!["window=new".to_string()];
             if let Some(paths) = &paths {
                 if !paths.is_empty() {
                     let encoded = serde_json::to_string(paths).unwrap_or_default();
-                    url_path = format!("index.html?workspacePaths={}", url_encode(&encoded));
+                    query.push(format!("workspacePaths={}", url_encode(&encoded)));
                 }
             }
+            if let Some(transfer) = &transfer {
+                let encoded = serde_json::to_string(transfer).unwrap_or_default();
+                query.push(format!("tabTransfer={}", url_encode(&encoded)));
+            }
+            let query_suffix = format!("?{}", query.join("&"));
 
-            let builder = tauri::WebviewWindowBuilder::new(
-                app,
-                &label,
-                tauri::WebviewUrl::App(url_path.into()),
-            )
-            .title(" ")
-            .inner_size(width.unwrap_or(1440.0), height.unwrap_or(900.0))
-            .min_inner_size(1024.0, 680.0)
-            .resizable(true);
+            let main_url = app
+                .get_webview_window("main")
+                .and_then(|window| window.url().ok())
+                .or_else(|| invoking_window.url().ok());
+            let webview_url = match main_url {
+                Some(mut url) if matches!(url.scheme(), "http" | "https") => {
+                    url.set_path("/");
+                    url.set_query(Some(query_suffix.trim_start_matches('?')));
+                    url.set_fragment(None);
+                    tauri::WebviewUrl::External(url)
+                }
+                _ => {
+                    let url_path = format!("index.html{}", query_suffix);
+                    tauri::WebviewUrl::App(url_path.into())
+                }
+            };
+
+            let builder = tauri::WebviewWindowBuilder::new(app, &label, webview_url)
+                .title(" ")
+                .inner_size(width.unwrap_or(1440.0), height.unwrap_or(900.0))
+                .min_inner_size(1024.0, 680.0)
+                .resizable(true);
 
             #[cfg(target_os = "macos")]
             let builder = builder
@@ -544,18 +576,43 @@ async fn dispatch(
             json(label)
         }
         BridgeCommand::WindowSyncTabs {
-            window_label,
             workspace_paths,
+            active_workspace_id,
         } => {
-            let mut map = state.window_workspaces.lock().unwrap();
-            map.insert(window_label, workspace_paths);
+            let window_label = invoking_window.label().to_string();
+            let workspace_ids = {
+                let mut map = state.window_workspaces.lock().map_err(|_| {
+                    DesktopError::new(
+                        "WINDOW_STATE_LOCK_FAILED",
+                        "Unable to synchronize window tabs",
+                        true,
+                    )
+                })?;
+                map.retain(|label, _| app.get_webview_window(label).is_some());
+                map.insert(window_label.clone(), workspace_paths.clone());
+                map.values()
+                    .flat_map(|paths| paths.iter().map(|value| crate::state::workspace_id(value)))
+                    .collect::<std::collections::HashSet<_>>()
+            };
+            state.retain_workspace_watchers(&workspace_ids)?;
+
+            if window_label == "main" {
+                let open_workspace_ids = workspace_paths
+                    .iter()
+                    .map(|paths| crate::state::workspace_id(paths))
+                    .collect::<Vec<_>>();
+                let mut snapshot = state.app.read().await.clone();
+                snapshot.open_workspace_ids = open_workspace_ids.clone();
+                snapshot.active_workspace_id = active_workspace_id
+                    .filter(|workspace_id| open_workspace_ids.contains(workspace_id));
+                snapshot.last_workspace_id = snapshot.active_workspace_id.clone();
+                state.save_app_state(snapshot).await?;
+            }
             json(true)
         }
-        BridgeCommand::WindowFocusWorkspace {
-            current_window_label,
-            paths,
-        } => {
+        BridgeCommand::WindowFocusWorkspace { paths } => {
             use tauri::{Emitter, Manager};
+            let current_window_label = invoking_window.label().to_string();
             let mut target_window_label: Option<String> = None;
             {
                 let mut map = state.window_workspaces.lock().unwrap();
@@ -588,6 +645,143 @@ async fn dispatch(
             }
 
             json(false)
+        }
+        BridgeCommand::WindowSyncBounds {
+            x,
+            y,
+            width,
+            height,
+        } => {
+            let window_label = invoking_window.label().to_string();
+            let mut map = state.window_bounds.lock().unwrap();
+            map.insert(window_label, (x, y, width, height));
+            json(true)
+        }
+        BridgeCommand::WindowTabDrop {
+            transfer,
+            screen_x,
+            screen_y,
+        } => {
+            use tauri::{Emitter, Manager};
+            if transfer.source_window_label != invoking_window.label() {
+                return Err(DesktopError::new(
+                    "TAB_TRANSFER_SOURCE_MISMATCH",
+                    "The tab transfer source does not match the invoking window",
+                    false,
+                ));
+            }
+            let mut target_window_label: Option<String> = None;
+            let registered_windows = state
+                .window_workspaces
+                .lock()
+                .map_err(|_| {
+                    DesktopError::new(
+                        "WINDOW_STATE_LOCK_FAILED",
+                        "Unable to read window tabs",
+                        true,
+                    )
+                })?
+                .keys()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+
+            if screen_x.is_finite() && screen_y.is_finite() {
+                let windows = app.webview_windows();
+                for (label, window) in windows {
+                    if label != transfer.source_window_label
+                        && registered_windows.contains(&label)
+                        && window.is_visible().unwrap_or(false)
+                        && !window.is_minimized().unwrap_or(false)
+                    {
+                        if let (Ok(pos), Ok(size), Ok(scale)) = (
+                            window.outer_position(),
+                            window.outer_size(),
+                            window.scale_factor(),
+                        ) {
+                            let scale = if scale <= 0.0 { 1.0 } else { scale };
+                            let win_x = pos.x as f64 / scale;
+                            let win_y = pos.y as f64 / scale;
+                            let win_w = size.width as f64 / scale;
+                            if point_in_tab_snap_zone(screen_x, screen_y, win_x, win_y, win_w) {
+                                target_window_label = Some(label);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if target_window_label.is_none() {
+                let bounds_map = state.window_bounds.lock().map_err(|_| {
+                    DesktopError::new(
+                        "WINDOW_STATE_LOCK_FAILED",
+                        "Unable to read window bounds",
+                        true,
+                    )
+                })?;
+                for (label, (win_x, win_y, win_w, _)) in bounds_map.iter() {
+                    if label != &transfer.source_window_label
+                        && registered_windows.contains(label)
+                        && app.get_webview_window(label).is_some()
+                        && point_in_tab_snap_zone(screen_x, screen_y, *win_x, *win_y, *win_w)
+                    {
+                        target_window_label = Some(label.clone());
+                        break;
+                    }
+                }
+            }
+
+            if let Some(target_label) = target_window_label {
+                if let Some(target) = app.get_webview_window(&target_label) {
+                    let _ = target.unminimize();
+                    let _ = target.show();
+                    let _ = target.set_focus();
+                    let payload = WindowTabImport {
+                        transfer,
+                        screen_x,
+                        screen_y,
+                    };
+                    if target.emit("versiondock://import-tab", payload).is_ok() {
+                        return json(true);
+                    }
+                }
+            }
+
+            json(false)
+        }
+        BridgeCommand::WindowCompleteTabTransfer {
+            transfer_id,
+            source_window_label,
+            tab_id,
+            target_window_label,
+            accepted,
+        } => {
+            use tauri::{Emitter, Manager};
+            if target_window_label != invoking_window.label() {
+                return Err(DesktopError::new(
+                    "TAB_TRANSFER_TARGET_MISMATCH",
+                    "The tab transfer target does not match the invoking window",
+                    false,
+                ));
+            }
+            let Some(source) = app.get_webview_window(&source_window_label) else {
+                return json(false);
+            };
+            source
+                .emit(
+                    "versiondock://tab-transfer-completed",
+                    WindowTabTransferCompleted {
+                        transfer_id,
+                        source_window_label,
+                        tab_id,
+                        target_window_label,
+                        accepted,
+                    },
+                )
+                .map_err(|error| {
+                    DesktopError::new("TAB_TRANSFER_ACK_FAILED", error.to_string(), true)
+                })?;
+            json(true)
         }
         BridgeCommand::RepositoryStatus {
             workspace_id,
@@ -1585,10 +1779,40 @@ fn paths_match(a: &[String], b: &[String]) -> bool {
     a_sorted == b_sorted
 }
 
+const TAB_SNAP_MARGIN: f64 = 40.0;
+const TAB_BAR_HEIGHT: f64 = 42.0;
+
+fn point_in_tab_snap_zone(
+    point_x: f64,
+    point_y: f64,
+    window_x: f64,
+    window_y: f64,
+    window_width: f64,
+) -> bool {
+    point_x.is_finite()
+        && point_y.is_finite()
+        && window_x.is_finite()
+        && window_y.is_finite()
+        && window_width.is_finite()
+        && window_width > 0.0
+        && point_x >= window_x - TAB_SNAP_MARGIN
+        && point_x <= window_x + window_width + TAB_SNAP_MARGIN
+        && point_y >= window_y - TAB_SNAP_MARGIN
+        && point_y <= window_y + TAB_BAR_HEIGHT + TAB_SNAP_MARGIN
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::{ExternalEditor, VcsKind};
+
+    #[test]
+    fn tab_drop_only_snaps_near_the_target_title_bar() {
+        assert!(point_in_tab_snap_zone(500.0, 120.0, 100.0, 100.0, 900.0));
+        assert!(point_in_tab_snap_zone(70.0, 80.0, 100.0, 100.0, 900.0));
+        assert!(!point_in_tab_snap_zone(500.0, 220.0, 100.0, 100.0, 900.0));
+        assert!(!point_in_tab_snap_zone(20.0, 120.0, 100.0, 100.0, 900.0));
+    }
 
     fn repo(root: &Path) -> crate::models::RepositoryMeta {
         crate::models::RepositoryMeta {

@@ -74,12 +74,27 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	y: number | null,
 	width: number | null,
 	height: number | null,
+	transfer: WindowTabTransfer | null,
 } } | { type: "windowSyncTabs"; payload: {
-	window_label: string,
 	workspace_paths: string[][],
+	active_workspace_id: string | null,
 } } | { type: "windowFocusWorkspace"; payload: {
-	current_window_label: string,
 	paths: string[],
+} } | { type: "windowTabDrop"; payload: {
+	transfer: WindowTabTransfer,
+	screen_x: number | null,
+	screen_y: number | null,
+} } | { type: "windowCompleteTabTransfer"; payload: {
+	transfer_id: string,
+	source_window_label: string,
+	tab_id: string,
+	target_window_label: string,
+	accepted: boolean,
+} } | { type: "windowSyncBounds"; payload: {
+	x: number | null,
+	y: number | null,
+	width: number | null,
+	height: number | null,
 } } | { type: "repositoryStatus"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -802,6 +817,28 @@ export type UnpushedCommit = {
 export type UnpushedOperation = { type: "revert"; hashes: string[] } | { type: "undoHead" } | { type: "drop"; hashes: string[] } | { type: "squash"; hashes: string[]; message: string } | { type: "editMessage"; hash: string; message: string };
 
 export type VcsKind = "git" | "svn";
+
+export type WindowTabImport = {
+	transfer: WindowTabTransfer,
+	screenX: number | null,
+	screenY: number | null,
+};
+
+export type WindowTabTransfer = {
+	transferId: string,
+	sourceWindowLabel: string,
+	tabId: string,
+	tabName: string,
+	paths: string[],
+};
+
+export type WindowTabTransferCompleted = {
+	transferId: string,
+	sourceWindowLabel: string,
+	tabId: string,
+	targetWindowLabel: string,
+	accepted: boolean,
+};
 
 export type WorkspaceDescriptor = {
 	id: string,

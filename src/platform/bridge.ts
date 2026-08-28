@@ -1,9 +1,19 @@
-import type { BridgeCommand, DesktopError, ProgressEvent, RepositoryEvent, ResponseEnvelope, WorkspaceEvent } from '../bindings/generated';
+import type {
+  BridgeCommand, DesktopError, ProgressEvent, RepositoryEvent, ResponseEnvelope,
+  WindowTabImport, WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
+} from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
 export interface RequestOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+}
+
+export interface NewWindowPlacement {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
 }
 
 export type BridgeEvent = ProgressEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
@@ -17,10 +27,19 @@ export interface VersionDockBridge {
   platform(): 'macos' | 'windows' | 'linux';
   selectWorkspaceFolders(title: string): Promise<string[]>;
   notify(title: string, body: string): Promise<boolean>;
-  openInNewWindow(paths?: string[], position?: { x: number; y: number }): Promise<void>;
-  syncWindowTabs(workspacePaths: string[][]): Promise<void>;
+  openInNewWindow(paths?: string[], placement?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string>;
+  transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting?: boolean): Promise<boolean>;
+  syncWindowTabs(workspacePaths: string[][], activeWorkspaceId: string | null): Promise<void>;
+  syncWindowBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
   focusWorkspaceAcrossWindows(paths: string[]): Promise<boolean>;
   onFocusTab(handler: (paths: string[]) => void): Promise<() => void>;
+  windowTabDrop(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }): Promise<boolean>;
+  onImportTab(handler: (payload: WindowTabImport) => void): Promise<() => void>;
+  completeTabTransfer(transfer: WindowTabTransfer, targetWindowLabel: string, accepted: boolean): Promise<void>;
+  onTabTransferCompleted(handler: (payload: WindowTabTransferCompleted) => void): Promise<() => void>;
+  getWindowLabel(): Promise<string>;
+  broadcastTabDragState(state: TabDragPayload | null): Promise<void>;
+  onTabDragState(handler: (state: TabDragPayload | null) => void): Promise<() => void>;
   window: {
     startDragging(): Promise<void>;
     toggleMaximize(): Promise<void>;
@@ -29,6 +48,15 @@ export interface VersionDockBridge {
     isMaximized(): Promise<boolean>;
     onDragDrop(handler: (paths: string[]) => void): Promise<() => void>;
   };
+}
+
+export interface TabDragPayload {
+  sourceWindowLabel: string;
+  tabId: string;
+  tabName: string;
+  paths: string[];
+  screenX: number;
+  screenY: number;
 }
 
 export function isAbortError(error: unknown): boolean {
@@ -84,13 +112,17 @@ export class BridgeError extends Error implements DesktopError {
 let requestSequence = 0;
 function requestId(): string {
   requestSequence += 1;
-  return `req-${Date.now()}-${requestSequence}`;
+  const entropy = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `req-${entropy}-${requestSequence}`;
 }
 
 export class TauriBridge implements VersionDockBridge {
   private state: unknown;
   private handlers = new Set<(event: BridgeEvent) => void>();
   private unlisten?: () => void;
+  private windowSyncQueue: Promise<void> = Promise.resolve();
   private currentPlatform: 'macos' | 'windows' | 'linux' = (() => { const value = osPlatform(); return value === 'macos' || value === 'windows' ? value : 'linux'; })();
 
   readonly window = {
@@ -124,9 +156,12 @@ export class TauriBridge implements VersionDockBridge {
     const id = requestId();
     const timeoutMs = options.timeoutMs ?? 120_000;
     const { invoke } = await import('@tauri-apps/api/core');
+    if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
 
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let abortHandler: (() => void) | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => {
+      timeout = setTimeout(() => {
         void invoke('bridge_cancel', { requestId: id }).catch(() => undefined);
         reject(new BridgeError({
           code: 'REQUEST_TIMEOUT',
@@ -137,11 +172,11 @@ export class TauriBridge implements VersionDockBridge {
           recoverable: true,
         }));
       }, timeoutMs);
-      options.signal?.addEventListener('abort', () => {
-        clearTimeout(timer);
+      abortHandler = () => {
         void invoke('bridge_cancel', { requestId: id }).catch(() => undefined);
         reject(new DOMException('Operation aborted', 'AbortError'));
-      }, { once: true });
+      };
+      options.signal?.addEventListener('abort', abortHandler, { once: true });
     });
 
     try {
@@ -170,6 +205,9 @@ export class TauriBridge implements VersionDockBridge {
         stderr: null,
         recoverable: false,
       });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      if (abortHandler) options.signal?.removeEventListener('abort', abortHandler);
     }
   }
 
@@ -196,34 +234,46 @@ export class TauriBridge implements VersionDockBridge {
       return true;
     } catch { return false; }
   }
-  async openInNewWindow(paths?: string[], position?: { x: number; y: number }): Promise<void> {
-    await this.request({
+  async openInNewWindow(paths?: string[], placement?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string> {
+    return this.request<string>({
       type: 'windowOpenNew',
       payload: {
         paths: paths ?? null,
-        x: position?.x ?? null,
-        y: position?.y ?? null,
-        width: null,
-        height: null,
+        x: placement?.x ?? null,
+        y: placement?.y ?? null,
+        width: placement?.width ?? null,
+        height: placement?.height ?? null,
+        transfer: transfer ?? null,
       },
     });
   }
-  async syncWindowTabs(workspacePaths: string[][]): Promise<void> {
-    const win = (await import('@tauri-apps/api/window')).getCurrentWindow();
+  async syncWindowTabs(workspacePaths: string[][], activeWorkspaceId: string | null): Promise<void> {
+    this.windowSyncQueue = this.windowSyncQueue.catch(() => undefined).then(async () => {
+      await this.request({
+        type: 'windowSyncTabs',
+        payload: {
+          workspace_paths: workspacePaths,
+          active_workspace_id: activeWorkspaceId,
+        },
+      });
+    });
+    await this.windowSyncQueue;
+  }
+  async syncWindowBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void> {
     await this.request({
-      type: 'windowSyncTabs',
+      type: 'windowSyncBounds',
       payload: {
-        window_label: win.label,
-        workspace_paths: workspacePaths,
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
       },
     });
   }
   async focusWorkspaceAcrossWindows(paths: string[]): Promise<boolean> {
-    const win = (await import('@tauri-apps/api/window')).getCurrentWindow();
     return this.request<boolean>({
       type: 'windowFocusWorkspace',
       payload: {
-        current_window_label: win.label,
         paths,
       },
     });
@@ -231,6 +281,76 @@ export class TauriBridge implements VersionDockBridge {
   async onFocusTab(handler: (paths: string[]) => void): Promise<() => void> {
     const { listen } = await import('@tauri-apps/api/event');
     return listen<string[]>('versiondock://focus-tab', ({ payload }) => {
+      handler(payload);
+    });
+  }
+  async windowTabDrop(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }): Promise<boolean> {
+    return this.request<boolean>({
+      type: 'windowTabDrop',
+      payload: {
+        transfer,
+        screen_x: point.screenX,
+        screen_y: point.screenY,
+      },
+    });
+  }
+  async transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting = true): Promise<boolean> {
+    let dispose: (() => void) | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let resolveCompletion: (accepted: boolean) => void = () => undefined;
+    const completed = new Promise<boolean>((resolve) => {
+      resolveCompletion = resolve;
+    });
+    try {
+      // The source tab remains intact until the destination has loaded the workspace
+      // and acknowledged the transfer, so a failed scan cannot lose the user's tab.
+      dispose = await this.onTabTransferCompleted((payload) => {
+        if (payload.transferId === transfer.transferId) resolveCompletion(payload.accepted);
+      });
+      timeout = setTimeout(() => resolveCompletion(false), 120_000);
+      const attached = attachToExisting && await this.windowTabDrop(transfer, point);
+      if (!attached) await this.openInNewWindow(transfer.paths, placement, transfer);
+      return await completed;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      dispose?.();
+    }
+  }
+  async onImportTab(handler: (payload: WindowTabImport) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<WindowTabImport>('versiondock://import-tab', ({ payload }) => {
+      handler(payload);
+    });
+  }
+  async completeTabTransfer(transfer: WindowTabTransfer, targetWindowLabel: string, accepted: boolean): Promise<void> {
+    await this.request({
+      type: 'windowCompleteTabTransfer',
+      payload: {
+        transfer_id: transfer.transferId,
+        source_window_label: transfer.sourceWindowLabel,
+        tab_id: transfer.tabId,
+        target_window_label: targetWindowLabel,
+        accepted,
+      },
+    });
+  }
+  async onTabTransferCompleted(handler: (payload: WindowTabTransferCompleted) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<WindowTabTransferCompleted>('versiondock://tab-transfer-completed', ({ payload }) => {
+      handler(payload);
+    });
+  }
+  async getWindowLabel(): Promise<string> {
+    const win = (await import('@tauri-apps/api/window')).getCurrentWindow();
+    return win.label;
+  }
+  async broadcastTabDragState(state: TabDragPayload | null): Promise<void> {
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit('versiondock://tab-drag-state', state);
+  }
+  async onTabDragState(handler: (state: TabDragPayload | null) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<TabDragPayload | null>('versiondock://tab-drag-state', ({ payload }) => {
       handler(payload);
     });
   }
@@ -247,16 +367,44 @@ export class MockBridge implements VersionDockBridge {
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }
   async selectWorkspaceFolders(): Promise<string[]> { return []; }
   async notify(): Promise<boolean> { return false; }
-  async openInNewWindow(): Promise<void> {
+  async openInNewWindow(): Promise<string> {
+    return Promise.resolve('mock-window-new');
+  }
+  async transferTab(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+  async syncWindowTabs(...args: Parameters<VersionDockBridge['syncWindowTabs']>): Promise<void> {
+    void args;
     return Promise.resolve();
   }
-  async syncWindowTabs(): Promise<void> {
+  async syncWindowBounds(): Promise<void> {
     return Promise.resolve();
   }
   async focusWorkspaceAcrossWindows(): Promise<boolean> {
     return Promise.resolve(false);
   }
   async onFocusTab(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
+  async windowTabDrop(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+  async onImportTab(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
+  async completeTabTransfer(): Promise<void> {
+    return Promise.resolve();
+  }
+  async onTabTransferCompleted(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
+  async getWindowLabel(): Promise<string> {
+    return 'mock-window';
+  }
+  async broadcastTabDragState(): Promise<void> {
+    return Promise.resolve();
+  }
+  async onTabDragState(): Promise<() => void> {
     return Promise.resolve(() => undefined);
   }
   readonly window = {

@@ -36,6 +36,9 @@ pub fn run() {
                 // The window configuration owns decorations per platform. Do not restore
                 // the legacy `decorated: false` value saved by earlier borderless builds.
                 .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
+                // Detached tab windows have unique labels and should not accumulate stale
+                // one-off geometry entries across application runs.
+                .with_filter(|label| label == "main")
                 .build(),
         )
         .setup(|app| {
@@ -54,6 +57,12 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let state = window.state::<AppState>();
+                let _ = state.unregister_window(window.label());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::bridge_request,

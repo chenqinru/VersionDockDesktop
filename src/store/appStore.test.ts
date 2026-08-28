@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { MockBridge } from '../platform/bridge';
-import { interleaveHistory, useAppStore } from './appStore';
+import { interleaveHistory, useAppStore, workspacePathsEqual } from './appStore';
 
 const bootstrap: BootstrapData = {
   state: { theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
@@ -30,6 +30,11 @@ const deferred = <T>() => {
 afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', busy: false, error: undefined }));
 
 describe('appStore async lifecycle', () => {
+  it('compares multi-root workspace paths independent of selection order', () => {
+    expect(workspacePathsEqual(['/repo/admin', '/repo/api'], ['/repo/api', '/repo/admin'])).toBe(true);
+    expect(workspacePathsEqual(['/repo/admin'], ['/repo/api'])).toBe(false);
+  });
+
   it('supports single, toggle, and range commit selection with aggregated revision diffs', async () => {
     const commits: CommitNode[] = [
       { repoId: 'a', hash: 'a'.repeat(40), shortHash: 'aaaaaaaa', parents: ['b'.repeat(40)], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-03T00:00:00Z', committerDate: '2026-01-03T00:00:00Z', message: 'third', refs: [] },
@@ -362,5 +367,53 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().tabs.length).toBe(0);
     expect(useAppStore.getState().activeTabId).toBeNull();
     expect(useAppStore.getState().snapshot).toBeUndefined();
+  });
+
+  it('does not restore the primary window tabs into a blank secondary window', async () => {
+    const savedWorkspace = snapshot('saved', 1).workspace;
+    const secondarySyncs: Array<{ paths: string[][]; activeId: string | null }> = [];
+    class SecondaryWindowBridge extends MockBridge {
+      override async getWindowLabel(): Promise<string> { return 'window-secondary'; }
+      override async syncWindowTabs(paths: string[][], activeId: string | null): Promise<void> {
+        secondarySyncs.push({ paths, activeId });
+      }
+    }
+    const bridge = new SecondaryWindowBridge(() => []);
+    useAppStore.setState({
+      bridge,
+      bootstrap: {
+        ...bootstrap,
+        state: {
+          ...bootstrap.state,
+          recentWorkspaces: [savedWorkspace],
+          openWorkspaceIds: [savedWorkspace.id],
+          activeWorkspaceId: savedWorkspace.id,
+        },
+      },
+    });
+
+    await useAppStore.getState().restoreTabsOnStartup();
+
+    expect(useAppStore.getState().tabs).toEqual([]);
+    expect(secondarySyncs).toEqual([{ paths: [], activeId: null }]);
+  });
+
+  it('can force an explicit new window to open a workspace already registered elsewhere', async () => {
+    const target = snapshot('forced', 1);
+    let crossWindowFocusCalls = 0;
+    class ExplicitWindowBridge extends MockBridge {
+      override async focusWorkspaceAcrossWindows(): Promise<boolean> {
+        crossWindowFocusCalls += 1;
+        return true;
+      }
+    }
+    const bridge = new ExplicitWindowBridge((command) => command.type === 'workspaceOpen' ? target : []);
+    useAppStore.setState({ bridge, bootstrap });
+
+    const opened = await useAppStore.getState().openWorkspace(target.workspace.paths, true, { skipCrossWindowFocus: true });
+
+    expect(opened).toBe(true);
+    expect(crossWindowFocusCalls).toBe(0);
+    expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['forced']);
   });
 });

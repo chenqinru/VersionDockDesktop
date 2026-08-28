@@ -25,7 +25,8 @@ pub struct AppState {
     pub read_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
-    watchers: std::sync::Mutex<Vec<RecommendedWatcher>>,
+    pub window_bounds: std::sync::Mutex<HashMap<String, (f64, f64, f64, f64)>>,
+    watchers: std::sync::Mutex<HashMap<String, Vec<RecommendedWatcher>>>,
     generation: AtomicU32,
 }
 
@@ -89,7 +90,8 @@ impl AppState {
             read_limit: Semaphore::new(4),
             write_locks: Mutex::new(HashMap::new()),
             window_workspaces: std::sync::Mutex::new(HashMap::new()),
-            watchers: std::sync::Mutex::new(Vec::new()),
+            window_bounds: std::sync::Mutex::new(HashMap::new()),
+            watchers: std::sync::Mutex::new(HashMap::new()),
             generation: AtomicU32::new(1),
         }
     }
@@ -185,7 +187,7 @@ impl AppState {
                 true,
             )
         })?;
-        watchers.clear();
+        let mut workspace_watchers = Vec::new();
         let last_emit = Arc::new(std::sync::Mutex::new(
             HashMap::<String, std::time::Instant>::new(),
         ));
@@ -242,9 +244,46 @@ impl AppState {
                 .map_err(|error| {
                     DesktopError::new("WATCHER_START_FAILED", error.to_string(), true)
                 })?;
-            watchers.push(watcher);
+            workspace_watchers.push(watcher);
         }
+        watchers.insert(workspace.id.clone(), workspace_watchers);
         Ok(())
+    }
+
+    pub fn retain_workspace_watchers(
+        &self,
+        workspace_ids: &std::collections::HashSet<String>,
+    ) -> Result<(), DesktopError> {
+        let mut watchers = self.watchers.lock().map_err(|_| {
+            DesktopError::new(
+                "WATCHER_LOCK_FAILED",
+                "Unable to update file watchers",
+                true,
+            )
+        })?;
+        watchers.retain(|workspace_id, _| workspace_ids.contains(workspace_id));
+        Ok(())
+    }
+
+    pub fn unregister_window(&self, window_label: &str) -> Result<(), DesktopError> {
+        let workspace_ids = {
+            let mut workspaces = self.window_workspaces.lock().map_err(|_| {
+                DesktopError::new(
+                    "WINDOW_STATE_LOCK_FAILED",
+                    "Unable to remove window state",
+                    true,
+                )
+            })?;
+            workspaces.remove(window_label);
+            workspaces
+                .values()
+                .flat_map(|paths| paths.iter().map(|value| workspace_id(value)))
+                .collect::<std::collections::HashSet<_>>()
+        };
+        if let Ok(mut bounds) = self.window_bounds.lock() {
+            bounds.remove(window_label);
+        }
+        self.retain_workspace_watchers(&workspace_ids)
     }
 }
 
