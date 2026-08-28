@@ -11,6 +11,7 @@ import { TabDragPreviewWindow } from '../windowing/tabDragPreviewWindow';
 interface ActiveTabDrag {
   tab: WorkspaceDescriptor;
   originalIndex: number;
+  targetIndex: number;
   pointerId: number;
   startPoint: ScreenPoint;
   startClientX: number;
@@ -21,6 +22,8 @@ interface ActiveTabDrag {
   previewPrepared: boolean;
   detaching: boolean;
   started: boolean;
+  tabRects: Array<{ left: number; width: number }>;
+  tabGap: number;
 }
 
 interface TabDragPreview {
@@ -29,6 +32,14 @@ interface TabDragPreview {
   screenY: number;
   width: number;
   detaching: boolean;
+}
+
+interface LocalTabDragLayout {
+  tabId: string;
+  originalIndex: number;
+  targetIndex: number;
+  deltaX: number;
+  shiftX: number;
 }
 
 function transferId(): string {
@@ -105,6 +116,7 @@ export function TitleBar() {
 
   const [menuPos, setMenuPos] = useState({ left: platform === 'macos' ? 84 : 12, top: 38 });
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [localTabDragLayout, setLocalTabDragLayout] = useState<LocalTabDragLayout | null>(null);
   const [pendingTransferTabIds, setPendingTransferTabIds] = useState<Set<string>>(() => new Set());
   const [tabDragPreview, setTabDragPreview] = useState<TabDragPreview | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -321,11 +333,25 @@ export function TitleBar() {
   const beginTabPointerDrag = (event: React.PointerEvent<HTMLDivElement>, tab: WorkspaceDescriptor) => {
     if (event.button !== 0 || transferringTabsRef.current.has(tab.id) || (event.target instanceof Element && event.target.closest('button'))) return;
     const element = event.currentTarget;
-    const tabWidth = element.getBoundingClientRect().width;
+    const tabRect = element.getBoundingClientRect();
+    const tabWidth = tabRect.width;
+    const tabRects = Array.from(tabsRef.current?.querySelectorAll<HTMLElement>('.titlebar-tab') ?? [])
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { left: rect.left, width: rect.width };
+      });
+    const originalIndex = useAppStore.getState().tabs.findIndex((item) => item.id === tab.id);
+    const previousRect = tabRects[Math.max(0, originalIndex - 1)];
+    const tabGap = originalIndex > 0 && previousRect
+      ? Math.max(0, tabRects[originalIndex].left - previousRect.left - previousRect.width)
+      : tabRects.length > 1
+        ? Math.max(0, tabRects[1].left - tabRects[0].left - tabRects[0].width)
+        : 4;
     const startPoint = dragPoint(event);
     const drag: ActiveTabDrag = {
       tab,
-      originalIndex: useAppStore.getState().tabs.findIndex((item) => item.id === tab.id),
+      originalIndex,
+      targetIndex: originalIndex,
       pointerId: event.pointerId,
       startPoint,
       startClientX: event.clientX,
@@ -341,6 +367,8 @@ export function TitleBar() {
       previewPrepared: false,
       detaching: false,
       started: false,
+      tabRects,
+      tabGap,
     };
     activeTabDragRef.current = drag;
     element.setPointerCapture(event.pointerId);
@@ -355,23 +383,38 @@ export function TitleBar() {
       });
     };
 
-    const reorderAtPointer = (pointer: PointerEvent, point: ScreenPoint) => {
-      const localY = point.screenY - drag.sourceBounds.y;
-      if (localY < -8 || localY > 50) return;
-      const currentTabs = useAppStore.getState().tabs;
-      const fromIndex = currentTabs.findIndex((item) => item.id === tab.id);
-      if (fromIndex === -1) return;
-      const midpoints = Array.from(tabsRef.current?.querySelectorAll<HTMLElement>('.titlebar-tab') ?? [])
-        .map((node) => {
-          const rect = node.getBoundingClientRect();
-          return rect.left + rect.width / 2;
-        });
-      let insertionIndex = midpoints.findIndex((midpoint) => pointer.clientX < midpoint);
-      if (insertionIndex === -1) insertionIndex = currentTabs.length;
+    const isInSourceTitleBar = (pointer: PointerEvent) => pointer.clientX >= 0
+      && pointer.clientX <= window.innerWidth
+      && pointer.clientY >= -8
+      && pointer.clientY <= 50;
+
+    const updateReorderTarget = (pointer: PointerEvent) => {
+      // Same-window ordering is a DOM interaction. Using global screen
+      // coordinates here is unreliable in macOS titlebar overlays and on
+      // mixed-DPI displays, where window.screenY and PointerEvent.screenY can
+      // use different origins/scales.
+      if (!isInSourceTitleBar(pointer)) return;
+      if (drag.originalIndex === -1 || drag.tabRects.length === 0) return;
+      const originalRect = drag.tabRects[drag.originalIndex];
+      const firstRect = drag.tabRects[0];
+      const lastRect = drag.tabRects[drag.tabRects.length - 1];
+      const minDeltaX = firstRect.left - originalRect.left;
+      const maxDeltaX = lastRect.left + lastRect.width - originalRect.left - tabWidth;
+      const deltaX = Math.max(minDeltaX, Math.min(pointer.clientX - drag.startClientX, maxDeltaX));
+      const draggedCenter = originalRect.left + deltaX + tabWidth / 2;
+      const midpoints = drag.tabRects.map((rect) => rect.left + rect.width / 2);
+      let insertionIndex = midpoints.findIndex((midpoint) => draggedCenter < midpoint);
+      if (insertionIndex === -1) insertionIndex = drag.tabRects.length;
       let targetIndex = insertionIndex;
-      if (fromIndex < targetIndex) targetIndex -= 1;
-      targetIndex = Math.max(0, Math.min(targetIndex, currentTabs.length - 1));
-      if (targetIndex !== fromIndex) reorderTabs(fromIndex, targetIndex);
+      if (drag.originalIndex < targetIndex) targetIndex -= 1;
+      drag.targetIndex = Math.max(0, Math.min(targetIndex, drag.tabRects.length - 1));
+      setLocalTabDragLayout({
+        tabId: tab.id,
+        originalIndex: drag.originalIndex,
+        targetIndex: drag.targetIndex,
+        deltaX,
+        shiftX: tabWidth + drag.tabGap,
+      });
     };
 
     const move = (pointer: PointerEvent) => {
@@ -382,15 +425,6 @@ export function TitleBar() {
         pointer.clientX - drag.startClientX,
         pointer.clientY - drag.startClientY,
       );
-      if (!drag.previewPrepared && travelledDistance >= 1) {
-        drag.previewPrepared = true;
-        void tabDragPreviewWindow.prepare(
-          tab.name,
-          tabWidth,
-          point,
-          document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
-        );
-      }
       if (!drag.started && travelledDistance < 4) return;
       if (!drag.started) {
         drag.started = true;
@@ -398,25 +432,42 @@ export function TitleBar() {
         document.body.classList.add('is-dragging-tab');
         void bridge.window.setCursorIcon('grabbing');
         publishDrag(point);
-        tabDragPreviewWindow.activate();
       }
       pointer.preventDefault();
-      reorderAtPointer(pointer, point);
-      const detaching = shouldDetachTab(point, drag.sourceBounds, travelledDistance);
+      const detaching = !isInSourceTitleBar(pointer)
+        && shouldDetachTab(point, drag.sourceBounds, travelledDistance);
+      if (!detaching) {
+        updateReorderTarget(pointer);
+        setTabDragPreview(null);
+      } else {
+        setLocalTabDragLayout(null);
+      }
+      if (detaching && !drag.previewPrepared) {
+        drag.previewPrepared = true;
+        void tabDragPreviewWindow.prepare(
+          tab.name,
+          tabWidth,
+          point,
+          document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+        );
+        tabDragPreviewWindow.activate();
+      } else if (!detaching && drag.previewPrepared) {
+        drag.previewPrepared = false;
+        tabDragPreviewWindow.hide();
+      }
       document.body.classList.toggle('is-detaching-tab', detaching);
       if (drag.detaching !== detaching) {
         drag.detaching = detaching;
         void bridge.window.setCursorIcon(detaching ? 'copy' : 'grabbing');
       }
-      if (!('__TAURI_INTERNALS__' in window)) {
-        setTabDragPreview({
-          tabName: tab.name,
-          screenX: point.screenX,
-          screenY: point.screenY,
-          width: tabWidth,
-          detaching,
-        });
-      }
+      const usesNativeDetachPreview = '__TAURI_INTERNALS__' in window;
+      if (detaching) setTabDragPreview(usesNativeDetachPreview ? null : {
+        tabName: tab.name,
+        screenX: point.screenX,
+        screenY: point.screenY,
+        width: tabWidth,
+        detaching,
+      });
       const now = performance.now();
       if (now - drag.lastBroadcastAt >= 32) {
         drag.lastBroadcastAt = now;
@@ -431,6 +482,7 @@ export function TitleBar() {
       if (element.hasPointerCapture(drag.pointerId)) element.releasePointerCapture(drag.pointerId);
       if (activeTabDragRef.current === drag) activeTabDragRef.current = null;
       setDraggingTabId(null);
+      setLocalTabDragLayout(null);
       setTabDragPreview(null);
       tabDragPreviewWindow.hide();
       document.body.classList.remove('is-dragging-tab', 'is-detaching-tab');
@@ -446,20 +498,16 @@ export function TitleBar() {
       );
       const detaching = drag.started
         && !cancelled
+        && !isInSourceTitleBar(pointer)
         && shouldDetachTab(point, drag.sourceBounds, travelledDistance);
-      const localX = point.screenX - drag.sourceBounds.x;
-      const localY = point.screenY - drag.sourceBounds.y;
-      const releasedInSourceTabBar = localX >= 0
-        && localX <= drag.sourceBounds.width
-        && localY >= -8
-        && localY <= 50;
+      const releasedInSourceTabBar = isInSourceTitleBar(pointer);
       if (drag.started && !cancelled && !detaching && releasedInSourceTabBar) {
-        reorderAtPointer(pointer, point);
-      } else if (drag.started && !detaching) {
+        updateReorderTarget(pointer);
         const currentTabs = useAppStore.getState().tabs;
         const currentIndex = currentTabs.findIndex((item) => item.id === tab.id);
-        const originalIndex = Math.max(0, Math.min(drag.originalIndex, currentTabs.length - 1));
-        if (currentIndex !== -1 && currentIndex !== originalIndex) reorderTabs(currentIndex, originalIndex);
+        if (currentIndex !== -1 && currentIndex !== drag.targetIndex) {
+          reorderTabs(currentIndex, drag.targetIndex);
+        }
       }
       const started = drag.started;
       cleanup();
@@ -491,6 +539,25 @@ export function TitleBar() {
             {tabs.filter((tab) => !pendingTransferTabIds.has(tab.id)).map((tab, index) => {
               const isActive = tab.id === activeTabId;
               const isDragging = tab.id === draggingTabId;
+              const isLocalDragging = localTabDragLayout?.tabId === tab.id;
+              let dragTranslateX = 0;
+              if (localTabDragLayout) {
+                if (isLocalDragging) {
+                  dragTranslateX = localTabDragLayout.deltaX;
+                } else if (
+                  localTabDragLayout.originalIndex < localTabDragLayout.targetIndex
+                  && index > localTabDragLayout.originalIndex
+                  && index <= localTabDragLayout.targetIndex
+                ) {
+                  dragTranslateX = -localTabDragLayout.shiftX;
+                } else if (
+                  localTabDragLayout.targetIndex < localTabDragLayout.originalIndex
+                  && index >= localTabDragLayout.targetIndex
+                  && index < localTabDragLayout.originalIndex
+                ) {
+                  dragTranslateX = localTabDragLayout.shiftX;
+                }
+              }
               return (
                 <Fragment key={tab.id}>
                   {snapInsertionIndex === index && remoteDragState && remoteDragState.sourceWindowLabel !== windowLabel && (
@@ -506,7 +573,10 @@ export function TitleBar() {
                     role="tab"
                     aria-selected={isActive}
                     onPointerDown={(event) => beginTabPointerDrag(event, tab)}
-                    className={`titlebar-tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''}`}
+                    className={`titlebar-tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isLocalDragging ? 'local-dragging' : ''} ${dragTranslateX !== 0 && !isLocalDragging ? 'reorder-shifting' : ''}`}
+                    style={localTabDragLayout ? {
+                      transform: `translate3d(${dragTranslateX}px, 0, 0)${isLocalDragging ? ' scale(1.025)' : ''}`,
+                    } : undefined}
                     onClick={(event) => {
                       if (suppressClickRef.current === tab.id) {
                         suppressClickRef.current = null;
@@ -563,10 +633,12 @@ export function TitleBar() {
           <button
             ref={addAnchorRef}
             type="button"
-            className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''}`}
+            className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null ? 'drag-hidden' : ''}`}
             aria-label={t('New Tab')}
+            aria-hidden={draggingTabId !== null}
             title={t('Open Another Workspace')}
             disabled={busy}
+            tabIndex={draggingTabId !== null ? -1 : undefined}
             onClick={toggleNewTabMenu}
           >
             <Codicon name="plus" />
