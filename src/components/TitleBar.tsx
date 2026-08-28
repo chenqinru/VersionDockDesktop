@@ -5,7 +5,15 @@ import { useAppStore } from '../store/appStore';
 import { useBridge } from '../platform/context';
 import type { TabDragPayload } from '../platform/bridge';
 import type { WindowTabTransfer, WorkspaceDescriptor } from '../bindings/generated';
-import { tabSnapInsertionIndex, type ScreenPoint, type WindowBounds } from '../windowing/tabDrag';
+import { dragPoint, shouldDetachTab, tabSnapInsertionIndex, type ScreenPoint, type WindowBounds } from '../windowing/tabDrag';
+
+interface ActiveTabDrag {
+  tabId: string;
+  startPoint: ScreenPoint;
+  lastPoint: ScreenPoint;
+  sourceBounds: WindowBounds;
+  droppedOnSourceTab: boolean;
+}
 
 function transferId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -21,8 +29,7 @@ export function TitleBar() {
   const snapInsertionIndexRef = useRef<number | null>(null);
   const transferringTabsRef = useRef(new Set<string>());
   const windowLabelRef = useRef('');
-  const lastDragPointRef = useRef<{ screenX: number; screenY: number } | null>(null);
-  const dragStartPointRef = useRef<{ screenX: number; screenY: number } | null>(null);
+  const activeTabDragRef = useRef<ActiveTabDrag | null>(null);
   const lastBroadcastRef = useRef<number>(0);
   const bridge = useBridge();
   const platform = bridge.platform();
@@ -256,58 +263,56 @@ export function TitleBar() {
     }
   };
 
+  const beginTabDragTracking = (event: React.PointerEvent, tabId: string) => {
+    if (event.button !== 0 || (event.target instanceof Element && event.target.closest('button'))) return;
+    const startPoint = dragPoint(event);
+    activeTabDragRef.current = {
+      tabId,
+      startPoint,
+      lastPoint: startPoint,
+      sourceBounds: {
+        x: window.screenX,
+        y: window.screenY,
+        width: window.outerWidth > 0 ? window.outerWidth : window.innerWidth,
+        height: window.outerHeight > 0 ? window.outerHeight : window.innerHeight,
+      },
+      droppedOnSourceTab: false,
+    };
+  };
+
   const handleTabDragEnd = (event: React.DragEvent, tab: WorkspaceDescriptor) => {
     setDraggingTabId(null);
     setDragOverTabId(null);
     void bridge.broadcastTabDragState(null);
 
-    const hasValidEventCoords = (event.screenX > 10 || event.screenY > 10);
-    const lastPoint = lastDragPointRef.current;
-    const hasValidLastCoords = lastPoint !== null && (lastPoint.screenX > 10 || lastPoint.screenY > 10);
+    const drag = activeTabDragRef.current;
+    activeTabDragRef.current = null;
+    if (!drag || drag.tabId !== tab.id || drag.droppedOnSourceTab) return;
 
-    const point = hasValidEventCoords
-      ? { screenX: event.screenX, screenY: event.screenY }
-      : (hasValidLastCoords ? lastPoint : null);
-
-    const startPoint = dragStartPointRef.current;
-
-    // 若无有效坐标或无有效起始点，说明根本未发生有效拖拽，直接取消，绝对不关闭 Tab
-    if (!point || !startPoint || (startPoint.screenX <= 10 && startPoint.screenY <= 10)) {
-      return;
-    }
-
-    const distance = Math.hypot(point.screenX - startPoint.screenX, point.screenY - startPoint.screenY);
-    // 1. 如果移动距离过小（微调、误触或轻微晃动，小于 35px），视为取消脱离，原 Tab 保持原样
-    if (distance < 35) {
-      return;
-    }
-
-    const localX = point.screenX - window.screenX;
-    const localY = point.screenY - window.screenY;
-    const winWidth = window.outerWidth > 0 ? window.outerWidth : window.innerWidth;
-
-    // 2. 如果松开时鼠标落在当前源窗口的 Tab 栏安全区域内（例如拖出去后又放回了原 Tab 栏），视为取消脱离
-    const releasedInSourceTabBar =
-      localX >= -20 &&
-      localX <= winWidth + 20 &&
-      localY >= -30 &&
-      localY <= 50;
-
-    if (releasedInSourceTabBar) {
-      return;
-    }
-
-    // 3. 确实脱离了当前 Tab 栏或当前窗口，立即执行 0 延迟脱离成窗与跨窗口吸附合并
-    const isLastTab = useAppStore.getState().tabs.length <= 1;
-    void closeTab(tab.id);
+    const fallbackPoint = dragPoint(event, drag.lastPoint);
     void (async () => {
+      let nativeGeometry: Awaited<ReturnType<typeof bridge.window.dragGeometry>> = null;
       try {
-        await completeTransfer(tab, point, {
-          x: point.screenX - 140,
-          y: point.screenY - 18,
-          width: winWidth,
-          height: window.outerHeight > 0 ? window.outerHeight : window.innerHeight,
-        }, true);
+        nativeGeometry = await bridge.window.dragGeometry();
+      } catch {
+        // Browser demo and older runtimes fall back to the best DOM coordinates.
+      }
+      const point = nativeGeometry?.point ?? fallbackPoint;
+      const sourceBounds = nativeGeometry?.sourceBounds ?? drag.sourceBounds;
+      const travelledDistance = nativeGeometry
+        ? Number.POSITIVE_INFINITY
+        : Math.hypot(
+          point.screenX - drag.startPoint.screenX,
+          point.screenY - drag.startPoint.screenY,
+        );
+      // 原生窗口使用同一物理坐标系读取光标与窗口边界；只有真正越过安全区才脱离。
+      // 因此轻微晃动，以及拖出去后又放回原标签栏，都会保留原窗口中的标签页。
+      if (!shouldDetachTab(point, sourceBounds, travelledDistance)) return;
+
+      const isLastTab = useAppStore.getState().tabs.length <= 1;
+      void closeTab(tab.id);
+      try {
+        await completeTransfer(tab, point, sourceBounds, true);
       } finally {
         if (isLastTab) {
           await bridge.window.close();
@@ -328,6 +333,8 @@ export function TitleBar() {
     event.preventDefault();
     event.stopPropagation();
     const sourceTabId = draggingTabId || event.dataTransfer.getData('text/plain');
+    const drag = activeTabDragRef.current;
+    if (drag && drag.tabId === sourceTabId) drag.droppedOnSourceTab = true;
     if (sourceTabId && sourceTabId !== targetTabId) {
       const fromIndex = tabs.findIndex((t) => t.id === sourceTabId);
       const toIndex = tabs.findIndex((t) => t.id === targetTabId);
@@ -364,6 +371,7 @@ export function TitleBar() {
                     role="tab"
                     aria-selected={isActive}
                     draggable={true}
+                    onPointerDown={(event) => beginTabDragTracking(event, tab.id)}
                     onDragStart={(event) => {
                       const payload = JSON.stringify({
                         type: 'versiondock-tab',
@@ -376,21 +384,36 @@ export function TitleBar() {
                       event.dataTransfer.setData('text/plain', tab.id);
                       event.dataTransfer.effectAllowed = 'move';
                       setDraggingTabId(tab.id);
-                      const startPoint = { screenX: event.screenX, screenY: event.screenY };
-                      dragStartPointRef.current = startPoint;
-                      lastDragPointRef.current = startPoint;
+                      const trackedDrag = activeTabDragRef.current?.tabId === tab.id
+                        ? activeTabDragRef.current
+                        : null;
+                      const startPoint = trackedDrag?.startPoint ?? dragPoint(event);
+                      const point = dragPoint(event, startPoint);
+                      activeTabDragRef.current = {
+                        tabId: tab.id,
+                        startPoint,
+                        lastPoint: point,
+                        sourceBounds: trackedDrag?.sourceBounds ?? {
+                          x: window.screenX,
+                          y: window.screenY,
+                          width: window.outerWidth > 0 ? window.outerWidth : window.innerWidth,
+                          height: window.outerHeight > 0 ? window.outerHeight : window.innerHeight,
+                        },
+                        droppedOnSourceTab: false,
+                      };
                       void bridge.broadcastTabDragState({
                         sourceWindowLabel: windowLabelRef.current,
                         tabId: tab.id,
                         tabName: tab.name,
                         paths: tab.paths,
-                        screenX: event.screenX,
-                        screenY: event.screenY,
+                        ...point,
                       });
                     }}
                     onDrag={(event) => {
-                      if (event.screenX === 0 && event.screenY === 0) return;
-                      lastDragPointRef.current = { screenX: event.screenX, screenY: event.screenY };
+                      const drag = activeTabDragRef.current;
+                      if (!drag || drag.tabId !== tab.id) return;
+                      const point = dragPoint(event, drag.lastPoint);
+                      drag.lastPoint = point;
                       const now = performance.now();
                       if (now - lastBroadcastRef.current >= 32) {
                         lastBroadcastRef.current = now;
@@ -399,8 +422,7 @@ export function TitleBar() {
                           tabId: tab.id,
                           tabName: tab.name,
                           paths: tab.paths,
-                          screenX: event.screenX,
-                          screenY: event.screenY,
+                          ...point,
                         });
                       }
                     }}

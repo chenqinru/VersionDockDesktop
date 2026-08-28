@@ -16,6 +16,11 @@ export interface NewWindowPlacement {
   height?: number;
 }
 
+export interface WindowDragGeometry {
+  point: { screenX: number; screenY: number };
+  sourceBounds: { x: number; y: number; width: number; height: number };
+}
+
 export type BridgeEvent = ProgressEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
 
 export interface VersionDockBridge {
@@ -46,6 +51,7 @@ export interface VersionDockBridge {
     minimize(): Promise<void>;
     close(): Promise<void>;
     isMaximized(): Promise<boolean>;
+    dragGeometry(): Promise<WindowDragGeometry | null>;
     onDragDrop(handler: (paths: string[]) => void): Promise<() => void>;
   };
 }
@@ -131,6 +137,29 @@ export class TauriBridge implements VersionDockBridge {
     minimize: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().minimize(),
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
     isMaximized: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().isMaximized(),
+    dragGeometry: async () => {
+      const { cursorPosition, getCurrentWindow } = await import('@tauri-apps/api/window');
+      const currentWindow = getCurrentWindow();
+      const [cursor, position, size, rawScaleFactor] = await Promise.all([
+        cursorPosition(),
+        currentWindow.outerPosition(),
+        currentWindow.outerSize(),
+        currentWindow.scaleFactor(),
+      ]);
+      const scaleFactor = rawScaleFactor > 0 ? rawScaleFactor : 1;
+      return {
+        point: {
+          screenX: position.x / scaleFactor + (cursor.x - position.x) / scaleFactor,
+          screenY: position.y / scaleFactor + (cursor.y - position.y) / scaleFactor,
+        },
+        sourceBounds: {
+          x: position.x / scaleFactor,
+          y: position.y / scaleFactor,
+          width: size.width / scaleFactor,
+          height: size.height / scaleFactor,
+        },
+      };
+    },
     onDragDrop: async (handler: (paths: string[]) => void) => (await import('@tauri-apps/api/window')).getCurrentWindow().onDragDropEvent(({ payload }) => {
       if (payload.type === 'drop') handler(payload.paths);
     }),
@@ -409,6 +438,6 @@ export class MockBridge implements VersionDockBridge {
   }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined,
-    isMaximized: async () => false, onDragDrop: async () => () => undefined,
+    isMaximized: async () => false, dragGeometry: async () => null, onDragDrop: async () => () => undefined,
   };
 }

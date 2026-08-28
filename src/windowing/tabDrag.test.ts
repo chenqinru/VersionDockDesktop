@@ -14,6 +14,19 @@ describe('tab drag geometry', () => {
     )).toBe(false);
   });
 
+  it('cancels after a long excursion when released back over the source tab strip', () => {
+    expect(shouldDetachTab(
+      { screenX: 420, screenY: 110 },
+      source,
+      480,
+    )).toBe(false);
+  });
+
+  it('requires both the travelled distance and the detach distance to cross the threshold', () => {
+    expect(shouldDetachTab({ screenX: 420, screenY: 220 }, source, 55)).toBe(false);
+    expect(shouldDetachTab({ screenX: 420, screenY: 220 }, source, 56)).toBe(true);
+  });
+
   it('detaches after crossing the return threshold in any direction', () => {
     expect(shouldDetachTab({ screenX: 420, screenY: 180 }, source)).toBe(true);
     expect(shouldDetachTab({ screenX: 30, screenY: 100 }, source)).toBe(true);
@@ -29,5 +42,12 @@ describe('tab drag geometry', () => {
       { screenX: 0, screenY: 0, clientX: 0, clientY: 0 },
       { screenX: -320, screenY: 240 },
     )).toEqual({ screenX: -320, screenY: 240 });
+  });
+
+  it('ignores empty screen coordinates even when WebKit retains client coordinates', () => {
+    expect(dragPoint(
+      { screenX: 0, screenY: 0, clientX: 420, clientY: 18 },
+      { screenX: 740, screenY: 112 },
+    )).toEqual({ screenX: 740, screenY: 112 });
   });
 });

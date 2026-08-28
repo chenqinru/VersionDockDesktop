@@ -19,10 +19,11 @@ export function dragPoint(
   previous?: ScreenPoint,
 ): ScreenPoint {
   const coordinatesAreFinite = Number.isFinite(event.screenX) && Number.isFinite(event.screenY);
+  // WKWebView may keep client coordinates while reporting an unusable (0, 0)
+  // screen position during HTML drag/dragend. Screen coordinates are the only
+  // coordinates compatible with cross-window bounds, so retain the last one.
   const browserSentEmptyDragCoordinates = event.screenX === 0
     && event.screenY === 0
-    && event.clientX === 0
-    && event.clientY === 0
     && previous !== undefined;
   return coordinatesAreFinite && !browserSentEmptyDragCoordinates
     ? { screenX: event.screenX, screenY: event.screenY }
