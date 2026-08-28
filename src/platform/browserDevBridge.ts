@@ -315,6 +315,7 @@ export class BrowserDevBridge implements VersionDockBridge {
     close: async () => undefined,
     isMaximized: async () => false,
     dragGeometry: async () => null,
+    setCursorIcon: async () => undefined,
     onDragDrop: async () => () => undefined,
   };
 

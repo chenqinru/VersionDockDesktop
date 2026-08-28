@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "core:event:default",
+    "core:webview:allow-create-webview-window",
     "core:window:default",
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",
@@ -14,6 +15,9 @@
     "core:window:allow-unmaximize",
     "core:window:allow-close",
     "core:window:allow-is-maximized",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-set-cursor-icon",
+    "core:window:allow-show",
     "dialog:allow-open",
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",

@@ -52,6 +52,7 @@ export interface VersionDockBridge {
     close(): Promise<void>;
     isMaximized(): Promise<boolean>;
     dragGeometry(): Promise<WindowDragGeometry | null>;
+    setCursorIcon(icon: 'default' | 'grab' | 'grabbing' | 'copy'): Promise<void>;
     onDragDrop(handler: (paths: string[]) => void): Promise<() => void>;
   };
 }
@@ -137,6 +138,7 @@ export class TauriBridge implements VersionDockBridge {
     minimize: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().minimize(),
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
     isMaximized: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().isMaximized(),
+    setCursorIcon: async (icon: 'default' | 'grab' | 'grabbing' | 'copy') => (await import('@tauri-apps/api/window')).getCurrentWindow().setCursorIcon(icon),
     dragGeometry: async () => {
       const { cursorPosition, getCurrentWindow } = await import('@tauri-apps/api/window');
       const currentWindow = getCurrentWindow();
@@ -438,6 +440,6 @@ export class MockBridge implements VersionDockBridge {
   }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined,
-    isMaximized: async () => false, dragGeometry: async () => null, onDragDrop: async () => () => undefined,
+    isMaximized: async () => false, dragGeometry: async () => null, setCursorIcon: async () => undefined, onDragDrop: async () => () => undefined,
   };
 }

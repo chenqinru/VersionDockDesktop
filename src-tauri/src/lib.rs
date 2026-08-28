@@ -66,7 +66,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::bridge_request,
-            commands::bridge_cancel
+            commands::bridge_cancel,
+            commands::follow_tab_drag_preview
         ])
         .run(tauri::generate_context!())
         .expect("error while running VersionDock Desktop");

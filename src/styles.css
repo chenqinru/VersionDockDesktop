@@ -182,6 +182,51 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   cursor: grabbing;
 }
 
+body.is-dragging-tab,
+body.is-dragging-tab * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+body.is-dragging-tab.is-detaching-tab,
+body.is-dragging-tab.is-detaching-tab * {
+  cursor: copy !important;
+}
+
+body.is-tab-drop-target,
+body.is-tab-drop-target * {
+  cursor: copy !important;
+}
+
+.titlebar-tab-drag-preview {
+  position: fixed;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  min-width: 110px;
+  max-width: 220px;
+  padding: 0 6px 0 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--versiondock-surface) 94%, transparent);
+  color: var(--versiondock-text);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  opacity: 0.92;
+  pointer-events: none;
+  user-select: none;
+  transform: scale(0.98);
+}
+
+.titlebar-tab-drag-preview.detaching {
+  border-color: var(--versiondock-accent);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32), 0 0 0 1px color-mix(in srgb, var(--versiondock-accent) 35%, transparent);
+  opacity: 1;
+}
+
 .titlebar-tab.drag-over {
   border-color: var(--versiondock-primary);
   background: var(--versiondock-selection);

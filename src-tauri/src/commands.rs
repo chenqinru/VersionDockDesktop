@@ -24,6 +24,23 @@ pub async fn bridge_cancel(
 }
 
 #[tauri::command]
+pub fn follow_tab_drag_preview(app: AppHandle, label: String) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let Some(preview) = app.get_webview_window(&label) else {
+                break;
+            };
+            if let (Ok(cursor), Ok(size)) = (app.cursor_position(), preview.outer_size()) {
+                let x = (cursor.x - f64::from(size.width) / 2.0).round() as i32;
+                let y = (cursor.y - f64::from(size.height) / 2.0).round() as i32;
+                let _ = preview.set_position(tauri::PhysicalPosition::new(x, y));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(8)).await;
+        }
+    });
+}
+
+#[tauri::command]
 pub async fn bridge_request(
     envelope: RequestEnvelope,
     app: AppHandle,
