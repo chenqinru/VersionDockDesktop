@@ -119,6 +119,11 @@ pub enum BridgeCommand {
         width: f64,
         height: f64,
     },
+    WindowSetSize {
+        width: f64,
+        height: f64,
+        center: bool,
+    },
     RepositoryStatus {
         workspace_id: String,
         repo_id: String,

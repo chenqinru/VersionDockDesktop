@@ -615,8 +615,8 @@ async fn dispatch(
 
             let builder = tauri::WebviewWindowBuilder::new(app, &label, webview_url)
                 .title(" ")
-                .inner_size(width.unwrap_or(1440.0), height.unwrap_or(900.0))
-                .min_inner_size(1024.0, 680.0)
+                .inner_size(width.unwrap_or(880.0), height.unwrap_or(540.0))
+                .min_inner_size(800.0, 480.0)
                 .resizable(true);
 
             #[cfg(target_os = "macos")]
@@ -736,6 +736,56 @@ async fn dispatch(
             let window_label = invoking_window.label().to_string();
             let mut map = state.window_bounds.lock().unwrap();
             map.insert(window_label, (x, y, width, height));
+            json(true)
+        }
+        BridgeCommand::WindowSetSize {
+            width,
+            height,
+            center,
+        } => {
+            let is_welcome = width > 0.0 && width < 1000.0;
+            let _ = invoking_window.set_resizable(!is_welcome);
+            let _ = invoking_window.set_maximizable(!is_welcome);
+
+            if let Ok(Some(monitor)) = invoking_window.current_monitor() {
+                let scale = monitor.scale_factor();
+                let m_size = monitor.size().to_logical::<f64>(scale);
+                let m_pos = monitor.position().to_logical::<f64>(scale);
+
+                let (actual_width, actual_height) = if is_welcome {
+                    (width, height)
+                } else if width > 0.0 && height > 0.0 {
+                    (
+                        width.min(m_size.width - 40.0),
+                        height.min(m_size.height - 60.0),
+                    )
+                } else {
+                    let w = (m_size.width * 0.88)
+                        .clamp(1280.0, 1920.0)
+                        .min(m_size.width - 40.0);
+                    let h = (m_size.height * 0.88)
+                        .clamp(800.0, 1200.0)
+                        .min(m_size.height - 60.0);
+                    (w, h)
+                };
+
+                let _ =
+                    invoking_window.set_size(tauri::LogicalSize::new(actual_width, actual_height));
+                if center {
+                    let target_x = m_pos.x + (m_size.width - actual_width).max(0.0) / 2.0;
+                    let target_y = m_pos.y + (m_size.height - actual_height).max(0.0) / 2.0;
+                    let _ = invoking_window
+                        .set_position(tauri::LogicalPosition::new(target_x, target_y));
+                }
+            } else {
+                let actual_width = if width > 0.0 { width } else { 1560.0 };
+                let actual_height = if height > 0.0 { height } else { 980.0 };
+                let _ =
+                    invoking_window.set_size(tauri::LogicalSize::new(actual_width, actual_height));
+                if center {
+                    let _ = invoking_window.center();
+                }
+            }
             json(true)
         }
         BridgeCommand::WindowTabDrop {

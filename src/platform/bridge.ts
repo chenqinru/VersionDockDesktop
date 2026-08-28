@@ -53,6 +53,7 @@ export interface VersionDockBridge {
     isMaximized(): Promise<boolean>;
     dragGeometry(): Promise<WindowDragGeometry | null>;
     setCursorIcon(icon: 'default' | 'grab' | 'grabbing' | 'copy'): Promise<void>;
+    setSize(width: number, height: number, center?: boolean): Promise<void>;
     onDragDrop(handler: (paths: string[]) => void): Promise<() => void>;
   };
 }
@@ -142,6 +143,19 @@ export class TauriBridge implements VersionDockBridge {
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
     isMaximized: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().isMaximized(),
     setCursorIcon: async (icon: 'default' | 'grab' | 'grabbing' | 'copy') => (await import('@tauri-apps/api/window')).getCurrentWindow().setCursorIcon(icon),
+    setSize: async (width: number, height: number, center = false) => {
+      try {
+        await this.request({ type: 'windowSetSize', payload: { width, height, center } });
+      } catch {
+        const { LogicalSize } = await import('@tauri-apps/api/dpi');
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const currentWindow = getCurrentWindow();
+        await currentWindow.setSize(new LogicalSize(width, height));
+        if (center) {
+          await currentWindow.center();
+        }
+      }
+    },
     dragGeometry: async () => {
       const { cursorPosition, getCurrentWindow } = await import('@tauri-apps/api/window');
       const currentWindow = getCurrentWindow();
@@ -395,7 +409,10 @@ export class MockBridge implements VersionDockBridge {
   constructor(private readonly responder: (command: BridgeCommand) => unknown | Promise<unknown>) {}
   send(command: BridgeCommand): void { void this.responder(command); }
   async request<T>(command: BridgeCommand): Promise<T> { return this.responder(command) as Promise<T>; }
-  subscribe(): () => void { return () => undefined; }
+  subscribe(handler?: (event: BridgeEvent) => void): () => void {
+    void handler;
+    return () => undefined;
+  }
   getState<T>(): T | undefined { return this.state as T | undefined; }
   setState<T>(state: T): void { this.state = state; }
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }
@@ -443,6 +460,6 @@ export class MockBridge implements VersionDockBridge {
   }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined,
-    isMaximized: async () => false, dragGeometry: async () => null, setCursorIcon: async () => undefined, onDragDrop: async () => () => undefined,
+    isMaximized: async () => false, dragGeometry: async () => null, setCursorIcon: async () => undefined, setSize: async () => undefined, onDragDrop: async () => () => undefined,
   };
 }

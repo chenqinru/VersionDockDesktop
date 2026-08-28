@@ -601,123 +601,139 @@ export function TitleBar() {
 
   return (
     <>
-      <header className={`titlebar ${platform}`} data-tauri-drag-region>
+      <header
+        className={`titlebar ${platform} ${tabs.length === 0 ? 'welcome-mode' : ''}`}
+        data-tauri-drag-region
+        onDoubleClick={(event) => {
+          if (tabs.length === 0) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         {platform === 'macos' && <div className="titlebar-macos-spacer" data-tauri-drag-region />}
-        <div className={`titlebar-tabs-track ${snapInsertionIndex !== null ? 'tab-snap-active' : ''}`}>
-          <div ref={tabsRef} className="titlebar-tabs" role="tablist">
-            {tabs.filter((tab) => !pendingTransferTabIds.has(tab.id)).map((tab, index) => {
-              const isActive = tab.id === activeTabId;
-              const isDragging = tab.id === draggingTabId;
-              const isLocalDragging = localTabDragLayout?.tabId === tab.id;
-              const isRemoteShifting = !localTabDragLayout
-                && remoteInsertionActive
-                && index >= snapInsertionIndex;
-              let dragTranslateX = 0;
-              if (localTabDragLayout) {
-                if (isLocalDragging) {
-                  dragTranslateX = localTabDragLayout.deltaX;
-                } else if (
-                  localTabDragLayout.originalIndex < localTabDragLayout.targetIndex
-                  && index > localTabDragLayout.originalIndex
-                  && index <= localTabDragLayout.targetIndex
-                ) {
-                  dragTranslateX = -localTabDragLayout.shiftX;
-                } else if (
-                  localTabDragLayout.targetIndex < localTabDragLayout.originalIndex
-                  && index >= localTabDragLayout.targetIndex
-                  && index < localTabDragLayout.originalIndex
-                ) {
-                  dragTranslateX = localTabDragLayout.shiftX;
+        {tabs.length > 0 && (
+          <div className={`titlebar-tabs-track ${snapInsertionIndex !== null ? 'tab-snap-active' : ''}`}>
+            <div ref={tabsRef} className="titlebar-tabs" role="tablist">
+              {tabs.filter((tab) => !pendingTransferTabIds.has(tab.id)).map((tab, index) => {
+                const isActive = tab.id === activeTabId;
+                const isDragging = tab.id === draggingTabId;
+                const isLocalDragging = localTabDragLayout?.tabId === tab.id;
+                const isRemoteShifting = !localTabDragLayout
+                  && remoteInsertionActive
+                  && index >= snapInsertionIndex;
+                let dragTranslateX = 0;
+                if (localTabDragLayout) {
+                  if (isLocalDragging) {
+                    dragTranslateX = localTabDragLayout.deltaX;
+                  } else if (
+                    localTabDragLayout.originalIndex < localTabDragLayout.targetIndex
+                    && index > localTabDragLayout.originalIndex
+                    && index <= localTabDragLayout.targetIndex
+                  ) {
+                    dragTranslateX = -localTabDragLayout.shiftX;
+                  } else if (
+                    localTabDragLayout.targetIndex < localTabDragLayout.originalIndex
+                    && index >= localTabDragLayout.targetIndex
+                    && index < localTabDragLayout.originalIndex
+                  ) {
+                    dragTranslateX = localTabDragLayout.shiftX;
+                  }
+                } else if (isRemoteShifting) {
+                  dragTranslateX = remoteTabShiftX;
                 }
-              } else if (isRemoteShifting) {
-                dragTranslateX = remoteTabShiftX;
-              }
-              return (
-                <Fragment key={tab.id}>
-                  <div
-                    key={tab.id}
-                    data-tab-id={tab.id}
-                    role="tab"
-                    aria-selected={isActive}
-                    onPointerDown={(event) => beginTabPointerDrag(event, tab)}
-                    className={`titlebar-tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isLocalDragging ? 'local-dragging' : ''} ${dragTranslateX !== 0 && !isLocalDragging ? 'reorder-shifting' : ''} ${isRemoteShifting ? 'remote-reorder-shifting' : ''}`}
-                    style={localTabDragLayout || isRemoteShifting ? {
-                      transform: `translate3d(${dragTranslateX}px, 0, 0)${isLocalDragging ? ' scale(1.025)' : ''}`,
-                    } : undefined}
-                    onClick={(event) => {
-                      if (suppressClickRef.current === tab.id) {
-                        suppressClickRef.current = null;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        return;
-                      }
-                      void switchTab(tab.id);
-                    }}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setContextMenu({
-                        visible: true,
-                        x: event.clientX,
-                        y: event.clientY,
-                        tabId: tab.id,
-                      });
-                    }}
-                    onAuxClick={(event) => {
-                      if (event.button === 1) {
-                        event.preventDefault();
-                        void closeTab(tab.id);
-                      }
-                    }}
-                    title={tab.paths.join(' · ')}
-                  >
-                    <Codicon name="folder-opened" className="titlebar-tab-icon" />
-                    <span className="titlebar-tab-title">{tab.name}</span>
-                    <button
-                      type="button"
-                      className="titlebar-tab-close"
-                      aria-label={t('Close')}
-                      title={t('Close')}
+                return (
+                  <Fragment key={tab.id}>
+                    <div
+                      key={tab.id}
+                      data-tab-id={tab.id}
+                      role="tab"
+                      aria-selected={isActive}
+                      onPointerDown={(event) => beginTabPointerDrag(event, tab)}
+                      className={`titlebar-tab ${isActive ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${isLocalDragging ? 'local-dragging' : ''} ${dragTranslateX !== 0 && !isLocalDragging ? 'reorder-shifting' : ''} ${isRemoteShifting ? 'remote-reorder-shifting' : ''}`}
+                      style={localTabDragLayout || isRemoteShifting ? {
+                        transform: `translate3d(${dragTranslateX}px, 0, 0)${isLocalDragging ? ' scale(1.025)' : ''}`,
+                      } : undefined}
                       onClick={(event) => {
-                        event.stopPropagation();
-                        void closeTab(tab.id);
+                        if (suppressClickRef.current === tab.id) {
+                          suppressClickRef.current = null;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          return;
+                        }
+                        void switchTab(tab.id);
                       }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setContextMenu({
+                          visible: true,
+                          x: event.clientX,
+                          y: event.clientY,
+                          tabId: tab.id,
+                        });
+                      }}
+                      onAuxClick={(event) => {
+                        if (event.button === 1) {
+                          event.preventDefault();
+                          void closeTab(tab.id);
+                        }
+                      }}
+                      title={tab.paths.join(' · ')}
                     >
-                      <Codicon name="close" />
-                    </button>
-                  </div>
-                </Fragment>
-              );
-            })}
+                      <Codicon name={tab.available ? 'folder-opened' : 'warning'} className="titlebar-tab-icon" />
+                      <span className="titlebar-tab-title">{tab.name}</span>
+                      <button
+                        type="button"
+                        className="titlebar-tab-close"
+                        aria-label={t('Close Tab')}
+                        title={t('Close Tab')}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void closeTab(tab.id);
+                        }}
+                      >
+                        <Codicon name="close" />
+                      </button>
+                    </div>
+                  </Fragment>
+                );
+              })}
 
-            {remoteInsertionActive && remoteDropSlotLeft !== null && (
-              <div
-                className="titlebar-remote-drop-slot"
-                style={{ left: remoteDropSlotLeft, width: remoteTabWidth }}
-                aria-hidden="true"
-              />
-            )}
-            {remoteInsertionActive && (
-              <div
-                className="titlebar-remote-end-spacer"
-                style={{ width: remoteTabShiftX }}
-                aria-hidden="true"
-              />
-            )}
+              {remoteInsertionActive && remoteDropSlotLeft !== null && (
+                <div
+                  className="titlebar-remote-drop-slot"
+                  style={{ left: remoteDropSlotLeft, width: remoteTabWidth }}
+                  aria-hidden="true"
+                />
+              )}
+              {remoteInsertionActive && (
+                <div
+                  className="titlebar-remote-end-spacer"
+                  style={{ width: remoteTabShiftX }}
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+            <button
+              ref={addAnchorRef}
+              type="button"
+              className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null || remoteInsertionActive ? 'drag-hidden' : ''}`}
+              aria-label={t('New Tab')}
+              aria-hidden={draggingTabId !== null || remoteInsertionActive}
+              title={t('Open Another Workspace')}
+              disabled={busy}
+              tabIndex={draggingTabId !== null || remoteInsertionActive ? -1 : undefined}
+              onClick={toggleNewTabMenu}
+            >
+              <Codicon name="plus" />
+            </button>
           </div>
-          <button
-            ref={addAnchorRef}
-            type="button"
-            className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null || remoteInsertionActive ? 'drag-hidden' : ''}`}
-            aria-label={t('New Tab')}
-            aria-hidden={draggingTabId !== null || remoteInsertionActive}
-            title={t('Open Another Workspace')}
-            disabled={busy}
-            tabIndex={draggingTabId !== null || remoteInsertionActive ? -1 : undefined}
-            onClick={toggleNewTabMenu}
-          >
-            <Codicon name="plus" />
-          </button>
-        </div>
+        )}
+        {tabs.length === 0 && (
+          <div className="titlebar-welcome-title" data-tauri-drag-region>
+            <span className="titlebar-welcome-app-name">{t('Welcome to VersionDock')}</span>
+          </div>
+        )}
         <div
           className="titlebar-drag"
           data-tauri-drag-region
@@ -728,7 +744,7 @@ export function TitleBar() {
             <button type="button" aria-label={t('Minimize')} title={t('Minimize')} onClick={() => void bridge.window.minimize()}>
               <Codicon name="chrome-minimize" />
             </button>
-            <button type="button" aria-label={maximized ? t('Restore') : t('Maximize')} title={maximized ? t('Restore') : t('Maximize')} onClick={() => { void bridge.window.toggleMaximize().then(() => setMaximized((value) => !value)); }}>
+            <button type="button" aria-label={maximized ? t('Restore') : t('Maximize')} title={maximized ? t('Restore') : t('Maximize')} disabled={tabs.length === 0} onClick={() => { if (tabs.length > 0) void bridge.window.toggleMaximize().then(() => setMaximized((value) => !value)); }}>
               <Codicon name={maximized ? 'chrome-restore' : 'chrome-maximize'} />
             </button>
             <button type="button" className="close" aria-label={t('Close')} title={t('Close')} onClick={() => void bridge.window.close()}>

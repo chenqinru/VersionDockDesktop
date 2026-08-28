@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
-  WorkspaceSnapshot, WorkspaceDescriptor, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
+  WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
   WindowTabTransfer,
 } from '../bindings/generated';
@@ -587,6 +587,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   const refreshFromWatcher = async () => {
+    if (!get().snapshot?.workspace.id) return;
     if (watcherRefreshInFlight) {
       watcherRefreshQueued = true;
       return;
@@ -616,7 +617,9 @@ export const useAppStore = create<AppStore>((set, get) => {
     initialize: async (value) => {
       set({ bridge: value });
       value.subscribe((event) => {
-        if ('workspaceId' in event && ['worktree', 'status', 'refs'].includes(event.reason) && event.workspaceId === get().snapshot?.workspace.id) {
+        const currentWorkspaceId = get().snapshot?.workspace.id;
+        if (!currentWorkspaceId) return;
+        if ('workspaceId' in event && ['worktree', 'status', 'refs'].includes(event.reason) && event.workspaceId === currentWorkspaceId) {
           watcherReasons.add(event.reason);
           if (watcherTimer) clearTimeout(watcherTimer);
           watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
@@ -644,6 +647,9 @@ export const useAppStore = create<AppStore>((set, get) => {
           await Promise.allSettled(gitRepos.map((repo) => get().sync(repo.meta.id, 'fetch')));
         }
       }, 'workspace');
+      if (!get().snapshot) {
+        set({ error: undefined, errorDetails: undefined });
+      }
       set({ ready: true });
     },
 
@@ -1009,42 +1015,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         clearStartupParameters();
       }
 
-      if (currentWindowLabel !== 'main') {
-        await persistTabs([], null);
-        return;
-      }
-
-      const state = get().bootstrap?.state;
-      if (!state) return;
-      const recent = state.recentWorkspaces ?? [];
-      const openIds = state.openWorkspaceIds ?? [];
-      let initialTabs: WorkspaceDescriptor[] = [];
-
-      if (openIds.length > 0) {
-        initialTabs = openIds
-          .map((id) => recent.find((item) => item.id === id && item.available))
-          .filter((item): item is WorkspaceDescriptor => Boolean(item));
-      }
-
-      if (initialTabs.length === 0) {
-        const lastId = state.activeWorkspaceId ?? state.lastWorkspaceId;
-        const lastWorkspace = recent.find((item) => item.id === lastId && item.available);
-        if (lastWorkspace) {
-          initialTabs = [lastWorkspace];
-        }
-      }
-
-      if (initialTabs.length > 0) {
-        const targetActiveId = (state.activeWorkspaceId && initialTabs.some((t) => t.id === state.activeWorkspaceId))
-          ? state.activeWorkspaceId
-          : (state.lastWorkspaceId && initialTabs.some((t) => t.id === state.lastWorkspaceId))
-          ? state.lastWorkspaceId
-          : initialTabs[0].id;
-
-        set({ tabs: initialTabs, activeTabId: targetActiveId });
-        const targetWorkspace = initialTabs.find((t) => t.id === targetActiveId) ?? initialTabs[0];
-        await get().openWorkspace(targetWorkspace.paths, true);
-      }
+      await persistTabs([], null);
     },
 
     restoreLastWorkspace: async () => {
@@ -1074,6 +1045,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     }, 'workspace'),
 
     refresh: async (silent = false) => {
+      const currentWorkspaceId = get().snapshot?.workspace.id;
+      if (!currentWorkspaceId) return;
       const operation = async () => {
         const id = workspaceId();
         const controller = beginRequest(`workspace:${id}`);
@@ -1641,8 +1614,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ comparison: undefined });
     },
     loadRemotes: async (repoId) => {
-      const id = repoId ?? get().selectedRepoId; if (!id) return;
-      const values = await bridge().request<RemoteInfo[]>({ type: 'remotes', payload: { workspace_id: workspaceId(), repo_id: id } });
+      const wid = get().snapshot?.workspace.id;
+      const id = repoId ?? get().selectedRepoId;
+      if (!wid || !id) return;
+      const values = await bridge().request<RemoteInfo[]>({ type: 'remotes', payload: { workspace_id: wid, repo_id: id } }).catch(() => []);
+      if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ remotes: { ...state.remotes, [id]: values } }));
     },
     remoteOperation: async (repoId, operation) => withBusy(async () => {

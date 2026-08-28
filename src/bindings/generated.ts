@@ -95,6 +95,10 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	y: number | null,
 	width: number | null,
 	height: number | null,
+} } | { type: "windowSetSize"; payload: {
+	width: number | null,
+	height: number | null,
+	center: boolean,
 } } | { type: "repositoryStatus"; payload: {
 	workspace_id: string,
 	repo_id: string,

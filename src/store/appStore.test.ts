@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
-import { MockBridge } from '../platform/bridge';
+import { MockBridge, type BridgeEvent } from '../platform/bridge';
 import { interleaveHistory, useAppStore, workspacePathsEqual } from './appStore';
 
 const bootstrap: BootstrapData = {
@@ -369,16 +369,15 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().snapshot).toBeUndefined();
   });
 
-  it('does not restore the primary window tabs into a blank secondary window', async () => {
+  it('opens to the welcome chooser without restoring previous workspace tabs on startup', async () => {
     const savedWorkspace = snapshot('saved', 1).workspace;
     const secondarySyncs: Array<{ paths: string[][]; activeId: string | null }> = [];
-    class SecondaryWindowBridge extends MockBridge {
-      override async getWindowLabel(): Promise<string> { return 'window-secondary'; }
+    class StartupBridge extends MockBridge {
       override async syncWindowTabs(paths: string[][], activeId: string | null): Promise<void> {
         secondarySyncs.push({ paths, activeId });
       }
     }
-    const bridge = new SecondaryWindowBridge(() => []);
+    const bridge = new StartupBridge(() => []);
     useAppStore.setState({
       bridge,
       bootstrap: {
@@ -395,6 +394,7 @@ describe('appStore async lifecycle', () => {
     await useAppStore.getState().restoreTabsOnStartup();
 
     expect(useAppStore.getState().tabs).toEqual([]);
+    expect(useAppStore.getState().snapshot).toBeUndefined();
     expect(secondarySyncs).toEqual([{ paths: [], activeId: null }]);
   });
 
@@ -415,5 +415,51 @@ describe('appStore async lifecycle', () => {
     expect(opened).toBe(true);
     expect(crossWindowFocusCalls).toBe(0);
     expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['forced']);
+  });
+
+  it('does not throw or set error when refreshing with no open workspace', async () => {
+    const bridge = new MockBridge(() => []);
+    useAppStore.setState({ bridge, bootstrap, snapshot: undefined, error: undefined });
+
+    await expect(useAppStore.getState().refresh(true)).resolves.toBeUndefined();
+    await expect(useAppStore.getState().refresh(false)).resolves.toBeUndefined();
+
+    expect(useAppStore.getState().error).toBeUndefined();
+  });
+
+  it('ignores background watcher events and cleans startup errors when no workspace is open', async () => {
+    let subscriber: ((event: BridgeEvent) => void) | undefined;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          state: {
+            ...bootstrap.state,
+            openWorkspaceIds: [],
+            activeWorkspaceId: null,
+            lastWorkspaceId: null,
+          },
+        };
+      }
+      return [];
+    });
+    bridge.subscribe = (handler) => {
+      subscriber = handler;
+      return () => undefined;
+    };
+
+    await useAppStore.getState().initialize(bridge);
+
+    expect(useAppStore.getState().snapshot).toBeUndefined();
+    expect(useAppStore.getState().error).toBeUndefined();
+
+    // 发送其他工作区的事件，不应触发错误
+    subscriber?.({
+      workspaceId: 'other-workspace',
+      repoId: 'repo',
+      generation: 1,
+      reason: 'status',
+    });
+    expect(useAppStore.getState().error).toBeUndefined();
   });
 });

@@ -20,7 +20,6 @@ mod integration_tests;
 
 use state::AppState;
 use tauri::Manager;
-use tauri_plugin_window_state::StateFlags;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,27 +32,27 @@ pub fn run() {
         .plugin(tauri_plugin_window_controls::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                // The window configuration owns decorations per platform. Do not restore
-                // the legacy `decorated: false` value saved by earlier borderless builds.
-                .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
-                // Detached tab windows have unique labels and should not accumulate stale
-                // one-off geometry entries across application runs.
-                .with_filter(|label| label == "main")
+                .with_filter(|_| false)
                 .build(),
         )
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             app.manage(AppState::load(config_dir));
 
-            #[cfg(target_os = "windows")]
-            {
-                use tauri_plugin_window_controls::WindowControlsExt;
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_fullscreen(false);
+                let _ = window.unmaximize();
+                let _ = window.set_resizable(false);
+                let _ = window.set_maximizable(false);
+                let _ = window.set_size(tauri::LogicalSize::new(880.0, 540.0));
+                let _ = window.center();
 
-                let window = app
-                    .get_webview_window("main")
-                    .expect("main window not found");
-                window.set_title_bar_height(38)?;
-                window.set_title_bar_overlay(true)?;
+                #[cfg(target_os = "windows")]
+                {
+                    use tauri_plugin_window_controls::WindowControlsExt;
+                    let _ = window.set_title_bar_height(38);
+                    let _ = window.set_title_bar_overlay(true);
+                }
             }
 
             Ok(())

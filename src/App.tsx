@@ -123,6 +123,16 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [bridge, openWorkspace, t]);
 
+  const hasSnapshot = Boolean(snapshot);
+  useEffect(() => {
+    if (!ready) return;
+    if (hasSnapshot) {
+      void bridge.window.setSize(0, 0, true);
+    } else {
+      void bridge.window.setSize(880, 540, true);
+    }
+  }, [bridge, ready, hasSnapshot]);
+
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);
 
   return <I18nContext.Provider value={{ language, preference: languagePreference, t }}>

@@ -4,6 +4,7 @@ import { TitleBar } from './TitleBar';
 import { BridgeContext } from '../platform/context';
 import { MockBridge, type TabDragPayload, type VersionDockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
+import { I18nContext, createTranslator } from '../i18n';
 
 const bridge = new MockBridge(() => []);
 const workspace = {
@@ -361,5 +362,26 @@ describe('TitleBar tab dragging', () => {
     await act(async () => acceptTransfer?.(true));
     await waitFor(() => expect(useAppStore.getState().tabs).toEqual([]));
     await waitFor(() => expect(transferBridge.broadcastTabDragState).toHaveBeenCalledWith(null));
+  });
+
+  it('does not render tabs track or plus button when no tabs are open, but renders welcome title and prevents double click', () => {
+    useAppStore.setState({ bridge, tabs: [], activeTabId: null, busy: false });
+    const { container } = render(
+      <BridgeContext.Provider value={bridge}>
+        <I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t: createTranslator('zh-CN') }}>
+          <TitleBar />
+        </I18nContext.Provider>
+      </BridgeContext.Provider>,
+    );
+
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('New Tab')).not.toBeInTheDocument();
+    expect(screen.getByText('欢迎访问 VersionDock')).toBeInTheDocument();
+
+    const header = container.querySelector('header');
+    expect(header).toBeInTheDocument();
+    const doubleClickEvent = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
+    header?.dispatchEvent(doubleClickEvent);
+    expect(doubleClickEvent.defaultPrevented).toBe(true);
   });
 });

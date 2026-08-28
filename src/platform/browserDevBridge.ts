@@ -316,6 +316,7 @@ export class BrowserDevBridge implements VersionDockBridge {
     isMaximized: async () => false,
     dragGeometry: async () => null,
     setCursorIcon: async () => undefined,
+    setSize: async () => undefined,
     onDragDrop: async () => () => undefined,
   };
 
@@ -452,7 +453,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'conflictVersions': return { path: command.payload.relative_path, base: '', ours: '', theirs: '', working: '', language: 'text', fingerprint: 'browser-demo', binary: false };
       case 'sync': case 'branchOperation': case 'tagOperation': case 'stashOperation': case 'shelfOperation':
       case 'changelistOperation': case 'worktreeOperation': case 'openWorktree': case 'remoteOperation': case 'svnOperation': case 'submoduleOperation': case 'historyOperation': case 'systemOpen':
-      case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': return true;
+      case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'windowSetSize': return true;
       case 'changelists': return [];
     }
   }
