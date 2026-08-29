@@ -1,5 +1,5 @@
 import { Codicon } from './Codicon';
-import { useAppStore } from '../store/appStore';
+import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { confirmDialog } from './dialogService';
 import { ContextMenu } from './ContextMenu';
@@ -11,7 +11,10 @@ export function MergeWorkspace() {
   const setResult = useAppStore((state) => state.setMergeResult);
   const save = useAppStore((state) => state.saveMerge);
   const back = useAppStore((state) => state.backToHistory);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => isOperationActive(state.operations, {
+    repositoryId: state.selectedFile?.repoId,
+    domain: 'conflict',
+  }));
   const accept = useAppStore((state) => state.acceptConflict);
   const [context, setContext] = useState<{ x: number; y: number }>();
   const { t } = useI18n();

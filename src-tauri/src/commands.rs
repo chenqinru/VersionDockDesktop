@@ -6,9 +6,10 @@ use tauri_plugin_opener::OpenerExt;
 use crate::{
     changelist, identity,
     models::{
-        BootstrapData, BridgeCommand, ConflictFile, DesktopCapabilities, DesktopError,
-        ProgressEvent, RequestEnvelope, ResponseEnvelope, VcsKind, WindowTabImport,
-        WindowTabTransferCompleted,
+        BootstrapData, BridgeCommand, CapabilityStatus, ConflictFile, DesktopCapabilities,
+        DesktopError, NotificationPermissionState, OperationEvent, OperationStatus, RefreshScope,
+        RepositoryEvent, RepositoryEventSource, RequestEnvelope, ResponseEnvelope,
+        RuntimeCapabilities, VcsKind, WindowTabImport, WindowTabTransferCompleted,
     },
     shelf,
     state::AppState,
@@ -112,20 +113,44 @@ pub async fn bridge_request(
     state: State<'_, AppState>,
 ) -> Result<ResponseEnvelope, DesktopError> {
     let request_id = envelope.request_id.clone();
-    let (phase, message) = command_progress(&envelope.command);
-    let error_context = command_error_context(&envelope.command);
+    let command = envelope.command;
+    let (phase, message) = command_progress(&command);
+    let error_context = command_error_context(&command);
+    let context = envelope.context.clone();
+    let started_at = chrono::Utc::now().to_rfc3339();
     let token = state.register_request(&request_id).await;
     let _ = app.emit(
         "versiondock://event",
-        ProgressEvent {
-            request_id: request_id.clone(),
+        OperationEvent {
+            operation_id: request_id.clone(),
+            context: context.clone(),
+            status: OperationStatus::Running,
             phase: phase.into(),
             message: message.into(),
+            started_at: started_at.clone(),
+            cancellable: true,
             completed: None,
             total: None,
+            result: None,
+            error: None,
         },
     );
-    let mut result = dispatch(envelope.command, &app, &window, &state, &token).await;
+    let mut result = match validate_request_context(&context, &error_context) {
+        Ok(()) => {
+            dispatch(
+                command.clone(),
+                &app,
+                &window,
+                &state,
+                &token,
+                &request_id,
+                &context,
+                &started_at,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
     if let Err(error) = &mut result {
         error
             .operation
@@ -141,26 +166,267 @@ pub async fn bridge_request(
         }
     }
     state.finish_request(&request_id).await;
-    let succeeded = result.is_ok();
+    let status = match &result {
+        Ok(value)
+            if value.as_array().is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item.get("error").is_some_and(|error| !error.is_null()))
+            }) =>
+        {
+            OperationStatus::Partial
+        }
+        Ok(_) => OperationStatus::Succeeded,
+        Err(error) if error.code == "REQUEST_CANCELLED" => OperationStatus::Cancelled,
+        Err(error) if error.code == "COMMAND_TIMEOUT" || error.code == "REQUEST_TIMEOUT" => {
+            OperationStatus::TimedOut
+        }
+        Err(_) => OperationStatus::Failed,
+    };
+    let event_error = result.as_ref().err().cloned();
+    let result_summary = match &result {
+        Ok(value) if value.as_array().is_some() => {
+            let items = value.as_array().expect("array checked");
+            let failed = items
+                .iter()
+                .filter(|item| item.get("error").is_some_and(|error| !error.is_null()))
+                .count() as u32;
+            Some(crate::models::OperationResultSummary {
+                summary: if failed > 0 {
+                    "Partial success"
+                } else {
+                    "Completed"
+                }
+                .into(),
+                succeeded: items.len() as u32 - failed,
+                failed,
+            })
+        }
+        Ok(_) => Some(crate::models::OperationResultSummary {
+            summary: "Completed".into(),
+            succeeded: 1,
+            failed: 0,
+        }),
+        Err(_) => Some(crate::models::OperationResultSummary {
+            summary: "Failed".into(),
+            succeeded: 0,
+            failed: 1,
+        }),
+    };
+    if result.is_ok() {
+        emit_refresh_events(app.clone(), state.inner(), &command, &result);
+    }
     let _ = app.emit(
         "versiondock://event",
-        ProgressEvent {
-            request_id: request_id.clone(),
-            phase: if succeeded { "completed" } else { "failed" }.into(),
-            message: if succeeded {
-                "Operation completed"
-            } else {
-                "Operation failed"
+        OperationEvent {
+            operation_id: request_id.clone(),
+            context,
+            phase: match status {
+                OperationStatus::Succeeded => "completed",
+                OperationStatus::Partial => "partial",
+                OperationStatus::Cancelled => "cancelled",
+                OperationStatus::TimedOut => "timedOut",
+                OperationStatus::Failed => "failed",
+                _ => "completed",
             }
             .into(),
+            message: match status {
+                OperationStatus::Succeeded => "Operation completed",
+                OperationStatus::Partial => "Operation partially completed",
+                OperationStatus::Cancelled => "Operation cancelled",
+                OperationStatus::TimedOut => "Operation timed out",
+                OperationStatus::Failed => "Operation failed",
+                _ => "Operation completed",
+            }
+            .into(),
+            status,
+            started_at,
+            cancellable: false,
             completed: Some(1),
             total: Some(1),
+            result: result_summary,
+            error: event_error,
         },
     );
     Ok(match result {
         Ok(value) => ResponseEnvelope::success(request_id, value),
         Err(error) => ResponseEnvelope::failure(request_id, error),
     })
+}
+
+fn validate_request_context(
+    context: &crate::models::RequestContext,
+    command: &(String, Option<String>, Option<String>, Option<String>),
+) -> Result<(), DesktopError> {
+    if context.workspace_id.is_some() && command.1.is_some() && context.workspace_id != command.1 {
+        return Err(DesktopError::new(
+            "REQUEST_CONTEXT_MISMATCH",
+            "Request workspace context does not match the command target",
+            false,
+        ));
+    }
+    if context.repository_id.is_some() && command.2.is_some() && context.repository_id != command.2
+    {
+        return Err(DesktopError::new(
+            "REQUEST_CONTEXT_MISMATCH",
+            "Request repository context does not match the command target",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn emit_refresh_events(
+    app: AppHandle,
+    state: &AppState,
+    command: &BridgeCommand,
+    result: &Result<serde_json::Value, DesktopError>,
+) {
+    let (_, workspace_id, repository_id, _) = command_error_context(command);
+    let Some(workspace_id) = workspace_id else {
+        return;
+    };
+    let scopes = command_refresh_scopes(command);
+    if scopes.is_empty() {
+        return;
+    }
+    let generation = state.next_generation();
+    if matches!(command, BridgeCommand::BatchCommit { .. }) {
+        if let Ok(value) = result {
+            for repository_id in value
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item.get("repoId").and_then(|id| id.as_str()))
+            {
+                let _ = app.emit(
+                    "versiondock://event",
+                    RepositoryEvent {
+                        workspace_id: workspace_id.clone(),
+                        repo_id: Some(repository_id.into()),
+                        generation,
+                        source: RepositoryEventSource::Operation,
+                        scopes: scopes.clone(),
+                    },
+                );
+            }
+        }
+        return;
+    }
+    let _ = app.emit(
+        "versiondock://event",
+        RepositoryEvent {
+            workspace_id,
+            repo_id: repository_id,
+            generation,
+            source: RepositoryEventSource::Operation,
+            scopes,
+        },
+    );
+}
+
+fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
+    match command {
+        BridgeCommand::Stage { .. } | BridgeCommand::Unstage { .. } => vec![
+            RefreshScope::Index,
+            RefreshScope::Status,
+            RefreshScope::Diff,
+        ],
+        BridgeCommand::Discard { .. }
+        | BridgeCommand::DeletePaths { .. }
+        | BridgeCommand::AddIgnore { .. }
+        | BridgeCommand::UpdateIgnoreRules { .. } => vec![RefreshScope::Status, RefreshScope::Diff],
+        BridgeCommand::Commit { .. } | BridgeCommand::BatchCommit { .. } => vec![
+            RefreshScope::Status,
+            RefreshScope::Refs,
+            RefreshScope::History,
+        ],
+        BridgeCommand::Sync { .. }
+        | BridgeCommand::BranchOperation { .. }
+        | BridgeCommand::TagOperation { .. }
+        | BridgeCommand::HistoryOperation { .. }
+        | BridgeCommand::UnpushedOperation { .. } => vec![
+            RefreshScope::Status,
+            RefreshScope::Refs,
+            RefreshScope::History,
+            RefreshScope::Conflicts,
+        ],
+        BridgeCommand::ConflictSave { .. }
+        | BridgeCommand::ConflictAccept { .. }
+        | BridgeCommand::AbortRepositoryOperation { .. } => vec![
+            RefreshScope::Status,
+            RefreshScope::Diff,
+            RefreshScope::Operation,
+            RefreshScope::Conflicts,
+        ],
+        BridgeCommand::StashOperation { .. }
+        | BridgeCommand::ShelfOperation { .. }
+        | BridgeCommand::ChangelistOperation { .. } => {
+            vec![RefreshScope::Status, RefreshScope::Diff]
+        }
+        BridgeCommand::WorktreeOperation { .. }
+        | BridgeCommand::SubtreeOperation { .. }
+        | BridgeCommand::SubmoduleOperation { .. } => vec![
+            RefreshScope::WorkspaceSnapshot,
+            RefreshScope::Status,
+            RefreshScope::Refs,
+            RefreshScope::History,
+        ],
+        BridgeCommand::RemoteOperation { .. }
+        | BridgeCommand::GitProfileOperation { .. }
+        | BridgeCommand::SvnAccountOperation { .. } => vec![RefreshScope::Status],
+        BridgeCommand::SvnOperation { .. } => vec![
+            RefreshScope::Status,
+            RefreshScope::Diff,
+            RefreshScope::Conflicts,
+            RefreshScope::SvnRevision,
+            RefreshScope::History,
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn emit_operation_phase(
+    app: &AppHandle,
+    operation_id: &str,
+    context: &crate::models::RequestContext,
+    started_at: &str,
+    phase: &str,
+    message: &str,
+    completed: Option<u32>,
+    total: Option<u32>,
+) {
+    let _ = app.emit(
+        "versiondock://event",
+        OperationEvent {
+            operation_id: operation_id.into(),
+            context: context.clone(),
+            status: OperationStatus::Running,
+            phase: phase.into(),
+            message: message.into(),
+            started_at: started_at.into(),
+            cancellable: true,
+            completed,
+            total,
+            result: None,
+            error: None,
+        },
+    );
+}
+
+fn tool_capability(available: bool, tool: &str, version: Option<&str>) -> CapabilityStatus {
+    if available {
+        CapabilityStatus {
+            available: true,
+            reason_code: None,
+            detail: version.map(|value| format!("{tool} {value}")),
+        }
+    } else {
+        CapabilityStatus::unavailable(
+            "VCS_TOOL_UNAVAILABLE",
+            format!("{tool} is not installed or cannot be executed"),
+        )
+    }
 }
 
 fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
@@ -462,6 +728,9 @@ async fn dispatch(
     invoking_window: &tauri::WebviewWindow,
     state: &AppState,
     token: &tokio_util::sync::CancellationToken,
+    operation_id: &str,
+    request_context: &crate::models::RequestContext,
+    started_at: &str,
 ) -> Result<serde_json::Value, DesktopError> {
     match command {
         BridgeCommand::Bootstrap => {
@@ -469,25 +738,122 @@ async fn dispatch(
             for workspace in &mut snapshot.recent_workspaces {
                 workspace.available = workspace.paths.iter().all(|path| Path::new(path).is_dir());
             }
+            let tools = workspace::tool_availability(token).await;
+            let secure_credentials = svn_account::secure_store_capability().await;
+            let notifications_available = cfg!(target_os = "macos")
+                || cfg!(target_os = "windows")
+                || (cfg!(target_os = "linux")
+                    && (std::env::var_os("DISPLAY").is_some()
+                        || std::env::var_os("WAYLAND_DISPLAY").is_some())
+                    && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some());
+            let notification_status = if notifications_available {
+                CapabilityStatus::available()
+            } else {
+                CapabilityStatus::unavailable(
+                    "SYSTEM_NOTIFICATIONS_UNAVAILABLE",
+                    "No supported desktop notification session is available",
+                )
+            };
+            let runtime = RuntimeCapabilities {
+                system_notifications: notification_status.clone(),
+                notification_permission: if notifications_available {
+                    NotificationPermissionState::NotRequested
+                } else {
+                    NotificationPermissionState::Unavailable
+                },
+                secure_credentials: secure_credentials.clone(),
+            };
+            let mut availability = std::collections::BTreeMap::new();
+            availability.insert("systemNotifications".into(), notification_status);
+            availability.insert(
+                "secureCredentials".into(),
+                secure_credentials.status.clone(),
+            );
+            for key in [
+                "stash",
+                "worktree",
+                "subtree",
+                "submodule",
+                "remoteManagement",
+                "identity",
+            ] {
+                availability.insert(
+                    key.into(),
+                    tool_capability(tools.git, "Git", tools.git_version.as_deref()),
+                );
+            }
+            availability.insert(
+                "svnAccount".into(),
+                tool_capability(tools.svn, "SVN", tools.svn_version.as_deref()),
+            );
+            let vcs_available = tools.git || tools.svn;
+            let vcs_detail = [
+                tools
+                    .git_version
+                    .as_deref()
+                    .map(|version| format!("Git {version}")),
+                tools
+                    .svn_version
+                    .as_deref()
+                    .map(|version| format!("SVN {version}")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
+            for key in ["compare", "fileHistory"] {
+                availability.insert(
+                    key.into(),
+                    if vcs_available {
+                        CapabilityStatus {
+                            available: true,
+                            reason_code: None,
+                            detail: Some(vcs_detail.clone()),
+                        }
+                    } else {
+                        CapabilityStatus::unavailable(
+                            "VCS_TOOL_UNAVAILABLE",
+                            "Git and SVN are unavailable",
+                        )
+                    },
+                );
+            }
+            for key in ["shelf", "changelist"] {
+                availability.insert(key.into(), CapabilityStatus::available());
+            }
+            availability.insert(
+                "ai".into(),
+                CapabilityStatus::unavailable(
+                    "OUT_OF_SCOPE",
+                    "AI capabilities are intentionally unavailable in VersionDock Desktop V4",
+                ),
+            );
             json(BootstrapData {
                 state: snapshot,
-                tools: workspace::tool_availability(token).await,
+                tools: tools.clone(),
+                launch_workspace_id: state
+                    .launch_workspace_id
+                    .lock()
+                    .ok()
+                    .and_then(|mut launch| launch.take()),
                 capabilities: DesktopCapabilities {
-                    stash: true,
+                    stash: tools.git,
                     shelf: true,
                     changelist: true,
-                    worktree: true,
-                    subtree: true,
-                    submodule: true,
-                    compare: true,
-                    remote_management: true,
-                    identity: true,
-                    svn_account: true,
-                    file_history: true,
-                    secure_credentials: true,
-                    system_notifications: true,
+                    worktree: tools.git,
+                    subtree: tools.git,
+                    submodule: tools.git,
+                    compare: tools.git || tools.svn,
+                    remote_management: tools.git,
+                    identity: tools.git,
+                    svn_account: tools.svn,
+                    file_history: tools.git || tools.svn,
+                    secure_credentials: secure_credentials.status.available,
+                    system_notifications: notifications_available,
+                    availability,
                     ..DesktopCapabilities::default()
                 },
+                runtime,
             })
         }
         BridgeCommand::SaveAppState { state: snapshot } => {
@@ -527,41 +893,100 @@ async fn dispatch(
             json(layout)
         }
         BridgeCommand::WorkspaceOpen { paths } => {
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "validate",
+                "Validating workspace paths",
+                None,
+                None,
+            );
             let descriptor = workspace::descriptor(paths)?;
             state.upsert_workspace(descriptor.clone()).await?;
             let generation = state.next_generation();
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             let settings = state.app.read().await.settings.clone();
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "scan",
+                "Enumerating directories and repositories",
+                None,
+                None,
+            );
             let snapshot =
                 workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
-            state.watch_workspace(&descriptor, &settings, app.clone())?;
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "watch",
+                "Starting repository watchers",
+                None,
+                None,
+            );
+            state.watch_workspace(&descriptor, &snapshot.repositories, &settings, app.clone())?;
             json(snapshot)
         }
         BridgeCommand::WorkspaceRemoveRecent { workspace_id } => {
             let mut snapshot = state.app.read().await.clone();
+            let removed = snapshot
+                .recent_workspaces
+                .iter()
+                .find(|workspace| workspace.id == workspace_id)
+                .cloned();
+            let mut removed_color_ids = std::collections::HashSet::from([workspace_id.clone()]);
+            if let Some(workspace) = removed
+                .filter(|workspace| workspace.paths.iter().all(|path| Path::new(path).is_dir()))
+            {
+                let generation = state.next_generation();
+                if let Ok(removed_snapshot) =
+                    workspace::snapshot(workspace, generation, &snapshot.settings, token).await
+                {
+                    removed_color_ids.extend(
+                        removed_snapshot
+                            .repositories
+                            .into_iter()
+                            .map(|repository| repository.meta.id),
+                    );
+                }
+            }
             snapshot
                 .recent_workspaces
                 .retain(|workspace| workspace.id != workspace_id);
             if snapshot.last_workspace_id.as_deref() == Some(&workspace_id) {
                 snapshot.last_workspace_id = None;
             }
+            snapshot
+                .settings
+                .project_colors
+                .retain(|id, _| !removed_color_ids.contains(id));
             state.save_app_state(snapshot).await?;
             json(true)
         }
         BridgeCommand::WorkspaceRefresh { workspace_id } => {
             let descriptor = state.workspace(&workspace_id).await?;
             let generation = state.next_generation();
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             let settings = state.app.read().await.settings.clone();
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "scan",
+                "Refreshing repository metadata",
+                None,
+                None,
+            );
             let snapshot =
                 workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
-            state.watch_workspace(&descriptor, &settings, app.clone())?;
+            state.watch_workspace(&descriptor, &snapshot.repositories, &settings, app.clone())?;
             json(snapshot)
         }
         BridgeCommand::WindowOpenNew {
@@ -920,10 +1345,7 @@ async fn dispatch(
         } => {
             let descriptor = state.workspace(&workspace_id).await?;
             let repo = workspace::repository(&descriptor, &repo_id)?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(match repo.kind {
                 VcsKind::Git => workspace::git_status(repo, token).await?,
                 VcsKind::Svn => workspace::svn_status(repo, token).await?,
@@ -939,10 +1361,7 @@ async fn dispatch(
             to_revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(
                 vcs::diff(
                     &repo,
@@ -963,10 +1382,7 @@ async fn dispatch(
             relative_path,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::stash_file_diff(&repo, &reference, &relative_path, token).await?)
         }
         BridgeCommand::ShelfFileDiff {
@@ -976,10 +1392,7 @@ async fn dispatch(
             relative_path,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(shelf::file_diff(&state.config_dir, &repo, &shelf_id, &relative_path).await?)
         }
         BridgeCommand::Stage {
@@ -988,7 +1401,7 @@ async fn dispatch(
             paths,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::stage(&repo, &paths, token).await
             })
             .await?;
@@ -1000,7 +1413,7 @@ async fn dispatch(
             paths,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::unstage(&repo, &paths, token).await
             })
             .await?;
@@ -1012,7 +1425,7 @@ async fn dispatch(
             paths,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::discard(&repo, &paths, token).await
             })
             .await?;
@@ -1024,7 +1437,7 @@ async fn dispatch(
             paths,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::delete_paths(&repo, &paths).await
             })
             .await?;
@@ -1037,7 +1450,7 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             json(
-                with_write(state, &repo_id, async {
+                with_write(state, &repo_id, token, async {
                     vcs::add_ignore(&repo, &relative_path, token).await
                 })
                 .await?,
@@ -1058,7 +1471,7 @@ async fn dispatch(
             patterns,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::update_ignore_rules(&repo, &directory, &patterns, token).await
             })
             .await?;
@@ -1081,7 +1494,7 @@ async fn dispatch(
             } else {
                 None
             };
-            let value = with_write(state, &repo_id, async {
+            let value = with_write(state, &repo_id, token, async {
                 vcs::commit_with_identity(&repo, &message, amend, &paths, identity.as_ref(), token)
                     .await
             })
@@ -1094,19 +1507,67 @@ async fn dispatch(
             push,
         } => {
             let mut results = Vec::new();
-            for target in targets {
+            let total = targets.len() as u32;
+            for (index, target) in targets.into_iter().enumerate() {
+                emit_operation_phase(
+                    app,
+                    operation_id,
+                    request_context,
+                    started_at,
+                    "commitRepository",
+                    "Committing repository",
+                    Some(index as u32),
+                    Some(total),
+                );
                 let repo_id = target.repo_id.clone();
-                let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+                let repo = match resolve_repo(state, &workspace_id, &repo_id).await {
+                    Ok(repo) => repo,
+                    Err(error) => {
+                        results.push(crate::models::RepositoryOperationResult {
+                            repo_id,
+                            commit_attempted: false,
+                            committed: false,
+                            revision: None,
+                            push_attempted: false,
+                            pushed: false,
+                            failed_stage: Some("prepare".into()),
+                            recovery_hint: Some(
+                                "Reopen the workspace and verify that the repository is available"
+                                    .into(),
+                            ),
+                            error: Some(error),
+                        });
+                        continue;
+                    }
+                };
                 let identity = if repo.kind == VcsKind::Git {
-                    Some(
-                        identity::state(&state.config_dir, &repo, token)
-                            .await?
-                            .effective,
-                    )
+                    match identity::state(&state.config_dir, &repo, token).await {
+                        Ok(identity) => Some(identity.effective),
+                        Err(error) => {
+                            results.push(crate::models::RepositoryOperationResult {
+                                repo_id,
+                                commit_attempted: false,
+                                committed: false,
+                                revision: None,
+                                push_attempted: false,
+                                pushed: false,
+                                failed_stage: Some("identity".into()),
+                                recovery_hint: Some(
+                                    "Configure a valid Git identity and retry this repository"
+                                        .into(),
+                                ),
+                                error: Some(error),
+                            });
+                            continue;
+                        }
+                    }
                 } else {
                     None
                 };
-                let commit_result = with_write(state, &repo_id, async {
+                let commit_result = with_write(state, &repo_id, token, async {
+                    if !target.unstage_paths.is_empty() {
+                        vcs::unstage(&repo, &target.unstage_paths, token).await?;
+                    }
                     vcs::commit_with_identity(
                         &repo,
                         &target.message,
@@ -1121,7 +1582,7 @@ async fn dispatch(
                 match commit_result {
                     Ok(revision) => {
                         let push_result = if push && repo.kind == VcsKind::Git {
-                            with_write(state, &repo_id, async {
+                            with_write(state, &repo_id, token, async {
                                 vcs::sync(&repo, crate::models::SyncAction::Push, None, token).await
                             })
                             .await
@@ -1132,29 +1593,56 @@ async fn dispatch(
                         match push_result {
                             Ok(pushed) => results.push(crate::models::RepositoryOperationResult {
                                 repo_id,
+                                commit_attempted: true,
                                 committed: true,
                                 revision: Some(revision),
+                                push_attempted: push && repo.kind == VcsKind::Git,
                                 pushed,
+                                failed_stage: None,
+                                recovery_hint: None,
                                 error: None,
                             }),
                             Err(error) => results.push(crate::models::RepositoryOperationResult {
                                 repo_id,
+                                commit_attempted: true,
                                 committed: true,
                                 revision: Some(revision),
+                                push_attempted: true,
                                 pushed: false,
+                                failed_stage: Some("push".into()),
+                                recovery_hint: Some(
+                                    "Retry the push after checking the remote and branch state"
+                                        .into(),
+                                ),
                                 error: Some(error),
                             }),
                         }
                     }
                     Err(error) => results.push(crate::models::RepositoryOperationResult {
                         repo_id,
+                        commit_attempted: true,
                         committed: false,
                         revision: None,
+                        push_attempted: false,
                         pushed: false,
+                        failed_stage: Some("commit".into()),
+                        recovery_hint: Some(
+                            "Review repository changes and retry only this repository".into(),
+                        ),
                         error: Some(error),
                     }),
                 }
             }
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "refresh",
+                "Refreshing affected repositories",
+                Some(total),
+                Some(total),
+            );
             json(results)
         }
         BridgeCommand::Sync {
@@ -1164,7 +1652,7 @@ async fn dispatch(
             remote,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let value = with_write(state, &repo_id, async {
+            let value = with_write(state, &repo_id, token, async {
                 vcs::sync(&repo, action, remote, token).await
             })
             .await?;
@@ -1179,11 +1667,29 @@ async fn dispatch(
             revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
-            json(vcs::history(&repo, skip, limit, filter, revision, token).await?)
+            let _permit = state.acquire_read(token).await?;
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "loadCommits",
+                "Loading repository commits",
+                None,
+                None,
+            );
+            let history = vcs::history(&repo, skip, limit, filter, revision, token).await?;
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "projectPage",
+                "Projecting the visible history page",
+                Some(history.commits.len() as u32),
+                None,
+            );
+            json(history)
         }
         BridgeCommand::HistoryTopology {
             workspace_id,
@@ -1191,10 +1697,7 @@ async fn dispatch(
             svn_limit,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::history_topology(&repo, svn_limit, token).await?)
         }
         BridgeCommand::CommitDetail {
@@ -1203,10 +1706,7 @@ async fn dispatch(
             revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::commit_detail(&repo, &revision, token).await?)
         }
         BridgeCommand::CommitMergeCommits {
@@ -1216,10 +1716,7 @@ async fn dispatch(
             parents,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::merge_commits(&repo, &revision, &parents, token).await?)
         }
         BridgeCommand::CommitMergeParentFiles {
@@ -1229,10 +1726,7 @@ async fn dispatch(
             parent_hash,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::merge_parent_files(&repo, &revision, &parent_hash, token).await?)
         }
         BridgeCommand::UnpushedCommits {
@@ -1240,10 +1734,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::unpushed_commits(&repo, token).await?)
         }
         BridgeCommand::UnpushedOperation {
@@ -1252,7 +1743,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::unpushed_operation(&repo, operation, token).await
             })
             .await?;
@@ -1264,10 +1755,7 @@ async fn dispatch(
             revisions,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::create_patch(&repo, &revisions, token).await?)
         }
         BridgeCommand::HistoryOperation {
@@ -1276,7 +1764,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::history_operation(&repo, operation, token).await
             })
             .await?;
@@ -1295,7 +1783,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::branch_operation(&repo, operation, token).await
             })
             .await?;
@@ -1314,7 +1802,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::tag_operation(&repo, operation, token).await
             })
             .await?;
@@ -1333,7 +1821,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::stash_operation(&repo, operation, token).await
             })
             .await?;
@@ -1393,7 +1881,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 shelf::operate(&state.config_dir, &repo, operation, token).await
             })
             .await?;
@@ -1412,7 +1900,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 changelist::operate(&state.config_dir, &repo, operation).await
             })
             .await?;
@@ -1431,7 +1919,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::worktree_operation(&state.config_dir, &repo, operation, token).await
             })
             .await?;
@@ -1467,10 +1955,7 @@ async fn dispatch(
             base_ref,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::worktree_diff(&state.config_dir, &repo, &path, &base_ref, token).await?)
         }
         BridgeCommand::WorktreeFileDiff {
@@ -1481,10 +1966,7 @@ async fn dispatch(
             relative_path,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(
                 vcs::worktree_file_diff(
                     &state.config_dir,
@@ -1503,10 +1985,7 @@ async fn dispatch(
             base_ref,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::branch_working_diff(&repo, &base_ref, token).await?)
         }
         BridgeCommand::BranchWorkingFileDiff {
@@ -1516,10 +1995,7 @@ async fn dispatch(
             relative_path,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::branch_working_file_diff(&repo, &base_ref, &relative_path, token).await?)
         }
         BridgeCommand::Subtrees {
@@ -1527,10 +2003,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::subtrees(&repo, token).await?)
         }
         BridgeCommand::SubtreeOperation {
@@ -1539,7 +2012,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::subtree_operation(&repo, operation, token).await
             })
             .await?;
@@ -1550,10 +2023,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::submodules(&repo, token).await?)
         }
         BridgeCommand::SubmoduleOperation {
@@ -1562,7 +2032,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::submodule_operation(&repo, operation, token).await
             })
             .await?;
@@ -1574,7 +2044,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::svn_operation(&repo, operation, token).await
             })
             .await?;
@@ -1587,10 +2057,7 @@ async fn dispatch(
             target,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::branch_compare(&repo, &base, &target, token).await?)
         }
         BridgeCommand::Remotes {
@@ -1598,10 +2065,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit =
-                state.read_limit.acquire().await.map_err(|_| {
-                    DesktopError::new("APP_CLOSING", "Application is closing", true)
-                })?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::remotes(&repo, token).await?)
         }
         BridgeCommand::RemoteOperation {
@@ -1610,7 +2074,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::remote_operation(&repo, operation, token).await
             })
             .await?;
@@ -1672,7 +2136,7 @@ async fn dispatch(
             expected_fingerprint,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::conflict_save(
                     &repo,
                     &relative_path,
@@ -1692,7 +2156,7 @@ async fn dispatch(
             choice,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::conflict_accept(&repo, &relative_path, choice, token).await
             })
             .await?;
@@ -1704,7 +2168,7 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, async {
+            with_write(state, &repo_id, token, async {
                 vcs::abort_operation(&repo, &operation, token).await
             })
             .await?;
@@ -1878,12 +2342,21 @@ async fn resolve_repo(
     Ok(repo)
 }
 
-async fn with_write<T, F>(state: &AppState, repo_id: &str, operation: F) -> Result<T, DesktopError>
+async fn with_write<T, F>(
+    state: &AppState,
+    repo_id: &str,
+    token: &tokio_util::sync::CancellationToken,
+    operation: F,
+) -> Result<T, DesktopError>
 where
     F: std::future::Future<Output = Result<T, DesktopError>>,
 {
     let lock = state.write_lock(repo_id).await;
-    let _guard = lock.lock().await;
+    let _guard = tokio::select! {
+        _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
+        guard = lock.lock_owned() => guard,
+    };
+    let _permit = state.acquire_write(token).await?;
     operation.await
 }
 
@@ -1944,6 +2417,10 @@ fn point_in_tab_snap_zone(
 mod tests {
     use super::*;
     use crate::models::{ExternalEditor, VcsKind};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     #[test]
     fn tab_drop_only_snaps_near_the_target_title_bar() {
@@ -2005,5 +2482,59 @@ mod tests {
             &root.path().join("file.txt"),
         );
         assert_eq!(result.unwrap_err().code, "INVALID_EXTERNAL_EDITOR");
+    }
+
+    #[tokio::test]
+    async fn coordinator_serializes_same_repository_and_limits_cross_repository_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState::load(root.path().to_path_buf()));
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+        for index in 0..4 {
+            let state = state.clone();
+            let active = active.clone();
+            let maximum = maximum.clone();
+            tasks.push(tokio::spawn(async move {
+                let token = tokio_util::sync::CancellationToken::new();
+                with_write(
+                    &state,
+                    if index < 2 { "same" } else { "other" },
+                    &token,
+                    async {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        maximum.fetch_max(current, Ordering::SeqCst);
+                        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        Ok::<_, DesktopError>(())
+                    },
+                )
+                .await
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+        assert_eq!(maximum.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn coordinator_cancels_while_waiting_for_repository_lock() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState::load(root.path().to_path_buf()));
+        let held = state.write_lock("repo").await.lock_owned().await;
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = token.clone();
+        let waiting_state = state.clone();
+        let waiting = tokio::spawn(async move {
+            with_write(&waiting_state, "repo", &token, async {
+                Ok::<_, DesktopError>(())
+            })
+            .await
+        });
+        cancel.cancel();
+        let error = waiting.await.unwrap().unwrap_err();
+        drop(held);
+        assert_eq!(error.code, "REQUEST_CANCELLED");
     }
 }

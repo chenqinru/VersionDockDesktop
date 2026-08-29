@@ -654,7 +654,9 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
   const selectedFile = useAppStore((state) => state.selectedFile);
-  const loading = useAppStore((state) => Object.values(state.selectedCommitLoading).some(Boolean));
+  const loading = useAppStore((state) => state.selectedCommits.some((commit) =>
+    state.selectedCommitLoading[commitKey(commit.repoId, commit.hash)] === true
+  ));
   const repositories = useAppStore((state) => state.snapshot?.repositories ?? []);
   const openDiff = useAppStore((state) => state.openDiff);
   const openFileHistory = useAppStore((state) => state.openFileHistory);
@@ -772,7 +774,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           ))}
         </div>
       </section>
-      {!workspaceView && <div className="detail-info-resize" role="separator" aria-label={t('Resize commit detail')} onPointerDown={resizeInfo}><i /></div>}
+      {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={150} aria-valuemax={Math.max(230, window.innerHeight - 120)} aria-valuenow={Math.round(infoHeight ?? Math.max(160, window.innerHeight * .28))} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setInfoHeight((value) => Math.max(150, Math.min(Math.max(230, window.innerHeight - 120), (value ?? Math.max(160, window.innerHeight * .28)) + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>}
       {workspaceView ? <ExtendedCommitSummary detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section className="detail-summary" style={infoHeight ? { height: infoHeight } : undefined}>
         <header className="detail-toolbar">
           <span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}>

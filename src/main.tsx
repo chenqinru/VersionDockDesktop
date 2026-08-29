@@ -37,4 +37,7 @@ void start().catch((error) => {
   document.body.dataset.startupError = error instanceof Error ? error.message : String(error);
 });
 
-window.addEventListener('beforeunload', () => disposeBridge());
+window.addEventListener('beforeunload', () => {
+  useAppStore.getState().dispose();
+  disposeBridge();
+});

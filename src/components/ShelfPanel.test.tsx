@@ -49,7 +49,7 @@ const snapshot = {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ shelves: {}, busy: false, snapshot: undefined, bridge: undefined });
+  useAppStore.setState({ shelves: {}, snapshot: undefined, bridge: undefined });
 });
 
 describe('ShelfPanel', () => {

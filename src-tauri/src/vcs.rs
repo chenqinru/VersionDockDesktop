@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
@@ -27,6 +28,40 @@ const RECORD: char = '\u{1e}';
 const DIFF_MAX_BYTES: usize = 5 * 1024 * 1024;
 const DIFF_MAX_LINES: usize = 50_000;
 const SUBTREE_CONFIG_PREFIX: &str = "versiondock.subtree.";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileHistoryCursor {
+    repo_id: String,
+    path: String,
+    vcs: VcsKind,
+    offset: u32,
+    anchor_revision: String,
+    peg_revision: Option<String>,
+}
+
+fn encode_file_history_cursor(cursor: &FileHistoryCursor) -> Result<String, DesktopError> {
+    serde_json::to_vec(cursor)
+        .map(hex::encode)
+        .map_err(|error| DesktopError::new("FILE_HISTORY_CURSOR_INVALID", error.to_string(), false))
+}
+
+fn decode_file_history_cursor(value: &str) -> Result<FileHistoryCursor, DesktopError> {
+    let bytes = hex::decode(value).map_err(|_| {
+        DesktopError::new(
+            "FILE_HISTORY_CURSOR_INVALID",
+            "Invalid file history cursor",
+            false,
+        )
+    })?;
+    serde_json::from_slice(&bytes).map_err(|_| {
+        DesktopError::new(
+            "FILE_HISTORY_CURSOR_INVALID",
+            "Invalid file history cursor",
+            false,
+        )
+    })
+}
 
 pub(crate) fn bytes_are_binary(bytes: &[u8]) -> bool {
     const BINARY_PREFIXES: &[&[u8]] = &[
@@ -349,6 +384,45 @@ pub async fn stage(
     let root = Path::new(&repo.root_path);
     match repo.kind {
         VcsKind::Git => {
+            for path in paths {
+                let safe = relative_path(root, path, true)?;
+                let index_entry = git(
+                    vec![
+                        "ls-files".into(),
+                        "--stage".into(),
+                        "--".into(),
+                        format!(":(literal){safe}"),
+                    ],
+                    repo,
+                    token,
+                )
+                .await?
+                .stdout_text();
+                if index_entry.starts_with("160000 ") {
+                    let pointer_diff = git(
+                        vec![
+                            "diff".into(),
+                            "--raw".into(),
+                            "--".into(),
+                            format!(":(literal){safe}"),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?
+                    .stdout_text();
+                    if pointer_diff.trim().is_empty() {
+                        return Err(DesktopError::new(
+                            "SUBMODULE_POINTER_UNCHANGED",
+                            format!(
+                                "{safe} has nested changes but no new submodule commit to stage"
+                            ),
+                            true,
+                        )
+                        .hint("Commit inside the submodule first, then stage its pointer"));
+                    }
+                }
+            }
             let mut args = vec!["add".into(), "--".into()];
             args.extend(
                 paths
@@ -799,9 +873,52 @@ pub async fn file_history(
     token: &CancellationToken,
 ) -> Result<FileHistoryPage, DesktopError> {
     let path = relative_path(Path::new(&repo.root_path), relative_path_value, true)?;
-    let skip = cursor
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0);
+    let cursor = match cursor {
+        Some(value) => {
+            let cursor = decode_file_history_cursor(value)?;
+            if cursor.repo_id != repo.id || cursor.path != path || cursor.vcs != repo.kind {
+                return Err(DesktopError::new(
+                    "FILE_HISTORY_CURSOR_CONTEXT_MISMATCH",
+                    "File history cursor belongs to another repository or path",
+                    false,
+                ));
+            }
+            cursor
+        }
+        None => {
+            let anchor_revision = match repo.kind {
+                VcsKind::Git => git(vec!["rev-parse".into(), "HEAD".into()], repo, token)
+                    .await?
+                    .stdout_text()
+                    .trim()
+                    .to_string(),
+                VcsKind::Svn => svn(
+                    vec![
+                        "info".into(),
+                        "--show-item".into(),
+                        "revision".into(),
+                        "--".into(),
+                        format!("{}@", path),
+                    ],
+                    repo,
+                    token,
+                )
+                .await?
+                .stdout_text()
+                .trim()
+                .to_string(),
+            };
+            FileHistoryCursor {
+                repo_id: repo.id.clone(),
+                path: path.clone(),
+                vcs: repo.kind,
+                offset: 0,
+                peg_revision: (repo.kind == VcsKind::Svn).then(|| anchor_revision.clone()),
+                anchor_revision,
+            }
+        }
+    };
+    let skip = cursor.offset;
     let limit = limit.clamp(1, 200);
     match repo.kind {
         VcsKind::Git => {
@@ -816,6 +933,7 @@ pub async fn file_history(
                     "--name-status".into(),
                     format!("--format={format}"),
                     format!("--max-count={}", skip + limit + 1),
+                    cursor.anchor_revision.clone(),
                     "--".into(),
                     path.clone(),
                 ],
@@ -832,7 +950,14 @@ pub async fn file_history(
             entries.truncate(limit as usize);
             Ok(FileHistoryPage {
                 entries,
-                next_cursor: has_more.then(|| (skip + limit).to_string()),
+                next_cursor: has_more
+                    .then(|| {
+                        encode_file_history_cursor(&FileHistoryCursor {
+                            offset: skip + limit,
+                            ..cursor
+                        })
+                    })
+                    .transpose()?,
             })
         }
         VcsKind::Svn => {
@@ -843,8 +968,14 @@ pub async fn file_history(
                     "--verbose".into(),
                     "--limit".into(),
                     (skip + limit + 1).to_string(),
+                    "--revision".into(),
+                    format!("{}:1", cursor.anchor_revision),
                     "--".into(),
-                    format!("{}@", path),
+                    format!(
+                        "{}@{}",
+                        path,
+                        cursor.peg_revision.as_deref().unwrap_or("HEAD")
+                    ),
                 ],
                 repo,
                 token,
@@ -909,7 +1040,14 @@ pub async fn file_history(
             entries.truncate(limit as usize);
             Ok(FileHistoryPage {
                 entries,
-                next_cursor: has_more.then(|| (skip + limit).to_string()),
+                next_cursor: has_more
+                    .then(|| {
+                        encode_file_history_cursor(&FileHistoryCursor {
+                            offset: skip + limit,
+                            ..cursor
+                        })
+                    })
+                    .transpose()?,
             })
         }
     }
@@ -5648,6 +5786,25 @@ mod tests {
         assert_eq!(entries[0].previous_path.as_deref(), Some("src/old.rs"));
         assert_eq!(entries[1].path, "src/old.rs");
         assert_eq!(entries[1].previous_path, None);
+    }
+
+    #[test]
+    fn file_history_cursor_round_trips_its_repository_path_and_revision_context() {
+        let cursor = FileHistoryCursor {
+            repo_id: "git-repo".into(),
+            path: "src/中文 file.rs".into(),
+            vcs: VcsKind::Git,
+            offset: 100,
+            anchor_revision: "abcdef1234567890".into(),
+            peg_revision: None,
+        };
+        let encoded = encode_file_history_cursor(&cursor).unwrap();
+        let decoded = decode_file_history_cursor(&encoded).unwrap();
+        assert_eq!(decoded.repo_id, cursor.repo_id);
+        assert_eq!(decoded.path, cursor.path);
+        assert_eq!(decoded.offset, 100);
+        assert_eq!(decoded.anchor_revision, cursor.anchor_revision);
+        assert!(decode_file_history_cursor("100").is_err());
     }
 
     #[test]

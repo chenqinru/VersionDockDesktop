@@ -55,7 +55,7 @@ const snapshot = {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ subtrees: {}, busy: false, snapshot: undefined, bridge: undefined });
+  useAppStore.setState({ subtrees: {}, snapshot: undefined, bridge: undefined });
 });
 
 describe('SubtreePanel', () => {

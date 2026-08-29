@@ -2536,7 +2536,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   color: var(--versiondock-faint);
 }
 .startup { flex: 1; display: flex; justify-content: center; align-items: center; gap: 8px; color: var(--versiondock-muted); }
-.busy-line { position: fixed; z-index: 100; left: 0; top: 38px; height: 2px; width: 35%; background: var(--versiondock-accent); animation: busy 1.1s ease-in-out infinite; }
 @keyframes toast-slide-in {
   from { opacity: 0; transform: translateY(12px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -2558,7 +2557,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .toast-details summary { cursor: pointer; user-select: none; color: var(--versiondock-accent); margin-bottom: 4px; }
 .toast-details pre { max-width: 100%; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1)); font-family: var(--versiondock-code); padding: 6px 8px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border-soft); border-radius: 4px; color: var(--versiondock-text); margin: 4px 0 0; }
 .drop-overlay { position: fixed; z-index: 200; inset: 46px 8px 8px; border: 2px dashed var(--versiondock-accent); background: color-mix(in srgb, var(--versiondock-bg) 82%, transparent); backdrop-filter: blur(3px); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; color: var(--versiondock-accent); }.drop-overlay .codicon { font-size: calc(38px * var(--versiondock-ui-font-scale, 1)); }
-@keyframes busy { 0% { transform: translateX(-110%); } 50% { transform: translateX(150%); } 100% { transform: translateX(310%); } }
 @keyframes menu-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes workspace-menu-in { from { opacity: 0; } to { opacity: 1; } }
 .settings-section-title { scroll-margin-top: 2px; }
@@ -3792,6 +3790,89 @@ button.danger:not(:disabled):hover,
   align-items: center;
   height: 100%;
   gap: 2px;
+  min-width: 0;
+}
+
+.statusbar-left { overflow: hidden; }
+.statusbar-right { margin-left: auto; }
+
+.statusbar-operation {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(360px, 42vw);
+  height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px 0 6px;
+  color: var(--versiondock-text);
+  border-radius: 3px;
+}
+
+.statusbar-operation > .codicon-loading {
+  flex: 0 0 auto;
+  color: var(--versiondock-accent);
+}
+
+.statusbar-operation-label {
+  min-width: 0;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusbar-operation-progress {
+  appearance: none;
+  width: 64px;
+  height: 3px;
+  flex: 0 0 64px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  background: var(--versiondock-border);
+}
+
+.statusbar-operation-progress::-webkit-progress-bar {
+  background: var(--versiondock-border);
+}
+
+.statusbar-operation-progress::-webkit-progress-value {
+  background: var(--versiondock-accent);
+  border-radius: 2px;
+}
+
+.statusbar-operation-count {
+  flex: 0 0 auto;
+  color: var(--versiondock-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.statusbar-operation-cancel {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--versiondock-muted);
+}
+
+.statusbar-operation-cancel:hover {
+  color: var(--versiondock-text);
+  background: var(--versiondock-hover);
+}
+
+@media (max-width: 900px) {
+  .statusbar-operation { max-width: 220px; }
+  .statusbar-operation-progress { display: none; }
+  .statusbar-operation-label { max-width: 150px; }
+}
+
+@media (max-width: 680px) {
+  .statusbar-operation-label { max-width: 96px; }
 }
 
 .statusbar-item {
@@ -4315,6 +4396,42 @@ button.danger:not(:disabled):hover,
 
 .notification-item-dismiss:hover {
   color: var(--versiondock-text);
+}
+
+.batch-commit-report { width: min(620px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 32px)); }
+.batch-commit-results { display: grid; gap: 8px; min-width: 0; overflow: auto; padding: 4px 0; }
+.batch-commit-results article { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: 10px; min-width: 0; padding: 10px; border: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
+.batch-commit-results article.success > .codicon { color: var(--versiondock-success); }
+.batch-commit-results article.failed > .codicon { color: var(--versiondock-danger); }
+.batch-commit-results article > div { display: grid; min-width: 0; gap: 3px; }
+.batch-commit-results article strong,
+.batch-commit-results article span,
+.batch-commit-results article code,
+.batch-commit-results article small { min-width: 0; overflow-wrap: anywhere; }
+.batch-commit-results article code { max-height: 72px; overflow: auto; white-space: pre-wrap; }
+
+@media (max-width: 680px) {
+  .batch-commit-results article { grid-template-columns: 20px minmax(0, 1fr); }
+  .batch-commit-results article > button { grid-column: 2; justify-self: start; }
+}
+
+.settings-capability-warning { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 4px 8px; min-width: 0; padding: 8px; color: var(--versiondock-warning); border: 1px solid color-mix(in srgb, var(--versiondock-warning) 45%, transparent); }
+.settings-capability-warning small { grid-column: 2; overflow-wrap: anywhere; color: var(--versiondock-muted); }
+.resize-handle:focus-visible,
+.inner-resize-handle:focus-visible,
+.commit-resize-grip:focus-visible,
+.detail-info-resize:focus-visible,
+.compare-splitter:focus-visible { outline: 2px solid var(--versiondock-focus); outline-offset: -1px; }
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  .diff-code-cell.addition,
+  .diff-inline-row.addition { border-left: 3px solid CanvasText; }
+  .diff-code-cell.deletion,
+  .diff-inline-row.deletion { border-left: 3px dashed CanvasText; }
+  .status-added,
+  .status-untracked { text-decoration: underline; }
+  .status-deleted,
+  .conflicted .status-mark { text-decoration: line-through; }
 }
 
 /* ==========================================================================
@@ -5138,8 +5255,3 @@ button.danger:not(:disabled):hover,
 .editor-browse-btn:active {
   transform: scale(0.97);
 }
-
-
-
-
-

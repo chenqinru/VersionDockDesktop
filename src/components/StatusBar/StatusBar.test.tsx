@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppStateSnapshot, BootstrapData, BridgeCommand, WorkspaceSnapshot } from '../../bindings/generated';
 import { I18nContext, createTranslator } from '../../i18n';
 import { MockBridge } from '../../platform/bridge';
+import type { RequestOptions } from '../../platform/bridge';
 import { BridgeContext } from '../../platform/context';
 import { useAppStore } from '../../store/appStore';
 import { StatusBar } from './StatusBar';
@@ -86,8 +87,10 @@ const snapshot = (): WorkspaceSnapshot => ({
 
 const renderStatusBar = () => {
   const commands: BridgeCommand[] = [];
-  const bridge = new MockBridge((command) => {
+  const requests: Array<{ command: BridgeCommand; options?: RequestOptions }> = [];
+  const bridge = new MockBridge((command, options) => {
     commands.push(command);
+    requests.push({ command, options });
     if (command.type === 'gitIdentity') {
       return {
         effective: {
@@ -119,6 +122,7 @@ const renderStatusBar = () => {
     ready: true,
     selectedRepoId: 'repo1',
     notifications: [],
+    operations: {},
   });
 
   const result = render(
@@ -129,18 +133,18 @@ const renderStatusBar = () => {
     </BridgeContext.Provider>
   );
 
-  return { bridge, commands, container: result.container };
+  return { bridge, commands, requests, container: result.container };
 };
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, ready: false, snapshot: undefined });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, ready: false, snapshot: undefined, operations: {} });
   vi.restoreAllMocks();
 });
 
 describe('StatusBar', () => {
   it('renders branch status and accounts item', async () => {
-    renderStatusBar();
+    const { requests } = renderStatusBar();
 
     // 验证分支与数字
     expect(screen.getByText('main')).toBeInTheDocument();
@@ -151,6 +155,18 @@ describe('StatusBar', () => {
     await waitFor(() => {
       expect(screen.getByText('Git: Developer')).toBeInTheDocument();
     });
+    expect(requests.find(({ command }) => command.type === 'gitIdentity')?.options?.showProgress).toBe(false);
+  });
+
+  it('does not reload identity when only repository snapshot data changes', async () => {
+    const { requests } = renderStatusBar();
+    await waitFor(() => expect(screen.getByText('Git: Developer')).toBeInTheDocument());
+    const updatedSnapshot = snapshot();
+    updatedSnapshot.generation = 2;
+    updatedSnapshot.repositories[0] = { ...updatedSnapshot.repositories[0], ahead: 4 };
+    useAppStore.setState({ snapshot: updatedSnapshot });
+    await waitFor(() => expect(screen.getByText('4')).toBeInTheDocument());
+    expect(requests.filter(({ command }) => command.type === 'gitIdentity')).toHaveLength(1);
   });
 
   it('opens branch menu popover on clicking branch item', async () => {
@@ -227,5 +243,27 @@ describe('StatusBar', () => {
     fireEvent.click(clearBtn);
 
     expect(screen.getByText('No notifications')).toBeInTheDocument();
+  });
+
+  it('shows active operation progress in the status bar and supports cancellation', async () => {
+    const { bridge, container } = renderStatusBar();
+    const cancelOperation = vi.fn(async () => true);
+    bridge.cancelOperation = cancelOperation;
+    useAppStore.setState({
+      operations: {
+        fetch: {
+          operationId: 'fetch',
+          context: { generation: 1, domain: 'sync', visibility: 'foreground', workspaceId: 'ws1', repositoryId: 'repo1', target: null },
+          status: 'running', phase: 'sync', message: '', startedAt: '', cancellable: true,
+          completed: 2, total: 4, result: null, error: null,
+        },
+      },
+    });
+
+    expect(await screen.findByText('Synchronizing repository')).toBeInTheDocument();
+    expect(container.querySelector('.statusbar-operation-progress')).toHaveAttribute('value', '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(cancelOperation).toHaveBeenCalledWith('fetch');
+    expect(document.querySelector('.operation-strip')).toBeNull();
   });
 });

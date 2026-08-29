@@ -80,7 +80,7 @@ const snapshot = {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ unpushedCommits: {}, branchesByRepo: {}, busy: false, snapshot: undefined, bridge: undefined });
+  useAppStore.setState({ unpushedCommits: {}, branchesByRepo: {}, snapshot: undefined, bridge: undefined });
 });
 
 describe('PushPanel', () => {

@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
-import { MockBridge, type BridgeEvent } from '../platform/bridge';
-import { interleaveHistory, useAppStore, workspacePathsEqual } from './appStore';
+import { MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
+import { interleaveHistory, isOperationActive, useAppStore, workspacePathsEqual } from './appStore';
 
 const bootstrap: BootstrapData = {
   state: { theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
@@ -27,9 +27,25 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-afterEach(() => useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', busy: false, error: undefined }));
+afterEach(() => {
+  useAppStore.getState().dispose();
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', operations: {}, ready: false, error: undefined });
+});
 
 describe('appStore async lifecycle', () => {
+  it('isolates operation activity by repository and domain', () => {
+    const operations = {
+      fetchA: {
+        operationId: 'fetchA',
+        context: { generation: 1, domain: 'sync' as const, visibility: 'foreground' as const, workspaceId: 'workspace', repositoryId: 'repo-a', target: null },
+        status: 'running' as const,
+        phase: 'sync', message: '', startedAt: '', cancellable: true, completed: null, total: null, error: null,
+      },
+    };
+    expect(isOperationActive(operations, { repositoryId: 'repo-a', domain: 'sync' })).toBe(true);
+    expect(isOperationActive(operations, { repositoryId: 'repo-b', domain: 'sync' })).toBe(false);
+    expect(isOperationActive(operations, { repositoryId: 'repo-a', domain: 'diff' })).toBe(false);
+  });
   it('compares multi-root workspace paths independent of selection order', () => {
     expect(workspacePathsEqual(['/repo/admin', '/repo/api'], ['/repo/api', '/repo/admin'])).toBe(true);
     expect(workspacePathsEqual(['/repo/admin'], ['/repo/api'])).toBe(false);
@@ -128,20 +144,62 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState()).toMatchObject({ mode: 'merge', mergeResult: 'working' });
   });
 
-  it('refreshes watcher changes silently without resetting the active workspace mode', async () => {
+  it('refreshes watcher changes silently without visible operations or resetting the active workspace mode', async () => {
     const response = deferred<WorkspaceSnapshot>();
-    const bridge = new MockBridge((command) => {
+    const requests: Array<{ command: BridgeCommand; options?: RequestOptions }> = [];
+    const bridge = new MockBridge((command, options) => {
+      requests.push({ command, options });
       if (command.type === 'workspaceRefresh') return response.promise;
       if (command.type === 'conflicts') return [];
       return [];
     });
     const current = snapshot('workspace', 1);
-    useAppStore.setState({ bridge, bootstrap, snapshot: current, mode: 'diff', busy: false });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, mode: 'diff', });
     const refreshing = useAppStore.getState().refresh(true);
-    expect(useAppStore.getState().busy).toBe(false);
     response.resolve(snapshot('workspace', 2));
     await refreshing;
-    expect(useAppStore.getState()).toMatchObject({ mode: 'diff', busy: false });
+    expect(useAppStore.getState()).toMatchObject({ mode: 'diff', });
+    expect(requests.find(({ command }) => command.type === 'workspaceRefresh')?.options?.showProgress).toBe(false);
+    expect(requests.find(({ command }) => command.type === 'conflicts')?.options?.showProgress).toBe(false);
+  });
+
+  it('keeps silent history refresh out of loading state and native progress', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    const requests: Array<{ command: BridgeCommand; options?: RequestOptions }> = [];
+    const bridge = new MockBridge((command, options) => {
+      requests.push({ command, options });
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'historyTopology') return [];
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'repo', historyLoading: false });
+
+    await useAppStore.getState().loadHistory(true, true);
+
+    expect(useAppStore.getState().historyLoading).toBe(false);
+    expect(requests.filter(({ command }) => command.type === 'history' || command.type === 'historyTopology'))
+      .toHaveLength(2);
+    expect(requests.filter(({ command }) => command.type === 'history' || command.type === 'historyTopology')
+      .every(({ options }) => options?.showProgress === false)).toBe(true);
+  });
+
+  it('keeps the active view stable when creating a stash in the running workspace', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    const requests: Array<{ command: BridgeCommand; options?: RequestOptions }> = [];
+    const bridge = new MockBridge((command, options) => {
+      requests.push({ command, options });
+      if (command.type === 'workspaceRefresh') return { ...workspace, generation: 2 };
+      if (command.type === 'stashes' || command.type === 'conflicts') return [];
+      return true;
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, allRepositories: workspace.repositories, selectedRepoId: 'repo', mode: 'diff' });
+
+    await useAppStore.getState().stashOperation('repo', { type: 'create', message: 'WIP', paths: ['src/file.ts'], include_untracked: true });
+
+    expect(useAppStore.getState().mode).toBe('diff');
+    expect(requests.find(({ command }) => command.type === 'workspaceRefresh')?.options?.showProgress).toBe(false);
   });
 
   it('loads branch-to-working-tree differences without changing the commit-panel tab', async () => {
@@ -458,8 +516,47 @@ describe('appStore async lifecycle', () => {
       workspaceId: 'other-workspace',
       repoId: 'repo',
       generation: 1,
-      reason: 'status',
+      source: 'watcher',
+      scopes: ['status'],
     });
     expect(useAppStore.getState().error).toBeUndefined();
+  });
+
+  it('keeps watcher status requests and their operation events in the background', async () => {
+    vi.useFakeTimers();
+    try {
+      let subscriber: ((event: BridgeEvent) => void) | undefined;
+      const requests: Array<{ command: BridgeCommand; options?: RequestOptions }> = [];
+      const updated = { ...repository('repo', 'Repository'), revision: 'updated' };
+      const bridge = new MockBridge((command, options) => {
+        requests.push({ command, options });
+        if (command.type === 'bootstrap') return { ...bootstrap, state: { ...bootstrap.state, openWorkspaceIds: [], activeWorkspaceId: null, lastWorkspaceId: null } };
+        if (command.type === 'repositoryStatus') return updated;
+        return [];
+      });
+      bridge.subscribe = (handler) => {
+        subscriber = handler;
+        return () => undefined;
+      };
+      await useAppStore.getState().initialize(bridge);
+      const current = snapshot('workspace', 1);
+      current.repositories = [repository('repo', 'Repository')];
+      useAppStore.setState({ snapshot: current, allRepositories: current.repositories, selectedRepoId: 'repo', mode: 'diff' });
+
+      subscriber?.({
+        operationId: 'background-status',
+        context: { generation: 1, domain: 'status', visibility: 'background', workspaceId: 'workspace', repositoryId: 'repo', target: null },
+        status: 'running', phase: 'status', message: '', startedAt: '', cancellable: true, completed: null, total: null, result: null, error: null,
+      });
+      subscriber?.({ workspaceId: 'workspace', repoId: 'repo', generation: 1, source: 'watcher', scopes: ['status'] });
+      await vi.advanceTimersByTimeAsync(301);
+
+      expect(useAppStore.getState().operations).not.toHaveProperty('background-status');
+      expect(useAppStore.getState().mode).toBe('diff');
+      expect(useAppStore.getState().snapshot?.repositories[0].revision).toBe('updated');
+      expect(requests.find(({ command }) => command.type === 'repositoryStatus')?.options?.showProgress).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

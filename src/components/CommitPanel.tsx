@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
-import { useAppStore } from '../store/appStore';
+import { capabilityAvailable, isOperationActive, useAppStore, type BatchCommitReport } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
 import { StashPanel } from './StashPanel';
@@ -20,6 +20,29 @@ import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { ConflictBanner } from './ConflictBanner';
 
 const emptyRepositories: RepositoryStatus[] = [];
+
+function BatchCommitReportDialog({ report, repositories }: { report: BatchCommitReport; repositories: RepositoryStatus[] }) {
+  const retry = useAppStore((state) => state.retryBatchResult);
+  const dismiss = useAppStore((state) => state.dismissBatchReport);
+  const { t } = useI18n();
+  return <div className="dialog-backdrop" role="presentation">
+    <section className="app-dialog batch-commit-report" role="dialog" aria-modal="true" aria-labelledby="batch-commit-report-title">
+      <header><Codicon name="checklist" /><strong id="batch-commit-report-title">{t('Batch commit results')}</strong></header>
+      <div className="batch-commit-results">
+        {report.results.map((result) => {
+          const name = repositories.find((repo) => repo.meta.id === result.repoId)?.meta.name ?? result.repoId;
+          const complete = result.committed && (!result.pushAttempted || result.pushed);
+          return <article key={result.repoId} className={complete ? 'success' : 'failed'}>
+            <Codicon name={complete ? 'pass-filled' : 'error'} />
+            <div><strong>{name}</strong><span>{result.committed ? `${t('Committed')} ${result.revision?.slice(0, 12) ?? ''}` : t('Commit failed')}</span>{result.pushAttempted && <span>{result.pushed ? t('Push succeeded') : t('Push failed')}</span>}{result.error && <code>{result.error.message}</code>}{result.recoveryHint && <small>{t(result.recoveryHint)}</small>}</div>
+            {!complete && <button disabled={isOperationActive(useAppStore.getState().operations, { repositoryId: result.repoId, domain: result.committed ? 'sync' : 'commit' })} onClick={() => void retry(result.repoId)}>{t(result.committed ? 'Retry push' : 'Retry repository')}</button>}
+          </article>;
+        })}
+      </div>
+      <footer><button className="primary" onClick={dismiss}>{t('Close')}</button></footer>
+    </section>
+  </div>;
+}
 
 function StatusMark({ file }: { file: FileChange }) {
   const value = file.conflicted ? 'C' : file.status === 'untracked' ? 'U' : file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : file.status === 'renamed' ? 'R' : 'M';
@@ -118,21 +141,25 @@ export function CommitPanel() {
   const deletePaths = useAppStore((state) => state.deletePaths);
   const addIgnore = useAppStore((state) => state.addIgnore);
   const commitMany = useAppStore((state) => state.commitMany);
+  const batchCommitReport = useAppStore((state) => state.batchCommitReport);
   const conflicts = useAppStore((state) => state.conflicts);
   const openMerge = useAppStore((state) => state.openMerge);
   const resolveConflict = useAppStore((state) => state.resolveConflict);
   const abortRepositoryOperation = useAppStore((state) => state.abortRepositoryOperation);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => isOperationActive(state.operations, {
+    workspaceId: state.snapshot?.workspace.id,
+    domain: ['commit', 'workspace'],
+  }));
   const viewMode = useAppStore((state) => (state.bootstrap?.state.layout?.fileViewMode ?? state.bootstrap?.state.fileViewMode) === 'list' ? 'list' : 'tree');
   const setFileViewMode = useAppStore((state) => state.setFileViewMode);
   const stashViewMode = useAppStore((state) => (state.bootstrap?.state.layout?.stashViewMode ?? state.bootstrap?.state.stashViewMode) === 'list' ? 'list' : 'tree');
   const setStashViewMode = useAppStore((state) => state.setStashViewMode);
   const systemOpen = useAppStore((state) => state.systemOpen);
   const openFileHistory = useAppStore((state) => state.openFileHistory);
-  const stashEnabled = useAppStore((state) => (state.bootstrap?.capabilities.stash ?? false) && (state.snapshot?.repositories.some((repo) => repo.capabilities?.stash !== false) ?? true));
-  const shelfEnabled = useAppStore((state) => (state.bootstrap?.capabilities.shelf ?? false) && (state.snapshot?.repositories.some((repo) => repo.capabilities?.shelf !== false) ?? true));
-  const worktreeEnabled = useAppStore((state) => (state.bootstrap?.capabilities.worktree ?? false) && (state.snapshot?.repositories.some((repo) => repo.capabilities?.worktree !== false) ?? true));
-  const subtreeEnabled = useAppStore((state) => (state.bootstrap?.capabilities.subtree ?? false) && (state.snapshot?.repositories.some((repo) => repo.capabilities?.subtree !== false) ?? true));
+  const stashEnabled = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'stash') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'stash', true)) ?? true));
+  const shelfEnabled = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'shelf') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'shelf', true)) ?? true));
+  const worktreeEnabled = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'worktree') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'worktree', true)) ?? true));
+  const subtreeEnabled = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'subtree') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'subtree', true)) ?? true));
   const storedTab = useAppStore((state) => state.bootstrap?.state.layout?.activeTab ?? state.bootstrap?.state.activeTab);
   const defaultCommitAction = useAppStore((state) => state.bootstrap?.state.settings?.defaultCommitAction ?? 'commit');
   const defaultSaveAction = useAppStore((state) => state.bootstrap?.state.settings?.defaultSaveAction ?? 'stash');
@@ -141,13 +168,12 @@ export function CommitPanel() {
   const pushEnabled = snapshot?.repositories.some((repo) => repo.meta.kind === 'git') ?? false;
   const tab = pushEnabled && storedTab === 'push' ? 'push' : stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : subtreeEnabled && storedTab === 'subtree' ? 'subtree' : 'changes';
   const setTab = useAppStore((state) => state.setActiveTab);
-  const changelistEnabled = useAppStore((state) => (state.bootstrap?.capabilities.changelist ?? false) && (state.snapshot?.repositories.some((repo) => repo.capabilities?.changelist !== false) ?? true) && changesDisplayMode === 'changelists');
+  const changelistEnabled = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'changelist') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'changelist', true)) ?? true) && changesDisplayMode === 'changelists');
   const changelists = useAppStore((state) => state.changelists);
   const changelistOperation = useAppStore((state) => state.changelistOperation);
   const stashes = useAppStore((state) => state.stashes);
   const shelves = useAppStore((state) => state.shelves);
   const subtrees = useAppStore((state) => state.subtrees);
-  const submodules = useAppStore((state) => state.submodules);
   const worktrees = useAppStore((state) => state.worktrees);
   const branchWorkingDiffOpen = useAppStore((state) => state.worktreeDiff?.source === 'repository');
   const [selected, setSelected] = useState(new Set<string>());
@@ -213,7 +239,13 @@ export function CommitPanel() {
         amend: amendRepos.has(repo.meta.id),
       };
     }), message, push);
-    setMessage(''); setSelected(new Set());
+    const failedRepoIds = new Set(useAppStore.getState().batchCommitReport?.results.filter((result) => result.error).map((result) => result.repoId) ?? []);
+    if (failedRepoIds.size === 0) {
+      setMessage('');
+      setSelected(new Set());
+    } else {
+      setSelected((current) => new Set([...current].filter((key) => failedRepoIds.has(key.split('\0', 1)[0]))));
+    }
   };
   const doSave = async (kind: 'stash' | 'shelf') => {
     for (const repo of commitTargets.filter((item) => item.meta.kind === 'git')) {
@@ -369,20 +401,6 @@ export function CommitPanel() {
         if (copyMessage) await useAppStore.getState().svnOperation(repo.meta.id, { type: 'copy', source_url: sourceUrl, destination_url: destinationUrl, revision: null, message: copyMessage });
         break;
       }
-      case 'submodule-open': if (file) await systemOpen(repo.meta.id, file.path, false); break;
-      case 'submodule-reveal': if (file) await systemOpen(repo.meta.id, file.path, true); break;
-      case 'submodule-update': if (file) await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'update', path: file.path, init: true, recursive: false, remote: false }); break;
-      case 'submodule-update-recursive': if (file) await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'update', path: file.path, init: true, recursive: true, remote: false }); break;
-      case 'submodule-sync': if (file) await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'sync', path: file.path, recursive: true }); break;
-      case 'submodule-deinit':
-      case 'submodule-deinit-force': if (file && await confirmDialog({ title: t(id === 'submodule-deinit-force' ? 'Force deinitialize submodule?' : 'Deinitialize submodule?'), message: `${file.path}\n\n${t('The submodule working directory will be cleared.')}`, danger: true })) await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'deinit', path: file.path, force: id === 'submodule-deinit-force' }); break;
-      case 'submodule-init-all':
-      case 'submodule-update-all':
-      case 'submodule-sync-all': for (const entry of submodules[repo.meta.id] ?? []) {
-        if (id === 'submodule-init-all') await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'init', path: entry.path, recursive: true });
-        else if (id === 'submodule-update-all') await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'update', path: entry.path, init: true, recursive: true, remote: false });
-        else await useAppStore.getState().submoduleOperation(repo.meta.id, { type: 'sync', path: entry.path, recursive: true });
-      } break;
       case 'delete': await confirmDelete(repo, files); break;
       case 'manage': openIdentityPanel(repo.meta.id); break;
       case 'view-log': await selectRepo(repo.meta.id, true); break;
@@ -442,7 +460,7 @@ export function CommitPanel() {
   }, [commitMenu, saveMenu, viewMenu]);
 
   const panelToolbar = <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span /><button disabled={busy} title={t('Fetch')} onClick={() => void Promise.all(gitRepos.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>;
-  const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
+  const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}{batchCommitReport && snapshot && <BatchCommitReportDialog report={batchCommitReport} repositories={repos} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
 
@@ -553,7 +571,7 @@ export function CommitPanel() {
         {repos.map((repo) => { const fileProps = { selected, setFiles, onFile: (file: FileChange) => void openDiff(repo.meta.id, file.path, file.staged && !file.unstaged), onContext: (event: React.MouseEvent, file: FileChange) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'file' as const, repo, files: [file], path: file.path }); }, onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'folder' as const, repo, files, path: folderPath }); }, onRepoContext: (event: React.MouseEvent) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'repo' as const, repo, files: repo.files }); }, viewMode: viewMode as 'tree' | 'list', expansion }; return <div key={repo.meta.id} onMouseDown={() => void selectRepo(repo.meta.id)}>{changelistEnabled && repo.meta.kind === 'git' ? <ChangelistRepoFiles repo={repo} entries={changelists[repo.meta.id] ?? []} {...fileProps} /> : <RepoFiles repo={repo} {...fileProps} />}</div>; })}
       </div>
       <div className="commit-form">
-        <div className="commit-resize-grip" role="separator" aria-label={t('Resize commit message')} aria-orientation="horizontal" onPointerDown={startTextareaResize}><i /></div>
+        <div className="commit-resize-grip" role="separator" tabIndex={0} aria-label={t('Resize commit message')} aria-orientation="horizontal" aria-valuemin={52} aria-valuemax={Math.round(window.innerHeight * 0.55)} aria-valuenow={Math.round(textareaHeight)} onPointerDown={startTextareaResize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTextareaHeight((value) => Math.max(52, Math.min(window.innerHeight * 0.55, value + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>
         {repos.length > 1 && <div className="commit-targets">{commitTargets.length === 0 ? <span>{t('No files selected')}</span> : commitTargets.map((repo) => <em key={repo.meta.id} style={{ color: repo.meta.color, background: `${repo.meta.color}28`, borderColor: `${repo.meta.color}60` }}><button title={t('Remove {0}', repo.meta.name)} onClick={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), false)}><Codicon name="close" /></button>{repo.meta.name}<b>{selectedByRepo.get(repo.meta.id)?.length}</b></em>)}</div>}
         {commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(commitTargets[0].meta.id)} onChange={() => setAmendRepos((current) => { const next = new Set(current); if (next.has(commitTargets[0].meta.id)) next.delete(commitTargets[0].meta.id); else next.add(commitTargets[0].meta.id); return next; })} />{t('Amend')}</label></div>}
         <textarea style={{ height: textareaHeight }} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(defaultCommitAction === 'commitAndPush'); }} />

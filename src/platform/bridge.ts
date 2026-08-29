@@ -1,12 +1,15 @@
 import type {
-  BridgeCommand, DesktopError, ProgressEvent, RepositoryEvent, ResponseEnvelope,
-  WindowTabImport, WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
+  BootstrapData, BridgeCommand, DesktopError, NotificationPermissionState, OperationDomain,
+  OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
+  WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
 } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
 export interface RequestOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  showProgress?: boolean;
+  context?: Partial<Omit<RequestContext, 'generation'>> & { generation?: number };
 }
 
 export interface NewWindowPlacement {
@@ -21,11 +24,12 @@ export interface WindowDragGeometry {
   sourceBounds: { x: number; y: number; width: number; height: number };
 }
 
-export type BridgeEvent = ProgressEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
+export type BridgeEvent = OperationEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
 
 export interface VersionDockBridge {
   send(command: BridgeCommand): void;
   request<T>(command: BridgeCommand, options?: RequestOptions): Promise<T>;
+  cancelOperation(operationId: string): Promise<boolean>;
   subscribe(handler: (event: BridgeEvent) => void): () => void;
   getState<T>(): T | undefined;
   setState<T>(state: T): void;
@@ -130,11 +134,67 @@ function requestId(): string {
   return `req-${entropy}-${requestSequence}`;
 }
 
+const commandDomain = (command: BridgeCommand): OperationDomain => {
+  switch (command.type) {
+    case 'bootstrap': case 'saveAppState': case 'updateSettings': case 'updateLayout': return 'application';
+    case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent': return 'workspace';
+    case 'repositoryStatus': return 'status';
+    case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff':
+    case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
+    case 'history': case 'historyTopology': case 'commitDetail': case 'commitMergeCommits':
+    case 'commitMergeParentFiles': case 'unpushedCommits': case 'unpushedOperation':
+    case 'historyOperation': case 'createPatch': case 'branchCompare': return 'history';
+    case 'branches': case 'branchOperation': return 'branch';
+    case 'tags': case 'tagOperation': return 'tag';
+    case 'commit': case 'batchCommit': return 'commit';
+    case 'sync': return 'sync';
+    case 'conflicts': case 'conflictVersions': case 'conflictSave': case 'conflictAccept':
+    case 'abortRepositoryOperation': return 'conflict';
+    case 'stashes': case 'stashOperation': return 'stash';
+    case 'shelves': case 'shelfOperation': return 'shelf';
+    case 'changelists': case 'changelistOperation': return 'changelist';
+    case 'worktrees': case 'worktreeOperation': case 'openWorktree': return 'worktree';
+    case 'subtrees': case 'subtreeOperation': return 'subtree';
+    case 'submodules': case 'submoduleOperation': return 'submodule';
+    case 'remotes': case 'remoteOperation': return 'remote';
+    case 'gitIdentity': case 'gitProfileOperation': return 'identity';
+    case 'svnAccount': case 'svnAccountOperation': case 'svnOperation': return 'svnAccount';
+    case 'fileHistory': case 'fileRevisionContent': return 'fileHistory';
+    default: return 'system';
+  }
+};
+
+const commandIdentifiers = (command: BridgeCommand) => {
+  const payload = 'payload' in command ? command.payload as unknown as Record<string, unknown> : {};
+  const text = (key: string) => typeof payload[key] === 'string' ? payload[key] as string : null;
+  return {
+    workspaceId: text('workspace_id'),
+    repositoryId: text('repo_id'),
+    target: text('relative_path') ?? text('path') ?? text('revision') ?? text('target'),
+  };
+};
+
+export const commandShowsProgressByDefault = (command: BridgeCommand): boolean => {
+  switch (command.type) {
+    case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent':
+    case 'stage': case 'unstage': case 'discard': case 'deletePaths': case 'addIgnore': case 'updateIgnoreRules':
+    case 'commit': case 'batchCommit': case 'sync': case 'branchOperation': case 'tagOperation':
+    case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation':
+    case 'stashOperation': case 'shelfOperation': case 'changelistOperation': case 'worktreeOperation':
+    case 'subtreeOperation': case 'submoduleOperation': case 'unpushedOperation': case 'historyOperation':
+    case 'svnOperation': case 'remoteOperation': case 'gitProfileOperation': case 'svnAccountOperation':
+      return true;
+    default:
+      return false;
+  }
+};
+
 export class TauriBridge implements VersionDockBridge {
   private state: unknown;
   private handlers = new Set<(event: BridgeEvent) => void>();
   private unlisten?: () => void;
   private windowSyncQueue: Promise<void> = Promise.resolve();
+  private contextGenerations = new Map<string, number>();
   private currentPlatform: 'macos' | 'windows' | 'linux' = (() => { const value = osPlatform(); return value === 'macos' || value === 'windows' ? value : 'linux'; })();
 
   readonly window = {
@@ -146,7 +206,7 @@ export class TauriBridge implements VersionDockBridge {
     setCursorIcon: async (icon: 'default' | 'grab' | 'grabbing' | 'copy') => (await import('@tauri-apps/api/window')).getCurrentWindow().setCursorIcon(icon),
     setSize: async (width: number, height: number, center = false) => {
       try {
-        await this.request({ type: 'windowSetSize', payload: { width, height, center } });
+        await this.request({ type: 'windowSetSize', payload: { width, height, center } }, { showProgress: false });
       } catch {
         const { LogicalSize } = await import('@tauri-apps/api/dpi');
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -187,7 +247,8 @@ export class TauriBridge implements VersionDockBridge {
 
   async initialize(): Promise<void> {
     const { listen } = await import('@tauri-apps/api/event');
-    this.unlisten = await listen<ProgressEvent | WorkspaceEvent | RepositoryEvent>('versiondock://event', ({ payload }) => {
+    this.unlisten = await listen<OperationEvent | WorkspaceEvent | RepositoryEvent>('versiondock://event', ({ payload }) => {
+      if ('operationId' in payload && payload.context.visibility === 'background') return;
       this.handlers.forEach((handler) => handler(payload));
     });
   }
@@ -198,11 +259,32 @@ export class TauriBridge implements VersionDockBridge {
   }
 
   send(command: BridgeCommand): void {
-    void this.request(command).catch(() => undefined);
+    void this.request(command, { showProgress: false }).catch(() => undefined);
+  }
+
+  async cancelOperation(operationId: string): Promise<boolean> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<boolean>('bridge_cancel', { requestId: operationId });
   }
 
   async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {
     const id = requestId();
+    const inferred = commandIdentifiers(command);
+    const contextBase = {
+      domain: options.context?.domain ?? commandDomain(command),
+      workspaceId: options.context?.workspaceId ?? inferred.workspaceId,
+      repositoryId: options.context?.repositoryId ?? inferred.repositoryId,
+      target: options.context?.target ?? inferred.target,
+    };
+    const contextKey = [contextBase.domain, contextBase.workspaceId, contextBase.repositoryId, contextBase.target].join(':');
+    const context: RequestContext = {
+      ...contextBase,
+      generation: options.context?.generation ?? (this.contextGenerations.get(contextKey) ?? 0) + 1,
+      visibility: (options.showProgress ?? commandShowsProgressByDefault(command))
+        ? (options.context?.visibility ?? 'foreground')
+        : 'background',
+    };
+    this.contextGenerations.set(contextKey, context.generation);
     const timeoutMs = options.timeoutMs ?? 120_000;
     const { invoke } = await import('@tauri-apps/api/core');
     if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
@@ -233,6 +315,7 @@ export class TauriBridge implements VersionDockBridge {
         invoke<ResponseEnvelope>('bridge_request', {
           envelope: {
             requestId: id,
+            context,
             command,
           },
         }),
@@ -243,6 +326,22 @@ export class TauriBridge implements VersionDockBridge {
         throw new BridgeError(response.error);
       }
 
+      if (command.type === 'bootstrap' && response.result) {
+        const bootstrap = response.result as BootstrapData;
+        const permission = await this.notificationPermission();
+        if (bootstrap.runtime) {
+          bootstrap.runtime.notificationPermission = permission;
+          if (permission === 'allowed') {
+            bootstrap.runtime.systemNotifications.available = true;
+            bootstrap.runtime.systemNotifications.reasonCode = null;
+            bootstrap.runtime.systemNotifications.detail = null;
+          } else if (permission === 'denied' || permission === 'restricted') {
+            bootstrap.runtime.systemNotifications.available = false;
+            bootstrap.runtime.systemNotifications.reasonCode = 'NOTIFICATION_PERMISSION_DENIED';
+            bootstrap.runtime.systemNotifications.detail = 'System notification permission is not granted';
+          }
+        }
+      }
       return response.result as T;
     } catch (error) {
       if (isAbortError(error) || error instanceof BridgeError) throw error;
@@ -268,6 +367,20 @@ export class TauriBridge implements VersionDockBridge {
   getState<T>(): T | undefined { return this.state as T | undefined; }
   setState<T>(state: T): void { this.state = state; }
   platform(): 'macos' | 'windows' | 'linux' { return this.currentPlatform; }
+  private async notificationPermission(): Promise<NotificationPermissionState> {
+    try {
+      const notifications = await import('@tauri-apps/plugin-notification') as typeof import('@tauri-apps/plugin-notification') & { permissionState?: () => Promise<string> };
+      if (typeof notifications.permissionState === 'function') {
+        const state = await notifications.permissionState();
+        if (state === 'granted') return 'allowed';
+        if (state === 'denied') return 'denied';
+        if (state === 'prompt' || state === 'prompt-with-rationale') return 'notRequested';
+      }
+      return await notifications.isPermissionGranted() ? 'allowed' : 'notRequested';
+    } catch {
+      return 'unavailable';
+    }
+  }
   async selectWorkspaceFolders(title: string): Promise<string[]> {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const value = await open({ directory: true, multiple: true, title });
@@ -303,7 +416,7 @@ export class TauriBridge implements VersionDockBridge {
         height: placement?.height ?? null,
         transfer: transfer ?? null,
       },
-    });
+    }, { showProgress: false });
   }
   async syncWindowTabs(workspacePaths: string[][], activeWorkspaceId: string | null): Promise<void> {
     this.windowSyncQueue = this.windowSyncQueue.catch(() => undefined).then(async () => {
@@ -313,7 +426,7 @@ export class TauriBridge implements VersionDockBridge {
           workspace_paths: workspacePaths,
           active_workspace_id: activeWorkspaceId,
         },
-      });
+      }, { showProgress: false });
     });
     await this.windowSyncQueue;
   }
@@ -326,7 +439,7 @@ export class TauriBridge implements VersionDockBridge {
         width: bounds.width,
         height: bounds.height,
       },
-    });
+    }, { showProgress: false });
   }
   async focusWorkspaceAcrossWindows(paths: string[]): Promise<boolean> {
     return this.request<boolean>({
@@ -334,7 +447,7 @@ export class TauriBridge implements VersionDockBridge {
       payload: {
         paths,
       },
-    });
+    }, { showProgress: false });
   }
   async onFocusTab(handler: (paths: string[]) => void): Promise<() => void> {
     const { listen } = await import('@tauri-apps/api/event');
@@ -350,7 +463,7 @@ export class TauriBridge implements VersionDockBridge {
         screen_x: point.screenX,
         screen_y: point.screenY,
       },
-    });
+    }, { showProgress: false });
   }
   async transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting = true): Promise<boolean> {
     let dispose: (() => void) | undefined;
@@ -390,7 +503,7 @@ export class TauriBridge implements VersionDockBridge {
         target_window_label: targetWindowLabel,
         accepted,
       },
-    });
+    }, { showProgress: false });
   }
   async onTabTransferCompleted(handler: (payload: WindowTabTransferCompleted) => void): Promise<() => void> {
     const { listen } = await import('@tauri-apps/api/event');
@@ -416,9 +529,10 @@ export class TauriBridge implements VersionDockBridge {
 
 export class MockBridge implements VersionDockBridge {
   private state: unknown;
-  constructor(private readonly responder: (command: BridgeCommand) => unknown | Promise<unknown>) {}
+  constructor(private readonly responder: (command: BridgeCommand, options?: RequestOptions) => unknown | Promise<unknown>) {}
   send(command: BridgeCommand): void { void this.responder(command); }
-  async request<T>(command: BridgeCommand): Promise<T> { return this.responder(command) as Promise<T>; }
+  async request<T>(command: BridgeCommand, options?: RequestOptions): Promise<T> { return this.responder(command, options) as Promise<T>; }
+  async cancelOperation(): Promise<boolean> { return false; }
   subscribe(handler?: (event: BridgeEvent) => void): () => void {
     void handler;
     return () => undefined;

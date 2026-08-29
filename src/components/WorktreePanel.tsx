@@ -180,7 +180,7 @@ function WorktreeRow({
               <button
                 data-action-btn=""
                 style={row.btn}
-                title="Open Worktree"
+                title={t('Open Worktree')}
                 onClick={(e) => { e.stopPropagation(); onOpenInExplorer(repoId, entry.path); }}
               >
                 <Codicon name="folder-opened" />

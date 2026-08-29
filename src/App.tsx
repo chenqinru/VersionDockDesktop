@@ -36,7 +36,6 @@ export function App() {
   const mode = useAppStore((state) => state.mode);
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
   const ready = useAppStore((state) => state.ready);
-  const busy = useAppStore((state) => state.busy);
   const error = useAppStore((state) => state.error);
   const clearError = useAppStore((state) => state.clearError);
   const errorDetails = useAppStore((state) => state.errorDetails);
@@ -145,11 +144,10 @@ export function App() {
       {!ready ? <div className="startup"><Codicon name="loading codicon-modifier-spin" />{t('Loading workspace…')}</div> : !snapshot ? <WorkspaceChooser /> : (
         <main className="main-workspace">
           <div style={{ width: commitWidth }} className="commit-slot"><CommitPanel /></div>
-          <div className="resize-handle" onPointerDown={resizeCommit} />
+          <div className="resize-handle" role="separator" tabIndex={0} aria-label={t('Resize commit panel')} aria-orientation="vertical" aria-valuemin={280} aria-valuemax={620} aria-valuenow={commitWidth} onPointerDown={resizeCommit} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('commit', Math.min(620, Math.max(280, commitWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />
           <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span></div> : mode === 'history' || comparisonDiffOpen ? <><HistoryWorkspace />{comparisonDiffOpen && <div className="comparison-diff-overlay"><DiffWorkspace /></div>}</> : mode === 'commit-detail' ? <CommitDetailWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
         </main>
       )}
-      {busy && <div className="busy-line" />}
       {error && !isAbortError(error) && (
         <div className="toast error" role="alert">
           <div className="toast-icon">
@@ -162,7 +160,7 @@ export function App() {
             <div className="toast-message">{error}</div>
             {errorDetails && (
               <details className="toast-details">
-                <summary>Technical details</summary>
+                <summary>{t('Technical details')}</summary>
                 <pre>{errorDetails}</pre>
               </details>
             )}

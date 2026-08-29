@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DefaultCommitAction, DefaultSaveAction, ExternalEditor, LanguagePreference, ThemePreference, UiFontSizePreference } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
@@ -9,7 +9,7 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
-export const settingsCategories = [
+const settingsCategories = [
   { id: 'settings-section-appearance-title', sectionId: 'settings-section-appearance', icon: 'color-mode', label: 'Appearance' },
   { id: 'settings-section-changes-title', sectionId: 'settings-section-changes', icon: 'source-control', label: 'Changes and commit' },
   { id: 'settings-section-refresh-title', sectionId: 'settings-section-refresh', icon: 'sync', label: 'Refresh and startup' },
@@ -35,6 +35,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const fileViewMode = useAppStore((state) => (state.bootstrap?.state.layout?.fileViewMode ?? state.bootstrap?.state.fileViewMode) === 'list' ? 'list' : 'tree');
   const externalEditor = settings?.externalEditor;
   const repositories = useAppStore((state) => state.allRepositories);
+  const runtime = useAppStore((state) => state.bootstrap?.runtime);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const openAbout = useAppStore((state) => state.openAbout);
   const setTheme = useAppStore((state) => state.setTheme);
@@ -62,63 +63,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
-
-  const isScrollingRef = useRef(false);
-  const scrollTimeoutRef = useRef<number | null>(null);
-
-  const scrollToCategory = (event: MouseEvent<HTMLAnchorElement>, id: SettingsCategoryId) => {
-    event.preventDefault();
-    if (searchQuery) setSearchQuery('');
-    setActiveCategory(id);
-
-    const targetElement = content.current?.querySelector<HTMLElement>(`#${id}`);
-    if (targetElement && content.current) {
-      isScrollingRef.current = true;
-      if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
-
-      const containerRect = content.current.getBoundingClientRect();
-      const targetRect = targetElement.getBoundingClientRect();
-      const targetScrollTop = content.current.scrollTop + targetRect.top - containerRect.top - 12;
-
-      if (typeof content.current.scrollTo === 'function') {
-        content.current.scrollTo({
-          top: Math.max(0, targetScrollTop),
-          behavior: 'smooth',
-        });
-      } else {
-        content.current.scrollTop = Math.max(0, targetScrollTop);
-      }
-
-      scrollTimeoutRef.current = window.setTimeout(() => {
-        isScrollingRef.current = false;
-      }, 400);
-    }
-  };
-
-  const updateActiveCategory = () => {
-    if (searchQuery.trim() || isScrollingRef.current) return;
-    const scrollContainer = content.current;
-    if (!scrollContainer) return;
-    const containerTop = scrollContainer.getBoundingClientRect().top;
-
-    // 检查是否已经滚动触底
-    if (scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 40) {
-      setActiveCategory(settingsCategories[settingsCategories.length - 1].id);
-      return;
-    }
-
-    let currentId = settingsCategories[0].id;
-    for (const category of settingsCategories) {
-      const el = scrollContainer.querySelector<HTMLElement>(`#${category.id}`);
-      if (el) {
-        const top = el.getBoundingClientRect().top;
-        if (top - containerTop <= 65) {
-          currentId = category.id;
-        }
-      }
-    }
-    setActiveCategory(currentId);
-  };
 
   const isSearching = searchQuery.trim().length > 0;
 
@@ -223,7 +167,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 uiFontSize={uiFontSize}
                 fileViewMode={fileViewMode}
                 externalEditor={externalEditor}
-                repositories={repositories}
                 setTheme={setTheme}
                 setLanguage={setLanguage}
                 setUiFontSize={setUiFontSize}
@@ -372,6 +315,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         checked={settings?.notifyUnpushedCommits ?? false}
                         onChange={(value) => void updateSettings({ notifyUnpushedCommits: value })}
                       />
+                      {runtime && !runtime.systemNotifications.available && <div className="settings-capability-warning" role="status">
+                        <Codicon name="warning" />
+                        <span>{t('System notifications are unavailable. Notifications will remain in the in-app notification center.')}</span>
+                        {runtime.systemNotifications.detail && <small>{runtime.systemNotifications.detail}</small>}
+                      </div>}
                     </SettingsCard>
                   </SettingsSection>
                 )}
@@ -692,11 +640,8 @@ function SettingNumber({
   onChange: (value: number) => void;
 }) {
   const { t } = useI18n();
-  const [localText, setLocalText] = useState(String(value));
-
-  useEffect(() => {
-    setLocalText(String(value));
-  }, [value]);
+  const [draft, setDraft] = useState<string | null>(null);
+  const localText = draft ?? String(value);
 
   const handleStep = (delta: number) => {
     const next = Math.min(max, Math.max(min, value + delta));
@@ -706,10 +651,10 @@ function SettingNumber({
   const handleBlur = () => {
     const parsed = Number(localText);
     if (isNaN(parsed)) {
-      setLocalText(String(value));
+      setDraft(null);
     } else {
       const clamped = Math.min(max, Math.max(min, parsed));
-      setLocalText(String(clamped));
+      setDraft(null);
       if (clamped !== value) {
         onChange(clamped);
       }
@@ -753,7 +698,8 @@ function SettingNumber({
             inputMode="numeric"
             className="settings-stepper-input"
             value={localText}
-            onChange={(e) => setLocalText(e.target.value)}
+          onFocus={() => setDraft(String(value))}
+          onChange={(e) => setDraft(e.target.value)}
             onBlur={handleBlur}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleBlur();
@@ -1217,7 +1163,6 @@ interface SearchResultsProps {
   uiFontSize: UiFontSizePreference;
   fileViewMode: 'tree' | 'list';
   externalEditor: ExternalEditor | null | undefined;
-  repositories: ReturnType<typeof useAppStore.getState>['allRepositories'];
   setTheme: (t: ThemePreference) => void;
   setLanguage: (l: LanguagePreference) => void;
   setUiFontSize: (f: UiFontSizePreference) => void;
@@ -1237,7 +1182,6 @@ function SearchResults({
   uiFontSize,
   fileViewMode,
   externalEditor,
-  repositories: _repos,
   setTheme,
   setLanguage,
   setUiFontSize,

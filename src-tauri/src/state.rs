@@ -14,15 +14,18 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::models::{
-    AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState,
-    ThemePreference, UiFontSizePreference, WorkspaceDescriptor,
+    AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState, RefreshScope,
+    RepositoryEvent, RepositoryEventSource, RepositoryStatus, ThemePreference,
+    UiFontSizePreference, WorkspaceDescriptor,
 };
 
 pub struct AppState {
     pub config_dir: PathBuf,
     pub app: RwLock<AppStateSnapshot>,
+    pub launch_workspace_id: std::sync::Mutex<Option<String>>,
     pub cancellations: Mutex<HashMap<String, CancellationToken>>,
     pub read_limit: Semaphore,
+    pub write_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
     pub window_bounds: std::sync::Mutex<HashMap<String, (f64, f64, f64, f64)>>,
@@ -37,7 +40,7 @@ impl AppState {
             .ok()
             .and_then(|bytes| migrate_state(&bytes))
             .unwrap_or_default();
-        app.schema_version = 3;
+        app.schema_version = 4;
         app.settings = app.settings.normalize();
         if app.layout.stash_view_mode != "list" && app.layout.stash_view_mode != "tree" {
             app.layout.stash_view_mode = "tree".into();
@@ -45,6 +48,7 @@ impl AppState {
         if app.layout.file_view_mode != "list" && app.layout.file_view_mode != "tree" {
             app.layout.file_view_mode = "tree".into();
         }
+        let mut launch_workspace_id = None;
         let mut arguments = std::env::args_os().skip(1);
         while let Some(argument) = arguments.next() {
             if argument == "--workspace" {
@@ -68,6 +72,7 @@ impl AppState {
                         app.recent_workspaces.truncate(10);
                         app.last_workspace_id = Some(descriptor.id.clone());
                         app.active_workspace_id = Some(descriptor.id.clone());
+                        launch_workspace_id = Some(descriptor.id.clone());
                         if !app.open_workspace_ids.contains(&descriptor.id) {
                             app.open_workspace_ids.insert(0, descriptor.id);
                         }
@@ -86,8 +91,10 @@ impl AppState {
         Self {
             config_dir,
             app: RwLock::new(app),
+            launch_workspace_id: std::sync::Mutex::new(launch_workspace_id),
             cancellations: Mutex::new(HashMap::new()),
             read_limit: Semaphore::new(4),
+            write_limit: Semaphore::new(2),
             write_locks: Mutex::new(HashMap::new()),
             window_workspaces: std::sync::Mutex::new(HashMap::new()),
             window_bounds: std::sync::Mutex::new(HashMap::new()),
@@ -122,6 +129,21 @@ impl AppState {
         }
     }
 
+    pub async fn cancel_all(&self) {
+        let mut cancellations = self.cancellations.lock().await;
+        for token in cancellations.values() {
+            token.cancel();
+        }
+        cancellations.clear();
+    }
+
+    pub fn has_registered_windows(&self) -> bool {
+        self.window_workspaces
+            .lock()
+            .map(|windows| !windows.is_empty())
+            .unwrap_or(false)
+    }
+
     pub async fn write_lock(&self, repo_id: &str) -> Arc<Mutex<()>> {
         self.write_locks
             .lock()
@@ -129,6 +151,26 @@ impl AppState {
             .entry(repo_id.to_string())
             .or_default()
             .clone()
+    }
+
+    pub async fn acquire_write(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<tokio::sync::SemaphorePermit<'_>, DesktopError> {
+        tokio::select! {
+            _ = cancellation.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
+            permit = self.write_limit.acquire() => permit.map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true)),
+        }
+    }
+
+    pub async fn acquire_read(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<tokio::sync::SemaphorePermit<'_>, DesktopError> {
+        tokio::select! {
+            _ = cancellation.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
+            permit = self.read_limit.acquire() => permit.map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true)),
+        }
     }
 
     pub async fn save_app_state(&self, snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
@@ -177,6 +219,7 @@ impl AppState {
     pub fn watch_workspace(
         &self,
         workspace: &WorkspaceDescriptor,
+        repositories: &[RepositoryStatus],
         settings: &DesktopSettings,
         app: AppHandle,
     ) -> Result<(), DesktopError> {
@@ -192,11 +235,22 @@ impl AppState {
             HashMap::<String, std::time::Instant>::new(),
         ));
         let generation = self.next_generation();
+        let mut repository_roots = repositories
+            .iter()
+            .map(|repository| {
+                (
+                    PathBuf::from(&repository.meta.root_path),
+                    repository.meta.id.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        repository_roots.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
         for root in &workspace.paths {
             let workspace_id = workspace.id.clone();
             let last_emit = last_emit.clone();
             let app = app.clone();
             let ignored = settings.ignored_folders.clone();
+            let repository_roots = repository_roots.clone();
             let mut watcher =
                 notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
                     let Ok(event) = result else {
@@ -217,22 +271,31 @@ impl AppState {
                     {
                         return;
                     }
-                    let reason = watcher_reason(&event.paths);
+                    let repository_id = event.paths.iter().find_map(|event_path| {
+                        repository_roots
+                            .iter()
+                            .find(|(root, _)| event_path.starts_with(root))
+                            .map(|(_, id)| id.clone())
+                    });
+                    let scopes = watcher_scopes(&event.paths, repository_id.is_some());
+                    let key = format!("{:?}:{:?}", repository_id, scopes);
                     let Ok(mut last) = last_emit.lock() else {
                         return;
                     };
-                    if last.get(reason).is_some_and(|instant| {
+                    if last.get(&key).is_some_and(|instant| {
                         instant.elapsed() < std::time::Duration::from_millis(300)
                     }) {
                         return;
                     }
-                    last.insert(reason.into(), std::time::Instant::now());
+                    last.insert(key, std::time::Instant::now());
                     let _ = app.emit(
                         "versiondock://event",
-                        crate::models::WorkspaceEvent {
+                        RepositoryEvent {
                             workspace_id: workspace_id.clone(),
+                            repo_id: repository_id,
                             generation,
-                            reason: reason.into(),
+                            source: RepositoryEventSource::Watcher,
+                            scopes,
                         },
                     );
                 })
@@ -287,21 +350,63 @@ impl AppState {
     }
 }
 
-fn watcher_reason(paths: &[PathBuf]) -> &'static str {
+fn watcher_scopes(paths: &[PathBuf], repository_known: bool) -> Vec<RefreshScope> {
+    if !repository_known {
+        return vec![RefreshScope::WorkspaceSnapshot];
+    }
+    let mut scopes = Vec::new();
     if paths.iter().any(|path| {
         let value = path.to_string_lossy().replace('\\', "/");
         value.ends_with("/.git/HEAD")
             || value.contains("/.git/refs/")
             || value.ends_with("/.git/packed-refs")
     }) {
-        "refs"
-    } else if paths.iter().any(|path| {
+        add_scope(&mut scopes, RefreshScope::Refs);
+        add_scope(&mut scopes, RefreshScope::History);
+    }
+    if paths.iter().any(|path| {
         let value = path.to_string_lossy().replace('\\', "/");
-        value.ends_with("/.git/index") || value.ends_with("/.svn/wc.db")
+        value.contains("/.git/rebase-")
+            || value.contains("/.git/MERGE_")
+            || value.ends_with("/.git/CHERRY_PICK_HEAD")
+            || value.ends_with("/.git/REVERT_HEAD")
     }) {
-        "status"
-    } else {
-        "worktree"
+        add_scope(&mut scopes, RefreshScope::Operation);
+        add_scope(&mut scopes, RefreshScope::Conflicts);
+        add_scope(&mut scopes, RefreshScope::Status);
+    }
+    if paths.iter().any(|path| {
+        let value = path.to_string_lossy().replace('\\', "/");
+        value.ends_with("/.git/index")
+    }) {
+        add_scope(&mut scopes, RefreshScope::Index);
+        add_scope(&mut scopes, RefreshScope::Status);
+        add_scope(&mut scopes, RefreshScope::Conflicts);
+    }
+    if paths.iter().any(|path| {
+        path.to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("/.svn/wc.db")
+    }) {
+        add_scope(&mut scopes, RefreshScope::Status);
+        add_scope(&mut scopes, RefreshScope::Conflicts);
+        add_scope(&mut scopes, RefreshScope::SvnRevision);
+    }
+    let ordinary_worktree = paths.iter().any(|path| {
+        !path
+            .components()
+            .any(|part| part.as_os_str() == ".git" || part.as_os_str() == ".svn")
+    });
+    if ordinary_worktree || scopes.is_empty() {
+        add_scope(&mut scopes, RefreshScope::Status);
+        add_scope(&mut scopes, RefreshScope::Diff);
+    }
+    scopes
+}
+
+fn add_scope(scopes: &mut Vec<RefreshScope>, scope: RefreshScope) {
+    if !scopes.contains(&scope) {
+        scopes.push(scope);
     }
 }
 
@@ -314,7 +419,7 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
         >= 3
     {
         let mut current = serde_json::from_value::<AppStateSnapshot>(value).ok()?;
-        current.schema_version = 3;
+        current.schema_version = 4;
         return Some(current);
     }
     let mut settings = DesktopSettings::default();
@@ -360,7 +465,7 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
         .and_then(|item| serde_json::from_value(item).ok())
         .unwrap_or_default();
     Some(AppStateSnapshot {
-        schema_version: 3,
+        schema_version: 4,
         settings: settings.normalize(),
         layout,
         last_workspace_id: value
@@ -508,7 +613,7 @@ mod tests {
           "branchSidebarCollapsed":true,"branchSidebarCollapsedSections":["tags"]
         }"##;
         let state = migrate_state(legacy).unwrap();
-        assert_eq!(state.schema_version, 3);
+        assert_eq!(state.schema_version, 4);
         assert!(matches!(state.settings.theme, ThemePreference::Dark));
         assert_eq!(state.layout.active_tab, "stash");
         assert_eq!(state.layout.panel_sizes.commit, 400);
@@ -541,22 +646,37 @@ mod tests {
 
     #[test]
     fn classifies_vcs_metadata_watcher_events() {
-        assert_eq!(watcher_reason(&[PathBuf::from("/repo/.git/HEAD")]), "refs");
         assert_eq!(
-            watcher_reason(&[PathBuf::from("/repo/.git/refs/heads/main")]),
-            "refs"
+            watcher_scopes(&[PathBuf::from("/repo/.git/HEAD")], true),
+            vec![RefreshScope::Refs, RefreshScope::History]
         );
         assert_eq!(
-            watcher_reason(&[PathBuf::from("/repo/.git/index")]),
-            "status"
+            watcher_scopes(&[PathBuf::from("/repo/.git/refs/heads/main")], true),
+            vec![RefreshScope::Refs, RefreshScope::History]
         );
         assert_eq!(
-            watcher_reason(&[PathBuf::from("/repo/.svn/wc.db")]),
-            "status"
+            watcher_scopes(&[PathBuf::from("/repo/.git/index")], true),
+            vec![
+                RefreshScope::Index,
+                RefreshScope::Status,
+                RefreshScope::Conflicts
+            ]
         );
         assert_eq!(
-            watcher_reason(&[PathBuf::from("/repo/src/main.rs")]),
-            "worktree"
+            watcher_scopes(&[PathBuf::from("/repo/.svn/wc.db")], true),
+            vec![
+                RefreshScope::Status,
+                RefreshScope::Conflicts,
+                RefreshScope::SvnRevision
+            ]
+        );
+        assert_eq!(
+            watcher_scopes(&[PathBuf::from("/repo/src/main.rs")], true),
+            vec![RefreshScope::Status, RefreshScope::Diff]
+        );
+        assert_eq!(
+            watcher_scopes(&[PathBuf::from("/workspace/new/.git")], false),
+            vec![RefreshScope::WorkspaceSnapshot]
         );
     }
 }

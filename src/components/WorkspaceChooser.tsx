@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Codicon } from './Codicon';
-import { useAppStore } from '../store/appStore';
+import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
 
@@ -9,7 +9,7 @@ export function WorkspaceChooser() {
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const removeRecent = useAppStore((state) => state.removeRecent);
   const openAbout = useAppStore((state) => state.openAbout);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const { t } = useI18n();
   const bridge = useBridge();
   const [filterText, setFilterText] = useState('');
@@ -114,11 +114,11 @@ export function WorkspaceChooser() {
             </div>
             <div className="feature-item">
               <Codicon name="multiple-windows" />
-              <span>Multi-Tabs</span>
+              <span>{t('Multi-Tabs')}</span>
             </div>
             <div className="feature-item">
               <Codicon name="diff" />
-              <span>Visual Diff</span>
+              <span>{t('Visual Diff')}</span>
             </div>
           </div>
         </section>

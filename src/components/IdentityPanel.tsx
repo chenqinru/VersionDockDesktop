@@ -171,7 +171,7 @@ function GitIdentity({
         <label className="identity-label-block">
           <span className="field-title">{t('Profile')}</span>
           <select
-            aria-label="Profile"
+            aria-label={t('Profile')}
             className="identity-select"
             value={value.selectedProfileId ?? ''}
             onChange={(event) =>

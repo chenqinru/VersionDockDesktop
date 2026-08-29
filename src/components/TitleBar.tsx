@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
-import { useAppStore } from '../store/appStore';
+import { isOperationActive, useAppStore } from '../store/appStore';
 import { useBridge } from '../platform/context';
 import type { TabDragPayload } from '../platform/bridge';
 import type { WindowTabTransfer, WorkspaceDescriptor } from '../bindings/generated';
@@ -67,7 +67,7 @@ export function TitleBar() {
   const platform = bridge.platform();
   const tabs = useAppStore((state) => state.tabs);
   const activeTabId = useAppStore((state) => state.activeTabId);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const recentWorkspaces = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const switchTab = useAppStore((state) => state.switchTab);
@@ -161,6 +161,7 @@ export function TitleBar() {
 
   useEffect(() => {
     let disposed = false;
+    let lastReportedBounds = '';
     void bridge.getWindowLabel().then((label) => {
       if (disposed) return;
       windowLabelRef.current = label;
@@ -168,12 +169,16 @@ export function TitleBar() {
     });
 
     const reportBounds = () => {
-      void bridge.syncWindowBounds({
+      const bounds = {
         x: window.screenX,
         y: window.screenY,
         width: window.outerWidth,
         height: window.outerHeight,
-      });
+      };
+      const key = `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`;
+      if (key === lastReportedBounds) return;
+      lastReportedBounds = key;
+      void bridge.syncWindowBounds(bounds);
     };
     reportBounds();
     const interval = setInterval(reportBounds, 800);

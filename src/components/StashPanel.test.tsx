@@ -72,7 +72,7 @@ const snapshot = {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ stashes: {}, busy: false, snapshot: undefined, bridge: undefined });
+  useAppStore.setState({ stashes: {}, snapshot: undefined, bridge: undefined });
 });
 
 describe('StashPanel', () => {

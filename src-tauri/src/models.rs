@@ -6,7 +6,66 @@ use std::collections::BTreeMap;
 #[serde(rename_all = "camelCase")]
 pub struct RequestEnvelope {
     pub request_id: String,
+    pub context: RequestContext,
     pub command: BridgeCommand,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestContext {
+    pub generation: u32,
+    pub domain: OperationDomain,
+    #[serde(default)]
+    pub visibility: OperationVisibility,
+    pub workspace_id: Option<String>,
+    pub repository_id: Option<String>,
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationVisibility {
+    #[default]
+    Foreground,
+    Background,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationDomain {
+    Application,
+    Workspace,
+    Status,
+    Diff,
+    History,
+    Branch,
+    Tag,
+    Commit,
+    Sync,
+    Conflict,
+    Stash,
+    Shelf,
+    Changelist,
+    Worktree,
+    Subtree,
+    Submodule,
+    Remote,
+    Identity,
+    SvnAccount,
+    FileHistory,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Partial,
+    Failed,
+    Cancelled,
+    TimedOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -447,15 +506,22 @@ pub struct BatchCommitTarget {
     pub message: String,
     pub amend: bool,
     pub paths: Vec<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub unstage_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryOperationResult {
     pub repo_id: String,
+    pub commit_attempted: bool,
     pub committed: bool,
     pub revision: Option<String>,
+    pub push_attempted: bool,
     pub pushed: bool,
+    pub failed_stage: Option<String>,
+    pub recovery_hint: Option<String>,
     pub error: Option<DesktopError>,
 }
 
@@ -845,12 +911,28 @@ impl DesktopError {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct ProgressEvent {
-    pub request_id: String,
+pub struct OperationEvent {
+    pub operation_id: String,
+    pub context: RequestContext,
+    pub status: OperationStatus,
     pub phase: String,
     pub message: String,
+    pub started_at: String,
+    pub cancellable: bool,
     pub completed: Option<u32>,
     pub total: Option<u32>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub result: Option<OperationResultSummary>,
+    pub error: Option<DesktopError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationResultSummary {
+    pub summary: String,
+    pub succeeded: u32,
+    pub failed: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -865,9 +947,33 @@ pub struct WorkspaceEvent {
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryEvent {
     pub workspace_id: String,
-    pub repo_id: String,
+    pub repo_id: Option<String>,
     pub generation: u32,
-    pub reason: String,
+    pub source: RepositoryEventSource,
+    pub scopes: Vec<RefreshScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryEventSource {
+    Watcher,
+    Operation,
+    Scheduler,
+    OtherWindow,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum RefreshScope {
+    WorkspaceSnapshot,
+    Status,
+    Diff,
+    Index,
+    Refs,
+    History,
+    Operation,
+    Conflicts,
+    SvnRevision,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
@@ -922,7 +1028,7 @@ pub struct AppStateSnapshot {
 }
 
 fn default_schema_version() -> u32 {
-    3
+    4
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1018,7 +1124,11 @@ impl DesktopSettings {
                     && seen.insert(value.clone())
             })
             .collect();
-        self.project_colors.retain(|_, value| is_color(value));
+        self.project_colors = self
+            .project_colors
+            .into_iter()
+            .filter_map(|(key, value)| normalize_color(&value).map(|color| (key, color)))
+            .collect();
         self.hidden_repository_ids = self
             .hidden_repository_ids
             .into_iter()
@@ -1041,6 +1151,11 @@ fn is_color(value: &str) -> bool {
     value.len() == 7
         && value.starts_with('#')
         && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn normalize_color(value: &str) -> Option<String> {
+    let value = value.trim();
+    is_color(value).then(|| value.to_ascii_lowercase())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
@@ -1166,6 +1281,65 @@ pub struct BootstrapData {
     pub state: AppStateSnapshot,
     pub tools: ToolAvailability,
     pub capabilities: DesktopCapabilities,
+    #[serde(default)]
+    #[specta(optional)]
+    pub launch_workspace_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub runtime: RuntimeCapabilities,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityStatus {
+    pub available: bool,
+    pub reason_code: Option<String>,
+    pub detail: Option<String>,
+}
+
+impl CapabilityStatus {
+    pub fn available() -> Self {
+        Self {
+            available: true,
+            reason_code: None,
+            detail: None,
+        }
+    }
+
+    pub fn unavailable(code: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            available: false,
+            reason_code: Some(code.into()),
+            detail: Some(detail.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationPermissionState {
+    #[default]
+    NotRequested,
+    Allowed,
+    Denied,
+    Restricted,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureCredentialCapability {
+    pub status: CapabilityStatus,
+    pub backend: Option<String>,
+    pub password_stdin_supported: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCapabilities {
+    pub system_notifications: CapabilityStatus,
+    pub notification_permission: NotificationPermissionState,
+    pub secure_credentials: SecureCredentialCapability,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
@@ -1191,6 +1365,9 @@ pub struct DesktopCapabilities {
     pub secure_credentials: bool,
     #[specta(optional)]
     pub system_notifications: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub availability: BTreeMap<String, CapabilityStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
@@ -1213,6 +1390,9 @@ pub struct RepositoryCapabilities {
     pub identity: bool,
     pub svn_account: bool,
     pub file_history: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub availability: BTreeMap<String, CapabilityStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1221,6 +1401,12 @@ pub struct ToolAvailability {
     pub git: bool,
     pub svn: bool,
     pub svnadmin: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub git_version: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub svn_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

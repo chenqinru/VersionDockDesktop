@@ -18,7 +18,7 @@ const renderPanel = () => render(<BridgeContext.Provider value={bridge}><CommitP
 const gitRepo: RepositoryStatus = { meta: { id: 'repo', name: 'Repository', rootPath: '/tmp/repo', color: '#4ec9b0', kind: 'git', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false }, branch: 'main', revision: 'abc', ahead: 0, behind: 0, files: [], conflicts: 0, operation: null };
 const gitSnapshot: WorkspaceSnapshot = { workspace: { id: 'workspace', name: 'Workspace', paths: ['/tmp/repo'], lastOpenedAt: '', available: true }, generation: 1, tools: { git: true, svn: true, svnadmin: true }, repositories: [gitRepo] };
 
-afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, mode: 'history' }); });
+afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, mode: 'history' }); });
 
 describe('CommitPanel capabilities and file view', () => {
   it('compacts single-child directory chains while preserving file paths', () => {
@@ -117,9 +117,12 @@ describe('CommitPanel capabilities and file view', () => {
   it('commits selected files across repositories and unstages excluded indexed files', async () => {
     const commands: string[] = [];
     const multiBridge = new MockBridge((command) => {
-      commands.push(command.type === 'unstage' ? `unstage:${command.payload.repo_id}:${command.payload.paths.join(',')}` : command.type);
+      commands.push(command.type);
       if (command.type === 'batchCommit') {
-        for (const target of command.payload.targets) commands.push(`commit:${target.repoId}:${target.paths.join(',')}`);
+        for (const target of command.payload.targets) {
+          if (target.unstagePaths?.length) commands.push(`unstage:${target.repoId}:${target.unstagePaths.join(',')}`);
+          commands.push(`commit:${target.repoId}:${target.paths.join(',')}`);
+        }
         return command.payload.targets.map((target) => ({ repoId: target.repoId, committed: true, revision: 'abc', pushed: false, error: null }));
       }
       if (command.type === 'workspaceRefresh') return { ...gitSnapshot, repositories: [] };

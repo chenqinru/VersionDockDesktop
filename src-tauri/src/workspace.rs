@@ -34,27 +34,27 @@ const SKIP: [&str; 11] = [
 ];
 
 pub async fn tool_availability(token: &CancellationToken) -> ToolAvailability {
+    let git = cli::run(
+        "git",
+        &["--version".into()],
+        Path::new("."),
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+    )
+    .await;
+    let svn = cli::run(
+        "svn",
+        &["--version".into(), "--quiet".into()],
+        Path::new("."),
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+    )
+    .await;
     ToolAvailability {
-        git: cli::run(
-            "git",
-            &["--version".into()],
-            Path::new("."),
-            None,
-            cli::DEFAULT_TIMEOUT,
-            token,
-        )
-        .await
-        .is_ok(),
-        svn: cli::run(
-            "svn",
-            &["--version".into(), "--quiet".into()],
-            Path::new("."),
-            None,
-            cli::DEFAULT_TIMEOUT,
-            token,
-        )
-        .await
-        .is_ok(),
+        git: git.is_ok(),
+        svn: svn.is_ok(),
         svnadmin: cli::run(
             "svnadmin",
             &["--version".into(), "--quiet".into()],
@@ -65,6 +65,14 @@ pub async fn tool_availability(token: &CancellationToken) -> ToolAvailability {
         )
         .await
         .is_ok(),
+        git_version: git.ok().map(|value| {
+            value
+                .stdout_text()
+                .trim()
+                .trim_start_matches("git version ")
+                .to_string()
+        }),
+        svn_version: svn.ok().map(|value| value.stdout_text().trim().to_string()),
     }
 }
 
@@ -193,7 +201,17 @@ pub fn scan(
                 .unwrap_or(0);
             let git_file = path.join(".git");
             let is_worktree = *kind == VcsKind::Git && git_file.is_file();
-            let is_submodule = *kind == VcsKind::Git && parent.is_some() && git_file.exists();
+            let is_submodule = *kind == VcsKind::Git
+                && parent.is_some_and(|(parent_path, _, _)| {
+                    let relative = path
+                        .strip_prefix(parent_path)
+                        .ok()
+                        .map(|value| value.to_string_lossy().replace('\\', "/"));
+                    git_file.exists()
+                        || relative.is_some_and(|value| {
+                            declared_submodule_paths(parent_path).contains(&value)
+                        })
+                });
             RepositoryMeta {
                 id: id.clone(),
                 name: path
@@ -541,9 +559,40 @@ fn empty_status(meta: RepositoryMeta, tool_available: bool) -> RepositoryStatus 
 
 fn repository_capabilities(kind: VcsKind, tool_available: bool) -> RepositoryCapabilities {
     if !tool_available {
-        return RepositoryCapabilities::default();
+        let mut unavailable = RepositoryCapabilities::default();
+        for key in [
+            "status",
+            "diff",
+            "commit",
+            "sync",
+            "history",
+            "conflict",
+            "stash",
+            "shelf",
+            "changelist",
+            "worktree",
+            "subtree",
+            "submodule",
+            "compare",
+            "remoteManagement",
+            "identity",
+            "svnAccount",
+            "fileHistory",
+        ] {
+            unavailable.availability.insert(
+                key.into(),
+                crate::models::CapabilityStatus::unavailable(
+                    "VCS_TOOL_UNAVAILABLE",
+                    match kind {
+                        VcsKind::Git => "Git is not installed",
+                        VcsKind::Svn => "SVN is not installed",
+                    },
+                ),
+            );
+        }
+        return unavailable;
     }
-    match kind {
+    let mut capabilities = match kind {
         VcsKind::Git => RepositoryCapabilities {
             status: true,
             diff: true,
@@ -562,6 +611,7 @@ fn repository_capabilities(kind: VcsKind, tool_available: bool) -> RepositoryCap
             identity: true,
             svn_account: false,
             file_history: true,
+            ..RepositoryCapabilities::default()
         },
         VcsKind::Svn => RepositoryCapabilities {
             status: true,
@@ -574,7 +624,39 @@ fn repository_capabilities(kind: VcsKind, tool_available: bool) -> RepositoryCap
             file_history: true,
             ..RepositoryCapabilities::default()
         },
+    };
+    for (key, available) in [
+        ("status", capabilities.status),
+        ("diff", capabilities.diff),
+        ("commit", capabilities.commit),
+        ("sync", capabilities.sync),
+        ("history", capabilities.history),
+        ("conflict", capabilities.conflict),
+        ("stash", capabilities.stash),
+        ("shelf", capabilities.shelf),
+        ("changelist", capabilities.changelist),
+        ("worktree", capabilities.worktree),
+        ("subtree", capabilities.subtree),
+        ("submodule", capabilities.submodule),
+        ("compare", capabilities.compare),
+        ("remoteManagement", capabilities.remote_management),
+        ("identity", capabilities.identity),
+        ("svnAccount", capabilities.svn_account),
+        ("fileHistory", capabilities.file_history),
+    ] {
+        capabilities.availability.insert(
+            key.into(),
+            if available {
+                crate::models::CapabilityStatus::available()
+            } else {
+                crate::models::CapabilityStatus::unavailable(
+                    "VCS_CAPABILITY_NOT_APPLICABLE",
+                    "This capability is not available for the repository type",
+                )
+            },
+        );
     }
+    capabilities
 }
 
 fn repo_id(path: &Path, kind: VcsKind) -> String {

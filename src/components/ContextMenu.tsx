@@ -37,10 +37,22 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
   }, [x, y]);
 
   useEffect(() => {
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    queueMicrotask(() => ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const keyHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      const entries = [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
+      if (!entries.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+      e.preventDefault();
+      const current = entries.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? entries.length - 1
+        : e.key === 'ArrowDown' ? (current + 1 + entries.length) % entries.length
+          : (current - 1 + entries.length) % entries.length;
+      entries[next]?.focus();
+    };
     const blurHandler = () => onClose();
     const visibilityHandler = () => {
       if (document.visibilityState !== 'visible') onClose();
@@ -54,6 +66,7 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
       document.removeEventListener('keydown', keyHandler);
       document.removeEventListener('visibilitychange', visibilityHandler);
       window.removeEventListener('blur', blurHandler);
+      trigger?.focus();
     };
   }, [onClose]);
 
@@ -66,15 +79,17 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
   };
 
   return (
-    <div ref={ref} style={{ ...styles.menu, ...style }}>
+    <div ref={ref} role="menu" style={{ ...styles.menu, ...style }}>
       {items.map((item, i) => {
         if ('separator' in item && item.separator) {
           return <div key={i} style={styles.separator} />;
         }
         const it = item as ContextMenuItem;
         return (
-          <div
+          <button
             key={it.id}
+            type="button"
+            role="menuitem"
             style={styles.item(!!it.danger)}
             onClick={() => { onSelect(it.id); onClose(); }}
             onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--vscode-list-hoverBackground, var(--versiondock-hover))')}
@@ -82,7 +97,7 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
           >
             <Codicon name={it.icon} style={styles.icon} />
             <span>{it.label}</span>
-          </div>
+          </button>
         );
       })}
     </div>
@@ -112,6 +127,10 @@ const styles = {
       ? 'var(--vscode-errorForeground, var(--versiondock-danger))'
       : 'var(--vscode-menu-foreground, var(--versiondock-text))',
     transition: 'background 0.08s',
+    width: '100%',
+    border: 0,
+    textAlign: 'left',
+    font: 'inherit',
   }),
   icon: {
     fontSize: '14px',

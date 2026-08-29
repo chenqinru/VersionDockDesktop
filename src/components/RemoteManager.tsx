@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
-import { useAppStore } from '../store/appStore';
+import { isOperationActive, useAppStore } from '../store/appStore';
 import { confirmDialog, promptDialog } from './dialogService';
 import { ContextMenu } from './ContextMenu';
 import type { RemoteInfo } from '../bindings/generated';
@@ -12,7 +12,7 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
   const values = useAppStore((state) => state.remotes[repoId] ?? []);
   const load = useAppStore((state) => state.loadRemotes);
   const operate = useAppStore((state) => state.remoteOperation);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => isOperationActive(state.operations, { repositoryId: repoId, domain: 'remote' }));
 
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');

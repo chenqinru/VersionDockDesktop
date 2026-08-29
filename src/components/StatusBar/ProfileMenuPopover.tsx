@@ -44,7 +44,7 @@ export function ProfileMenuPopover({ anchorRect, onClose }: ProfileMenuPopoverPr
           const data = await bridge.request<GitIdentityState>({
             type: 'gitIdentity',
             payload: { workspace_id: workspaceId, repo_id: repo.meta.id },
-          });
+          }, { showProgress: false });
           return { repoId: repo.meta.id, data };
         } catch {
           return null;
@@ -56,7 +56,7 @@ export function ProfileMenuPopover({ anchorRect, onClose }: ProfileMenuPopoverPr
           const data = await bridge.request<SvnAccountState>({
             type: 'svnAccount',
             payload: { workspace_id: workspaceId, repo_id: repo.meta.id },
-          });
+          }, { showProgress: false });
           return { repoId: repo.meta.id, data };
         } catch {
           return null;

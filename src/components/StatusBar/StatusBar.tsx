@@ -2,6 +2,7 @@ import { BranchStatusBarItem } from './BranchStatusBarItem';
 import { ProfileStatusBarItem } from './ProfileStatusBarItem';
 import { NotificationStatusBarItem } from './NotificationStatusBarItem';
 import { UpdateStatusBarItem } from './UpdateStatusBarItem';
+import { OperationStatusBarItem } from './OperationStatusBarItem';
 import { useAppStore } from '../../store/appStore';
 
 export function StatusBar() {
@@ -19,6 +20,7 @@ export function StatusBar() {
         <ProfileStatusBarItem />
       </div>
       <div className="statusbar-right">
+        <OperationStatusBarItem />
         <UpdateStatusBarItem />
         <NotificationStatusBarItem />
       </div>

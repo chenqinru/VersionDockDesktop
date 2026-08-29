@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DiffDocument, FileHistoryEntry, FileHistoryPage, FileRevisionDocument } from '../bindings/generated';
 import { useBridge } from '../platform/context';
 import { useAppStore } from '../store/appStore';
@@ -23,10 +23,14 @@ export function FileHistoryPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [context, setContext] = useState<{ x: number; y: number; entry: FileHistoryEntry }>();
+  const contextGeneration = useRef(0);
+  const loadMoreController = useRef<AbortController>();
   const { t } = useI18n();
 
   useEffect(() => {
     if (!target || !workspaceId) return;
+    const generation = ++contextGeneration.current;
+    loadMoreController.current?.abort();
     const controller = new AbortController();
     let active = true;
     queueMicrotask(() => {
@@ -40,9 +44,9 @@ export function FileHistoryPanel() {
       setLoading(true);
     });
     void bridge.request<FileHistoryPage>({ type: 'fileHistory', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: target.path, cursor: null, limit: 100 } }, { signal: controller.signal })
-      .then((page) => { if (active) { setEntries(page.entries); setCursor(page.nextCursor); setSelected(page.entries[0]); } })
-      .catch((reason) => { if (active && !isAbortError(reason)) setError(String(reason)); })
-      .finally(() => { if (active) setLoading(false); });
+      .then((page) => { if (active && generation === contextGeneration.current) { setEntries(page.entries); setCursor(page.nextCursor); setSelected(page.entries[0]); } })
+      .catch((reason) => { if (active && generation === contextGeneration.current && !isAbortError(reason)) setError(String(reason)); })
+      .finally(() => { if (active && generation === contextGeneration.current) setLoading(false); });
     return () => { active = false; controller.abort(); };
   }, [bridge, target, workspaceId]);
 
@@ -64,11 +68,21 @@ export function FileHistoryPanel() {
   const choose = (entry: FileHistoryEntry) => { setSelected(entry); setDocument(undefined); setDiff(undefined); setError(undefined); setLoading(true); };
   const loadMore = async () => {
     if (!cursor || loading) return;
+    loadMoreController.current?.abort();
+    const controller = new AbortController();
+    loadMoreController.current = controller;
+    const generation = contextGeneration.current;
+    const requestCursor = cursor;
     setLoading(true);
     try {
-      const page = await bridge.request<FileHistoryPage>({ type: 'fileHistory', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: target.path, cursor, limit: 100 } });
+      const page = await bridge.request<FileHistoryPage>({ type: 'fileHistory', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: target.path, cursor: requestCursor, limit: 100 } }, { signal: controller.signal });
+      if (generation !== contextGeneration.current) return;
       setEntries((current) => [...current, ...page.entries]); setCursor(page.nextCursor);
-    } catch (reason) { setError(String(reason)); } finally { setLoading(false); }
+    } catch (reason) {
+      if (generation === contextGeneration.current && !isAbortError(reason)) setError(String(reason));
+    } finally {
+      if (generation === contextGeneration.current) setLoading(false);
+    }
   };
   const binary = Boolean(document?.binary || diff?.binary);
   const truncated = Boolean(document?.truncated || diff?.truncated);

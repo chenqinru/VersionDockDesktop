@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
-import { useAppStore } from '../../store/appStore';
+import { isOperationActive, useAppStore } from '../../store/appStore';
 import { useI18n } from '../../i18n';
 import { BranchMenuPopover } from './BranchMenuPopover';
 
@@ -12,7 +12,10 @@ export function BranchStatusBarItem() {
 
   const snapshot = useAppStore((state) => state.snapshot);
   const bootstrap = useAppStore((state) => state.bootstrap);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => isOperationActive(state.operations, {
+    workspaceId: state.snapshot?.workspace.id,
+    domain: ['branch', 'sync'],
+  }));
 
   const repositories = useMemo(() => snapshot?.repositories ?? [], [snapshot?.repositories]);
   const gitRepos = useMemo(() => repositories.filter((r) => r.meta.kind === 'git'), [repositories]);

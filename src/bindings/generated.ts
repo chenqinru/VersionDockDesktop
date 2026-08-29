@@ -26,12 +26,15 @@ export type BatchCommitTarget = {
 	message: string,
 	amend: boolean,
 	paths: string[],
+	unstagePaths?: string[],
 };
 
 export type BootstrapData = {
 	state: AppStateSnapshot,
 	tools: ToolAvailability,
 	capabilities: DesktopCapabilities,
+	launchWorkspaceId?: string | null,
+	runtime?: RuntimeCapabilities,
 };
 
 export type BranchCompareResult = {
@@ -355,6 +358,12 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	revision: string,
 } };
 
+export type CapabilityStatus = {
+	available: boolean,
+	reasonCode: string | null,
+	detail: string | null,
+};
+
 export type ChangelistEntry = {
 	id: string,
 	name: string,
@@ -439,6 +448,7 @@ export type DesktopCapabilities = {
 	fileHistory?: boolean,
 	secureCredentials?: boolean,
 	systemNotifications?: boolean,
+	availability?: { [key in string]: CapabilityStatus },
 };
 
 export type DesktopError = {
@@ -616,6 +626,34 @@ export type MergeVersions = {
 	binary: boolean,
 };
 
+export type NotificationPermissionState = "notRequested" | "allowed" | "denied" | "restricted" | "unavailable";
+
+export type OperationDomain = "application" | "workspace" | "status" | "diff" | "history" | "branch" | "tag" | "commit" | "sync" | "conflict" | "stash" | "shelf" | "changelist" | "worktree" | "subtree" | "submodule" | "remote" | "identity" | "svnAccount" | "fileHistory" | "system";
+
+export type OperationEvent = {
+	operationId: string,
+	context: RequestContext,
+	status: OperationStatus,
+	phase: string,
+	message: string,
+	startedAt: string,
+	cancellable: boolean,
+	completed: number | null,
+	total: number | null,
+	result?: OperationResultSummary | null,
+	error: DesktopError | null,
+};
+
+export type OperationResultSummary = {
+	summary: string,
+	succeeded: number,
+	failed: number,
+};
+
+export type OperationStatus = "queued" | "running" | "succeeded" | "partial" | "failed" | "cancelled" | "timedOut";
+
+export type OperationVisibility = "foreground" | "background";
+
 export type PanelSizes = {
 	commit: number,
 	branches: number,
@@ -627,13 +665,7 @@ export type PatchDocument = {
 	content: string,
 };
 
-export type ProgressEvent = {
-	requestId: string,
-	phase: string,
-	message: string,
-	completed: number | null,
-	total: number | null,
-};
+export type RefreshScope = "workspaceSnapshot" | "status" | "diff" | "index" | "refs" | "history" | "operation" | "conflicts" | "svnRevision";
 
 export type RemoteInfo = {
 	name: string,
@@ -661,14 +693,18 @@ export type RepositoryCapabilities = {
 	identity: boolean,
 	svnAccount: boolean,
 	fileHistory: boolean,
+	availability?: { [key in string]: CapabilityStatus },
 };
 
 export type RepositoryEvent = {
 	workspaceId: string,
-	repoId: string,
+	repoId: string | null,
 	generation: number,
-	reason: string,
+	source: RepositoryEventSource,
+	scopes: RefreshScope[],
 };
+
+export type RepositoryEventSource = "watcher" | "operation" | "scheduler" | "otherWindow";
 
 export type RepositoryMeta = {
 	id: string,
@@ -684,9 +720,13 @@ export type RepositoryMeta = {
 
 export type RepositoryOperationResult = {
 	repoId: string,
+	commitAttempted: boolean,
 	committed: boolean,
 	revision: string | null,
+	pushAttempted: boolean,
 	pushed: boolean,
+	failedStage: string | null,
+	recoveryHint: string | null,
 	error: DesktopError | null,
 };
 
@@ -703,8 +743,18 @@ export type RepositoryStatus = {
 	toolAvailable?: boolean,
 };
 
+export type RequestContext = {
+	generation: number,
+	domain: OperationDomain,
+	visibility?: OperationVisibility,
+	workspaceId: string | null,
+	repositoryId: string | null,
+	target: string | null,
+};
+
 export type RequestEnvelope = {
 	requestId: string,
+	context: RequestContext,
 	command: BridgeCommand,
 };
 
@@ -712,6 +762,18 @@ export type ResponseEnvelope = {
 	requestId: string,
 	result: unknown,
 	error: DesktopError | null,
+};
+
+export type RuntimeCapabilities = {
+	systemNotifications: CapabilityStatus,
+	notificationPermission: NotificationPermissionState,
+	secureCredentials: SecureCredentialCapability,
+};
+
+export type SecureCredentialCapability = {
+	status: CapabilityStatus,
+	backend: string | null,
+	passwordStdinSupported: boolean,
 };
 
 export type SettingsEffects = {
@@ -805,6 +867,8 @@ export type ToolAvailability = {
 	git: boolean,
 	svn: boolean,
 	svnadmin: boolean,
+	gitVersion?: string | null,
+	svnVersion?: string | null,
 };
 
 export type UiFontSizePreference = "minimum" | "small" | "standard" | "large" | "maximum";

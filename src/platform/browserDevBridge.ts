@@ -291,7 +291,7 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 } : detailFiles;
 
 const initialState: AppStateSnapshot = {
-  schemaVersion: 3, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
+  schemaVersion: 4, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
   settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
   layout: { panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
 };
@@ -324,6 +324,7 @@ export class BrowserDevBridge implements VersionDockBridge {
   getState<T>(): T | undefined { return this.state as T; }
   setState<T>(state: T): void { this.state = structuredClone(state as AppStateSnapshot); }
   send(command: BridgeCommand): void { void this.request(command); }
+  async cancelOperation(): Promise<boolean> { return false; }
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
   async selectExecutable(): Promise<string | null> { return '/usr/local/bin/zed'; }
   async notify(): Promise<boolean> { return false; }
@@ -448,7 +449,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'ignoreRules': return { directory: command.payload.directory, source: '.gitignore', patterns: [] };
       case 'updateIgnoreRules': return true;
       case 'commit': return activeHistories[command.payload.repo_id]?.[0]?.hash ?? 'browser-demo-commit';
-      case 'batchCommit': return command.payload.targets.map((target) => ({ repoId: target.repoId, committed: true, revision: activeHistories[target.repoId]?.[0]?.hash ?? 'browser-demo-commit', pushed: command.payload.push, error: null }));
+      case 'batchCommit': return command.payload.targets.map((target) => ({ repoId: target.repoId, commitAttempted: true, committed: true, revision: activeHistories[target.repoId]?.[0]?.hash ?? 'browser-demo-commit', pushAttempted: command.payload.push, pushed: command.payload.push, failedStage: null, recoveryHint: null, error: null }));
       case 'branchCompare': return { base: command.payload.base, target: command.payload.target, baseCommits: [], targetCommits: [], files: activeDetailFiles[command.payload.repo_id] ?? [] };
       case 'conflictVersions': return { path: command.payload.relative_path, base: '', ours: '', theirs: '', working: '', language: 'text', fingerprint: 'browser-demo', binary: false };
       case 'sync': case 'branchOperation': case 'tagOperation': case 'stashOperation': case 'shelfOperation':

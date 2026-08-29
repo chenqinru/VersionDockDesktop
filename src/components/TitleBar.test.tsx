@@ -18,10 +18,37 @@ const workspace = {
 afterEach(() => {
   cleanup();
   document.body.classList.remove('is-dragging-tab', 'is-detaching-tab');
-  useAppStore.setState({ bridge: undefined, tabs: [], activeTabId: null, busy: false });
+  useAppStore.setState({ bridge: undefined, tabs: [], activeTabId: null, });
 });
 
 describe('TitleBar tab dragging', () => {
+  it('only synchronizes window bounds when the geometry changes', () => {
+    vi.useFakeTimers();
+    try {
+      Object.defineProperties(window, {
+        screenX: { configurable: true, value: 100 },
+        screenY: { configurable: true, value: 80 },
+        outerWidth: { configurable: true, value: 1200 },
+        outerHeight: { configurable: true, value: 800 },
+      });
+      const syncWindowBounds = vi.fn(async () => undefined);
+      const boundsBridge = new MockBridge(() => []) as VersionDockBridge;
+      boundsBridge.syncWindowBounds = syncWindowBounds;
+
+      render(<BridgeContext.Provider value={boundsBridge}><TitleBar /></BridgeContext.Provider>);
+      expect(syncWindowBounds).toHaveBeenCalledTimes(1);
+      act(() => vi.advanceTimersByTime(2_400));
+      expect(syncWindowBounds).toHaveBeenCalledTimes(1);
+
+      Object.defineProperty(window, 'screenX', { configurable: true, value: 140 });
+      act(() => vi.advanceTimersByTime(800));
+      expect(syncWindowBounds).toHaveBeenCalledTimes(2);
+      expect(syncWindowBounds).toHaveBeenLastCalledWith({ x: 140, y: 80, width: 1200, height: 800 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('avoids native HTML dragging and only uses the copy cursor after the detach threshold', () => {
     Object.defineProperties(window, {
       screenX: { configurable: true, value: 100 },
@@ -29,7 +56,7 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, busy: false });
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, });
     render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
 
     const tab = screen.getByRole('tab');
@@ -70,7 +97,7 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ bridge: reorderBridge, tabs: workspaces, activeTabId: 'first', busy: false });
+    useAppStore.setState({ bridge: reorderBridge, tabs: workspaces, activeTabId: 'first', });
     render(<BridgeContext.Provider value={reorderBridge}><TitleBar /></BridgeContext.Provider>);
 
     const renderedTabs = screen.getAllByRole('tab');
@@ -120,7 +147,7 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ tabs: workspaces, activeTabId: 'first', busy: false });
+    useAppStore.setState({ tabs: workspaces, activeTabId: 'first', });
     render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
 
     const renderedTabs = screen.getAllByRole('tab');
@@ -156,7 +183,7 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ tabs: workspaces, activeTabId: 'second', busy: false });
+    useAppStore.setState({ tabs: workspaces, activeTabId: 'second', });
     render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
 
     const renderedTabs = screen.getAllByRole('tab');
@@ -191,7 +218,7 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ tabs: workspaces, activeTabId: 'middle', busy: false });
+    useAppStore.setState({ tabs: workspaces, activeTabId: 'middle', });
     const { unmount } = render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
 
     const rects = [
@@ -220,7 +247,7 @@ describe('TitleBar tab dragging', () => {
     expect(useAppStore.getState().tabs.map((tab) => tab.id)).toEqual(['middle', 'first', 'last']);
 
     unmount();
-    useAppStore.setState({ tabs: workspaces, activeTabId: 'middle', busy: false });
+    useAppStore.setState({ tabs: workspaces, activeTabId: 'middle', });
     render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
     renderedTabs = attachGeometry();
     fireEvent.pointerDown(renderedTabs[1], { button: 0, pointerId: 9, screenX: 290, screenY: 110, clientX: 190, clientY: 30 });
@@ -246,7 +273,7 @@ describe('TitleBar tab dragging', () => {
       outerHeight: { configurable: true, value: 800 },
     });
     const secondWorkspace = { ...workspace, id: 'second', name: 'Second', paths: ['/tmp/second'] };
-    useAppStore.setState({ tabs: [workspace, secondWorkspace], activeTabId: workspace.id, busy: false });
+    useAppStore.setState({ tabs: [workspace, secondWorkspace], activeTabId: workspace.id, });
     render(<BridgeContext.Provider value={targetBridge}><TitleBar /></BridgeContext.Provider>);
     await waitFor(() => expect(dragStateHandler).toBeDefined());
     const renderedTabs = screen.getAllByRole('tab');
@@ -343,7 +370,7 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ bridge: transferBridge, tabs: [workspace], activeTabId: workspace.id, busy: false });
+    useAppStore.setState({ bridge: transferBridge, tabs: [workspace], activeTabId: workspace.id, });
     render(<BridgeContext.Provider value={transferBridge}><TitleBar /></BridgeContext.Provider>);
 
     const tab = screen.getByRole('tab');
@@ -365,7 +392,7 @@ describe('TitleBar tab dragging', () => {
   });
 
   it('does not render tabs track or plus button when no tabs are open, but renders welcome title and prevents double click', () => {
-    useAppStore.setState({ bridge, tabs: [], activeTabId: null, busy: false });
+    useAppStore.setState({ bridge, tabs: [], activeTabId: null, });
     const { container } = render(
       <BridgeContext.Provider value={bridge}>
         <I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t: createTranslator('zh-CN') }}>

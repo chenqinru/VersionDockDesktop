@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { RepositoryStatus, UnpushedCommit, BranchInfo, CommitDetail, CommitFile } from '../bindings/generated';
 import { useI18n } from '../i18n';
-import { useAppStore } from '../store/appStore';
+import { isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { branchColor, readableAccentColor } from './branchColor';
@@ -966,7 +966,10 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   const loadUnpushedCommits = useAppStore((state) => state.loadUnpushedCommits);
   const sync = useAppStore((state) => state.sync);
   const openDiff = useAppStore((state) => state.openDiff);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => repos.some((repo) => isOperationActive(state.operations, {
+    repositoryId: repo.meta.id,
+    domain: 'sync',
+  })));
   const { t } = useI18n();
   const [checked, setChecked] = useState<Set<string>>(() => new Set<string>());
   const [pushButtonHovered, setPushButtonHovered] = useState(false);

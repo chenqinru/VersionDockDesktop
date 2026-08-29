@@ -10,11 +10,115 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli,
-    models::{DesktopError, RepositoryMeta, SvnAccountOperation, SvnAccountState},
+    models::{
+        CapabilityStatus, DesktopError, RepositoryMeta, SecureCredentialCapability,
+        SvnAccountOperation, SvnAccountState,
+    },
 };
 
 const SERVICE: &str = "com.versiondock.desktop.svn";
 static SESSION_AUTH: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+static SECURE_CAPABILITY: OnceLock<SecureCredentialCapability> = OnceLock::new();
+
+trait CredentialStore: Send + Sync {
+    fn get(&self, root: &str, username: &str) -> Result<String, String>;
+    fn set(&self, root: &str, username: &str, password: &str) -> Result<(), String>;
+    fn delete(&self, root: &str, username: &str) -> Result<(), String>;
+}
+
+struct SystemCredentialStore;
+
+impl CredentialStore for SystemCredentialStore {
+    fn get(&self, root: &str, username: &str) -> Result<String, String> {
+        entry(root, username)
+            .and_then(|item| item.get_password())
+            .map_err(|error| error.to_string())
+    }
+
+    fn set(&self, root: &str, username: &str, password: &str) -> Result<(), String> {
+        entry(root, username)
+            .and_then(|item| item.set_password(password))
+            .map_err(|error| error.to_string())
+    }
+
+    fn delete(&self, root: &str, username: &str) -> Result<(), String> {
+        entry(root, username)
+            .and_then(|item| item.delete_credential())
+            .map_err(|error| error.to_string())
+    }
+}
+
+static SYSTEM_STORE: SystemCredentialStore = SystemCredentialStore;
+
+pub async fn secure_store_capability() -> SecureCredentialCapability {
+    if let Some(capability) = SECURE_CAPABILITY.get() {
+        return capability.clone();
+    }
+    let probe_account = format!("capability-probe-{}", uuid::Uuid::new_v4());
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || {
+            let entry = keyring::Entry::new(SERVICE, &probe_account)?;
+            entry.set_password("versiondock-capability-probe")?;
+            let value = entry.get_password()?;
+            entry.delete_credential()?;
+            if value != "versiondock-capability-probe" {
+                return Err(keyring::Error::NoEntry);
+            }
+            Ok::<(), keyring::Error>(())
+        }),
+    )
+    .await;
+    let backend = if cfg!(target_os = "macos") {
+        "macos-keychain"
+    } else if cfg!(target_os = "windows") {
+        "windows-credential-manager"
+    } else {
+        "linux-secret-service"
+    };
+    let capability = match result {
+        Ok(Ok(Ok(()))) => SecureCredentialCapability {
+            status: CapabilityStatus::available(),
+            backend: Some(backend.into()),
+            password_stdin_supported: svn_password_stdin_available(),
+        },
+        Ok(Ok(Err(error))) => SecureCredentialCapability {
+            status: CapabilityStatus::unavailable("SECURE_STORAGE_UNAVAILABLE", error.to_string()),
+            backend: Some(backend.into()),
+            password_stdin_supported: svn_password_stdin_available(),
+        },
+        Ok(Err(error)) => SecureCredentialCapability {
+            status: CapabilityStatus::unavailable("SECURE_STORAGE_PROBE_FAILED", error.to_string()),
+            backend: Some(backend.into()),
+            password_stdin_supported: svn_password_stdin_available(),
+        },
+        Err(_) => SecureCredentialCapability {
+            status: CapabilityStatus::unavailable(
+                "SECURE_STORAGE_PROBE_TIMEOUT",
+                "Secure storage capability probe timed out",
+            ),
+            backend: Some(backend.into()),
+            password_stdin_supported: svn_password_stdin_available(),
+        },
+    };
+    let _ = SECURE_CAPABILITY.set(capability.clone());
+    capability
+}
+
+fn svn_password_stdin_available() -> bool {
+    let version = std::process::Command::new("svn")
+        .args(["--version", "--quiet"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .unwrap_or_default();
+    let mut parts = version
+        .trim()
+        .split('.')
+        .filter_map(|part| part.parse::<u32>().ok());
+    matches!((parts.next(), parts.next()), (Some(major), Some(minor)) if major > 1 || (major == 1 && minor >= 10))
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct AccountFile {
@@ -31,13 +135,10 @@ pub async fn state(
     let file = load(config_dir);
     let username = file.usernames.get(&root).cloned();
     let password_stdin_supported = svn_password_stdin_supported(repo, token).await;
-    let secure_storage_available =
-        entry(&root, username.as_deref().unwrap_or("capability-probe")).is_ok();
-    let password_stored = username.as_ref().is_some_and(|value| {
-        entry(&root, value)
-            .and_then(|item| item.get_password())
-            .is_ok()
-    });
+    let secure_storage_available = secure_store_capability().await.status.available;
+    let password_stored = username
+        .as_ref()
+        .is_some_and(|value| SYSTEM_STORE.get(&root, value).is_ok());
     Ok(SvnAccountState {
         repository_root: root,
         username,
@@ -76,20 +177,16 @@ pub async fn operate(
                     )
                     .hint("Use the system SVN credential cache instead"));
                 }
-                entry(&root, &username)
-                    .and_then(|item| item.set_password(&password))
-                    .map_err(|error| {
-                        DesktopError::new("SECURE_STORAGE_FAILED", error.to_string(), true)
-                    })?;
+                SYSTEM_STORE
+                    .set(&root, &username, &password)
+                    .map_err(|error| DesktopError::new("SECURE_STORAGE_FAILED", error, true))?;
             }
             file.usernames.insert(root.clone(), username);
             save(config_dir, &file)?;
         }
         SvnAccountOperation::Delete => {
             if let Some(username) = file.usernames.remove(&root) {
-                if let Ok(item) = entry(&root, &username) {
-                    let _ = item.delete_credential();
-                }
+                let _ = SYSTEM_STORE.delete(&root, &username);
             }
             if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
                 cache.remove(&repo.root_path);
@@ -114,9 +211,9 @@ pub async fn auth(
     let (Some(username), true) = (value.username, value.password_stdin_supported) else {
         return Ok(None);
     };
-    let password = entry(&value.repository_root, &username)
-        .and_then(|item| item.get_password())
-        .map_err(|error| DesktopError::new("SECURE_STORAGE_FAILED", error.to_string(), true))?;
+    let password = SYSTEM_STORE
+        .get(&value.repository_root, &username)
+        .map_err(|error| DesktopError::new("SECURE_STORAGE_FAILED", error, true))?;
     Ok(Some((username, password)))
 }
 
@@ -258,4 +355,55 @@ fn save(config_dir: &Path, value: &AccountFile) -> Result<(), DesktopError> {
         .map_err(|error| DesktopError::new("SVN_ACCOUNT_IO_FAILED", error.to_string(), true))?;
     std::fs::rename(temporary, target)
         .map_err(|error| DesktopError::new("SVN_ACCOUNT_IO_FAILED", error.to_string(), true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct MemoryCredentialStore(Mutex<HashMap<String, String>>);
+
+    impl CredentialStore for MemoryCredentialStore {
+        fn get(&self, root: &str, username: &str) -> Result<String, String> {
+            self.0
+                .lock()
+                .map_err(|_| "credential store lock failed".to_string())?
+                .get(&account_key(root, username))
+                .cloned()
+                .ok_or_else(|| "credential not found".to_string())
+        }
+
+        fn set(&self, root: &str, username: &str, password: &str) -> Result<(), String> {
+            self.0
+                .lock()
+                .map_err(|_| "credential store lock failed".to_string())?
+                .insert(account_key(root, username), password.to_string());
+            Ok(())
+        }
+
+        fn delete(&self, root: &str, username: &str) -> Result<(), String> {
+            self.0
+                .lock()
+                .map_err(|_| "credential store lock failed".to_string())?
+                .remove(&account_key(root, username));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn memory_store_supports_write_read_and_delete_without_system_credentials() {
+        let store = MemoryCredentialStore::default();
+        store
+            .set("https://svn.example.test/repo", "alice", "secret")
+            .unwrap();
+        assert_eq!(
+            store.get("https://svn.example.test/repo", "alice").unwrap(),
+            "secret"
+        );
+        store
+            .delete("https://svn.example.test/repo", "alice")
+            .unwrap();
+        assert!(store.get("https://svn.example.test/repo", "alice").is_err());
+    }
 }

@@ -19,33 +19,33 @@ export function ProfileStatusBarItem() {
 
   const currentRepo = snapshot?.repositories.find((r) => r.meta.id === selectedRepoId) ?? snapshot?.repositories[0];
   const workspaceId = snapshot?.workspace.id;
-  const isGit = currentRepo?.meta.kind === 'git';
-  const isSvn = currentRepo?.meta.kind === 'svn';
+  const currentRepoId = currentRepo?.meta.id;
+  const currentRepoKind = currentRepo?.meta.kind;
 
   const refreshSummary = useCallback(async () => {
-    if (!workspaceId || !currentRepo) {
+    if (!workspaceId || !currentRepoId) {
       return t('No profile');
     }
     try {
-      if (isGit) {
+      if (currentRepoKind === 'git') {
         const data = await bridge.request<GitIdentityState>({
           type: 'gitIdentity',
-          payload: { workspace_id: workspaceId, repo_id: currentRepo.meta.id },
-        });
+          payload: { workspace_id: workspaceId, repo_id: currentRepoId },
+        }, { showProgress: false });
         const name = data.effective.userName?.trim();
         return `Git: ${name || t('No profile')}`;
-      } else if (isSvn) {
+      } else if (currentRepoKind === 'svn') {
         const data = await bridge.request<SvnAccountState>({
           type: 'svnAccount',
-          payload: { workspace_id: workspaceId, repo_id: currentRepo.meta.id },
-        });
+          payload: { workspace_id: workspaceId, repo_id: currentRepoId },
+        }, { showProgress: false });
         return `SVN: ${data.username || (data.passwordStored ? t('Authenticated') : t('No account detected'))}`;
       }
       return t('No profile');
     } catch {
       return t('No profile');
     }
-  }, [bridge, currentRepo, isGit, isSvn, t, workspaceId]);
+  }, [bridge, currentRepoId, currentRepoKind, t, workspaceId]);
 
   useEffect(() => {
     let active = true;

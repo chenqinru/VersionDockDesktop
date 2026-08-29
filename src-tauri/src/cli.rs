@@ -86,6 +86,9 @@ pub async fn run(
             Stdio::null()
         });
 
+    #[cfg(unix)]
+    command.process_group(0);
+
     #[cfg(windows)]
     command.creation_flags(0x08000000);
 
@@ -116,8 +119,7 @@ pub async fn run(
 
     let status = tokio::select! {
         _ = cancellation.cancelled() => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            terminate_process_tree(&mut child).await;
             stdout_task.abort();
             stderr_task.abort();
             return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true));
@@ -126,8 +128,7 @@ pub async fn run(
             match result {
                 Ok(value) => value.map_err(|error| DesktopError::new("COMMAND_IO_FAILED", error.to_string(), true))?,
                 Err(_) => {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
+                    terminate_process_tree(&mut child).await;
                     stdout_task.abort();
                     stderr_task.abort();
                     return Err(DesktopError::new("COMMAND_TIMEOUT", format!("{program} timed out"), true));
@@ -181,6 +182,29 @@ pub async fn run(
         });
     }
     Ok(result)
+}
+
+async fn terminate_process_tree(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        // Commands run in an isolated process group, so this also terminates
+        // credential helpers and other subprocesses spawned by Git or SVN.
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+
+    #[cfg(windows)]
+    if let Some(pid) = child.id() {
+        let _ = tokio::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x08000000)
+            .status()
+            .await;
+    }
+
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 fn classify_failure(program: &str, stderr: &str) -> (&'static str, Option<&'static str>) {
@@ -282,8 +306,16 @@ pub fn redact(value: &str) -> String {
         .map(|line| {
             let lower = line.to_ascii_lowercase();
             if lower.contains("authorization:")
+                || lower.contains("proxy-authorization:")
+                || lower.contains("bearer ")
                 || lower.contains("password=")
+                || lower.contains("password:")
+                || lower.contains("\"password\"")
                 || lower.contains("token=")
+                || lower.contains("token:")
+                || lower.contains("\"token\"")
+                || lower.contains("api_key")
+                || lower.contains("apikey")
             {
                 "<redacted>".to_string()
             } else {
@@ -330,11 +362,11 @@ mod tests {
     #[test]
     fn secrets_are_redacted() {
         let value = redact(
-            "ok https://user:secret@example.test/repo\nAuthorization: bearer secret\npassword=hunter2",
+            "ok https://user:secret@example.test/repo\nAuthorization: bearer secret\npassword=hunter2\n{\"token\":\"secret\"}",
         );
         assert_eq!(
             value,
-            "ok https://<redacted>@example.test/repo\n<redacted>\n<redacted>"
+            "ok https://<redacted>@example.test/repo\n<redacted>\n<redacted>\n<redacted>"
         );
     }
 

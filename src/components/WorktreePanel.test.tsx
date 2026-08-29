@@ -50,7 +50,7 @@ const snapshot = {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ worktrees: {}, worktreeDiff: undefined, busy: false, snapshot: undefined, bridge: undefined });
+  useAppStore.setState({ worktrees: {}, worktreeDiff: undefined, snapshot: undefined, bridge: undefined });
 });
 
 describe('WorktreePanel', () => {

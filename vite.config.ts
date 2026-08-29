@@ -8,6 +8,10 @@ export default defineConfig({
     port: 1421,
     strictPort: true,
     host: '127.0.0.1',
+    hmr: process.env.VERSIONDOCK_STABLE_DEV === '1' ? false : undefined,
+    watch: process.env.VERSIONDOCK_STABLE_DEV === '1'
+      ? { ignored: ['**/*'] }
+      : undefined,
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {

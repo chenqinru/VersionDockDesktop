@@ -95,6 +95,23 @@ afterEach(() => {
 });
 
 describe('CommitDetailPanel merge commits', () => {
+  it('keeps the selected detail visible while an unrelated hover preview loads', () => {
+    useAppStore.setState({
+      snapshot,
+      selectedCommit: directoryDetail,
+      selectedCommits: [directoryCommit],
+      selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: directoryDetail },
+      selectedCommitLoading: {},
+    });
+    render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    expect(screen.getByText('alpha.ts')).toBeInTheDocument();
+
+    useAppStore.setState({ selectedCommitLoading: { 'repo-1:hover-preview': true } });
+
+    expect(screen.getByText('alpha.ts')).toBeInTheDocument();
+    expect(screen.queryByText('Loading files...')).not.toBeInTheDocument();
+  });
+
   it('shows only restore and cherry-pick actions on directories and applies every descendant file', async () => {
     const historyOperation = vi.fn().mockResolvedValue(undefined);
     useAppStore.setState({

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { CommitNode } from '../bindings/generated';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
-import { useAppStore } from '../store/appStore';
+import { isOperationActive, useAppStore } from '../store/appStore';
 import { CommitSearch, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
 
 type CompareFilters = {
@@ -103,7 +103,7 @@ export function BranchComparePanel({
   const branches = useAppStore((state) => state.branchesByRepo[repoId] ?? []);
   const comparison = useAppStore((state) => state.comparison);
   const compare = useAppStore((state) => state.compareBranches);
-  const busy = useAppStore((state) => state.busy);
+  const busy = useAppStore((state) => isOperationActive(state.operations, { repositoryId: repoId, domain: 'history' }));
   const repo = useAppStore((state) => state.snapshot?.repositories.find((item) => item.meta.id === repoId));
   const current = branches.find((branch) => branch.current)?.name ?? branches[0]?.name ?? '';
   const fallback = branches.find((branch) => branch.name !== current)?.name ?? current;
@@ -148,7 +148,7 @@ export function BranchComparePanel({
         commits={activeComparison.targetCommits}
         renderCommits={renderCommits}
       />
-      <div className="compare-splitter" role="separator" aria-orientation="horizontal" onPointerDown={resize}><i /></div>
+      <div className="compare-splitter" role="separator" tabIndex={0} aria-label={t('Resize branch comparison')} aria-orientation="horizontal" aria-valuemin={110} aria-valuenow={Math.round(topHeight ?? 110)} onPointerDown={resize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTopHeight((value) => Math.max(110, (value ?? 110) + (event.key === 'ArrowDown' ? 10 : -10))); } }}><i /></div>
       <ComparePane
         title={t('Exists in {0} but not in {1}', baseLabel, targetLabel)}
         emptyText={t('{0} contains all commits from {1}', targetLabel, baseLabel)}

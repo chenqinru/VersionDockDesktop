@@ -4,6 +4,7 @@ import { useAppStore } from '../../store/appStore';
 import { useI18n } from '../../i18n';
 import { promptDialog, confirmDialog } from '../dialogService';
 import type { RepositoryStatus } from '../../bindings/generated';
+import { useBridge } from '../../platform/context';
 
 interface BranchMenuPopoverProps {
   anchorRect: DOMRect | null;
@@ -12,6 +13,7 @@ interface BranchMenuPopoverProps {
 
 export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProps) {
   const { t } = useI18n();
+  const bridge = useBridge();
   const snapshot = useAppStore((state) => state.snapshot);
   const sync = useAppStore((state) => state.sync);
   const branchOperation = useAppStore((state) => state.branchOperation);
@@ -19,7 +21,6 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   const abortRepositoryOperation = useAppStore((state) => state.abortRepositoryOperation);
   const submoduleOperation = useAppStore((state) => state.submoduleOperation);
   const svnOperation = useAppStore((state) => state.svnOperation);
-  const systemOpen = useAppStore((state) => state.systemOpen);
   const setActiveTab = useAppStore((state) => state.setActiveTab);
   const backToHistory = useAppStore((state) => state.backToHistory);
   const openBranchComparison = useAppStore((state) => state.openBranchComparison);
@@ -310,6 +311,12 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   };
 
   const activeSubmenuRepo = repositories.find((r) => r.meta.id === activeSubmenuRepoId);
+  const activeSubmoduleParent = activeSubmenuRepo?.meta.parentRepoId
+    ? repositories.find((repo) => repo.meta.id === activeSubmenuRepo.meta.parentRepoId)
+    : undefined;
+  const activeSubmodulePath = activeSubmoduleParent && activeSubmenuRepo
+    ? activeSubmenuRepo.meta.rootPath.slice(activeSubmoduleParent.meta.rootPath.replace(/[\\/]+$/, '').length).replace(/^[\\/]+/, '').replaceAll('\\', '/')
+    : undefined;
   const activeRepoBranches = activeSubmenuRepoId ? branchesByRepo[activeSubmenuRepoId] ?? [] : [];
   const activeRepoTags = activeSubmenuRepoId ? tagsByRepo[activeSubmenuRepoId] ?? [] : [];
   const currentRepoBranch =
@@ -845,7 +852,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                 )}
 
                 {/* Submodule 分组（对齐原版 showRepoBranchMenu） */}
-                {activeSubmenuRepo.meta.isSubmodule && (
+                {activeSubmenuRepo.meta.isSubmodule && activeSubmoduleParent && activeSubmodulePath && (
                   <div className="statusbar-menu-section">
                     <div className="statusbar-menu-group-header">{t('SUBMODULE')}</div>
                     <button
@@ -853,9 +860,9 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await submoduleOperation(activeSubmenuRepo.meta.id, {
+                        await submoduleOperation(activeSubmoduleParent.meta.id, {
                           type: 'update',
-                          path: activeSubmenuRepo.meta.rootPath,
+                          path: activeSubmodulePath,
                           init: false,
                           recursive: false,
                           remote: false,
@@ -871,9 +878,9 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await submoduleOperation(activeSubmenuRepo.meta.id, {
+                        await submoduleOperation(activeSubmoduleParent.meta.id, {
                           type: 'update',
-                          path: activeSubmenuRepo.meta.rootPath,
+                          path: activeSubmodulePath,
                           init: true,
                           recursive: true,
                           remote: false,
@@ -889,9 +896,9 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await submoduleOperation(activeSubmenuRepo.meta.id, {
+                        await submoduleOperation(activeSubmoduleParent.meta.id, {
                           type: 'init',
-                          path: activeSubmenuRepo.meta.rootPath,
+                          path: activeSubmodulePath,
                           recursive: false,
                         });
                       }}
@@ -911,9 +918,9 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                           danger: true,
                         });
                         if (confirmed) {
-                          await submoduleOperation(activeSubmenuRepo.meta.id, {
+                          await submoduleOperation(activeSubmoduleParent.meta.id, {
                             type: 'deinit',
-                            path: activeSubmenuRepo.meta.rootPath,
+                            path: activeSubmodulePath,
                             force: false,
                           });
                         }
@@ -928,7 +935,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await systemOpen(activeSubmenuRepo.meta.id, activeSubmenuRepo.meta.rootPath, true);
+                        await bridge.openInNewWindow([activeSubmenuRepo.meta.rootPath]);
                       }}
                     >
                       <Codicon name="link-external" />

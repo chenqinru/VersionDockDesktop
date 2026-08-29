@@ -1,7 +1,8 @@
 #![allow(
     clippy::field_reassign_with_default,
     clippy::large_enum_variant,
-    clippy::result_large_err
+    clippy::result_large_err,
+    clippy::too_many_arguments
 )]
 
 mod changelist;
@@ -110,6 +111,12 @@ pub fn run() {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.state::<AppState>();
                 let _ = state.unregister_window(window.label());
+                if !state.has_registered_windows() {
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        app.state::<AppState>().cancel_all().await;
+                    });
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

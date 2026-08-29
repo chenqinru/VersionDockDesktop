@@ -4,7 +4,7 @@ import type {
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
-  WindowTabTransfer,
+  DesktopCapabilities, OperationDomain, OperationEvent, RefreshScope, RepositoryCapabilities, WindowTabTransfer,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
@@ -41,6 +41,13 @@ export interface AppNotification {
   actionLabel?: string;
   actionKey?: 'pullAll' | 'pushAll' | 'openConflicts' | 'openIdentity' | 'refresh';
   actionData?: any;
+}
+
+export interface BatchCommitReport {
+  message: string;
+  push: boolean;
+  targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>;
+  results: RepositoryOperationResult[];
 }
 
 const HISTORY_PAGE_SIZE = 100;
@@ -178,8 +185,7 @@ export interface WorkspaceSessionState {
 export interface AppStore {
   bridge?: VersionDockBridge;
   ready: boolean;
-  busy: boolean;
-  operations: Record<string, number>;
+  operations: Record<string, OperationEvent>;
   error?: string;
   errorDetails?: string;
   notice?: string;
@@ -243,7 +249,9 @@ export interface AppStore {
   comparisonTarget?: { repoId: string; target: string };
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
+  batchCommitReport?: BatchCommitReport;
   initialize: (bridge: VersionDockBridge) => Promise<void>;
+  dispose: () => void;
   openWorkspace: (paths: string[], focus?: boolean, options?: OpenWorkspaceOptions) => Promise<boolean>;
   switchTab: (workspaceId: string) => Promise<void>;
   closeTab: (workspaceId: string) => Promise<void>;
@@ -268,8 +276,10 @@ export interface AppStore {
   addIgnore: (repoId: string, path: string) => Promise<void>;
   commit: (repoId: string, message: string, amend: boolean, paths: string[], push: boolean) => Promise<void>;
   commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>, message: string, push: boolean) => Promise<void>;
+  retryBatchResult: (repoId: string) => Promise<void>;
+  dismissBatchReport: () => void;
   sync: (repoId: string, action: 'fetch' | 'pull' | 'push' | 'update') => Promise<void>;
-  loadHistory: (reset?: boolean) => Promise<void>;
+  loadHistory: (reset?: boolean, silent?: boolean) => Promise<void>;
   setHistoryFilter: (value: string) => void;
   setHistoryScope: (scope: HistoryScope) => void;
   selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
@@ -309,7 +319,7 @@ export interface AppStore {
   loadRemotes: (repoId?: string) => Promise<void>;
   remoteOperation: (repoId: string, operation: RemoteOperation) => Promise<void>;
   systemOpen: (repoId: string, path: string, reveal: boolean, external?: boolean) => Promise<void>;
-  loadConflicts: () => Promise<void>;
+  loadConflicts: (silent?: boolean) => Promise<void>;
   openMerge: (conflict: ConflictFile) => Promise<void>;
   resolveConflict: (conflict: ConflictFile, choice: 'mine' | 'theirs' | 'working') => Promise<void>;
   setMergeResult: (value: string) => void;
@@ -343,7 +353,7 @@ export interface AppStore {
 }
 
 const emptyState: AppStateSnapshot = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   settings: {
     theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
     promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false,
@@ -360,14 +370,92 @@ let autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let workspaceRequestGeneration = 0;
 let watcherRefreshInFlight = false;
 let watcherRefreshQueued = false;
-const watcherReasons = new Set<string>();
+const watcherScopes = new Map<string, Set<RefreshScope>>();
+const repositoryEventGenerations = new Map<string, number>();
 let commitSelectionGeneration = 0;
 let changesDiffGeneration = 0;
+let diffRequestGeneration = 0;
 let historyRequestGeneration = 0;
 let comparisonRequestGeneration = 0;
 let branchWorkingDiffGeneration = 0;
 const requestControllers = new Map<string, AbortController>();
 const notificationBaseline = new Map<string, { incoming: number; unpushed: number }>();
+const bridgeSubscriptions: Array<() => void> = [];
+let localOperationSequence = 0;
+let currentWindowLabel = `window-${Math.random().toString(36).slice(2)}`;
+const ownedSchedulerLeases = new Set<string>();
+
+function claimSchedulerLease(name: string, ttlMs: number): boolean {
+  if (typeof localStorage === 'undefined') return true;
+  const key = `versiondock:scheduler:${name}`;
+  const now = Date.now();
+  try {
+    const current = JSON.parse(localStorage.getItem(key) ?? 'null') as { owner?: string; expiresAt?: number } | null;
+    if (current?.owner && current.owner !== currentWindowLabel && (current.expiresAt ?? 0) > now) return false;
+    localStorage.setItem(key, JSON.stringify({ owner: currentWindowLabel, expiresAt: now + ttlMs }));
+    ownedSchedulerLeases.add(key);
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function releaseSchedulerLeases() {
+  if (typeof localStorage === 'undefined') return;
+  for (const key of ownedSchedulerLeases) {
+    try {
+      const current = JSON.parse(localStorage.getItem(key) ?? 'null') as { owner?: string } | null;
+      if (current?.owner === currentWindowLabel) localStorage.removeItem(key);
+    } catch { /* ignore damaged cross-window lease state */ }
+  }
+  ownedSchedulerLeases.clear();
+}
+
+const ACTIVE_OPERATION_STATUSES = new Set(['queued', 'running']);
+
+export function isOperationActive(
+  operations: Record<string, OperationEvent>,
+  criteria: {
+    workspaceId?: string | null;
+    repositoryId?: string | null;
+    domain?: OperationDomain | OperationDomain[];
+  },
+): boolean {
+  const domains = criteria.domain
+    ? new Set(Array.isArray(criteria.domain) ? criteria.domain : [criteria.domain])
+    : undefined;
+  return Object.values(operations).some((operation) => ACTIVE_OPERATION_STATUSES.has(operation.status)
+    && (criteria.workspaceId === undefined || operation.context.workspaceId === criteria.workspaceId)
+    && (criteria.repositoryId === undefined || operation.context.repositoryId === criteria.repositoryId)
+    && (!domains || domains.has(operation.context.domain)));
+}
+
+export function capabilityAvailable(
+  capabilities: DesktopCapabilities | RepositoryCapabilities | undefined,
+  key: string,
+  fallback = false,
+): boolean {
+  return capabilities?.availability?.[key]?.available
+    ?? (capabilities && key in capabilities ? Boolean((capabilities as unknown as Record<string, unknown>)[key]) : fallback);
+}
+
+function operationContext(domainKey: string, state: AppStore): OperationEvent['context'] {
+  const [rawDomain, repositoryId] = domainKey.split(':', 2);
+  const domainMap: Record<string, OperationDomain> = {
+    repository: 'status', workspace: 'workspace', diff: 'diff', history: 'history', branch: 'branch',
+    tag: 'tag', commit: 'commit', sync: 'sync', conflict: 'conflict', stash: 'stash', shelf: 'shelf',
+    changelist: 'changelist', worktree: 'worktree', subtree: 'subtree', submodule: 'submodule', remote: 'remote',
+    identity: 'identity', svn: 'svnAccount', system: 'system', fileHistory: 'fileHistory',
+  };
+  return {
+    generation: ++localOperationSequence,
+    domain: domainMap[rawDomain] ?? 'application',
+    visibility: 'foreground',
+    workspaceId: state.snapshot?.workspace.id ?? null,
+    repositoryId: repositoryId ?? null,
+    target: null,
+  };
+}
 
 function beginRequest(key: string): AbortController {
   requestControllers.get(key)?.abort();
@@ -393,7 +481,26 @@ function projectSnapshot(snapshot: WorkspaceSnapshot, repositories: RepositorySt
 
 export const useAppStore = create<AppStore>((set, get) => {
   const withBusy = async (operation: () => Promise<void>, domain = 'workspace') => {
-    set((state) => ({ busy: true, error: undefined, operations: { ...state.operations, [domain]: (state.operations[domain] ?? 0) + 1 } }));
+    const operationId = `client-${Date.now()}-${++localOperationSequence}`;
+    const context = operationContext(domain, get());
+    set((state) => ({
+      error: undefined,
+      operations: {
+        ...state.operations,
+        [operationId]: {
+          operationId,
+          context,
+          status: 'running',
+          phase: context.domain,
+          message: '',
+          startedAt: new Date().toISOString(),
+          cancellable: false,
+          completed: null,
+          total: null,
+          error: null,
+        },
+      },
+    }));
     try {
       await operation();
     } catch (error) {
@@ -405,9 +512,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     } finally {
       set((state) => {
         const operations = { ...state.operations };
-        const remaining = Math.max(0, (operations[domain] ?? 1) - 1);
-        if (remaining) operations[domain] = remaining; else delete operations[domain];
-        return { operations, busy: Object.keys(operations).length > 0 };
+        delete operations[operationId];
+        return { operations };
       });
     }
   };
@@ -431,7 +537,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     if (autoRefreshTimer) clearInterval(autoRefreshTimer);
     autoRefreshTimer = undefined;
     const seconds = settings().autoRefreshInterval;
-    if (seconds > 0) autoRefreshTimer = setInterval(() => { if (get().snapshot && !get().busy) void get().refresh(true); }, seconds * 1000);
+    if (seconds > 0) autoRefreshTimer = setInterval(() => {
+      const state = get();
+      if (state.snapshot && claimSchedulerLease('auto-refresh', Math.max(2_000, seconds * 1_500)) && !isOperationActive(state.operations, { workspaceId: state.snapshot.workspace.id, domain: 'workspace' })) void state.refresh(true);
+    }, seconds * 1000);
   };
 
   const updateSettings = async (patch: Partial<DesktopSettings>) => {
@@ -545,7 +654,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     await bridge().syncWindowTabs(tabs.map((item) => item.paths), activeId);
   };
 
-  const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true) => {
+  const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true, silent = false) => {
     const current = get().snapshot;
     if (current?.workspace.id === snapshot.workspace.id && current.generation > snapshot.generation) return;
     const workspaceChanged = current?.workspace.id !== snapshot.workspace.id;
@@ -557,11 +666,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     set(workspaceChanged
       ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId });
+    const notificationLeader = claimSchedulerLease('notifications', 5_000);
     for (const repo of visibleSnapshot.repositories) {
       const counts = { incoming: repo.behind, unpushed: repo.ahead };
       const previous = notificationBaseline.get(repo.meta.id);
       notificationBaseline.set(repo.meta.id, counts);
-      if (!previous) continue;
+      if (!previous || !notificationLeader) continue;
       const preferences = settings();
       const incoming = preferences.notifyIncomingCommits && counts.incoming > previous.incoming;
       const unpushed = preferences.notifyUnpushedCommits && counts.unpushed > previous.unpushed;
@@ -578,7 +688,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!await bridge().notify('VersionDock Desktop', body)) set({ notice: body });
     }
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
-    const requests: Promise<void>[] = [get().loadConflicts()];
+    const requests: Promise<void>[] = [get().loadConflicts(silent)];
     if (workspaceChanged || reloadRepository) requests.push(get().loadStashes(), get().loadShelves(), get().loadWorktrees(), get().loadSubtrees(), get().loadSubmodules(), get().loadUnpushedCommits());
     await Promise.all(requests);
     if (get().snapshot?.workspace.id === snapshot.workspace.id) {
@@ -601,12 +711,76 @@ export const useAppStore = create<AppStore>((set, get) => {
       return;
     }
     watcherRefreshInFlight = true;
-    const reasons = new Set(watcherReasons);
-    watcherReasons.clear();
+    const pending = new Map(watcherScopes);
+    watcherScopes.clear();
     try {
-      await get().refresh(true);
-      if (reasons.has('refs')) {
-        await Promise.all([get().loadHistory(true), get().selectRepo(get().selectedRepoId ?? '', true)]);
+      const workspaceId = get().snapshot?.workspace.id;
+      if (!workspaceId) return;
+      if ([...pending.values()].some((scopes) => scopes.has('workspaceSnapshot'))) {
+        await get().refresh(true);
+        return;
+      }
+      for (const [repoId, scopes] of pending) {
+        if (!repoId) continue;
+        if (scopes.has('status') || scopes.has('index') || scopes.has('operation') || scopes.has('svnRevision')) {
+          const status = await bridge().request<RepositoryStatus>(
+            { type: 'repositoryStatus', payload: { workspace_id: workspaceId, repo_id: repoId } },
+            { showProgress: false },
+          );
+          if (get().snapshot?.workspace.id !== workspaceId) return;
+          set((state) => {
+            const allRepositories = state.allRepositories.map((repo) => repo.meta.id === repoId ? status : repo);
+            return {
+              allRepositories,
+              snapshot: state.snapshot ? projectSnapshot({ ...state.snapshot, repositories: allRepositories }, allRepositories, settings()) : undefined,
+            };
+          });
+        }
+        if (scopes.has('refs') || scopes.has('history')) {
+          const [branches, tags] = await Promise.all([
+            bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false }),
+            bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false }),
+          ]);
+          if (get().snapshot?.workspace.id !== workspaceId) return;
+          set((state) => ({
+            branchesByRepo: { ...state.branchesByRepo, [repoId]: branches },
+            tagsByRepo: { ...state.tagsByRepo, [repoId]: tags },
+            branches: state.selectedRepoId === repoId ? branches : state.branches,
+            tags: state.selectedRepoId === repoId ? tags : state.tags,
+          }));
+          if (!get().historyLoading) await get().loadHistory(true, true);
+        }
+        if (scopes.has('conflicts')) await get().loadConflicts(true);
+        const selected = get().selectedFile;
+        if (scopes.has('diff') && selected?.repoId === repoId && get().mode === 'diff') {
+          const generation = ++diffRequestGeneration;
+          const controller = beginRequest(`watcher-diff:${repoId}`);
+          const diff = await bridge().request<DiffDocument>({
+            type: 'fileDiff',
+            payload: {
+              workspace_id: workspaceId,
+              repo_id: selected.repoId,
+              relative_path: selected.path,
+              staged: selected.staged,
+              revision: selected.revision ?? null,
+              from_revision: selected.fromRevision ?? null,
+              to_revision: selected.toRevision ?? null,
+            },
+          }, { signal: controller.signal, showProgress: false });
+          const current = get();
+          const currentFile = current.selectedFile;
+          if (generation === diffRequestGeneration
+            && current.snapshot?.workspace.id === workspaceId
+            && current.mode === 'diff'
+            && currentFile?.repoId === selected.repoId
+            && currentFile.path === selected.path
+            && currentFile.staged === selected.staged
+            && currentFile.revision === selected.revision
+            && currentFile.fromRevision === selected.fromRevision
+            && currentFile.toRevision === selected.toRevision) {
+            set({ diff });
+          }
+        }
       }
     } finally {
       watcherRefreshInFlight = false;
@@ -618,7 +792,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, busy: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {},
+    ready: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined,
 
     operations: {},
 
@@ -642,16 +816,37 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     initialize: async (value) => {
+      bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
       set({ bridge: value });
-      value.subscribe((event) => {
+      currentWindowLabel = await value.getWindowLabel().catch(() => currentWindowLabel);
+      bridgeSubscriptions.push(value.subscribe((event) => {
+        if ('operationId' in event) {
+          if (event.context.visibility === 'background') return;
+          set((state) => ({ operations: { ...state.operations, [event.operationId]: event } }));
+          if (!ACTIVE_OPERATION_STATUSES.has(event.status)) {
+            window.setTimeout(() => set((state) => {
+              const operations = { ...state.operations };
+              delete operations[event.operationId];
+              return { operations };
+            }), 750);
+          }
+          return;
+        }
         const currentWorkspaceId = get().snapshot?.workspace.id;
         if (!currentWorkspaceId) return;
-        if ('workspaceId' in event && ['worktree', 'status', 'refs'].includes(event.reason) && event.workspaceId === currentWorkspaceId) {
-          watcherReasons.add(event.reason);
+        if ('scopes' in event && event.workspaceId === currentWorkspaceId) {
+          const generationKey = `${event.workspaceId}:${event.repoId ?? ''}`;
+          const previousGeneration = repositoryEventGenerations.get(generationKey) ?? 0;
+          if (event.generation < previousGeneration) return;
+          repositoryEventGenerations.set(generationKey, event.generation);
+          const key = event.repoId ?? '';
+          const scopes = watcherScopes.get(key) ?? new Set<RefreshScope>();
+          event.scopes.forEach((scope) => scopes.add(scope));
+          watcherScopes.set(key, scopes);
           if (watcherTimer) clearTimeout(watcherTimer);
           watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
         }
-      });
+      }));
       void value.onFocusTab((focusPaths) => {
         const targetTab = get().tabs.find((tab) =>
           tab.paths.length === focusPaths.length && tab.paths.every((p, i) => p === focusPaths[i])
@@ -659,7 +854,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (targetTab) {
           void get().switchTab(targetTab.id);
         }
-      });
+      }).then((dispose) => bridgeSubscriptions.push(dispose));
       await withBusy(async () => {
         const loaded = await value.request<BootstrapData>({ type: 'bootstrap' });
         const bootstrap = loaded.state.settings?.resetViewLocationsOnStartup
@@ -667,9 +862,13 @@ export const useAppStore = create<AppStore>((set, get) => {
           : loaded;
         value.setState(bootstrap.state);
         set({ bootstrap, ready: true });
-        await get().restoreTabsOnStartup();
+        const launchWorkspace = bootstrap.launchWorkspaceId
+          ? bootstrap.state.recentWorkspaces.find((workspace) => workspace.id === bootstrap.launchWorkspaceId)
+          : undefined;
+        if (launchWorkspace) await get().openWorkspace(launchWorkspace.paths, true, { skipCrossWindowFocus: true });
+        else await get().restoreTabsOnStartup();
         restartAutoRefresh();
-        if (bootstrap.state.settings?.fetchOnStartup && get().snapshot) {
+        if (bootstrap.state.settings?.fetchOnStartup && get().snapshot && claimSchedulerLease('fetch-on-startup', 60_000)) {
           const gitRepos = get().snapshot?.repositories.filter((repo) => repo.meta.kind === 'git' && repo.toolAvailable !== false) ?? [];
           await Promise.allSettled(gitRepos.map((repo) => get().sync(repo.meta.id, 'fetch')));
         }
@@ -679,6 +878,18 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       set({ ready: true });
       void get().checkUpdateSilently();
+    },
+
+    dispose: () => {
+      cancelRequests();
+      bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
+      if (watcherTimer) clearTimeout(watcherTimer);
+      if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      watcherTimer = undefined;
+      autoRefreshTimer = undefined;
+      watcherScopes.clear();
+      repositoryEventGenerations.clear();
+      releaseSchedulerLeases();
     },
 
     openWorkspace: async (paths, focus = true, options = {}) => {
@@ -768,6 +979,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       workspaceRequestGeneration += 1;
       historyRequestGeneration += 1;
       changesDiffGeneration += 1;
+      diffRequestGeneration += 1;
       commitSelectionGeneration += 1;
       comparisonRequestGeneration += 1;
       branchWorkingDiffGeneration += 1;
@@ -1078,9 +1290,12 @@ export const useAppStore = create<AppStore>((set, get) => {
       const operation = async () => {
         const id = workspaceId();
         const controller = beginRequest(`workspace:${id}`);
-        const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceRefresh', payload: { workspace_id: id } }, { signal: controller.signal });
+        const snapshot = await bridge().request<WorkspaceSnapshot>(
+          { type: 'workspaceRefresh', payload: { workspace_id: id } },
+          { signal: controller.signal, showProgress: !silent },
+        );
         if (get().snapshot?.workspace.id !== id) return;
-        await applySnapshot(snapshot, !silent);
+        await applySnapshot(snapshot, !silent, silent);
       };
       if (silent) {
         try {
@@ -1101,7 +1316,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       const repoChanged = get().selectedRepoId !== repoId;
       if (repoChanged) {
         comparisonRequestGeneration += 1;
-        requestControllers.get('branch-comparison')?.abort();
+        commitSelectionGeneration += 1;
+        changesDiffGeneration += 1;
+        diffRequestGeneration += 1;
+        historyRequestGeneration += 1;
+        for (const key of ['branch-comparison', 'diff', 'history', 'changes-diff', 'branch-working-diff']) {
+          requestControllers.get(key)?.abort();
+        }
       }
       set((state) => ({
         selectedRepoId: repoId,
@@ -1113,6 +1334,9 @@ export const useAppStore = create<AppStore>((set, get) => {
           mergeCommitsLoading: {},
           changes: undefined,
           changesDiff: undefined,
+          selectedFile: undefined,
+          fileHistoryTarget: undefined,
+          diff: undefined,
           comparisonTarget: undefined,
           comparison: undefined,
           mode: 'history' as const,
@@ -1154,9 +1378,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     openDiff: async (repoId, path, staged, revision, range) => withBusy(async () => {
+      const generation = ++diffRequestGeneration;
       const controller = beginRequest('diff');
       const diff = await bridge().request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: path, staged, revision: revision ?? null, from_revision: range?.fromRevision ?? null, to_revision: range?.toRevision ?? null } }, { signal: controller.signal });
-      set({ selectedFile: { repoId, path, staged, revision, fromRevision: range?.fromRevision, toRevision: range?.toRevision }, diff, mode: 'diff' });
+      if (generation === diffRequestGeneration) set({ selectedFile: { repoId, path, staged, revision, fromRevision: range?.fromRevision, toRevision: range?.toRevision }, diff, mode: 'diff' });
     }, `diff:${repoId}`),
     openStashDiff: async (repoId, reference, path) => withBusy(async () => {
       const controller = beginRequest('diff');
@@ -1219,23 +1444,60 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     commitMany: async (targets, message, push) => withBusy(async () => {
       const workspace_id = workspaceId();
-      await Promise.all(targets.map(async (target) => {
-        if (target.unstagePaths.length > 0) {
-          await bridge().request({ type: 'unstage', payload: { workspace_id, repo_id: target.repoId, paths: target.unstagePaths } });
-        }
-      }));
-      const results = await bridge().request<RepositoryOperationResult[]>({ type: 'batchCommit', payload: { workspace_id, targets: targets.map((target) => ({ repoId: target.repoId, message, amend: target.amend, paths: target.paths })), push } }, { timeoutMs: 600_000 });
+      const results = await bridge().request<RepositoryOperationResult[]>({
+        type: 'batchCommit',
+        payload: {
+          workspace_id,
+          targets: targets.map((target) => ({
+            repoId: target.repoId,
+            message,
+            amend: target.amend,
+            paths: target.paths,
+            unstagePaths: target.unstagePaths,
+          })),
+          push,
+        },
+      }, { timeoutMs: 600_000 });
+      set({ batchCommitReport: { message, push, targets, results } });
       const failures = results.filter((result) => result.error);
       if (failures.length) set({ error: failures.map((result) => `${result.repoId}: ${result.error?.message}`).join('\n') });
       await get().refresh();
     }, 'commit:batch'),
+
+    retryBatchResult: async (repoId) => withBusy(async () => {
+      const report = get().batchCommitReport;
+      const previous = report?.results.find((result) => result.repoId === repoId);
+      const target = report?.targets.find((item) => item.repoId === repoId);
+      if (!report || !previous || !target) return;
+      let next: RepositoryOperationResult;
+      if (previous.committed && previous.pushAttempted && !previous.pushed) {
+        try {
+          await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null } }, { timeoutMs: 600_000 });
+          next = { ...previous, pushed: true, failedStage: null, recoveryHint: null, error: null };
+        } catch (error) {
+          next = { ...previous, error: error instanceof BridgeError ? error : previous.error };
+        }
+      } else {
+        [next] = await bridge().request<RepositoryOperationResult[]>({
+          type: 'batchCommit',
+          payload: {
+            workspace_id: workspaceId(),
+            targets: [{ repoId, message: report.message, amend: target.amend, paths: target.paths, unstagePaths: target.unstagePaths }],
+            push: report.push,
+          },
+        }, { timeoutMs: 600_000 });
+      }
+      set({ batchCommitReport: { ...report, results: report.results.map((item) => item.repoId === repoId ? next : item) } });
+      await get().refresh();
+    }, `commit:${repoId}`),
+    dismissBatchReport: () => set({ batchCommitReport: undefined }),
 
     sync: async (repoId, action) => withBusy(async () => {
       await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
       await get().refresh();
     }, `sync:${repoId}`),
 
-    loadHistory: async (reset = false) => {
+    loadHistory: async (reset = false, silent = false) => {
       const allRepos = (get().snapshot?.repositories ?? []).filter((repo) => !repo.meta.isWorktree);
       const scope = get().historyScope;
       const repoIds = scope.repoIds ? new Set(scope.repoIds) : null;
@@ -1252,19 +1514,20 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       const requestGeneration = reset ? ++historyRequestGeneration : historyRequestGeneration;
       const requestWorkspace = workspaceId();
+      const controller = beginRequest('history');
       const visibleLimit = Math.min((reset ? 0 : get().history.length) + HISTORY_PAGE_SIZE, historyMaxCommits);
-      set({ historyLoading: true });
+      if (!silent) set({ historyLoading: true });
       try {
         // VersionDock fetches the prefix needed from every repository, merges
         // those logs, and only then applies the workspace-wide page boundary.
         const pagesPromise = Promise.all(repos.map(async (repo) => {
-          const page = await bridge().request<HistoryPage>({ type: 'history', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, skip: 0, limit: visibleLimit, filter: get().historyFilter || null, revision: scope.revisionsByRepo[repo.meta.id] ?? null } });
+          const page = await bridge().request<HistoryPage>({ type: 'history', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, skip: 0, limit: visibleLimit, filter: get().historyFilter || null, revision: scope.revisionsByRepo[repo.meta.id] ?? null } }, { signal: controller.signal, showProgress: !silent });
           return { repoId: repo.meta.id, page };
         }));
         const topologyPromise = reset && !get().historyFilter
           ? Promise.all(repos.map(async (repo) => ({
             repoId: repo.meta.id,
-            commits: await bridge().request<GraphCommitNode[]>({ type: 'historyTopology', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, svn_limit: 1000 } }).catch(() => []),
+            commits: await bridge().request<GraphCommitNode[]>({ type: 'historyTopology', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, svn_limit: 1000 } }, { signal: controller.signal, showProgress: !silent }).catch((error) => isAbortError(error) ? Promise.reject(error) : []),
           })))
           : Promise.resolve(undefined);
         const [pages, topology] = await Promise.all([pagesPromise, topologyPromise]);
@@ -1291,7 +1554,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           throw error;
         }
       } finally {
-        if (requestGeneration === historyRequestGeneration) set({ historyLoading: false });
+        if (!silent && requestGeneration === historyRequestGeneration) set({ historyLoading: false });
       }
     },
 
@@ -1447,7 +1710,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     stashOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'stashOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-      await Promise.all([get().loadStashes(repoId), get().refresh()]);
+      await Promise.all([get().loadStashes(repoId), get().refresh(true)]);
     }, `stash:${repoId}`),
     loadShelves: async (repoId) => {
       const b = get().bridge;
@@ -1657,11 +1920,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       await bridge().request({ type: 'systemOpen', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: relativePath, reveal, external } });
     }, `system:${repoId}`),
 
-    loadConflicts: async () => {
+    loadConflicts: async (silent = false) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
-      const conflicts = await b.request<ConflictFile[]>({ type: 'conflicts', payload: { workspace_id: wid } }).catch(() => []);
+      const conflicts = await b.request<ConflictFile[]>({ type: 'conflicts', payload: { workspace_id: wid } }, { showProgress: !silent }).catch(() => []);
       if (get().snapshot?.workspace.id !== wid) return;
       set({ conflicts });
     },
@@ -1696,7 +1959,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       await get().refresh();
     }, `conflict:${repoId}`),
 
-    backToHistory: () => set({ mode: 'history', diff: undefined, changes: undefined, changesDiff: undefined, merge: undefined }),
+    backToHistory: () => {
+      for (const key of ['diff', 'changes-diff', 'branch-working-diff']) requestControllers.get(key)?.abort();
+      set({ mode: 'history', diff: undefined, changes: undefined, changesDiff: undefined, merge: undefined });
+    },
     openFileHistory: (repoId, path) => set({ fileHistoryTarget: { repoId, path } }),
     closeFileHistory: () => set({ fileHistoryTarget: undefined }),
 
