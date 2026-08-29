@@ -32,14 +32,29 @@ function Get-VerifiedArchive(
   }
 }
 
+function Test-NativeExecutable([string]$Executable) {
+  try {
+    & $Executable --version --quiet *> $null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  }
+}
+
 $cacheRootPath = [System.IO.Path]::GetFullPath($CacheRoot)
 $runtimeRoot = Join-Path $cacheRootPath "runtime"
 $svnExecutable = Join-Path $runtimeRoot "bin\svn.exe"
 $svnAdminExecutable = Join-Path $runtimeRoot "bin\svnadmin.exe"
 
 if ((Test-Path -LiteralPath $svnExecutable) -and (Test-Path -LiteralPath $svnAdminExecutable)) {
-  Write-Host "Using cached Unicode-capable SVN runtime at $runtimeRoot"
-  exit 0
+  $svnWorks = Test-NativeExecutable $svnExecutable
+  $svnAdminWorks = Test-NativeExecutable $svnAdminExecutable
+  if ($svnWorks -and $svnAdminWorks) {
+    Write-Host "Using cached Unicode-capable SVN runtime at $runtimeRoot"
+    exit 0
+  }
+  Write-Warning "Discarding an incomplete Windows SVN runtime cache"
+  Remove-Item -LiteralPath $runtimeRoot -Recurse -Force
 }
 
 $buildRoot = Join-Path $env:RUNNER_TEMP ("versiondock-svn-build-{0}" -f [guid]::NewGuid().ToString("N"))
@@ -76,7 +91,10 @@ $env:VCPKG_ROOT = $vcpkgRoot
 & (Join-Path $vcpkgRoot "bootstrap-vcpkg.bat") -disableMetrics
 Assert-NativeSuccess "vcpkg bootstrap"
 $env:VCPKG_DEFAULT_BINARY_CACHE = $binaryCache
-& (Join-Path $vcpkgRoot "vcpkg.exe") install --triplet x64-windows apr apr-util serf expat zlib sqlite3
+# VersionDock's integration suite uses local file:// repositories. HTTP/WebDAV
+# support would pull in serf, OpenSSL and SCons even though none of them are
+# exercised here, so keep the CI-only client limited to the protocols we test.
+& (Join-Path $vcpkgRoot "vcpkg.exe") install --triplet x64-windows apr apr-util expat zlib sqlite3
 Assert-NativeSuccess "vcpkg dependency installation"
 
 Push-Location $sourceDirectory
@@ -98,7 +116,9 @@ $cmakeConfigureArguments = @(
   "-DCMAKE_BUILD_TYPE:STRING=Release"
   "-DBUILD_SHARED_LIBS:BOOL=ON"
   "-DSVN_ENABLE_TESTS:BOOL=OFF"
-  "-DSVN_ENABLE_RA_SERF:BOOL=ON"
+  "-DSVN_ENABLE_RA_LOCAL:BOOL=ON"
+  "-DSVN_ENABLE_RA_SERF:BOOL=OFF"
+  "-DSVN_ENABLE_RA_SVN:BOOL=ON"
   "-DSVN_ENABLE_NLS:BOOL=OFF"
   "-DSVN_ENABLE_TUI:BOOL=OFF"
   "-DCMAKE_INSTALL_PREFIX:PATH=$installStaging"
