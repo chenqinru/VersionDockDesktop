@@ -59,7 +59,7 @@ export type BranchInfo = {
 
 export type BranchOperation = { type: "create"; name: string; from: string | null } | { type: "checkout"; name: string } | { type: "merge"; name: string } | { type: "rebase"; name: string } | { type: "rename"; old_name: string; new_name: string } | { type: "delete"; name: string; force: boolean };
 
-export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payload: {
+export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities" } | { type: "saveAppState"; payload: {
 	state: AppStateSnapshot,
 } } | { type: "updateSettings"; payload: {
 	settings: DesktopSettings,
@@ -308,6 +308,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "saveAppState"; payl
 	operation: RemoteOperation,
 } } | { type: "conflicts"; payload: {
 	workspace_id: string,
+	repo_id: string | null,
 } } | { type: "conflictVersions"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -665,7 +666,7 @@ export type PatchDocument = {
 	content: string,
 };
 
-export type RefreshScope = "workspaceSnapshot" | "status" | "diff" | "index" | "refs" | "history" | "operation" | "conflicts" | "svnRevision";
+export type RefreshScope = "workspaceSnapshot" | "status" | "diff" | "index" | "refs" | "history" | "operation" | "conflicts" | "svnRevision" | "unpushed" | "worktrees" | "subtrees" | "submodules";
 
 export type RemoteInfo = {
 	name: string,

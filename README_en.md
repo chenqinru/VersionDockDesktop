@@ -50,7 +50,8 @@ Looking for an in-editor VS Code extension instead?
 - **Node.js**: `20+`
 - **Rust**: `stable` (1.78+)
 - **System WebView**: Pre-installed on macOS, Windows, and modern Linux distributions.
-- **Git** / **SVN**: Installed in system PATH.
+- **Git**: 2.23+ in system PATH.
+- **SVN**: 1.9+ in system PATH; 1.10+ is required for secure password-stdin integration.
 
 ```bash
 # Install dependencies

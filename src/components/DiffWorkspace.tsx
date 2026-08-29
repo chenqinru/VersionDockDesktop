@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
@@ -13,8 +13,16 @@ export function DiffWorkspace() {
   const diff = useAppStore((state) => state.diff);
   const back = useAppStore((state) => state.backToHistory);
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
-  const [context, setContext] = useState<{ x: number; y: number }>();
+  const [context, setContext] = useState<{ x: number; y: number; selection?: string }>();
+  const lastRangeRef = useRef<Range | null>(null);
   const { t } = useI18n();
+
+  const syncSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && sel.toString().length > 0) {
+      lastRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
   const file = useAppStore((state) => state.selectedFile);
   const externalEditor = useAppStore((state) => state.bootstrap?.state.settings?.externalEditor ?? state.bootstrap?.state.externalEditor);
   const snapshot = useAppStore((state) => state.snapshot);
@@ -44,7 +52,38 @@ export function DiffWorkspace() {
         </>}
       </div>
     </header>
-    <div className="diff-content-context" onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY }); }}>{diff.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : !diff.content ? <DiffPlaceholder kind="empty" path={diff.path} /> : <UnifiedDiffView content={diff.content} path={diff.path} language={diff.language} />}</div>
-    {context && <ContextMenu x={context.x} y={context.y} items={contextItems} onSelect={() => { const selection = window.getSelection()?.toString(); void navigator.clipboard?.writeText(selection || diff.content).catch(() => undefined); setContext(undefined); }} onClose={() => setContext(undefined)} />}
+    <div
+      className="diff-content-context"
+      onMouseUp={syncSelection}
+      onKeyUp={syncSelection}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        syncSelection();
+        const sel = window.getSelection();
+        if ((!sel || sel.isCollapsed || !sel.toString()) && lastRangeRef.current) {
+          sel?.removeAllRanges();
+          try {
+            sel?.addRange(lastRangeRef.current);
+          } catch {
+            // ignore range reset errors if DOM mutated
+          }
+        }
+        const selection = window.getSelection()?.toString() || '';
+        setContext({ x: event.clientX, y: event.clientY, selection });
+      }}
+    >
+      {diff.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : !diff.content ? <DiffPlaceholder kind="empty" path={diff.path} /> : <UnifiedDiffView content={diff.content} path={diff.path} language={diff.language} />}
+    </div>
+    {context && <ContextMenu
+      x={context.x}
+      y={context.y}
+      items={contextItems}
+      onSelect={() => {
+        const text = context.selection || window.getSelection()?.toString() || diff.content;
+        void navigator.clipboard?.writeText(text).catch(() => undefined);
+        setContext(undefined);
+      }}
+      onClose={() => setContext(undefined)}
+    />}
   </section>;
 }

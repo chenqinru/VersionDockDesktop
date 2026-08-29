@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../i18n';
 import { useBridge } from '../../platform/context';
 import { useAppStore } from '../../store/appStore';
@@ -18,7 +18,15 @@ export function OperationStatusBarItem() {
       && (!activeWorkspaceId || operation.context.workspaceId === null || operation.context.workspaceId === activeWorkspaceId)
   ), [activeWorkspaceId, operations]);
 
-  const operation = activeOperations[0];
+  const [visibleOperationId, setVisibleOperationId] = useState<string>();
+  const candidate = activeOperations[0];
+  useEffect(() => {
+    if (!candidate) return;
+    if (activeOperations.some((operation) => operation.operationId === visibleOperationId)) return;
+    const timer = window.setTimeout(() => setVisibleOperationId(candidate.operationId), 250);
+    return () => window.clearTimeout(timer);
+  }, [activeOperations, candidate, visibleOperationId]);
+  const operation = activeOperations.find((item) => item.operationId === visibleOperationId);
   if (!operation) return null;
 
   const label = t(operation.phase);

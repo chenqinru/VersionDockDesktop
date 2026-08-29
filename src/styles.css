@@ -3734,26 +3734,56 @@ button.danger:not(:disabled):hover,
 .diff-placeholder > small { color: var(--versiondock-faint); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 
 .unified-diff { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--versiondock-bg); font-family: var(--versiondock-code); }
+.diff-toolbar { height: 28px; min-height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; background: color-mix(in srgb, var(--versiondock-surface) 90%, var(--versiondock-bg)); border-bottom: 1px solid var(--versiondock-border-soft); user-select: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); gap: 6px; z-index: 2; }
+.diff-toolbar-left, .diff-toolbar-right { display: flex; align-items: center; gap: 4px; }
+.diff-view-mode-group { display: flex; align-items: center; gap: 2px; padding: 1px; border-radius: 4px; background: color-mix(in srgb, var(--versiondock-bg) 60%, var(--versiondock-surface)); border: 1px solid var(--versiondock-border-soft); }
+.diff-toolbar-btn { height: 20px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--versiondock-muted); cursor: pointer; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.diff-toolbar-btn:hover:not(:disabled) { background: var(--versiondock-hover); color: var(--versiondock-text); }
+.diff-toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.diff-toolbar-btn.active { background: color-mix(in srgb, var(--versiondock-accent-bg) 20%, transparent); color: var(--versiondock-accent); font-weight: 500; }
+.diff-toolbar-btn .codicon { font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.diff-change-count { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); padding: 0 4px; }
 .unified-diff-scroll { min-width: 0; min-height: 0; flex: 1; overflow: auto; contain: strict; }
-.unified-diff-virtual { position: relative; width: 100%; min-width: 720px; }
-.unified-diff.inline .unified-diff-virtual { min-width: 520px; }
-.unified-diff-virtual-row { position: absolute; top: 0; left: 0; width: 100%; min-width: inherit; }
-.diff-split-row { width: 100%; min-height: 20px; display: grid; grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr); }
-.diff-code-cell { min-width: 0; min-height: 20px; overflow: hidden; display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: stretch; }
-.diff-code-cell.old { border-right: 1px solid var(--versiondock-border); }
-.diff-code-cell.deletion, .diff-inline-row.deletion { background: color-mix(in srgb, var(--versiondock-danger) 16%, var(--versiondock-bg)); }
-.diff-code-cell.addition, .diff-inline-row.addition { background: color-mix(in srgb, var(--versiondock-success) 15%, var(--versiondock-bg)); }
-.diff-code-cell.empty { background: color-mix(in srgb, var(--versiondock-surface) 58%, var(--versiondock-bg)); }
-.diff-code-cell.empty code { background-color: color-mix(in srgb, var(--versiondock-surface) 72%, var(--versiondock-bg)); background-image: repeating-linear-gradient(-45deg, transparent 0 4px, color-mix(in srgb, var(--versiondock-muted) 24%, transparent) 4px 5px); }
+.unified-diff-virtual { position: relative; width: 100%; min-width: 100%; }
+.unified-diff-split-container { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%; height: 100%; position: relative; }
+.unified-diff-pane { position: relative; width: 100%; height: 100%; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.unified-diff-pane.old { border-right: 1px solid var(--versiondock-border); }
+.unified-diff-pane .unified-diff-virtual-row { position: absolute; top: 0; left: 0; width: max-content; min-width: 100%; }
+.unified-diff-virtual-row { position: absolute; top: 0; left: 0; width: max-content; min-width: 100%; }
+.diff-split-row { width: 100%; min-height: 20px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.diff-code-cell { min-width: 100%; width: max-content; min-height: 20px; display: flex; align-items: stretch; }
+.diff-code-cell.old { border-right: 0; }
+.diff-code-cell.deletion, .diff-inline-row.deletion { background: color-mix(in srgb, var(--versiondock-danger) 16%, var(--versiondock-bg)); box-shadow: inset 3.5px 0 0 var(--versiondock-danger); }
+.diff-code-cell.addition, .diff-inline-row.addition { background: color-mix(in srgb, var(--versiondock-success) 15%, var(--versiondock-bg)); box-shadow: inset 3.5px 0 0 var(--versiondock-success); }
+.diff-code-cell.empty { background: color-mix(in srgb, var(--versiondock-surface) 58%, var(--versiondock-bg)); flex: 1; min-width: 100%; }
+.diff-code-cell.empty code { background-color: color-mix(in srgb, var(--versiondock-surface) 72%, var(--versiondock-bg)); background-image: repeating-linear-gradient(-45deg, transparent 0 6px, color-mix(in srgb, var(--versiondock-muted) 24%, transparent) 6px 7.071px); background-size: 10px 10px; width: 100%; min-width: 100%; }
+.diff-code-cell.empty .diff-line-number { border-left-color: transparent; }
 .diff-marker { display: none; }
-.diff-line-number { display: flex; align-items: center; justify-content: flex-end; padding: 0 10px 0 3px; color: var(--versiondock-faint); background: color-mix(in srgb, var(--versiondock-surface) 55%, transparent); font: 400 calc(10px * var(--versiondock-ui-font-scale, 1))/20px var(--versiondock-code); user-select: none; }
-.diff-code-cell code, .diff-inline-row code { min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; display: block; padding: 0 10px 0 7px; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/20px var(--versiondock-code); white-space: pre; tab-size: 4; }
-.diff-code-cell code::-webkit-scrollbar, .diff-inline-row code::-webkit-scrollbar { display: none; }
+.diff-line-number { position: sticky; left: 0; z-index: 2; flex-shrink: 0; width: 48px; min-width: 48px; display: flex; align-items: center; justify-content: flex-end; padding: 0 10px 0 3px; color: var(--versiondock-faint); background: color-mix(in srgb, var(--versiondock-surface) 95%, var(--versiondock-bg)); font: 400 calc(10px * var(--versiondock-ui-font-scale, 1))/20px var(--versiondock-code); -webkit-user-select: none; -moz-user-select: none; user-select: none; border-left: 3.5px solid transparent; }
+.diff-code-cell.deletion > .diff-line-number, .diff-inline-row.deletion > .diff-line-number.old { color: var(--versiondock-danger); background: color-mix(in srgb, var(--versiondock-surface) 95%, var(--versiondock-bg)); border-left-color: var(--versiondock-danger); }
+.diff-code-cell.addition > .diff-line-number, .diff-inline-row.addition > .diff-line-number.old { border-left-color: var(--versiondock-success); }
+.diff-code-cell.addition > .diff-line-number, .diff-inline-row.addition > .diff-line-number.new { color: var(--versiondock-success); background: color-mix(in srgb, var(--versiondock-surface) 95%, var(--versiondock-bg)); }
+.diff-inline-row.addition > .diff-line-number.old { background: color-mix(in srgb, var(--versiondock-surface) 95%, var(--versiondock-bg)); }
+.diff-code-cell code, .diff-inline-row code { min-width: 0; flex: 1; display: block; padding: 0 10px 0 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/20px var(--versiondock-code); white-space: pre; tab-size: 4; overflow: visible; }
+.unified-diff ::selection, .unified-diff-scroll ::selection, .unified-diff-virtual ::selection, .unified-diff-pane ::selection, .diff-code-cell ::selection, .diff-code-cell code::selection, .diff-code-cell span::selection, .diff-inline-row ::selection, .diff-inline-row code::selection, .diff-inline-row span::selection { background: #264f78 !important; color: inherit !important; }
+.unified-diff ::-moz-selection, .unified-diff-scroll ::-moz-selection, .unified-diff-virtual ::-moz-selection, .unified-diff-pane ::-moz-selection, .diff-code-cell ::-moz-selection, .diff-code-cell code::-moz-selection, .diff-code-cell span::-moz-selection, .diff-inline-row ::-moz-selection, .diff-inline-row code::-moz-selection, .diff-inline-row span::-moz-selection { background: #264f78 !important; color: inherit !important; }
+[data-theme='light'] .unified-diff ::selection, [data-theme='light'] .unified-diff-scroll ::selection, [data-theme='light'] .unified-diff-virtual ::selection, [data-theme='light'] .unified-diff-pane ::selection, [data-theme='light'] .diff-code-cell ::selection, [data-theme='light'] .diff-code-cell code::selection, [data-theme='light'] .diff-code-cell span::selection, [data-theme='light'] .diff-inline-row ::selection, [data-theme='light'] .diff-inline-row code::selection, [data-theme='light'] .diff-inline-row span::selection { background: #add6ff !important; color: inherit !important; }
+[data-theme='light'] .unified-diff ::-moz-selection, [data-theme='light'] .unified-diff-scroll ::-moz-selection, [data-theme='light'] .unified-diff-virtual ::-moz-selection, [data-theme='light'] .unified-diff-pane ::-moz-selection, [data-theme='light'] .diff-code-cell ::-moz-selection, [data-theme='light'] .diff-code-cell code::-moz-selection, [data-theme='light'] .diff-code-cell span::-moz-selection, [data-theme='light'] .diff-inline-row ::-moz-selection, [data-theme='light'] .diff-inline-row code::-moz-selection, [data-theme='light'] .diff-inline-row span::-moz-selection { background: #add6ff !important; color: inherit !important; }
 .diff-code-cell mark, .diff-inline-row mark { padding: 0; color: inherit; background: color-mix(in srgb, currentColor 20%, transparent); border-radius: 2px; }
 .diff-code-cell.deletion mark, .diff-inline-row.deletion mark { background: color-mix(in srgb, var(--versiondock-danger) 32%, transparent); }
 .diff-code-cell.addition mark, .diff-inline-row.addition mark { background: color-mix(in srgb, var(--versiondock-success) 30%, transparent); }
-.diff-inline-row { width: 100%; min-height: 20px; overflow: hidden; display: grid; grid-template-columns: 42px 42px minmax(0, 1fr); }
-.diff-inline-row > .diff-line-number.old { border-right: 0; }
+.diff-inline-row { width: max-content; min-width: 100%; min-height: 20px; display: flex; align-items: stretch; }
+.diff-inline-row > .diff-line-number.old { position: sticky; left: 0; z-index: 2; width: 42px; min-width: 42px; border-right: 0; }
+.diff-inline-row > .diff-line-number.new { position: sticky; left: 42px; z-index: 2; width: 42px; min-width: 42px; }
+.diff-fold-row { position: relative; width: 100%; height: 28px; min-height: 28px; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-user-select: none; background: var(--versiondock-bg); }
+.split-center-fold-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 28px; z-index: 10; pointer-events: auto; }
+.diff-fold-line { position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: color-mix(in srgb, var(--versiondock-border) 80%, transparent); z-index: 1; }
+.diff-fold-controls { position: relative; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.diff-fold-badge { height: 22px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; background: color-mix(in srgb, var(--versiondock-surface) 92%, var(--versiondock-bg)); border: 1px solid var(--versiondock-border); color: var(--versiondock-muted); font: 500 calc(11px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-font); cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); transition: all 0.12s ease; }
+.diff-fold-badge:hover { background: var(--versiondock-hover); color: var(--versiondock-text); border-color: var(--versiondock-accent); }
+.diff-fold-actions { display: flex; flex-direction: column; gap: 2px; }
+.diff-fold-action-btn { height: 12px; line-height: 10px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; background: color-mix(in srgb, var(--versiondock-surface) 95%, var(--versiondock-bg)); border: 1px solid var(--versiondock-border-soft); color: var(--versiondock-muted); font: 600 9px var(--versiondock-code); cursor: pointer; transition: all 0.1s ease; }
+.diff-fold-action-btn:hover { background: var(--versiondock-hover); color: var(--versiondock-accent); border-color: var(--versiondock-accent); }
 .diff-hunk-row, .diff-meta-row { min-height: 24px; display: flex; align-items: center; gap: 7px; padding: 2px 10px; }
 .diff-hunk-row { justify-content: center; color: var(--versiondock-faint); background: color-mix(in srgb, var(--versiondock-surface) 48%, var(--versiondock-bg)); }
 .diff-hunk-row > span { width: 42px; height: 1px; background: var(--versiondock-border-soft); }

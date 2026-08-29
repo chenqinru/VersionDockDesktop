@@ -14,10 +14,51 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::models::{
-    AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState, RefreshScope,
-    RepositoryEvent, RepositoryEventSource, RepositoryStatus, ThemePreference,
+    AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState,
+    OperationEvent, OperationStatus, RefreshScope, RepositoryEvent, RepositoryEventSource,
+    RepositoryMeta, RepositoryStatus, RequestContext, ThemePreference, ToolAvailability,
     UiFontSizePreference, WorkspaceDescriptor,
 };
+
+#[derive(Clone)]
+pub struct OperationReporter {
+    pub app: AppHandle,
+    pub operation_id: String,
+    pub context: RequestContext,
+    pub started_at: String,
+}
+
+tokio::task_local! {
+    static CURRENT_OPERATION: OperationReporter;
+}
+
+pub async fn with_operation_reporter<F: std::future::Future>(
+    reporter: OperationReporter,
+    future: F,
+) -> F::Output {
+    CURRENT_OPERATION.scope(reporter, future).await
+}
+
+pub fn emit_current_operation(status: OperationStatus, phase: &str, message: &str) {
+    let _ = CURRENT_OPERATION.try_with(|reporter| {
+        let _ = reporter.app.emit(
+            "versiondock://event",
+            OperationEvent {
+                operation_id: reporter.operation_id.clone(),
+                context: reporter.context.clone(),
+                status,
+                phase: phase.into(),
+                message: message.into(),
+                started_at: reporter.started_at.clone(),
+                cancellable: true,
+                completed: None,
+                total: None,
+                result: None,
+                error: None,
+            },
+        );
+    });
+}
 
 pub struct AppState {
     pub config_dir: PathBuf,
@@ -27,6 +68,8 @@ pub struct AppState {
     pub read_limit: Semaphore,
     pub write_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    repository_cache: RwLock<HashMap<String, HashMap<String, RepositoryMeta>>>,
+    tool_cache: RwLock<Option<ToolAvailability>>,
     pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
     pub window_bounds: std::sync::Mutex<HashMap<String, (f64, f64, f64, f64)>>,
     watchers: std::sync::Mutex<HashMap<String, Vec<RecommendedWatcher>>>,
@@ -96,6 +139,8 @@ impl AppState {
             read_limit: Semaphore::new(4),
             write_limit: Semaphore::new(2),
             write_locks: Mutex::new(HashMap::new()),
+            repository_cache: RwLock::new(HashMap::new()),
+            tool_cache: RwLock::new(None),
             window_workspaces: std::sync::Mutex::new(HashMap::new()),
             window_bounds: std::sync::Mutex::new(HashMap::new()),
             watchers: std::sync::Mutex::new(HashMap::new()),
@@ -153,24 +198,99 @@ impl AppState {
             .clone()
     }
 
+    pub async fn cache_repositories(&self, workspace_id: &str, repositories: &[RepositoryStatus]) {
+        self.repository_cache.write().await.insert(
+            workspace_id.to_string(),
+            repositories
+                .iter()
+                .map(|repository| (repository.meta.id.clone(), repository.meta.clone()))
+                .collect(),
+        );
+    }
+
+    pub async fn cached_repository(
+        &self,
+        workspace_id: &str,
+        repository_id: &str,
+    ) -> Option<RepositoryMeta> {
+        self.repository_cache
+            .read()
+            .await
+            .get(workspace_id)
+            .and_then(|repositories| repositories.get(repository_id))
+            .cloned()
+    }
+
+    pub async fn cache_repository(&self, workspace_id: &str, repository: RepositoryMeta) {
+        self.repository_cache
+            .write()
+            .await
+            .entry(workspace_id.to_string())
+            .or_default()
+            .insert(repository.id.clone(), repository);
+    }
+
+    pub async fn cached_repositories(&self, workspace_id: &str) -> Vec<RepositoryMeta> {
+        self.repository_cache
+            .read()
+            .await
+            .get(workspace_id)
+            .map(|repositories| repositories.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub async fn remove_cached_workspace(&self, workspace_id: &str) {
+        self.repository_cache.write().await.remove(workspace_id);
+    }
+
+    pub async fn cache_tools(&self, tools: ToolAvailability) {
+        *self.tool_cache.write().await = Some(tools);
+    }
+
+    pub async fn cached_tools(&self) -> Option<ToolAvailability> {
+        self.tool_cache.read().await.clone()
+    }
+
     pub async fn acquire_write(
         &self,
         cancellation: &CancellationToken,
     ) -> Result<tokio::sync::SemaphorePermit<'_>, DesktopError> {
-        tokio::select! {
+        emit_current_operation(
+            OperationStatus::Queued,
+            "waitingForWriteSlot",
+            "Waiting for a repository write slot",
+        );
+        let permit = tokio::select! {
             _ = cancellation.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
             permit = self.write_limit.acquire() => permit.map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true)),
-        }
+        }?;
+        emit_current_operation(
+            OperationStatus::Running,
+            "runningRepositoryOperation",
+            "Running repository operation",
+        );
+        Ok(permit)
     }
 
     pub async fn acquire_read(
         &self,
         cancellation: &CancellationToken,
     ) -> Result<tokio::sync::SemaphorePermit<'_>, DesktopError> {
-        tokio::select! {
+        emit_current_operation(
+            OperationStatus::Queued,
+            "waitingForReadSlot",
+            "Waiting for a repository read slot",
+        );
+        let permit = tokio::select! {
             _ = cancellation.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
             permit = self.read_limit.acquire() => permit.map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true)),
-        }
+        }?;
+        emit_current_operation(
+            OperationStatus::Running,
+            "readingRepository",
+            "Reading repository data",
+        );
+        Ok(permit)
     }
 
     pub async fn save_app_state(&self, snapshot: AppStateSnapshot) -> Result<(), DesktopError> {

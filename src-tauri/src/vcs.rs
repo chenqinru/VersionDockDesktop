@@ -243,6 +243,7 @@ pub async fn diff(
                 git(
                     vec![
                         "diff".into(),
+                        "-U999999".into(),
                         "--no-ext-diff".into(),
                         "--no-color".into(),
                         "--binary".into(),
@@ -260,6 +261,7 @@ pub async fn diff(
                 git(
                     vec![
                         "show".into(),
+                        "-U999999".into(),
                         "--format=".into(),
                         "--no-ext-diff".into(),
                         "--no-color".into(),
@@ -275,6 +277,7 @@ pub async fn diff(
             } else {
                 let mut args = vec![
                     "diff".into(),
+                    "-U999999".into(),
                     "--no-ext-diff".into(),
                     "--no-color".into(),
                     "--binary".into(),
@@ -3609,6 +3612,7 @@ pub async fn stash_file_diff(
     let mut output = git(
         vec![
             "diff".into(),
+            "-U999999".into(),
             "--no-ext-diff".into(),
             "--no-color".into(),
             "--binary".into(),
@@ -3637,6 +3641,7 @@ pub async fn stash_file_diff(
         output = git(
             vec![
                 "diff".into(),
+                "-U999999".into(),
                 "--no-ext-diff".into(),
                 "--no-color".into(),
                 "--binary".into(),
@@ -5228,6 +5233,7 @@ pub async fn worktree_file_diff(
         &worktree,
         vec![
             "diff".into(),
+            "-U999999".into(),
             "--no-ext-diff".into(),
             "--no-color".into(),
             "--binary".into(),
@@ -5347,6 +5353,7 @@ pub async fn branch_working_file_diff(
     let output = git(
         vec![
             "diff".into(),
+            "-U999999".into(),
             "--no-ext-diff".into(),
             "--no-color".into(),
             "--binary".into(),

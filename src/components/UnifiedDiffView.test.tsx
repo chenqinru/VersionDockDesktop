@@ -3,9 +3,15 @@ import { readFileSync } from 'node:fs';
 import { highlightDiffLines, highlightParsedDiffSide, parseUnifiedDiff, resolveDiffHighlightLanguage } from './UnifiedDiffView';
 
 describe('parseUnifiedDiff', () => {
-  it('keeps VS Code-style diagonal shading on aligned empty split cells', () => {
+  it('keeps VS Code-style diagonal shading on aligned empty split cells with seamless repetition', () => {
     const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
-    expect(styles).toMatch(/\.diff-code-cell\.empty code\s*\{[^}]*repeating-linear-gradient\(-45deg,/s);
+    expect(styles).toMatch(/\.diff-code-cell\.empty code\s*\{[^}]*repeating-linear-gradient\(-45deg,[^}]*background-size:\s*10px\s*10px/s);
+  });
+
+  it('renders colored vertical bars on deletion and addition line numbers', () => {
+    const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
+    expect(styles).toMatch(/\.diff-code-cell\.deletion,\s*\.diff-inline-row\.deletion\s*\{[^}]*box-shadow:\s*inset\s+3\.5px\s+0\s+0\s+var\(--versiondock-danger\)/s);
+    expect(styles).toMatch(/\.diff-code-cell\.addition,\s*\.diff-inline-row\.addition\s*\{[^}]*box-shadow:\s*inset\s+3\.5px\s+0\s+0\s+var\(--versiondock-success\)/s);
   });
 
   it('aligns deletion and addition blocks with old and new line numbers', () => {
@@ -118,5 +124,13 @@ describe('parseUnifiedDiff', () => {
     expect(importTokens.find((token) => token.content === 'import')?.color).toBeTruthy();
     expect(templateTokens.find((token) => token.content === 'NewPanel')?.color).toBe('#569CD6');
     expect(new Set(importTokens.map((token) => token.color).filter(Boolean)).size).toBeGreaterThan(2);
+  });
+
+  it('renders modern divider style fold rows with pill badge and step expansion controls', () => {
+    const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
+    expect(styles).toMatch(/\.diff-fold-row\s*\{[^}]*position:\s*relative/s);
+    expect(styles).toMatch(/\.diff-fold-line\s*\{[^}]*position:\s*absolute/s);
+    expect(styles).toMatch(/\.diff-fold-badge\s*\{[^}]*border-radius:\s*12px/s);
+    expect(styles).toMatch(/\.diff-fold-action-btn\s*\{[^}]*border-radius:\s*3px/s);
   });
 });

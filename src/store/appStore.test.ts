@@ -199,7 +199,7 @@ describe('appStore async lifecycle', () => {
     await useAppStore.getState().stashOperation('repo', { type: 'create', message: 'WIP', paths: ['src/file.ts'], include_untracked: true });
 
     expect(useAppStore.getState().mode).toBe('diff');
-    expect(requests.find(({ command }) => command.type === 'workspaceRefresh')?.options?.showProgress).toBe(false);
+    expect(requests.some(({ command }) => command.type === 'workspaceRefresh')).toBe(false);
   });
 
   it('loads branch-to-working-tree differences without changing the commit-panel tab', async () => {
@@ -558,5 +558,67 @@ describe('appStore async lifecycle', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('refreshes history, unpushed commits, and conflicts only for the event repository', async () => {
+    vi.useFakeTimers();
+    try {
+      let subscriber: ((event: BridgeEvent) => void) | undefined;
+      const requests: BridgeCommand[] = [];
+      const commit: CommitNode = {
+        repoId: 'a', hash: 'new-a', shortHash: 'new-a', parents: [], author: 'A', email: '',
+        authorDate: '2026-08-30T00:00:00Z', committerDate: '2026-08-30T00:00:00Z',
+        message: 'updated A', refs: [], incoming: false, unpushed: true,
+      };
+      const bridge = new MockBridge((command) => {
+        requests.push(command);
+        if (command.type === 'bootstrap') return bootstrap;
+        if (command.type === 'branches' || command.type === 'tags' || command.type === 'historyTopology' || command.type === 'unpushedCommits') return [];
+        if (command.type === 'history') return { commits: [commit], hasMore: false };
+        if (command.type === 'conflicts') return [{ repoId: 'a', repoName: 'A', repoColor: '#000', path: 'conflict.txt', kind: 'git', binary: false, conflictType: 'text', actions: ['mine'] }];
+        return [];
+      });
+      bridge.subscribe = (handler) => { subscriber = handler; return () => undefined; };
+      await useAppStore.getState().initialize(bridge);
+      const current = snapshot('workspace', 1);
+      current.repositories = [repository('a', 'A'), repository('b', 'B')];
+      useAppStore.setState({
+        snapshot: current,
+        allRepositories: current.repositories,
+        selectedRepoId: 'a',
+        historyByRepo: { a: [], b: [] },
+        historyTopologyByRepo: { a: [], b: [] },
+        historyScope: { repoIds: null, revisionsByRepo: {} },
+      });
+      requests.length = 0;
+
+      subscriber?.({ workspaceId: 'workspace', repoId: 'a', generation: 1, source: 'watcher', scopes: ['refs', 'history', 'conflicts'] });
+      await vi.advanceTimersByTimeAsync(301);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(requests.filter((command) => command.type === 'history').map((command) => command.payload.repo_id)).toEqual(['a']);
+      expect(requests.some((command) => command.type === 'unpushedCommits' && command.payload.repo_id === 'a')).toBe(true);
+      expect(requests.some((command) => command.type === 'conflicts' && command.payload.repo_id === 'a')).toBe(true);
+      expect(useAppStore.getState().historyByRepo.a?.[0]?.hash).toBe('new-a');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes runtime capabilities without replacing workspace state', async () => {
+    const bridge = new MockBridge((command) => command.type === 'runtimeCapabilities' ? {
+      systemNotifications: { available: false, reasonCode: 'NOTIFICATION_PERMISSION_DENIED', detail: 'Denied' },
+      notificationPermission: 'denied',
+      secureCredentials: { status: { available: true, reasonCode: null, detail: null }, backend: 'test', passwordStdinSupported: true },
+    } : []);
+    const currentSnapshot = snapshot('workspace', 1);
+    useAppStore.setState({ bridge, bootstrap, snapshot: currentSnapshot });
+
+    await useAppStore.getState().refreshRuntimeCapabilities();
+
+    expect(useAppStore.getState().snapshot).toBe(currentSnapshot);
+    expect(useAppStore.getState().bootstrap?.runtime?.notificationPermission).toBe('denied');
+    expect(useAppStore.getState().bootstrap?.capabilities.systemNotifications).toBe(false);
   });
 });

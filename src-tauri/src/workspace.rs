@@ -10,8 +10,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     cli,
     models::{
-        DesktopError, DesktopSettings, FileChange, RepositoryCapabilities, RepositoryMeta,
-        RepositoryStatus, ToolAvailability, VcsKind, WorkspaceDescriptor, WorkspaceSnapshot,
+        CapabilityStatus, DesktopError, DesktopSettings, FileChange, RepositoryCapabilities,
+        RepositoryMeta, RepositoryStatus, SecureCredentialCapability, ToolAvailability, VcsKind,
+        WorkspaceDescriptor, WorkspaceSnapshot,
     },
     state::{canonical_directory, workspace_id},
 };
@@ -110,6 +111,7 @@ pub async fn snapshot(
     token: &CancellationToken,
 ) -> Result<WorkspaceSnapshot, DesktopError> {
     let tools = tool_availability(token).await;
+    let secure_credentials = crate::svn_account::secure_store_capability().await;
     let metas = scan(&workspace, settings)?;
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
     let mut tasks = tokio::task::JoinSet::new();
@@ -117,6 +119,7 @@ pub async fn snapshot(
         let semaphore = semaphore.clone();
         let token = token.clone();
         let tools = tools.clone();
+        let secure_credentials = secure_credentials.clone();
         tasks.spawn(async move {
             let _permit = semaphore
                 .acquire_owned()
@@ -126,11 +129,12 @@ pub async fn snapshot(
                 VcsKind::Git => tools.git,
                 VcsKind::Svn => tools.svn,
             };
-            let status = match meta.kind {
+            let mut status = match meta.kind {
                 VcsKind::Git if tools.git => git_status(meta, &token).await,
                 VcsKind::Svn if tools.svn => svn_status(meta, &token).await,
                 _ => Ok(empty_status(meta, tool_available)),
             }?;
+            apply_runtime_capabilities(&mut status, &tools, &secure_credentials);
             Ok::<_, DesktopError>((index, status))
         });
     }
@@ -345,22 +349,6 @@ fn discover_submodules(
         }
         discover_submodules(&child, depth + 1, result, seen);
     }
-}
-
-pub fn repository(
-    workspace: &WorkspaceDescriptor,
-    repo_id_value: &str,
-) -> Result<RepositoryMeta, DesktopError> {
-    scan(workspace, &DesktopSettings::default())?
-        .into_iter()
-        .find(|meta| meta.id == repo_id_value)
-        .ok_or_else(|| {
-            DesktopError::new(
-                "REPOSITORY_NOT_FOUND",
-                "Repository is no longer part of the workspace",
-                true,
-            )
-        })
 }
 
 pub async fn git_status(
@@ -659,6 +647,248 @@ fn repository_capabilities(kind: VcsKind, tool_available: bool) -> RepositoryCap
     capabilities
 }
 
+fn parsed_version(value: &str) -> Option<(u32, u32, u32)> {
+    let values = value
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .take(3)
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    Some((
+        *values.first()?,
+        *values.get(1).unwrap_or(&0),
+        *values.get(2).unwrap_or(&0),
+    ))
+}
+
+fn unavailable(code: &str, detail: impl Into<String>) -> CapabilityStatus {
+    CapabilityStatus::unavailable(code, detail)
+}
+
+fn contextual_capability(available: bool, code: &str, detail: &str) -> CapabilityStatus {
+    if available {
+        CapabilityStatus::available()
+    } else {
+        unavailable(code, detail)
+    }
+}
+
+pub fn apply_runtime_capabilities(
+    status: &mut RepositoryStatus,
+    tools: &ToolAvailability,
+    secure_credentials: &SecureCredentialCapability,
+) {
+    let (tool_name, version, minimum) = match status.meta.kind {
+        VcsKind::Git => ("Git", tools.git_version.as_deref(), (2, 23, 0)),
+        VcsKind::Svn => ("SVN", tools.svn_version.as_deref(), (1, 9, 0)),
+    };
+    if !status.tool_available {
+        for key in [
+            "syncFetch",
+            "syncPull",
+            "syncPush",
+            "historyRewrite",
+            "worktreeWrite",
+            "subtreeWrite",
+            "submoduleWrite",
+            "svnPasswordStorage",
+        ] {
+            status.capabilities.availability.insert(
+                key.into(),
+                unavailable(
+                    "VCS_TOOL_UNAVAILABLE",
+                    format!("{tool_name} is not installed or cannot be executed"),
+                ),
+            );
+        }
+        return;
+    }
+    let parsed_tool_version = version.and_then(parsed_version);
+    let version_supported = match parsed_tool_version {
+        Some(current) => current >= minimum,
+        None => true,
+    };
+    if !version_supported {
+        let detail = format!(
+            "{tool_name} {} is older than the supported minimum {}.{}",
+            version.unwrap_or("unknown"),
+            minimum.0,
+            minimum.1,
+        );
+        for capability in status.capabilities.availability.values_mut() {
+            if capability.available {
+                *capability = unavailable("VCS_VERSION_UNSUPPORTED", detail.clone());
+            }
+        }
+        for key in [
+            "syncFetch",
+            "syncPull",
+            "syncPush",
+            "historyRewrite",
+            "worktreeWrite",
+            "subtreeWrite",
+            "submoduleWrite",
+            "svnPasswordStorage",
+        ] {
+            status.capabilities.availability.insert(
+                key.into(),
+                unavailable("VCS_VERSION_UNSUPPORTED", detail.clone()),
+            );
+        }
+        return;
+    }
+
+    let git = status.meta.kind == VcsKind::Git && status.tool_available && version_supported;
+    let svn = status.meta.kind == VcsKind::Svn && status.tool_available && version_supported;
+    let detached = git
+        && (status.branch == "HEAD"
+            || status.branch.starts_with("HEAD (")
+            || status.branch.contains("detached"));
+    let conflicted = status.conflicts > 0;
+    let operation_active = status.operation.is_some();
+    let dirty = status
+        .files
+        .iter()
+        .any(|file| file.staged || file.unstaged || file.conflicted);
+    let has_head = !status.revision.trim().is_empty();
+    let safe_sync = !detached && !conflicted && !operation_active;
+    let safe_extension_write = !conflicted && !operation_active;
+
+    status.capabilities.availability.insert(
+        "commit".into(),
+        contextual_capability(
+            (git || svn) && !conflicted,
+            "REPOSITORY_CONFLICTED",
+            "Resolve repository conflicts before committing",
+        ),
+    );
+    status.capabilities.availability.insert(
+        "syncFetch".into(),
+        contextual_capability(git, "VCS_CAPABILITY_NOT_APPLICABLE", "Fetch requires Git"),
+    );
+    for key in ["syncPull", "syncPush"] {
+        let (code, detail) = if !git {
+            ("VCS_CAPABILITY_NOT_APPLICABLE", "Pull and push require Git")
+        } else if detached {
+            (
+                "DETACHED_HEAD",
+                "Check out a branch before pulling or pushing",
+            )
+        } else if conflicted {
+            (
+                "REPOSITORY_CONFLICTED",
+                "Resolve conflicts before synchronizing",
+            )
+        } else {
+            (
+                "REPOSITORY_OPERATION_IN_PROGRESS",
+                "Finish or abort the current repository operation",
+            )
+        };
+        status.capabilities.availability.insert(
+            key.into(),
+            contextual_capability(git && safe_sync, code, detail),
+        );
+    }
+    status.capabilities.availability.insert(
+        "historyRewrite".into(),
+        contextual_capability(
+            git && has_head && !detached && !conflicted && !dirty && !operation_active,
+            if !git {
+                "VCS_CAPABILITY_NOT_APPLICABLE"
+            } else if detached {
+                "DETACHED_HEAD"
+            } else if !has_head {
+                "HEAD_UNAVAILABLE"
+            } else if conflicted {
+                "REPOSITORY_CONFLICTED"
+            } else if operation_active {
+                "REPOSITORY_OPERATION_IN_PROGRESS"
+            } else if dirty {
+                "WORKTREE_DIRTY"
+            } else {
+                "CAPABILITY_UNAVAILABLE"
+            },
+            if !git {
+                "History rewriting requires Git"
+            } else if detached {
+                "Check out a branch before rewriting history"
+            } else if !has_head {
+                "Create the initial commit first"
+            } else if conflicted {
+                "Resolve conflicts before rewriting history"
+            } else if operation_active {
+                "Finish or abort the current repository operation"
+            } else if dirty {
+                "Commit, stash, or discard working tree changes first"
+            } else {
+                "History rewriting is unavailable"
+            },
+        ),
+    );
+    for (key, supported) in [
+        ("worktreeWrite", status.capabilities.worktree),
+        ("subtreeWrite", status.capabilities.subtree),
+        ("submoduleWrite", status.capabilities.submodule),
+    ] {
+        status.capabilities.availability.insert(
+            key.into(),
+            contextual_capability(
+                git && supported && safe_extension_write,
+                if !git || !supported {
+                    "VCS_CAPABILITY_NOT_APPLICABLE"
+                } else if conflicted {
+                    "REPOSITORY_CONFLICTED"
+                } else {
+                    "REPOSITORY_OPERATION_IN_PROGRESS"
+                },
+                if !git || !supported {
+                    "This repository does not support this Git extension operation"
+                } else if conflicted {
+                    "Resolve conflicts before modifying repository structure"
+                } else {
+                    "Finish or abort the current repository operation"
+                },
+            ),
+        );
+    }
+    status.capabilities.availability.insert(
+        "svnPasswordStorage".into(),
+        contextual_capability(
+            svn && secure_credentials.status.available
+                && secure_credentials.password_stdin_supported,
+            if !svn {
+                "VCS_CAPABILITY_NOT_APPLICABLE"
+            } else if !secure_credentials.status.available {
+                "SECURE_STORAGE_UNAVAILABLE"
+            } else {
+                "SVN_PASSWORD_STDIN_UNAVAILABLE"
+            },
+            if !svn {
+                "Password storage is only available for SVN repositories"
+            } else if !secure_credentials.status.available {
+                "System secure storage is unavailable"
+            } else {
+                "SVN 1.10 or newer is required to pass passwords through stdin"
+            },
+        ),
+    );
+
+    if parsed_tool_version.is_none() {
+        let detail = format!(
+            "Could not parse the reported {tool_name} version{}; baseline capabilities remain enabled",
+            version.map_or(String::new(), |value| format!(": {value}")),
+        );
+        for capability in status.capabilities.availability.values_mut() {
+            if capability.available {
+                capability.reason_code = Some("VCS_VERSION_UNPARSED".into());
+                capability.detail = Some(detail.clone());
+            }
+        }
+    }
+}
+
 fn repo_id(path: &Path, kind: VcsKind) -> String {
     let hash = Sha256::digest(format!("{}::{kind:?}", path.display()).as_bytes());
     format!(
@@ -808,6 +1038,120 @@ mod tests {
         assert_eq!(
             parse_git_header("## main...origin/main [ahead 2, behind 3]"),
             ("main".into(), 2, 3)
+        );
+    }
+
+    fn capability_status(kind: VcsKind, branch: &str) -> RepositoryStatus {
+        RepositoryStatus {
+            meta: RepositoryMeta {
+                id: "repo".into(),
+                name: "repo".into(),
+                root_path: "/repo".into(),
+                color: "#000".into(),
+                kind,
+                parent_repo_id: None,
+                depth: 0,
+                is_submodule: false,
+                is_worktree: false,
+            },
+            branch: branch.into(),
+            revision: "abcdef0".into(),
+            ahead: 0,
+            behind: 0,
+            files: vec![],
+            conflicts: 0,
+            operation: None,
+            capabilities: repository_capabilities(kind, true),
+            tool_available: true,
+        }
+    }
+
+    #[test]
+    fn capabilities_reject_detached_push_and_require_secure_svn_password_storage() {
+        let tools = ToolAvailability {
+            git: true,
+            svn: true,
+            svnadmin: true,
+            git_version: Some("2.53.0".into()),
+            svn_version: Some("1.14.5".into()),
+        };
+        let unavailable_store = SecureCredentialCapability {
+            status: CapabilityStatus::unavailable("NO_STORE", "No secure store"),
+            backend: None,
+            password_stdin_supported: true,
+        };
+        let mut git = capability_status(VcsKind::Git, "HEAD (detached at abcdef0)");
+        apply_runtime_capabilities(&mut git, &tools, &unavailable_store);
+        assert!(!git.capabilities.availability["syncPush"].available);
+        assert_eq!(
+            git.capabilities.availability["syncPush"]
+                .reason_code
+                .as_deref(),
+            Some("DETACHED_HEAD")
+        );
+        assert!(git.capabilities.availability["syncFetch"].available);
+
+        let mut svn = capability_status(VcsKind::Svn, "trunk");
+        apply_runtime_capabilities(&mut svn, &tools, &unavailable_store);
+        assert!(!svn.capabilities.availability["svnPasswordStorage"].available);
+        assert_eq!(parsed_version("svn, version 1.14.5"), Some((1, 14, 5)));
+    }
+
+    #[test]
+    fn capabilities_report_precise_unavailable_reasons_and_unparsed_versions() {
+        let secure_store = SecureCredentialCapability {
+            status: CapabilityStatus::available(),
+            backend: Some("memory".into()),
+            password_stdin_supported: true,
+        };
+        let mut svn = capability_status(VcsKind::Svn, "trunk");
+        let mut tools = ToolAvailability {
+            git: true,
+            svn: true,
+            svnadmin: true,
+            git_version: Some("vendor build".into()),
+            svn_version: Some("1.14.5".into()),
+        };
+        apply_runtime_capabilities(&mut svn, &tools, &secure_store);
+        assert_eq!(
+            svn.capabilities.availability["worktreeWrite"]
+                .reason_code
+                .as_deref(),
+            Some("VCS_CAPABILITY_NOT_APPLICABLE")
+        );
+
+        let mut git = capability_status(VcsKind::Git, "main");
+        apply_runtime_capabilities(&mut git, &tools, &secure_store);
+        assert_eq!(
+            git.capabilities.availability["svnPasswordStorage"]
+                .reason_code
+                .as_deref(),
+            Some("VCS_CAPABILITY_NOT_APPLICABLE")
+        );
+        assert_eq!(
+            git.capabilities.availability["syncFetch"]
+                .reason_code
+                .as_deref(),
+            Some("VCS_VERSION_UNPARSED")
+        );
+
+        tools.git_version = Some("2.53.0".into());
+        git.conflicts = 1;
+        git.files.push(FileChange {
+            path: "conflicted.txt".into(),
+            status: "conflicted".into(),
+            staged: false,
+            unstaged: false,
+            conflicted: true,
+            conflict_type: Some("bothModified".into()),
+            submodule: false,
+        });
+        apply_runtime_capabilities(&mut git, &tools, &secure_store);
+        assert_eq!(
+            git.capabilities.availability["historyRewrite"]
+                .reason_code
+                .as_deref(),
+            Some("REPOSITORY_CONFLICTED")
         );
     }
 }

@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { bundledLanguages, codeToTokensBase, type BundledLanguage, type BundledTheme, type ThemedToken } from 'shiki';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 
 type DiffSide = 'old' | 'new';
-type HorizontalScrollGroup = DiffSide | 'inline';
 type DiffCellKind = 'context' | 'deletion' | 'addition' | 'empty';
 
 export interface DiffCell {
@@ -29,6 +28,7 @@ export interface ParsedUnifiedDiff {
 type RenderRow =
   | { kind: 'hunk'; text: string }
   | { kind: 'meta'; text: string }
+  | { kind: 'fold'; foldId: string; hiddenCount: number }
   | { kind: 'split'; oldCell: DiffCell; newCell: DiffCell }
   | { kind: 'inline'; side: DiffSide | 'both'; oldNumber: number | null; newNumber: number | null; cell: DiffCell; peer?: DiffCell };
 
@@ -228,24 +228,132 @@ export function parseUnifiedDiff(content: string, fallbackPath = ''): ParsedUnif
   };
 }
 
-function buildRenderRows(parsed: ParsedUnifiedDiff, view: 'split' | 'inline'): RenderRow[] {
-  const rows: RenderRow[] = [];
+type FoldExpansion = { top: number; bottom: number; all?: boolean };
+
+function buildRenderRows(
+  parsed: ParsedUnifiedDiff,
+  view: 'split' | 'inline',
+  collapsed: boolean,
+  expandedFolds: Record<string, FoldExpansion>,
+): RenderRow[] {
+  const pairRows: Extract<ParsedDiffRow, { kind: 'pair' }>[] = [];
+  const metaRows: Extract<ParsedDiffRow, { kind: 'meta' }>[] = [];
   for (const row of parsed.rows) {
-    if (row.kind !== 'pair') {
-      rows.push(row);
-      continue;
+    if (row.kind === 'pair') pairRows.push(row);
+    else if (row.kind === 'meta') metaRows.push(row);
+  }
+
+  if (!collapsed) {
+    const rows: RenderRow[] = [];
+    for (const row of parsed.rows) {
+      if (row.kind === 'hunk') continue;
+      if (row.kind === 'meta') {
+        rows.push(row);
+        continue;
+      }
+      if (view === 'split') {
+        rows.push({ kind: 'split', oldCell: row.oldCell, newCell: row.newCell });
+        continue;
+      }
+      if (row.oldCell.kind === 'context' && row.newCell.kind === 'context') {
+        rows.push({ kind: 'inline', side: 'both', oldNumber: row.oldCell.lineNumber, newNumber: row.newCell.lineNumber, cell: row.oldCell });
+        continue;
+      }
+      if (row.oldCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'old', oldNumber: row.oldCell.lineNumber, newNumber: null, cell: row.oldCell, peer: row.newCell.kind === 'addition' ? row.newCell : undefined });
+      if (row.newCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'new', oldNumber: null, newNumber: row.newCell.lineNumber, cell: row.newCell, peer: row.oldCell.kind === 'deletion' ? row.oldCell : undefined });
     }
+    return rows;
+  }
+
+  const CONTEXT_MARGIN = 3;
+  const isChanged = (row: Extract<ParsedDiffRow, { kind: 'pair' }>) =>
+    row.oldCell.kind === 'deletion' || row.newCell.kind === 'addition';
+
+  const keep = new Array<boolean>(pairRows.length).fill(false);
+  const hasChanges = pairRows.some(isChanged);
+  if (!hasChanges) {
+    if (pairRows.length > 10) {
+      for (let k = 0; k < 3; k += 1) keep[k] = true;
+      for (let k = pairRows.length - 3; k < pairRows.length; k += 1) keep[k] = true;
+    } else {
+      keep.fill(true);
+    }
+  } else {
+    for (let k = 0; k < pairRows.length; k += 1) {
+      if (isChanged(pairRows[k])) {
+        const start = Math.max(0, k - CONTEXT_MARGIN);
+        const end = Math.min(pairRows.length - 1, k + CONTEXT_MARGIN);
+        for (let j = start; j <= end; j += 1) {
+          keep[j] = true;
+        }
+      }
+    }
+  }
+
+  const rows: RenderRow[] = [];
+  let i = 0;
+  let foldIndex = 0;
+
+  const pushPairRow = (row: Extract<ParsedDiffRow, { kind: 'pair' }>) => {
     if (view === 'split') {
       rows.push({ kind: 'split', oldCell: row.oldCell, newCell: row.newCell });
-      continue;
-    }
-    if (row.oldCell.kind === 'context' && row.newCell.kind === 'context') {
+    } else if (row.oldCell.kind === 'context' && row.newCell.kind === 'context') {
       rows.push({ kind: 'inline', side: 'both', oldNumber: row.oldCell.lineNumber, newNumber: row.newCell.lineNumber, cell: row.oldCell });
-      continue;
+    } else {
+      if (row.oldCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'old', oldNumber: row.oldCell.lineNumber, newNumber: null, cell: row.oldCell, peer: row.newCell.kind === 'addition' ? row.newCell : undefined });
+      if (row.newCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'new', oldNumber: null, newNumber: row.newCell.lineNumber, cell: row.newCell, peer: row.oldCell.kind === 'deletion' ? row.oldCell : undefined });
     }
-    if (row.oldCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'old', oldNumber: row.oldCell.lineNumber, newNumber: null, cell: row.oldCell, peer: row.newCell.kind === 'addition' ? row.newCell : undefined });
-    if (row.newCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'new', oldNumber: null, newNumber: row.newCell.lineNumber, cell: row.newCell, peer: row.oldCell.kind === 'deletion' ? row.oldCell : undefined });
+  };
+
+  while (i < pairRows.length) {
+    if (keep[i]) {
+      pushPairRow(pairRows[i]);
+      i += 1;
+    } else {
+      const startIdx = i;
+      while (i < pairRows.length && !keep[i]) {
+        i += 1;
+      }
+      const endIdx = i - 1;
+      const count = endIdx - startIdx + 1;
+      const foldId = `fold-${foldIndex}-${pairRows[startIdx].oldCell.lineNumber}`;
+      foldIndex += 1;
+      const expansion = expandedFolds[foldId] || { top: 0, bottom: 0 };
+
+      if (expansion.all || (expansion.top + expansion.bottom >= count)) {
+        for (let k = startIdx; k <= endIdx; k += 1) {
+          pushPairRow(pairRows[k]);
+        }
+      } else {
+        const topEnd = Math.min(endIdx, startIdx + expansion.top - 1);
+        for (let k = startIdx; k <= topEnd; k += 1) {
+          pushPairRow(pairRows[k]);
+        }
+
+        const topExpanded = Math.max(0, topEnd - startIdx + 1);
+        const bottomExpanded = Math.min(count - topExpanded, expansion.bottom);
+        const hiddenCount = count - topExpanded - bottomExpanded;
+
+        if (hiddenCount > 0) {
+          rows.push({
+            kind: 'fold',
+            foldId,
+            hiddenCount,
+          });
+        }
+
+        const bottomStart = Math.max(topEnd + 1, endIdx - bottomExpanded + 1);
+        for (let k = bottomStart; k <= endIdx; k += 1) {
+          pushPairRow(pairRows[k]);
+        }
+      }
+    }
   }
+
+  for (const meta of metaRows) {
+    rows.push(meta);
+  }
+
   return rows;
 }
 
@@ -255,6 +363,9 @@ function changedRange(content: string, peer?: string): [number, number] | undefi
   while (prefix < content.length && prefix < peer.length && content[prefix] === peer[prefix]) prefix += 1;
   let suffix = 0;
   while (suffix < content.length - prefix && suffix < peer.length - prefix && content[content.length - 1 - suffix] === peer[peer.length - 1 - suffix]) suffix += 1;
+  if (content.slice(0, prefix).trim() === '') {
+    prefix = 0;
+  }
   return [prefix, content.length - suffix];
 }
 
@@ -279,30 +390,70 @@ function changedContent(content: string, peer?: string, tokens?: ThemedToken[]):
   });
 }
 
-function SyncedCode({ group, offset, onScroll, children }: { group: HorizontalScrollGroup; offset: number; onScroll: (group: HorizontalScrollGroup, event: UIEvent<HTMLElement>) => void; children: ReactNode }) {
-  return <code
-    data-diff-scroll-group={group}
-    ref={(element) => { if (element && element.scrollLeft !== offset) element.scrollLeft = offset; }}
-    onScroll={(event) => onScroll(group, event)}
-  >{children}</code>;
-}
-
-function DiffCodeCell({ cell, peer, side, tokens, horizontalOffset, onHorizontalScroll }: { cell: DiffCell; peer?: DiffCell; side: DiffSide; tokens?: ThemedToken[]; horizontalOffset: number; onHorizontalScroll: (group: HorizontalScrollGroup, event: UIEvent<HTMLElement>) => void }) {
+function DiffCodeCell({ cell, peer, side, tokens }: { cell: DiffCell; peer?: DiffCell; side: DiffSide; tokens?: ThemedToken[] }) {
   const marker = cell.kind === 'deletion' ? '−' : cell.kind === 'addition' ? '+' : ' ';
   return <div className={`diff-code-cell ${side} ${cell.kind}`}>
     <span className="diff-marker">{marker}</span>
     <span className="diff-line-number">{cell.lineNumber ?? ''}</span>
-    <SyncedCode group={side} offset={horizontalOffset} onScroll={onHorizontalScroll}>{cell.kind === 'empty' ? ' ' : changedContent(cell.content, peer?.content, tokens)}</SyncedCode>
+    <code>{cell.kind === 'empty' ? ' ' : changedContent(cell.content, peer?.content, tokens)}</code>
   </div>;
 }
 
-function renderRow(row: RenderRow, highlighted: WeakMap<DiffCell, ThemedToken[]> | undefined, horizontalOffsets: Record<HorizontalScrollGroup, number>, onHorizontalScroll: (group: HorizontalScrollGroup, event: UIEvent<HTMLElement>) => void): ReactNode {
-  if (row.kind === 'hunk') return <div className="diff-hunk-row" title={row.text}><span /><Codicon name="ellipsis" /><span /></div>;
+function DiffFoldRow({
+  foldId,
+  hiddenCount,
+  onExpand,
+}: {
+  foldId: string;
+  hiddenCount: number;
+  onExpand: (foldId: string, action: 'all' | 'top' | 'bottom') => void;
+}) {
+  const { t } = useI18n();
+  return <div className="diff-fold-row" role="region" aria-label={t('+{0} more lines', hiddenCount)}>
+    <div className="diff-fold-line" />
+    <div className="diff-fold-controls">
+      <button
+        type="button"
+        className="diff-fold-badge"
+        title={t('Expand differences')}
+        onClick={() => onExpand(foldId, 'all')}
+      >
+        <span>{t('+{0} more lines', hiddenCount)}</span>
+      </button>
+      <div className="diff-fold-actions">
+        <button
+          type="button"
+          className="diff-fold-action-btn"
+          title={t('Expand 10 lines above')}
+          onClick={() => onExpand(foldId, 'top')}
+        >
+          +10
+        </button>
+        <button
+          type="button"
+          className="diff-fold-action-btn"
+          title={t('Expand 10 lines below')}
+          onClick={() => onExpand(foldId, 'bottom')}
+        >
+          +10
+        </button>
+      </div>
+    </div>
+  </div>;
+}
+
+function renderRow(
+  row: RenderRow,
+  highlighted: WeakMap<DiffCell, ThemedToken[]> | undefined,
+  onExpandFold: (foldId: string, action: 'all' | 'top' | 'bottom') => void,
+): ReactNode {
+  if (row.kind === 'hunk') return null;
   if (row.kind === 'meta') return <div className="diff-meta-row"><Codicon name="info" /><code>{row.text}</code></div>;
+  if (row.kind === 'fold') return <DiffFoldRow foldId={row.foldId} hiddenCount={row.hiddenCount} onExpand={onExpandFold} />;
   if (row.kind === 'split') {
     return <div className="diff-split-row">
-      <DiffCodeCell side="old" cell={row.oldCell} peer={row.newCell.kind === 'addition' ? row.newCell : undefined} tokens={highlighted?.get(row.oldCell)} horizontalOffset={horizontalOffsets.old} onHorizontalScroll={onHorizontalScroll} />
-      <DiffCodeCell side="new" cell={row.newCell} peer={row.oldCell.kind === 'deletion' ? row.oldCell : undefined} tokens={highlighted?.get(row.newCell)} horizontalOffset={horizontalOffsets.new} onHorizontalScroll={onHorizontalScroll} />
+      <DiffCodeCell side="old" cell={row.oldCell} peer={row.newCell.kind === 'addition' ? row.newCell : undefined} tokens={highlighted?.get(row.oldCell)} />
+      <DiffCodeCell side="new" cell={row.newCell} peer={row.oldCell.kind === 'deletion' ? row.oldCell : undefined} tokens={highlighted?.get(row.newCell)} />
     </div>;
   }
   const marker = row.cell.kind === 'deletion' ? '−' : row.cell.kind === 'addition' ? '+' : ' ';
@@ -310,7 +461,7 @@ function renderRow(row: RenderRow, highlighted: WeakMap<DiffCell, ThemedToken[]>
     <span className="diff-line-number old">{row.oldNumber ?? ''}</span>
     <span className="diff-line-number new">{row.newNumber ?? ''}</span>
     <span className="diff-marker">{marker}</span>
-    <SyncedCode group="inline" offset={horizontalOffsets.inline} onScroll={onHorizontalScroll}>{changedContent(row.cell.content, row.peer?.content, highlighted?.get(row.cell))}</SyncedCode>
+    <code>{changedContent(row.cell.content, row.peer?.content, highlighted?.get(row.cell))}</code>
   </div>;
 }
 
@@ -318,18 +469,84 @@ export function UnifiedDiffView({ content, path = '', language = 'text', classNa
   const { t } = useI18n();
   const [view, setView] = useState<'split' | 'inline'>('split');
   const [theme, setTheme] = useState<BundledTheme>(() => document.documentElement.dataset.theme === 'light' ? 'light-plus' : 'dark-plus');
+  const [collapsed, setCollapsed] = useState<boolean>(true);
+  const [expandedFolds, setExpandedFolds] = useState<Record<string, FoldExpansion>>({});
   const parsed = useMemo(() => parseUnifiedDiff(content, path), [content, path]);
-  const rows = useMemo(() => buildRenderRows(parsed, view), [parsed, view]);
+  const rows = useMemo(() => buildRenderRows(parsed, view, collapsed, expandedFolds), [parsed, view, collapsed, expandedFolds]);
   const [highlighted, setHighlighted] = useState<WeakMap<DiffCell, ThemedToken[]>>();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const horizontalOffsets = useRef<Record<HorizontalScrollGroup, number>>({ old: 0, new: 0, inline: 0 });
+  const [activeChangeIndex, setActiveChangeIndex] = useState<number>(-1);
+
+  const handleExpandFold = useCallback((foldId: string, action: 'all' | 'top' | 'bottom') => {
+    setExpandedFolds((prev) => {
+      const current = prev[foldId] || { top: 0, bottom: 0 };
+      if (action === 'all') {
+        return { ...prev, [foldId]: { ...current, all: true } };
+      }
+      if (action === 'top') {
+        return { ...prev, [foldId]: { ...current, top: current.top + 10 } };
+      }
+      if (action === 'bottom') {
+        return { ...prev, [foldId]: { ...current, bottom: current.bottom + 10 } };
+      }
+      return prev;
+    });
+  }, []);
+
+  const changeRanges = useMemo(() => {
+    const ranges: { startIndex: number; endIndex: number }[] = [];
+    let inChange = false;
+    let start = -1;
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      const isChanged = (row?.kind === 'split' && (row.oldCell.kind === 'deletion' || row.newCell.kind === 'addition'))
+        || (row?.kind === 'inline' && (row.cell.kind === 'deletion' || row.cell.kind === 'addition'));
+      if (isChanged) {
+        if (!inChange) {
+          inChange = true;
+          start = i;
+        }
+      } else if (inChange) {
+        ranges.push({ startIndex: start, endIndex: i - 1 });
+        inChange = false;
+      }
+    }
+    if (inChange) {
+      ranges.push({ startIndex: start, endIndex: rows.length - 1 });
+    }
+    return ranges;
+  }, [rows]);
+
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => rows[index]?.kind === 'hunk' || rows[index]?.kind === 'meta' ? 27 : 22,
+    estimateSize: (index) => rows[index]?.kind === 'fold' ? 28 : rows[index]?.kind === 'meta' ? 27 : 20,
     overscan: 24,
   });
+
+  const goToChange = useCallback((index: number) => {
+    if (!changeRanges.length) return;
+    const target = ((index % changeRanges.length) + changeRanges.length) % changeRanges.length;
+    setActiveChangeIndex(target);
+    const range = changeRanges[target];
+    if (range) {
+      virtualizer.scrollToIndex(range.startIndex, { align: 'center', behavior: 'smooth' });
+    }
+  }, [changeRanges, virtualizer]);
+
+  const goToPrev = useCallback(() => {
+    goToChange(activeChangeIndex <= 0 ? changeRanges.length - 1 : activeChangeIndex - 1);
+  }, [activeChangeIndex, changeRanges.length, goToChange]);
+
+  const goToNext = useCallback(() => {
+    goToChange(activeChangeIndex >= changeRanges.length - 1 ? 0 : activeChangeIndex + 1);
+  }, [activeChangeIndex, changeRanges.length, goToChange]);
+
+  useEffect(() => {
+    setActiveChangeIndex(-1);
+    setExpandedFolds({});
+  }, [content, path]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -363,29 +580,152 @@ export function UnifiedDiffView({ content, path = '', language = 'text', classNa
     return () => { active = false; };
   }, [content.length, language, parsed, path, theme]);
   useEffect(() => { virtualizer.measure(); }, [view, virtualizer]);
-  const syncHorizontalScroll = useCallback((group: HorizontalScrollGroup, event: UIEvent<HTMLElement>) => {
-    const source = event.currentTarget;
-    const next = source.scrollLeft;
-    if (horizontalOffsets.current[group] === next) return;
-    horizontalOffsets.current[group] = next;
-    scrollRef.current?.querySelectorAll<HTMLElement>(`code[data-diff-scroll-group="${group}"]`).forEach((element) => {
-      if (element !== source && element.scrollLeft !== next) element.scrollLeft = next;
-    });
-  }, []);
 
   return <section className={`unified-diff ${view} ${className}`} aria-label={t('File differences')}>
+    <div className="diff-toolbar">
+      <div className="diff-toolbar-left">
+        <button
+          type="button"
+          className="diff-toolbar-btn"
+          title={view === 'split' ? t('Inline view') : t('Split view')}
+          onClick={() => setView((prev) => prev === 'split' ? 'inline' : 'split')}
+        >
+          <Codicon name={view === 'split' ? 'list-flat' : 'split-horizontal'} />
+          <span>{view === 'split' ? t('Inline view') : t('Split view')}</span>
+        </button>
+        <button
+          type="button"
+          className={`diff-toolbar-btn ${!collapsed ? 'active' : ''}`}
+          title={collapsed ? t('Expand differences') : t('Collapse differences')}
+          onClick={() => {
+            setCollapsed((prev) => !prev);
+            setExpandedFolds({});
+          }}
+        >
+          <Codicon name={collapsed ? 'unfold' : 'fold'} />
+          <span>{collapsed ? t('Expand differences') : t('Collapse differences')}</span>
+        </button>
+      </div>
+      <div className="diff-toolbar-right">
+        {changeRanges.length > 0 ? (
+          <span className="diff-change-count">
+            {activeChangeIndex >= 0 ? `${activeChangeIndex + 1} / ${changeRanges.length}` : `${changeRanges.length} ${t('changes')}`}
+          </span>
+        ) : (
+          <span className="diff-change-count">{t('No changes')}</span>
+        )}
+        <button
+          type="button"
+          className="diff-toolbar-btn"
+          disabled={changeRanges.length === 0}
+          title={t('Previous change')}
+          aria-label={t('Previous change')}
+          onClick={goToPrev}
+        >
+          <Codicon name="arrow-up" />
+          <span>{t('Previous change')}</span>
+        </button>
+        <button
+          type="button"
+          className="diff-toolbar-btn"
+          disabled={changeRanges.length === 0}
+          title={t('Next change')}
+          aria-label={t('Next change')}
+          onClick={goToNext}
+        >
+          <Codicon name="arrow-down" />
+          <span>{t('Next change')}</span>
+        </button>
+      </div>
+    </div>
     <div ref={scrollRef} className="unified-diff-scroll">
       <div className="unified-diff-virtual" style={{ height: virtualizer.getTotalSize() }}>
-        {virtualizer.getVirtualItems().map((virtualRow) => {
-          const row = rows[virtualRow.index];
-          return <div
-            key={virtualRow.key}
-            ref={virtualizer.measureElement}
-            data-index={virtualRow.index}
-            className="unified-diff-virtual-row"
-            style={{ transform: `translateY(${virtualRow.start}px)` }}
-          >{renderRow(row, highlighted, horizontalOffsets.current, syncHorizontalScroll)}</div>;
-        })}
+        {view === 'split' ? (
+          <div className="unified-diff-split-container">
+            <div className="unified-diff-pane old">
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const row = rows[virtualRow.index];
+                if (row.kind === 'meta') return null;
+                if (row.kind === 'fold') {
+                  return <div
+                    key={`old-${virtualRow.key}`}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    className="unified-diff-virtual-row"
+                    style={{ transform: `translateY(${virtualRow.start}px)`, height: 28 }}
+                  />;
+                }
+                if (row.kind !== 'split') return null;
+                const peerRow = rows[virtualRow.index];
+                return <div
+                  key={`old-${virtualRow.key}`}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className="unified-diff-virtual-row"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <DiffCodeCell
+                    side="old"
+                    cell={row.oldCell}
+                    peer={peerRow.kind === 'split' && peerRow.newCell.kind === 'addition' ? peerRow.newCell : undefined}
+                    tokens={highlighted?.get(row.oldCell)}
+                  />
+                </div>;
+              })}
+            </div>
+            <div className="unified-diff-pane new">
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const row = rows[virtualRow.index];
+                if (row.kind === 'meta') return null;
+                if (row.kind === 'fold') {
+                  return <div
+                    key={`new-${virtualRow.key}`}
+                    data-index={virtualRow.index}
+                    className="unified-diff-virtual-row"
+                    style={{ transform: `translateY(${virtualRow.start}px)`, height: 28 }}
+                  />;
+                }
+                if (row.kind !== 'split') return null;
+                const peerRow = rows[virtualRow.index];
+                return <div
+                  key={`new-${virtualRow.key}`}
+                  data-index={virtualRow.index}
+                  className="unified-diff-virtual-row"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <DiffCodeCell
+                    side="new"
+                    cell={row.newCell}
+                    peer={peerRow.kind === 'split' && peerRow.oldCell.kind === 'deletion' ? peerRow.oldCell : undefined}
+                    tokens={highlighted?.get(row.newCell)}
+                  />
+                </div>;
+              })}
+            </div>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              if (row.kind !== 'fold') return null;
+              return <div
+                key={`center-fold-${virtualRow.key}`}
+                className="unified-diff-virtual-row split-center-fold-overlay"
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                <DiffFoldRow foldId={row.foldId} hiddenCount={row.hiddenCount} onExpand={handleExpandFold} />
+              </div>;
+            })}
+          </div>
+        ) : (
+          virtualizer.getVirtualItems().map((virtualRow) => {
+            const row = rows[virtualRow.index];
+            return <div
+              key={virtualRow.key}
+              ref={virtualizer.measureElement}
+              data-index={virtualRow.index}
+              className="unified-diff-virtual-row"
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
+            >{renderRow(row, highlighted, handleExpandFold)}</div>;
+          })
+        )}
       </div>
     </div>
   </section>;

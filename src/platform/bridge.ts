@@ -1,7 +1,7 @@
 import type {
   BootstrapData, BridgeCommand, DesktopError, NotificationPermissionState, OperationDomain,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
-  WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
+  RuntimeCapabilities, WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
 } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
@@ -136,7 +136,7 @@ function requestId(): string {
 
 const commandDomain = (command: BridgeCommand): OperationDomain => {
   switch (command.type) {
-    case 'bootstrap': case 'saveAppState': case 'updateSettings': case 'updateLayout': return 'application';
+    case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'updateSettings': case 'updateLayout': return 'application';
     case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent': return 'workspace';
     case 'repositoryStatus': return 'status';
     case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff':
@@ -328,19 +328,10 @@ export class TauriBridge implements VersionDockBridge {
 
       if (command.type === 'bootstrap' && response.result) {
         const bootstrap = response.result as BootstrapData;
-        const permission = await this.notificationPermission();
-        if (bootstrap.runtime) {
-          bootstrap.runtime.notificationPermission = permission;
-          if (permission === 'allowed') {
-            bootstrap.runtime.systemNotifications.available = true;
-            bootstrap.runtime.systemNotifications.reasonCode = null;
-            bootstrap.runtime.systemNotifications.detail = null;
-          } else if (permission === 'denied' || permission === 'restricted') {
-            bootstrap.runtime.systemNotifications.available = false;
-            bootstrap.runtime.systemNotifications.reasonCode = 'NOTIFICATION_PERMISSION_DENIED';
-            bootstrap.runtime.systemNotifications.detail = 'System notification permission is not granted';
-          }
-        }
+        if (bootstrap.runtime) bootstrap.runtime = await this.withNotificationPermission(bootstrap.runtime);
+      }
+      if (command.type === 'runtimeCapabilities' && response.result) {
+        response.result = await this.withNotificationPermission(response.result as RuntimeCapabilities);
       }
       return response.result as T;
     } catch (error) {
@@ -380,6 +371,20 @@ export class TauriBridge implements VersionDockBridge {
     } catch {
       return 'unavailable';
     }
+  }
+  private async withNotificationPermission(runtime: RuntimeCapabilities): Promise<RuntimeCapabilities> {
+    const permission = await this.notificationPermission();
+    const systemNotifications = { ...runtime.systemNotifications };
+    if (permission === 'allowed') {
+      systemNotifications.available = true;
+      systemNotifications.reasonCode = null;
+      systemNotifications.detail = null;
+    } else if (permission === 'denied' || permission === 'restricted') {
+      systemNotifications.available = false;
+      systemNotifications.reasonCode = 'NOTIFICATION_PERMISSION_DENIED';
+      systemNotifications.detail = 'System notification permission is not granted';
+    }
+    return { ...runtime, notificationPermission: permission, systemNotifications };
   }
   async selectWorkspaceFolders(title: string): Promise<string[]> {
     const { open } = await import('@tauri-apps/plugin-dialog');

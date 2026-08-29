@@ -127,6 +127,7 @@ impl ResponseEnvelope {
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum BridgeCommand {
     Bootstrap,
+    RuntimeCapabilities,
     SaveAppState {
         state: AppStateSnapshot,
     },
@@ -437,6 +438,7 @@ pub enum BridgeCommand {
     },
     Conflicts {
         workspace_id: String,
+        repo_id: Option<String>,
     },
     ConflictVersions {
         workspace_id: String,
@@ -974,6 +976,10 @@ pub enum RefreshScope {
     Operation,
     Conflicts,
     SvnRevision,
+    Unpushed,
+    Worktrees,
+    Subtrees,
+    Submodules,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]

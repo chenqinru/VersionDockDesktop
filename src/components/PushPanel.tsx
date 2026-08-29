@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { RepositoryStatus, UnpushedCommit, BranchInfo, CommitDetail, CommitFile } from '../bindings/generated';
 import { useI18n } from '../i18n';
-import { isOperationActive, useAppStore } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { branchColor, readableAccentColor } from './branchColor';
@@ -989,6 +989,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   }, [loadUnpushedCommits]);
 
   const canPushRepo = (repo: RepositoryStatus) => {
+    if (!capabilityAvailable(repo.capabilities, 'syncPush', true)) return false;
     const branch = branchesByRepo[repo.meta.id]?.find((item) => item.current);
     const ahead = branch?.ahead ?? repo.ahead;
     const hasUpstream = Boolean(branch?.upstream);
@@ -1096,6 +1097,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   if (isSingleRepo) {
     const solo = repos[0];
     const canPush = canPushRepo(solo);
+    const pushReason = capabilityReason(solo.capabilities, 'syncPush');
     const branch = branchesByRepo[solo.meta.id]?.find((item) => item.current);
     return (
       <div style={css.root}>
@@ -1116,7 +1118,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
           />
         </div>
         <div style={css.footer}>
-          <button data-primary-action-btn="" style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush([solo])} {...pushButtonFeedback}>
+          <button data-primary-action-btn="" title={!canPush ? pushReason : undefined} style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush([solo])} {...pushButtonFeedback}>
             <Codicon name="cloud-upload" style={{ marginRight: '6px' }} />
             {pushButtonLabel([solo])}
           </button>
@@ -1128,6 +1130,9 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   const checkedRepos = repos.filter((repo) => checked.has(repo.meta.id) && canPushRepo(repo));
   const pushableChecked = checkedRepos;
   const canPush = pushableChecked.length > 0;
+  const batchPushReason = checkedRepos.length === 0
+    ? repos.map((repo) => capabilityReason(repo.capabilities, 'syncPush')).find(Boolean)
+    : undefined;
 
   return (
     <div style={css.root}>
@@ -1174,7 +1179,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
             })}
           </div>
         )}
-        <button data-primary-action-btn="" style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush(pushableChecked)} {...pushButtonFeedback}>
+        <button data-primary-action-btn="" title={!canPush ? batchPushReason : undefined} style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush(pushableChecked)} {...pushButtonFeedback}>
           <Codicon name="cloud-upload" style={{ marginRight: '6px' }} />
           {pushButtonLabel(pushableChecked)}
         </button>

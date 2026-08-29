@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
-import { useAppStore } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useResizable } from '../hooks/useResizable';
 import { BranchSidebar } from './BranchSidebar';
@@ -279,13 +279,16 @@ function CommitList({
   const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: index * COMMIT_ROW_HEIGHT }));
   const contextItems = (commit: CommitNode): ContextMenuEntry[] => {
     const git = repoKindById[commit.repoId] !== 'svn';
+    const repository = repoMap.get(commit.repoId);
+    const rewriteAvailable = capabilityAvailable(repository?.capabilities, 'historyRewrite', true);
+    const rewriteReason = capabilityReason(repository?.capabilities, 'historyRewrite');
     const selection = selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
     if (selection.length > 1) {
       const allUnpushed = selection.every((item) => item.unpushed);
       return [
         { id: 'patch-multi', label: t('Create Patch...'), icon: 'diff' },
         ...(git ? [{ id: 'cherry-pick-multi', label: t('Cherry-Pick All'), icon: 'git-commit' } as ContextMenuEntry, { separator: true } as ContextMenuEntry, { id: 'revert-multi', label: t('Revert Commits'), icon: 'discard' } as ContextMenuEntry] : []),
-        ...(allUnpushed ? [{ separator: true } as ContextMenuEntry, { id: 'drop-multi', label: t('Drop Commits'), icon: 'trash', danger: true } as ContextMenuEntry, { id: 'squash-multi', label: t('Squash {0} Commits...', selection.length), icon: 'fold-down' } as ContextMenuEntry] : []),
+        ...(allUnpushed ? [{ separator: true } as ContextMenuEntry, { id: 'drop-multi', label: t('Drop Commits'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'squash-multi', label: t('Squash {0} Commits...', selection.length), icon: 'fold-down', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
       ];
     }
     const hasTags = commit.refs.some((ref) => ref.startsWith('refs/tags/') || ref.startsWith('tag: '));
@@ -303,13 +306,13 @@ function CommitList({
     items.push(
       { id: 'cherry-pick', label: t('Cherry-Pick'), icon: 'git-commit' },
       { separator: true },
-      { id: 'reset', label: t('Reset Current Branch to Here...'), icon: 'history', danger: true },
+      { id: 'reset', label: t('Reset Current Branch to Here...'), icon: 'history', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason },
       { id: 'revert', label: t('Revert Commit'), icon: 'discard' },
     );
     if (commit.unpushed) items.push(
       { separator: true },
-      ...(commits[0]?.hash === commit.hash ? [{ id: 'edit', label: t('Edit Commit Message…'), icon: 'edit' } as ContextMenuEntry, { id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', danger: true } as ContextMenuEntry] : []),
-      { id: 'drop', label: t('Drop Commit'), icon: 'trash', danger: true },
+      ...(commits[0]?.hash === commit.hash ? [{ id: 'edit', label: t('Edit Commit Message…'), icon: 'edit', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
+      { id: 'drop', label: t('Drop Commit'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason },
     );
     return items;
   };

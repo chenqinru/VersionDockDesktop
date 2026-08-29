@@ -2,7 +2,7 @@ import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
   MergeCommitSummary,
   DiffDocument, GraphCommitNode, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
-  TagInfo, WorkspaceSnapshot, WorktreeEntry, SubmoduleEntry,
+  RuntimeCapabilities, TagInfo, WorkspaceSnapshot, WorktreeEntry, SubmoduleEntry,
   WindowTabTransfer,
 } from '../bindings/generated';
 import type { BridgeEvent, NewWindowPlacement, RequestOptions, VersionDockBridge } from './bridge';
@@ -13,6 +13,16 @@ const workspace = {
 };
 
 const browserDemoMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sidebar') === 'mixed' ? 'mixed' : 'git';
+
+const unavailableRuntime: RuntimeCapabilities = {
+  systemNotifications: { available: false, reasonCode: 'BROWSER_DEMO', detail: 'System notifications are unavailable in browser demo mode' },
+  notificationPermission: 'unavailable',
+  secureCredentials: {
+    status: { available: false, reasonCode: 'BROWSER_DEMO', detail: 'Secure storage is unavailable in browser demo mode' },
+    backend: null,
+    passwordStdinSupported: false,
+  },
+};
 
 const repository = (
   id: string, name: string, color: string, branch: string, files: RepositoryStatus['files'], ahead = 0, behind = 0,
@@ -391,7 +401,9 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'bootstrap': return {
         state: this.state, tools: { git: true, svn: true, svnadmin: true },
         capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: true, compare: true, remoteManagement: true },
+        runtime: unavailableRuntime,
       } satisfies BootstrapData;
+      case 'runtimeCapabilities': return unavailableRuntime;
       case 'saveAppState': this.state = structuredClone(command.payload.state); return true;
       case 'updateSettings': this.state.settings = structuredClone(command.payload.settings); return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: true } };
       case 'updateLayout': this.state.layout = structuredClone(command.payload.layout); return command.payload.layout;

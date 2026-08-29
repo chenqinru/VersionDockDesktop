@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppStateSnapshot, BootstrapData, BridgeCommand, WorkspaceSnapshot } from '../../bindings/generated';
 import { I18nContext, createTranslator } from '../../i18n';
@@ -265,5 +265,31 @@ describe('StatusBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(cancelOperation).toHaveBeenCalledWith('fetch');
     expect(document.querySelector('.operation-strip')).toBeNull();
+  });
+
+  it('does not flash the operation item for requests that finish within the display delay', async () => {
+    vi.useFakeTimers();
+    try {
+      renderStatusBar();
+      act(() => {
+        useAppStore.setState({
+          operations: {
+            quick: {
+              operationId: 'quick',
+              context: { generation: 1, domain: 'sync', visibility: 'foreground', workspaceId: 'ws1', repositoryId: 'repo1', target: null },
+              status: 'running', phase: 'sync', message: '', startedAt: '', cancellable: true,
+              completed: null, total: null, result: null, error: null,
+            },
+          },
+        });
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      act(() => useAppStore.setState({ operations: {} }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+
+      expect(document.querySelector('.statusbar-operation')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

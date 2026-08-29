@@ -6,6 +6,8 @@ export interface ContextMenuItem {
   label: string;
   icon: string;
   danger?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
   separator?: false;
 }
 export interface ContextMenuSeparator {
@@ -38,16 +40,19 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
 
   useEffect(() => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    queueMicrotask(() => ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     const keyHandler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return; }
-      const entries = [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
+      const entries = [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
       if (!entries.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
       e.preventDefault();
       const current = entries.indexOf(document.activeElement as HTMLButtonElement);
+      if (current === -1) {
+        entries[e.key === 'ArrowUp' ? entries.length - 1 : 0]?.focus();
+        return;
+      }
       const next = e.key === 'Home' ? 0 : e.key === 'End' ? entries.length - 1
         : e.key === 'ArrowDown' ? (current + 1 + entries.length) % entries.length
           : (current - 1 + entries.length) % entries.length;
@@ -79,7 +84,12 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
   };
 
   return (
-    <div ref={ref} role="menu" style={{ ...styles.menu, ...style }}>
+    <div
+      ref={ref}
+      role="menu"
+      style={{ ...styles.menu, ...style }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       {items.map((item, i) => {
         if ('separator' in item && item.separator) {
           return <div key={i} style={styles.separator} />;
@@ -90,9 +100,11 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
             key={it.id}
             type="button"
             role="menuitem"
-            style={styles.item(!!it.danger)}
-            onClick={() => { onSelect(it.id); onClose(); }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--vscode-list-hoverBackground, var(--versiondock-hover))')}
+            disabled={it.disabled}
+            title={it.disabled ? it.disabledReason : undefined}
+            style={styles.item(!!it.danger, !!it.disabled)}
+            onClick={() => { if (!it.disabled) { onSelect(it.id); onClose(); } }}
+            onMouseEnter={(e) => { if (!it.disabled) e.currentTarget.style.background = 'var(--vscode-list-hoverBackground, var(--versiondock-hover))'; }}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
             <Codicon name={it.icon} style={styles.icon} />
@@ -116,12 +128,13 @@ const styles = {
     color: 'var(--vscode-menu-foreground, var(--versiondock-text))',
     userSelect: 'none' as const,
   },
-  item: (danger: boolean): React.CSSProperties => ({
+  item: (danger: boolean, disabled: boolean): React.CSSProperties => ({
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
     padding: '5px 12px',
-    cursor: 'pointer',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.48 : 1,
     background: 'transparent',
     color: danger
       ? 'var(--vscode-errorForeground, var(--versiondock-danger))'

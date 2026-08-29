@@ -12,7 +12,7 @@ use crate::{
         RuntimeCapabilities, VcsKind, WindowTabImport, WindowTabTransferCompleted,
     },
     shelf,
-    state::AppState,
+    state::{self, AppState, OperationReporter},
     svn_account, vcs, workspace,
 };
 
@@ -124,9 +124,9 @@ pub async fn bridge_request(
         OperationEvent {
             operation_id: request_id.clone(),
             context: context.clone(),
-            status: OperationStatus::Running,
-            phase: phase.into(),
-            message: message.into(),
+            status: OperationStatus::Queued,
+            phase: "queued".into(),
+            message: "Waiting to start operation".into(),
             started_at: started_at.clone(),
             cancellable: true,
             completed: None,
@@ -135,22 +135,42 @@ pub async fn bridge_request(
             error: None,
         },
     );
-    let mut result = match validate_request_context(&context, &error_context) {
-        Ok(()) => {
-            dispatch(
-                command.clone(),
-                &app,
-                &window,
-                &state,
-                &token,
-                &request_id,
-                &context,
-                &started_at,
-            )
-            .await
-        }
-        Err(error) => Err(error),
+    let reporter = OperationReporter {
+        app: app.clone(),
+        operation_id: request_id.clone(),
+        context: context.clone(),
+        started_at: started_at.clone(),
     };
+    let waits_for_coordinator = error_context.2.is_some()
+        || matches!(
+            command,
+            BridgeCommand::WorkspaceOpen { .. }
+                | BridgeCommand::WorkspaceRefresh { .. }
+                | BridgeCommand::BatchCommit { .. }
+                | BridgeCommand::Conflicts { .. }
+        );
+    let mut result = state::with_operation_reporter(reporter, async {
+        if !waits_for_coordinator {
+            state::emit_current_operation(OperationStatus::Running, phase, message);
+        }
+        match validate_request_context(&context, &error_context) {
+            Ok(()) => {
+                dispatch(
+                    command.clone(),
+                    &app,
+                    &window,
+                    &state,
+                    &token,
+                    &request_id,
+                    &context,
+                    &started_at,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        }
+    })
+    .await;
     if let Err(error) = &mut result {
         error
             .operation
@@ -242,8 +262,16 @@ pub async fn bridge_request(
             status,
             started_at,
             cancellable: false,
-            completed: Some(1),
-            total: Some(1),
+            completed: matches!(command, BridgeCommand::BatchCommit { .. }).then(|| {
+                result_summary
+                    .as_ref()
+                    .map_or(0, |summary| summary.succeeded + summary.failed)
+            }),
+            total: matches!(command, BridgeCommand::BatchCommit { .. }).then(|| {
+                result_summary
+                    .as_ref()
+                    .map_or(0, |summary| summary.succeeded + summary.failed)
+            }),
             result: result_summary,
             error: event_error,
         },
@@ -340,6 +368,7 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
             RefreshScope::Status,
             RefreshScope::Refs,
             RefreshScope::History,
+            RefreshScope::Unpushed,
         ],
         BridgeCommand::Sync { .. }
         | BridgeCommand::BranchOperation { .. }
@@ -350,6 +379,7 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
             RefreshScope::Refs,
             RefreshScope::History,
             RefreshScope::Conflicts,
+            RefreshScope::Unpushed,
         ],
         BridgeCommand::ConflictSave { .. }
         | BridgeCommand::ConflictAccept { .. }
@@ -364,13 +394,42 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
         | BridgeCommand::ChangelistOperation { .. } => {
             vec![RefreshScope::Status, RefreshScope::Diff]
         }
-        BridgeCommand::WorktreeOperation { .. }
-        | BridgeCommand::SubtreeOperation { .. }
-        | BridgeCommand::SubmoduleOperation { .. } => vec![
-            RefreshScope::WorkspaceSnapshot,
+        BridgeCommand::WorktreeOperation {
+            operation:
+                crate::models::WorktreeOperation::Create { .. }
+                | crate::models::WorktreeOperation::Remove { .. }
+                | crate::models::WorktreeOperation::Prune,
+            ..
+        } => vec![RefreshScope::WorkspaceSnapshot, RefreshScope::Worktrees],
+        BridgeCommand::WorktreeOperation { .. } => vec![RefreshScope::Worktrees],
+        BridgeCommand::SubtreeOperation {
+            operation:
+                crate::models::SubtreeOperation::Register { .. }
+                | crate::models::SubtreeOperation::Edit { .. }
+                | crate::models::SubtreeOperation::DeleteRegistry { .. },
+            ..
+        } => vec![RefreshScope::Subtrees],
+        BridgeCommand::SubtreeOperation { .. } => vec![
+            RefreshScope::Status,
+            RefreshScope::Diff,
+            RefreshScope::Refs,
+            RefreshScope::History,
+            RefreshScope::Unpushed,
+            RefreshScope::Subtrees,
+        ],
+        BridgeCommand::SubmoduleOperation {
+            operation:
+                crate::models::SubmoduleOperation::Init { .. }
+                | crate::models::SubmoduleOperation::Deinit { .. }
+                | crate::models::SubmoduleOperation::Update { init: true, .. },
+            ..
+        } => vec![RefreshScope::WorkspaceSnapshot, RefreshScope::Submodules],
+        BridgeCommand::SubmoduleOperation { .. } => vec![
             RefreshScope::Status,
             RefreshScope::Refs,
             RefreshScope::History,
+            RefreshScope::Unpushed,
+            RefreshScope::Submodules,
         ],
         BridgeCommand::RemoteOperation { .. }
         | BridgeCommand::GitProfileOperation { .. }
@@ -429,6 +488,36 @@ fn tool_capability(available: bool, tool: &str, version: Option<&str>) -> Capabi
     }
 }
 
+fn system_notification_capability() -> CapabilityStatus {
+    let available = cfg!(target_os = "macos")
+        || cfg!(target_os = "windows")
+        || (cfg!(target_os = "linux")
+            && (std::env::var_os("DISPLAY").is_some()
+                || std::env::var_os("WAYLAND_DISPLAY").is_some())
+            && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some());
+    if available {
+        CapabilityStatus::available()
+    } else {
+        CapabilityStatus::unavailable(
+            "SYSTEM_NOTIFICATIONS_UNAVAILABLE",
+            "No supported desktop notification session is available",
+        )
+    }
+}
+
+async fn runtime_capabilities() -> RuntimeCapabilities {
+    let system_notifications = system_notification_capability();
+    RuntimeCapabilities {
+        notification_permission: if system_notifications.available {
+            NotificationPermissionState::NotRequested
+        } else {
+            NotificationPermissionState::Unavailable
+        },
+        system_notifications,
+        secure_credentials: svn_account::secure_store_capability().await,
+    }
+}
+
 fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
     match command {
         BridgeCommand::WorkspaceOpen { .. } | BridgeCommand::WorkspaceRefresh { .. } => {
@@ -476,16 +565,87 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
     }
 }
 
+fn sync_phase(action: &crate::models::SyncAction) -> (&'static str, &'static str) {
+    match action {
+        crate::models::SyncAction::Fetch => ("fetching", "Fetching remote references"),
+        crate::models::SyncAction::Pull => ("pulling", "Pulling repository changes"),
+        crate::models::SyncAction::Push => ("pushing", "Pushing repository changes"),
+        crate::models::SyncAction::Update => ("updating", "Updating SVN working copy"),
+    }
+}
+
+fn svn_phase(operation: &crate::models::SvnOperation) -> (&'static str, &'static str) {
+    match operation {
+        crate::models::SvnOperation::Cleanup { .. } => ("svnCleanup", "Cleaning SVN working copy"),
+        crate::models::SvnOperation::ResolveWorking { .. } => {
+            ("svnResolve", "Resolving SVN conflicts")
+        }
+        crate::models::SvnOperation::Lock { .. } => ("svnLock", "Locking SVN paths"),
+        crate::models::SvnOperation::Unlock { .. } => ("svnUnlock", "Unlocking SVN paths"),
+        crate::models::SvnOperation::Relocate { .. } => {
+            ("svnRelocate", "Relocating SVN working copy")
+        }
+        crate::models::SvnOperation::Switch { .. } => ("svnSwitch", "Switching SVN working copy"),
+        crate::models::SvnOperation::Copy { .. } => ("svnCopy", "Creating SVN branch or tag"),
+    }
+}
+
+fn submodule_phase(operation: &crate::models::SubmoduleOperation) -> (&'static str, &'static str) {
+    match operation {
+        crate::models::SubmoduleOperation::Init { .. } => {
+            ("submoduleInit", "Initializing submodule")
+        }
+        crate::models::SubmoduleOperation::Update { .. } => {
+            ("submoduleUpdate", "Updating submodule")
+        }
+        crate::models::SubmoduleOperation::Deinit { .. } => {
+            ("submoduleDeinit", "Deinitializing submodule")
+        }
+        crate::models::SubmoduleOperation::Sync { .. } => {
+            ("submoduleSync", "Synchronizing submodule URLs")
+        }
+    }
+}
+
+fn subtree_phase(operation: &crate::models::SubtreeOperation) -> (&'static str, &'static str) {
+    match operation {
+        crate::models::SubtreeOperation::Add { .. } => ("subtreeAdd", "Adding subtree"),
+        crate::models::SubtreeOperation::Pull { .. } => ("subtreePull", "Pulling subtree"),
+        crate::models::SubtreeOperation::Push { .. } => ("subtreePush", "Pushing subtree"),
+        crate::models::SubtreeOperation::Register { .. } => {
+            ("subtreeRegister", "Registering subtree")
+        }
+        crate::models::SubtreeOperation::Edit { .. } => {
+            ("subtreeEdit", "Updating subtree registration")
+        }
+        crate::models::SubtreeOperation::DeleteRegistry { .. } => {
+            ("subtreeDelete", "Deleting subtree registration")
+        }
+        crate::models::SubtreeOperation::RemoveFiles { .. } => {
+            ("subtreeRemove", "Removing subtree files")
+        }
+        crate::models::SubtreeOperation::Split { .. } => {
+            ("subtreeSplit", "Splitting subtree history")
+        }
+        crate::models::SubtreeOperation::Merge { .. } => {
+            ("subtreeMerge", "Merging subtree revision")
+        }
+    }
+}
+
 fn command_error_context(
     command: &BridgeCommand,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     let operation = command_progress(command).0.to_string();
     match command {
         BridgeCommand::WorkspaceRemoveRecent { workspace_id }
-        | BridgeCommand::WorkspaceRefresh { workspace_id }
-        | BridgeCommand::Conflicts { workspace_id } => {
+        | BridgeCommand::WorkspaceRefresh { workspace_id } => {
             (operation, Some(workspace_id.clone()), None, None)
         }
+        BridgeCommand::Conflicts {
+            workspace_id,
+            repo_id,
+        } => (operation, Some(workspace_id.clone()), repo_id.clone(), None),
         BridgeCommand::RepositoryStatus {
             workspace_id,
             repo_id,
@@ -739,30 +899,11 @@ async fn dispatch(
                 workspace.available = workspace.paths.iter().all(|path| Path::new(path).is_dir());
             }
             let tools = workspace::tool_availability(token).await;
-            let secure_credentials = svn_account::secure_store_capability().await;
-            let notifications_available = cfg!(target_os = "macos")
-                || cfg!(target_os = "windows")
-                || (cfg!(target_os = "linux")
-                    && (std::env::var_os("DISPLAY").is_some()
-                        || std::env::var_os("WAYLAND_DISPLAY").is_some())
-                    && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some());
-            let notification_status = if notifications_available {
-                CapabilityStatus::available()
-            } else {
-                CapabilityStatus::unavailable(
-                    "SYSTEM_NOTIFICATIONS_UNAVAILABLE",
-                    "No supported desktop notification session is available",
-                )
-            };
-            let runtime = RuntimeCapabilities {
-                system_notifications: notification_status.clone(),
-                notification_permission: if notifications_available {
-                    NotificationPermissionState::NotRequested
-                } else {
-                    NotificationPermissionState::Unavailable
-                },
-                secure_credentials: secure_credentials.clone(),
-            };
+            state.cache_tools(tools.clone()).await;
+            let runtime = runtime_capabilities().await;
+            let secure_credentials = runtime.secure_credentials.clone();
+            let notification_status = runtime.system_notifications.clone();
+            let notifications_available = notification_status.available;
             let mut availability = std::collections::BTreeMap::new();
             availability.insert("systemNotifications".into(), notification_status);
             availability.insert(
@@ -856,6 +997,7 @@ async fn dispatch(
                 runtime,
             })
         }
+        BridgeCommand::RuntimeCapabilities => json(runtime_capabilities().await),
         BridgeCommand::SaveAppState { state: snapshot } => {
             state.save_app_state(snapshot).await?;
             json(true)
@@ -893,6 +1035,7 @@ async fn dispatch(
             json(layout)
         }
         BridgeCommand::WorkspaceOpen { paths } => {
+            let _permit = state.acquire_read(token).await?;
             emit_operation_phase(
                 app,
                 operation_id,
@@ -906,7 +1049,6 @@ async fn dispatch(
             let descriptor = workspace::descriptor(paths)?;
             state.upsert_workspace(descriptor.clone()).await?;
             let generation = state.next_generation();
-            let _permit = state.acquire_read(token).await?;
             let settings = state.app.read().await.settings.clone();
             emit_operation_phase(
                 app,
@@ -920,6 +1062,10 @@ async fn dispatch(
             );
             let snapshot =
                 workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
+            state
+                .cache_repositories(&descriptor.id, &snapshot.repositories)
+                .await;
+            state.cache_tools(snapshot.tools.clone()).await;
             emit_operation_phase(
                 app,
                 operation_id,
@@ -934,6 +1080,7 @@ async fn dispatch(
             json(snapshot)
         }
         BridgeCommand::WorkspaceRemoveRecent { workspace_id } => {
+            state.remove_cached_workspace(&workspace_id).await;
             let mut snapshot = state.app.read().await.clone();
             let removed = snapshot
                 .recent_workspaces
@@ -970,9 +1117,9 @@ async fn dispatch(
             json(true)
         }
         BridgeCommand::WorkspaceRefresh { workspace_id } => {
+            let _permit = state.acquire_read(token).await?;
             let descriptor = state.workspace(&workspace_id).await?;
             let generation = state.next_generation();
-            let _permit = state.acquire_read(token).await?;
             let settings = state.app.read().await.settings.clone();
             emit_operation_phase(
                 app,
@@ -986,6 +1133,10 @@ async fn dispatch(
             );
             let snapshot =
                 workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
+            state
+                .cache_repositories(&descriptor.id, &snapshot.repositories)
+                .await;
+            state.cache_tools(snapshot.tools.clone()).await;
             state.watch_workspace(&descriptor, &snapshot.repositories, &settings, app.clone())?;
             json(snapshot)
         }
@@ -1343,13 +1494,19 @@ async fn dispatch(
             workspace_id,
             repo_id,
         } => {
-            let descriptor = state.workspace(&workspace_id).await?;
-            let repo = workspace::repository(&descriptor, &repo_id)?;
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(match repo.kind {
+            let tools = match state.cached_tools().await {
+                Some(tools) => tools,
+                None => workspace::tool_availability(token).await,
+            };
+            let secure_credentials = svn_account::secure_store_capability().await;
+            let mut status = match repo.kind {
                 VcsKind::Git => workspace::git_status(repo, token).await?,
                 VcsKind::Svn => workspace::svn_status(repo, token).await?,
-            })
+            };
+            workspace::apply_runtime_capabilities(&mut status, &tools, &secure_credentials);
+            json(status)
         }
         BridgeCommand::FileDiff {
             workspace_id,
@@ -1484,6 +1641,16 @@ async fn dispatch(
             amend,
             paths,
         } => {
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "preparingCommit",
+                "Preparing commit inputs and identity",
+                None,
+                None,
+            );
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let identity = if repo.kind == VcsKind::Git {
                 Some(
@@ -1495,6 +1662,24 @@ async fn dispatch(
                 None
             };
             let value = with_write(state, &repo_id, token, async {
+                emit_operation_phase(
+                    app,
+                    operation_id,
+                    request_context,
+                    started_at,
+                    if paths.is_empty() {
+                        "committing"
+                    } else {
+                        "stagingAndCommitting"
+                    },
+                    if paths.is_empty() {
+                        "Creating commit"
+                    } else {
+                        "Staging selected paths and creating commit"
+                    },
+                    None,
+                    None,
+                );
                 vcs::commit_with_identity(&repo, &message, amend, &paths, identity.as_ref(), token)
                     .await
             })
@@ -1509,16 +1694,6 @@ async fn dispatch(
             let mut results = Vec::new();
             let total = targets.len() as u32;
             for (index, target) in targets.into_iter().enumerate() {
-                emit_operation_phase(
-                    app,
-                    operation_id,
-                    request_context,
-                    started_at,
-                    "commitRepository",
-                    "Committing repository",
-                    Some(index as u32),
-                    Some(total),
-                );
                 let repo_id = target.repo_id.clone();
                 let repo = match resolve_repo(state, &workspace_id, &repo_id).await {
                     Ok(repo) => repo,
@@ -1565,6 +1740,16 @@ async fn dispatch(
                     None
                 };
                 let commit_result = with_write(state, &repo_id, token, async {
+                    emit_operation_phase(
+                        app,
+                        operation_id,
+                        request_context,
+                        started_at,
+                        "stagingAndCommitting",
+                        "Preparing selected paths and creating commit",
+                        Some(index as u32),
+                        Some(total),
+                    );
                     if !target.unstage_paths.is_empty() {
                         vcs::unstage(&repo, &target.unstage_paths, token).await?;
                     }
@@ -1583,6 +1768,16 @@ async fn dispatch(
                     Ok(revision) => {
                         let push_result = if push && repo.kind == VcsKind::Git {
                             with_write(state, &repo_id, token, async {
+                                emit_operation_phase(
+                                    app,
+                                    operation_id,
+                                    request_context,
+                                    started_at,
+                                    "pushRepository",
+                                    "Pushing committed repository",
+                                    Some(index as u32),
+                                    Some(total),
+                                );
                                 vcs::sync(&repo, crate::models::SyncAction::Push, None, token).await
                             })
                             .await
@@ -1651,8 +1846,19 @@ async fn dispatch(
             action,
             remote,
         } => {
+            let (phase, message) = sync_phase(&action);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let value = with_write(state, &repo_id, token, async {
+                emit_operation_phase(
+                    app,
+                    operation_id,
+                    request_context,
+                    started_at,
+                    phase,
+                    message,
+                    None,
+                    None,
+                );
                 vcs::sync(&repo, action, remote, token).await
             })
             .await?;
@@ -1775,6 +1981,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::branches(&repo, token).await?)
         }
         BridgeCommand::BranchOperation {
@@ -1794,6 +2001,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::tags(&repo, token).await?)
         }
         BridgeCommand::TagOperation {
@@ -1813,6 +2021,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::stashes(&repo, token).await?)
         }
         BridgeCommand::StashOperation {
@@ -1834,6 +2043,16 @@ async fn dispatch(
             reveal,
             external,
         } => {
+            emit_operation_phase(
+                app,
+                operation_id,
+                request_context,
+                started_at,
+                "openingPath",
+                "Opening repository path",
+                None,
+                None,
+            );
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let target =
                 crate::state::safe_relative(Path::new(&repo.root_path), &relative_path, true)?;
@@ -1873,6 +2092,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(shelf::list(&state.config_dir, &repo).await?)
         }
         BridgeCommand::ShelfOperation {
@@ -1892,6 +2112,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(changelist::list(&state.config_dir, &repo).await?)
         }
         BridgeCommand::ChangelistOperation {
@@ -1911,6 +2132,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::worktrees(&repo, token).await?)
         }
         BridgeCommand::WorktreeOperation {
@@ -1932,6 +2154,7 @@ async fn dispatch(
             reveal,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             let target = vcs::managed_worktree_path(&state.config_dir, &repo, &path, token).await?;
             if reveal {
                 app.opener()
@@ -2011,8 +2234,19 @@ async fn dispatch(
             repo_id,
             operation,
         } => {
+            let (phase, message) = subtree_phase(&operation);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
+                emit_operation_phase(
+                    app,
+                    operation_id,
+                    request_context,
+                    started_at,
+                    phase,
+                    message,
+                    None,
+                    None,
+                );
                 vcs::subtree_operation(&repo, operation, token).await
             })
             .await?;
@@ -2031,8 +2265,19 @@ async fn dispatch(
             repo_id,
             operation,
         } => {
+            let (phase, message) = submodule_phase(&operation);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
+                emit_operation_phase(
+                    app,
+                    operation_id,
+                    request_context,
+                    started_at,
+                    phase,
+                    message,
+                    None,
+                    None,
+                );
                 vcs::submodule_operation(&repo, operation, token).await
             })
             .await?;
@@ -2043,8 +2288,19 @@ async fn dispatch(
             repo_id,
             operation,
         } => {
+            let (phase, message) = svn_phase(&operation);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
+                emit_operation_phase(
+                    app,
+                    operation_id,
+                    request_context,
+                    started_at,
+                    phase,
+                    message,
+                    None,
+                    None,
+                );
                 vcs::svn_operation(&repo, operation, token).await
             })
             .await?;
@@ -2080,13 +2336,32 @@ async fn dispatch(
             .await?;
             json(true)
         }
-        BridgeCommand::Conflicts { workspace_id } => {
-            let descriptor = state.workspace(&workspace_id).await?;
-            let settings = state.app.read().await.settings.clone();
-            let snapshot =
-                workspace::snapshot(descriptor, state.next_generation(), &settings, token).await?;
-            let files = snapshot
-                .repositories
+        BridgeCommand::Conflicts {
+            workspace_id,
+            repo_id,
+        } => {
+            let _permit = state.acquire_read(token).await?;
+            let repositories = if let Some(repo_id) = repo_id {
+                vec![resolve_repo(state, &workspace_id, &repo_id).await?]
+            } else {
+                let cached = state.cached_repositories(&workspace_id).await;
+                if cached.is_empty() {
+                    let descriptor = state.workspace(&workspace_id).await?;
+                    let settings = state.app.read().await.settings.clone();
+                    workspace::scan(&descriptor, &settings)?
+                } else {
+                    cached
+                }
+            };
+            let mut statuses = Vec::with_capacity(repositories.len());
+            for repository in repositories {
+                let status = match repository.kind {
+                    VcsKind::Git => workspace::git_status(repository, token).await?,
+                    VcsKind::Svn => workspace::svn_status(repository, token).await?,
+                };
+                statuses.push(status);
+            }
+            let files = statuses
                 .iter()
                 .flat_map(|repository| {
                     repository
@@ -2126,6 +2401,7 @@ async fn dispatch(
             relative_path,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::conflict_versions(&repo, &relative_path, token).await?)
         }
         BridgeCommand::ConflictSave {
@@ -2179,6 +2455,7 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             if repo.kind != VcsKind::Git {
                 return Err(DesktopError::new(
                     "UNSUPPORTED_OPERATION",
@@ -2201,13 +2478,19 @@ async fn dispatch(
                     false,
                 ));
             }
-            json(identity::operate(&state.config_dir, &repo, operation, token).await?)
+            json(
+                with_write(state, &repo_id, token, async {
+                    identity::operate(&state.config_dir, &repo, operation, token).await
+                })
+                .await?,
+            )
         }
         BridgeCommand::SvnAccount {
             workspace_id,
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             if repo.kind != VcsKind::Svn {
                 return Err(DesktopError::new(
                     "UNSUPPORTED_OPERATION",
@@ -2230,7 +2513,12 @@ async fn dispatch(
                     false,
                 ));
             }
-            json(svn_account::operate(&state.config_dir, &repo, operation, token).await?)
+            json(
+                with_write(state, &repo_id, token, async {
+                    svn_account::operate(&state.config_dir, &repo, operation, token).await
+                })
+                .await?,
+            )
         }
         BridgeCommand::FileHistory {
             workspace_id,
@@ -2240,6 +2528,7 @@ async fn dispatch(
             limit,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::file_history(&repo, &relative_path, cursor.as_deref(), limit, token).await?)
         }
         BridgeCommand::FileRevisionContent {
@@ -2249,6 +2538,7 @@ async fn dispatch(
             revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
             json(vcs::file_revision_content(&repo, &relative_path, &revision, token).await?)
         }
     }
@@ -2329,8 +2619,26 @@ async fn resolve_repo(
     workspace_id: &str,
     repo_id: &str,
 ) -> Result<crate::models::RepositoryMeta, DesktopError> {
-    let descriptor = state.workspace(workspace_id).await?;
-    let repo = workspace::repository(&descriptor, repo_id)?;
+    let repo = if let Some(repository) = state.cached_repository(workspace_id, repo_id).await {
+        repository
+    } else {
+        let descriptor = state.workspace(workspace_id).await?;
+        let settings = state.app.read().await.settings.clone();
+        let repository = workspace::scan(&descriptor, &settings)?
+            .into_iter()
+            .find(|repository| repository.id == repo_id)
+            .ok_or_else(|| {
+                DesktopError::new(
+                    "REPOSITORY_NOT_FOUND",
+                    "Repository is no longer part of the workspace",
+                    true,
+                )
+            })?;
+        state
+            .cache_repository(workspace_id, repository.clone())
+            .await;
+        repository
+    };
     if repo.kind == VcsKind::Svn {
         svn_account::hydrate(
             &state.config_dir,
@@ -2352,6 +2660,11 @@ where
     F: std::future::Future<Output = Result<T, DesktopError>>,
 {
     let lock = state.write_lock(repo_id).await;
+    state::emit_current_operation(
+        OperationStatus::Queued,
+        "waitingForRepository",
+        "Waiting for the repository write lock",
+    );
     let _guard = tokio::select! {
         _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
         guard = lock.lock_owned() => guard,
@@ -2482,6 +2795,45 @@ mod tests {
             &root.path().join("file.txt"),
         );
         assert_eq!(result.unwrap_err().code, "INVALID_EXTERNAL_EDITOR");
+    }
+
+    #[test]
+    fn refresh_scopes_keep_extension_operations_repository_local() {
+        let subtree = BridgeCommand::SubtreeOperation {
+            workspace_id: "workspace".into(),
+            repo_id: "repo".into(),
+            operation: crate::models::SubtreeOperation::Pull {
+                subtree_id: "subtree".into(),
+            },
+        };
+        let scopes = command_refresh_scopes(&subtree);
+        assert!(scopes.contains(&RefreshScope::Subtrees));
+        assert!(scopes.contains(&RefreshScope::History));
+        assert!(!scopes.contains(&RefreshScope::WorkspaceSnapshot));
+
+        let update = BridgeCommand::SubmoduleOperation {
+            workspace_id: "workspace".into(),
+            repo_id: "repo".into(),
+            operation: crate::models::SubmoduleOperation::Update {
+                path: "module".into(),
+                init: false,
+                recursive: false,
+                remote: false,
+            },
+        };
+        let scopes = command_refresh_scopes(&update);
+        assert!(scopes.contains(&RefreshScope::Submodules));
+        assert!(!scopes.contains(&RefreshScope::WorkspaceSnapshot));
+
+        let initialize = BridgeCommand::SubmoduleOperation {
+            workspace_id: "workspace".into(),
+            repo_id: "repo".into(),
+            operation: crate::models::SubmoduleOperation::Init {
+                path: "module".into(),
+                recursive: false,
+            },
+        };
+        assert!(command_refresh_scopes(&initialize).contains(&RefreshScope::WorkspaceSnapshot));
     }
 
     #[tokio::test]

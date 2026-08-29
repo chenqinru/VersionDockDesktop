@@ -4,7 +4,7 @@ import type {
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
-  DesktopCapabilities, OperationDomain, OperationEvent, RefreshScope, RepositoryCapabilities, WindowTabTransfer,
+  DesktopCapabilities, OperationDomain, OperationEvent, RefreshScope, RepositoryCapabilities, RuntimeCapabilities, WindowTabTransfer,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
@@ -319,7 +319,8 @@ export interface AppStore {
   loadRemotes: (repoId?: string) => Promise<void>;
   remoteOperation: (repoId: string, operation: RemoteOperation) => Promise<void>;
   systemOpen: (repoId: string, path: string, reveal: boolean, external?: boolean) => Promise<void>;
-  loadConflicts: (silent?: boolean) => Promise<void>;
+  loadConflicts: (silent?: boolean, repoId?: string) => Promise<void>;
+  refreshRuntimeCapabilities: () => Promise<void>;
   openMerge: (conflict: ConflictFile) => Promise<void>;
   resolveConflict: (conflict: ConflictFile, choice: 'mine' | 'theirs' | 'working') => Promise<void>;
   setMergeResult: (value: string) => void;
@@ -439,6 +440,14 @@ export function capabilityAvailable(
     ?? (capabilities && key in capabilities ? Boolean((capabilities as unknown as Record<string, unknown>)[key]) : fallback);
 }
 
+export function capabilityReason(
+  capabilities: DesktopCapabilities | RepositoryCapabilities | undefined,
+  key: string,
+): string | undefined {
+  const status = capabilities?.availability?.[key];
+  return status && !status.available ? status.detail ?? status.reasonCode ?? undefined : undefined;
+}
+
 function operationContext(domainKey: string, state: AppStore): OperationEvent['context'] {
   const [rawDomain, repositoryId] = domainKey.split(':', 2);
   const domainMap: Record<string, OperationDomain> = {
@@ -480,9 +489,15 @@ function projectSnapshot(snapshot: WorkspaceSnapshot, repositories: RepositorySt
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
+  const ensureRepositoryCapability = (repoId: string, key: string) => {
+    const repository = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
+    if (!repository || capabilityAvailable(repository.capabilities, key, true)) return true;
+    set({ notice: capabilityReason(repository.capabilities, key) ?? 'Operation is unavailable for this repository' });
+    return false;
+  };
   const withBusy = async (operation: () => Promise<void>, domain = 'workspace') => {
     const operationId = `client-${Date.now()}-${++localOperationSequence}`;
-    const context = operationContext(domain, get());
+    const context = { ...operationContext(domain, get()), visibility: 'background' as const };
     set((state) => ({
       error: undefined,
       operations: {
@@ -686,6 +701,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         actionData: { repoId: repo.meta.id },
       });
       if (!await bridge().notify('VersionDock Desktop', body)) set({ notice: body });
+      void get().refreshRuntimeCapabilities();
     }
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     const requests: Promise<void>[] = [get().loadConflicts(silent)];
@@ -704,6 +720,50 @@ export const useAppStore = create<AppStore>((set, get) => {
     }
   };
 
+  const refreshHistoryRepository = async (workspaceId: string, repoId: string) => {
+    const current = get();
+    const requestGeneration = historyRequestGeneration;
+    if (current.historyScope.repoIds && !current.historyScope.repoIds.includes(repoId)) return;
+    const repo = current.snapshot?.repositories.find((item) => item.meta.id === repoId);
+    if (!repo) return;
+    const visibleLimit = Math.min(
+      Math.max(current.history.length, HISTORY_PAGE_SIZE),
+      settings().maximumGraphCommits,
+    );
+    const [page, topology] = await Promise.all([
+      bridge().request<HistoryPage>({
+        type: 'history',
+        payload: {
+          workspace_id: workspaceId,
+          repo_id: repoId,
+          skip: 0,
+          limit: visibleLimit,
+          filter: current.historyFilter || null,
+          revision: current.historyScope.revisionsByRepo[repoId] ?? null,
+        },
+      }, { showProgress: false }),
+      bridge().request<GraphCommitNode[]>({
+        type: 'historyTopology',
+        payload: { workspace_id: workspaceId, repo_id: repoId, svn_limit: 1000 },
+      }, { showProgress: false }).catch(() => []),
+    ]);
+    if (get().snapshot?.workspace.id !== workspaceId || historyRequestGeneration !== requestGeneration) return;
+    set((state) => {
+      const historyByRepo = { ...state.historyByRepo, [repoId]: page.commits };
+      const historyHasMoreByRepo = { ...state.historyHasMoreByRepo, [repoId]: page.hasMore };
+      const historyTopologyByRepo = { ...state.historyTopologyByRepo, [repoId]: topology };
+      const merged = interleaveHistory(historyByRepo);
+      return {
+        historyByRepo,
+        historyHasMoreByRepo,
+        history: merged.slice(0, visibleLimit),
+        historyHasMore: merged.length > visibleLimit || Object.values(historyHasMoreByRepo).some(Boolean),
+        historyTopologyByRepo,
+        historyTopology: interleaveLogs(historyTopologyByRepo),
+      };
+    });
+  };
+
   const refreshFromWatcher = async () => {
     if (!get().snapshot?.workspace.id) return;
     if (watcherRefreshInFlight) {
@@ -718,6 +778,12 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!workspaceId) return;
       if ([...pending.values()].some((scopes) => scopes.has('workspaceSnapshot'))) {
         await get().refresh(true);
+        for (const [repoId, scopes] of pending) {
+          if (!repoId) continue;
+          if (scopes.has('worktrees')) await get().loadWorktrees(repoId);
+          if (scopes.has('subtrees')) await get().loadSubtrees(repoId);
+          if (scopes.has('submodules')) await get().loadSubmodules(repoId);
+        }
         return;
       }
       for (const [repoId, scopes] of pending) {
@@ -748,9 +814,16 @@ export const useAppStore = create<AppStore>((set, get) => {
             branches: state.selectedRepoId === repoId ? branches : state.branches,
             tags: state.selectedRepoId === repoId ? tags : state.tags,
           }));
-          if (!get().historyLoading) await get().loadHistory(true, true);
+          if (!get().historyLoading) await refreshHistoryRepository(workspaceId, repoId);
         }
-        if (scopes.has('conflicts')) await get().loadConflicts(true);
+        if (scopes.has('unpushed') || scopes.has('refs')) {
+          const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
+          if (repo?.meta.kind === 'git') await get().loadUnpushedCommits(repoId);
+        }
+        if (scopes.has('conflicts')) await get().loadConflicts(true, repoId);
+        if (scopes.has('worktrees')) await get().loadWorktrees(repoId);
+        if (scopes.has('subtrees')) await get().loadSubtrees(repoId);
+        if (scopes.has('submodules')) await get().loadSubmodules(repoId);
         const selected = get().selectedFile;
         if (scopes.has('diff') && selected?.repoId === repoId && get().mode === 'diff') {
           const generation = ++diffRequestGeneration;
@@ -818,6 +891,16 @@ export const useAppStore = create<AppStore>((set, get) => {
     initialize: async (value) => {
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
       set({ bridge: value });
+      const refreshRuntimeOnFocus = () => void get().refreshRuntimeCapabilities();
+      const refreshRuntimeOnVisibility = () => {
+        if (document.visibilityState === 'visible') refreshRuntimeOnFocus();
+      };
+      window.addEventListener('focus', refreshRuntimeOnFocus);
+      document.addEventListener('visibilitychange', refreshRuntimeOnVisibility);
+      bridgeSubscriptions.push(() => {
+        window.removeEventListener('focus', refreshRuntimeOnFocus);
+        document.removeEventListener('visibilitychange', refreshRuntimeOnVisibility);
+      });
       currentWindowLabel = await value.getWindowLabel().catch(() => currentWindowLabel);
       bridgeSubscriptions.push(value.subscribe((event) => {
         if ('operationId' in event) {
@@ -1415,31 +1498,25 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     stage: async (repoId, paths) => withBusy(async () => {
       await bridge().request({ type: 'stage', payload: { workspace_id: workspaceId(), repo_id: repoId, paths } });
-      await get().refresh();
     }, `repository:${repoId}`),
 
     unstage: async (repoId, paths) => withBusy(async () => {
       await bridge().request({ type: 'unstage', payload: { workspace_id: workspaceId(), repo_id: repoId, paths } });
-      await get().refresh();
     }, `repository:${repoId}`),
 
     discard: async (repoId, paths) => withBusy(async () => {
       await bridge().request({ type: 'discard', payload: { workspace_id: workspaceId(), repo_id: repoId, paths } });
-      await get().refresh();
     }, `repository:${repoId}`),
     deletePaths: async (repoId, paths) => withBusy(async () => {
       await bridge().request({ type: 'deletePaths', payload: { workspace_id: workspaceId(), repo_id: repoId, paths } });
-      await get().refresh();
     }, `repository:${repoId}`),
     addIgnore: async (repoId, path) => withBusy(async () => {
       await bridge().request({ type: 'addIgnore', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: path } });
-      await get().refresh();
     }, `repository:${repoId}`),
 
     commit: async (repoId, message, amend, paths, push) => withBusy(async () => {
       await bridge().request({ type: 'commit', payload: { workspace_id: workspaceId(), repo_id: repoId, message, amend, paths } });
       if (push) await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null } }, { timeoutMs: 600_000 });
-      await get().refresh();
     }, `commit:${repoId}`),
 
     commitMany: async (targets, message, push) => withBusy(async () => {
@@ -1461,7 +1538,6 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ batchCommitReport: { message, push, targets, results } });
       const failures = results.filter((result) => result.error);
       if (failures.length) set({ error: failures.map((result) => `${result.repoId}: ${result.error?.message}`).join('\n') });
-      await get().refresh();
     }, 'commit:batch'),
 
     retryBatchResult: async (repoId) => withBusy(async () => {
@@ -1488,13 +1564,13 @@ export const useAppStore = create<AppStore>((set, get) => {
         }, { timeoutMs: 600_000 });
       }
       set({ batchCommitReport: { ...report, results: report.results.map((item) => item.repoId === repoId ? next : item) } });
-      await get().refresh();
     }, `commit:${repoId}`),
     dismissBatchReport: () => set({ batchCommitReport: undefined }),
 
     sync: async (repoId, action) => withBusy(async () => {
+      const capability = action === 'fetch' ? 'syncFetch' : action === 'push' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
+      if (!ensureRepositoryCapability(repoId, capability)) return;
       await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
-      await get().refresh();
     }, `sync:${repoId}`),
 
     loadHistory: async (reset = false, silent = false) => {
@@ -1678,7 +1754,6 @@ export const useAppStore = create<AppStore>((set, get) => {
       const repoId = requestedRepoId ?? get().selectedRepoId; if (!repoId) return;
       await withBusy(async () => {
         await bridge().request({ type: 'branchOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation: operation as never } });
-        await get().refresh();
       }, `repository:${repoId}`);
     },
 
@@ -1710,7 +1785,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     stashOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'stashOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-      await Promise.all([get().loadStashes(repoId), get().refresh(true)]);
+      await get().loadStashes(repoId);
     }, `stash:${repoId}`),
     loadShelves: async (repoId) => {
       const b = get().bridge;
@@ -1732,7 +1807,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     shelfOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'shelfOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-      await Promise.all([get().loadShelves(repoId), get().refresh()]);
+      await get().loadShelves(repoId);
     }, `shelf:${repoId}`),
     loadChangelists: async (repoId) => {
       const b = get().bridge;
@@ -1766,8 +1841,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       set((state) => ({ worktrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.worktrees }), state.worktrees) }));
     },
     worktreeOperation: async (repoId, operation) => withBusy(async () => {
+      if (!ensureRepositoryCapability(repoId, 'worktreeWrite')) return;
       await bridge().request({ type: 'worktreeOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-      await Promise.all([get().loadWorktrees(repoId), get().refresh()]);
+      await get().loadWorktrees(repoId);
     }, `worktree:${repoId}`),
     openWorktree: async (repoId, path, reveal) => withBusy(async () => {
       await bridge().request({ type: 'openWorktree', payload: { workspace_id: workspaceId(), repo_id: repoId, path, reveal } });
@@ -1822,9 +1898,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       set((state) => ({ subtrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.subtrees }), state.subtrees) }));
     },
     subtreeOperation: async (repoId, operation) => withBusy(async () => {
+      if (!ensureRepositoryCapability(repoId, 'subtreeWrite')) return;
       const networkOperation = operation.type === 'add' || operation.type === 'pull' || operation.type === 'push';
       await bridge().request({ type: 'subtreeOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, networkOperation ? { timeoutMs: 600_000 } : undefined);
-      await Promise.all([get().loadSubtrees(repoId), get().refresh()]);
+      await get().loadSubtrees(repoId);
     }, `subtree:${repoId}`),
     loadSubmodules: async (repoId) => {
       const b = get().bridge;
@@ -1839,8 +1916,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       set((state) => ({ submodules: values.reduce((next, value) => ({ ...next, [value.repoId]: value.submodules }), state.submodules) }));
     },
     submoduleOperation: async (repoId, operation) => withBusy(async () => {
+      if (!ensureRepositoryCapability(repoId, 'submoduleWrite')) return;
       await bridge().request({ type: 'submoduleOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
-      await Promise.all([get().loadSubmodules(repoId), get().refresh()]);
+      await get().loadSubmodules(repoId);
     }, `submodule:${repoId}`),
     loadUnpushedCommits: async (repoId) => {
       const b = get().bridge;
@@ -1861,12 +1939,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       set((state) => ({ unpushedCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.unpushedCommits) }));
     },
     unpushedOperation: async (repoId, operation) => withBusy(async () => {
+      if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return;
       await bridge().request({ type: 'unpushedOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
-      await Promise.all([get().loadUnpushedCommits(repoId), get().refresh()]);
+      await get().loadUnpushedCommits(repoId);
     }, `history:${repoId}`),
     historyOperation: async (repoId, operation) => withBusy(async () => {
+      if (operation.type === 'reset' && !ensureRepositoryCapability(repoId, 'historyRewrite')) return;
       await bridge().request({ type: 'historyOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
-      await get().refresh();
     }, `history:${repoId}`),
     createPatch: async (repoId, revisions) => bridge().request<PatchDocument>({ type: 'createPatch', payload: { workspace_id: workspaceId(), repo_id: repoId, revisions } }),
     svnOperation: async (repoId, operation) => withBusy(async () => {
@@ -1914,19 +1993,49 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     remoteOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'remoteOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, operation.type === 'prune' ? { timeoutMs: 600_000 } : undefined);
-      await Promise.all([get().loadRemotes(repoId), get().selectRepo(repoId, true)]);
+      await get().loadRemotes(repoId);
     }, `remote:${repoId}`),
     systemOpen: async (repoId, relativePath, reveal, external = false) => withBusy(async () => {
       await bridge().request({ type: 'systemOpen', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: relativePath, reveal, external } });
     }, `system:${repoId}`),
 
-    loadConflicts: async (silent = false) => {
+    loadConflicts: async (silent = false, repoId) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
-      const conflicts = await b.request<ConflictFile[]>({ type: 'conflicts', payload: { workspace_id: wid } }, { showProgress: !silent }).catch(() => []);
+      const conflicts = await b.request<ConflictFile[]>({ type: 'conflicts', payload: { workspace_id: wid, repo_id: repoId ?? null } }, { showProgress: !silent }).catch(() => []);
       if (get().snapshot?.workspace.id !== wid) return;
-      set({ conflicts });
+      set((state) => ({
+        conflicts: repoId
+          ? [...state.conflicts.filter((conflict) => conflict.repoId !== repoId), ...conflicts]
+          : conflicts,
+      }));
+    },
+
+    refreshRuntimeCapabilities: async () => {
+      const current = get().bootstrap;
+      if (!current) return;
+      try {
+        const runtime = await bridge().request<RuntimeCapabilities>({ type: 'runtimeCapabilities' }, { showProgress: false });
+        set((state) => state.bootstrap ? ({
+          bootstrap: {
+            ...state.bootstrap,
+            runtime,
+            capabilities: {
+              ...state.bootstrap.capabilities,
+              secureCredentials: runtime.secureCredentials.status.available,
+              systemNotifications: runtime.systemNotifications.available,
+              availability: {
+                ...(state.bootstrap.capabilities.availability ?? {}),
+                secureCredentials: runtime.secureCredentials.status,
+                systemNotifications: runtime.systemNotifications,
+              },
+            },
+          },
+        }) : state);
+      } catch {
+        // Keep the last known runtime truth when a transient platform probe fails.
+      }
     },
 
     openMerge: async (conflict) => withBusy(async () => {
@@ -1939,7 +2048,6 @@ export const useAppStore = create<AppStore>((set, get) => {
     }, `conflict:${conflict.repoId}`),
     resolveConflict: async (conflict, choice) => withBusy(async () => {
       await bridge().request({ type: 'conflictAccept', payload: { workspace_id: workspaceId(), repo_id: conflict.repoId, relative_path: conflict.path, choice } });
-      await get().refresh();
     }, `conflict:${conflict.repoId}`),
 
     setMergeResult: (mergeResult) => set({ mergeResult }),
@@ -1947,16 +2055,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       const merge = get().merge; const file = get().selectedFile;
       if (!merge || !file) return;
       await bridge().request({ type: 'conflictSave', payload: { workspace_id: workspaceId(), repo_id: file.repoId, relative_path: file.path, content: get().mergeResult, expected_fingerprint: merge.fingerprint } });
-      await get().refresh();
     }),
     acceptConflict: async (choice) => withBusy(async () => {
       const file = get().selectedFile; if (!file) return;
       await bridge().request({ type: 'conflictAccept', payload: { workspace_id: workspaceId(), repo_id: file.repoId, relative_path: file.path, choice } });
-      await get().refresh();
     }),
     abortRepositoryOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'abortRepositoryOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-      await get().refresh();
     }, `conflict:${repoId}`),
 
     backToHistory: () => {

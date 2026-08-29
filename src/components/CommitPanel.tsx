@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
-import { capabilityAvailable, isOperationActive, useAppStore, type BatchCommitReport } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, isOperationActive, useAppStore, type BatchCommitReport } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
 import { StashPanel } from './StashPanel';
@@ -218,6 +218,13 @@ export function CommitPanel() {
     return map;
   }, [selected]);
   const commitTargets = repos.filter((repo) => (selectedByRepo.get(repo.meta.id)?.length ?? 0) > 0);
+  const commitUnavailable = commitTargets.find((repo) => !capabilityAvailable(repo.capabilities, 'commit', true));
+  const pushUnavailable = commitTargets.find((repo) => repo.meta.kind === 'git' && !capabilityAvailable(repo.capabilities, 'syncPush', true));
+  const commitDisabledReason = commitUnavailable
+    ? capabilityReason(commitUnavailable.capabilities, 'commit')
+    : pushUnavailable
+      ? capabilityReason(pushUnavailable.capabilities, 'syncPush')
+      : undefined;
   const setFiles = (repoId: string, paths: string[], value: boolean) => setSelected((current) => {
     const next = new Set(current);
     for (const path of paths) {
@@ -227,7 +234,7 @@ export function CommitPanel() {
     return next;
   });
   const doCommit = async (push: boolean) => {
-    if (!message.trim() || !commitTargets.length) return;
+    if (!message.trim() || !commitTargets.length || commitUnavailable || (push && pushUnavailable)) return;
     const untracked = commitTargets.flatMap((repo) => repo.files.filter((file) => file.status === 'untracked' && (selectedByRepo.get(repo.meta.id) ?? []).includes(file.path)).map((file) => `${repo.meta.name}: ${file.path}`));
     if (promptBeforeAddingUntracked && untracked.length > 0 && !await confirmDialog({ title: t('Prompt before adding untracked files'), message: untracked.join('\n'), confirmLabel: t('Commit') })) return;
     await commitMany(commitTargets.map((repo) => {
@@ -577,7 +584,7 @@ export function CommitPanel() {
         <textarea style={{ height: textareaHeight }} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(defaultCommitAction === 'commitAndPush'); }} />
         <div className="commit-actions">
           <div ref={saveMenuRef} className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu"><button onClick={() => { void doSave('stash'); setSaveMenu(false); }}><Codicon name="save" />{t('Stash changes')}</button><button onClick={() => { void doSave('shelf'); setSaveMenu(false); }}><Codicon name="archive" />{t('Shelve changes')}</button></div>}</div>
-          <div ref={commitMenuRef} className="split-button commit-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doCommit(defaultCommitAction === 'commitAndPush')}><Codicon name={defaultCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(defaultCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
+          <div ref={commitMenuRef} className="split-button commit-action"><button title={commitDisabledReason} disabled={!message.trim() || !commitTargets.length || busy || Boolean(commitUnavailable) || (defaultCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(defaultCommitAction === 'commitAndPush')}><Codicon name={defaultCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(defaultCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button><button disabled={!message.trim() || !commitTargets.length || busy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button disabled={Boolean(commitUnavailable)} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : undefined} onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button disabled={Boolean(commitUnavailable || pushUnavailable)} title={commitDisabledReason} onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
         </div>
       </div>
       {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context)} onSelect={(id) => void handleContextAction(id)} onClose={() => setContext(undefined)} />}

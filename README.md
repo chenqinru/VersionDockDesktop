@@ -50,7 +50,8 @@ VersionDock Desktop 是基于 Tauri 2、Rust、React 18 和 TypeScript 构建的
 - **Node.js**: `20+`
 - **Rust**: `stable` (1.78+)
 - **System WebView**: 系统自带组件（macOS WebKit, Windows WebView2, Linux WebKit2GTK）
-- **Git** / **SVN**: 按需安装
+- **Git**：系统 PATH 中安装 2.23 或更高版本
+- **SVN**：系统 PATH 中安装 1.9 或更高版本；安全的 password-stdin 凭据集成要求 1.10 或更高版本
 
 > Windows 上当前稳定的 SVN 1.14.5 CLI 会将命令行参数转换到系统 ANSI code page，无法可靠处理中文等超出该代码页的路径；1.15.0-rc3 源码同样尚未包含修复。此类路径需要使用包含 Apache Subversion r1935602 Unicode argv 修复的客户端。CI 会从固定源码提交构建并验证该能力，待修复进入正式版后再切换到对应稳定版本。
 
