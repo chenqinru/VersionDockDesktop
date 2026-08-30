@@ -131,6 +131,10 @@ pub enum BridgeCommand {
     SaveAppState {
         state: AppStateSnapshot,
     },
+    SaveCommitSelections {
+        workspace_id: String,
+        selections: Vec<RepositoryCommitSelection>,
+    },
     UpdateSettings {
         settings: DesktopSettings,
     },
@@ -145,6 +149,50 @@ pub enum BridgeCommand {
     },
     WorkspaceRefresh {
         workspace_id: String,
+    },
+    InitializeRepository {
+        workspace_id: String,
+        target_path: String,
+    },
+    CloneRepository {
+        url: String,
+        parent_path: String,
+        target_name: String,
+        provider_account_id: Option<String>,
+    },
+    ProviderAccounts,
+    ProviderGithubBegin {
+        account_id: Option<String>,
+    },
+    ProviderGithubComplete {
+        flow_id: String,
+    },
+    ProviderGitlabSave {
+        account_id: Option<String>,
+        host: String,
+        token: String,
+    },
+    ProviderRemove {
+        account_id: String,
+    },
+    ProviderRepositories {
+        account_id: String,
+        query: Option<String>,
+        page: u32,
+        per_page: u32,
+    },
+    ProviderNamespaces {
+        account_id: String,
+    },
+    PublishRepository {
+        workspace_id: String,
+        repo_id: String,
+        account_id: String,
+        namespace_id: Option<String>,
+        name: String,
+        description: String,
+        visibility: RemoteVisibility,
+        push: bool,
     },
     WindowOpenNew {
         paths: Option<Vec<String>>,
@@ -257,6 +305,15 @@ pub enum BridgeCommand {
         targets: Vec<BatchCommitTarget>,
         push: bool,
     },
+    RecentCommitMessages {
+        workspace_id: String,
+        repo_ids: Vec<String>,
+        limit: u32,
+    },
+    LastCommitMessage {
+        workspace_id: String,
+        repo_id: String,
+    },
     Sync {
         workspace_id: String,
         repo_id: String,
@@ -268,13 +325,13 @@ pub enum BridgeCommand {
         repo_id: String,
         skip: u32,
         limit: u32,
-        filter: Option<String>,
-        revision: Option<String>,
+        query: HistoryQuery,
     },
     HistoryTopology {
         workspace_id: String,
         repo_id: String,
         svn_limit: u32,
+        revision: Option<String>,
     },
     CommitDetail {
         workspace_id: String,
@@ -320,6 +377,11 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         operation: BranchOperation,
+    },
+    BranchRecovery {
+        workspace_id: String,
+        repo_id: String,
+        operation: BranchRecoveryOperation,
     },
     Tags {
         workspace_id: String,
@@ -463,6 +525,10 @@ pub enum BridgeCommand {
         repo_id: String,
         operation: String,
     },
+    RestoreConflicts {
+        workspace_id: String,
+        repo_id: String,
+    },
     GitIdentity {
         workspace_id: String,
         repo_id: String,
@@ -529,6 +595,165 @@ pub struct RepositoryOperationResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct InitializeRepositoryResult {
+    pub snapshot: WorkspaceSnapshot,
+    pub repository_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneRepositoryResult {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteProviderKind {
+    Github,
+    Gitlab,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProviderAccount {
+    pub id: String,
+    pub provider: RemoteProviderKind,
+    pub host: String,
+    pub login: String,
+    pub display_name: Option<String>,
+    pub secure_storage_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubDeviceFlow {
+    pub flow_id: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_at: String,
+    pub interval: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteNamespace {
+    pub id: String,
+    pub name: String,
+    pub full_path: String,
+    pub kind: String,
+    pub host: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteRepository {
+    pub id: String,
+    pub provider: RemoteProviderKind,
+    pub host: String,
+    pub name: String,
+    pub full_name: String,
+    pub clone_url: String,
+    pub web_url: Option<String>,
+    pub default_branch: Option<String>,
+    pub namespace: Option<RemoteNamespace>,
+    pub private: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteRepositoryPage {
+    pub items: Vec<RemoteRepository>,
+    pub page: u32,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteVisibility {
+    Private,
+    Internal,
+    Public,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishRepositoryResult {
+    pub repository: RemoteRepository,
+    pub remote_created: bool,
+    pub remote_configured: bool,
+    pub push_attempted: bool,
+    pub pushed: bool,
+    pub failed_stage: Option<String>,
+    pub recovery_hint: Option<String>,
+    pub error: Option<DesktopError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentCommitMessage {
+    pub repo_id: String,
+    pub revision: String,
+    pub committed_at: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryQuery {
+    pub text: Option<String>,
+    pub author: Option<String>,
+    pub from_date: Option<String>,
+    pub to_date: Option<String>,
+    pub path: Option<String>,
+    pub revision: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResult {
+    pub output: String,
+    pub update: Option<RepositoryUpdateResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryUpdateResult {
+    pub repo_id: String,
+    pub before_revision: String,
+    pub after_revision: String,
+    pub summary: Option<UpdateSummary>,
+    pub summary_error: Option<DesktopError>,
+    pub before_status: String,
+    pub after_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSummary {
+    pub kind: UpdateKind,
+    pub commit_count: u32,
+    pub file_count: u32,
+    pub contains_merge: bool,
+    pub detail: UpdateDetail,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateKind {
+    NoChanges,
+    FastForward,
+    Updated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDetail {
+    pub commits: Vec<CommitNode>,
+    pub files: Vec<CommitFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct IgnoreRules {
     pub directory: String,
     pub source: String,
@@ -553,6 +778,41 @@ pub enum BranchOperation {
     Rebase { name: String },
     Rename { old_name: String, new_name: String },
     Delete { name: String, force: bool },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchOperationResult {
+    pub completed: bool,
+    pub conflicted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum BranchRecoveryOperation {
+    StashAndCheckout { target: String },
+    CarryChanges { target: String },
+    ForceCheckout { target: String },
+    StashAndMerge { target: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BranchRecoveryStatus {
+    Completed,
+    Conflicted,
+    PartialFailure,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchRecoveryResult {
+    pub status: BranchRecoveryStatus,
+    pub target: String,
+    pub stash_reference: Option<String>,
+    pub changes_restored: bool,
+    pub error: Option<DesktopError>,
+    pub recovery_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -792,6 +1052,27 @@ pub enum SvnAccountOperation {
     },
     Delete,
     Test,
+    ClearNative {
+        credential_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SvnCredentialSource {
+    VersionDockSecureStore,
+    NativeCache,
+    Session,
+    #[default]
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SvnNativeCredential {
+    pub id: String,
+    pub realm: String,
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -841,6 +1122,10 @@ pub struct SvnAccountState {
     pub secure_storage_available: bool,
     pub password_stdin_supported: bool,
     pub connection_ok: Option<bool>,
+    #[serde(default)]
+    pub source: SvnCredentialSource,
+    #[serde(default)]
+    pub native_credentials: Vec<SvnNativeCredential>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1003,6 +1288,9 @@ pub struct AppStateSnapshot {
     pub recent_workspaces: Vec<WorkspaceDescriptor>,
     #[serde(default)]
     #[specta(optional)]
+    pub commit_selections: BTreeMap<String, Vec<RepositoryCommitSelection>>,
+    #[serde(default)]
+    #[specta(optional)]
     pub theme: Option<ThemePreference>,
     #[serde(default)]
     #[specta(optional)]
@@ -1034,7 +1322,7 @@ pub struct AppStateSnapshot {
 }
 
 fn default_schema_version() -> u32 {
-    4
+    6
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1066,6 +1354,12 @@ pub struct DesktopSettings {
     #[serde(default)]
     #[specta(optional)]
     pub skipped_update_version: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub online_avatars_enabled: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub gravatar_enabled: bool,
 }
 
 fn default_auto_check_updates() -> bool {
@@ -1090,6 +1384,8 @@ impl Default for DesktopSettings {
             notify_unpushed_commits: false,
             auto_check_updates: true,
             skipped_update_version: None,
+            online_avatars_enabled: false,
+            gravatar_enabled: false,
             repository_scan_depth: 4,
             ignored_folders: vec![
                 ".git".into(),
@@ -1352,6 +1648,10 @@ pub struct RuntimeCapabilities {
 #[serde(rename_all = "camelCase")]
 pub struct DesktopCapabilities {
     pub ai: bool,
+    #[specta(optional)]
+    pub initialize_repository: bool,
+    #[specta(optional)]
+    pub clone_repository: bool,
     pub stash: bool,
     pub shelf: bool,
     pub changelist: bool,
@@ -1833,6 +2133,19 @@ pub struct ConflictFile {
     pub actions: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictBlock {
+    pub index: u32,
+    pub ours_label: String,
+    pub theirs_label: String,
+    pub ours_lines: Vec<String>,
+    pub base_lines: Vec<String>,
+    pub theirs_lines: Vec<String>,
+    pub start_line: u32,
+    pub end_line: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeVersions {
@@ -1841,7 +2154,32 @@ pub struct MergeVersions {
     pub ours: String,
     pub theirs: String,
     pub working: String,
+    pub marker_content: String,
+    pub conflicts: Vec<ConflictBlock>,
+    pub ours_label: String,
+    pub theirs_label: String,
     pub language: String,
     pub fingerprint: String,
     pub binary: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCommitSelection {
+    pub repo_id: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreConflictFailure {
+    pub path: String,
+    pub error: DesktopError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreConflictsResult {
+    pub restored_paths: Vec<String>,
+    pub failures: Vec<RestoreConflictFailure>,
 }

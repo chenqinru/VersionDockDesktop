@@ -158,6 +158,26 @@ describe('StatusBar', () => {
     expect(requests.find(({ command }) => command.type === 'gitIdentity')?.options?.showProgress).toBe(false);
   });
 
+  it('shows branch activity only for the selected repository', () => {
+    renderStatusBar();
+    const current = snapshot();
+    current.repositories.push({
+      ...current.repositories[0],
+      meta: { ...current.repositories[0].meta, id: 'repo2', name: 'Repo2', rootPath: '/test/repo2' },
+    });
+    const operation = {
+      operationId: 'branchRepo1',
+      context: { generation: 1, domain: 'branch' as const, visibility: 'foreground' as const, workspaceId: 'ws1', repositoryId: 'repo1', target: null },
+      status: 'running' as const,
+      phase: 'checkout', message: '', startedAt: '', cancellable: true, completed: null, total: null, error: null,
+    };
+    act(() => useAppStore.setState({ snapshot: current, selectedRepoId: 'repo2', operations: { branchRepo1: operation } }));
+    const branchButton = screen.getByText('main').closest('button')!;
+    expect(branchButton.querySelector('.codicon-modifier-spin')).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ selectedRepoId: 'repo1' }));
+    expect(branchButton.querySelector('.codicon-modifier-spin')).toBeInTheDocument();
+  });
+
   it('does not reload identity when only repository snapshot data changes', async () => {
     const { requests } = renderStatusBar();
     await waitFor(() => expect(screen.getByText('Git: Developer')).toBeInTheDocument());

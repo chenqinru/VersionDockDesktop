@@ -15,9 +15,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::models::{
     AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState,
-    OperationEvent, OperationStatus, RefreshScope, RepositoryEvent, RepositoryEventSource,
-    RepositoryMeta, RepositoryStatus, RequestContext, ThemePreference, ToolAvailability,
-    UiFontSizePreference, WorkspaceDescriptor,
+    OperationEvent, OperationStatus, RefreshScope, RepositoryCommitSelection, RepositoryEvent,
+    RepositoryEventSource, RepositoryMeta, RepositoryStatus, RequestContext, ThemePreference,
+    ToolAvailability, UiFontSizePreference, WorkspaceDescriptor,
 };
 
 #[derive(Clone)]
@@ -68,6 +68,7 @@ pub struct AppState {
     pub read_limit: Semaphore,
     pub write_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    state_write_lock: Mutex<()>,
     repository_cache: RwLock<HashMap<String, HashMap<String, RepositoryMeta>>>,
     tool_cache: RwLock<Option<ToolAvailability>>,
     pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
@@ -83,7 +84,7 @@ impl AppState {
             .ok()
             .and_then(|bytes| migrate_state(&bytes))
             .unwrap_or_default();
-        app.schema_version = 4;
+        app.schema_version = 6;
         app.settings = app.settings.normalize();
         if app.layout.stash_view_mode != "list" && app.layout.stash_view_mode != "tree" {
             app.layout.stash_view_mode = "tree".into();
@@ -139,6 +140,7 @@ impl AppState {
             read_limit: Semaphore::new(4),
             write_limit: Semaphore::new(2),
             write_locks: Mutex::new(HashMap::new()),
+            state_write_lock: Mutex::new(()),
             repository_cache: RwLock::new(HashMap::new()),
             tool_cache: RwLock::new(None),
             window_workspaces: std::sync::Mutex::new(HashMap::new()),
@@ -293,7 +295,13 @@ impl AppState {
         Ok(permit)
     }
 
-    pub async fn save_app_state(&self, snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
+    pub async fn save_app_state(&self, mut snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
+        let _state_write = self.state_write_lock.lock().await;
+        snapshot.commit_selections = self.app.read().await.commit_selections.clone();
+        self.save_app_state_locked(snapshot).await
+    }
+
+    async fn save_app_state_locked(&self, snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
         *self.app.write().await = snapshot.clone();
         std::fs::create_dir_all(&self.config_dir).map_err(io_error)?;
         let target = self.config_dir.join("state.json");
@@ -303,6 +311,48 @@ impl AppState {
         })?;
         std::fs::write(&temporary, bytes).map_err(io_error)?;
         std::fs::rename(&temporary, &target).map_err(io_error)
+    }
+
+    pub async fn save_commit_selections(
+        &self,
+        workspace_id: &str,
+        selections: Vec<RepositoryCommitSelection>,
+    ) -> Result<Vec<RepositoryCommitSelection>, DesktopError> {
+        let mut normalized = selections
+            .into_iter()
+            .map(|mut selection| {
+                selection.paths = selection
+                    .paths
+                    .into_iter()
+                    .map(|value| value.trim().replace('\\', "/"))
+                    .filter(|value| {
+                        !value.is_empty()
+                            && !value.contains('\0')
+                            && !value.starts_with('-')
+                            && !value
+                                .split('/')
+                                .any(|part| part.is_empty() || part == "." || part == "..")
+                    })
+                    .collect();
+                selection.paths.sort();
+                selection.paths.dedup();
+                selection
+            })
+            .filter(|selection| !selection.repo_id.trim().is_empty())
+            .collect::<Vec<_>>();
+        normalized.sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
+        normalized.dedup_by(|left, right| left.repo_id == right.repo_id);
+        let _state_write = self.state_write_lock.lock().await;
+        let mut snapshot = self.app.read().await.clone();
+        if normalized.is_empty() {
+            snapshot.commit_selections.remove(workspace_id);
+        } else {
+            snapshot
+                .commit_selections
+                .insert(workspace_id.to_string(), normalized.clone());
+        }
+        self.save_app_state_locked(snapshot).await?;
+        Ok(normalized)
     }
 
     pub async fn workspace(&self, workspace_id: &str) -> Result<WorkspaceDescriptor, DesktopError> {
@@ -539,7 +589,7 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
         >= 3
     {
         let mut current = serde_json::from_value::<AppStateSnapshot>(value).ok()?;
-        current.schema_version = 4;
+        current.schema_version = 6;
         return Some(current);
     }
     let mut settings = DesktopSettings::default();
@@ -585,7 +635,7 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
         .and_then(|item| serde_json::from_value(item).ok())
         .unwrap_or_default();
     Some(AppStateSnapshot {
-        schema_version: 4,
+        schema_version: 6,
         settings: settings.normalize(),
         layout,
         last_workspace_id: value
@@ -606,6 +656,7 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
             .cloned()
             .and_then(|item| serde_json::from_value(item).ok())
             .unwrap_or_default(),
+        commit_selections: Default::default(),
         theme: None,
         language: None,
         ui_font_size: None,
@@ -733,7 +784,7 @@ mod tests {
           "branchSidebarCollapsed":true,"branchSidebarCollapsedSections":["tags"]
         }"##;
         let state = migrate_state(legacy).unwrap();
-        assert_eq!(state.schema_version, 4);
+        assert_eq!(state.schema_version, 6);
         assert!(matches!(state.settings.theme, ThemePreference::Dark));
         assert_eq!(state.layout.active_tab, "stash");
         assert_eq!(state.layout.panel_sizes.commit, 400);
@@ -762,6 +813,21 @@ mod tests {
         assert_eq!(settings.maximum_graph_commits, 100);
         assert_eq!(settings.ignored_folders, vec!["node_modules"]);
         assert_eq!(settings.project_colors.len(), 1);
+    }
+
+    #[test]
+    fn migrates_v5_commit_selections_without_cross_workspace_loss() {
+        let value = br##"{
+          "schemaVersion":5,"lastWorkspaceId":null,"openWorkspaceIds":[],"activeWorkspaceId":null,
+          "recentWorkspaces":[],"commitSelections":{"workspace-a":[{"repoId":"repo-a","paths":["src/a.ts"]}]}
+        }"##;
+        let state = migrate_state(value).unwrap();
+        assert_eq!(state.schema_version, 6);
+        assert_eq!(state.commit_selections["workspace-a"][0].repo_id, "repo-a");
+        assert_eq!(
+            state.commit_selections["workspace-a"][0].paths,
+            ["src/a.ts"]
+        );
     }
 
     #[test]

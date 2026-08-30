@@ -80,7 +80,7 @@ const snapshot = {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ unpushedCommits: {}, branchesByRepo: {}, snapshot: undefined, bridge: undefined });
+  useAppStore.setState({ unpushedCommits: {}, branchesByRepo: {}, snapshot: undefined, bridge: undefined, operations: {} });
 });
 
 describe('PushPanel', () => {
@@ -139,6 +139,32 @@ describe('PushPanel', () => {
 
     expect(screen.getByText('SOCIAL-PRATICE2')).toBeInTheDocument();
     expect(screen.getByText('BACKEND-SERVICE')).toBeInTheDocument();
+  });
+
+  it('allows pushing an idle repository while another repository is syncing', () => {
+    const bridge = new MockBridge(() => []);
+    useAppStore.setState({
+      bridge,
+      snapshot,
+      operations: {
+        syncOne: {
+          operationId: 'syncOne',
+          context: { generation: 1, domain: 'sync', visibility: 'foreground', workspaceId: 'workspace-1', repositoryId: 'repo-1', target: null },
+          status: 'running', phase: 'push', message: '', startedAt: '', cancellable: true, completed: null, total: null, error: null,
+        },
+      },
+      unpushedCommits: { 'repo-1': sampleUnpushed, 'repo-2': [] },
+      branchesByRepo: {
+        'repo-1': [{ name: 'main', current: true, remote: false, upstream: null, ahead: 232, behind: 0 }],
+        'repo-2': [{ name: 'feature/login', current: true, remote: false, upstream: 'origin/feature/login', ahead: 1, behind: 0 }],
+      },
+    });
+    render(<BridgeContext.Provider value={bridge}><PushPanel repos={[gitRepo1, { ...gitRepo2, ahead: 1 }]} /></BridgeContext.Provider>);
+    const includeButtons = screen.getAllByTitle('Include in push');
+    fireEvent.click(includeButtons[1]);
+    expect(screen.getByRole('button', { name: 'Push' })).toBeEnabled();
+    fireEvent.click(includeButtons[0]);
+    expect(screen.getByRole('button', { name: /Push & Publish Branch/ })).toBeDisabled();
   });
 
   it('toggles aggregated changes view when clicking mode button', async () => {

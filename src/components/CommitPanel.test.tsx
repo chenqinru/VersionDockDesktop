@@ -18,7 +18,7 @@ const renderPanel = () => render(<BridgeContext.Provider value={bridge}><CommitP
 const gitRepo: RepositoryStatus = { meta: { id: 'repo', name: 'Repository', rootPath: '/tmp/repo', color: '#4ec9b0', kind: 'git', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false }, branch: 'main', revision: 'abc', ahead: 0, behind: 0, files: [], conflicts: 0, operation: null };
 const gitSnapshot: WorkspaceSnapshot = { workspace: { id: 'workspace', name: 'Workspace', paths: ['/tmp/repo'], lastOpenedAt: '', available: true }, generation: 1, tools: { git: true, svn: true, svnadmin: true }, repositories: [gitRepo] };
 
-afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, mode: 'history' }); });
+afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {} }); });
 
 describe('CommitPanel capabilities and file view', () => {
   it('compacts single-child directory chains while preserving file paths', () => {
@@ -144,6 +144,69 @@ describe('CommitPanel capabilities and file view', () => {
     await waitFor(() => expect(commands).toContain('commit:two:selected.rs'));
     expect(commands).toContain('unstage:one:excluded.ts');
     expect(commands).toContain('commit:one:selected.ts');
+  });
+
+  it('keeps commit actions available when only an unrelated repository is busy', () => {
+    const repoOne = { ...gitRepo, meta: { ...gitRepo.meta, id: 'one', name: 'ONE' }, files: [{ path: 'one.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
+    const repoTwo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'two', name: 'TWO' }, files: [{ path: 'two.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
+    useAppStore.setState({
+      bootstrap: bootstrap(false),
+      snapshot: { ...gitSnapshot, repositories: [repoOne, repoTwo] },
+      selectedRepoId: 'two',
+      operations: {
+        commitOne: {
+          operationId: 'commitOne',
+          context: { generation: 1, domain: 'commit', visibility: 'foreground', workspaceId: 'workspace', repositoryId: 'one', target: null },
+          status: 'running', phase: 'commit', message: '', startedAt: '', cancellable: true, completed: null, total: null, error: null,
+        },
+      },
+    });
+    renderPanel();
+    fireEvent.click(screen.getByLabelText('two.ts'));
+    fireEvent.change(screen.getByPlaceholderText(/Commit message/), { target: { value: 'repo two only' } });
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
+    fireEvent.click(screen.getByLabelText('one.ts'));
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
+  });
+
+  it('keeps failed repository selections and displays the precise batch failure stage', async () => {
+    const partialBridge = new MockBridge((command) => command.type === 'batchCommit' ? [
+      { repoId: 'one', commitAttempted: true, committed: true, revision: 'success123456', pushAttempted: false, pushed: false, failedStage: null, recoveryHint: null, error: null },
+      { repoId: 'two', commitAttempted: true, committed: false, revision: null, pushAttempted: false, pushed: false, failedStage: 'identity', recoveryHint: 'Configure an identity', error: { code: 'IDENTITY_REQUIRED', message: 'Identity is missing', command: null, exitCode: null, stderr: null, recoverable: true } },
+    ] : []);
+    const repoOne = { ...gitRepo, meta: { ...gitRepo.meta, id: 'one', name: 'ONE' }, files: [{ path: 'one.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
+    const repoTwo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'two', name: 'TWO' }, files: [{ path: 'two.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
+    useAppStore.setState({ bridge: partialBridge, bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [repoOne, repoTwo] }, selectedRepoId: 'one' });
+    render(<BridgeContext.Provider value={partialBridge}><CommitPanel /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByLabelText('one.ts'));
+    fireEvent.click(screen.getByLabelText('two.ts'));
+    fireEvent.change(screen.getByPlaceholderText(/Commit message/), { target: { value: 'partial result' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Commit' }));
+
+    expect(await screen.findByText('Failed stage: Identity check')).toBeInTheDocument();
+    expect(screen.getByLabelText('one.ts')).not.toBeChecked();
+    expect(screen.getByLabelText('two.ts')).toBeChecked();
+    expect(screen.getByPlaceholderText(/Commit message/)).toHaveValue('partial result');
+  });
+
+  it('retries only push after a successful batch commit', async () => {
+    const commands: string[] = [];
+    const retryBridge = new MockBridge((command) => { commands.push(command.type); return []; });
+    useAppStore.setState({
+      bridge: retryBridge,
+      bootstrap: bootstrap(false),
+      snapshot: gitSnapshot,
+      batchCommitReport: {
+        message: 'already committed', push: true,
+        targets: [{ repoId: 'repo', paths: ['a.ts'], unstagePaths: [], amend: false }],
+        results: [{ repoId: 'repo', commitAttempted: true, committed: true, revision: 'abc123', pushAttempted: true, pushed: false, failedStage: 'push', recoveryHint: 'Retry push', error: { code: 'PUSH_FAILED', message: 'Remote rejected', command: null, exitCode: 1, stderr: null, recoverable: true } }],
+      },
+    });
+    render(<BridgeContext.Provider value={retryBridge}><CommitPanel /></BridgeContext.Provider>);
+    expect(screen.getByText('Failed stage: Push')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry push' }));
+    await waitFor(() => expect(commands).toContain('sync'));
+    expect(commands).not.toContain('batchCommit');
   });
 
   it('hides the stash surface until its real capability is enabled', () => {

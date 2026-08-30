@@ -30,6 +30,7 @@ export function NotificationCenterPopover({ anchorRect, onClose }: NotificationC
   const setActiveTab = useAppStore((state) => state.setActiveTab);
   const openIdentityPanel = useAppStore((state) => state.openIdentityPanel);
   const refresh = useAppStore((state) => state.refresh);
+  const openUpdateDetails = useAppStore((state) => state.openUpdateDetails);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -80,6 +81,9 @@ export function NotificationCenterPopover({ anchorRect, onClose }: NotificationC
         break;
       case 'refresh':
         await refresh(true);
+        break;
+      case 'viewUpdateDetails':
+        if (item.actionData) await openUpdateDetails(item.actionData);
         break;
       default:
         break;

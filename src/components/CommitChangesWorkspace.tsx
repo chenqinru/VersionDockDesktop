@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
-import { useAppStore } from '../store/appStore';
+import { useAppStore, type WorkingChangeTarget } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { DetailFileTarget } from '../history/commitDetails';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { DiffPlaceholder } from './DiffPlaceholder';
 import { UnifiedDiffView } from './UnifiedDiffView';
 
-function targetKey(target: DetailFileTarget): string {
-  return `${target.repoId}\0${target.path}\0${target.fromRevision ?? ''}\0${target.toRevision ?? target.commitHash}`;
+type ChangeTarget = DetailFileTarget | WorkingChangeTarget;
+
+function isWorking(target: ChangeTarget): target is WorkingChangeTarget { return 'section' in target; }
+
+function targetKey(target: ChangeTarget): string {
+  return isWorking(target) ? `${target.repoId}\0${target.section}\0${target.path}` : `${target.repoId}\0${target.path}\0${target.fromRevision ?? ''}\0${target.toRevision ?? target.commitHash}`;
 }
 
 function statusClass(status: string): string {
@@ -24,21 +28,23 @@ export function CommitChangesWorkspace() {
   const back = useAppStore((state) => state.backToHistory);
   const systemOpen = useAppStore((state) => state.systemOpen);
   const openFileHistory = useAppStore((state) => state.openFileHistory);
+  const openHistoryForPath = useAppStore((state) => state.openHistoryForPath);
   const externalEditor = useAppStore((state) => state.bootstrap?.state.settings?.externalEditor ?? state.bootstrap?.state.externalEditor);
   const repositories = useAppStore((state) => state.snapshot?.repositories ?? []);
   const { t } = useI18n();
   const [selectedKey, setSelectedKey] = useState('');
-  const [context, setContext] = useState<{ x: number; y: number; target: DetailFileTarget }>();
+  const [context, setContext] = useState<{ x: number; y: number; target: ChangeTarget }>();
   const selected = useMemo(
     () => changes?.files.find((target) => targetKey(target) === selectedKey) ?? changes?.files[0],
     [changes, selectedKey],
   );
   const repoNames = useMemo(() => Object.fromEntries(repositories.map((repo) => [repo.meta.id, repo.meta.name])), [repositories]);
   const commitFiles = (commitHash: string, files: DetailFileTarget[]) => files.filter((target) => (target.commitHashes ?? [target.commitHash]).includes(commitHash));
-  const openContext = (event: React.MouseEvent, target: DetailFileTarget) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, target }); };
+  const openContext = (event: React.MouseEvent, target: ChangeTarget) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, target }); };
   const contextItems: ContextMenuEntry[] = [
     { id: 'diff', label: t('Show Diff'), icon: 'diff' },
     { id: 'history', label: t('File history'), icon: 'history' },
+    { id: 'commit-history', label: t('Show in commit history'), icon: 'git-commit' },
     { separator: true },
     { id: 'open', label: t('Open'), icon: 'go-to-file' },
     ...(externalEditor ? [{ id: 'external', label: t('Open in external editor'), icon: 'code' } as ContextMenuEntry] : []),
@@ -49,6 +55,7 @@ export function CommitChangesWorkspace() {
     if (!target) return;
     if (id === 'diff') { setSelectedKey(targetKey(target)); void loadDiff(target); }
     if (id === 'history') openFileHistory(target.repoId, target.path);
+    if (id === 'commit-history') void openHistoryForPath(target.repoId, target.path);
     if (id === 'open') void systemOpen(target.repoId, target.path, false);
     if (id === 'external') void systemOpen(target.repoId, target.path, false, true);
     if (id === 'reveal') void systemOpen(target.repoId, target.path, true);
@@ -69,7 +76,7 @@ export function CommitChangesWorkspace() {
   }, [changes, loadDiff, selected]);
 
   if (!changes) return <div className="workspace-empty"><Codicon name="diff-multiple" />{t('Select a commit')}</div>;
-  const title = changes.commits.length === 1 ? changes.commits[0]?.message : `${changes.commits.length} ${t('commits')}`;
+  const title = changes.kind === 'workingTree' ? t('Working Tree Changes') : changes.commits.length === 1 ? changes.commits[0]?.message : `${changes.commits.length} ${t('commits')}`;
   return <section className="changes-workspace">
     <header>
       <button onClick={back}><Codicon name="arrow-left" />{t('Back to history')}</button>
@@ -81,7 +88,7 @@ export function CommitChangesWorkspace() {
     </header>
     <div className="changes-columns">
       <aside className="changes-files">
-        {repositories.map((repo) => {
+        {changes.kind === 'commits' && repositories.map((repo) => {
           const files = changes.files.filter((target) => target.repoId === repo.meta.id);
           if (!files.length) return null;
           return <section key={repo.meta.id}>
@@ -99,7 +106,12 @@ export function CommitChangesWorkspace() {
             })}
           </section>;
         })}
-        {changes.files.some((target) => !repoNames[target.repoId]) && <section><h3><Codicon name="repo" />{t('Repository')}</h3>{changes.files.filter((target) => !repoNames[target.repoId]).map((target) => <button key={targetKey(target)} className="changes-file-row" onContextMenu={(event) => openContext(event, target)} onClick={() => { setSelectedKey(targetKey(target)); void loadDiff(target); }}><FileIcon name={target.path} /><span className="changes-file-name">{target.path}</span></button>)}</section>}
+        {changes.kind === 'workingTree' && (['staged', 'unstaged', 'untracked'] as const).map((section) => {
+          const files = changes.files.filter((target) => target.section === section);
+          if (!files.length) return null;
+          return <section key={section}><h3><Codicon name={section === 'staged' ? 'diff-added' : section === 'untracked' ? 'new-file' : 'diff'} />{t(section === 'staged' ? 'Staged Changes' : section === 'untracked' ? 'Untracked Files' : 'Unstaged Changes')}<b>{files.length}</b></h3>{files.map((target) => <button key={targetKey(target)} className={`changes-file-row ${selected && targetKey(target) === targetKey(selected) ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => { setSelectedKey(targetKey(target)); void loadDiff(target); }}><FileIcon name={target.path.split('/').pop() ?? target.path} /><span className="changes-file-name">{target.path}</span><em className={`change-status ${statusClass(target.status)}`}>{target.status.slice(0, 1).toUpperCase()}</em></button>)}</section>;
+        })}
+        {changes.kind === 'commits' && changes.files.some((target) => !repoNames[target.repoId]) && <section><h3><Codicon name="repo" />{t('Repository')}</h3>{changes.files.filter((target) => !repoNames[target.repoId]).map((target) => <button key={targetKey(target)} className="changes-file-row" onContextMenu={(event) => openContext(event, target)} onClick={() => { setSelectedKey(targetKey(target)); void loadDiff(target); }}><FileIcon name={target.path} /><span className="changes-file-name">{target.path}</span></button>)}</section>}
       </aside>
       <div className="changes-preview">
         {diff?.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff?.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : selected && diff?.content ? <UnifiedDiffView content={diff.content} path={diff.path} language={diff.language} /> : selected && diff ? <DiffPlaceholder kind="empty" path={diff.path} /> : <DiffPlaceholder kind="select" />}

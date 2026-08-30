@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorktreePanel } from './WorktreePanel';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, WorktreeEntry } from '../bindings/generated';
@@ -54,6 +54,21 @@ afterEach(() => {
 });
 
 describe('WorktreePanel', () => {
+  it('validates a managed worktree before opening a VersionDock window and keeps reveal in the backend', async () => {
+    const commands: string[] = [];
+    const bridge = new MockBridge((command) => {
+      commands.push(`${command.type}:${command.type === 'openWorktree' ? command.payload.reveal : ''}`);
+      return command.type === 'openWorktree' ? '/tmp/VersionDock-linked' : true;
+    });
+    bridge.focusWorkspaceAcrossWindows = vi.fn(async () => false);
+    bridge.openInNewWindow = vi.fn(async () => 'window-new');
+    useAppStore.setState({ bridge, snapshot, allRepositories: [gitRepo] });
+    await useAppStore.getState().openWorktree('repo-1', '/tmp/VersionDock-linked', false);
+    await useAppStore.getState().openWorktree('repo-1', '/tmp/VersionDock-linked', true);
+    expect(commands).toContain('openWorktree:false');
+    expect(commands).toContain('openWorktree:true');
+    expect(bridge.openInNewWindow).toHaveBeenCalledTimes(1);
+  });
   it('renders repository and worktree item with main badge and branch badge', () => {
     const bridge = new MockBridge(() => sampleWorktrees);
     useAppStore.setState({

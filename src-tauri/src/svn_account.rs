@@ -12,7 +12,7 @@ use crate::{
     cli,
     models::{
         CapabilityStatus, DesktopError, RepositoryMeta, SecureCredentialCapability,
-        SvnAccountOperation, SvnAccountState,
+        SvnAccountOperation, SvnAccountState, SvnCredentialSource, SvnNativeCredential,
     },
 };
 
@@ -139,6 +139,23 @@ pub async fn state(
     let password_stored = username
         .as_ref()
         .is_some_and(|value| SYSTEM_STORE.get(&root, value).is_ok());
+    let native_credentials = native_credentials(repo, &root, token)
+        .await
+        .unwrap_or_default();
+    let session = SESSION_AUTH
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .is_some_and(|cache| cache.contains_key(&repo.root_path));
+    let source = if password_stored {
+        SvnCredentialSource::VersionDockSecureStore
+    } else if session {
+        SvnCredentialSource::Session
+    } else if !native_credentials.is_empty() {
+        SvnCredentialSource::NativeCache
+    } else {
+        SvnCredentialSource::None
+    };
     Ok(SvnAccountState {
         repository_root: root,
         username,
@@ -146,6 +163,8 @@ pub async fn state(
         secure_storage_available,
         password_stdin_supported,
         connection_ok: None,
+        source,
+        native_credentials,
     })
 }
 
@@ -160,6 +179,9 @@ pub async fn operate(
     let testing = matches!(operation, SvnAccountOperation::Test);
     match operation {
         SvnAccountOperation::Save { username, password } => {
+            if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
+                cache.remove(&repo.root_path);
+            }
             let username = username.trim().to_string();
             if username.is_empty() || username.chars().any(char::is_control) {
                 return Err(DesktopError::new(
@@ -194,12 +216,91 @@ pub async fn operate(
             save(config_dir, &file)?;
         }
         SvnAccountOperation::Test => {}
+        SvnAccountOperation::ClearNative { credential_id } => {
+            if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
+                cache.remove(&repo.root_path);
+            }
+            let credentials = native_credentials(repo, &root, token).await?;
+            let credential = credentials
+                .into_iter()
+                .find(|item| item.id == credential_id)
+                .ok_or_else(|| {
+                    DesktopError::new(
+                        "SVN_NATIVE_CREDENTIAL_NOT_FOUND",
+                        "SVN cached credential is no longer available",
+                        true,
+                    )
+                })?;
+            let mut args = vec!["auth".into(), "--remove".into(), credential.realm];
+            if let Some(username) = credential.username {
+                args.push(username);
+            }
+            cli::run(
+                "svn",
+                &args,
+                Path::new(&repo.root_path),
+                None,
+                cli::DEFAULT_TIMEOUT,
+                token,
+            )
+            .await?;
+        }
     }
     let mut result = state(config_dir, repo, token).await?;
     if testing {
         result.connection_ok = Some(test_connection(config_dir, repo, &result, token).await?);
     }
     Ok(result)
+}
+
+async fn native_credentials(
+    repo: &RepositoryMeta,
+    root: &str,
+    token: &CancellationToken,
+) -> Result<Vec<SvnNativeCredential>, DesktopError> {
+    let output = cli::run(
+        "svn",
+        &["auth".into()],
+        Path::new(&repo.root_path),
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+    )
+    .await?
+    .stdout_text();
+    Ok(parse_native_credentials(&output, root))
+}
+
+fn parse_native_credentials(output: &str, root: &str) -> Vec<SvnNativeCredential> {
+    let host = url::Url::parse(root)
+        .ok()
+        .and_then(|url| url.host_str().map(String::from))
+        .unwrap_or_default();
+    let mut values = Vec::new();
+    for record in output.split("\n\n") {
+        let field = |name: &str| {
+            record
+                .lines()
+                .find_map(|line| line.trim().strip_prefix(name).map(str::trim))
+        };
+        let Some(realm) = field("Authentication realm:") else {
+            continue;
+        };
+        if !host.is_empty() && !realm.contains(&host) {
+            continue;
+        }
+        let username = field("Username:")
+            .filter(|value| !value.is_empty())
+            .map(String::from);
+        let hash =
+            Sha256::digest(format!("{realm}\0{}", username.as_deref().unwrap_or("")).as_bytes());
+        values.push(SvnNativeCredential {
+            id: hex::encode(&hash[..12]),
+            realm: realm.into(),
+            username,
+        });
+    }
+    values
 }
 
 pub async fn auth(
@@ -405,5 +506,14 @@ mod tests {
             .delete("https://svn.example.test/repo", "alice")
             .unwrap();
         assert!(store.get("https://svn.example.test/repo", "alice").is_err());
+    }
+
+    #[test]
+    fn native_cache_parser_scopes_realms_without_reading_passwords() {
+        let output = "Credential kind: svn.simple\nAuthentication realm: <https://svn.example.test:443> Project\nUsername: alice\nPassword: secret\n\nCredential kind: svn.simple\nAuthentication realm: <https://other.test> Other\nUsername: bob\n";
+        let values = parse_native_credentials(output, "https://svn.example.test/repo");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].username.as_deref(), Some("alice"));
+        assert!(!format!("{values:?}").contains("secret"));
     }
 }

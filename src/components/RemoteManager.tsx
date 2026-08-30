@@ -5,6 +5,7 @@ import { isOperationActive, useAppStore } from '../store/appStore';
 import { confirmDialog, promptDialog } from './dialogService';
 import { ContextMenu } from './ContextMenu';
 import type { RemoteInfo } from '../bindings/generated';
+import { ProviderPanel } from './ProviderPanel';
 
 export function RemoteManager({ repoId, close }: { repoId: string; close: () => void }) {
   const snapshot = useAppStore((state) => state.snapshot);
@@ -18,6 +19,7 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
   const [url, setUrl] = useState('');
   const [context, setContext] = useState<{ x: number; y: number; remote: RemoteInfo }>();
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
 
   const popover = useRef<HTMLElement>(null);
   const { t } = useI18n();
@@ -152,6 +154,7 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
         </header>
 
         <div className="modal-body remote-manager-body">
+          {repo?.meta.kind === 'git' && values.length === 0 && <button type="button" className="primary" onClick={() => setPublishOpen(true)}><Codicon name="cloud-upload" />{t('Publish Repository')}</button>}
           {/* 添加远程表单 */}
           <div className="remote-add-card">
             <div className="remote-section-title">{t('Add Remote')}</div>
@@ -304,6 +307,7 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
           />
         )}
       </section>
+      {publishOpen && <ProviderPanel mode="publish" repoId={repoId} close={() => { setPublishOpen(false); void load(repoId); }} />}
     </div>
   );
 }

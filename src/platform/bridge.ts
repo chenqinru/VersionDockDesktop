@@ -35,6 +35,7 @@ export interface VersionDockBridge {
   setState<T>(state: T): void;
   platform(): 'macos' | 'windows' | 'linux';
   selectWorkspaceFolders(title: string): Promise<string[]>;
+  selectDirectory(title: string): Promise<string | null>;
   selectExecutable(title: string): Promise<string | null>;
   notify(title: string, body: string): Promise<boolean>;
   openInNewWindow(paths?: string[], placement?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string>;
@@ -136,20 +137,20 @@ function requestId(): string {
 
 const commandDomain = (command: BridgeCommand): OperationDomain => {
   switch (command.type) {
-    case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'updateSettings': case 'updateLayout': return 'application';
-    case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent': return 'workspace';
+    case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'saveCommitSelections': case 'updateSettings': case 'updateLayout': return 'application';
+    case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent': case 'initializeRepository': case 'cloneRepository': return 'workspace';
     case 'repositoryStatus': return 'status';
     case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff':
     case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
     case 'history': case 'historyTopology': case 'commitDetail': case 'commitMergeCommits':
     case 'commitMergeParentFiles': case 'unpushedCommits': case 'unpushedOperation':
     case 'historyOperation': case 'createPatch': case 'branchCompare': return 'history';
-    case 'branches': case 'branchOperation': return 'branch';
+    case 'branches': case 'branchOperation': case 'branchRecovery': return 'branch';
     case 'tags': case 'tagOperation': return 'tag';
-    case 'commit': case 'batchCommit': return 'commit';
+    case 'commit': case 'batchCommit': case 'recentCommitMessages': case 'lastCommitMessage': return 'commit';
     case 'sync': return 'sync';
     case 'conflicts': case 'conflictVersions': case 'conflictSave': case 'conflictAccept':
-    case 'abortRepositoryOperation': return 'conflict';
+    case 'abortRepositoryOperation': case 'restoreConflicts': return 'conflict';
     case 'stashes': case 'stashOperation': return 'stash';
     case 'shelves': case 'shelfOperation': return 'shelf';
     case 'changelists': case 'changelistOperation': return 'changelist';
@@ -157,6 +158,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'subtrees': case 'subtreeOperation': return 'subtree';
     case 'submodules': case 'submoduleOperation': return 'submodule';
     case 'remotes': case 'remoteOperation': return 'remote';
+    case 'providerAccounts': case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGitlabSave': case 'providerRemove': case 'providerRepositories': case 'providerNamespaces': case 'publishRepository': return 'remote';
     case 'gitIdentity': case 'gitProfileOperation': return 'identity';
     case 'svnAccount': case 'svnAccountOperation': case 'svnOperation': return 'svnAccount';
     case 'fileHistory': case 'fileRevisionContent': return 'fileHistory';
@@ -177,12 +179,14 @@ const commandIdentifiers = (command: BridgeCommand) => {
 export const commandShowsProgressByDefault = (command: BridgeCommand): boolean => {
   switch (command.type) {
     case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent':
+    case 'initializeRepository': case 'cloneRepository':
     case 'stage': case 'unstage': case 'discard': case 'deletePaths': case 'addIgnore': case 'updateIgnoreRules':
-    case 'commit': case 'batchCommit': case 'sync': case 'branchOperation': case 'tagOperation':
-    case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation':
+    case 'commit': case 'batchCommit': case 'sync': case 'branchOperation': case 'branchRecovery': case 'tagOperation':
+    case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'restoreConflicts':
     case 'stashOperation': case 'shelfOperation': case 'changelistOperation': case 'worktreeOperation':
     case 'subtreeOperation': case 'submoduleOperation': case 'unpushedOperation': case 'historyOperation':
     case 'svnOperation': case 'remoteOperation': case 'gitProfileOperation': case 'svnAccountOperation':
+    case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGitlabSave': case 'providerRemove': case 'publishRepository':
       return true;
     default:
       return false;
@@ -391,6 +395,11 @@ export class TauriBridge implements VersionDockBridge {
     const value = await open({ directory: true, multiple: true, title });
     return !value ? [] : Array.isArray(value) ? value : [value];
   }
+  async selectDirectory(title: string): Promise<string | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const value = await open({ directory: true, multiple: false, title });
+    return typeof value === 'string' ? value : null;
+  }
   async selectExecutable(title: string): Promise<string | null> {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const value = await open({
@@ -546,6 +555,7 @@ export class MockBridge implements VersionDockBridge {
   setState<T>(state: T): void { this.state = state; }
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }
   async selectWorkspaceFolders(): Promise<string[]> { return []; }
+  async selectDirectory(): Promise<string | null> { return null; }
   async selectExecutable(): Promise<string | null> { return Promise.resolve('/usr/local/bin/mock-editor'); }
   async notify(): Promise<boolean> { return false; }
   async openInNewWindow(): Promise<string> {

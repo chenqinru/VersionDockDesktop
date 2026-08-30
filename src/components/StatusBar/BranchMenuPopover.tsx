@@ -5,6 +5,7 @@ import { useI18n } from '../../i18n';
 import { promptDialog, confirmDialog } from '../dialogService';
 import type { RepositoryStatus } from '../../bindings/generated';
 import { useBridge } from '../../platform/context';
+import { resolveSubmoduleOperationTarget } from './submoduleTarget';
 
 interface BranchMenuPopoverProps {
   anchorRect: DOMRect | null;
@@ -16,6 +17,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   const bridge = useBridge();
   const snapshot = useAppStore((state) => state.snapshot);
   const sync = useAppStore((state) => state.sync);
+  const updateProject = useAppStore((state) => state.updateProject);
   const branchOperation = useAppStore((state) => state.branchOperation);
   const tagOperation = useAppStore((state) => state.tagOperation);
   const abortRepositoryOperation = useAppStore((state) => state.abortRepositoryOperation);
@@ -177,9 +179,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   // 全局动作：更新全部仓库
   const handleUpdateAll = async () => {
     onClose();
-    await Promise.allSettled(
-      repositories.map((r) => sync(r.meta.id, r.meta.kind === 'git' ? 'pull' : 'update'))
-    );
+    await updateProject();
   };
 
   // 全局动作：推送全部仓库
@@ -311,12 +311,9 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   };
 
   const activeSubmenuRepo = repositories.find((r) => r.meta.id === activeSubmenuRepoId);
-  const activeSubmoduleParent = activeSubmenuRepo?.meta.parentRepoId
-    ? repositories.find((repo) => repo.meta.id === activeSubmenuRepo.meta.parentRepoId)
-    : undefined;
-  const activeSubmodulePath = activeSubmoduleParent && activeSubmenuRepo
-    ? activeSubmenuRepo.meta.rootPath.slice(activeSubmoduleParent.meta.rootPath.replace(/[\\/]+$/, '').length).replace(/^[\\/]+/, '').replaceAll('\\', '/')
-    : undefined;
+  const activeSubmoduleTarget = resolveSubmoduleOperationTarget(repositories, activeSubmenuRepoId);
+  const activeSubmoduleParent = activeSubmoduleTarget?.parent;
+  const activeSubmodulePath = activeSubmoduleTarget?.path;
   const activeRepoBranches = activeSubmenuRepoId ? branchesByRepo[activeSubmenuRepoId] ?? [] : [];
   const activeRepoTags = activeSubmenuRepoId ? tagsByRepo[activeSubmenuRepoId] ?? [] : [];
   const currentRepoBranch =

@@ -4,16 +4,24 @@ import type {
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
-  DesktopCapabilities, OperationDomain, OperationEvent, RefreshScope, RepositoryCapabilities, RuntimeCapabilities, WindowTabTransfer,
+  DesktopCapabilities, HistoryQuery, InitializeRepositoryResult, CloneRepositoryResult, OperationDomain, OperationEvent,
+  RecentCommitMessage, RefreshScope, RepositoryCapabilities, RepositoryUpdateResult, RuntimeCapabilities,
+  SyncResult, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
+  BranchRecoveryResult, RepositoryCommitSelection, RestoreConflictsResult,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
 import { checkAppUpdate, type AppUpdateCheckResult } from '../services/updater';
+import { choiceDialog, confirmDialog } from '../components/dialogService';
+import { createTranslator, resolveLanguage } from '../i18n';
 
 export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
 export type DiffRange = { fromRevision: string; toRevision: string };
-export type CommitChangesModel = { commits: CommitNode[]; files: DetailFileTarget[] };
+export type WorkingChangeTarget = { repoId: string; path: string; status: string; staged: boolean; section: 'staged' | 'unstaged' | 'untracked' };
+export type CommitChangesModel =
+  | { kind: 'commits'; commits: CommitNode[]; files: DetailFileTarget[] }
+  | { kind: 'workingTree'; repoId: string; files: WorkingChangeTarget[] };
 export type HistoryScope = {
   repoIds: string[] | null;
   revisionsByRepo: Record<string, string>;
@@ -39,7 +47,7 @@ export interface AppNotification {
   timestamp: number;
   read: boolean;
   actionLabel?: string;
-  actionKey?: 'pullAll' | 'pushAll' | 'openConflicts' | 'openIdentity' | 'refresh';
+  actionKey?: 'pullAll' | 'pushAll' | 'openConflicts' | 'openIdentity' | 'refresh' | 'viewUpdateDetails';
   actionData?: any;
 }
 
@@ -49,8 +57,10 @@ export interface BatchCommitReport {
   targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>;
   results: RepositoryOperationResult[];
 }
+export interface UpdateProjectReport { results: Array<{ repoId: string; repoName: string; result?: RepositoryUpdateResult; error?: string }> }
 
 const HISTORY_PAGE_SIZE = 100;
+const EMPTY_HISTORY_QUERY: HistoryQuery = { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null };
 
 interface LogCandidate<T extends GraphCommitNode> {
   commit: T;
@@ -152,6 +162,7 @@ export interface WorkspaceSessionState {
   branchesLoading: boolean;
   historyScope: HistoryScope;
   historyFilter: string;
+  historyQuery: HistoryQuery;
   selectedCommit?: CommitDetail;
   selectedCommits: CommitNode[];
   selectedPrimaryKey?: string;
@@ -168,6 +179,10 @@ export interface WorkspaceSessionState {
   conflicts: ConflictFile[];
   merge?: MergeVersions;
   mergeResult: string;
+  commitMessage: string;
+  mergeMessageSuggestion?: string;
+  amendRepoIds: string[];
+  commitSelections: Record<string, string[]>;
   stashes: Record<string, StashEntry[]>;
   shelves: Record<string, ShelfEntry[]>;
   changelists: Record<string, ChangelistEntry[]>;
@@ -222,6 +237,7 @@ export interface AppStore {
   branchesLoading: boolean;
   historyScope: HistoryScope;
   historyFilter: string;
+  historyQuery: HistoryQuery;
   selectedCommit?: CommitDetail;
   selectedCommits: CommitNode[];
   selectedPrimaryKey?: string;
@@ -238,6 +254,10 @@ export interface AppStore {
   conflicts: ConflictFile[];
   merge?: MergeVersions;
   mergeResult: string;
+  commitMessage: string;
+  mergeMessageSuggestion?: string;
+  amendRepoIds: string[];
+  commitSelections: Record<string, string[]>;
   stashes: Record<string, StashEntry[]>;
   shelves: Record<string, ShelfEntry[]>;
   changelists: Record<string, ChangelistEntry[]>;
@@ -250,9 +270,12 @@ export interface AppStore {
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
   batchCommitReport?: BatchCommitReport;
+  updateProjectReport?: UpdateProjectReport;
   initialize: (bridge: VersionDockBridge) => Promise<void>;
   dispose: () => void;
   openWorkspace: (paths: string[], focus?: boolean, options?: OpenWorkspaceOptions) => Promise<boolean>;
+  initializeRepository: (targetPath: string) => Promise<void>;
+  cloneRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, providerAccountId?: string) => Promise<boolean>;
   switchTab: (workspaceId: string) => Promise<void>;
   closeTab: (workspaceId: string) => Promise<void>;
   closeOtherTabs: (workspaceId: string) => Promise<void>;
@@ -268,7 +291,13 @@ export interface AppStore {
   openShelfDiff: (repoId: string, shelfId: string, path: string) => Promise<void>;
   openCommitDetail: () => void;
   openCommitChanges: () => void;
-  loadChangesDiff: (target: DetailFileTarget) => Promise<void>;
+  openWorkingChanges: (repoId: string) => void;
+  loadChangesDiff: (target: DetailFileTarget | WorkingChangeTarget) => Promise<void>;
+  setCommitMessage: (value: string) => void;
+  applyMergeMessageSuggestion: () => void;
+  dismissMergeMessageSuggestion: () => void;
+  setAmendRepoIds: (values: string[]) => void;
+  setCommitSelection: (repoId: string, paths: string[], selected: boolean) => void;
   stage: (repoId: string, paths: string[]) => Promise<void>;
   unstage: (repoId: string, paths: string[]) => Promise<void>;
   discard: (repoId: string, paths: string[]) => Promise<void>;
@@ -278,16 +307,26 @@ export interface AppStore {
   commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>, message: string, push: boolean) => Promise<void>;
   retryBatchResult: (repoId: string) => Promise<void>;
   dismissBatchReport: () => void;
-  sync: (repoId: string, action: 'fetch' | 'pull' | 'push' | 'update') => Promise<void>;
+  sync: (repoId: string, action: 'fetch' | 'pull' | 'push' | 'update', notify?: boolean) => Promise<RepositoryUpdateResult | undefined>;
+  updateProject: () => Promise<void>;
+  dismissUpdateProjectReport: () => void;
+  openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
+  openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
+  recentCommitMessages: (repoIds: string[], signal?: AbortSignal) => Promise<RecentCommitMessage[]>;
+  lastCommitMessage: (repoId: string, signal?: AbortSignal) => Promise<string | null>;
   loadHistory: (reset?: boolean, silent?: boolean) => Promise<void>;
   setHistoryFilter: (value: string) => void;
+  setHistoryQuery: (query: HistoryQuery) => void;
+  openHistoryForPath: (repoId: string, path: string) => Promise<void>;
+  clearHistoryPath: () => Promise<void>;
   setHistoryScope: (scope: HistoryScope) => void;
   selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
   loadCommitDetail: (commit: CommitNode) => Promise<CommitDetail>;
   loadMergeCommits: (commit: CommitNode) => Promise<void>;
   loadMergeParentFiles: (repoId: string, revision: string, parentHash: string) => Promise<CommitFile[]>;
   clearCommitSelection: () => void;
-  branchOperation: (operation: object, repoId?: string) => Promise<void>;
+  branchOperation: (operation: object, repoId?: string) => Promise<BranchOperationResult | undefined>;
+  branchRecovery: (repoId: string, operation: BranchRecoveryOperation) => Promise<BranchRecoveryResult | undefined>;
   tagOperation: (operation: object, repoId?: string) => Promise<void>;
   loadStashes: (repoId?: string) => Promise<void>;
   stashOperation: (repoId: string, operation: StashOperation) => Promise<void>;
@@ -308,7 +347,7 @@ export interface AppStore {
   loadSubmodules: (repoId?: string) => Promise<void>;
   submoduleOperation: (repoId: string, operation: SubmoduleOperation) => Promise<void>;
   loadUnpushedCommits: (repoId?: string) => Promise<void>;
-  unpushedOperation: (repoId: string, operation: UnpushedOperation) => Promise<void>;
+  unpushedOperation: (repoId: string, operation: UnpushedOperation) => Promise<boolean>;
   historyOperation: (repoId: string, operation: HistoryOperation) => Promise<void>;
   createPatch: (repoId: string, revisions: string[]) => Promise<PatchDocument>;
   svnOperation: (repoId: string, operation: SvnOperation) => Promise<void>;
@@ -327,6 +366,7 @@ export interface AppStore {
   saveMerge: () => Promise<void>;
   acceptConflict: (choice: 'mine' | 'theirs' | 'working') => Promise<void>;
   abortRepositoryOperation: (repoId: string, operation: string) => Promise<void>;
+  restoreConflicts: (repoIds: string[]) => Promise<RestoreConflictsResult[]>;
   backToHistory: () => void;
   openFileHistory: (repoId: string, path: string) => void;
   closeFileHistory: () => void;
@@ -354,16 +394,16 @@ export interface AppStore {
 }
 
 const emptyState: AppStateSnapshot = {
-  schemaVersion: 4,
+  schemaVersion: 6,
   settings: {
     theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
     promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false,
     notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4,
     ignoredFolders: ['.git', '.svn', '.hg', 'node_modules', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', 'target'],
-    maximumGraphCommits: 1000, projectColors: {}, externalEditor: null,
+    maximumGraphCommits: 1000, projectColors: {}, externalEditor: null, onlineAvatarsEnabled: false, gravatarEnabled: false,
   },
   layout: { panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
-  lastWorkspaceId: null, openWorkspaceIds: [], activeWorkspaceId: null, recentWorkspaces: [],
+  lastWorkspaceId: null, openWorkspaceIds: [], activeWorkspaceId: null, recentWorkspaces: [], commitSelections: {},
 };
 
 let watcherTimer: ReturnType<typeof setTimeout> | undefined;
@@ -377,8 +417,12 @@ let commitSelectionGeneration = 0;
 let changesDiffGeneration = 0;
 let diffRequestGeneration = 0;
 let historyRequestGeneration = 0;
+let historyPathPreviousScope: HistoryScope | undefined;
+let historyPathPreviousQuery: HistoryQuery | undefined;
 let comparisonRequestGeneration = 0;
 let branchWorkingDiffGeneration = 0;
+let commitSelectionSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let branchRecoveryDialogQueue: Promise<void> = Promise.resolve();
 const requestControllers = new Map<string, AbortController>();
 const notificationBaseline = new Map<string, { incoming: number; unpushed: number }>();
 const bridgeSubscriptions: Array<() => void> = [];
@@ -429,6 +473,36 @@ export function isOperationActive(
     && (criteria.workspaceId === undefined || operation.context.workspaceId === criteria.workspaceId)
     && (criteria.repositoryId === undefined || operation.context.repositoryId === criteria.repositoryId)
     && (!domains || domains.has(operation.context.domain)));
+}
+
+const REPOSITORY_TARGET_PREFIX = 'repositories:';
+
+function operationRepositoryIds(operation: OperationEvent): string[] {
+  if (operation.context.repositoryId) return [operation.context.repositoryId];
+  const target = operation.context.target;
+  if (!target?.startsWith(REPOSITORY_TARGET_PREFIX)) return [];
+  try {
+    const values = JSON.parse(target.slice(REPOSITORY_TARGET_PREFIX.length));
+    return Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function isOperationActiveForRepositories(
+  operations: Record<string, OperationEvent>,
+  repositoryIds: Iterable<string>,
+  criteria: { workspaceId?: string | null; domain?: OperationDomain | OperationDomain[] },
+): boolean {
+  const targets = new Set(repositoryIds);
+  if (!targets.size) return false;
+  const domains = criteria.domain
+    ? new Set(Array.isArray(criteria.domain) ? criteria.domain : [criteria.domain])
+    : undefined;
+  return Object.values(operations).some((operation) => ACTIVE_OPERATION_STATUSES.has(operation.status)
+    && (criteria.workspaceId === undefined || operation.context.workspaceId === criteria.workspaceId)
+    && (!domains || domains.has(operation.context.domain))
+    && operationRepositoryIds(operation).some((repositoryId) => targets.has(repositoryId)));
 }
 
 export function capabilityAvailable(
@@ -488,6 +562,26 @@ function projectSnapshot(snapshot: WorkspaceSnapshot, repositories: RepositorySt
   return { ...snapshot, repositories: repositories.filter((repo) => !hidden.has(repo.meta.id)) };
 }
 
+function selectionRecord(values: RepositoryCommitSelection[] | undefined): Record<string, string[]> {
+  return Object.fromEntries((values ?? []).map((item) => [item.repoId, item.paths]));
+}
+
+function pruneCommitSelections(repositories: RepositoryStatus[], selections: Record<string, string[]>): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const repo of repositories) {
+    const available = new Set(repo.files.map((file) => file.path));
+    const paths = [...new Set(selections[repo.meta.id] ?? [])].filter((path) => available.has(path));
+    if (paths.length) result[repo.meta.id] = paths;
+  }
+  return result;
+}
+
+function queueBranchRecoveryDialog(task: () => Promise<void>): Promise<void> {
+  const next = branchRecoveryDialogQueue.then(task, task);
+  branchRecoveryDialogQueue = next.catch(() => undefined);
+  return next;
+}
+
 export const useAppStore = create<AppStore>((set, get) => {
   const ensureRepositoryCapability = (repoId: string, key: string) => {
     const repository = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
@@ -495,9 +589,13 @@ export const useAppStore = create<AppStore>((set, get) => {
     set({ notice: capabilityReason(repository.capabilities, key) ?? 'Operation is unavailable for this repository' });
     return false;
   };
-  const withBusy = async (operation: () => Promise<void>, domain = 'workspace') => {
+  const withBusy = async <T>(
+    operation: () => Promise<T>,
+    domain = 'workspace',
+    target?: { repositoryId?: string | null; target?: string | null },
+  ): Promise<T | undefined> => {
     const operationId = `client-${Date.now()}-${++localOperationSequence}`;
-    const context = { ...operationContext(domain, get()), visibility: 'background' as const };
+    const context = { ...operationContext(domain, get()), ...target, visibility: 'background' as const };
     set((state) => ({
       error: undefined,
       operations: {
@@ -517,13 +615,14 @@ export const useAppStore = create<AppStore>((set, get) => {
       },
     }));
     try {
-      await operation();
+      return await operation();
     } catch (error) {
       if (!isAbortError(error)) {
         const msg = errorText(error);
         set({ error: msg, errorDetails: errorDetails(error) });
         get().addNotification({ type: 'error', title: 'Operation failed', message: msg });
       }
+      return undefined;
     } finally {
       set((state) => {
         const operations = { ...state.operations };
@@ -547,6 +646,23 @@ export const useAppStore = create<AppStore>((set, get) => {
 
   const settings = () => get().bootstrap?.state.settings ?? emptyState.settings!;
   const layout = () => get().bootstrap?.state.layout ?? emptyState.layout!;
+
+  const persistCommitSelections = (workspaceId: string, selections: Record<string, string[]>) => {
+    if (commitSelectionSaveTimer) clearTimeout(commitSelectionSaveTimer);
+    commitSelectionSaveTimer = setTimeout(() => {
+      const values = Object.entries(selections).map(([repoId, paths]) => ({ repoId, paths }));
+      get().bridge?.send({ type: 'saveCommitSelections', payload: { workspace_id: workspaceId, selections: values } });
+    }, 120);
+    const current = get().bootstrap;
+    if (current) set({ bootstrap: { ...current, state: { ...current.state, commitSelections: { ...(current.state.commitSelections ?? {}), [workspaceId]: Object.entries(selections).map(([repoId, paths]) => ({ repoId, paths })) } } } });
+  };
+  const clearCommittedSelections = (repoIds: string[]) => {
+    const commitSelections = { ...get().commitSelections };
+    repoIds.forEach((repoId) => delete commitSelections[repoId]);
+    set({ commitSelections });
+    const wid = get().snapshot?.workspace.id;
+    if (wid) persistCommitSelections(wid, commitSelections);
+  };
 
   const restartAutoRefresh = () => {
     if (autoRefreshTimer) clearInterval(autoRefreshTimer);
@@ -623,6 +739,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       branchesLoading: state.branchesLoading,
       historyScope: state.historyScope,
       historyFilter: state.historyFilter,
+      historyQuery: state.historyQuery,
       selectedCommit: state.selectedCommit,
       selectedCommits: state.selectedCommits,
       selectedPrimaryKey: state.selectedPrimaryKey,
@@ -639,6 +756,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       conflicts: state.conflicts,
       merge: state.merge,
       mergeResult: state.mergeResult,
+      commitMessage: state.commitMessage,
+      mergeMessageSuggestion: state.mergeMessageSuggestion,
+      amendRepoIds: state.amendRepoIds,
+      commitSelections: state.commitSelections,
       stashes: state.stashes,
       shelves: state.shelves,
       changelists: state.changelists,
@@ -676,11 +797,16 @@ export const useAppStore = create<AppStore>((set, get) => {
     if (workspaceChanged) notificationBaseline.clear();
     const allRepositories = snapshot.repositories;
     const visibleSnapshot = projectSnapshot(snapshot, allRepositories, settings());
+    const storedSelections = workspaceChanged
+      ? selectionRecord(get().bootstrap?.state.commitSelections?.[snapshot.workspace.id])
+      : get().commitSelections;
+    const commitSelections = pruneCommitSelections(allRepositories, storedSelections);
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
-      : { snapshot: visibleSnapshot, allRepositories, selectedRepoId });
+      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
+      : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
+    if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     const notificationLeader = claimSchedulerLease('notifications', 5_000);
     for (const repo of visibleSnapshot.repositories) {
       const counts = { incoming: repo.behind, unpushed: repo.ahead };
@@ -738,13 +864,12 @@ export const useAppStore = create<AppStore>((set, get) => {
           repo_id: repoId,
           skip: 0,
           limit: visibleLimit,
-          filter: current.historyFilter || null,
-          revision: current.historyScope.revisionsByRepo[repoId] ?? null,
+          query: { ...current.historyQuery, text: current.historyFilter || current.historyQuery.text, revision: current.historyScope.revisionsByRepo[repoId] ?? null },
         },
       }, { showProgress: false }),
       bridge().request<GraphCommitNode[]>({
         type: 'historyTopology',
-        payload: { workspace_id: workspaceId, repo_id: repoId, svn_limit: 1000 },
+        payload: { workspace_id: workspaceId, repo_id: repoId, svn_limit: 1000, revision: current.historyScope.revisionsByRepo[repoId] ?? null },
       }, { showProgress: false }).catch(() => []),
     ]);
     if (get().snapshot?.workspace.id !== workspaceId || historyRequestGeneration !== requestGeneration) return;
@@ -865,7 +990,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined,
+    ready: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined, updateProjectReport: undefined,
 
     operations: {},
 
@@ -968,8 +1093,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
       if (watcherTimer) clearTimeout(watcherTimer);
       if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      if (commitSelectionSaveTimer) clearTimeout(commitSelectionSaveTimer);
       watcherTimer = undefined;
       autoRefreshTimer = undefined;
+      commitSelectionSaveTimer = undefined;
       watcherScopes.clear();
       repositoryEventGenerations.clear();
       releaseSchedulerLeases();
@@ -1053,6 +1180,24 @@ export const useAppStore = create<AppStore>((set, get) => {
       return opened;
     },
 
+    initializeRepository: async (targetPath) => {
+      await withBusy(async () => {
+        const result = await bridge().request<InitializeRepositoryResult>({ type: 'initializeRepository', payload: { workspace_id: workspaceId(), target_path: targetPath } }, { timeoutMs: 120_000 });
+        await applySnapshot(result.snapshot, false);
+        await get().selectRepo(result.repositoryId, true);
+      }, 'workspace', { target: targetPath });
+    },
+
+    cloneRepository: async (url, parentPath, targetName, openInNewWindow = false, providerAccountId) => (await withBusy(async () => {
+        const result = await bridge().request<CloneRepositoryResult>({ type: 'cloneRepository', payload: { url, parent_path: parentPath, target_name: targetName, provider_account_id: providerAccountId ?? null } }, { timeoutMs: 600_000 });
+        if (openInNewWindow) {
+          if (!await bridge().focusWorkspaceAcrossWindows([result.path])) await bridge().openInNewWindow([result.path]);
+        } else {
+          await get().openWorkspace([result.path]);
+        }
+        return true;
+      }, 'workspace', { target: `${parentPath}/${targetName}` })) ?? false,
+
     switchTab: async (workspaceId: string) => {
       if (get().activeTabId === workspaceId && get().snapshot) return;
       const targetTab = get().tabs.find((t) => t.id === workspaceId);
@@ -1100,6 +1245,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           branchesLoading: false,
           historyScope: cachedSession.historyScope,
           historyFilter: cachedSession.historyFilter,
+          historyQuery: cachedSession.historyQuery ?? { ...EMPTY_HISTORY_QUERY, text: cachedSession.historyFilter || null },
           selectedCommit: cachedSession.selectedCommit,
           selectedCommits: cachedSession.selectedCommits,
           selectedPrimaryKey: cachedSession.selectedPrimaryKey,
@@ -1116,6 +1262,10 @@ export const useAppStore = create<AppStore>((set, get) => {
           conflicts: cachedSession.conflicts,
           merge: cachedSession.merge,
           mergeResult: cachedSession.mergeResult,
+          commitMessage: cachedSession.commitMessage ?? '',
+          mergeMessageSuggestion: cachedSession.mergeMessageSuggestion,
+          amendRepoIds: cachedSession.amendRepoIds ?? [],
+          commitSelections: cachedSession.commitSelections ?? {},
           stashes: cachedSession.stashes,
           shelves: cachedSession.shelves,
           changelists: cachedSession.changelists,
@@ -1184,6 +1334,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             branchesLoading: false,
             historyScope: { repoIds: null, revisionsByRepo: {} },
             historyFilter: '',
+            historyQuery: { ...EMPTY_HISTORY_QUERY },
             selectedCommit: undefined,
             selectedCommits: [],
             selectedPrimaryKey: undefined,
@@ -1263,6 +1414,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         branchesLoading: false,
         historyScope: { repoIds: null, revisionsByRepo: {} },
         historyFilter: '',
+        historyQuery: { ...EMPTY_HISTORY_QUERY },
         selectedCommit: undefined,
         selectedCommits: [],
         selectedPrimaryKey: undefined,
@@ -1487,14 +1639,43 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!state.selectedCommits.length) return;
       const files = buildCommitFileTargets(state.selectedCommits, state.selectedCommitDetails, state.snapshot?.repositories ?? []);
       if (!files.length) return;
-      set({ changes: { commits: state.selectedCommits, files }, changesDiff: undefined, mode: 'changes' });
+      set({ changes: { kind: 'commits', commits: state.selectedCommits, files }, changesDiff: undefined, mode: 'changes' });
+    },
+
+    openWorkingChanges: (repoId) => {
+      const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
+      if (!repo) return;
+      const files: WorkingChangeTarget[] = repo.files.flatMap((file) => {
+        const targets: WorkingChangeTarget[] = [];
+        if (file.staged) targets.push({ repoId, path: file.path, status: file.status, staged: true, section: 'staged' });
+        if (file.status === 'untracked') targets.push({ repoId, path: file.path, status: file.status, staged: false, section: 'untracked' });
+        else if (file.unstaged) targets.push({ repoId, path: file.path, status: file.status, staged: false, section: 'unstaged' });
+        return targets;
+      });
+      set({ changes: { kind: 'workingTree', repoId, files }, changesDiff: undefined, mode: 'changes' });
     },
 
     loadChangesDiff: async (target) => withBusy(async () => {
       const generation = ++changesDiffGeneration;
-      const diff = await bridge().request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId(), repo_id: target.repoId, relative_path: target.path, staged: false, revision: target.toRevision ? null : target.commitHash, from_revision: target.fromRevision ?? null, to_revision: target.toRevision ?? null } });
+      const working = 'section' in target;
+      const diff = await bridge().request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId(), repo_id: target.repoId, relative_path: target.path, staged: working ? target.staged : false, revision: working ? null : target.toRevision ? null : target.commitHash, from_revision: working ? null : target.fromRevision ?? null, to_revision: working ? null : target.toRevision ?? null } });
       if (generation === changesDiffGeneration) set({ changesDiff: diff });
     }, `diff:${target.repoId}`),
+
+    setCommitMessage: (commitMessage) => set({ commitMessage }),
+    applyMergeMessageSuggestion: () => set((state) => ({ commitMessage: state.mergeMessageSuggestion ?? state.commitMessage, mergeMessageSuggestion: undefined })),
+    dismissMergeMessageSuggestion: () => set({ mergeMessageSuggestion: undefined }),
+    setAmendRepoIds: (amendRepoIds) => set({ amendRepoIds: [...new Set(amendRepoIds)] }),
+    setCommitSelection: (repoId, paths, selected) => {
+      const current = get().commitSelections;
+      const nextPaths = new Set(current[repoId] ?? []);
+      paths.forEach((path) => selected ? nextPaths.add(path) : nextPaths.delete(path));
+      const commitSelections = { ...current };
+      if (nextPaths.size) commitSelections[repoId] = [...nextPaths]; else delete commitSelections[repoId];
+      set({ commitSelections });
+      const wid = get().snapshot?.workspace.id;
+      if (wid) persistCommitSelections(wid, commitSelections);
+    },
 
     stage: async (repoId, paths) => withBusy(async () => {
       await bridge().request({ type: 'stage', payload: { workspace_id: workspaceId(), repo_id: repoId, paths } });
@@ -1516,11 +1697,14 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     commit: async (repoId, message, amend, paths, push) => withBusy(async () => {
       await bridge().request({ type: 'commit', payload: { workspace_id: workspaceId(), repo_id: repoId, message, amend, paths } });
+      clearCommittedSelections([repoId]);
       if (push) await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null } }, { timeoutMs: 600_000 });
     }, `commit:${repoId}`),
 
     commitMany: async (targets, message, push) => withBusy(async () => {
       const workspace_id = workspaceId();
+      const repositoryIds = targets.map((target) => target.repoId);
+      const operationTarget = `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(repositoryIds)}`;
       const results = await bridge().request<RepositoryOperationResult[]>({
         type: 'batchCommit',
         payload: {
@@ -1534,11 +1718,21 @@ export const useAppStore = create<AppStore>((set, get) => {
           })),
           push,
         },
-      }, { timeoutMs: 600_000 });
+      }, {
+        timeoutMs: 600_000,
+        context: {
+          repositoryId: repositoryIds.length === 1 ? repositoryIds[0] : null,
+          target: operationTarget,
+        },
+      });
       set({ batchCommitReport: { message, push, targets, results } });
+      clearCommittedSelections(results.filter((result) => result.committed).map((result) => result.repoId));
       const failures = results.filter((result) => result.error);
       if (failures.length) set({ error: failures.map((result) => `${result.repoId}: ${result.error?.message}`).join('\n') });
-    }, 'commit:batch'),
+    }, 'commit', {
+      repositoryId: targets.length === 1 ? targets[0].repoId : null,
+      target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(targets.map((target) => target.repoId))}`,
+    }),
 
     retryBatchResult: async (repoId) => withBusy(async () => {
       const report = get().batchCommitReport;
@@ -1567,11 +1761,60 @@ export const useAppStore = create<AppStore>((set, get) => {
     }, `commit:${repoId}`),
     dismissBatchReport: () => set({ batchCommitReport: undefined }),
 
-    sync: async (repoId, action) => withBusy(async () => {
+    sync: async (repoId, action, notify = true) => withBusy(async () => {
       const capability = action === 'fetch' ? 'syncFetch' : action === 'push' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
       if (!ensureRepositoryCapability(repoId, capability)) return;
-      await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
+      const result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
+      if (notify && result.update) {
+        const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
+        const summary = result.update.summary;
+        get().addNotification({
+          type: result.update.summaryError ? 'warning' : 'success',
+          title: summary?.kind === 'noChanges' ? 'Repository is up to date' : 'Repository updated',
+          message: result.update.summaryError ? `${repo?.meta.name ?? repoId}: update succeeded, summary unavailable` : `${repo?.meta.name ?? repoId}: ${summary?.commitCount ?? 0} commits, ${summary?.fileCount ?? 0} files`,
+          actionLabel: summary?.commitCount ? 'View Update Details' : undefined,
+          actionKey: summary?.commitCount ? 'viewUpdateDetails' : undefined,
+          actionData: result.update,
+        });
+      }
+      return result.update ?? undefined;
     }, `sync:${repoId}`),
+
+    updateProject: async () => {
+      const repositories = get().snapshot?.repositories ?? [];
+      const wid = workspaceId();
+      const settled = await Promise.all(repositories.map(async (repo) => {
+        try { const value = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: repo.meta.kind === 'git' ? 'pull' : 'update', remote: null } }, { timeoutMs: 600_000 }); return { repoId: repo.meta.id, repoName: repo.meta.name, result: value.update ?? undefined }; }
+        catch (error) { return { repoId: repo.meta.id, repoName: repo.meta.name, error: errorText(error) }; }
+      }));
+      set({ updateProjectReport: { results: settled } });
+      const updated = settled.flatMap((item) => item.result ? [item.result] : []);
+      const commits = updated.reduce((sum, item) => sum + (item.summary?.commitCount ?? 0), 0);
+      const files = updated.reduce((sum, item) => sum + (item.summary?.fileCount ?? 0), 0);
+      const failed = settled.filter((item) => item.error).length;
+      get().addNotification({ type: failed ? 'warning' : 'success', title: 'Project update completed', message: `${updated.length} succeeded, ${failed} failed · ${commits} commits, ${files} files` });
+    },
+    dismissUpdateProjectReport: () => set({ updateProjectReport: undefined }),
+
+    openUpdateDetails: async (result) => {
+      const commits = result.summary?.detail.commits ?? [];
+      if (!commits.length) return;
+      const details = await Promise.all(commits.map((commit) => get().loadCommitDetail(commit)));
+      const byKey = Object.fromEntries(details.map((detail) => [commitKey(detail.commit.repoId, detail.commit.hash), detail]));
+      set({ selectedCommits: commits, selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash), selectedCommit: details[0], selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey } });
+      if (commits.length === 1) get().openCommitDetail(); else get().openCommitChanges();
+    },
+    openUpdateResults: async (results) => {
+      const commits = results.flatMap((result) => result.summary?.detail.commits ?? []);
+      if (!commits.length) return;
+      const details = await Promise.all(commits.map((commit) => get().loadCommitDetail(commit)));
+      const byKey = Object.fromEntries(details.map((detail) => [commitKey(detail.commit.repoId, detail.commit.hash), detail]));
+      set({ selectedCommits: commits, selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash), selectedCommit: details[0], selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey } });
+      get().openCommitChanges();
+    },
+
+    recentCommitMessages: async (repoIds, signal) => bridge().request<RecentCommitMessage[]>({ type: 'recentCommitMessages', payload: { workspace_id: workspaceId(), repo_ids: repoIds, limit: 50 } }, { signal, showProgress: false }),
+    lastCommitMessage: async (repoId, signal) => bridge().request<string | null>({ type: 'lastCommitMessage', payload: { workspace_id: workspaceId(), repo_id: repoId } }, { signal, showProgress: false }),
 
     loadHistory: async (reset = false, silent = false) => {
       const allRepos = (get().snapshot?.repositories ?? []).filter((repo) => !repo.meta.isWorktree);
@@ -1597,13 +1840,14 @@ export const useAppStore = create<AppStore>((set, get) => {
         // VersionDock fetches the prefix needed from every repository, merges
         // those logs, and only then applies the workspace-wide page boundary.
         const pagesPromise = Promise.all(repos.map(async (repo) => {
-          const page = await bridge().request<HistoryPage>({ type: 'history', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, skip: 0, limit: visibleLimit, filter: get().historyFilter || null, revision: scope.revisionsByRepo[repo.meta.id] ?? null } }, { signal: controller.signal, showProgress: !silent });
+          const page = await bridge().request<HistoryPage>({ type: 'history', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, skip: 0, limit: visibleLimit, query: { ...get().historyQuery, text: get().historyFilter || get().historyQuery.text, revision: scope.revisionsByRepo[repo.meta.id] ?? null } } }, { signal: controller.signal, showProgress: !silent });
           return { repoId: repo.meta.id, page };
         }));
-        const topologyPromise = reset && !get().historyFilter
+        const breaking = get().historyQuery.text || get().historyQuery.author || get().historyQuery.fromDate || get().historyQuery.toDate || get().historyQuery.path;
+        const topologyPromise = reset && !breaking
           ? Promise.all(repos.map(async (repo) => ({
             repoId: repo.meta.id,
-            commits: await bridge().request<GraphCommitNode[]>({ type: 'historyTopology', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, svn_limit: 1000 } }, { signal: controller.signal, showProgress: !silent }).catch((error) => isAbortError(error) ? Promise.reject(error) : []),
+            commits: await bridge().request<GraphCommitNode[]>({ type: 'historyTopology', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, svn_limit: 1000, revision: scope.revisionsByRepo[repo.meta.id] ?? null } }, { signal: controller.signal, showProgress: !silent }).catch((error) => isAbortError(error) ? Promise.reject(error) : []),
           })))
           : Promise.resolve(undefined);
         const [pages, topology] = await Promise.all([pagesPromise, topologyPromise]);
@@ -1634,7 +1878,32 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
-    setHistoryFilter: (value) => set({ historyFilter: value }),
+    setHistoryFilter: (value) => set((state) => ({ historyFilter: value, historyQuery: { ...state.historyQuery, text: value || null } })),
+    setHistoryQuery: (historyQuery) => {
+      ++historyRequestGeneration;
+      requestControllers.get('history')?.abort();
+      set({ historyQuery, historyFilter: historyQuery.text ?? '', history: [], historyByRepo: {}, historyHasMore: false, historyTopology: [], historyTopologyByRepo: {} });
+    },
+    openHistoryForPath: async (repoId, path) => {
+      ++historyRequestGeneration;
+      requestControllers.get('history')?.abort();
+      if (!get().historyQuery.path) {
+        historyPathPreviousScope = get().historyScope;
+        historyPathPreviousQuery = get().historyQuery;
+      }
+      set((state) => ({ historyScope: { repoIds: [repoId], revisionsByRepo: state.historyScope.revisionsByRepo[repoId] ? { [repoId]: state.historyScope.revisionsByRepo[repoId] } : {} }, historyQuery: { ...state.historyQuery, path }, selectedRepoId: repoId, mode: 'history' }));
+      await get().loadHistory(true);
+    },
+    clearHistoryPath: async () => {
+      ++historyRequestGeneration;
+      requestControllers.get('history')?.abort();
+      const restored = historyPathPreviousScope ?? get().historyScope;
+      const restoredQuery = historyPathPreviousQuery ?? get().historyQuery;
+      historyPathPreviousScope = undefined;
+      historyPathPreviousQuery = undefined;
+      set({ historyScope: restored, historyQuery: { ...restoredQuery, path: null }, historyFilter: restoredQuery.text ?? '' });
+      await get().loadHistory(true);
+    },
     setHistoryScope: (historyScope) => set({ historyScope }),
 
     loadCommitDetail: async (commit) => {
@@ -1751,10 +2020,55 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     branchOperation: async (operation, requestedRepoId) => {
-      const repoId = requestedRepoId ?? get().selectedRepoId; if (!repoId) return;
-      await withBusy(async () => {
-        await bridge().request({ type: 'branchOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation: operation as never } });
-      }, `repository:${repoId}`);
+      const repoId = requestedRepoId ?? get().selectedRepoId; if (!repoId) return undefined;
+      const value = operation as { type?: string; name?: string };
+      const t = createTranslator(resolveLanguage(settings().language));
+      const suggestMergeMessage = () => {
+        const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
+        const suggestion = `Merge branch '${value.name ?? 'branch'}' into '${repo?.branch ?? 'HEAD'}'`;
+        if (get().commitMessage.trim()) set({ mergeMessageSuggestion: suggestion });
+        else set({ commitMessage: suggestion, mergeMessageSuggestion: undefined });
+        get().addNotification({ type: 'warning', title: t('Merge conflicts detected'), message: t('{0}: resolve conflicts before committing', repo?.meta.name ?? repoId), actionLabel: t('Open Conflicts'), actionKey: 'openConflicts' });
+      };
+      try {
+        const result = await bridge().request<BranchOperationResult>({ type: 'branchOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation: operation as never } });
+        if (result.conflicted) suggestMergeMessage();
+        return result;
+      } catch (error) {
+        if (!(error instanceof BridgeError) || error.code !== 'DIRTY_WORKTREE' || !value.name || (value.type !== 'checkout' && value.type !== 'merge')) {
+          set({ error: errorText(error), errorDetails: errorDetails(error) });
+          return undefined;
+        }
+        const target = value.name;
+        await queueBranchRecoveryDialog(async () => {
+        if (value.type === 'merge') {
+          const selected = await choiceDialog({ title: t('Uncommitted changes'), message: t('Local changes would be overwritten by merging "{0}".', target), choices: [{ id: 'stash', label: t('Stash and merge'), description: t('Save all local changes to a retained stash, then merge.'), icon: 'archive' }, { id: 'cancel', label: t('Cancel'), icon: 'close' }] });
+          if (selected === 'stash') {
+            const recovery = await get().branchRecovery(repoId, { type: 'stashAndMerge', target });
+            if (recovery?.status === 'conflicted') suggestMergeMessage();
+          }
+          return;
+        }
+        const selected = await choiceDialog({ title: t('Uncommitted changes'), message: t('Choose how to handle local changes before switching to "{0}".', target), choices: [{ id: 'stash', label: t('Stash and checkout'), description: t('Keep changes in a stash and switch branches.'), icon: 'archive' }, { id: 'carry', label: t('Carry changes'), description: t('Switch branches and apply the changes there.'), icon: 'arrow-right' }, { id: 'force', label: t('Force checkout'), description: t('Discard tracked local changes and switch branches.'), icon: 'warning', danger: true }, { id: 'cancel', label: t('Cancel'), icon: 'close' }] });
+        if (selected === 'force' && !await confirmDialog({ title: t('Force checkout?'), message: t('Tracked working tree and index changes will be discarded. Untracked files are not deleted.'), danger: true, confirmLabel: t('Force Checkout') })) return;
+        const recovery = selected === 'stash' ? { type: 'stashAndCheckout', target } as const : selected === 'carry' ? { type: 'carryChanges', target } as const : selected === 'force' ? { type: 'forceCheckout', target } as const : undefined;
+        if (recovery) await get().branchRecovery(repoId, recovery);
+        });
+        return undefined;
+      }
+    },
+    branchRecovery: async (repoId, operation) => {
+      const t = createTranslator(resolveLanguage(settings().language));
+      try {
+        const result = await bridge().request<BranchRecoveryResult>({ type: 'branchRecovery', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
+        if (result.status === 'partialFailure') get().addNotification({ type: 'warning', title: t('Branch recovery needs attention'), message: result.recoveryHint ? t(result.recoveryHint) : result.error?.message ?? t('Review the repository and retained stash.') });
+        else if (result.stashReference) get().addNotification({ type: result.status === 'conflicted' ? 'warning' : 'success', title: result.status === 'conflicted' ? t('Merge conflicts detected') : t('Branch operation completed'), message: t('{0} was retained for recovery.', result.stashReference) });
+        await get().refresh(true);
+        return result;
+      } catch (error) {
+        set({ error: errorText(error), errorDetails: errorDetails(error) });
+        return undefined;
+      }
     },
 
     tagOperation: async (operation, requestedRepoId) => {
@@ -1846,7 +2160,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       await get().loadWorktrees(repoId);
     }, `worktree:${repoId}`),
     openWorktree: async (repoId, path, reveal) => withBusy(async () => {
-      await bridge().request({ type: 'openWorktree', payload: { workspace_id: workspaceId(), repo_id: repoId, path, reveal } });
+      const managedPath = await bridge().request<string>({ type: 'openWorktree', payload: { workspace_id: workspaceId(), repo_id: repoId, path, reveal } });
+      if (!reveal && !await bridge().focusWorkspaceAcrossWindows([managedPath])) await bridge().openInNewWindow([managedPath]);
     }, `worktree:${repoId}`),
     loadWorktreeDiff: async (repoId, path, baseRef = 'HEAD') => withBusy(async () => {
       const wid = get().snapshot?.workspace.id;
@@ -1938,11 +2253,12 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ unpushedCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.unpushedCommits) }));
     },
-    unpushedOperation: async (repoId, operation) => withBusy(async () => {
-      if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return;
+    unpushedOperation: async (repoId, operation) => (await withBusy(async () => {
+      if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return false;
       await bridge().request({ type: 'unpushedOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
       await get().loadUnpushedCommits(repoId);
-    }, `history:${repoId}`),
+      return true;
+    }, `history:${repoId}`)) ?? false,
     historyOperation: async (repoId, operation) => withBusy(async () => {
       if (operation.type === 'reset' && !ensureRepositoryCapability(repoId, 'historyRewrite')) return;
       await bridge().request({ type: 'historyOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
@@ -2044,7 +2360,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         return;
       }
       const merge = await bridge().request<MergeVersions>({ type: 'conflictVersions', payload: { workspace_id: workspaceId(), repo_id: conflict.repoId, relative_path: conflict.path } });
-      set({ merge, mergeResult: merge.working, selectedFile: { repoId: conflict.repoId, path: conflict.path, staged: false }, mode: 'merge' });
+      set({ merge, mergeResult: merge.markerContent || merge.working, selectedFile: { repoId: conflict.repoId, path: conflict.path, staged: false }, mode: 'merge' });
     }, `conflict:${conflict.repoId}`),
     resolveConflict: async (conflict, choice) => withBusy(async () => {
       await bridge().request({ type: 'conflictAccept', payload: { workspace_id: workspaceId(), repo_id: conflict.repoId, relative_path: conflict.path, choice } });
@@ -2063,6 +2379,15 @@ export const useAppStore = create<AppStore>((set, get) => {
     abortRepositoryOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'abortRepositoryOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
     }, `conflict:${repoId}`),
+    restoreConflicts: async (repoIds) => {
+      const results: RestoreConflictsResult[] = [];
+      for (const repoId of [...new Set(repoIds)]) {
+        const result = await withBusy(async () => bridge().request<RestoreConflictsResult>({ type: 'restoreConflicts', payload: { workspace_id: workspaceId(), repo_id: repoId } }), `conflict:${repoId}`);
+        if (result) results.push(result);
+      }
+      await get().refresh(true);
+      return results;
+    },
 
     backToHistory: () => {
       for (const key of ['diff', 'changes-diff', 'branch-working-diff']) requestControllers.get(key)?.abort();

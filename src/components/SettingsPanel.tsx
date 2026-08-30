@@ -4,6 +4,7 @@ import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
 import { EditorIcon } from './EditorIcons';
+import { ProviderPanel } from './ProviderPanel';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -15,6 +16,7 @@ const settingsCategories = [
   { id: 'settings-section-refresh-title', sectionId: 'settings-section-refresh', icon: 'sync', label: 'Refresh and startup' },
   { id: 'settings-section-repository-title', sectionId: 'settings-section-repository', icon: 'repo', label: 'Repository and history' },
   { id: 'settings-section-external-editor-title', sectionId: 'settings-section-external-editor', icon: 'terminal', label: 'External editor' },
+  { id: 'settings-section-accounts-title', sectionId: 'settings-section-accounts', icon: 'accounts-view-bar-icon', label: 'Accounts and privacy' },
   { id: 'settings-section-about-title', sectionId: 'settings-section-about', icon: 'info', label: 'About and updates' },
 ] as const;
 
@@ -27,6 +29,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(settingsCategories[0].id);
   const [searchQuery, setSearchQuery] = useState('');
+  const [providersOpen, setProvidersOpen] = useState(false);
 
   const settings = useAppStore((state) => state.bootstrap?.state.settings);
   const theme = settings?.theme ?? 'system';
@@ -407,6 +410,14 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </SettingsSection>
                 )}
 
+                {activeCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="accounts-view-bar-icon" title={t('Accounts and privacy')}>
+                  <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub and GitLab accounts')}</button></SettingsCard>
+                  <SettingsCard title={t('Author avatars')}>
+                    <SettingToggle label={t('Online author avatars')} description={t('Resolve GitHub noreply addresses to GitHub avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false } : {}) })} />
+                    <SettingToggle label={t('Use Gravatar for other emails')} description={t('Send only a SHA-256 email hash to Gravatar.')} checked={(settings?.onlineAvatarsEnabled ?? false) && (settings?.gravatarEnabled ?? false)} onChange={(value) => void updateSettings({ gravatarEnabled: value })} />
+                  </SettingsCard>
+                </SettingsSection>}
+
                 {/* 5. 外部编辑器 External editor */}
                 {activeCategory === 'settings-section-external-editor-title' && (
                   <ExternalEditorSettings
@@ -478,6 +489,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           </div>
         </div>
       </section>
+      {providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}
     </div>
   );
 }

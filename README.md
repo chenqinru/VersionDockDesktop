@@ -4,6 +4,8 @@
 
 <h1 align="center">VersionDock Desktop</h1>
 
+> GitHub Provider 登录使用 OAuth Device Flow。发布构建需设置 `VERSIONDOCK_GITHUB_CLIENT_ID`；未设置时仅禁用 GitHub 登录，GitLab 和本地功能不受影响。仅 debug/test 构建可通过 `VERSIONDOCK_ALLOW_INSECURE_PROVIDER_HOSTS=1` 显式允许 HTTP 自建 GitLab，TLS 校验不会被关闭。
+
 <p align="center">
   <strong>基于 Tauri 2、Rust 和 React 打造的现代化独立 Git & SVN 桌面工作台</strong>
 </p>

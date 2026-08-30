@@ -4,25 +4,16 @@ import { FileIcon } from './FileIcon';
 import { useAppStore, type AppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
-import { branchColor } from './branchColor';
 import type { CommitDetail, CommitNode, CommitPathOperationEntry, MergeParentChange, RepositoryStatus } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { confirmDialog } from './dialogService';
+import { AuthorAvatar } from './AuthorAvatar';
 
 type DetailTreeNode = { name: string; path: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
 
 function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date);
-}
-
-function initials(value: string): string {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2) || '?').toUpperCase();
-}
-
-function avatarColor(value: string): string {
-  return branchColor(value || 'author');
 }
 
 function statusClass(status: string): string {
@@ -138,6 +129,7 @@ function DetailFileContextMenu({ position, file, close, openDiff }: { position: 
   const { t } = useI18n();
   const systemOpen = useAppStore((state) => state.systemOpen);
   const openFileHistory = useAppStore((state) => state.openFileHistory);
+  const openHistoryForPath = useAppStore((state) => state.openHistoryForPath);
   const historyOperation = useAppStore((state) => state.historyOperation);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
@@ -146,6 +138,7 @@ function DetailFileContextMenu({ position, file, close, openDiff }: { position: 
   const items: ContextMenuEntry[] = [
     { id: 'diff', label: t('Show Diff'), icon: 'diff' },
     { id: 'history', label: t('File history'), icon: 'history' },
+    { id: 'commit-history', label: t('Show in commit history'), icon: 'git-commit' },
     { id: 'open', label: t('Open file'), icon: 'go-to-file' },
     { id: 'reveal', label: t('Reveal in File Manager'), icon: 'folder-opened' },
     ...(repoKind === 'git' && directCommitFile ? [
@@ -156,6 +149,7 @@ function DetailFileContextMenu({ position, file, close, openDiff }: { position: 
   return <ContextMenu x={position.x} y={position.y} items={items} onSelect={(id) => {
     if (id === 'diff') openTarget(file, openDiff);
     if (id === 'history') openFileHistory(file.repoId, file.path);
+    if (id === 'commit-history') void openHistoryForPath(file.repoId, file.path);
     if (id === 'open') void systemOpen(file.repoId, file.path, false);
     if (id === 'reveal') void systemOpen(file.repoId, file.path, true);
     if (id === 'checkout-file') void confirmDialog({ title: t('Get file from revision?'), message: `${file.path}\n${file.commitHash}`, danger: true }).then((yes) => { if (yes) return historyOperation(file.repoId, { type: 'applyPaths', entries: commitPathEntries([file], selectedCommits, selectedDetails, 'apply') }); });
@@ -610,7 +604,7 @@ function ExtendedCommitSummary({
       <div className="extended-detail-block">
         <h3>{t('Author')}</h3>
         <div className="extended-author">
-          <span className="avatar" style={{ background: avatarColor(commit.email || commit.author) }}>{initials(commit.author)}</span>
+          <AuthorAvatar name={commit.author} email={commit.email} size={24} />
           <span><strong>{commit.author}</strong><small>{commit.email}</small></span>
         </div>
       </div>
@@ -635,9 +629,7 @@ function ExtendedCommitSummary({
 function AuthorMeta({ commit }: { commit: CommitNode }) {
   return (
     <div className="detail-author-meta">
-      <span className="avatar" style={{ background: avatarColor(commit.email || commit.author) }}>
-        {initials(commit.author)}
-      </span>
+      <AuthorAvatar name={commit.author} email={commit.email} size={36} />
       <span className="detail-author-line">
         <strong>{commit.author}</strong>
         <i>·</i>

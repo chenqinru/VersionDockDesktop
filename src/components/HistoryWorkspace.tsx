@@ -15,8 +15,9 @@ import { formatRefLabel, groupRefs, mergeLocalRemote, type RefGroup } from '../h
 import { branchColor, headColor, isPrimaryBranch, primaryBranchColor, tagColor } from './branchColor';
 import type { CommitDetail, CommitNode, GraphCommitNode } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
-import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, editorDialog, promptDialog } from './dialogService';
 import { CommitSearch, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
+import { AuthorAvatar } from './AuthorAvatar';
 
 type FilterMenu = 'authors' | 'repos' | 'refs' | 'dates' | null;
 type ViewFilters = { author: string; repoId: string; ref: string; from: string; to: string };
@@ -29,15 +30,6 @@ function formatDate(value: string): string {
   if (Number.isNaN(date.getTime())) return value;
   const pad = (item: number) => String(item).padStart(2, '0');
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function initials(value: string): string {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2) || '?').toUpperCase();
-}
-
-function avatarColor(value: string): string {
-  return branchColor(value || 'author');
 }
 
 function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { open: boolean; onToggle: () => void; onFetch: () => void; expanded: boolean; onToggleExpanded: () => void }) {
@@ -157,7 +149,7 @@ function CommitPopover({ detail, anchor, onEnter, onLeave }: { detail: CommitDet
   }, [anchor]);
   return <div ref={popoverRef} className="commit-popover" style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden', pointerEvents: position ? 'auto' : 'none' }} onMouseEnter={onEnter} onMouseLeave={onLeave}>
     <div className="popover-line"><Codicon name="git-commit" /><code>{detail.commit.shortHash}</code></div>
-    <div className="popover-line"><span className="mini-avatar" style={{ background: avatarColor(detail.commit.email || detail.commit.author) }}>{initials(detail.commit.author)}</span><span>{detail.commit.author}</span><i>·</i><time>{formatDate(detail.commit.authorDate)}</time></div>
+    <div className="popover-line"><AuthorAvatar className="mini-avatar" name={detail.commit.author} email={detail.commit.email} size={18} /><span>{detail.commit.author}</span><i>·</i><time>{formatDate(detail.commit.authorDate)}</time></div>
     <div className="popover-line"><Codicon name="diff" /><span>{detail.files.length} {detail.files.length === 1 ? t('file changed') : t('files changed')}</span>{added > 0 && <b className="added">+{added}</b>}{removed > 0 && <b className="removed">-{removed}</b>}</div>
     <RefBadges refs={detail.commit.refs} />
     <small>{t('Click to view more details')}</small>
@@ -347,11 +339,25 @@ function CommitList({
       const mode = await choiceDialog({ title: t('Reset Current Branch to Here...'), message: `${commit.shortHash} ${commit.message}`, danger: true, choices: [{ id: 'soft', label: t('Soft'), description: t('Keep staged and unstaged changes'), icon: 'arrow-down' }, { id: 'mixed', label: t('Mixed'), description: t('Keep unstaged changes, unstage staged changes'), icon: 'discard' }, { id: 'hard', label: t('Hard'), description: t('Discard all changes'), icon: 'warning', danger: true }] });
       if (mode && await confirmDialog({ title: t('Reset {0}?', mode), message: `${commit.shortHash} ${commit.message}\n\n${t(mode === 'hard' ? 'All working tree and index changes will be discarded.' : 'Commits after this revision will be removed from the current branch.')}`, danger: true })) await historyOperation(commit.repoId, { type: 'reset', revision: commit.hash, mode });
     }
-    if (id === 'edit') { const message = await promptDialog({ title: t('Edit Commit Message'), message: commit.shortHash, inputLabel: t('Commit message'), initialValue: commit.message }); if (message) await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message }); }
+    if (id === 'edit') {
+      const detail = await useAppStore.getState().loadCommitDetail(commit);
+      const repoName = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
+      await editorDialog({ title: t('Edit Commit Message'), message: `${repoName} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, confirmLabel: t('Save'), submit: async (message) => {
+        const ok = await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message });
+        if (!ok) throw new Error(useAppStore.getState().error ?? t('Operation failed'));
+        return true;
+      } });
+    }
     if (id === 'undo' && await confirmDialog({ title: t('Undo Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('Changes remain staged.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'undoHead' });
     if (id === 'drop' && await confirmDialog({ title: t('Drop Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('This rewrites local history and may require force push.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: [commit.hash] });
     if (id === 'drop-multi' && await confirmDialog({ title: t('Drop Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: newestFirst.map((item) => item.hash) });
-    if (id === 'squash-multi') { const message = await promptDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n') }); if (message) await unpushedOperation(commit.repoId, { type: 'squash', hashes: newestFirst.map((item) => item.hash), message }); }
+    if (id === 'squash-multi') {
+      await editorDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n'), items: oldestFirst.map((item) => ({ id: item.shortHash, label: item.message, description: item.author })), confirmLabel: t('Squash'), submit: async (message) => {
+        const ok = await unpushedOperation(commit.repoId, { type: 'squash', hashes: newestFirst.map((item) => item.hash), message });
+        if (!ok) throw new Error(useAppStore.getState().error ?? t('Operation failed'));
+        return true;
+      } });
+    }
     setContext(undefined);
   };
 
@@ -383,7 +389,7 @@ function CommitList({
               {commit.incoming && <span title={t('Not pulled')}><Codicon name="arrow-down" className="commit-flow-icon incoming" /></span>}
               {commit.unpushed && <span title={t('Not pushed')}><Codicon name="arrow-up" className="commit-flow-icon unpushed" /></span>}
             </span>
-            <span className="mini-avatar" style={{ background: avatarColor(commit.email || commit.author) }}>{initials(commit.author)}</span><span className="commit-author-name">{commit.author}</span>
+            <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.email} size={18} /><span className="commit-author-name">{commit.author}</span>
           </span>
           <time>{formatDate(commit.committerDate)}</time>
         </div>;
@@ -415,8 +421,13 @@ export function HistoryWorkspace() {
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const tagsByRepo = useAppStore((state) => state.tagsByRepo);
   const historySearch = useAppStore((state) => state.historyFilter);
+  const historyQuery = useAppStore((state) => state.historyQuery);
   const setHistorySearch = useAppStore((state) => state.setHistoryFilter);
+  const setHistoryQuery = useAppStore((state) => state.setHistoryQuery);
+  const openHistoryForPath = useAppStore((state) => state.openHistoryForPath);
+  const clearHistoryPath = useAppStore((state) => state.clearHistoryPath);
   const setHistoryScope = useAppStore((state) => state.setHistoryScope);
+  const historyScope = useAppStore((state) => state.historyScope);
   const loadHistory = useAppStore((state) => state.loadHistory);
   const refresh = useAppStore((state) => state.refresh);
   const sync = useAppStore((state) => state.sync);
@@ -455,7 +466,7 @@ export function HistoryWorkspace() {
     return map;
   }, [branchesByRepo, snapshotRepos]);
 
-  const hasTopologyBreakingFilter = !!(historySearch.trim() || filters.author || filters.from || filters.to);
+  const hasTopologyBreakingFilter = !!(historyQuery.text || historyQuery.author || historyQuery.fromDate || historyQuery.toDate || historyQuery.path);
   const hasBranchFilter = !!filters.ref;
   const topologyCommits = !hasTopologyBreakingFilter
     ? (historyTopology.length > 0 ? historyTopology : hasBranchFilter ? allHistory : undefined)
@@ -475,20 +486,15 @@ export function HistoryWorkspace() {
   const selectedRepoLabel = selectedRepo?.label ?? t('Repository');
   const selectedRefLabel = refOptions.find((option) => option.id === filters.ref)?.label ?? t('Branch / Tags');
   const filterActive = !!(filters.author || filters.repoId || filters.ref || filters.from || filters.to);
-  const visibleHistory = useMemo(() => allHistory.filter((commit) => {
-    const search = historySearch.trim().toLowerCase();
-    if (search && !`${commit.message} ${commit.hash} ${commit.author}`.toLowerCase().includes(search)) return false;
-    if (filters.author && commit.author !== filters.author) return false;
-    if (filters.repoId && commit.repoId !== filters.repoId) return false;
-    const date = Date.parse(commit.committerDate);
-    if (filters.from && date < Date.parse(`${filters.from}T00:00:00`)) return false;
-    if (filters.to && date > Date.parse(`${filters.to}T23:59:59`)) return false;
-    return true;
-  }), [allHistory, filters, historySearch]);
+  const visibleHistory = allHistory;
   const updateFilters = (next: Partial<ViewFilters>) => {
     const updated = { ...filters, ...next };
     setFilters(updated);
-    if (!Object.hasOwn(next, 'repoId') && !Object.hasOwn(next, 'ref')) return;
+    setHistoryQuery({ ...historyQuery, author: updated.author || null, fromDate: updated.from || null, toDate: updated.to || null });
+    if (!Object.hasOwn(next, 'repoId') && !Object.hasOwn(next, 'ref')) {
+      queueMicrotask(() => void loadHistory(true).catch(() => undefined));
+      return;
+    }
     const selectedRef = refOptions.find((option) => option.id === updated.ref);
     const repoIds = snapshotRepos
       .map((repo) => repo.meta.id)
@@ -499,9 +505,15 @@ export function HistoryWorkspace() {
     setHistoryScope({ repoIds: updated.repoId || selectedRef ? repoIds : null, revisionsByRepo });
     queueMicrotask(() => void loadHistory(true).catch(() => undefined));
   };
+  useEffect(() => {
+    const repoId = historyScope.repoIds?.length === 1 ? historyScope.repoIds[0] : '';
+    const ref = refOptions.find((option) => JSON.stringify(option.revisionsByRepo) === JSON.stringify(historyScope.revisionsByRepo))?.id ?? '';
+    queueMicrotask(() => setFilters({ author: historyQuery.author ?? '', repoId, ref, from: historyQuery.fromDate ?? '', to: historyQuery.toDate ?? '' }));
+  }, [historyQuery.author, historyQuery.fromDate, historyQuery.toDate, historyScope, refOptions]);
   const clearFilters = () => {
     setFilters(EMPTY_FILTERS);
     setHistoryScope({ repoIds: null, revisionsByRepo: {} });
+    setHistoryQuery({ text: null, author: null, fromDate: null, toDate: null, path: null, revision: null });
     queueMicrotask(() => void loadHistory(true).catch(() => undefined));
   };
   const fetchAndRefresh = async () => {
@@ -529,10 +541,11 @@ export function HistoryWorkspace() {
   return <section className="history-workspace">
     {!compareTarget && <div className="history-filters" onClick={(event) => event.stopPropagation()}>
       <CommitSearch value={historySearch} onChange={setHistorySearch} onSubmit={() => void loadHistory(true).catch(() => undefined)} onClear={() => queueMicrotask(() => void loadHistory(true).catch(() => undefined))} />
-      <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover title={t('Author')} values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} query={authorQuery} onQuery={setAuthorQuery} />}</div>
+      <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover title={t('Author suggestions from current results')} values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} query={authorQuery} onQuery={setAuthorQuery} allowCustom />}</div>
       <div ref={menu === 'repos' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon={selectedRepo ? undefined : 'repo'} leading={selectedRepo ? <span className="filter-repo-dot" style={{ background: selectedRepo.color }} /> : undefined} label={selectedRepoLabel} active={!!filters.repoId} open={menu === 'repos'} onClick={() => setMenu(menu === 'repos' ? null : 'repos')} />{menu === 'repos' && <FilterPopover title={t('Repository')} values={repoOptions} selected={filters.repoId} onSelect={(repoId) => { updateFilters({ repoId }); setMenu(null); }} onClear={() => updateFilters({ repoId: '' })} />}</div>
       <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor branch-filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!filters.ref} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <FilterPopover title={t('Branch / Tags')} values={refOptions} selected={filters.ref} onSelect={(ref) => { updateFilters({ ref }); setMenu(null); }} onClear={() => updateFilters({ ref: '' })} query={refQuery} onQuery={setRefQuery} />}</div>
       <div ref={menu === 'dates' ? activeFilter : undefined} className="filter-anchor date-filter-anchor"><ToggleFilter icon="calendar" label={filters.from || filters.to ? `${filters.from || '…'} → ${filters.to || '…'}` : t('From → To')} active={!!filters.from || !!filters.to} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} />{menu === 'dates' && <DatePopover from={filters.from} to={filters.to} onChange={(from, to) => updateFilters({ from, to })} onClear={() => updateFilters({ from: '', to: '' })} />}</div>
+      <button type="button" className={`filter-button ${historyQuery.path ? 'active' : ''}`} title={historyQuery.path ?? t('Filter by path')} onClick={async () => { if (historyQuery.path) { await clearHistoryPath(); return; } let repoId = filters.repoId || selectedRepoId; if (snapshotRepos.length > 1 && !filters.repoId) { const chosen = await choiceDialog({ title: t('Select repository for path filter'), message: t('Path filters belong to one repository.'), choices: snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repo.meta.name, icon: 'repo' })) }); if (!chosen) return; repoId = chosen; } const path = await promptDialog({ title: t('Filter by path'), message: snapshotRepos.find((repo) => repo.meta.id === repoId)?.meta.name ?? '', inputLabel: t('Repository-relative path') }); if (path) await openHistoryForPath(repoId, path); }}><Codicon name="file" /><span>{historyQuery.path ?? t('Path…')}</span>{historyQuery.path && <Codicon name="close" />}</button>
       <span className="history-filter-spacer" />
       {filterActive && <button className="history-clear-filters" title={t('Clear all filters')} onClick={clearFilters}><Codicon name="clear-all" /></button>}
       <MoreMenu open={moreOpen} onToggle={() => setMoreOpen((value) => !value)} onFetch={() => void fetchAndRefresh()} expanded={expandedRepoIds.size > 0 && expandedRepoIds.size === new Set(allHistory.map((commit) => commit.repoId)).size} onToggleExpanded={toggleRepoNames} />

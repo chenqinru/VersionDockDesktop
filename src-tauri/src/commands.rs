@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -6,12 +6,13 @@ use tauri_plugin_opener::OpenerExt;
 use crate::{
     changelist, identity,
     models::{
-        BootstrapData, BridgeCommand, CapabilityStatus, ConflictFile, DesktopCapabilities,
-        DesktopError, NotificationPermissionState, OperationEvent, OperationStatus, RefreshScope,
-        RepositoryEvent, RepositoryEventSource, RequestEnvelope, ResponseEnvelope,
-        RuntimeCapabilities, VcsKind, WindowTabImport, WindowTabTransferCompleted,
+        BootstrapData, BridgeCommand, CapabilityStatus, CloneRepositoryResult, ConflictFile,
+        DesktopCapabilities, DesktopError, InitializeRepositoryResult, NotificationPermissionState,
+        OperationEvent, OperationStatus, RefreshScope, RepositoryEvent, RepositoryEventSource,
+        RequestEnvelope, ResponseEnvelope, RuntimeCapabilities, VcsKind, WindowTabImport,
+        WindowTabTransferCompleted,
     },
-    shelf,
+    provider, shelf,
     state::{self, AppState, OperationReporter},
     svn_account, vcs, workspace,
 };
@@ -155,7 +156,10 @@ pub async fn bridge_request(
         }
         match validate_request_context(&context, &error_context) {
             Ok(()) => {
-                dispatch(
+                // `dispatch` contains every command branch, so its debug-build future is larger
+                // than Tokio's default worker stack. Keep it on the heap or Bootstrap can abort
+                // the process with a stack overflow before the first window finishes loading.
+                Box::pin(dispatch(
                     command.clone(),
                     &app,
                     &window,
@@ -164,7 +168,7 @@ pub async fn bridge_request(
                     &request_id,
                     &context,
                     &started_at,
-                )
+                ))
                 .await
             }
             Err(error) => Err(error),
@@ -187,6 +191,15 @@ pub async fn bridge_request(
     }
     state.finish_request(&request_id).await;
     let status = match &result {
+        Ok(value)
+            if value.get("status").and_then(|item| item.as_str()) == Some("partialFailure")
+                || value
+                    .get("failures")
+                    .and_then(|item| item.as_array())
+                    .is_some_and(|items| !items.is_empty()) =>
+        {
+            OperationStatus::Partial
+        }
         Ok(value)
             if value.as_array().is_some_and(|items| {
                 items
@@ -222,11 +235,24 @@ pub async fn bridge_request(
                 failed,
             })
         }
-        Ok(_) => Some(crate::models::OperationResultSummary {
-            summary: "Completed".into(),
-            succeeded: 1,
-            failed: 0,
-        }),
+        Ok(value) => {
+            let partial = value.get("status").and_then(|item| item.as_str())
+                == Some("partialFailure")
+                || value
+                    .get("failures")
+                    .and_then(|item| item.as_array())
+                    .is_some_and(|items| !items.is_empty());
+            Some(crate::models::OperationResultSummary {
+                summary: if partial {
+                    "Partial success"
+                } else {
+                    "Completed"
+                }
+                .into(),
+                succeeded: u32::from(!partial),
+                failed: u32::from(partial),
+            })
+        }
         Err(_) => Some(crate::models::OperationResultSummary {
             summary: "Failed".into(),
             succeeded: 0,
@@ -355,6 +381,7 @@ fn emit_refresh_events(
 
 fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
     match command {
+        BridgeCommand::InitializeRepository { .. } => vec![RefreshScope::WorkspaceSnapshot],
         BridgeCommand::Stage { .. } | BridgeCommand::Unstage { .. } => vec![
             RefreshScope::Index,
             RefreshScope::Status,
@@ -372,6 +399,7 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
         ],
         BridgeCommand::Sync { .. }
         | BridgeCommand::BranchOperation { .. }
+        | BridgeCommand::BranchRecovery { .. }
         | BridgeCommand::TagOperation { .. }
         | BridgeCommand::HistoryOperation { .. }
         | BridgeCommand::UnpushedOperation { .. } => vec![
@@ -383,7 +411,8 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
         ],
         BridgeCommand::ConflictSave { .. }
         | BridgeCommand::ConflictAccept { .. }
-        | BridgeCommand::AbortRepositoryOperation { .. } => vec![
+        | BridgeCommand::AbortRepositoryOperation { .. }
+        | BridgeCommand::RestoreConflicts { .. } => vec![
             RefreshScope::Status,
             RefreshScope::Diff,
             RefreshScope::Operation,
@@ -432,6 +461,7 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
             RefreshScope::Submodules,
         ],
         BridgeCommand::RemoteOperation { .. }
+        | BridgeCommand::PublishRepository { .. }
         | BridgeCommand::GitProfileOperation { .. }
         | BridgeCommand::SvnAccountOperation { .. } => vec![RefreshScope::Status],
         BridgeCommand::SvnOperation { .. } => vec![
@@ -523,6 +553,10 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         BridgeCommand::WorkspaceOpen { .. } | BridgeCommand::WorkspaceRefresh { .. } => {
             ("scanning", "Scanning workspace repositories")
         }
+        BridgeCommand::InitializeRepository { .. } => {
+            ("initializing", "Initializing Git repository")
+        }
+        BridgeCommand::CloneRepository { .. } => ("cloning", "Cloning Git repository"),
         BridgeCommand::RepositoryStatus { .. } => ("status", "Reading repository status"),
         BridgeCommand::FileDiff { .. }
         | BridgeCommand::StashFileDiff { .. }
@@ -538,12 +572,27 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
             ("commit", "Creating repository commit")
         }
         BridgeCommand::Sync { .. } => ("sync", "Synchronizing repository"),
+        BridgeCommand::ProviderAccounts
+        | BridgeCommand::ProviderRepositories { .. }
+        | BridgeCommand::ProviderNamespaces { .. } => ("provider", "Loading remote provider data"),
+        BridgeCommand::ProviderGithubBegin { .. }
+        | BridgeCommand::ProviderGithubComplete { .. }
+        | BridgeCommand::ProviderGitlabSave { .. }
+        | BridgeCommand::ProviderRemove { .. } => {
+            ("providerAuth", "Updating remote provider account")
+        }
+        BridgeCommand::PublishRepository { .. } => ("publish", "Publishing repository"),
+        BridgeCommand::RecentCommitMessages { .. } | BridgeCommand::LastCommitMessage { .. } => {
+            ("commitMessages", "Loading commit messages")
+        }
         BridgeCommand::History { .. }
         | BridgeCommand::HistoryTopology { .. }
         | BridgeCommand::FileHistory { .. } => ("history", "Loading repository history"),
+        BridgeCommand::BranchRecovery { .. } => ("branchRecovery", "Recovering branch operation"),
         BridgeCommand::ConflictSave { .. }
         | BridgeCommand::ConflictAccept { .. }
-        | BridgeCommand::AbortRepositoryOperation { .. } => ("conflict", "Updating conflict state"),
+        | BridgeCommand::AbortRepositoryOperation { .. }
+        | BridgeCommand::RestoreConflicts { .. } => ("conflict", "Updating conflict state"),
         BridgeCommand::GitIdentity { .. } | BridgeCommand::GitProfileOperation { .. } => {
             ("identity", "Resolving Git identity")
         }
@@ -560,7 +609,10 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         BridgeCommand::UnpushedOperation { .. } => ("history", "Updating unpushed commit history"),
         BridgeCommand::UpdateSettings { .. }
         | BridgeCommand::UpdateLayout { .. }
-        | BridgeCommand::SaveAppState { .. } => ("persisting", "Saving application settings"),
+        | BridgeCommand::SaveAppState { .. }
+        | BridgeCommand::SaveCommitSelections { .. } => {
+            ("persisting", "Saving application settings")
+        }
         _ => ("running", "Running repository operation"),
     }
 }
@@ -639,7 +691,9 @@ fn command_error_context(
     let operation = command_progress(command).0.to_string();
     match command {
         BridgeCommand::WorkspaceRemoveRecent { workspace_id }
-        | BridgeCommand::WorkspaceRefresh { workspace_id } => {
+        | BridgeCommand::WorkspaceRefresh { workspace_id }
+        | BridgeCommand::SaveCommitSelections { workspace_id, .. }
+        | BridgeCommand::InitializeRepository { workspace_id, .. } => {
             (operation, Some(workspace_id.clone()), None, None)
         }
         BridgeCommand::Conflicts {
@@ -707,6 +761,10 @@ fn command_error_context(
             workspace_id,
             repo_id,
             ..
+        }
+        | BridgeCommand::RestoreConflicts {
+            workspace_id,
+            repo_id,
         } => (
             operation,
             Some(workspace_id.clone()),
@@ -781,6 +839,11 @@ fn command_error_context(
             ..
         }
         | BridgeCommand::BranchOperation {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::BranchRecovery {
             workspace_id,
             repo_id,
             ..
@@ -923,6 +986,42 @@ async fn dispatch(
                     tool_capability(tools.git, "Git", tools.git_version.as_deref()),
                 );
             }
+            for key in ["initializeRepository", "cloneRepository"] {
+                availability.insert(
+                    key.into(),
+                    tool_capability(tools.git, "Git", tools.git_version.as_deref()),
+                );
+            }
+            availability.insert(
+                "githubProvider".into(),
+                if provider::github_available() && secure_credentials.status.available {
+                    CapabilityStatus::available()
+                } else {
+                    CapabilityStatus::unavailable(
+                        if provider::github_available() {
+                            "SECURE_STORAGE_UNAVAILABLE"
+                        } else {
+                            "GITHUB_CLIENT_ID_MISSING"
+                        },
+                        if provider::github_available() {
+                            "System secure storage is unavailable"
+                        } else {
+                            "GitHub OAuth client ID is not configured"
+                        },
+                    )
+                },
+            );
+            availability.insert(
+                "gitlabProvider".into(),
+                if secure_credentials.status.available {
+                    CapabilityStatus::available()
+                } else {
+                    CapabilityStatus::unavailable(
+                        "SECURE_STORAGE_UNAVAILABLE",
+                        "System secure storage is unavailable",
+                    )
+                },
+            );
             availability.insert(
                 "svnAccount".into(),
                 tool_capability(tools.svn, "SVN", tools.svn_version.as_deref()),
@@ -978,6 +1077,8 @@ async fn dispatch(
                     .ok()
                     .and_then(|mut launch| launch.take()),
                 capabilities: DesktopCapabilities {
+                    initialize_repository: tools.git,
+                    clone_repository: tools.git,
                     stash: tools.git,
                     shelf: true,
                     changelist: true,
@@ -1001,6 +1102,21 @@ async fn dispatch(
         BridgeCommand::SaveAppState { state: snapshot } => {
             state.save_app_state(snapshot).await?;
             json(true)
+        }
+        BridgeCommand::SaveCommitSelections {
+            workspace_id,
+            mut selections,
+        } => {
+            let _ = state.workspace(&workspace_id).await?;
+            for selection in &mut selections {
+                let repo = resolve_repo(state, &workspace_id, &selection.repo_id).await?;
+                selection.paths = vcs::validate_commit_selection_paths(&repo, &selection.paths)?;
+            }
+            json(
+                state
+                    .save_commit_selections(&workspace_id, selections)
+                    .await?,
+            )
         }
         BridgeCommand::UpdateSettings { settings } => {
             let mut snapshot = state.app.read().await.clone();
@@ -1106,6 +1222,7 @@ async fn dispatch(
             snapshot
                 .recent_workspaces
                 .retain(|workspace| workspace.id != workspace_id);
+            snapshot.commit_selections.remove(&workspace_id);
             if snapshot.last_workspace_id.as_deref() == Some(&workspace_id) {
                 snapshot.last_workspace_id = None;
             }
@@ -1114,6 +1231,9 @@ async fn dispatch(
                 .project_colors
                 .retain(|id, _| !removed_color_ids.contains(id));
             state.save_app_state(snapshot).await?;
+            state
+                .save_commit_selections(&workspace_id, Vec::new())
+                .await?;
             json(true)
         }
         BridgeCommand::WorkspaceRefresh { workspace_id } => {
@@ -1139,6 +1259,192 @@ async fn dispatch(
             state.cache_tools(snapshot.tools.clone()).await;
             state.watch_workspace(&descriptor, &snapshot.repositories, &settings, app.clone())?;
             json(snapshot)
+        }
+        BridgeCommand::InitializeRepository {
+            workspace_id,
+            target_path,
+        } => {
+            let descriptor = state.workspace(&workspace_id).await?;
+            let target = state::canonical_directory(&target_path)?;
+            let allowed = descriptor
+                .paths
+                .iter()
+                .any(|path| state::canonical_directory(path).is_ok_and(|root| root == target));
+            if !allowed {
+                return Err(DesktopError::new(
+                    "PATH_OUTSIDE_WORKSPACE",
+                    "Initialization target must be a selected workspace root",
+                    false,
+                ));
+            }
+            if vcs::existing_repository(&target, token).await.is_some() {
+                return Err(DesktopError::new(
+                    "REPOSITORY_ALREADY_EXISTS",
+                    "The selected directory already contains a repository",
+                    false,
+                ));
+            }
+            let lock_key = format!("path:{}", target.to_string_lossy());
+            with_write(state, &lock_key, token, async {
+                vcs::initialize_repository(&target, token).await
+            })
+            .await?;
+            let generation = state.next_generation();
+            let settings = state.app.read().await.settings.clone();
+            let snapshot =
+                workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
+            let repository_id = snapshot
+                .repositories
+                .iter()
+                .find(|repo| {
+                    repo.meta.kind == VcsKind::Git
+                        && state::canonical_directory(&repo.meta.root_path)
+                            .is_ok_and(|root| root == target)
+                })
+                .map(|repo| repo.meta.id.clone())
+                .ok_or_else(|| {
+                    DesktopError::new(
+                        "INITIALIZED_REPOSITORY_NOT_FOUND",
+                        "Git initialized but the repository could not be loaded",
+                        true,
+                    )
+                })?;
+            state
+                .cache_repositories(&descriptor.id, &snapshot.repositories)
+                .await;
+            state.watch_workspace(&descriptor, &snapshot.repositories, &settings, app.clone())?;
+            json(InitializeRepositoryResult {
+                snapshot,
+                repository_id,
+            })
+        }
+        BridgeCommand::CloneRepository {
+            url,
+            parent_path,
+            target_name,
+            provider_account_id,
+        } => {
+            let parent = state::canonical_directory(&parent_path)?;
+            let target = state::safe_relative(&parent, &target_name, true)?;
+            let lock_key = format!("path:{}", target.to_string_lossy());
+            let credentials = provider_account_id
+                .as_deref()
+                .map(|id| provider::credentials_for_url(&state.config_dir, id, &url))
+                .transpose()?;
+            let path = with_write(state, &lock_key, token, async {
+                vcs::clone_repository(&url, &parent, &target_name, credentials.as_ref(), token)
+                    .await
+            })
+            .await?;
+            json(CloneRepositoryResult {
+                path: path.to_string_lossy().into_owned(),
+            })
+        }
+        BridgeCommand::ProviderAccounts => json(provider::accounts(&state.config_dir)),
+        BridgeCommand::ProviderGithubBegin { account_id } => {
+            json(provider::github_begin(account_id, token).await?)
+        }
+        BridgeCommand::ProviderGithubComplete { flow_id } => {
+            json(provider::github_complete(&state.config_dir, &flow_id, token).await?)
+        }
+        BridgeCommand::ProviderGitlabSave {
+            account_id,
+            host,
+            token: secret,
+        } => {
+            json(provider::gitlab_save(&state.config_dir, account_id, &host, &secret, token).await?)
+        }
+        BridgeCommand::ProviderRemove { account_id } => {
+            json(provider::remove(&state.config_dir, &account_id)?)
+        }
+        BridgeCommand::ProviderRepositories {
+            account_id,
+            query,
+            page,
+            per_page,
+        } => json(
+            provider::repositories(&state.config_dir, &account_id, query, page, per_page, token)
+                .await?,
+        ),
+        BridgeCommand::ProviderNamespaces { account_id } => {
+            json(provider::namespaces(&state.config_dir, &account_id, token).await?)
+        }
+        BridgeCommand::PublishRepository {
+            workspace_id,
+            repo_id,
+            account_id,
+            namespace_id,
+            name,
+            description,
+            visibility,
+            push,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let branch = vcs::publish_preflight(&repo, token).await?;
+            let created = provider::create_repository(
+                &state.config_dir,
+                &account_id,
+                namespace_id.as_deref(),
+                &name,
+                &description,
+                visibility,
+                token,
+            )
+            .await?;
+            let mut result = crate::models::PublishRepositoryResult {
+                repository: created.clone(),
+                remote_created: true,
+                remote_configured: false,
+                push_attempted: push,
+                pushed: false,
+                failed_stage: None,
+                recovery_hint: None,
+                error: None,
+            };
+            let local = with_write(state, &repo_id, token, async {
+                if !vcs::remotes(&repo, token).await?.is_empty() {
+                    return Err(DesktopError::new(
+                        "REMOTE_APPEARED",
+                        "A remote appeared while publishing",
+                        true,
+                    ));
+                }
+                vcs::remote_operation(
+                    &repo,
+                    crate::models::RemoteOperation::Add {
+                        name: "origin".into(),
+                        url: created.clone_url.clone(),
+                    },
+                    token,
+                )
+                .await?;
+                result.remote_configured = true;
+                if push {
+                    let credentials = provider::credentials_for_url(
+                        &state.config_dir,
+                        &account_id,
+                        &created.clone_url,
+                    )?;
+                    vcs::push_published(&repo, &branch, &credentials, token).await?;
+                    result.pushed = true;
+                }
+                Ok::<(), DesktopError>(())
+            })
+            .await;
+            if let Err(error) = local {
+                result.failed_stage = Some(
+                    if result.remote_configured {
+                        "push"
+                    } else {
+                        "localRemote"
+                    }
+                    .into(),
+                );
+                result.recovery_hint =
+                    Some(created.web_url.clone().unwrap_or(created.clone_url.clone()));
+                result.error = Some(error);
+            }
+            json(result)
         }
         BridgeCommand::WindowOpenNew {
             paths,
@@ -1840,6 +2146,31 @@ async fn dispatch(
             );
             json(results)
         }
+        BridgeCommand::RecentCommitMessages {
+            workspace_id,
+            repo_ids,
+            limit,
+        } => {
+            let mut messages = Vec::new();
+            for repo_id in repo_ids {
+                let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+                let _permit = state.acquire_read(token).await?;
+                messages.extend(vcs::recent_commit_messages(&repo, token).await?);
+            }
+            messages.sort_by(|left, right| right.committed_at.cmp(&left.committed_at));
+            let mut seen = HashSet::new();
+            messages.retain(|item| seen.insert(item.message.clone()));
+            messages.truncate(limit.clamp(1, 50) as usize);
+            json(messages)
+        }
+        BridgeCommand::LastCommitMessage {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::last_commit_message(&repo, token).await?)
+        }
         BridgeCommand::Sync {
             workspace_id,
             repo_id,
@@ -1869,8 +2200,7 @@ async fn dispatch(
             repo_id,
             skip,
             limit,
-            filter,
-            revision,
+            query,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
@@ -1884,7 +2214,7 @@ async fn dispatch(
                 None,
                 None,
             );
-            let history = vcs::history(&repo, skip, limit, filter, revision, token).await?;
+            let history = vcs::history(&repo, skip, limit, query, token).await?;
             emit_operation_phase(
                 app,
                 operation_id,
@@ -1901,10 +2231,11 @@ async fn dispatch(
             workspace_id,
             repo_id,
             svn_limit,
+            revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::history_topology(&repo, svn_limit, token).await?)
+            json(vcs::history_topology(&repo, svn_limit, revision, token).await?)
         }
         BridgeCommand::CommitDetail {
             workspace_id,
@@ -1990,11 +2321,23 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            with_write(state, &repo_id, token, async {
+            let result = with_write(state, &repo_id, token, async {
                 vcs::branch_operation(&repo, operation, token).await
             })
             .await?;
-            json(true)
+            json(result)
+        }
+        BridgeCommand::BranchRecovery {
+            workspace_id,
+            repo_id,
+            operation,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let result = with_write(state, &repo_id, token, async {
+                vcs::branch_recovery(&repo, operation, token).await
+            })
+            .await?;
+            json(result)
         }
         BridgeCommand::Tags {
             workspace_id,
@@ -2058,7 +2401,7 @@ async fn dispatch(
                 crate::state::safe_relative(Path::new(&repo.root_path), &relative_path, true)?;
             if reveal {
                 app.opener()
-                    .reveal_items_in_dir([target])
+                    .reveal_items_in_dir([target.clone()])
                     .map_err(|error| {
                         DesktopError::new("SYSTEM_REVEAL_FAILED", error.to_string(), true)
                     })?;
@@ -2158,18 +2501,12 @@ async fn dispatch(
             let target = vcs::managed_worktree_path(&state.config_dir, &repo, &path, token).await?;
             if reveal {
                 app.opener()
-                    .reveal_items_in_dir([target])
+                    .reveal_items_in_dir([target.clone()])
                     .map_err(|error| {
                         DesktopError::new("SYSTEM_REVEAL_FAILED", error.to_string(), true)
                     })?;
-            } else {
-                app.opener()
-                    .open_path(target.to_string_lossy(), None::<&str>)
-                    .map_err(|error| {
-                        DesktopError::new("SYSTEM_OPEN_FAILED", error.to_string(), true)
-                    })?;
             }
-            json(true)
+            json(target.to_string_lossy().into_owned())
         }
         BridgeCommand::WorktreeDiff {
             workspace_id,
@@ -2449,6 +2786,17 @@ async fn dispatch(
             })
             .await?;
             json(true)
+        }
+        BridgeCommand::RestoreConflicts {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let result = with_write(state, &repo_id, token, async {
+                vcs::restore_conflicts(&repo, token).await
+            })
+            .await?;
+            json(result)
         }
         BridgeCommand::GitIdentity {
             workspace_id,

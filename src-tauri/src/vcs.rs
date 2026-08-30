@@ -10,15 +10,18 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     cli,
     models::{
-        BranchCompareResult, BranchInfo, BranchOperation, CommitBranches, CommitDetail, CommitFile,
-        CommitNode, CommitPathOperationEntry, ConflictChoice, DesktopError, DiffDocument,
-        EffectiveGitIdentity, FileHistoryEntry, FileHistoryPage, FileRevisionDocument,
-        GraphCommitNode, HistoryOperation, HistoryPage, IgnoreRules, MergeCommitSummary,
-        MergeParentChange, MergeVersions, PatchDocument, RemoteInfo, RemoteOperation,
-        RepositoryMeta, ShelfFileEntry, StashEntry, StashOperation, SubmoduleEntry,
-        SubmoduleOperation, SubtreeEntry, SubtreeOperation, SubtreeState, SvnOperation, SyncAction,
-        TagInfo, TagOperation, UnpushedCommit, UnpushedOperation, VcsKind, WorktreeDiffResult,
-        WorktreeEntry, WorktreeOperation,
+        BranchCompareResult, BranchInfo, BranchOperation, BranchOperationResult,
+        BranchRecoveryOperation, BranchRecoveryResult, BranchRecoveryStatus, CommitBranches,
+        CommitDetail, CommitFile, CommitNode, CommitPathOperationEntry, ConflictBlock,
+        ConflictChoice, DesktopError, DiffDocument, EffectiveGitIdentity, FileHistoryEntry,
+        FileHistoryPage, FileRevisionDocument, GraphCommitNode, HistoryOperation, HistoryPage,
+        HistoryQuery, IgnoreRules, MergeCommitSummary, MergeParentChange, MergeVersions,
+        PatchDocument, RecentCommitMessage, RemoteInfo, RemoteOperation, RepositoryMeta,
+        RepositoryUpdateResult, RestoreConflictFailure, RestoreConflictsResult, ShelfFileEntry,
+        StashEntry, StashOperation, SubmoduleEntry, SubmoduleOperation, SubtreeEntry,
+        SubtreeOperation, SubtreeState, SvnOperation, SyncAction, SyncResult, TagInfo,
+        TagOperation, UnpushedCommit, UnpushedOperation, UpdateDetail, UpdateKind, UpdateSummary,
+        VcsKind, WorktreeDiffResult, WorktreeEntry, WorktreeOperation,
     },
     state::safe_relative,
 };
@@ -28,6 +31,16 @@ const RECORD: char = '\u{1e}';
 const DIFF_MAX_BYTES: usize = 5 * 1024 * 1024;
 const DIFF_MAX_LINES: usize = 50_000;
 const SUBTREE_CONFIG_PREFIX: &str = "versiondock.subtree.";
+
+pub fn validate_commit_selection_paths(
+    repo: &RepositoryMeta,
+    paths: &[String],
+) -> Result<Vec<String>, DesktopError> {
+    paths
+        .iter()
+        .map(|path| relative_path(Path::new(&repo.root_path), path, true))
+        .collect()
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -178,6 +191,394 @@ fn literal_path(root: &Path, value: &str, include_leaf: bool) -> Result<String, 
 fn relative_path(root: &Path, value: &str, include_leaf: bool) -> Result<String, DesktopError> {
     safe_relative(root, value, include_leaf)?;
     Ok(value.replace('\\', "/"))
+}
+
+fn option_like(value: &str) -> bool {
+    value.trim_start().starts_with('-')
+}
+
+fn regex_literal(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|character| {
+            if matches!(
+                character,
+                '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\'
+            ) {
+                vec!['\\', character]
+            } else {
+                vec![character]
+            }
+        })
+        .collect()
+}
+
+pub async fn initialize_repository(
+    target: &Path,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    cli::run(
+        "git",
+        &[
+            "init".into(),
+            "--".into(),
+            target.to_string_lossy().into_owned(),
+        ],
+        target,
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn existing_repository(target: &Path, token: &CancellationToken) -> Option<VcsKind> {
+    if cli::run(
+        "git",
+        &["rev-parse".into(), "--show-toplevel".into()],
+        target,
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+    )
+    .await
+    .is_ok()
+    {
+        return Some(VcsKind::Git);
+    }
+    cli::run(
+        "svn",
+        &["--non-interactive".into(), "info".into(), "--xml".into()],
+        target,
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+    )
+    .await
+    .is_ok()
+    .then_some(VcsKind::Svn)
+}
+
+pub async fn clone_repository(
+    url: &str,
+    parent: &Path,
+    target_name: &str,
+    credentials: Option<&(String, String)>,
+    token: &CancellationToken,
+) -> Result<PathBuf, DesktopError> {
+    let url = url.trim();
+    if url.is_empty() || url.contains('\0') || option_like(url) {
+        return Err(DesktopError::new(
+            "INVALID_CLONE_URL",
+            "Invalid Git clone URL",
+            false,
+        ));
+    }
+    let supported = url.starts_with("https://")
+        || url.starts_with("ssh://")
+        || url.starts_with("file://")
+        || (!url.contains("://")
+            && (parent.join(url).exists()
+                || Path::new(url).is_absolute() && Path::new(url).exists()
+                || url
+                    .split_once(':')
+                    .is_some_and(|(host, path)| !host.is_empty() && !path.is_empty())));
+    if !supported {
+        return Err(DesktopError::new(
+            "UNSUPPORTED_CLONE_URL",
+            "Clone URL must use HTTPS, SSH, file://, or a local path",
+            false,
+        ));
+    }
+    if target_name.is_empty()
+        || target_name.contains('\0')
+        || option_like(target_name)
+        || Path::new(target_name).components().count() != 1
+        || matches!(target_name, "." | "..")
+    {
+        return Err(DesktopError::new(
+            "INVALID_TARGET_NAME",
+            "Invalid clone target name",
+            false,
+        ));
+    }
+    let target = safe_relative(parent, target_name, true)?;
+    if target.exists()
+        && (!target.is_dir()
+            || target
+                .read_dir()
+                .map_or(true, |mut entries| entries.next().is_some()))
+    {
+        return Err(DesktopError::new(
+            "CLONE_TARGET_NOT_EMPTY",
+            "Clone target already exists and is not empty",
+            true,
+        ));
+    }
+    let existed = target.exists();
+    let askpass = credentials.map(|_| create_askpass()).transpose()?;
+    let mut environment = Vec::new();
+    if let (Some((username, password)), Some(path)) = (credentials, askpass.as_ref()) {
+        environment.extend([
+            ("GIT_ASKPASS".into(), path.to_string_lossy().into_owned()),
+            ("GIT_TERMINAL_PROMPT".into(), "0".into()),
+            ("VERSIONDOCK_GIT_USERNAME".into(), username.clone()),
+            ("VERSIONDOCK_GIT_PASSWORD".into(), password.clone()),
+        ]);
+    }
+    let result = cli::run_with_env(
+        "git",
+        &[
+            "-c".into(),
+            "core.quotepath=false".into(),
+            "clone".into(),
+            "--".into(),
+            url.into(),
+            target_name.into(),
+        ],
+        parent,
+        None,
+        cli::NETWORK_TIMEOUT,
+        token,
+        &environment,
+    )
+    .await;
+    if let Some(path) = askpass {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Err(error) = result {
+        if !existed
+            && target.is_dir()
+            && target
+                .read_dir()
+                .is_ok_and(|mut entries| entries.next().is_none())
+        {
+            let _ = std::fs::remove_dir(&target);
+        }
+        return Err(error);
+    }
+    std::fs::canonicalize(&target)
+        .map_err(|error| DesktopError::new("CLONE_TARGET_UNAVAILABLE", error.to_string(), true))
+}
+
+pub async fn publish_preflight(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    ensure_git(repo)?;
+    if !remotes(repo, token).await?.is_empty() {
+        return Err(DesktopError::new(
+            "REMOTE_ALREADY_EXISTS",
+            "Repository already has a remote",
+            false,
+        ));
+    }
+    git(
+        vec!["rev-parse".into(), "--verify".into(), "HEAD".into()],
+        repo,
+        token,
+    )
+    .await
+    .map_err(|_| {
+        DesktopError::new(
+            "HEAD_MISSING",
+            "Create the initial commit before publishing",
+            false,
+        )
+    })?;
+    let branch = git(
+        vec![
+            "symbolic-ref".into(),
+            "--short".into(),
+            "-q".into(),
+            "HEAD".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text()
+    .trim()
+    .to_string();
+    if branch.is_empty() {
+        return Err(DesktopError::new(
+            "DETACHED_HEAD",
+            "Check out a local branch before publishing",
+            false,
+        ));
+    }
+    Ok(branch)
+}
+
+pub async fn push_published(
+    repo: &RepositoryMeta,
+    branch: &str,
+    credentials: &(String, String),
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    validate_ref(branch)?;
+    let askpass = create_askpass()?;
+    let environment = vec![
+        ("GIT_ASKPASS".into(), askpass.to_string_lossy().into_owned()),
+        ("GIT_TERMINAL_PROMPT".into(), "0".into()),
+        ("VERSIONDOCK_GIT_USERNAME".into(), credentials.0.clone()),
+        ("VERSIONDOCK_GIT_PASSWORD".into(), credentials.1.clone()),
+    ];
+    let result = cli::run_with_env(
+        "git",
+        &[
+            "-c".into(),
+            "core.quotepath=false".into(),
+            "push".into(),
+            "--set-upstream".into(),
+            "origin".into(),
+            branch.into(),
+        ],
+        Path::new(&repo.root_path),
+        None,
+        cli::NETWORK_TIMEOUT,
+        token,
+        &environment,
+    )
+    .await;
+    let _ = std::fs::remove_file(askpass);
+    result.map(|_| ())
+}
+
+fn create_askpass() -> Result<PathBuf, DesktopError> {
+    let extension = if cfg!(windows) { "cmd" } else { "sh" };
+    let path = std::env::temp_dir().join(format!(
+        "versiondock-askpass-{}.{}",
+        uuid::Uuid::new_v4(),
+        extension
+    ));
+    let body = if cfg!(windows) {
+        "@echo off\r\necho %1 | findstr /I username >nul\r\nif %errorlevel%==0 (echo %VERSIONDOCK_GIT_USERNAME%) else (echo %VERSIONDOCK_GIT_PASSWORD%)\r\n"
+    } else {
+        "#!/bin/sh\ncase \"$1\" in *sername*) printf '%s\\n' \"$VERSIONDOCK_GIT_USERNAME\" ;; *) printf '%s\\n' \"$VERSIONDOCK_GIT_PASSWORD\" ;; esac\n"
+    };
+    std::fs::write(&path, body)
+        .map_err(|e| DesktopError::new("ASKPASS_CREATE_FAILED", e.to_string(), true))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| DesktopError::new("ASKPASS_CREATE_FAILED", e.to_string(), true))?;
+    }
+    Ok(path)
+}
+
+fn normalize_commit_message(value: &str) -> Option<String> {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = normalized.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+pub async fn recent_commit_messages(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<RecentCommitMessage>, DesktopError> {
+    match repo.kind {
+        VcsKind::Git => {
+            let format = format!("%H{FIELD}%cI{FIELD}%B{RECORD}");
+            let raw = git(
+                vec![
+                    "log".into(),
+                    "--max-count=100".into(),
+                    format!("--format={format}"),
+                ],
+                repo,
+                token,
+            )
+            .await;
+            let raw = match raw {
+                Ok(value) => value.stdout_text(),
+                Err(error)
+                    if error.stderr.as_deref().is_some_and(|value| {
+                        value.contains("does not have any commits yet")
+                            || value.contains("unknown revision")
+                    }) =>
+                {
+                    return Ok(Vec::new())
+                }
+                Err(error) => return Err(error),
+            };
+            Ok(raw
+                .split(RECORD)
+                .filter_map(|record| {
+                    let mut fields = record.trim().splitn(3, FIELD);
+                    let revision = fields.next()?.trim();
+                    let committed_at = fields.next()?.trim();
+                    let message = normalize_commit_message(fields.next()?)?;
+                    Some(RecentCommitMessage {
+                        repo_id: repo.id.clone(),
+                        revision: revision.into(),
+                        committed_at: committed_at.into(),
+                        message,
+                    })
+                })
+                .collect())
+        }
+        VcsKind::Svn => {
+            let raw = svn(
+                vec!["log".into(), "--xml".into(), "--limit".into(), "100".into()],
+                repo,
+                token,
+            )
+            .await?
+            .stdout_text();
+            let document = roxmltree::Document::parse(&raw)
+                .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+            Ok(document
+                .descendants()
+                .filter(|node| node.has_tag_name("logentry"))
+                .filter_map(|entry| {
+                    let text = |name| {
+                        entry
+                            .children()
+                            .find(|child| child.has_tag_name(name))
+                            .and_then(|child| child.text())
+                            .unwrap_or("")
+                    };
+                    Some(RecentCommitMessage {
+                        repo_id: repo.id.clone(),
+                        revision: entry.attribute("revision")?.into(),
+                        committed_at: text("date").into(),
+                        message: normalize_commit_message(text("msg"))?,
+                    })
+                })
+                .collect())
+        }
+    }
+}
+
+pub async fn last_commit_message(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    if repo.kind == VcsKind::Git {
+        return Ok(recent_commit_messages(repo, token)
+            .await?
+            .into_iter()
+            .next()
+            .map(|item| item.message));
+    }
+    let revision = current_revision(repo, token).await?;
+    let raw = svn(
+        vec!["log".into(), "--xml".into(), "-r".into(), revision],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    Ok(document
+        .descendants()
+        .find(|node| node.has_tag_name("msg"))
+        .and_then(|node| node.text())
+        .and_then(normalize_commit_message))
 }
 
 pub async fn diff(
@@ -1181,6 +1582,161 @@ pub async fn abort_operation(
     Ok(())
 }
 
+fn git_operation_name(root: &Path) -> Option<&'static str> {
+    let marker = root.join(".git");
+    let git_dir = if marker.is_dir() {
+        marker
+    } else {
+        let value = std::fs::read_to_string(marker).ok()?;
+        let target = value.trim().strip_prefix("gitdir: ")?;
+        let target = Path::new(target);
+        if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            root.join(target)
+        }
+    };
+    if git_dir.join("MERGE_HEAD").exists() {
+        Some("merge")
+    } else if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+        Some("rebase")
+    } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+        Some("cherry-pick")
+    } else {
+        None
+    }
+}
+
+pub async fn restore_conflicts(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<RestoreConflictsResult, DesktopError> {
+    ensure_git(repo)?;
+    let root = Path::new(&repo.root_path);
+    if let Some(operation) = git_operation_name(root) {
+        return Err(DesktopError::new(
+            "OPERATION_IN_PROGRESS",
+            format!("Cannot restore conflicts while {operation} is in progress"),
+            true,
+        ));
+    }
+    let output = git(
+        vec![
+            "diff".into(),
+            "--name-only".into(),
+            "--diff-filter=U".into(),
+            "-z".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?;
+    let paths = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .map(|value| String::from_utf8_lossy(value).into_owned())
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Err(DesktopError::new(
+            "NO_RESTORABLE_CONFLICTS",
+            "No restorable Git conflicts were found",
+            true,
+        ));
+    }
+    let mut result = RestoreConflictsResult {
+        restored_paths: Vec::new(),
+        failures: Vec::new(),
+    };
+    for path in paths {
+        let safe = match relative_path(root, &path, true) {
+            Ok(value) => value,
+            Err(error) => {
+                result.failures.push(RestoreConflictFailure { path, error });
+                continue;
+            }
+        };
+        let pathspec = format!(":(literal){safe}");
+        let tracked = git(
+            vec![
+                "ls-tree".into(),
+                "-r".into(),
+                "--name-only".into(),
+                "HEAD".into(),
+                "--".into(),
+                pathspec.clone(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        .is_ok_and(|value| !value.stdout_text().trim().is_empty());
+        let restored = if tracked {
+            git(
+                vec![
+                    "restore".into(),
+                    "--source=HEAD".into(),
+                    "--staged".into(),
+                    "--worktree".into(),
+                    "--".into(),
+                    pathspec,
+                ],
+                repo,
+                token,
+            )
+            .await
+            .map(|_| ())
+        } else {
+            let removed_index = git(
+                vec![
+                    "rm".into(),
+                    "-f".into(),
+                    "--cached".into(),
+                    "--ignore-unmatch".into(),
+                    "--".into(),
+                    pathspec,
+                ],
+                repo,
+                token,
+            )
+            .await
+            .map(|_| ());
+            if removed_index.is_ok() {
+                let target = match safe_relative(root, &safe, true) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        result
+                            .failures
+                            .push(RestoreConflictFailure { path: safe, error });
+                        continue;
+                    }
+                };
+                if target.exists() {
+                    let metadata = std::fs::symlink_metadata(&target).map_err(|error| {
+                        DesktopError::new("RESTORE_CONFLICT_FAILED", error.to_string(), true)
+                    })?;
+                    let removal = if metadata.is_dir() {
+                        std::fs::remove_dir_all(&target)
+                    } else {
+                        std::fs::remove_file(&target)
+                    };
+                    removal.map_err(|error| {
+                        DesktopError::new("RESTORE_CONFLICT_FAILED", error.to_string(), true)
+                    })?;
+                }
+            }
+            removed_index
+        };
+        match restored {
+            Ok(()) => result.restored_paths.push(safe),
+            Err(error) => result
+                .failures
+                .push(RestoreConflictFailure { path: safe, error }),
+        }
+    }
+    Ok(result)
+}
+
 async fn prepare_svn_commit(
     repo: &RepositoryMeta,
     paths: &[String],
@@ -1239,10 +1795,24 @@ pub async fn sync(
     action: SyncAction,
     remote: Option<String>,
     token: &CancellationToken,
-) -> Result<String, DesktopError> {
+) -> Result<SyncResult, DesktopError> {
     if repo.kind == VcsKind::Git && matches!(action, SyncAction::Push) {
-        return git_push(repo, remote, token).await;
+        return Ok(SyncResult {
+            output: git_push(repo, remote, token).await?,
+            update: None,
+        });
     }
+    let captures_update = matches!(action, SyncAction::Pull | SyncAction::Update);
+    let before_revision = if captures_update {
+        current_revision(repo, token).await.unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let before_status = if captures_update {
+        status_fingerprint(repo, token).await.unwrap_or_default()
+    } else {
+        String::new()
+    };
     let (program, args) = match (repo.kind, action) {
         (VcsKind::Git, SyncAction::Fetch) => (
             "git",
@@ -1268,7 +1838,7 @@ pub async fn sync(
         safe.push("--non-interactive".into());
     }
     safe.extend(args);
-    Ok(cli::run(
+    let output = cli::run(
         program,
         &safe,
         Path::new(&repo.root_path),
@@ -1277,7 +1847,254 @@ pub async fn sync(
         token,
     )
     .await?
-    .stdout_text())
+    .stdout_text();
+    if !captures_update {
+        return Ok(SyncResult {
+            output,
+            update: None,
+        });
+    }
+    let after_result = current_revision(repo, token).await;
+    let after_revision = after_result
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|_| before_revision.clone());
+    let after_status = status_fingerprint(repo, token)
+        .await
+        .unwrap_or_else(|_| before_status.clone());
+    let summary = match after_result {
+        Ok(_) => update_summary(repo, &before_revision, &after_revision, token).await,
+        Err(error) => Err(error),
+    };
+    let (summary, summary_error) = match summary {
+        Ok(summary) => (Some(summary), None),
+        Err(error) => (None, Some(error)),
+    };
+    Ok(SyncResult {
+        output,
+        update: Some(RepositoryUpdateResult {
+            repo_id: repo.id.clone(),
+            before_revision,
+            after_revision,
+            summary,
+            summary_error,
+            before_status,
+            after_status,
+        }),
+    })
+}
+
+async fn status_fingerprint(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    let raw = match repo.kind {
+        VcsKind::Git => {
+            git(
+                vec!["status".into(), "--porcelain=v1".into(), "-z".into()],
+                repo,
+                token,
+            )
+            .await?
+            .stdout
+        }
+        VcsKind::Svn => {
+            svn(vec!["status".into(), "--xml".into()], repo, token)
+                .await?
+                .stdout
+        }
+    };
+    Ok(hex::encode(Sha256::digest(raw)))
+}
+
+async fn current_revision(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    match repo.kind {
+        VcsKind::Git => Ok(git(
+            vec!["rev-parse".into(), "--verify".into(), "HEAD".into()],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text()
+        .trim()
+        .into()),
+        VcsKind::Svn => {
+            let raw = svn(vec!["info".into(), "--xml".into()], repo, token)
+                .await?
+                .stdout_text();
+            let document = roxmltree::Document::parse(&raw)
+                .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+            document
+                .descendants()
+                .find(|node| node.has_tag_name("entry"))
+                .and_then(|node| node.attribute("revision"))
+                .map(String::from)
+                .ok_or_else(|| {
+                    DesktopError::new("SVN_REVISION_MISSING", "Unable to read SVN revision", true)
+                })
+        }
+    }
+}
+
+async fn update_summary(
+    repo: &RepositoryMeta,
+    before: &str,
+    after: &str,
+    token: &CancellationToken,
+) -> Result<UpdateSummary, DesktopError> {
+    if before == after {
+        return Ok(UpdateSummary {
+            kind: UpdateKind::NoChanges,
+            commit_count: 0,
+            file_count: 0,
+            contains_merge: false,
+            detail: UpdateDetail {
+                commits: Vec::new(),
+                files: Vec::new(),
+            },
+        });
+    }
+    match repo.kind {
+        VcsKind::Git => {
+            validate_revision(before)?;
+            validate_revision(after)?;
+            let format = format!("%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}");
+            let range = format!("{before}..{after}");
+            let (raw, stats, statuses) = tokio::try_join!(
+                async {
+                    Ok::<_, DesktopError>(
+                        git(
+                            vec![
+                                "log".into(),
+                                "--date-order".into(),
+                                format!("--format={format}"),
+                                range.clone(),
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await?
+                        .stdout_text(),
+                    )
+                },
+                async {
+                    Ok::<_, DesktopError>(
+                        git(
+                            vec![
+                                "diff".into(),
+                                "--numstat".into(),
+                                before.into(),
+                                after.into(),
+                                "--".into(),
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await?
+                        .stdout_text(),
+                    )
+                },
+                async {
+                    Ok::<_, DesktopError>(
+                        git(
+                            vec![
+                                "diff".into(),
+                                "--name-status".into(),
+                                before.into(),
+                                after.into(),
+                                "--".into(),
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await?
+                        .stdout_text(),
+                    )
+                },
+            )?;
+            let commits = parse_git_log(&repo.id, &raw);
+            let files = merge_git_files(&stats, &statuses);
+            Ok(UpdateSummary {
+                kind: UpdateKind::FastForward,
+                commit_count: commits.len() as u32,
+                file_count: files.len() as u32,
+                contains_merge: commits.iter().any(|commit| commit.parents.len() > 1),
+                detail: UpdateDetail { commits, files },
+            })
+        }
+        VcsKind::Svn => {
+            validate_svn_revision(before)?;
+            validate_svn_revision(after)?;
+            let start = before.parse::<u64>().unwrap_or(0).saturating_add(1);
+            let raw = svn(
+                vec![
+                    "log".into(),
+                    "--xml".into(),
+                    "--verbose".into(),
+                    "-r".into(),
+                    format!("{after}:{start}"),
+                ],
+                repo,
+                token,
+            )
+            .await?
+            .stdout_text();
+            let document = roxmltree::Document::parse(&raw)
+                .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+            let mut files = std::collections::BTreeMap::<String, CommitFile>::new();
+            let mut commits = Vec::new();
+            for entry in document
+                .descendants()
+                .filter(|node| node.has_tag_name("logentry"))
+            {
+                let revision = entry.attribute("revision").unwrap_or("");
+                let text = |name| {
+                    entry
+                        .children()
+                        .find(|child| child.has_tag_name(name))
+                        .and_then(|child| child.text())
+                        .unwrap_or("")
+                };
+                let message = text("msg");
+                commits.push(CommitNode {
+                    repo_id: repo.id.clone(),
+                    hash: revision.into(),
+                    short_hash: format!("r{revision}"),
+                    parents: Vec::new(),
+                    author: text("author").into(),
+                    email: String::new(),
+                    author_date: text("date").into(),
+                    committer_date: text("date").into(),
+                    message: message.lines().next().unwrap_or("").into(),
+                    refs: Vec::new(),
+                    incoming: false,
+                    unpushed: false,
+                });
+                for path in entry.descendants().filter(|node| node.has_tag_name("path")) {
+                    if let Some(value) = path.text() {
+                        let value = value.trim_start_matches('/').to_string();
+                        files.entry(value.clone()).or_insert(CommitFile {
+                            path: value,
+                            status: path.attribute("action").unwrap_or("M").into(),
+                            added: None,
+                            removed: None,
+                        });
+                    }
+                }
+            }
+            let files = files.into_values().collect::<Vec<_>>();
+            Ok(UpdateSummary {
+                kind: UpdateKind::Updated,
+                commit_count: commits.len() as u32,
+                file_count: files.len() as u32,
+                contains_merge: false,
+                detail: UpdateDetail { commits, files },
+            })
+        }
+    }
 }
 
 async fn git_push(
@@ -1349,24 +2166,24 @@ pub async fn history(
     repo: &RepositoryMeta,
     skip: u32,
     limit: u32,
-    filter: Option<String>,
-    revision: Option<String>,
+    query: HistoryQuery,
     token: &CancellationToken,
 ) -> Result<HistoryPage, DesktopError> {
     let limit = limit.clamp(1, 1_000);
     match repo.kind {
-        VcsKind::Git => git_history(repo, skip, limit, filter, revision, token).await,
-        VcsKind::Svn => svn_history(repo, skip, limit, filter, token).await,
+        VcsKind::Git => git_history(repo, skip, limit, query, token).await,
+        VcsKind::Svn => svn_history(repo, skip, limit, query, token).await,
     }
 }
 
 pub async fn history_topology(
     repo: &RepositoryMeta,
     svn_limit: u32,
+    revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<Vec<GraphCommitNode>, DesktopError> {
     match repo.kind {
-        VcsKind::Git => git_history_topology(repo, token).await,
+        VcsKind::Git => git_history_topology(repo, revision, token).await,
         VcsKind::Svn => svn_history_topology(repo, svn_limit.clamp(1, 5_000), token).await,
     }
 }
@@ -2018,15 +2835,14 @@ async fn git_history(
     repo: &RepositoryMeta,
     skip: u32,
     limit: u32,
-    filter: Option<String>,
-    revision: Option<String>,
+    query: HistoryQuery,
     token: &CancellationToken,
 ) -> Result<HistoryPage, DesktopError> {
-    if let Some(value) = revision.as_deref() {
+    if let Some(value) = query.revision.as_deref() {
         validate_revision_or_ref(value)?;
     }
     let format = format!(
-        "%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}"
+        "%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{FIELD}%B{RECORD}"
     );
     let head_hash = git(
         vec![
@@ -2044,18 +2860,38 @@ async fn git_history(
     let mut args = vec![
         "log".into(),
         "--date-order".into(),
-        format!("--skip={skip}"),
-        format!("--max-count={}", limit + 1),
         format!("--format={format}"),
         "--date=iso-strict".into(),
     ];
-    if let Some(value) = filter.filter(|value| !value.trim().is_empty()) {
-        args.push("--regexp-ignore-case".to_string());
-        args.push(format!("--grep={}", value.trim()));
+    if let Some(value) = query
+        .author
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        args.push(format!("--author={}", regex_literal(value)));
+    }
+    if let Some(value) = query
+        .from_date
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        validate_history_date(value)?;
+        args.push(format!("--since={value}T00:00:00"));
+    }
+    if let Some(value) = query
+        .to_date
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        validate_history_date(value)?;
+        args.push(format!("--until={value}T23:59:59"));
     }
     // Prioritize the checked-out history when tips share a timestamp, matching
     // JetBrains and the VersionDock plugin. Unborn repositories have no HEAD.
-    if let Some(value) = revision {
+    if let Some(value) = query.revision.clone() {
         args.push(value);
     } else {
         if !head_hash.is_empty() {
@@ -2065,11 +2901,60 @@ async fn git_history(
         args.push("--exclude=refs/versiondock/ai-composer/*".into());
         args.push("--all".into());
     }
+    if let Some(path) = query
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let path = literal_path(Path::new(&repo.root_path), path, false)?;
+        args.push("--follow".into());
+        args.push("--".into());
+        args.push(path);
+    }
     let (raw, refs_by_hash) = tokio::try_join!(
         async { Ok::<_, DesktopError>(git(args, repo, token).await?.stdout_text()) },
         git_decorated_refs(repo, &head_hash, token),
     )?;
-    let mut commits = parse_git_log(&repo.id, &raw);
+    let needle = query.text.unwrap_or_default().trim().to_lowercase();
+    let mut commits = raw
+        .split(RECORD)
+        .filter_map(|record| {
+            let fields = record.trim().split(FIELD).collect::<Vec<_>>();
+            if fields.len() < 10 || fields[0].is_empty() {
+                return None;
+            }
+            let searchable = format!(
+                "{} {} {} {} {}",
+                fields[0], fields[1], fields[3], fields[7], fields[9]
+            )
+            .to_lowercase();
+            if !needle.is_empty() && !searchable.contains(&needle) {
+                return None;
+            }
+            Some(CommitNode {
+                repo_id: repo.id.clone(),
+                hash: fields[0].into(),
+                short_hash: fields[1].into(),
+                parents: fields[2].split_whitespace().map(String::from).collect(),
+                author: fields[3].into(),
+                email: fields[4].into(),
+                author_date: fields[5].into(),
+                committer_date: fields[6].into(),
+                message: fields[7].into(),
+                refs: fields[8]
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(String::from)
+                    .collect(),
+                incoming: false,
+                unpushed: false,
+            })
+        })
+        .skip(skip as usize)
+        .take(limit as usize + 1)
+        .collect::<Vec<_>>();
     for commit in &mut commits {
         if let Some(refs) = refs_by_hash.get(&commit.hash) {
             commit.refs = refs.clone();
@@ -2088,6 +2973,7 @@ async fn git_history(
 
 async fn git_history_topology(
     repo: &RepositoryMeta,
+    revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<Vec<GraphCommitNode>, DesktopError> {
     let format = format!("%H{FIELD}%P{FIELD}%cI{RECORD}");
@@ -2110,12 +2996,17 @@ async fn git_history_topology(
         format!("--format={format}"),
         "--date=iso-strict".into(),
     ];
-    if !head_hash.is_empty() {
+    if let Some(revision) = revision {
+        validate_revision_or_ref(&revision)?;
+        args.push(revision);
+    } else if !head_hash.is_empty() {
         args.push("HEAD".into());
     }
-    args.push("--exclude=refs/stash".into());
-    args.push("--exclude=refs/versiondock/ai-composer/*".into());
-    args.push("--all".into());
+    if args.last().is_some_and(|value| value == "HEAD") || head_hash.is_empty() {
+        args.push("--exclude=refs/stash".into());
+        args.push("--exclude=refs/versiondock/ai-composer/*".into());
+        args.push("--all".into());
+    }
     let (raw, refs_by_hash) = tokio::try_join!(
         async { Ok::<_, DesktopError>(git(args, repo, token).await?.stdout_text()) },
         git_decorated_refs(repo, &head_hash, token),
@@ -2304,27 +3195,42 @@ async fn svn_history(
     repo: &RepositoryMeta,
     skip: u32,
     limit: u32,
-    filter: Option<String>,
+    query: HistoryQuery,
     token: &CancellationToken,
 ) -> Result<HistoryPage, DesktopError> {
-    let requested = skip.saturating_add(limit).saturating_add(1).min(5_000);
-    let raw = svn(
-        vec![
-            "log".into(),
-            "--xml".into(),
-            "-r".into(),
-            "HEAD:0".into(),
-            "--limit".into(),
-            requested.to_string(),
-        ],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text();
+    let backend_filter = query
+        .text
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || query
+            .author
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || query.from_date.is_some()
+        || query.to_date.is_some();
+    let requested = skip
+        .saturating_add(limit)
+        .saturating_add(1)
+        .clamp(100, 5_000);
+    if let Some(value) = query.from_date.as_deref().filter(|value| !value.is_empty()) {
+        validate_history_date(value)?;
+    }
+    if let Some(value) = query.to_date.as_deref().filter(|value| !value.is_empty()) {
+        validate_history_date(value)?;
+    }
+    let target = svn_history_target(repo, query.revision.as_deref(), query.path.as_deref())?;
+    let mut args = vec!["log".into(), "--xml".into(), "-r".into(), "HEAD:0".into()];
+    if !backend_filter {
+        args.extend(["--limit".into(), requested.to_string()]);
+    }
+    if let Some(target) = target {
+        args.extend(["--".into(), target]);
+    }
+    let raw = svn(args, repo, token).await?.stdout_text();
     let document = roxmltree::Document::parse(&raw)
         .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
-    let needle = filter.unwrap_or_default().to_lowercase();
+    let needle = query.text.unwrap_or_default().to_lowercase();
+    let author_filter = query.author.unwrap_or_default().to_lowercase();
     let all = document
         .descendants()
         .filter(|node| node.has_tag_name("logentry"))
@@ -2337,11 +3243,23 @@ async fn svn_history(
                     .and_then(|node| node.text())
                     .unwrap_or("")
             };
-            let message = text("msg").lines().next().unwrap_or("").to_string();
+            let full_message = text("msg");
+            let message = full_message.lines().next().unwrap_or("").to_string();
             let author = text("author").to_string();
+            let date = text("date");
             if !needle.is_empty()
-                && !message.to_lowercase().contains(&needle)
+                && !full_message.to_lowercase().contains(&needle)
                 && !author.to_lowercase().contains(&needle)
+                && !revision.to_lowercase().contains(&needle)
+            {
+                return None;
+            }
+            if !author_filter.is_empty() && !author.to_lowercase().contains(&author_filter) {
+                return None;
+            }
+            let day = date.get(..10).unwrap_or(date);
+            if query.from_date.as_deref().is_some_and(|from| day < from)
+                || query.to_date.as_deref().is_some_and(|to| day > to)
             {
                 return None;
             }
@@ -2352,8 +3270,8 @@ async fn svn_history(
                 parents: vec![],
                 author,
                 email: String::new(),
-                author_date: text("date").into(),
-                committer_date: text("date").into(),
+                author_date: date.into(),
+                committer_date: date.into(),
                 message,
                 refs: vec![],
                 incoming: false,
@@ -2365,6 +3283,63 @@ async fn svn_history(
     let has_more = commits.len() > limit as usize;
     commits.truncate(limit as usize);
     Ok(HistoryPage { commits, has_more })
+}
+
+fn validate_history_date(value: &str) -> Result<(), DesktopError> {
+    let valid = value.len() == 10
+        && value.as_bytes().iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 4 | 7) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(DesktopError::new(
+            "INVALID_HISTORY_DATE",
+            "History dates must use YYYY-MM-DD",
+            false,
+        ))
+    }
+}
+
+fn svn_history_target(
+    repo: &RepositoryMeta,
+    revision: Option<&str>,
+    path: Option<&str>,
+) -> Result<Option<String>, DesktopError> {
+    let revision = revision
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "HEAD");
+    let path = path.map(str::trim).filter(|value| !value.is_empty());
+    if revision.is_none() && path.is_none() {
+        return Ok(None);
+    }
+    let mut relative = String::new();
+    if let Some(revision) = revision {
+        if revision.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Ok(Some(format!("{}@{revision}", repo.root_path)));
+        }
+        safe_relative(Path::new("/"), revision, true)?;
+        relative.push_str(revision.trim_matches('/'));
+    }
+    if let Some(path) = path {
+        relative_path(Path::new(&repo.root_path), path, false)?;
+        if !relative.is_empty() {
+            relative.push('/');
+        }
+        relative.push_str(path.trim_matches('/'));
+    }
+    Ok(Some(if revision.is_some() {
+        format!("^/{relative}@HEAD")
+    } else {
+        format!(
+            "{}@HEAD",
+            Path::new(&repo.root_path).join(relative).to_string_lossy()
+        )
+    }))
 }
 
 async fn svn_history_topology(
@@ -3020,7 +3995,7 @@ pub async fn branch_operation(
     repo: &RepositoryMeta,
     operation: BranchOperation,
     token: &CancellationToken,
-) -> Result<(), DesktopError> {
+) -> Result<BranchOperationResult, DesktopError> {
     if repo.kind == VcsKind::Svn {
         let args = match operation {
             BranchOperation::Checkout { name } => {
@@ -3072,9 +4047,13 @@ pub async fn branch_operation(
             }
         };
         svn(args, repo, token).await?;
-        return Ok(());
+        return Ok(BranchOperationResult {
+            completed: true,
+            conflicted: false,
+        });
     }
     ensure_git(repo)?;
+    let is_merge = matches!(operation, BranchOperation::Merge { .. });
     let args = match operation {
         BranchOperation::Create { name, from } => {
             validate_ref(&name)?;
@@ -3126,8 +4105,214 @@ pub async fn branch_operation(
             ]
         }
     };
-    git(args, repo, token).await?;
-    Ok(())
+    match git(args, repo, token).await {
+        Ok(_) => Ok(BranchOperationResult {
+            completed: true,
+            conflicted: false,
+        }),
+        Err(_) if is_merge && git_has_conflicts(repo, token).await => Ok(BranchOperationResult {
+            completed: false,
+            conflicted: true,
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+async fn git_has_conflicts(repo: &RepositoryMeta, token: &CancellationToken) -> bool {
+    git(
+        vec![
+            "diff".into(),
+            "--name-only".into(),
+            "--diff-filter=U".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .is_ok_and(|output| !output.stdout_text().trim().is_empty())
+}
+
+async fn stash_head(repo: &RepositoryMeta, token: &CancellationToken) -> Option<String> {
+    git(
+        vec!["rev-parse".into(), "--verify".into(), "refs/stash".into()],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .map(|output| output.stdout_text().trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
+async fn create_recovery_stash(
+    repo: &RepositoryMeta,
+    message: String,
+    token: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    let before = stash_head(repo, token).await;
+    git(
+        vec![
+            "stash".into(),
+            "push".into(),
+            "--include-untracked".into(),
+            "--message".into(),
+            message,
+        ],
+        repo,
+        token,
+    )
+    .await?;
+    let after = stash_head(repo, token).await;
+    Ok((after != before).then(|| "stash@{0}".into()))
+}
+
+fn recovery_error(
+    target: &str,
+    stash_reference: Option<String>,
+    changes_restored: bool,
+    error: DesktopError,
+    hint: impl Into<String>,
+) -> BranchRecoveryResult {
+    BranchRecoveryResult {
+        status: BranchRecoveryStatus::PartialFailure,
+        target: target.into(),
+        stash_reference,
+        changes_restored,
+        error: Some(error),
+        recovery_hint: Some(hint.into()),
+    }
+}
+
+pub async fn branch_recovery(
+    repo: &RepositoryMeta,
+    operation: BranchRecoveryOperation,
+    token: &CancellationToken,
+) -> Result<BranchRecoveryResult, DesktopError> {
+    ensure_git(repo)?;
+    let target = match &operation {
+        BranchRecoveryOperation::StashAndCheckout { target }
+        | BranchRecoveryOperation::CarryChanges { target }
+        | BranchRecoveryOperation::ForceCheckout { target }
+        | BranchRecoveryOperation::StashAndMerge { target } => target.clone(),
+    };
+    validate_revision_or_ref(&target)?;
+    if matches!(operation, BranchRecoveryOperation::ForceCheckout { .. }) {
+        git(
+            vec!["checkout".into(), "-f".into(), target.clone()],
+            repo,
+            token,
+        )
+        .await?;
+        return Ok(BranchRecoveryResult {
+            status: BranchRecoveryStatus::Completed,
+            target,
+            stash_reference: None,
+            changes_restored: false,
+            error: None,
+            recovery_hint: None,
+        });
+    }
+
+    let original_branch = git(vec!["branch".into(), "--show-current".into()], repo, token)
+        .await?
+        .stdout_text()
+        .trim()
+        .to_string();
+    let is_merge = matches!(operation, BranchRecoveryOperation::StashAndMerge { .. });
+    let carry = matches!(operation, BranchRecoveryOperation::CarryChanges { .. });
+    let label = if is_merge { "merge" } else { "checkout" };
+    let stash_reference = create_recovery_stash(
+        repo,
+        format!("VersionDock WIP before {label} of {target}"),
+        token,
+    )
+    .await?;
+    let command = if is_merge {
+        vec!["merge".into(), target.clone()]
+    } else {
+        vec!["switch".into(), target.clone()]
+    };
+    if let Err(error) = git(command, repo, token).await {
+        if is_merge && git_has_conflicts(repo, token).await {
+            return Ok(BranchRecoveryResult {
+                status: BranchRecoveryStatus::Conflicted,
+                target,
+                stash_reference,
+                changes_restored: false,
+                error: None,
+                recovery_hint: Some(
+                    "Resolve the merge conflicts; the recovery stash was retained".into(),
+                ),
+            });
+        }
+        if let Some(reference) = stash_reference.clone() {
+            let restore = git(
+                vec![
+                    "stash".into(),
+                    "apply".into(),
+                    "--index".into(),
+                    reference.clone(),
+                ],
+                repo,
+                token,
+            )
+            .await;
+            if restore.is_ok() {
+                let _ = git(vec!["stash".into(), "drop".into(), reference], repo, token).await;
+                return Ok(recovery_error(
+                    &target,
+                    None,
+                    true,
+                    error,
+                    "The operation failed and the original changes were restored",
+                ));
+            }
+            return Ok(recovery_error(
+                &target,
+                Some(reference),
+                false,
+                error,
+                "The operation and automatic restore failed; recover the retained stash manually",
+            ));
+        }
+        return Err(error);
+    }
+
+    if carry {
+        if let Some(reference) = stash_reference.clone() {
+            if let Err(error) = git(
+                vec![
+                    "stash".into(),
+                    "apply".into(),
+                    "--index".into(),
+                    reference.clone(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            {
+                return Ok(recovery_error(
+                    &target,
+                    Some(reference),
+                    false,
+                    error,
+                    "The target branch is checked out; resolve the apply conflict or recover the retained stash manually",
+                ));
+            }
+            git(vec!["stash".into(), "drop".into(), reference], repo, token).await?;
+        }
+    }
+
+    Ok(BranchRecoveryResult {
+        status: BranchRecoveryStatus::Completed,
+        target,
+        stash_reference: if carry { None } else { stash_reference },
+        changes_restored: carry,
+        error: None,
+        recovery_hint: (!original_branch.is_empty() && is_merge)
+            .then(|| format!("Merge started from {original_branch}")),
+    })
 }
 
 fn svn_repository_target(value: &str) -> Result<String, DesktopError> {
@@ -5398,16 +6583,111 @@ pub async fn conflict_versions(
         }
         VcsKind::Svn => svn_conflict_artifacts(root, &safe),
     };
+    let mut conflicts = parse_conflict_blocks(&working);
+    let mut marker_content = working.clone();
+    if !binary && conflicts.is_empty() {
+        marker_content = synthetic_conflict_content(&base, &ours, &theirs);
+        conflicts = parse_conflict_blocks(&marker_content);
+    }
+    let ours_label = conflicts
+        .first()
+        .map(|block| block.ours_label.clone())
+        .unwrap_or_else(|| "OURS".into());
+    let theirs_label = conflicts
+        .first()
+        .map(|block| block.theirs_label.clone())
+        .unwrap_or_else(|| "THEIRS".into());
     Ok(MergeVersions {
         path: safe.clone(),
         base,
         ours,
         theirs,
         working: working.clone(),
+        marker_content,
+        conflicts,
+        ours_label,
+        theirs_label,
         language: language_for(&safe),
         fingerprint: fingerprint(working.as_bytes()),
         binary,
     })
+}
+
+fn parse_conflict_blocks(content: &str) -> Vec<ConflictBlock> {
+    enum MarkerState {
+        Normal,
+        Ours,
+        Base,
+        Theirs,
+    }
+    let mut state = MarkerState::Normal;
+    let mut result = Vec::new();
+    let mut current: Option<ConflictBlock> = None;
+    for (line_index, line) in content.split('\n').enumerate() {
+        match state {
+            MarkerState::Normal => {
+                if let Some(label) = line.strip_prefix("<<<<<<< ") {
+                    current = Some(ConflictBlock {
+                        index: result.len() as u32,
+                        ours_label: label.to_string(),
+                        theirs_label: String::new(),
+                        ours_lines: Vec::new(),
+                        base_lines: Vec::new(),
+                        theirs_lines: Vec::new(),
+                        start_line: line_index as u32,
+                        end_line: line_index as u32,
+                    });
+                    state = MarkerState::Ours;
+                }
+            }
+            MarkerState::Ours => {
+                if line.starts_with("||||||| ") {
+                    state = MarkerState::Base;
+                } else if line == "=======" {
+                    state = MarkerState::Theirs;
+                } else if let Some(block) = current.as_mut() {
+                    block.ours_lines.push(line.to_string());
+                }
+            }
+            MarkerState::Base => {
+                if line == "=======" {
+                    state = MarkerState::Theirs;
+                } else if let Some(block) = current.as_mut() {
+                    block.base_lines.push(line.to_string());
+                }
+            }
+            MarkerState::Theirs => {
+                if let Some(label) = line.strip_prefix(">>>>>>> ") {
+                    if let Some(mut block) = current.take() {
+                        block.theirs_label = label.to_string();
+                        block.end_line = line_index as u32;
+                        result.push(block);
+                    }
+                    state = MarkerState::Normal;
+                } else if let Some(block) = current.as_mut() {
+                    block.theirs_lines.push(line.to_string());
+                }
+            }
+        }
+    }
+    result
+}
+
+fn synthetic_conflict_content(base: &str, ours: &str, theirs: &str) -> String {
+    let mut lines = vec!["<<<<<<< OURS".to_string()];
+    if !ours.is_empty() {
+        lines.extend(ours.split('\n').map(str::to_string));
+    }
+    if !base.is_empty() {
+        lines.push("||||||| BASE".into());
+        lines.extend(base.split('\n').map(str::to_string));
+    }
+    lines.push("=======".into());
+    if !theirs.is_empty() {
+        lines.extend(theirs.split('\n').map(str::to_string));
+    }
+    lines.push(">>>>>>> THEIRS".into());
+    lines.join("\n")
 }
 
 pub async fn conflict_save(
@@ -5417,7 +6697,9 @@ pub async fn conflict_save(
     expected: &str,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
-    if content.contains("<<<<<<<") || content.contains("=======") || content.contains(">>>>>>>") {
+    if content.lines().any(|line| {
+        line.starts_with("<<<<<<< ") || line == "=======" || line.starts_with(">>>>>>> ")
+    }) {
         return Err(DesktopError::new(
             "UNRESOLVED_MARKERS",
             "Conflict markers remain in the result",
@@ -5779,6 +7061,29 @@ mod tests {
         assert!(bytes_are_binary(b"\x89PNG\r\n\x1a\nnot-yet-compressed"));
         assert!(bytes_are_binary(b"%PDF-1.7\n1 0 obj"));
         assert!(!bytes_are_binary("中文文本\nsecond line".as_bytes()));
+    }
+
+    #[test]
+    fn parses_two_way_and_diff3_conflict_blocks() {
+        let content = "before\n<<<<<<< HEAD\nours one\n||||||| base\nbase one\n=======\ntheirs one\n>>>>>>> feature\nmiddle\n<<<<<<< HEAD\nours two\n=======\ntheirs two\n>>>>>>> feature\nafter";
+        let values = parse_conflict_blocks(content);
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].base_lines, ["base one"]);
+        assert_eq!(values[0].start_line, 1);
+        assert_eq!(values[0].end_line, 7);
+        assert!(values[1].base_lines.is_empty());
+        assert_eq!(values[1].ours_lines, ["ours two"]);
+        assert_eq!(values[1].theirs_lines, ["theirs two"]);
+    }
+
+    #[test]
+    fn synthesizes_marker_content_for_add_delete_conflicts() {
+        let value = synthetic_conflict_content("base", "", "incoming");
+        let conflicts = parse_conflict_blocks(&value);
+        assert_eq!(conflicts.len(), 1);
+        assert!(conflicts[0].ours_lines.is_empty());
+        assert_eq!(conflicts[0].base_lines, ["base"]);
+        assert_eq!(conflicts[0].theirs_lines, ["incoming"]);
     }
 
     #[test]

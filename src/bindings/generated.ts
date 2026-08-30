@@ -9,6 +9,7 @@ export type AppStateSnapshot = {
 	openWorkspaceIds?: string[],
 	activeWorkspaceId?: string | null,
 	recentWorkspaces: WorkspaceDescriptor[],
+	commitSelections?: { [key in string]: RepositoryCommitSelection[] },
 	theme?: ThemePreference | null,
 	language?: LanguagePreference | null,
 	uiFontSize?: UiFontSizePreference | null,
@@ -59,8 +60,29 @@ export type BranchInfo = {
 
 export type BranchOperation = { type: "create"; name: string; from: string | null } | { type: "checkout"; name: string } | { type: "merge"; name: string } | { type: "rebase"; name: string } | { type: "rename"; old_name: string; new_name: string } | { type: "delete"; name: string; force: boolean };
 
+export type BranchOperationResult = {
+	completed: boolean,
+	conflicted: boolean,
+};
+
+export type BranchRecoveryOperation = { type: "stashAndCheckout"; target: string } | { type: "carryChanges"; target: string } | { type: "forceCheckout"; target: string } | { type: "stashAndMerge"; target: string };
+
+export type BranchRecoveryResult = {
+	status: BranchRecoveryStatus,
+	target: string,
+	stashReference: string | null,
+	changesRestored: boolean,
+	error: DesktopError | null,
+	recoveryHint: string | null,
+};
+
+export type BranchRecoveryStatus = "completed" | "conflicted" | "partialFailure";
+
 export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities" } | { type: "saveAppState"; payload: {
 	state: AppStateSnapshot,
+} } | { type: "saveCommitSelections"; payload: {
+	workspace_id: string,
+	selections: RepositoryCommitSelection[],
 } } | { type: "updateSettings"; payload: {
 	settings: DesktopSettings,
 } } | { type: "updateLayout"; payload: {
@@ -71,6 +93,40 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 } } | { type: "workspaceRefresh"; payload: {
 	workspace_id: string,
+} } | { type: "initializeRepository"; payload: {
+	workspace_id: string,
+	target_path: string,
+} } | { type: "cloneRepository"; payload: {
+	url: string,
+	parent_path: string,
+	target_name: string,
+	provider_account_id: string | null,
+} } | { type: "providerAccounts" } | { type: "providerGithubBegin"; payload: {
+	account_id: string | null,
+} } | { type: "providerGithubComplete"; payload: {
+	flow_id: string,
+} } | { type: "providerGitlabSave"; payload: {
+	account_id: string | null,
+	host: string,
+	token: string,
+} } | { type: "providerRemove"; payload: {
+	account_id: string,
+} } | { type: "providerRepositories"; payload: {
+	account_id: string,
+	query: string | null,
+	page: number,
+	per_page: number,
+} } | { type: "providerNamespaces"; payload: {
+	account_id: string,
+} } | { type: "publishRepository"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	account_id: string,
+	namespace_id: string | null,
+	name: string,
+	description: string,
+	visibility: RemoteVisibility,
+	push: boolean,
 } } | { type: "windowOpenNew"; payload: {
 	paths: string[] | null,
 	x: number | null,
@@ -162,6 +218,13 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	targets: BatchCommitTarget[],
 	push: boolean,
+} } | { type: "recentCommitMessages"; payload: {
+	workspace_id: string,
+	repo_ids: string[],
+	limit: number,
+} } | { type: "lastCommitMessage"; payload: {
+	workspace_id: string,
+	repo_id: string,
 } } | { type: "sync"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -172,12 +235,12 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	repo_id: string,
 	skip: number,
 	limit: number,
-	filter: string | null,
-	revision: string | null,
+	query: HistoryQuery,
 } } | { type: "historyTopology"; payload: {
 	workspace_id: string,
 	repo_id: string,
 	svn_limit: number,
+	revision: string | null,
 } } | { type: "commitDetail"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -214,6 +277,10 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	operation: BranchOperation,
+} } | { type: "branchRecovery"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	operation: BranchRecoveryOperation,
 } } | { type: "tags"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -328,6 +395,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	operation: string,
+} } | { type: "restoreConflicts"; payload: {
+	workspace_id: string,
+	repo_id: string,
 } } | { type: "gitIdentity"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -375,6 +445,10 @@ export type ChangelistOperation = { type: "create"; name: string } | { type: "re
 
 export type ChangesDisplayMode = "simplified" | "changelists";
 
+export type CloneRepositoryResult = {
+	path: string,
+};
+
 export type CommitBranches = {
 	local: string[],
 	remote: string[],
@@ -417,6 +491,17 @@ export type CommitPathOperationEntry = {
 	status: string,
 };
 
+export type ConflictBlock = {
+	index: number,
+	oursLabel: string,
+	theirsLabel: string,
+	oursLines: string[],
+	baseLines: string[],
+	theirsLines: string[],
+	startLine: number,
+	endLine: number,
+};
+
 export type ConflictChoice = "mine" | "theirs" | "working";
 
 export type ConflictFile = {
@@ -436,6 +521,8 @@ export type DefaultSaveAction = "stash" | "shelf";
 
 export type DesktopCapabilities = {
 	ai: boolean,
+	initializeRepository?: boolean,
+	cloneRepository?: boolean,
 	stash: boolean,
 	shelf: boolean,
 	changelist: boolean,
@@ -488,6 +575,8 @@ export type DesktopSettings = {
 	externalEditor: ExternalEditor | null,
 	autoCheckUpdates?: boolean,
 	skippedUpdateVersion?: string | null,
+	onlineAvatarsEnabled?: boolean,
+	gravatarEnabled?: boolean,
 };
 
 export type DiffDocument = {
@@ -565,6 +654,14 @@ export type GitProfile = {
 
 export type GitProfileOperation = { type: "save"; profile: GitProfile } | { type: "delete"; profile_id: string } | { type: "select"; profile_id: string | null };
 
+export type GithubDeviceFlow = {
+	flowId: string,
+	userCode: string,
+	verificationUri: string,
+	expiresAt: string,
+	interval: number,
+};
+
 export type GraphCommitNode = {
 	repoId: string,
 	hash: string,
@@ -580,10 +677,24 @@ export type HistoryPage = {
 	hasMore: boolean,
 };
 
+export type HistoryQuery = {
+	text: string | null,
+	author: string | null,
+	fromDate: string | null,
+	toDate: string | null,
+	path: string | null,
+	revision: string | null,
+};
+
 export type IgnoreRules = {
 	directory: string,
 	source: string,
 	patterns: string[],
+};
+
+export type InitializeRepositoryResult = {
+	snapshot: WorkspaceSnapshot,
+	repositoryId: string,
 };
 
 export type LanguagePreference = "system" | "zhCn" | "en";
@@ -622,6 +733,10 @@ export type MergeVersions = {
 	ours: string,
 	theirs: string,
 	working: string,
+	markerContent: string,
+	conflicts: ConflictBlock[],
+	oursLabel: string,
+	theirsLabel: string,
 	language: string,
 	fingerprint: string,
 	binary: boolean,
@@ -666,6 +781,24 @@ export type PatchDocument = {
 	content: string,
 };
 
+export type PublishRepositoryResult = {
+	repository: RemoteRepository,
+	remoteCreated: boolean,
+	remoteConfigured: boolean,
+	pushAttempted: boolean,
+	pushed: boolean,
+	failedStage: string | null,
+	recoveryHint: string | null,
+	error: DesktopError | null,
+};
+
+export type RecentCommitMessage = {
+	repoId: string,
+	revision: string,
+	committedAt: string,
+	message: string,
+};
+
 export type RefreshScope = "workspaceSnapshot" | "status" | "diff" | "index" | "refs" | "history" | "operation" | "conflicts" | "svnRevision" | "unpushed" | "worktrees" | "subtrees" | "submodules";
 
 export type RemoteInfo = {
@@ -674,7 +807,47 @@ export type RemoteInfo = {
 	pushUrl: string,
 };
 
+export type RemoteNamespace = {
+	id: string,
+	name: string,
+	fullPath: string,
+	kind: string,
+	host: string,
+};
+
 export type RemoteOperation = { type: "add"; name: string; url: string } | { type: "rename"; old_name: string; new_name: string } | { type: "setUrl"; name: string; url: string; push: boolean } | { type: "remove"; name: string } | { type: "prune"; name: string };
+
+export type RemoteProviderAccount = {
+	id: string,
+	provider: RemoteProviderKind,
+	host: string,
+	login: string,
+	displayName: string | null,
+	secureStorageRef: string,
+};
+
+export type RemoteProviderKind = "github" | "gitlab";
+
+export type RemoteRepository = {
+	id: string,
+	provider: RemoteProviderKind,
+	host: string,
+	name: string,
+	fullName: string,
+	cloneUrl: string,
+	webUrl: string | null,
+	defaultBranch: string | null,
+	namespace: RemoteNamespace | null,
+	private: boolean,
+};
+
+export type RemoteRepositoryPage = {
+	items: RemoteRepository[],
+	page: number,
+	hasMore: boolean,
+};
+
+export type RemoteVisibility = "private" | "internal" | "public";
 
 export type RepositoryCapabilities = {
 	status: boolean,
@@ -695,6 +868,11 @@ export type RepositoryCapabilities = {
 	svnAccount: boolean,
 	fileHistory: boolean,
 	availability?: { [key in string]: CapabilityStatus },
+};
+
+export type RepositoryCommitSelection = {
+	repoId: string,
+	paths: string[],
 };
 
 export type RepositoryEvent = {
@@ -744,6 +922,16 @@ export type RepositoryStatus = {
 	toolAvailable?: boolean,
 };
 
+export type RepositoryUpdateResult = {
+	repoId: string,
+	beforeRevision: string,
+	afterRevision: string,
+	summary: UpdateSummary | null,
+	summaryError: DesktopError | null,
+	beforeStatus: string,
+	afterStatus: string,
+};
+
 export type RequestContext = {
 	generation: number,
 	domain: OperationDomain,
@@ -763,6 +951,16 @@ export type ResponseEnvelope = {
 	requestId: string,
 	result: unknown,
 	error: DesktopError | null,
+};
+
+export type RestoreConflictFailure = {
+	path: string,
+	error: DesktopError,
+};
+
+export type RestoreConflictsResult = {
+	restoredPaths: string[],
+	failures: RestoreConflictFailure[],
 };
 
 export type RuntimeCapabilities = {
@@ -839,7 +1037,7 @@ export type SubtreeOperation = { type: "add"; prefix: string; remote: string; br
 
 export type SubtreeState = "active" | "pending";
 
-export type SvnAccountOperation = { type: "save"; username: string; password: string | null } | { type: "delete" } | { type: "test" };
+export type SvnAccountOperation = { type: "save"; username: string; password: string | null } | { type: "delete" } | { type: "test" } | { type: "clearNative"; credential_id: string };
 
 export type SvnAccountState = {
 	repositoryRoot: string,
@@ -848,11 +1046,26 @@ export type SvnAccountState = {
 	secureStorageAvailable: boolean,
 	passwordStdinSupported: boolean,
 	connectionOk: boolean | null,
+	source?: SvnCredentialSource,
+	nativeCredentials?: SvnNativeCredential[],
+};
+
+export type SvnCredentialSource = "versionDockSecureStore" | "nativeCache" | "session" | "none";
+
+export type SvnNativeCredential = {
+	id: string,
+	realm: string,
+	username: string | null,
 };
 
 export type SvnOperation = { type: "cleanup"; break_locks: boolean; remove_unversioned: boolean; remove_ignored: boolean; include_externals: boolean } | { type: "resolveWorking"; paths: string[] } | { type: "lock"; paths: string[]; message: string | null; force: boolean } | { type: "unlock"; paths: string[]; force: boolean } | { type: "relocate"; from_url: string; to_url: string } | { type: "switch"; url: string; revision: string | null; ignore_ancestry: boolean } | { type: "copy"; source_url: string; destination_url: string; revision: string | null; message: string };
 
 export type SyncAction = "fetch" | "pull" | "push" | "update";
+
+export type SyncResult = {
+	output: string,
+	update: RepositoryUpdateResult | null,
+};
 
 export type TagInfo = {
 	name: string,
@@ -886,6 +1099,21 @@ export type UnpushedCommit = {
 };
 
 export type UnpushedOperation = { type: "revert"; hashes: string[] } | { type: "undoHead" } | { type: "drop"; hashes: string[] } | { type: "squash"; hashes: string[]; message: string } | { type: "editMessage"; hash: string; message: string };
+
+export type UpdateDetail = {
+	commits: CommitNode[],
+	files: CommitFile[],
+};
+
+export type UpdateKind = "noChanges" | "fastForward" | "updated";
+
+export type UpdateSummary = {
+	kind: UpdateKind,
+	commitCount: number,
+	fileCount: number,
+	containsMerge: boolean,
+	detail: UpdateDetail,
+};
 
 export type VcsKind = "git" | "svn";
 

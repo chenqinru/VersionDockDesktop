@@ -20,6 +20,8 @@ import { IdentityPanel } from './components/IdentityPanel';
 import { RemoteManager } from './components/RemoteManager';
 import { AboutDialog } from './components/AboutDialog';
 import { isAbortError } from './platform/bridge';
+import { UpdateProjectReportDialog } from './components/UpdateProjectReportDialog';
+import { choiceDialog } from './components/dialogService';
 
 const UI_FONT_SIZE = {
   minimum: { pixels: '11px', scale: '0.8461538462' },
@@ -42,6 +44,7 @@ export function App() {
   const notice = useAppStore((state) => state.notice);
   const clearNotice = useAppStore((state) => state.clearNotice);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
+  const initializeRepository = useAppStore((state) => state.initializeRepository);
   const setPanelSize = useAppStore((state) => state.setPanelSize);
   const identityPanelRepoId = useAppStore((state) => state.identityPanelRepoId);
   const closeIdentityPanel = useAppStore((state) => state.closeIdentityPanel);
@@ -60,6 +63,12 @@ export function App() {
   const commitWidth = bootstrap?.state.layout?.panelSizes.commit ?? bootstrap?.state.panelSizes?.commit ?? 360;
   const missingTools = snapshot && !snapshot.tools.git && !snapshot.tools.svn;
   const noRepositories = snapshot && !snapshot.repositories.length;
+  const initializeAvailable = bootstrap?.capabilities.availability?.initializeRepository?.available ?? bootstrap?.tools.git ?? false;
+  const initialize = async () => {
+    if (!snapshot || !initializeAvailable) return;
+    const target = snapshot.workspace.paths.length === 1 ? snapshot.workspace.paths[0] : await choiceDialog({ title: t('Initialize Repository'), message: t('Select the workspace root to initialize.'), choices: snapshot.workspace.paths.map((path) => ({ id: path, label: path, icon: 'folder' })) });
+    if (target) await initializeRepository(target);
+  };
   const comparisonDiffOpen = mode === 'diff' && Boolean(comparisonTarget);
   const resizeCommit = useResizable(commitWidth, 280, 620, (value) => setPanelSize('commit', value));
 
@@ -145,7 +154,7 @@ export function App() {
         <main className="main-workspace">
           <div style={{ width: commitWidth }} className="commit-slot"><CommitPanel /></div>
           <div className="resize-handle" role="separator" tabIndex={0} aria-label={t('Resize commit panel')} aria-orientation="vertical" aria-valuemin={280} aria-valuemax={620} aria-valuenow={commitWidth} onPointerDown={resizeCommit} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('commit', Math.min(620, Math.max(280, commitWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />
-          <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span></div> : mode === 'history' || comparisonDiffOpen ? <><HistoryWorkspace />{comparisonDiffOpen && <div className="comparison-diff-overlay"><DiffWorkspace /></div>}</> : mode === 'commit-detail' ? <CommitDetailWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
+          <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span><button className="primary" disabled={!initializeAvailable} title={bootstrap?.capabilities.availability?.initializeRepository?.detail ?? undefined} onClick={() => void initialize()}><Codicon name="repo-create" />{t('Initialize Repository')}</button></div> : mode === 'history' || comparisonDiffOpen ? <><HistoryWorkspace />{comparisonDiffOpen && <div className="comparison-diff-overlay"><DiffWorkspace /></div>}</> : mode === 'commit-detail' ? <CommitDetailWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
         </main>
       )}
       {error && !isAbortError(error) && (
@@ -189,6 +198,7 @@ export function App() {
       {dropActive && <div className="drop-overlay"><Codicon name="folder-opened" /><strong>{t('Drop folders anywhere in this window')}</strong></div>}
       <StatusBar />
       <DialogHost />
+      <UpdateProjectReportDialog />
       <FileHistoryPanel />
       {identityPanelRepoId && <IdentityPanel repoId={identityPanelRepoId} close={closeIdentityPanel} />}
       {remoteManagerRepoId && <RemoteManager repoId={remoteManagerRepoId} close={closeRemoteManager} />}

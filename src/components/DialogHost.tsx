@@ -6,6 +6,8 @@ import { useI18n } from '../i18n';
 export function DialogHost() {
   const [request, setRequest] = useState(currentDialog());
   const [value, setValue] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const dialog = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement>();
   const { t } = useI18n();
@@ -15,6 +17,7 @@ export function DialogHost() {
       if (next && document.activeElement instanceof HTMLElement) returnFocus.current = document.activeElement;
       setRequest(next);
       setValue(next?.initialValue ?? '');
+      setSubmitError(''); setSubmitting(false);
     };
     dialogListeners.add(listener);
     return () => { dialogListeners.delete(listener); };
@@ -28,7 +31,8 @@ export function DialogHost() {
     queueMicrotask(() => returnFocus.current?.focus());
   };
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'Escape') { finish(false); return; }
+    if (event.key === 'Escape' && !submitting) { finish(false); return; }
+    if (request.kind === 'editor' && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void submit(); return; }
     if (event.key !== 'Tab') return;
     const focusable = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
     if (!focusable.length) return;
@@ -37,14 +41,26 @@ export function DialogHost() {
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
-  const submit = () => finish(request.kind === 'prompt' ? value.trim() || null : true);
+  const submit = async () => {
+    if (request.kind === 'editor' && request.submit) {
+      setSubmitting(true); setSubmitError('');
+      try { if (await request.submit(value)) finish(value); }
+      catch (error) { setSubmitError(error instanceof Error ? error.message : String(error)); }
+      finally { setSubmitting(false); }
+      return;
+    }
+    finish(request.kind === 'prompt' ? value.trim() || null : true);
+  };
   return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) finish(false); }}>
     <section ref={dialog} className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
       <header><Codicon name={request.danger ? 'warning' : 'question'} /><strong id="app-dialog-title">{request.title}</strong></header>
       <p>{request.message}</p>
       {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
+      {request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
+      {request.kind === 'editor' && <label><span>{request.inputLabel}</span><textarea autoFocus className="dialog-editor" value={value} onChange={(event) => setValue(event.target.value)} /></label>}
+      {submitError && <p className="dialog-error" role="alert">{submitError}</p>}
       {request.kind === 'choice' && <div className="dialog-choices">{request.choices?.map((choice) => <button key={choice.id} className={choice.danger ? 'danger-choice' : ''} onClick={() => finish(choice.id)}>{choice.icon && <Codicon name={choice.icon} />}<span><strong>{choice.label}</strong>{choice.description && <small>{choice.description}</small>}</span></button>)}</div>}
-      <footer><button autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={request.kind === 'prompt' && !value.trim()} onClick={submit}>{request.confirmLabel ?? t('Confirm')}</button>}</footer>
+      <footer><button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={submitting || ((request.kind === 'prompt' || request.kind === 'editor') && !value.trim())} onClick={() => void submit()}>{request.confirmLabel ?? t('Confirm')}</button>}</footer>
     </section>
   </div>;
 }

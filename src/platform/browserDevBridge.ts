@@ -301,7 +301,7 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 } : detailFiles;
 
 const initialState: AppStateSnapshot = {
-  schemaVersion: 4, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace],
+  schemaVersion: 6, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace], commitSelections: {},
   settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
   layout: { panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
 };
@@ -336,6 +336,7 @@ export class BrowserDevBridge implements VersionDockBridge {
   send(command: BridgeCommand): void { void this.request(command); }
   async cancelOperation(): Promise<boolean> { return false; }
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
+  async selectDirectory(): Promise<string | null> { return workspace.paths[0] ?? null; }
   async selectExecutable(): Promise<string | null> { return '/usr/local/bin/zed'; }
   async notify(): Promise<boolean> { return false; }
   async openInNewWindow(paths?: string[], _position?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string> {
@@ -408,11 +409,24 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'updateSettings': this.state.settings = structuredClone(command.payload.settings); return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: true } };
       case 'updateLayout': this.state.layout = structuredClone(command.payload.layout); return command.payload.layout;
       case 'workspaceOpen': case 'workspaceRefresh': this.generation += 1; return this.snapshot();
+      case 'initializeRepository': this.generation += 1; return { snapshot: this.snapshot(), repositoryId: this.repositories[0]?.meta.id ?? 'admin' };
+      case 'cloneRepository': return { path: `${command.payload.parent_path}/${command.payload.target_name}` };
+      case 'saveCommitSelections': return command.payload.selections;
+      case 'branchRecovery': return { status: 'completed', target: command.payload.operation.target, stashReference: command.payload.operation.type === 'forceCheckout' ? null : 'stash@{0}', changesRestored: command.payload.operation.type === 'carryChanges', error: null, recoveryHint: null };
+      case 'restoreConflicts': return { restoredPaths: [], failures: [] };
+      case 'providerAccounts': return [];
+      case 'providerGithubBegin': return { flowId: 'demo-flow', userCode: 'DEMO-CODE', verificationUri: 'https://github.com/login/device', expiresAt: new Date(Date.now() + 900000).toISOString(), interval: 5 };
+      case 'providerGithubComplete': throw new Error('GitHub OAuth is unavailable in browser demo');
+      case 'providerGitlabSave': return { id: 'gitlab-demo', provider: 'gitlab', host: command.payload.host, login: 'demo', displayName: 'Demo', secureStorageRef: 'browser-demo' };
+      case 'providerRemove': return true;
+      case 'providerRepositories': return { items: [], page: command.payload.page, hasMore: false };
+      case 'providerNamespaces': return [];
+      case 'publishRepository': return { repository: { id: 'demo', provider: 'github', host: 'https://github.com', name: command.payload.name, fullName: `demo/${command.payload.name}`, cloneUrl: `https://github.com/demo/${command.payload.name}.git`, webUrl: null, defaultBranch: 'main', namespace: null, private: command.payload.visibility === 'private' }, remoteCreated: true, remoteConfigured: true, pushAttempted: command.payload.push, pushed: command.payload.push, failedStage: null, recoveryHint: null, error: null };
       case 'workspaceRemoveRecent': return true;
       case 'repositoryStatus': return this.repositories.find((repo) => repo.meta.id === command.payload.repo_id);
       case 'history': {
         const values = activeHistories[command.payload.repo_id] ?? [];
-        const revision = command.payload.revision?.replace(/^refs\/(?:heads|tags)\//, '');
+        const revision = command.payload.query.revision?.replace(/^refs\/(?:heads|tags)\//, '');
         const head = revision ? values.find((commit) => commit.refs.some((ref) => ref.replace(/^HEAD -> /, '').replace(/^refs\/(?:heads|tags)\//, '').replace(/^tag: /, '') === revision)) : undefined;
         const reachable = new Set<string>();
         const byHash = new Map(values.map((commit) => [commit.hash, commit]));
@@ -424,7 +438,8 @@ export class BrowserDevBridge implements VersionDockBridge {
           pending.push(...(byHash.get(hash)?.parents ?? []));
         }
         const scoped = head ? values.filter((commit) => reachable.has(commit.hash)) : values;
-        const filtered = command.payload.filter ? scoped.filter((commit) => commit.message.toLowerCase().includes(command.payload.filter!.toLowerCase())) : scoped;
+        const query = command.payload.query;
+        const filtered = scoped.filter((commit) => (!query.text || `${commit.hash} ${commit.message} ${commit.author}`.toLowerCase().includes(query.text.toLowerCase())) && (!query.author || commit.author.toLowerCase().includes(query.author.toLowerCase())) && (!query.fromDate || commit.committerDate.slice(0, 10) >= query.fromDate) && (!query.toDate || commit.committerDate.slice(0, 10) <= query.toDate));
         return { commits: filtered.slice(command.payload.skip, command.payload.skip + command.payload.limit), hasMore: false } satisfies HistoryPage;
       }
       case 'historyTopology': return (activeHistories[command.payload.repo_id] ?? []).map(({ repoId, hash, parents, committerDate, refs }) => ({ repoId, hash, parents, committerDate, refs })) satisfies GraphCommitNode[];
@@ -461,11 +476,16 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'ignoreRules': return { directory: command.payload.directory, source: '.gitignore', patterns: [] };
       case 'updateIgnoreRules': return true;
       case 'commit': return activeHistories[command.payload.repo_id]?.[0]?.hash ?? 'browser-demo-commit';
+      case 'recentCommitMessages': return command.payload.repo_ids.flatMap((repoId) => (activeHistories[repoId] ?? []).slice(0, 10).map((commit) => ({ repoId, revision: commit.hash, committedAt: commit.committerDate, message: commit.message }))).slice(0, command.payload.limit);
+      case 'lastCommitMessage': return activeHistories[command.payload.repo_id]?.[0]?.message ?? null;
       case 'batchCommit': return command.payload.targets.map((target) => ({ repoId: target.repoId, commitAttempted: true, committed: true, revision: activeHistories[target.repoId]?.[0]?.hash ?? 'browser-demo-commit', pushAttempted: command.payload.push, pushed: command.payload.push, failedStage: null, recoveryHint: null, error: null }));
       case 'branchCompare': return { base: command.payload.base, target: command.payload.target, baseCommits: [], targetCommits: [], files: activeDetailFiles[command.payload.repo_id] ?? [] };
-      case 'conflictVersions': return { path: command.payload.relative_path, base: '', ours: '', theirs: '', working: '', language: 'text', fingerprint: 'browser-demo', binary: false };
-      case 'sync': case 'branchOperation': case 'tagOperation': case 'stashOperation': case 'shelfOperation':
-      case 'changelistOperation': case 'worktreeOperation': case 'openWorktree': case 'remoteOperation': case 'svnOperation': case 'submoduleOperation': case 'historyOperation': case 'systemOpen':
+      case 'conflictVersions': return { path: command.payload.relative_path, base: 'base', ours: 'ours', theirs: 'theirs', working: '<<<<<<< OURS\nours\n||||||| BASE\nbase\n=======\ntheirs\n>>>>>>> THEIRS', markerContent: '<<<<<<< OURS\nours\n||||||| BASE\nbase\n=======\ntheirs\n>>>>>>> THEIRS', conflicts: [{ index: 0, oursLabel: 'OURS', theirsLabel: 'THEIRS', oursLines: ['ours'], baseLines: ['base'], theirsLines: ['theirs'], startLine: 0, endLine: 6 }], oursLabel: 'OURS', theirsLabel: 'THEIRS', language: 'text', fingerprint: 'browser-demo', binary: false };
+      case 'sync': return { output: '', update: command.payload.action === 'pull' || command.payload.action === 'update' ? { repoId: command.payload.repo_id, beforeRevision: 'before', afterRevision: 'after', beforeStatus: 'before-status', afterStatus: 'after-status', summary: { kind: 'fastForward', commitCount: 1, fileCount: 1, containsMerge: false, detail: { commits: (activeHistories[command.payload.repo_id] ?? []).slice(0, 1), files: activeDetailFiles[command.payload.repo_id] ?? [] } }, summaryError: null } : null };
+      case 'openWorktree': return command.payload.path;
+      case 'branchOperation': return { completed: true, conflicted: false };
+      case 'tagOperation': case 'stashOperation': case 'shelfOperation':
+      case 'changelistOperation': case 'worktreeOperation': case 'remoteOperation': case 'svnOperation': case 'submoduleOperation': case 'historyOperation': case 'systemOpen':
       case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'windowSetSize': return true;
       case 'changelists': return [];
     }

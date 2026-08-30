@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
-import { capabilityAvailable, capabilityReason, isOperationActive, useAppStore, type BatchCommitReport } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, isOperationActive, isOperationActiveForRepositories, useAppStore, type BatchCommitReport } from '../store/appStore';
 import { useI18n } from '../i18n';
-import type { FileChange, RepositoryStatus } from '../bindings/generated';
+import type { FileChange, RecentCommitMessage, RepositoryStatus } from '../bindings/generated';
 import { StashPanel } from './StashPanel';
 import { ShelfPanel } from './ShelfPanel';
 import { buildFileTree, type FileTreeNode } from './fileTree';
@@ -18,8 +18,15 @@ import { IgnoreRulesPanel } from './IgnoreRulesPanel';
 import { ChangelistManager } from './ChangelistManager';
 import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { ConflictBanner } from './ConflictBanner';
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 
 const emptyRepositories: RepositoryStatus[] = [];
+const batchFailedStageLabels: Record<string, string> = {
+  prepare: 'Preparation',
+  identity: 'Identity check',
+  commit: 'Commit',
+  push: 'Push',
+};
 
 function BatchCommitReportDialog({ report, repositories }: { report: BatchCommitReport; repositories: RepositoryStatus[] }) {
   const retry = useAppStore((state) => state.retryBatchResult);
@@ -32,9 +39,12 @@ function BatchCommitReportDialog({ report, repositories }: { report: BatchCommit
         {report.results.map((result) => {
           const name = repositories.find((repo) => repo.meta.id === result.repoId)?.meta.name ?? result.repoId;
           const complete = result.committed && (!result.pushAttempted || result.pushed);
+          const failedStage = result.failedStage
+            ? t('Failed stage: {0}', t(batchFailedStageLabels[result.failedStage] ?? result.failedStage))
+            : undefined;
           return <article key={result.repoId} className={complete ? 'success' : 'failed'}>
             <Codicon name={complete ? 'pass-filled' : 'error'} />
-            <div><strong>{name}</strong><span>{result.committed ? `${t('Committed')} ${result.revision?.slice(0, 12) ?? ''}` : t('Commit failed')}</span>{result.pushAttempted && <span>{result.pushed ? t('Push succeeded') : t('Push failed')}</span>}{result.error && <code>{result.error.message}</code>}{result.recoveryHint && <small>{t(result.recoveryHint)}</small>}</div>
+            <div><strong>{name}</strong><span>{result.committed ? `${t('Committed')} ${result.revision?.slice(0, 12) ?? ''}` : t('Commit failed')}</span>{result.pushAttempted && <span>{result.pushed ? t('Push succeeded') : t('Push failed')}</span>}{failedStage && <span>{failedStage}</span>}{result.error && <code>{result.error.message}</code>}{result.recoveryHint && <small>{t(result.recoveryHint)}</small>}</div>
             {!complete && <button disabled={isOperationActive(useAppStore.getState().operations, { repositoryId: result.repoId, domain: result.committed ? 'sync' : 'commit' })} onClick={() => void retry(result.repoId)}>{t(result.committed ? 'Retry push' : 'Retry repository')}</button>}
           </article>;
         })}
@@ -79,6 +89,7 @@ function TreeNode({ node, depth, repo, selected, setFiles, onFile, onContext, on
 
 function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContext, onRepoContext, viewMode, expansion }: { repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; onRepoContext: (event: React.MouseEvent) => void; viewMode: 'tree' | 'list'; expansion: ExpansionCommand }) {
   const { t } = useI18n();
+  const openWorkingChanges = useAppStore((state) => state.openWorkingChanges);
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>(() => ({ sequence: 0, expanded: repo.files.length > 0 }));
   const previousFileCount = useRef(repo.files.length);
   const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
@@ -98,6 +109,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
         <SelectionCheckbox label={repo.meta.name} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!repo.files.length} onChange={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), !allSelected)} />
         <button title={repo.meta.name} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><span className="branch-chip" title={repo.branch || repo.revision} style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}><Codicon name="git-branch" /><span className="branch-name">{repo.branch || repo.revision}</span></span></button>
         {(repo.ahead > 0 || repo.behind > 0) && <span className="repo-sync-state">{repo.ahead > 0 && `↑${repo.ahead}`}{repo.behind > 0 && ` ↓${repo.behind}`}</span>}
+        {repo.files.length > 0 && <button className="repo-open-changes" title={t('Open All Changes')} onClick={() => openWorkingChanges(repo.meta.id)}><Codicon name="diff-multiple" /></button>}
         {repo.files.length > 0 && <b>{selectedCount}/{repo.files.length}</b>}
       </div>
       {expanded && !repo.files.length && <div className="repo-no-changes">{t('No changes')}</div>}
@@ -146,9 +158,10 @@ export function CommitPanel() {
   const openMerge = useAppStore((state) => state.openMerge);
   const resolveConflict = useAppStore((state) => state.resolveConflict);
   const abortRepositoryOperation = useAppStore((state) => state.abortRepositoryOperation);
-  const busy = useAppStore((state) => isOperationActive(state.operations, {
+  const operations = useAppStore((state) => state.operations);
+  const workspaceBusy = useAppStore((state) => isOperationActive(state.operations, {
     workspaceId: state.snapshot?.workspace.id,
-    domain: ['commit', 'workspace'],
+    domain: 'workspace',
   }));
   const viewMode = useAppStore((state) => (state.bootstrap?.state.layout?.fileViewMode ?? state.bootstrap?.state.fileViewMode) === 'list' ? 'list' : 'tree');
   const setFileViewMode = useAppStore((state) => state.setFileViewMode);
@@ -176,9 +189,18 @@ export function CommitPanel() {
   const subtrees = useAppStore((state) => state.subtrees);
   const worktrees = useAppStore((state) => state.worktrees);
   const branchWorkingDiffOpen = useAppStore((state) => state.worktreeDiff?.source === 'repository');
-  const [selected, setSelected] = useState(new Set<string>());
-  const [message, setMessage] = useState('');
-  const [amendRepos, setAmendRepos] = useState(new Set<string>());
+  const commitSelections = useAppStore((state) => state.commitSelections);
+  const setCommitSelection = useAppStore((state) => state.setCommitSelection);
+  const selected = useMemo(() => new Set(Object.entries(commitSelections).flatMap(([repoId, paths]) => paths.map((path) => `${repoId}\0${path}`))), [commitSelections]);
+  const message = useAppStore((state) => state.commitMessage);
+  const setMessage = useAppStore((state) => state.setCommitMessage);
+  const mergeMessageSuggestion = useAppStore((state) => state.mergeMessageSuggestion);
+  const applyMergeMessageSuggestion = useAppStore((state) => state.applyMergeMessageSuggestion);
+  const dismissMergeMessageSuggestion = useAppStore((state) => state.dismissMergeMessageSuggestion);
+  const amendRepoIds = useAppStore((state) => state.amendRepoIds);
+  const setAmendRepoIds = useAppStore((state) => state.setAmendRepoIds);
+  const amendRepos = useMemo(() => new Set(amendRepoIds), [amendRepoIds]);
+  const openWorkingChanges = useAppStore((state) => state.openWorkingChanges);
   const [commitMenu, setCommitMenu] = useState(false);
   const [saveMenu, setSaveMenu] = useState(false);
   const [viewMenu, setViewMenu] = useState(false);
@@ -192,6 +214,11 @@ export function CommitPanel() {
   const [shelfExpansion, setShelfExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: false });
   const [stashExpansion, setStashExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: false });
   const [textareaHeight, setTextareaHeight] = useState(54);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyDialog = useDialogFocusTrap(historyOpen, () => setHistoryOpen(false));
+  const [historyMessages, setHistoryMessages] = useState<RecentCommitMessage[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const messageRequest = useRef<AbortController>();
   const [context, setContext] = useState<ChangeContext>();
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
@@ -200,6 +227,14 @@ export function CommitPanel() {
   const repos = snapshot?.repositories ?? emptyRepositories;
   const totalChanges = repos.reduce((sum, repo) => sum + repo.files.length, 0);
   const gitRepos = useMemo(() => repos.filter((repo) => repo.meta.kind === 'git'), [repos]);
+  const fetchTargets = gitRepos.filter((repo) => !isOperationActiveForRepositories(operations, [repo.meta.id], {
+    workspaceId: snapshot?.workspace.id,
+    domain: 'sync',
+  }));
+  const allRepoCommitBusy = workspaceBusy || isOperationActiveForRepositories(operations, repos.map((repo) => repo.meta.id), {
+    workspaceId: snapshot?.workspace.id,
+    domain: 'commit',
+  });
   const unpushedCommits = useAppStore((state) => state.unpushedCommits);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const stashCount = useMemo(() => gitRepos.reduce((sum, repo) => sum + (stashes[repo.meta.id]?.length ?? 0), 0), [gitRepos, stashes]);
@@ -212,12 +247,49 @@ export function CommitPanel() {
     return sum + (unpushedCommits[r.meta.id]?.length ?? (r.ahead || 0));
   }, 0), [branchesByRepo, gitRepos, unpushedCommits]);
   const activeOperationRepo = repos.find((repo) => repo.meta.kind === 'git' && repo.operation);
+  const restoreConflicts = useAppStore((state) => state.restoreConflicts);
+  const restorableConflictRepoIds = repos.filter((repo) => repo.meta.kind === 'git' && !repo.operation && (repo.conflicts > 0 || repo.files.some((file) => file.conflicted))).map((repo) => repo.meta.id);
   const selectedByRepo = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const key of selected) { const [repoId, path] = key.split('\0'); map.set(repoId, [...(map.get(repoId) ?? []), path]); }
     return map;
   }, [selected]);
   const commitTargets = repos.filter((repo) => (selectedByRepo.get(repo.meta.id)?.length ?? 0) > 0);
+  const commitTargetKey = commitTargets.map((repo) => repo.meta.id).join('\0');
+  const recentCommitMessages = useAppStore((state) => state.recentCommitMessages);
+  const lastCommitMessage = useAppStore((state) => state.lastCommitMessage);
+  const openMessageHistory = async () => {
+    if (!commitTargets.length) return;
+    messageRequest.current?.abort();
+    const controller = new AbortController();
+    messageRequest.current = controller;
+    setHistoryOpen(true); setHistoryLoading(true); setHistoryMessages([]);
+    try { const values = await recentCommitMessages(commitTargets.map((repo) => repo.meta.id), controller.signal); if (!controller.signal.aborted && messageRequest.current === controller) setHistoryMessages(values); }
+    catch { /* store handles non-cancellation errors */ }
+    finally { if (!controller.signal.aborted) setHistoryLoading(false); }
+  };
+  const fillLastMessage = async () => {
+    if (!commitTargets.length) return;
+    let repoId = commitTargets[0].meta.id;
+    if (commitTargets.length > 1) {
+      const selected = await choiceDialog({ title: t('Use Last Commit Message'), message: t('Select a repository.'), choices: commitTargets.map((repo) => ({ id: repo.meta.id, label: repo.meta.name, icon: 'repo' })) });
+      if (!selected) return;
+      repoId = selected;
+    }
+    messageRequest.current?.abort();
+    const controller = new AbortController(); messageRequest.current = controller;
+    const value = await lastCommitMessage(repoId, controller.signal);
+    if (!controller.signal.aborted && messageRequest.current === controller) { if (value) setMessage(value); else useAppStore.setState({ notice: t('No commit message is available for this repository.') }); }
+  };
+  useEffect(() => () => messageRequest.current?.abort(), [snapshot?.workspace.id, commitTargetKey]);
+  const commitBusy = workspaceBusy || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
+    workspaceId: snapshot?.workspace.id,
+    domain: ['commit', 'sync'],
+  });
+  const saveBusy = workspaceBusy || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
+    workspaceId: snapshot?.workspace.id,
+    domain: ['stash', 'shelf'],
+  });
   const commitUnavailable = commitTargets.find((repo) => !capabilityAvailable(repo.capabilities, 'commit', true));
   const pushUnavailable = commitTargets.find((repo) => repo.meta.kind === 'git' && !capabilityAvailable(repo.capabilities, 'syncPush', true));
   const commitDisabledReason = commitUnavailable
@@ -225,16 +297,9 @@ export function CommitPanel() {
     : pushUnavailable
       ? capabilityReason(pushUnavailable.capabilities, 'syncPush')
       : undefined;
-  const setFiles = (repoId: string, paths: string[], value: boolean) => setSelected((current) => {
-    const next = new Set(current);
-    for (const path of paths) {
-      const key = `${repoId}\0${path}`;
-      if (value) next.add(key); else next.delete(key);
-    }
-    return next;
-  });
+  const setFiles = (repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value);
   const doCommit = async (push: boolean) => {
-    if (!message.trim() || !commitTargets.length || commitUnavailable || (push && pushUnavailable)) return;
+    if (!message.trim() || !commitTargets.length || commitBusy || commitUnavailable || (push && pushUnavailable)) return;
     const untracked = commitTargets.flatMap((repo) => repo.files.filter((file) => file.status === 'untracked' && (selectedByRepo.get(repo.meta.id) ?? []).includes(file.path)).map((file) => `${repo.meta.name}: ${file.path}`));
     if (promptBeforeAddingUntracked && untracked.length > 0 && !await confirmDialog({ title: t('Prompt before adding untracked files'), message: untracked.join('\n'), confirmLabel: t('Commit') })) return;
     await commitMany(commitTargets.map((repo) => {
@@ -249,12 +314,13 @@ export function CommitPanel() {
     const failedRepoIds = new Set(useAppStore.getState().batchCommitReport?.results.filter((result) => result.error).map((result) => result.repoId) ?? []);
     if (failedRepoIds.size === 0) {
       setMessage('');
-      setSelected(new Set());
+      setAmendRepoIds([]);
     } else {
-      setSelected((current) => new Set([...current].filter((key) => failedRepoIds.has(key.split('\0', 1)[0]))));
+      setAmendRepoIds(amendRepoIds.filter((repoId) => failedRepoIds.has(repoId)));
     }
   };
   const doSave = async (kind: 'stash' | 'shelf') => {
+    if (saveBusy) return;
     for (const repo of commitTargets.filter((item) => item.meta.kind === 'git')) {
       const paths = selectedByRepo.get(repo.meta.id) ?? [];
       if (kind === 'stash') await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: message.trim() || t('WIP stash'), paths, include_untracked: true });
@@ -273,7 +339,7 @@ export function CommitPanel() {
     ].filter(Boolean).join('\n\n');
     if (!await confirmDialog({ title: t('Rollback'), message, danger: true })) return;
     for (const repo of repos) await discard(repo.meta.id, repo.files.map((file) => file.path));
-    setSelected(new Set());
+    for (const repo of repos) setFiles(repo.meta.id, repo.files.map((file) => file.path), false);
   };
   const confirmDiscard = async (repo: RepositoryStatus, files: FileChange[]) => {
     const tracked = files.filter((file) => file.status !== 'untracked');
@@ -320,6 +386,8 @@ export function CommitPanel() {
     }
     if (kind === 'file' && file) items.push(
       { id: file.staged && !file.unstaged ? 'diff-staged' : 'diff-unstaged', label: t('Show Diff'), icon: 'diff' },
+      { id: 'history', label: t('File history'), icon: 'history' },
+      { id: 'commit-history', label: t('Show in commit history'), icon: 'git-commit' },
       { id: 'open', label: t('Open file'), icon: 'go-to-file' },
       { id: 'reveal', label: t('Reveal in File Manager'), icon: 'folder-opened' },
     );
@@ -334,6 +402,7 @@ export function CommitPanel() {
     );
     if (kind === 'repo') items.push(
       { separator: true },
+      { id: 'open-all-changes', label: t('Open All Changes'), icon: 'diff-multiple' },
       { id: 'manage', label: t('Manage Repository'), icon: 'git-branch' },
       { id: 'view-log', label: t(git ? 'View Git Log' : 'View SVN Log'), icon: 'git-commit' },
       { separator: true },
@@ -355,6 +424,7 @@ export function CommitPanel() {
       case 'diff-unstaged': if (file) await openDiff(repo.meta.id, file.path, false); break;
       case 'diff-staged': if (file) await openDiff(repo.meta.id, file.path, true); break;
       case 'history': if (file) openFileHistory(repo.meta.id, file.path); break;
+      case 'commit-history': if (file) await useAppStore.getState().openHistoryForPath(repo.meta.id, file.path); break;
       case 'resolve': if (file) { const conflict = conflicts.find((item) => item.repoId === repo.meta.id && item.path === file.path); if (conflict) await openMerge(conflict); } break;
       case 'accept-yours': if (file) { const conflict = conflicts.find((item) => item.repoId === repo.meta.id && item.path === file.path); if (conflict) await resolveConflict(conflict, 'mine'); } break;
       case 'accept-theirs': if (file) { const conflict = conflicts.find((item) => item.repoId === repo.meta.id && item.path === file.path); if (conflict) await resolveConflict(conflict, 'theirs'); } break;
@@ -409,6 +479,7 @@ export function CommitPanel() {
         break;
       }
       case 'delete': await confirmDelete(repo, files); break;
+      case 'open-all-changes': openWorkingChanges(repo.meta.id); break;
       case 'manage': openIdentityPanel(repo.meta.id); break;
       case 'view-log': await selectRepo(repo.meta.id, true); break;
       case 'hide-repo': {
@@ -466,7 +537,7 @@ export function CommitPanel() {
     };
   }, [commitMenu, saveMenu, viewMenu]);
 
-  const panelToolbar = <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span /><button disabled={busy} title={t('Fetch')} onClick={() => void Promise.all(gitRepos.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>;
+  const panelToolbar = <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span /><button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void Promise.all(fetchTargets.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>;
   const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}{batchCommitReport && snapshot && <BatchCommitReportDialog report={batchCommitReport} repositories={repos} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
@@ -476,9 +547,9 @@ export function CommitPanel() {
       {panelToolbar}
       {panelOverlays}
       <div className="commit-commandbar">
-        <button disabled={busy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button>
+        <button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button>
         {tab === 'changes' && <>
-          <button disabled={!repos.some((repo) => repo.files.length) || busy} title={t('Rollback')} onClick={() => void discardAll()}><Codicon name="discard" /></button>
+          <button disabled={!repos.some((repo) => repo.files.length) || allRepoCommitBusy} title={t('Rollback')} onClick={() => void discardAll()}><Codicon name="discard" /></button>
           <button title={t('Expand all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: true }))}><Codicon name="expand-all" /></button>
           <button title={t('Collapse all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button>
           <div ref={viewMenuRef} className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={viewMode === 'list' ? 'selected' : ''} onClick={() => { setFileViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{viewMode === 'list' && <Codicon name="check" />}</button><button className={viewMode === 'tree' ? 'selected' : ''} onClick={() => { setFileViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{viewMode === 'tree' && <Codicon name="check" />}</button></div>}</div>
@@ -548,6 +619,19 @@ export function CommitPanel() {
                   },
                 ]
               : []),
+            ...(restorableConflictRepoIds.length
+              ? [{
+                  id: 'restore-current',
+                  label: t('Restore Current Branch'),
+                  title: t('Discard conflicted index and working tree changes'),
+                  tone: 'danger' as const,
+                  onClick: () => {
+                    void confirmDialog({ title: t('Restore Current Branch?'), message: t('All conflicted files without an active Git operation will be restored. This cannot be undone.'), danger: true }).then((yes) => {
+                      if (yes) return restoreConflicts(restorableConflictRepoIds);
+                    });
+                  },
+                }]
+              : []),
           ]}
         />
       ) : activeOperationRepo?.operation ? (
@@ -580,15 +664,22 @@ export function CommitPanel() {
       <div className="commit-form">
         <div className="commit-resize-grip" role="separator" tabIndex={0} aria-label={t('Resize commit message')} aria-orientation="horizontal" aria-valuemin={52} aria-valuemax={Math.round(window.innerHeight * 0.55)} aria-valuenow={Math.round(textareaHeight)} onPointerDown={startTextareaResize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTextareaHeight((value) => Math.max(52, Math.min(window.innerHeight * 0.55, value + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>
         {repos.length > 1 && <div className="commit-targets">{commitTargets.length === 0 ? <span>{t('No files selected')}</span> : commitTargets.map((repo) => <em key={repo.meta.id} style={{ color: repo.meta.color, background: `${repo.meta.color}28`, borderColor: `${repo.meta.color}60` }}><button title={t('Remove {0}', repo.meta.name)} onClick={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), false)}><Codicon name="close" /></button>{repo.meta.name}<b>{selectedByRepo.get(repo.meta.id)?.length}</b></em>)}</div>}
-        {commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(commitTargets[0].meta.id)} onChange={() => setAmendRepos((current) => { const next = new Set(current); if (next.has(commitTargets[0].meta.id)) next.delete(commitTargets[0].meta.id); else next.add(commitTargets[0].meta.id); return next; })} />{t('Amend')}</label></div>}
+        {commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(commitTargets[0].meta.id)} onChange={() => { const next = new Set(amendRepos); if (next.has(commitTargets[0].meta.id)) next.delete(commitTargets[0].meta.id); else next.add(commitTargets[0].meta.id); setAmendRepoIds([...next]); }} />{t('Amend')}</label></div>}
+        <div className="commit-message-tools"><button type="button" disabled={!commitTargets.length} title={t('View commit message history')} onClick={() => void openMessageHistory()}><Codicon name="history" /></button><button type="button" disabled={!commitTargets.length} title={t('Use Last Commit Message')} onClick={() => void fillLastMessage()}><Codicon name="arrow-circle-down" /></button></div>
+        {mergeMessageSuggestion && <div className="merge-message-suggestion" role="status"><span>{t('Merge message suggestion')}: {mergeMessageSuggestion}</span><button type="button" onClick={applyMergeMessageSuggestion}>{t('Use Merge Message')}</button><button type="button" onClick={dismissMergeMessageSuggestion}>{t('Ignore')}</button></div>}
         <textarea style={{ height: textareaHeight }} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(defaultCommitAction === 'commitAndPush'); }} />
         <div className="commit-actions">
-          <div ref={saveMenuRef} className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</button><button disabled={!message.trim() || !commitTargets.length || busy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu"><button onClick={() => { void doSave('stash'); setSaveMenu(false); }}><Codicon name="save" />{t('Stash changes')}</button><button onClick={() => { void doSave('shelf'); setSaveMenu(false); }}><Codicon name="archive" />{t('Shelve changes')}</button></div>}</div>
-          <div ref={commitMenuRef} className="split-button commit-action"><button title={commitDisabledReason} disabled={!message.trim() || !commitTargets.length || busy || Boolean(commitUnavailable) || (defaultCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(defaultCommitAction === 'commitAndPush')}><Codicon name={defaultCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(defaultCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button><button disabled={!message.trim() || !commitTargets.length || busy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button disabled={Boolean(commitUnavailable)} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : undefined} onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button disabled={Boolean(commitUnavailable || pushUnavailable)} title={commitDisabledReason} onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
+          <div ref={saveMenuRef} className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</button><button disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu"><button disabled={saveBusy} onClick={() => { void doSave('stash'); setSaveMenu(false); }}><Codicon name="save" />{t('Stash changes')}</button><button disabled={saveBusy} onClick={() => { void doSave('shelf'); setSaveMenu(false); }}><Codicon name="archive" />{t('Shelve changes')}</button></div>}</div>
+          <div ref={commitMenuRef} className="split-button commit-action"><button title={commitDisabledReason} disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable) || (defaultCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(defaultCommitAction === 'commitAndPush')}><Codicon name={defaultCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(defaultCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button><button disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button disabled={commitBusy || Boolean(commitUnavailable)} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : undefined} onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button disabled={commitBusy || Boolean(commitUnavailable || pushUnavailable)} title={commitDisabledReason} onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
         </div>
       </div>
       {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context)} onSelect={(id) => void handleContextAction(id)} onClose={() => setContext(undefined)} />}
       {changelistManagerRepoId && <ChangelistManager repoId={changelistManagerRepoId} close={() => setChangelistManagerRepoId(undefined)} />}
+      {historyOpen && <div className="dialog-backdrop" role="presentation"><section ref={historyDialog} className="app-dialog commit-message-history-dialog" role="dialog" aria-modal="true" aria-label={t('Commit Message History')}>
+        <header><Codicon name="history" /><strong>{t('Commit Message History')}</strong></header>
+        <div className="dialog-choice-list">{historyLoading ? <span>{t('Loading…')}</span> : historyMessages.length ? historyMessages.map((item) => <button key={`${item.repoId}:${item.revision}`} type="button" onClick={() => { setMessage(item.message); setHistoryOpen(false); messageRequest.current?.abort(); }}><strong>{item.message.split('\n')[0]}</strong><small>{item.committedAt}</small></button>) : <span>{t('No commit message history')}</span>}</div>
+        <footer><button type="button" onClick={() => { setHistoryOpen(false); messageRequest.current?.abort(); }}>{t('Close')}</button></footer>
+      </section></div>}
       </>}
     </aside>
   );

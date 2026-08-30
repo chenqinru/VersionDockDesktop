@@ -966,10 +966,13 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   const loadUnpushedCommits = useAppStore((state) => state.loadUnpushedCommits);
   const sync = useAppStore((state) => state.sync);
   const openDiff = useAppStore((state) => state.openDiff);
-  const busy = useAppStore((state) => repos.some((repo) => isOperationActive(state.operations, {
-    repositoryId: repo.meta.id,
+  const operations = useAppStore((state) => state.operations);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
+  const isRepoBusy = (repoId: string) => isOperationActive(operations, {
+    workspaceId,
+    repositoryId: repoId,
     domain: 'sync',
-  })));
+  });
   const { t } = useI18n();
   const [checked, setChecked] = useState<Set<string>>(() => new Set<string>());
   const [pushButtonHovered, setPushButtonHovered] = useState(false);
@@ -1074,7 +1077,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   };
 
   const handlePush = async (targets: RepositoryStatus[]) => {
-    if (busy || targets.length === 0) return;
+    if (targets.length === 0 || targets.some((repo) => isRepoBusy(repo.meta.id))) return;
     for (const repo of targets) {
       await sync(repo.meta.id, 'push');
     }
@@ -1097,6 +1100,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   if (isSingleRepo) {
     const solo = repos[0];
     const canPush = canPushRepo(solo);
+    const soloBusy = isRepoBusy(solo.meta.id);
     const pushReason = capabilityReason(solo.capabilities, 'syncPush');
     const branch = branchesByRepo[solo.meta.id]?.find((item) => item.current);
     return (
@@ -1118,7 +1122,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
           />
         </div>
         <div style={css.footer}>
-          <button data-primary-action-btn="" title={!canPush ? pushReason : undefined} style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush([solo])} {...pushButtonFeedback}>
+          <button data-primary-action-btn="" title={!canPush ? pushReason : undefined} style={css.pushBtn(canPush && !soloBusy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || soloBusy} onClick={() => void handlePush([solo])} {...pushButtonFeedback}>
             <Codicon name="cloud-upload" style={{ marginRight: '6px' }} />
             {pushButtonLabel([solo])}
           </button>
@@ -1130,6 +1134,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   const checkedRepos = repos.filter((repo) => checked.has(repo.meta.id) && canPushRepo(repo));
   const pushableChecked = checkedRepos;
   const canPush = pushableChecked.length > 0;
+  const batchBusy = pushableChecked.some((repo) => isRepoBusy(repo.meta.id));
   const batchPushReason = checkedRepos.length === 0
     ? repos.map((repo) => capabilityReason(repo.capabilities, 'syncPush')).find(Boolean)
     : undefined;
@@ -1179,7 +1184,7 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
             })}
           </div>
         )}
-        <button data-primary-action-btn="" title={!canPush ? batchPushReason : undefined} style={css.pushBtn(canPush && !busy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || busy} onClick={() => void handlePush(pushableChecked)} {...pushButtonFeedback}>
+        <button data-primary-action-btn="" title={!canPush ? batchPushReason : undefined} style={css.pushBtn(canPush && !batchBusy, pushButtonHovered, pushButtonPressed)} disabled={!canPush || batchBusy} onClick={() => void handlePush(pushableChecked)} {...pushButtonFeedback}>
           <Codicon name="cloud-upload" style={{ marginRight: '6px' }} />
           {pushButtonLabel(pushableChecked)}
         </button>

@@ -72,6 +72,18 @@ pub async fn run(
     timeout: Duration,
     cancellation: &CancellationToken,
 ) -> Result<CommandOutput, DesktopError> {
+    run_with_env(program, args, cwd, stdin, timeout, cancellation, &[]).await
+}
+
+pub async fn run_with_env(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    secret_env: &[(String, String)],
+) -> Result<CommandOutput, DesktopError> {
     let resolved = resolve_executable(program);
     let mut command = Command::new(&resolved);
     command
@@ -85,6 +97,7 @@ pub async fn run(
         } else {
             Stdio::null()
         });
+    command.envs(secret_env.iter().map(|(key, value)| (key, value)));
 
     #[cfg(unix)]
     command.process_group(0);
@@ -249,6 +262,16 @@ fn classify_failure(program: &str, stderr: &str) -> (&'static str, Option<&'stat
             Some("Configure an upstream branch before synchronizing"),
         );
     }
+    if lower.contains("would be overwritten by checkout")
+        || lower.contains("would be overwritten by merge")
+        || lower.contains("your local changes to the following files would be overwritten")
+        || lower.contains("please commit your changes or stash them")
+    {
+        return (
+            "DIRTY_WORKTREE",
+            Some("Commit, stash, carry, or discard local changes before retrying"),
+        );
+    }
     if lower.contains("non-fast-forward")
         || lower.contains("fetch first")
         || lower.contains("rejected")
@@ -391,6 +414,13 @@ mod tests {
             (
                 "REMOTE_REJECTED",
                 Some("Fetch remote changes and review branch divergence before retrying")
+            )
+        );
+        assert_eq!(
+            classify_failure("git", "Your local changes would be overwritten by checkout"),
+            (
+                "DIRTY_WORKTREE",
+                Some("Commit, stash, carry, or discard local changes before retrying")
             )
         );
     }

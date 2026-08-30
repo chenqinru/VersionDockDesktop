@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReactNode } from 'react';
 import type { RepositoryStatus, WorkspaceSnapshot } from '../bindings/generated';
@@ -53,6 +53,40 @@ describe('V3 identity and file history', () => {
 
     expect(await screen.findByText('Binary diff cannot be displayed')).toBeInTheDocument();
     expect(screen.getAllByText('assets/logo.png').length).toBeGreaterThan(0);
+  });
+
+  it('cancels load-more and rejects its stale page when the panel closes and changes context', async () => {
+    let loadMoreSignal: AbortSignal | undefined;
+    let resolveLoadMore: ((page: { entries: Array<Record<string, unknown>>; nextCursor: null }) => void) | undefined;
+    const pendingLoadMore = new Promise<{ entries: Array<Record<string, unknown>>; nextCursor: null }>((resolve) => { resolveLoadMore = resolve; });
+    const entry = (path: string, revision: string, message: string) => ({ revision, previousRevision: null, path, previousPath: null, author: 'Tester', date: '2026-08-23', message, status: 'M' });
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'fileHistory') {
+        if (command.payload.cursor) {
+          loadMoreSignal = options?.signal;
+          return pendingLoadMore;
+        }
+        return command.payload.relative_path === 'src/second.ts'
+          ? { entries: [entry('src/second.ts', 'second000000', 'second context')], nextCursor: null }
+          : { entries: [entry('src/first.ts', 'first0000000', 'first context')], nextCursor: 'next-page' };
+      }
+      if (command.type === 'fileRevisionContent') return { revision: command.payload.revision, path: command.payload.relative_path, content: command.payload.relative_path, binary: false, truncated: false };
+      return { path: '', content: '', language: 'typescript', binary: false, truncated: false, lineCount: 0 };
+    });
+    useAppStore.setState({ bridge, snapshot, fileHistoryTarget: { repoId: 'git', path: 'src/first.ts' } });
+    render(provider(bridge, <FileHistoryPanel />));
+    await screen.findByText('first context');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load more' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await waitFor(() => expect(loadMoreSignal).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(loadMoreSignal?.aborted).toBe(true);
+
+    act(() => useAppStore.setState({ fileHistoryTarget: { repoId: 'git', path: 'src/second.ts' } }));
+    await screen.findByText('second context');
+    await act(async () => resolveLoadMore?.({ entries: [entry('src/first.ts', 'stale0000000', 'stale page')], nextCursor: null }));
+    expect(screen.queryByText('stale page')).not.toBeInTheDocument();
   });
 
   it('shows the effective Git identity and persists profile selection through the Bridge', async () => {

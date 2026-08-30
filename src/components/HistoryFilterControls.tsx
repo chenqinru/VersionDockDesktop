@@ -55,7 +55,7 @@ export function ToggleFilter({ icon, leading, label, active, open, onClick }: {
   </button>;
 }
 
-export function FilterPopover({ title, values, selected, onSelect, onClear, query, onQuery }: {
+export function FilterPopover({ title, values, selected, onSelect, onClear, query, onQuery, allowCustom }: {
   title: string;
   values: HistoryFilterOption[];
   selected: string;
@@ -63,6 +63,7 @@ export function FilterPopover({ title, values, selected, onSelect, onClear, quer
   onClear: () => void;
   query?: string;
   onQuery?: (value: string) => void;
+  allowCustom?: boolean;
 }) {
   const { t } = useI18n();
   const displayed = query?.trim()
@@ -72,7 +73,7 @@ export function FilterPopover({ title, values, selected, onSelect, onClear, quer
   const allLabel = title === t('Author') ? t('All authors') : title === t('Repository') ? t('All repositories') : t('All branches & tags');
   return <div className="filter-popover" data-selection-mode="single">
     <header><strong>{title}</strong><button type="button" disabled={!selected} onClick={onClear}>{t('Clear')}</button></header>
-    {onQuery && <label className="popover-search"><Codicon name="search" /><input autoFocus value={query ?? ''} onChange={(event) => onQuery(event.target.value)} placeholder={t('Filter…')} /></label>}
+    {onQuery && <label className="popover-search"><Codicon name="search" /><input autoFocus value={query ?? ''} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => { if (allowCustom && event.key === 'Enter' && query?.trim()) onSelect(query.trim()); }} placeholder={allowCustom ? t('Type an author and press Enter…') : t('Filter…')} /></label>}
     <div className="filter-options">
       <label><input name={radioGroup} aria-label={allLabel} type="radio" checked={!selected} onChange={onClear} /><span>{allLabel}</span>{!selected && <Codicon name="check" />}</label>
       {displayed.map((value) => <label key={value.id} title={value.detail}>

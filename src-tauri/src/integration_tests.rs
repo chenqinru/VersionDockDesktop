@@ -5,9 +5,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     models::{
-        BranchOperation, CommitPathOperationEntry, ConflictChoice, HistoryOperation,
-        RemoteOperation, RepositoryMeta, StashOperation, SubmoduleOperation, SubtreeOperation,
-        SubtreeState, SvnOperation, SyncAction, TagOperation, UnpushedOperation, VcsKind,
+        BranchOperation, BranchRecoveryOperation, BranchRecoveryStatus, CommitPathOperationEntry,
+        ConflictChoice, HistoryOperation, HistoryQuery, RemoteOperation, RepositoryMeta,
+        StashOperation, SubmoduleOperation, SubtreeOperation, SubtreeState, SvnOperation,
+        SyncAction, TagOperation, UnpushedOperation, VcsKind,
     },
     shelf, vcs, workspace,
 };
@@ -24,6 +25,212 @@ fn available(program: &str) -> bool {
         "required integration-test tool is unavailable: {program}"
     );
     available
+}
+
+#[tokio::test]
+async fn v5_init_clone_commit_messages_and_structured_history_are_real() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let source = root.path().join("源 仓库");
+    std::fs::create_dir(&source).unwrap();
+    let token = CancellationToken::new();
+    vcs::initialize_repository(&source, &token).await.unwrap();
+    command("git", &["config", "user.name", "Ada Lovelace"], &source);
+    command(
+        "git",
+        &["config", "user.email", "ada@example.test"],
+        &source,
+    );
+    std::fs::write(source.join("中文 file.txt"), "needle body\n").unwrap();
+    command("git", &["add", "."], &source);
+    command(
+        "git",
+        &["commit", "-m", "subject line", "-m", "searchable body"],
+        &source,
+    );
+    let source_repo = repo(&source, VcsKind::Git);
+    let messages = vcs::recent_commit_messages(&source_repo, &token)
+        .await
+        .unwrap();
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].message.contains("searchable body"));
+    assert_eq!(
+        vcs::last_commit_message(&source_repo, &token)
+            .await
+            .unwrap(),
+        Some(messages[0].message.clone())
+    );
+    let page = vcs::history(
+        &source_repo,
+        0,
+        10,
+        HistoryQuery {
+            text: Some("searchable body".into()),
+            author: Some("Ada".into()),
+            path: Some("中文 file.txt".into()),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(page.commits.len(), 1);
+
+    let clones = root.path().join("clones");
+    std::fs::create_dir(&clones).unwrap();
+    let cloned = vcs::clone_repository(source.to_str().unwrap(), &clones, "副本", None, &token)
+        .await
+        .unwrap();
+    assert!(cloned.join(".git").is_dir());
+    assert!(
+        vcs::clone_repository("--upload-pack=evil", &clones, "bad", None, &token)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn real_git_branch_recovery_stashes_and_carries_changes() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command("git", &["config", "user.name", "Ada"], directory.path());
+    command(
+        "git",
+        &["config", "user.email", "ada@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("file.txt"), "base\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "base"], directory.path());
+    command("git", &["branch", "feature"], directory.path());
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    std::fs::write(directory.path().join("file.txt"), "stash me\n").unwrap();
+    std::fs::write(directory.path().join("untracked.txt"), "secret\n").unwrap();
+    let stashed = vcs::branch_recovery(
+        &repository,
+        BranchRecoveryOperation::StashAndCheckout {
+            target: "feature".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(stashed.status, BranchRecoveryStatus::Completed);
+    assert_eq!(stashed.stash_reference.as_deref(), Some("stash@{0}"));
+    assert!(!directory.path().join("untracked.txt").exists());
+
+    std::fs::write(directory.path().join("file.txt"), "carry me\n").unwrap();
+    let carried = vcs::branch_recovery(
+        &repository,
+        BranchRecoveryOperation::CarryChanges {
+            target: "main".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(carried.status, BranchRecoveryStatus::Completed);
+    assert!(carried.changes_restored);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+        "carry me\n"
+    );
+
+    std::fs::write(directory.path().join("keep-untracked.txt"), "keep\n").unwrap();
+    let forced = vcs::branch_recovery(
+        &repository,
+        BranchRecoveryOperation::ForceCheckout {
+            target: "feature".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(forced.status, BranchRecoveryStatus::Completed);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+        "base\n"
+    );
+    assert!(directory.path().join("keep-untracked.txt").exists());
+    std::fs::remove_file(directory.path().join("keep-untracked.txt")).unwrap();
+
+    command("git", &["switch", "-c", "merge-target"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "target\n").unwrap();
+    command("git", &["commit", "-am", "target"], directory.path());
+    command("git", &["switch", "feature"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "dirty before merge\n").unwrap();
+    let merged = vcs::branch_recovery(
+        &repository,
+        BranchRecoveryOperation::StashAndMerge {
+            target: "merge-target".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(merged.status, BranchRecoveryStatus::Completed);
+    assert_eq!(merged.stash_reference.as_deref(), Some("stash@{0}"));
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+        "target\n"
+    );
+}
+
+#[tokio::test]
+async fn real_git_restore_conflicts_rejects_an_active_merge() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command("git", &["config", "user.name", "Ada"], directory.path());
+    command(
+        "git",
+        &["config", "user.email", "ada@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("file.txt"), "base\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "base"], directory.path());
+    command("git", &["switch", "-c", "feature"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "feature\n").unwrap();
+    command("git", &["commit", "-am", "feature"], directory.path());
+    command("git", &["switch", "main"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "main\n").unwrap();
+    command("git", &["commit", "-am", "main"], directory.path());
+    let status = Command::new(crate::cli::resolve_executable("git"))
+        .args(["merge", "feature"])
+        .current_dir(directory.path())
+        .status()
+        .unwrap();
+    assert!(!status.success());
+    let error = vcs::restore_conflicts(
+        &repo(directory.path(), VcsKind::Git),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, "OPERATION_IN_PROGRESS");
+    std::fs::remove_file(directory.path().join(".git/MERGE_HEAD")).unwrap();
+    let restored = vcs::restore_conflicts(
+        &repo(directory.path(), VcsKind::Git),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored.restored_paths, ["file.txt"]);
+    assert!(restored.failures.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+        "main\n"
+    );
 }
 
 fn svn_file_url(path: &Path) -> String {
@@ -1584,11 +1791,11 @@ async fn real_git_core_workflow() {
     vcs::commit(&repository, "second commit", false, &[], &token)
         .await
         .unwrap();
-    let history = vcs::history(&repository, 0, 20, None, None, &token)
+    let history = vcs::history(&repository, 0, 20, Default::default(), &token)
         .await
         .unwrap();
     assert_eq!(history.commits.len(), 2);
-    let topology = vcs::history_topology(&repository, 1_000, &token)
+    let topology = vcs::history_topology(&repository, 1_000, None, &token)
         .await
         .unwrap();
     assert_eq!(topology.len(), 2);
@@ -1616,7 +1823,7 @@ async fn real_git_core_workflow() {
         .unwrap()
         .iter()
         .any(|branch| branch.current && branch.name == "feature/test"));
-    let feature_topology = vcs::history_topology(&repository, 1_000, &token)
+    let feature_topology = vcs::history_topology(&repository, 1_000, None, &token)
         .await
         .unwrap();
     assert!(feature_topology[0]
@@ -1627,8 +1834,10 @@ async fn real_git_core_workflow() {
         &repository,
         0,
         20,
-        None,
-        Some("refs/heads/feature/test".into()),
+        crate::models::HistoryQuery {
+            revision: Some("refs/heads/feature/test".into()),
+            ..Default::default()
+        },
         &token,
     )
     .await
@@ -1899,9 +2108,10 @@ async fn real_git_core_workflow() {
     vcs::sync(&repository, SyncAction::Fetch, None, &token)
         .await
         .unwrap();
-    vcs::sync(&repository, SyncAction::Pull, None, &token)
+    let pull = vcs::sync(&repository, SyncAction::Pull, None, &token)
         .await
         .unwrap();
+    assert_eq!(pull.update.unwrap().summary.unwrap().commit_count, 0);
 
     command("git", &["switch", "main"], directory.path());
     command("git", &["switch", "-c", "conflict-side"], directory.path());
@@ -1940,6 +2150,18 @@ async fn real_git_core_workflow() {
     .await
     .unwrap_err();
     assert_eq!(marker_error.code, "UNRESOLVED_MARKERS");
+    std::fs::write(directory.path().join("conflict.txt"), "changed elsewhere\n").unwrap();
+    let stale = vcs::conflict_save(
+        &repository,
+        "conflict.txt",
+        "resolved\n",
+        &versions.fingerprint,
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(stale.code, "CONFLICT_STALE");
+    std::fs::write(directory.path().join("conflict.txt"), &versions.working).unwrap();
     vcs::conflict_save(
         &repository,
         "conflict.txt",
@@ -2164,7 +2386,7 @@ async fn real_svn_core_workflow() {
     )
     .await
     .unwrap();
-    let history = vcs::history(&repository, 0, 20, None, None, &token)
+    let history = vcs::history(&repository, 0, 20, Default::default(), &token)
         .await
         .unwrap();
     assert!(
@@ -2172,7 +2394,7 @@ async fn real_svn_core_workflow() {
         "SVN history: {:#?}",
         history.commits
     );
-    let topology = vcs::history_topology(&repository, 1_000, &token)
+    let topology = vcs::history_topology(&repository, 1_000, None, &token)
         .await
         .unwrap();
     assert!(topology.len() >= 2);

@@ -3,16 +3,37 @@ import { Codicon } from './Codicon';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
+import { ProviderPanel } from './ProviderPanel';
+import type { RemoteRepository } from '../bindings/generated';
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 
 export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const removeRecent = useAppStore((state) => state.removeRecent);
   const openAbout = useAppStore((state) => state.openAbout);
+  const cloneRepository = useAppStore((state) => state.cloneRepository);
+  const initializeRepository = useAppStore((state) => state.initializeRepository);
+  const initializeAvailable = useAppStore((state) => state.bootstrap?.capabilities.availability?.initializeRepository?.available ?? state.bootstrap?.tools.git ?? false);
+  const cloneAvailable = useAppStore((state) => state.bootstrap?.capabilities.availability?.cloneRepository?.available ?? state.bootstrap?.tools.git ?? false);
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const { t } = useI18n();
   const bridge = useBridge();
   const [filterText, setFilterText] = useState('');
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneUrl, setCloneUrl] = useState('');
+  const [cloneParent, setCloneParent] = useState('');
+  const [cloneName, setCloneName] = useState('');
+  const [cloneNewWindow, setCloneNewWindow] = useState(false);
+  const [providerOpen, setProviderOpen] = useState(false);
+  const [providerAccountId, setProviderAccountId] = useState<string>();
+  const cloneDialog = useDialogFocusTrap(cloneOpen, () => setCloneOpen(false));
+
+  const inferredCloneName = (value: string) => value.trim().replace(/[?#].*$/, '').replace(/\/$/, '').split(/[/:]/).pop()?.replace(/\.git$/i, '') ?? '';
+  const submitClone = async () => {
+    if (!cloneUrl.trim() || !cloneParent.trim() || !cloneName.trim()) return;
+    if (await cloneRepository(cloneUrl.trim(), cloneParent.trim(), cloneName.trim(), cloneNewWindow, providerAccountId)) setCloneOpen(false);
+  };
 
   const choose = async (openInNew = false) => {
     const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
@@ -23,6 +44,11 @@ export function WorkspaceChooser() {
         await openWorkspace(paths);
       }
     }
+  };
+  const initialize = async () => {
+    const path = await bridge.selectDirectory(t('Initialize Repository'));
+    if (!path || !await openWorkspace([path])) return;
+    await initializeRepository(path);
   };
 
   const handleRecentClick = (event: React.MouseEvent, paths: string[]) => {
@@ -82,6 +108,14 @@ export function WorkspaceChooser() {
                 <span className="welcome-action-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
               </div>
               <span className="welcome-action-shortcut">{isMac ? '⌘ O' : 'Ctrl+O'}</span>
+            </button>
+            <button type="button" className="welcome-action-btn" disabled={busy || !initializeAvailable} onClick={() => void initialize()}>
+              <div className="welcome-action-icon"><Codicon name="repo-create" /></div>
+              <div className="welcome-action-text"><span className="welcome-action-title">{t('Initialize Repository')}</span><span className="welcome-action-desc">{t('Create a Git repository in a selected folder.')}</span></div>
+            </button>
+            <button type="button" className="welcome-action-btn" disabled={busy || !cloneAvailable} onClick={() => setCloneOpen(true)}>
+              <div className="welcome-action-icon"><Codicon name="repo-clone" /></div>
+              <div className="welcome-action-text"><span className="welcome-action-title">{t('Clone Repository')}</span><span className="welcome-action-desc">{t('Clone a Git repository into a local folder.')}</span></div>
             </button>
             <button
               type="button"
@@ -219,6 +253,16 @@ export function WorkspaceChooser() {
           </div>
         </section>
       </div>
+      {cloneOpen && <div className="dialog-backdrop" role="presentation"><section ref={cloneDialog} className="app-dialog clone-dialog" role="dialog" aria-modal="true" aria-label={t('Clone Repository')}>
+        <header><Codicon name="repo-clone" /><strong>{t('Clone Repository')}</strong></header>
+        <button type="button" onClick={() => setProviderOpen(true)}><Codicon name="cloud" />{t('Browse Remote Providers')}</button>
+        <label><span>{t('Git URL')}</span><input autoFocus value={cloneUrl} onChange={(event) => { const value = event.target.value; setCloneUrl(value); if (!cloneName) setCloneName(inferredCloneName(value)); }} /></label>
+        <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={cloneParent} onChange={(event) => setCloneParent(event.target.value)} /><button type="button" onClick={async () => { const value = await bridge.selectDirectory(t('Select clone parent folder')); if (value) setCloneParent(value); }}>{t('Browse…')}</button></div></label>
+        <label><span>{t('Folder name')}</span><input value={cloneName} onChange={(event) => setCloneName(event.target.value)} /></label>
+        <label className="dialog-check"><input type="checkbox" checked={cloneNewWindow} onChange={(event) => setCloneNewWindow(event.target.checked)} />{t('Open in New Window')}</label>
+        <footer><button type="button" onClick={() => setCloneOpen(false)}>{t('Cancel')}</button><button type="button" className="primary" disabled={busy || !cloneUrl.trim() || !cloneParent.trim() || !cloneName.trim()} onClick={() => void submitClone()}>{t('Clone')}</button></footer>
+      </section></div>}
+      {providerOpen && <ProviderPanel mode="browse" close={() => setProviderOpen(false)} onClone={(repository: RemoteRepository, accountId) => { setCloneUrl(repository.cloneUrl); setCloneName(repository.name); setProviderAccountId(accountId); setProviderOpen(false); }} />}
     </main>
   );
 }

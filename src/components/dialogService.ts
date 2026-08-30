@@ -1,5 +1,5 @@
 export type DialogRequest = {
-  kind: 'confirm' | 'prompt' | 'choice';
+  kind: 'confirm' | 'prompt' | 'choice' | 'editor';
   title: string;
   message: string;
   confirmLabel?: string;
@@ -8,6 +8,8 @@ export type DialogRequest = {
   inputLabel?: string;
   initialValue?: string;
   choices?: Array<{ id: string; label: string; description?: string; icon?: string; danger?: boolean }>;
+  items?: Array<{ id: string; label: string; description?: string }>;
+  submit?: (value: string) => Promise<boolean>;
   resolve: (value: boolean | string | null) => void;
 };
 
@@ -31,4 +33,8 @@ export function promptDialog(options: Omit<DialogRequest, 'kind' | 'resolve'>): 
 
 export function choiceDialog(options: Omit<DialogRequest, 'kind' | 'resolve' | 'inputLabel' | 'initialValue' | 'confirmLabel'> & { choices: NonNullable<DialogRequest['choices']> }): Promise<string | null> {
   return new Promise((resolve) => publishDialog({ ...options, kind: 'choice', resolve: (value) => resolve(typeof value === 'string' ? value : null) }));
+}
+
+export function editorDialog(options: Omit<DialogRequest, 'kind' | 'resolve' | 'choices'> & { submit: NonNullable<DialogRequest['submit']> }): Promise<void> {
+  return new Promise((resolve) => publishDialog({ ...options, kind: 'editor', resolve: () => resolve() }));
 }

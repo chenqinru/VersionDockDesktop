@@ -12,10 +12,12 @@ export function BranchStatusBarItem() {
 
   const snapshot = useAppStore((state) => state.snapshot);
   const bootstrap = useAppStore((state) => state.bootstrap);
-  const busy = useAppStore((state) => isOperationActive(state.operations, {
+  const selectedRepoId = useAppStore((state) => state.selectedRepoId);
+  const busy = useAppStore((state) => selectedRepoId ? isOperationActive(state.operations, {
     workspaceId: state.snapshot?.workspace.id,
+    repositoryId: selectedRepoId,
     domain: ['branch', 'sync'],
-  }));
+  }) : false);
 
   const repositories = useMemo(() => snapshot?.repositories ?? [], [snapshot?.repositories]);
   const gitRepos = useMemo(() => repositories.filter((r) => r.meta.kind === 'git'), [repositories]);

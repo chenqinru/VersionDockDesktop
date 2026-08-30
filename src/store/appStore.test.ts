@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
-import { MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
-import { interleaveHistory, isOperationActive, useAppStore, workspacePathsEqual } from './appStore';
+import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
+import { currentDialog, publishDialog } from '../components/dialogService';
+import { interleaveHistory, isOperationActive, isOperationActiveForRepositories, useAppStore, workspacePathsEqual } from './appStore';
 
 const bootstrap: BootstrapData = {
   state: { theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
@@ -28,8 +29,9 @@ const deferred = <T>() => {
 };
 
 afterEach(() => {
+  publishDialog(undefined);
   useAppStore.getState().dispose();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', operations: {}, ready: false, error: undefined });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', operations: {}, notifications: [], ready: false, error: undefined });
 });
 
 describe('appStore async lifecycle', () => {
@@ -45,6 +47,39 @@ describe('appStore async lifecycle', () => {
     expect(isOperationActive(operations, { repositoryId: 'repo-a', domain: 'sync' })).toBe(true);
     expect(isOperationActive(operations, { repositoryId: 'repo-b', domain: 'sync' })).toBe(false);
     expect(isOperationActive(operations, { repositoryId: 'repo-a', domain: 'diff' })).toBe(false);
+  });
+  it('matches multi-repository operation targets without blocking unrelated repositories', () => {
+    const operations = {
+      batch: {
+        operationId: 'batch',
+        context: { generation: 1, domain: 'commit' as const, visibility: 'foreground' as const, workspaceId: 'workspace', repositoryId: null, target: 'repositories:["repo-a","repo-b"]' },
+        status: 'running' as const,
+        phase: 'commit', message: '', startedAt: '', cancellable: true, completed: null, total: null, error: null,
+      },
+    };
+    expect(isOperationActiveForRepositories(operations, ['repo-b'], { workspaceId: 'workspace', domain: 'commit' })).toBe(true);
+    expect(isOperationActiveForRepositories(operations, ['repo-c'], { workspaceId: 'workspace', domain: 'commit' })).toBe(false);
+  });
+  it('annotates batch commit operations with their exact repository targets', async () => {
+    const requests: Array<{ command: BridgeCommand; options?: RequestOptions }> = [];
+    const bridge = new MockBridge((command, options) => {
+      requests.push({ command, options });
+      if (command.type === 'batchCommit') return command.payload.targets.map((target) => ({
+        repoId: target.repoId, commitAttempted: true, committed: true, revision: 'abc', pushAttempted: false, pushed: false, failedStage: null, recoveryHint: null, error: null,
+      }));
+      return [];
+    });
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo-a', 'A'), repository('repo-b', 'B')];
+    useAppStore.setState({ bridge, snapshot: workspace });
+
+    await useAppStore.getState().commitMany([
+      { repoId: 'repo-a', paths: ['a.ts'], unstagePaths: [], amend: false },
+      { repoId: 'repo-b', paths: ['b.ts'], unstagePaths: [], amend: false },
+    ], 'batch targets', false);
+
+    const batch = requests.find((request) => request.command.type === 'batchCommit');
+    expect(batch?.options?.context).toMatchObject({ repositoryId: null, target: 'repositories:["repo-a","repo-b"]' });
   });
   it('compares multi-root workspace paths independent of selection order', () => {
     expect(workspacePathsEqual(['/repo/admin', '/repo/api'], ['/repo/api', '/repo/admin'])).toBe(true);
@@ -320,7 +355,7 @@ describe('appStore async lifecycle', () => {
     });
     useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a', historyScope: { repoIds: ['a'], revisionsByRepo: { a: 'refs/heads/feature/x' } } });
     await useAppStore.getState().loadHistory(true);
-    expect(commands.find((command) => command.type === 'history')).toMatchObject({ type: 'history', payload: { repo_id: 'a', revision: 'refs/heads/feature/x' } });
+    expect(commands.find((command) => command.type === 'history')).toMatchObject({ type: 'history', payload: { repo_id: 'a', query: { revision: 'refs/heads/feature/x' } } });
     expect(commands.some((command) => command.type === 'history' && command.payload.repo_id === 'b')).toBe(false);
     expect(useAppStore.getState().history.map((commit) => commit.hash)).toEqual(['feature', 'root']);
   });
@@ -620,5 +655,80 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().snapshot).toBe(currentSnapshot);
     expect(useAppStore.getState().bootstrap?.runtime?.notificationPermission).toBe('denied');
     expect(useAppStore.getState().bootstrap?.capabilities.systemNotifications).toBe(false);
+  });
+
+  it('sends every history condition to the backend and restores the previous scope after a path jump', async () => {
+    const requests: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command);
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'historyTopology') return [];
+      return [];
+    });
+    const current = snapshot('workspace', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, selectedRepoId: 'a', historyScope: { repoIds: ['a'], revisionsByRepo: { a: 'refs/heads/main' } } });
+    useAppStore.getState().setHistoryQuery({ text: 'needle', author: 'Ada', fromDate: '2026-01-01', toDate: '2026-01-31', path: null, revision: null });
+    await useAppStore.getState().openHistoryForPath('b', 'src/file.ts');
+    expect(requests.find((command) => command.type === 'history')).toMatchObject({ type: 'history', payload: { repo_id: 'b', query: { text: 'needle', author: 'Ada', fromDate: '2026-01-01', toDate: '2026-01-31', path: 'src/file.ts' } } });
+    await useAppStore.getState().clearHistoryPath();
+    expect(useAppStore.getState().historyScope).toEqual({ repoIds: ['a'], revisionsByRepo: { a: 'refs/heads/main' } });
+    expect(useAppStore.getState().historyQuery.path).toBeNull();
+  });
+  it('keeps per-repository facts when Update Project partially fails', async () => {
+    const current = snapshot('workspace', 1); current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync' && command.payload.repo_id === 'b') throw new Error('offline');
+      if (command.type === 'sync') return { output: '', update: { repoId: 'a', beforeRevision: '1', afterRevision: '2', beforeStatus: 'x', afterStatus: 'x', summary: { kind: 'fastForward', commitCount: 1, fileCount: 2, containsMerge: false, detail: { commits: [], files: [] } }, summaryError: null } };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories });
+    await useAppStore.getState().updateProject();
+    expect(useAppStore.getState().updateProjectReport?.results).toEqual([expect.objectContaining({ repoId: 'a', result: expect.anything() }), expect.objectContaining({ repoId: 'b', error: 'offline' })]);
+  });
+
+  it('persists commit selections per workspace and leaves new files unselected', async () => {
+    vi.useFakeTimers();
+    try {
+      const requests: BridgeCommand[] = [];
+      const bridge = new MockBridge((command) => { requests.push(command); return command.type === 'saveCommitSelections' ? command.payload.selections : []; });
+      const current = snapshot('workspace', 1);
+      current.repositories = [{ ...repository('a', 'A'), files: [{ path: 'kept.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }, { path: 'new.ts', status: 'untracked', staged: false, unstaged: true, conflicted: false }] }];
+      useAppStore.setState({ bridge, snapshot: current, allRepositories: current.repositories, commitSelections: { a: ['kept.ts'] } });
+      useAppStore.getState().setCommitSelection('a', ['new.ts'], true);
+      useAppStore.getState().setCommitSelection('a', ['new.ts'], false);
+      await vi.advanceTimersByTimeAsync(121);
+      expect(useAppStore.getState().commitSelections).toEqual({ a: ['kept.ts'] });
+      expect(requests.find((command) => command.type === 'saveCommitSelections')).toMatchObject({ payload: { workspace_id: 'workspace', selections: [{ repoId: 'a', paths: ['kept.ts'] }] } });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('does not overwrite a non-empty commit draft when merge enters conflicts', async () => {
+    const current = snapshot('workspace', 1); current.repositories = [repository('a', 'A')];
+    const bridge = new MockBridge((command) => command.type === 'branchOperation' ? { completed: false, conflicted: true } : []);
+    useAppStore.setState({ bridge, snapshot: current, allRepositories: current.repositories, selectedRepoId: 'a', commitMessage: 'user draft' });
+    await useAppStore.getState().branchOperation({ type: 'merge', name: 'feature' }, 'a');
+    expect(useAppStore.getState().commitMessage).toBe('user draft');
+    expect(useAppStore.getState().mergeMessageSuggestion).toBe("Merge branch 'feature' into 'main'");
+    useAppStore.getState().applyMergeMessageSuggestion();
+    expect(useAppStore.getState().commitMessage).toBe("Merge branch 'feature' into 'main'");
+  });
+
+  it('offers dirty checkout recovery and dispatches the selected strategy', async () => {
+    const current = snapshot('workspace', 1); current.repositories = [repository('a', 'A')];
+    const operations: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      operations.push(command);
+      if (command.type === 'branchOperation') throw new BridgeError({ code: 'DIRTY_WORKTREE', message: 'dirty', command: 'git', exitCode: 1, stderr: null, recoverable: true });
+      if (command.type === 'branchRecovery') return { status: 'completed', target: 'feature', stashReference: 'stash@{0}', changesRestored: false, error: null, recoveryHint: null };
+      if (command.type === 'workspaceRefresh') return current;
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, selectedRepoId: 'a' });
+    const operation = useAppStore.getState().branchOperation({ type: 'checkout', name: 'feature' }, 'a');
+    await vi.waitFor(() => expect(currentDialog()?.kind).toBe('choice'));
+    currentDialog()?.resolve('stash');
+    await operation;
+    expect(operations.find((command) => command.type === 'branchRecovery')).toMatchObject({ payload: { operation: { type: 'stashAndCheckout', target: 'feature' } } });
   });
 });

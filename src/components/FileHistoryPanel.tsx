@@ -15,6 +15,7 @@ export function FileHistoryPanel() {
   const target = useAppStore((state) => state.fileHistoryTarget);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const close = useAppStore((state) => state.closeFileHistory);
+  const openHistoryForPath = useAppStore((state) => state.openHistoryForPath);
   const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<FileHistoryEntry>();
@@ -24,13 +25,19 @@ export function FileHistoryPanel() {
   const [error, setError] = useState<string>();
   const [context, setContext] = useState<{ x: number; y: number; entry: FileHistoryEntry }>();
   const contextGeneration = useRef(0);
+  const contextKey = target && workspaceId ? `${workspaceId}\0${target.repoId}\0${target.path}` : undefined;
+  const activeContextKey = useRef<string>();
+  const cursorRef = useRef<string | null>(null);
   const loadMoreController = useRef<AbortController>();
   const { t } = useI18n();
 
   useEffect(() => {
-    if (!target || !workspaceId) return;
     const generation = ++contextGeneration.current;
+    activeContextKey.current = contextKey;
     loadMoreController.current?.abort();
+    loadMoreController.current = undefined;
+    cursorRef.current = null;
+    if (!target || !workspaceId || !contextKey) return;
     const controller = new AbortController();
     let active = true;
     queueMicrotask(() => {
@@ -44,11 +51,19 @@ export function FileHistoryPanel() {
       setLoading(true);
     });
     void bridge.request<FileHistoryPage>({ type: 'fileHistory', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: target.path, cursor: null, limit: 100 } }, { signal: controller.signal })
-      .then((page) => { if (active && generation === contextGeneration.current) { setEntries(page.entries); setCursor(page.nextCursor); setSelected(page.entries[0]); } })
+      .then((page) => { if (active && generation === contextGeneration.current && activeContextKey.current === contextKey) { setEntries(page.entries); setCursor(page.nextCursor); cursorRef.current = page.nextCursor; setSelected(page.entries[0]); } })
       .catch((reason) => { if (active && generation === contextGeneration.current && !isAbortError(reason)) setError(String(reason)); })
       .finally(() => { if (active && generation === contextGeneration.current) setLoading(false); });
-    return () => { active = false; controller.abort(); };
-  }, [bridge, target, workspaceId]);
+    return () => {
+      active = false;
+      controller.abort();
+      loadMoreController.current?.abort();
+      if (activeContextKey.current === contextKey) {
+        activeContextKey.current = undefined;
+        contextGeneration.current += 1;
+      }
+    };
+  }, [bridge, contextKey, target, workspaceId]);
 
   useEffect(() => {
     if (!target || !workspaceId || !selected) return;
@@ -72,16 +87,18 @@ export function FileHistoryPanel() {
     const controller = new AbortController();
     loadMoreController.current = controller;
     const generation = contextGeneration.current;
+    const requestContextKey = contextKey;
     const requestCursor = cursor;
     setLoading(true);
     try {
       const page = await bridge.request<FileHistoryPage>({ type: 'fileHistory', payload: { workspace_id: workspaceId, repo_id: target.repoId, relative_path: target.path, cursor: requestCursor, limit: 100 } }, { signal: controller.signal });
-      if (generation !== contextGeneration.current) return;
-      setEntries((current) => [...current, ...page.entries]); setCursor(page.nextCursor);
+      if (generation !== contextGeneration.current || activeContextKey.current !== requestContextKey || cursorRef.current !== requestCursor) return;
+      setEntries((current) => [...current, ...page.entries]); setCursor(page.nextCursor); cursorRef.current = page.nextCursor;
     } catch (reason) {
-      if (generation === contextGeneration.current && !isAbortError(reason)) setError(String(reason));
+      if (generation === contextGeneration.current && activeContextKey.current === requestContextKey && !isAbortError(reason)) setError(String(reason));
     } finally {
-      if (generation === contextGeneration.current) setLoading(false);
+      if (generation === contextGeneration.current && activeContextKey.current === requestContextKey) setLoading(false);
+      if (loadMoreController.current === controller) loadMoreController.current = undefined;
     }
   };
   const binary = Boolean(document?.binary || diff?.binary);
@@ -92,6 +109,7 @@ export function FileHistoryPanel() {
         <Codicon name="history" />
         <strong>{t('File history')}</strong>
         <span className="file-history-path" title={target.path}>{target.path}</span>
+        <button aria-label={t('Show in commit history')} title={t('Show in commit history')} onClick={() => { close(); void openHistoryForPath(target.repoId, target.path); }}><Codicon name="git-commit" /></button>
         <button aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></button>
       </header>
       <div className="file-history-layout">

@@ -359,6 +359,7 @@ function SvnAccount({
       | { type: 'save'; username: string; password: string | null }
       | { type: 'delete' }
       | { type: 'test' }
+      | { type: 'clearNative'; credential_id: string }
   ) => {
     try {
       setError(undefined);
@@ -385,7 +386,10 @@ function SvnAccount({
           <span className="effective-label">{t('Repository root')}</span>
         </div>
         <div className="effective-name">{value.repositoryRoot}</div>
+        <small>{t('Credential source')}: {t(value.source ?? 'none')}</small>
       </div>
+
+      {(value.nativeCredentials?.length ?? 0) > 0 && <div className="identity-sources-card"><strong>{t('SVN Native Cache')}</strong>{value.nativeCredentials?.map((credential) => <div className="identity-source-item" key={credential.id}><span>{credential.realm}{credential.username ? ` · ${credential.username}` : ''}</span><button className="danger" onClick={() => void operate({ type: 'clearNative', credential_id: credential.id })}><Codicon name="trash" />{t('Clear')}</button></div>)}</div>}
 
       <div className="identity-form-row">
         <label className="identity-label-block">

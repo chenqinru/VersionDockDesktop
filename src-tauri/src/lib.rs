@@ -10,6 +10,7 @@ mod cli;
 mod commands;
 mod identity;
 mod models;
+mod provider;
 mod shelf;
 mod state;
 mod svn_account;
