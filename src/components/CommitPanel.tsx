@@ -15,7 +15,7 @@ import { branchColor } from './branchColor';
 import { SettingsPanel } from './SettingsPanel';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { IgnoreRulesPanel } from './IgnoreRulesPanel';
-import { ChangelistManager } from './ChangelistManager';
+import { ChangelistView } from './ChangelistView';
 import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { ConflictBanner } from './ConflictBanner';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
@@ -69,7 +69,7 @@ function SelectionCheckbox({ label, checked, indeterminate = false, disabled = f
 }
 
 type ExpansionCommand = { sequence: number; expanded: boolean };
-type ChangeContext = { x: number; y: number; kind: 'file' | 'folder' | 'repo'; repo: RepositoryStatus; files: FileChange[]; path?: string };
+type ChangeContext = { x: number; y: number; kind: 'file' | 'folder' | 'repo'; repo: RepositoryStatus; files: FileChange[]; path?: string; changelistId?: string };
 
 function TreeNode({ node, depth, repo, selected, setFiles, onFile, onContext, onFolderContext, expansion }: { node: FileTreeNode; depth: number; repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; expansion: ExpansionCommand }) {
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
@@ -93,6 +93,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>(() => ({ sequence: 0, expanded: repo.files.length > 0 }));
   const previousFileCount = useRef(repo.files.length);
   const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
+  const [hovered, setHovered] = useState(false);
   useEffect(() => {
     if (previousFileCount.current === 0 && repo.files.length > 0) {
       setLocalExpansion((current) => ({ sequence: Math.max(current.sequence, expansion.sequence) + 1, expanded: true }));
@@ -105,12 +106,50 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
   const branch = branchColor(repo.branch || repo.revision);
   return (
     <section className="repo-change-group">
-      <div className="repo-heading" style={{ background: `color-mix(in srgb, ${repo.meta.color} 18%, var(--versiondock-surface))` }} onContextMenu={onRepoContext}>
+      <div
+        className="repo-heading"
+        style={{
+          background: `color-mix(in srgb, ${repo.meta.color} 14%, var(--versiondock-surface))`,
+          height: 26,
+          paddingRight: 8,
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onContextMenu={onRepoContext}
+      >
         <SelectionCheckbox label={repo.meta.name} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!repo.files.length} onChange={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), !allSelected)} />
         <button title={repo.meta.name} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><span className="branch-chip" title={repo.branch || repo.revision} style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}><Codicon name="git-branch" /><span className="branch-name">{repo.branch || repo.revision}</span></span></button>
         {(repo.ahead > 0 || repo.behind > 0) && <span className="repo-sync-state">{repo.ahead > 0 && `↑${repo.ahead}`}{repo.behind > 0 && ` ↓${repo.behind}`}</span>}
-        {repo.files.length > 0 && <button className="repo-open-changes" title={t('Open All Changes')} onClick={() => openWorkingChanges(repo.meta.id)}><Codicon name="diff-multiple" /></button>}
-        {repo.files.length > 0 && <b>{selectedCount}/{repo.files.length}</b>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
+          {repo.files.length > 0 && (
+            <button
+              className="repo-open-changes"
+              style={{
+                opacity: hovered ? 1 : 0,
+                pointerEvents: hovered ? 'auto' : 'none',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px 4px',
+                color: 'inherit',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+              title={t('Open all changes')}
+              onClick={(e) => {
+                e.stopPropagation();
+                openWorkingChanges(repo.meta.id);
+              }}
+            >
+              <Codicon name="diff-multiple" />
+            </button>
+          )}
+          {repo.files.length > 0 && (
+            <span className={`count-badge ${selectedCount > 0 ? 'selected' : ''}`}>
+              {selectedCount}/{repo.files.length}
+            </span>
+          )}
+        </div>
       </div>
       {expanded && !repo.files.length && <div className="repo-no-changes">{t('No changes')}</div>}
       {expanded && viewMode === 'tree' && tree.map((node) => <TreeNode key={node.path} node={node} depth={0} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} onFolderContext={onFolderContext} expansion={expansion} />)}
@@ -129,16 +168,6 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
       })}
     </section>
   );
-}
-
-function ChangelistRepoFiles({ repo, entries, ...props }: { repo: RepositoryStatus; entries: import('../bindings/generated').ChangelistEntry[] } & Omit<Parameters<typeof RepoFiles>[0], 'repo'>) {
-  const assigned = new Set(entries.flatMap((entry) => entry.files));
-  const groups = [
-    ...entries.map((entry) => ({ id: entry.id, name: entry.name, files: repo.files.filter((file) => entry.files.includes(file.path)) })),
-    { id: 'unassigned', name: 'Default Changelist', files: repo.files.filter((file) => !assigned.has(file.path)) },
-  ].filter((group) => group.files.length > 0);
-  if (!groups.length) return <RepoFiles repo={repo} {...props} />;
-  return <>{groups.map((group) => <RepoFiles key={`${repo.meta.id}:${group.id}`} repo={{ ...repo, meta: { ...repo.meta, name: `${repo.meta.name} · ${group.name}` }, files: group.files }} {...props} />)}</>;
 }
 
 export function CommitPanel() {
@@ -181,7 +210,8 @@ export function CommitPanel() {
   const pushEnabled = snapshot?.repositories.some((repo) => repo.meta.kind === 'git') ?? false;
   const tab = pushEnabled && storedTab === 'push' ? 'push' : stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : subtreeEnabled && storedTab === 'subtree' ? 'subtree' : 'changes';
   const setTab = useAppStore((state) => state.setActiveTab);
-  const changelistEnabled = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'changelist') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'changelist', true)) ?? true) && changesDisplayMode === 'changelists');
+  const changelistCapability = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'changelist') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'changelist', true)) ?? true));
+  const changelistEnabled = changelistCapability && changesDisplayMode === 'changelists';
   const changelists = useAppStore((state) => state.changelists);
   const changelistOperation = useAppStore((state) => state.changelistOperation);
   const stashes = useAppStore((state) => state.stashes);
@@ -207,8 +237,6 @@ export function CommitPanel() {
   const [settings, setSettings] = useState(false);
   const openIdentityPanel = useAppStore((state) => state.openIdentityPanel);
   const [ignoreManager, setIgnoreManager] = useState<{ repoId: string; directory: string }>();
-  const [changelistManagerRepoId, setChangelistManagerRepoId] = useState<string>();
-  const selectedRepo = snapshot?.repositories.find((repo) => repo.meta.id === useAppStore.getState().selectedRepoId) ?? snapshot?.repositories[0];
   const [expansion, setExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
   const [shelfViewMode, setShelfViewMode] = useState<'tree' | 'list'>('tree');
   const [shelfExpansion, setShelfExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: false });
@@ -218,8 +246,9 @@ export function CommitPanel() {
   const historyDialog = useDialogFocusTrap(historyOpen, () => setHistoryOpen(false));
   const [historyMessages, setHistoryMessages] = useState<RecentCommitMessage[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const messageRequest = useRef<AbortController>();
+  const messageRequestRef = useRef<AbortController | null>(null);
   const [context, setContext] = useState<ChangeContext>();
+  const [clHeaderContext, setClHeaderContext] = useState<{ x: number; y: number; changelistId: string }>();
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
@@ -260,11 +289,11 @@ export function CommitPanel() {
   const lastCommitMessage = useAppStore((state) => state.lastCommitMessage);
   const openMessageHistory = async () => {
     if (!commitTargets.length) return;
-    messageRequest.current?.abort();
+    messageRequestRef.current?.abort();
     const controller = new AbortController();
-    messageRequest.current = controller;
+    messageRequestRef.current = controller;
     setHistoryOpen(true); setHistoryLoading(true); setHistoryMessages([]);
-    try { const values = await recentCommitMessages(commitTargets.map((repo) => repo.meta.id), controller.signal); if (!controller.signal.aborted && messageRequest.current === controller) setHistoryMessages(values); }
+    try { const values = await recentCommitMessages(commitTargets.map((repo) => repo.meta.id), controller.signal); if (!controller.signal.aborted && messageRequestRef.current === controller) setHistoryMessages(values); }
     catch { /* store handles non-cancellation errors */ }
     finally { if (!controller.signal.aborted) setHistoryLoading(false); }
   };
@@ -276,12 +305,12 @@ export function CommitPanel() {
       if (!selected) return;
       repoId = selected;
     }
-    messageRequest.current?.abort();
-    const controller = new AbortController(); messageRequest.current = controller;
+    messageRequestRef.current?.abort();
+    const controller = new AbortController(); messageRequestRef.current = controller;
     const value = await lastCommitMessage(repoId, controller.signal);
-    if (!controller.signal.aborted && messageRequest.current === controller) { if (value) setMessage(value); else useAppStore.setState({ notice: t('No commit message is available for this repository.') }); }
+    if (!controller.signal.aborted && messageRequestRef.current === controller) { if (value) setMessage(value); else useAppStore.getState().addNotification({ type: 'info', title: 'VersionDock Desktop', message: 'No commit message is available for this repository.', workspaceId: snapshot?.workspace.id }); }
   };
-  useEffect(() => () => messageRequest.current?.abort(), [snapshot?.workspace.id, commitTargetKey]);
+  useEffect(() => () => messageRequestRef.current?.abort(), [snapshot?.workspace.id, commitTargetKey]);
   const commitBusy = workspaceBusy || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
     workspaceId: snapshot?.workspace.id,
     domain: ['commit', 'sync'],
@@ -362,7 +391,6 @@ export function CommitPanel() {
     const file = kind === 'file' ? files[0] : undefined;
     const allUntracked = files.length > 0 && files.every((item) => item.status === 'untracked');
     const git = repo.meta.kind === 'git';
-    const hasCustomChangelists = (changelists[repo.meta.id] ?? []).length > 0;
     const items: ContextMenuEntry[] = [];
     if (kind === 'file' && file?.submodule) {
       if (file.staged && !file.unstaged) items.push({ id: 'unstage', label: t('Unstage'), icon: 'remove' });
@@ -396,7 +424,7 @@ export function CommitPanel() {
       { id: 'ignore', label: t(git ? 'Add to .gitignore' : 'Add to SVN Ignore'), icon: 'exclude' },
     );
     if (files.length && kind !== 'repo') items.push({ separator: true }, { id: 'delete', label: t('Delete'), icon: 'trash', danger: true });
-    if (changelistEnabled && hasCustomChangelists && files.length && !allUntracked) items.push(
+    if (changelistEnabled && files.length && !allUntracked) items.push(
       { separator: true },
       { id: 'move-to-changelist', label: t('Move to Changelist…'), icon: 'list-unordered' },
     );
@@ -411,6 +439,214 @@ export function CommitPanel() {
     items.push({ separator: true }, { id: 'refresh', label: t('Refresh'), icon: 'refresh' });
     if (repo.meta.kind === 'svn') items.push({ separator: true }, { id: 'manage-ignore', label: t('Manage SVN Ignore...'), icon: 'list-unordered' });
     return items;
+  };
+  const getChangelistFiles = (clId: string) => {
+    const result: Array<{ repo: RepositoryStatus; files: FileChange[] }> = [];
+    for (const r of repos) {
+      if (clId === 'unversioned') {
+        const files = r.files.filter((f) => f.status === 'untracked');
+        if (files.length) result.push({ repo: r, files });
+      } else if (clId === 'default' || clId === 'unassigned') {
+        const entries = changelists[r.meta.id] ?? [];
+        const assigned = new Set(entries.flatMap((e) => e.files));
+        const files = r.files.filter((f) => !assigned.has(f.path) && f.status !== 'untracked');
+        if (files.length) result.push({ repo: r, files });
+      } else {
+        const entries = changelists[r.meta.id] ?? [];
+        const entry = entries.find((e) => e.id === clId);
+        if (entry) {
+          const assigned = new Set(entry.files);
+          const files = r.files.filter((f) => assigned.has(f.path) && f.status !== 'untracked');
+          if (files.length) result.push({ repo: r, files });
+        }
+      }
+    }
+    return result;
+  };
+  const clHeaderItems = (clId: string): ContextMenuEntry[] => {
+    const isEmpty = clId === 'empty';
+    const isUnversioned = clId === 'unversioned';
+    const isCustom = clId !== 'default' && clId !== 'unassigned' && !isUnversioned && !isEmpty;
+    const clFiles = getChangelistFiles(clId);
+    const hasGitTargets = clFiles.some((g) => g.repo.meta.kind === 'git');
+    const items: ContextMenuEntry[] = [];
+
+    if (isEmpty) {
+      return [
+        { id: 'cl-new', label: t('New Changelist…'), icon: 'add' },
+        { separator: true },
+        { id: 'refresh', label: t('Refresh'), icon: 'refresh' },
+      ];
+    }
+
+    items.push({ id: 'cl-rollback', label: t('Rollback'), icon: 'discard' });
+    if (hasGitTargets) {
+      items.push(
+        { id: 'cl-shelve', label: t('Shelve Changes'), icon: 'archive' },
+        { id: 'cl-stash', label: t('Stash Changes'), icon: 'save' },
+      );
+    }
+    if (isUnversioned) {
+      items.push(
+        { separator: true },
+        { id: 'cl-add-to-git', label: t('Add to Git'), icon: 'add' },
+      );
+    }
+    items.push(
+      { separator: true },
+      { id: 'cl-new', label: t('New Changelist…'), icon: 'add' },
+    );
+    if (isCustom) {
+      items.push(
+        { id: 'cl-rename', label: t('Rename Changelist…'), icon: 'edit' },
+        { separator: true },
+        { id: 'cl-delete', label: t('Delete Changelist'), icon: 'trash', danger: true },
+      );
+    }
+    items.push(
+      { separator: true },
+      { id: 'refresh', label: t('Refresh'), icon: 'refresh' },
+    );
+    return items;
+  };
+  const handleClHeaderAction = async (actionId: string) => {
+    const clCtx = clHeaderContext;
+    if (!clCtx) return;
+    const clId = clCtx.changelistId;
+    const clFiles = getChangelistFiles(clId);
+    switch (actionId) {
+      case 'refresh': {
+        await useAppStore.getState().refresh();
+        break;
+      }
+      case 'cl-add-to-git': {
+        for (const g of clFiles) {
+          await stage(g.repo.meta.id, g.files.map((f) => f.path));
+        }
+        break;
+      }
+      case 'cl-new': {
+        const name = await promptDialog({
+          title: t('New Changelist'),
+          message: t('Create a new changelist.'),
+          inputLabel: t('Changelist name'),
+          initialValue: '',
+        });
+        if (name?.trim()) {
+          for (const r of repos) {
+            await changelistOperation(r.meta.id, { type: 'create', name: name.trim() });
+          }
+        }
+        break;
+      }
+      case 'cl-rename': {
+        let currentName = '';
+        for (const r of repos) {
+          const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
+          if (e) { currentName = e.name; break; }
+        }
+        const newName = await promptDialog({
+          title: t('Rename Changelist'),
+          message: t('Enter a new changelist name.'),
+          inputLabel: t('Changelist name'),
+          initialValue: currentName,
+        });
+        if (newName && newName !== currentName) {
+          for (const r of repos) {
+            const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
+            if (e) {
+              await changelistOperation(r.meta.id, { type: 'rename', changelist_id: clId, name: newName });
+            }
+          }
+        }
+        break;
+      }
+      case 'cl-delete': {
+        let currentName = '';
+        for (const r of repos) {
+          const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
+          if (e) { currentName = e.name; break; }
+        }
+        const total = clFiles.reduce((sum, g) => sum + g.files.length, 0);
+        if (await confirmDialog({
+          title: t('Delete Changelist'),
+          message: `${t('Delete changelist {0}?', currentName || clId)}\n${total} ${t('file')}`,
+          danger: true,
+        })) {
+          for (const r of repos) {
+            const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
+            if (e) {
+              await changelistOperation(r.meta.id, { type: 'delete', changelist_id: clId });
+            }
+          }
+        }
+        break;
+      }
+      case 'cl-shelve': {
+        let currentName = t('Shelve changes');
+        for (const r of repos) {
+          const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
+          if (e) { currentName = e.name; break; }
+        }
+        const shelfName = await promptDialog({
+          title: t('Shelve changes'),
+          message: t('Enter a shelf name.'),
+          inputLabel: t('Shelf name'),
+          initialValue: currentName,
+        });
+        if (shelfName?.trim()) {
+          for (const g of clFiles.filter((g) => g.repo.meta.kind === 'git')) {
+            await useAppStore.getState().shelfOperation(g.repo.meta.id, {
+              type: 'create',
+              name: shelfName.trim(),
+              paths: g.files.map((f) => f.path),
+            });
+          }
+        }
+        break;
+      }
+      case 'cl-stash': {
+        let currentName = t('Stash changes');
+        for (const r of repos) {
+          const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
+          if (e) { currentName = e.name; break; }
+        }
+        const stashMessage = await promptDialog({
+          title: t('Stash changes'),
+          message: t('Enter a stash message.'),
+          inputLabel: t('Stash message'),
+          initialValue: currentName,
+        });
+        if (stashMessage?.trim()) {
+          for (const g of clFiles.filter((g) => g.repo.meta.kind === 'git')) {
+            await useAppStore.getState().stashOperation(g.repo.meta.id, {
+              type: 'create',
+              message: stashMessage.trim(),
+              include_untracked: clId === 'unversioned',
+              paths: g.files.map((f) => f.path),
+            });
+          }
+        }
+        break;
+      }
+      case 'cl-rollback': {
+        const total = clFiles.reduce((sum, g) => sum + g.files.length, 0);
+        if (!total) break;
+        const details = clFiles.flatMap((g) => g.files.map((f) => `${g.repo.meta.name}: ${f.path}`)).join('\n');
+        if (await confirmDialog({
+          title: t('Rollback'),
+          message: `${t('Discard changes to {0} files? This cannot be undone.', total)}\n\n${details}`,
+          danger: true,
+        })) {
+          for (const g of clFiles) {
+            await discard(g.repo.meta.id, g.files.map((f) => f.path));
+            setFiles(g.repo.meta.id, g.files.map((f) => f.path), false);
+          }
+        }
+        break;
+      }
+    }
+    setClHeaderContext(undefined);
   };
   const handleContextAction = async (id: string) => {
     const value = context;
@@ -438,15 +674,35 @@ export function CommitPanel() {
       case 'ignore': if (value.path) await addIgnore(repo.meta.id, value.path); break;
       case 'manage-ignore': setIgnoreManager({ repoId: repo.meta.id, directory: value.kind === 'folder' ? (value.path ?? '') : '' }); break;
       case 'move-to-changelist': {
+        const customEntries = (changelists[repo.meta.id] ?? []);
+        const choices = [
+          { id: '__new__', label: `+ ${t('New Changelist…')}`, icon: 'add' },
+          { id: 'none', label: t('Default Changelist'), icon: 'source-control' },
+          ...customEntries.map((entry) => ({ id: entry.id, label: entry.name, description: `${entry.files.length} ${t('file')}`, icon: 'list-unordered' })),
+        ];
         const target = await choiceDialog({
           title: t('Move to Changelist…'),
           message: paths.join('\n'),
-          choices: [
-            { id: 'none', label: t('Unassigned'), icon: 'remove' },
-            ...(changelists[repo.meta.id] ?? []).map((entry) => ({ id: entry.id, label: entry.name, description: `${entry.files.length} ${t('file')}`, icon: 'list-unordered' })),
-          ],
+          choices,
         });
-        if (target) await changelistOperation(repo.meta.id, { type: 'assign', changelist_id: target === 'none' ? null : target, paths });
+        if (target === '__new__') {
+          const newName = await promptDialog({
+            title: t('New Changelist'),
+            message: t('Create a new changelist.'),
+            inputLabel: t('Changelist name'),
+            initialValue: '',
+          });
+          if (newName?.trim()) {
+            await changelistOperation(repo.meta.id, { type: 'create', name: newName.trim() });
+            const updatedList = useAppStore.getState().changelists[repo.meta.id] ?? [];
+            const created = updatedList.find((e) => e.name === newName.trim());
+            if (created) {
+              await changelistOperation(repo.meta.id, { type: 'assign', changelist_id: created.id, paths });
+            }
+          }
+        } else if (target) {
+          await changelistOperation(repo.meta.id, { type: 'assign', changelist_id: target === 'none' ? null : target, paths });
+        }
         break;
       }
       case 'svn-lock': {
@@ -564,7 +820,6 @@ export function CommitPanel() {
           <button title={t('Collapse all')} onClick={() => setStashExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button>
           <div ref={viewMenuRef} className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={stashViewMode === 'list' ? 'selected' : ''} onClick={() => { setStashViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{stashViewMode === 'list' && <Codicon name="check" />}</button><button className={stashViewMode === 'tree' ? 'selected' : ''} onClick={() => { setStashViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{stashViewMode === 'tree' && <Codicon name="check" />}</button></div>}</div>
         </>}
-        {tab === 'changes' && changelistEnabled && <button title={t('Changelists')} onClick={() => setChangelistManagerRepoId(selectedRepo?.meta.id)}><Codicon name="list-unordered" /></button>}
         <span />
       </div>
       <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Push')} className={tab === 'push' ? 'active' : ''} onClick={() => { setTab('push'); void useAppStore.getState().loadUnpushedCommits(); }}><Codicon name="cloud-upload" />{tab === 'push' && <span>{t('Push')}</span>}{totalToPush > 0 && <b>{totalToPush}</b>}</button>}</div>
@@ -659,7 +914,70 @@ export function CommitPanel() {
       ) : null}
       <div className="changes-scroll">
         {!repos.length && <div className="empty-state"><Codicon name="source-control" />{t('No repositories found')}</div>}
-        {repos.map((repo) => { const fileProps = { selected, setFiles, onFile: (file: FileChange) => void openDiff(repo.meta.id, file.path, file.staged && !file.unstaged), onContext: (event: React.MouseEvent, file: FileChange) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'file' as const, repo, files: [file], path: file.path }); }, onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'folder' as const, repo, files, path: folderPath }); }, onRepoContext: (event: React.MouseEvent) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, kind: 'repo' as const, repo, files: repo.files }); }, viewMode: viewMode as 'tree' | 'list', expansion }; return <div key={repo.meta.id} onMouseDown={() => void selectRepo(repo.meta.id)}>{changelistEnabled && repo.meta.kind === 'git' ? <ChangelistRepoFiles repo={repo} entries={changelists[repo.meta.id] ?? []} {...fileProps} /> : <RepoFiles repo={repo} {...fileProps} />}</div>; })}
+        {changelistEnabled ? (
+          <ChangelistView
+            repos={repos}
+            changelists={changelists}
+            selected={selected}
+            setFiles={setFiles}
+            onFile={(repoId, file) => void openDiff(repoId, file.path, file.staged && !file.unstaged)}
+            onContext={(event, file, repo) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContext({ x: event.clientX, y: event.clientY, kind: 'file', repo, files: [file], path: file.path });
+            }}
+            onFolderContext={(event, folderPath, files, repo) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContext({ x: event.clientX, y: event.clientY, kind: 'folder', repo, files, path: folderPath });
+            }}
+            onRepoContext={(event, repo, clId) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContext({ x: event.clientX, y: event.clientY, kind: 'repo', repo, files: repo.files, changelistId: clId });
+            }}
+            onHeaderContextMenu={(event, clId) => {
+              setClHeaderContext({ x: event.clientX, y: event.clientY, changelistId: clId });
+            }}
+            onEmptyContextMenu={(event) => {
+              setClHeaderContext({ x: event.clientX, y: event.clientY, changelistId: 'empty' });
+            }}
+            viewMode={viewMode as 'tree' | 'list'}
+            expansion={expansion}
+            openWorkingChanges={(repoId) => openWorkingChanges(repoId)}
+            onManageRepo={(repoId) => openIdentityPanel(repoId)}
+          />
+        ) : (
+          repos.map((repo) => {
+            const fileProps = {
+              selected,
+              setFiles,
+              onFile: (file: FileChange) => void openDiff(repo.meta.id, file.path, file.staged && !file.unstaged),
+              onContext: (event: React.MouseEvent, file: FileChange) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setContext({ x: event.clientX, y: event.clientY, kind: 'file' as const, repo, files: [file], path: file.path });
+              },
+              onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setContext({ x: event.clientX, y: event.clientY, kind: 'folder' as const, repo, files, path: folderPath });
+              },
+              onRepoContext: (event: React.MouseEvent) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setContext({ x: event.clientX, y: event.clientY, kind: 'repo' as const, repo, files: repo.files });
+              },
+              viewMode: viewMode as 'tree' | 'list',
+              expansion,
+            };
+            return (
+              <div key={repo.meta.id} onMouseDown={() => void selectRepo(repo.meta.id)}>
+                <RepoFiles repo={repo} {...fileProps} />
+              </div>
+            );
+          })
+        )}
       </div>
       <div className="commit-form">
         <div className="commit-resize-grip" role="separator" tabIndex={0} aria-label={t('Resize commit message')} aria-orientation="horizontal" aria-valuemin={52} aria-valuemax={Math.round(window.innerHeight * 0.55)} aria-valuenow={Math.round(textareaHeight)} onPointerDown={startTextareaResize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTextareaHeight((value) => Math.max(52, Math.min(window.innerHeight * 0.55, value + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>
@@ -674,11 +992,11 @@ export function CommitPanel() {
         </div>
       </div>
       {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context)} onSelect={(id) => void handleContextAction(id)} onClose={() => setContext(undefined)} />}
-      {changelistManagerRepoId && <ChangelistManager repoId={changelistManagerRepoId} close={() => setChangelistManagerRepoId(undefined)} />}
+      {clHeaderContext && <ContextMenu x={clHeaderContext.x} y={clHeaderContext.y} items={clHeaderItems(clHeaderContext.changelistId)} onSelect={(id) => void handleClHeaderAction(id)} onClose={() => setClHeaderContext(undefined)} />}
       {historyOpen && <div className="dialog-backdrop" role="presentation"><section ref={historyDialog} className="app-dialog commit-message-history-dialog" role="dialog" aria-modal="true" aria-label={t('Commit Message History')}>
         <header><Codicon name="history" /><strong>{t('Commit Message History')}</strong></header>
-        <div className="dialog-choice-list">{historyLoading ? <span>{t('Loading…')}</span> : historyMessages.length ? historyMessages.map((item) => <button key={`${item.repoId}:${item.revision}`} type="button" onClick={() => { setMessage(item.message); setHistoryOpen(false); messageRequest.current?.abort(); }}><strong>{item.message.split('\n')[0]}</strong><small>{item.committedAt}</small></button>) : <span>{t('No commit message history')}</span>}</div>
-        <footer><button type="button" onClick={() => { setHistoryOpen(false); messageRequest.current?.abort(); }}>{t('Close')}</button></footer>
+        <div className="dialog-choice-list">{historyLoading ? <span>{t('Loading…')}</span> : historyMessages.length ? historyMessages.map((item) => <button key={`${item.repoId}:${item.revision}`} type="button" onClick={() => { setMessage(item.message); setHistoryOpen(false); messageRequestRef.current?.abort(); }}><strong>{item.message.split('\n')[0]}</strong><small>{item.committedAt}</small></button>) : <span>{t('No commit message history')}</span>}</div>
+        <footer><button type="button" onClick={() => { setHistoryOpen(false); messageRequestRef.current?.abort(); }}>{t('Close')}</button></footer>
       </section></div>}
       </>}
     </aside>

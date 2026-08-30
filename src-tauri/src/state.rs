@@ -63,6 +63,7 @@ pub fn emit_current_operation(status: OperationStatus, phase: &str, message: &st
 pub struct AppState {
     pub config_dir: PathBuf,
     pub app: RwLock<AppStateSnapshot>,
+    pub application_session_id: String,
     pub launch_workspace_id: std::sync::Mutex<Option<String>>,
     pub cancellations: Mutex<HashMap<String, CancellationToken>>,
     pub read_limit: Semaphore,
@@ -84,7 +85,7 @@ impl AppState {
             .ok()
             .and_then(|bytes| migrate_state(&bytes))
             .unwrap_or_default();
-        app.schema_version = 6;
+        app.schema_version = 7;
         app.settings = app.settings.normalize();
         if app.layout.stash_view_mode != "list" && app.layout.stash_view_mode != "tree" {
             app.layout.stash_view_mode = "tree".into();
@@ -135,6 +136,7 @@ impl AppState {
         Self {
             config_dir,
             app: RwLock::new(app),
+            application_session_id: uuid::Uuid::new_v4().to_string(),
             launch_workspace_id: std::sync::Mutex::new(launch_workspace_id),
             cancellations: Mutex::new(HashMap::new()),
             read_limit: Semaphore::new(4),
@@ -589,7 +591,11 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
         >= 3
     {
         let mut current = serde_json::from_value::<AppStateSnapshot>(value).ok()?;
-        current.schema_version = 6;
+        if current.schema_version < 7 {
+            current.settings.notify_incoming_commits = true;
+            current.settings.notify_unpushed_commits = true;
+        }
+        current.schema_version = 7;
         return Some(current);
     }
     let mut settings = DesktopSettings::default();
@@ -635,7 +641,7 @@ fn migrate_state(bytes: &[u8]) -> Option<AppStateSnapshot> {
         .and_then(|item| serde_json::from_value(item).ok())
         .unwrap_or_default();
     Some(AppStateSnapshot {
-        schema_version: 6,
+        schema_version: 7,
         settings: settings.normalize(),
         layout,
         last_workspace_id: value
@@ -784,7 +790,7 @@ mod tests {
           "branchSidebarCollapsed":true,"branchSidebarCollapsedSections":["tags"]
         }"##;
         let state = migrate_state(legacy).unwrap();
-        assert_eq!(state.schema_version, 6);
+        assert_eq!(state.schema_version, 7);
         assert!(matches!(state.settings.theme, ThemePreference::Dark));
         assert_eq!(state.layout.active_tab, "stash");
         assert_eq!(state.layout.panel_sizes.commit, 400);
@@ -822,12 +828,42 @@ mod tests {
           "recentWorkspaces":[],"commitSelections":{"workspace-a":[{"repoId":"repo-a","paths":["src/a.ts"]}]}
         }"##;
         let state = migrate_state(value).unwrap();
-        assert_eq!(state.schema_version, 6);
+        assert_eq!(state.schema_version, 7);
         assert_eq!(state.commit_selections["workspace-a"][0].repo_id, "repo-a");
         assert_eq!(
             state.commit_selections["workspace-a"][0].paths,
             ["src/a.ts"]
         );
+    }
+
+    #[test]
+    fn v6_notification_defaults_are_replaced_before_release() {
+        let mut state = AppStateSnapshot {
+            schema_version: 6,
+            ..Default::default()
+        };
+        state.settings.notify_incoming_commits = false;
+        state.settings.notify_unpushed_commits = false;
+        let bytes = serde_json::to_vec(&state).unwrap();
+        let migrated = migrate_state(&bytes).unwrap();
+        assert_eq!(migrated.schema_version, 7);
+        assert!(migrated.settings.notify_incoming_commits);
+        assert!(migrated.settings.notify_unpushed_commits);
+    }
+
+    #[test]
+    fn application_session_id_is_stable_for_one_process_and_defaults_enable_notifications() {
+        let root = tempdir().unwrap();
+        let state = AppState::load(root.path().to_path_buf());
+        assert!(!state.application_session_id.is_empty());
+        let next_process = AppState::load(root.path().to_path_buf());
+        assert_ne!(
+            state.application_session_id,
+            next_process.application_session_id
+        );
+        let defaults = DesktopSettings::default();
+        assert!(defaults.notify_incoming_commits);
+        assert!(defaults.notify_unpushed_commits);
     }
 
     #[test]

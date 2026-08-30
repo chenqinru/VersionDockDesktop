@@ -93,6 +93,7 @@ function GitIdentity({
   repoId: string;
   t: Translate;
 }) {
+  const addNotification = useAppStore((state) => state.addNotification);
   const [value, setValue] = useState<GitIdentityState>();
   const [label, setLabel] = useState('');
   const [name, setName] = useState('');
@@ -128,9 +129,22 @@ function GitIdentity({
   }) => {
     try {
       setError(undefined);
-      setValue(await bridge.request<GitIdentityState>(operation));
+      const requested = operation.payload.operation;
+      const previousLabel = requested.type === 'delete' ? value?.profiles.find((profile) => profile.id === requested.profile_id)?.label : undefined;
+      const next = await bridge.request<GitIdentityState>(operation);
+      setValue(next);
+      const activeLabel = requested.type === 'select' && requested.profile_id
+        ? next.profiles.find((profile) => profile.id === requested.profile_id)?.label ?? next.effective.userName
+        : next.effective.userName;
+      const message = requested.type === 'save'
+        ? { key: 'VersionDock: Profile "{0}" updated.', args: [requested.profile.label] }
+        : requested.type === 'delete'
+          ? { key: 'VersionDock: Profile "{0}" deleted.', args: [previousLabel ?? requested.profile_id] }
+          : { key: 'VersionDock: {0} set as active profile for this workspace.', args: [activeLabel] };
+      addNotification({ type: 'success', title: 'Identity operation completed', message, workspaceId });
     } catch (reason) {
       setError(String(reason));
+      addNotification({ type: 'error', title: 'Identity operation failed', message: { raw: String(reason) }, workspaceId });
     }
   };
 
@@ -330,6 +344,8 @@ function SvnAccount({
   repoId: string;
   t: Translate;
 }) {
+  const addNotification = useAppStore((state) => state.addNotification);
+  const repoName = useAppStore((state) => state.snapshot?.repositories.find((repo) => repo.meta.id === repoId)?.meta.name ?? repoId);
   const [value, setValue] = useState<SvnAccountState>();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -369,8 +385,17 @@ function SvnAccount({
       });
       setValue(next);
       setPassword('');
+      const message = operation.type === 'test'
+        ? { key: 'VersionDock: SVN connection succeeded for {0}: {1}', args: [repoName, next.repositoryRoot] }
+        : operation.type === 'delete'
+          ? 'VersionDock: SVN session credentials forgotten.'
+          : operation.type === 'clearNative'
+            ? { key: 'VersionDock: Cached SVN credentials cleared for {0}.', args: [next.repositoryRoot] }
+            : { key: 'VersionDock: SVN account switched to {0}.', args: [operation.username] };
+      addNotification({ type: 'success', title: 'SVN account operation completed', message, workspaceId });
     } catch (reason) {
       setError(String(reason));
+      addNotification({ type: 'error', title: 'SVN account operation failed', message: { raw: String(reason) }, workspaceId });
     }
   };
 

@@ -890,6 +890,9 @@ pub enum ChangelistOperation {
         changelist_id: Option<String>,
         paths: Vec<String>,
     },
+    SetActive {
+        changelist_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1322,7 +1325,7 @@ pub struct AppStateSnapshot {
 }
 
 fn default_schema_version() -> u32 {
-    6
+    7
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1380,8 +1383,8 @@ impl Default for DesktopSettings {
             auto_refresh_interval: 0,
             fetch_on_startup: false,
             reset_view_locations_on_startup: false,
-            notify_incoming_commits: false,
-            notify_unpushed_commits: false,
+            notify_incoming_commits: true,
+            notify_unpushed_commits: true,
             auto_check_updates: true,
             skipped_update_version: None,
             online_avatars_enabled: false,
@@ -1583,6 +1586,7 @@ pub struct BootstrapData {
     pub state: AppStateSnapshot,
     pub tools: ToolAvailability,
     pub capabilities: DesktopCapabilities,
+    pub application_session_id: String,
     #[serde(default)]
     #[specta(optional)]
     pub launch_workspace_id: Option<String>,
@@ -2072,6 +2076,10 @@ pub struct ChangelistEntry {
     pub id: String,
     pub name: String,
     pub files: Vec<String>,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default)]
+    pub is_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

@@ -34,6 +34,7 @@ export type BootstrapData = {
 	state: AppStateSnapshot,
 	tools: ToolAvailability,
 	capabilities: DesktopCapabilities,
+	applicationSessionId: string,
 	launchWorkspaceId?: string | null,
 	runtime?: RuntimeCapabilities,
 };
@@ -439,9 +440,11 @@ export type ChangelistEntry = {
 	id: string,
 	name: string,
 	files: string[],
+	isDefault?: boolean,
+	isActive?: boolean,
 };
 
-export type ChangelistOperation = { type: "create"; name: string } | { type: "rename"; changelist_id: string; name: string } | { type: "delete"; changelist_id: string } | { type: "assign"; changelist_id: string | null; paths: string[] };
+export type ChangelistOperation = { type: "create"; name: string } | { type: "rename"; changelist_id: string; name: string } | { type: "delete"; changelist_id: string } | { type: "assign"; changelist_id: string | null; paths: string[] } | { type: "setActive"; changelist_id: string };
 
 export type ChangesDisplayMode = "simplified" | "changelists";
 

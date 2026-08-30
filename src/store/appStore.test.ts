@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
 import { currentDialog, publishDialog } from '../components/dialogService';
-import { interleaveHistory, isOperationActive, isOperationActiveForRepositories, useAppStore, workspacePathsEqual } from './appStore';
+import { interleaveHistory, isOperationActive, isOperationActiveForRepositories, resolveNotificationText, useAppStore, workspacePathsEqual } from './appStore';
 
 const bootstrap: BootstrapData = {
+  applicationSessionId: 'test-session',
   state: { theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
   tools: { git: true, svn: true, svnadmin: true },
   capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false },
@@ -31,10 +32,79 @@ const deferred = <T>() => {
 afterEach(() => {
   publishDialog(undefined);
   useAppStore.getState().dispose();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', operations: {}, notifications: [], ready: false, error: undefined });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', operations: {}, notifications: [], toastNotificationIds: [], ready: false });
 });
 
 describe('appStore async lifecycle', () => {
+  it('publishes plugin-compatible startup notifications once per workspace session', async () => {
+    const workspace = snapshot('notifications', 1);
+    workspace.repositories = [
+      { ...repository('repo-a', 'A'), ahead: 2, behind: 3, conflicts: 1 },
+      { ...repository('repo-b', 'B'), ahead: 1, behind: 1 },
+      { ...repository('worktree', 'Worktree'), ahead: 9, behind: 9, meta: { ...repository('worktree', 'Worktree').meta, isWorktree: true } },
+    ];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') return workspace;
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` }, ready: true });
+
+    await useAppStore.getState().openWorkspace(workspace.workspace.paths);
+    const first = useAppStore.getState().notifications;
+    expect(first).toHaveLength(3);
+    expect(first.map((item) => typeof item.message === 'string' ? item.message : 'key' in item.message ? item.message.key : item.message.raw)).toEqual([
+      'VersionDock: {0} unpushed commits across {1} repositories.',
+      'VersionDock: {0} incoming commits across {1} repositories.',
+      'VersionDock: Merge conflicts detected. Use the Merge Editor to resolve them.',
+    ]);
+    expect(first[1].actions.map((action) => action.type)).toEqual(['updateProject', 'disableIncoming']);
+
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications).toHaveLength(3);
+  });
+
+  it('keeps notification text translatable until render time and executes actions', async () => {
+    const bridge = new MockBridge((command) => command.type === 'updateLayout' ? command.payload.layout : true);
+    useAppStore.setState({ bridge, bootstrap, snapshot: snapshot('workspace', 1), activeTabId: 'workspace' });
+    const id = useAppStore.getState().addNotification({
+      type: 'info', title: 'Incoming Commits', message: { key: '{0} incoming commits', args: [3] }, workspaceId: 'workspace',
+      actions: [{ type: 'openPush', label: 'Go to Push' }],
+    });
+    const item = useAppStore.getState().notifications[0];
+    expect(resolveNotificationText(item.message, (key, ...args) => `zh:${key}:${args.join(',')}`)).toBe('zh:{0} incoming commits:3');
+    await useAppStore.getState().performNotificationAction(id, 0);
+    expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('push');
+    expect(useAppStore.getState().notifications[0].read).toBe(true);
+  });
+
+  it('queues every notification for immediate display without overwriting earlier messages', () => {
+    const first = useAppStore.getState().addNotification({ type: 'info', title: 'First', message: 'First message' });
+    const second = useAppStore.getState().addNotification({ type: 'success', title: 'Second', message: 'Second message' });
+    expect(useAppStore.getState().toastNotificationIds).toEqual([first, second]);
+    useAppStore.getState().dismissToast();
+    expect(useAppStore.getState().toastNotificationIds).toEqual([second]);
+  });
+
+  it('publishes operation-specific errors as critical notifications and ignores cancellation', async () => {
+    const workspace = snapshot('errors', 1);
+    workspace.repositories = [repository('repo-a', 'A')];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'branchOperation') throw new BridgeError({ code: 'BRANCH_FAILED', message: 'branch failed', command: 'git', exitCode: 1, stderr: 'details', recoverable: true });
+      if (command.type === 'stage') throw new DOMException('Operation aborted', 'AbortError');
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'repo-a', notifications: [] });
+
+    await useAppStore.getState().branchOperation({ type: 'delete', name: 'topic', force: false }, 'repo-a');
+    expect(useAppStore.getState().notifications[0].title).toBe('Branch operation failed');
+    expect(useAppStore.getState().toastNotificationIds).toEqual([useAppStore.getState().notifications[0].id]);
+
+    await useAppStore.getState().stage('repo-a', ['a.ts']);
+    expect(useAppStore.getState().notifications).toHaveLength(1);
+  });
+
   it('isolates operation activity by repository and domain', () => {
     const operations = {
       fetchA: {
@@ -512,12 +582,12 @@ describe('appStore async lifecycle', () => {
 
   it('does not throw or set error when refreshing with no open workspace', async () => {
     const bridge = new MockBridge(() => []);
-    useAppStore.setState({ bridge, bootstrap, snapshot: undefined, error: undefined });
+    useAppStore.setState({ bridge, bootstrap, snapshot: undefined, notifications: [] });
 
     await expect(useAppStore.getState().refresh(true)).resolves.toBeUndefined();
     await expect(useAppStore.getState().refresh(false)).resolves.toBeUndefined();
 
-    expect(useAppStore.getState().error).toBeUndefined();
+    expect(useAppStore.getState().notifications).toHaveLength(0);
   });
 
   it('ignores background watcher events and cleans startup errors when no workspace is open', async () => {
@@ -544,7 +614,7 @@ describe('appStore async lifecycle', () => {
     await useAppStore.getState().initialize(bridge);
 
     expect(useAppStore.getState().snapshot).toBeUndefined();
-    expect(useAppStore.getState().error).toBeUndefined();
+    expect(useAppStore.getState().notifications).toHaveLength(0);
 
     // 发送其他工作区的事件，不应触发错误
     subscriber?.({
@@ -554,7 +624,7 @@ describe('appStore async lifecycle', () => {
       source: 'watcher',
       scopes: ['status'],
     });
-    expect(useAppStore.getState().error).toBeUndefined();
+    expect(useAppStore.getState().notifications).toHaveLength(0);
   });
 
   it('keeps watcher status requests and their operation events in the background', async () => {

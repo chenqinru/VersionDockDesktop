@@ -1,0 +1,483 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Codicon } from './Codicon';
+import { FileIcon } from './FileIcon';
+import { branchColor } from './branchColor';
+import { useI18n } from '../i18n';
+import { buildFileTree, type FileTreeNode } from './fileTree';
+import type { FileChange, RepositoryStatus } from '../bindings/generated';
+
+export type ExpansionCommand = { sequence: number; expanded: boolean };
+
+export function StatusMark({ file }: { file: FileChange }) {
+  const value = file.conflicted ? 'C' : file.status === 'untracked' ? 'U' : file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : file.status === 'renamed' ? 'R' : 'M';
+  return <span className={`status-mark status-${file.status}`}>{value}</span>;
+}
+
+export function SelectionCheckbox({ label, checked, indeterminate = false, disabled = false, onChange }: { label: string; checked: boolean; indeterminate?: boolean; disabled?: boolean; onChange: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <span className={`selection-checkbox ${checked || indeterminate ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}>
+    <input ref={ref} aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={onChange} onClick={(event) => event.stopPropagation()} />
+    {(checked || indeterminate) && <Codicon name={indeterminate ? 'remove' : 'check'} />}
+  </span>;
+}
+
+export function TreeNode({
+  node,
+  depth,
+  basePad = 20,
+  repo,
+  selected,
+  setFiles,
+  onFile,
+  onContext,
+  onFolderContext,
+  expansion,
+}: {
+  node: FileTreeNode;
+  depth: number;
+  basePad?: number;
+  repo: RepositoryStatus;
+  selected: Set<string>;
+  setFiles: (repoId: string, paths: string[], value: boolean) => void;
+  onFile: (file: FileChange) => void;
+  onContext: (event: React.MouseEvent, file: FileChange) => void;
+  onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void;
+  expansion: ExpansionCommand;
+}) {
+  const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
+  const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
+  const currentPad = basePad + depth * 20;
+
+  if (!node.file) {
+    const selectedCount = node.files.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
+    const allSelected = node.files.length > 0 && selectedCount === node.files.length;
+    return (
+      <div className="tree-directory">
+        <div
+          className="directory-row"
+          style={{ paddingLeft: currentPad }}
+          onContextMenu={(event) => onFolderContext(event, node.path, node.files)}
+        >
+          <SelectionCheckbox
+            label={node.path}
+            checked={allSelected}
+            indeterminate={selectedCount > 0 && !allSelected}
+            onChange={() => setFiles(repo.meta.id, node.files.map((file) => file.path), !allSelected)}
+          />
+          <button title={node.path} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}>
+            <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
+            <FileIcon name={node.name} folder open={expanded} />
+            <span>{node.name}</span>
+          </button>
+          <b>{node.files.length}</b>
+        </div>
+        {expanded &&
+          node.children.map((child) => (
+            <TreeNode
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              basePad={basePad}
+              repo={repo}
+              selected={selected}
+              setFiles={setFiles}
+              onFile={onFile}
+              onContext={onContext}
+              onFolderContext={onFolderContext}
+              expansion={expansion}
+            />
+          ))}
+      </div>
+    );
+  }
+
+  const key = `${repo.meta.id}\0${node.file.path}`;
+  return (
+    <div
+      className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''}`}
+      style={{ paddingLeft: currentPad }}
+      onDoubleClick={() => onFile(node.file!)}
+      onContextMenu={(event) => onContext(event, node.file!)}
+    >
+      <SelectionCheckbox
+        label={node.file.path}
+        checked={selected.has(key)}
+        onChange={() => setFiles(repo.meta.id, [node.file!.path], !selected.has(key))}
+      />
+      <button title={node.file.path} onClick={() => onFile(node.file!)}>
+        <FileIcon name={node.name} />
+        <span className="file-name-group">
+          <span className="file-name">{node.name}</span>
+        </span>
+      </button>
+      {node.file.staged && <span className="staged-dot" />}
+      <StatusMark file={node.file} />
+    </div>
+  );
+}
+
+export interface ChangelistRepoGroup {
+  repo: RepositoryStatus;
+  files: FileChange[];
+}
+
+export interface ChangelistGroupProps {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+  isUnversioned?: boolean;
+  repoGroups: ChangelistRepoGroup[];
+  multiRepo: boolean;
+  singleRepo: boolean;
+  selected: Set<string>;
+  setFiles: (repoId: string, paths: string[], value: boolean) => void;
+  onFile: (repoId: string, file: FileChange) => void;
+  onContext: (event: React.MouseEvent, file: FileChange, repo: RepositoryStatus) => void;
+  onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[], repo: RepositoryStatus) => void;
+  onRepoContext: (event: React.MouseEvent, repo: RepositoryStatus, changelistId?: string) => void;
+  onHeaderContextMenu: (event: React.MouseEvent, changelistId: string) => void;
+  viewMode: 'tree' | 'list';
+  expansion: ExpansionCommand;
+  openWorkingChanges: (repoId: string) => void;
+}
+
+export function ChangelistGroup({
+  id,
+  name,
+  isDefault = false,
+  isUnversioned = false,
+  repoGroups,
+  multiRepo,
+  singleRepo,
+  selected,
+  setFiles,
+  onFile,
+  onContext,
+  onFolderContext,
+  onRepoContext,
+  onHeaderContextMenu,
+  viewMode,
+  expansion,
+  openWorkingChanges,
+}: ChangelistGroupProps) {
+  const { t } = useI18n();
+  const allFilesWithRepo = useMemo(
+    () => repoGroups.flatMap((g) => g.files.map((f) => ({ repoId: g.repo.meta.id, path: f.path }))),
+    [repoGroups],
+  );
+  const totalFiles = allFilesWithRepo.length;
+  const selectedCount = allFilesWithRepo.filter((f) => selected.has(`${f.repoId}\0${f.path}`)).length;
+  const allSelected = totalFiles > 0 && selectedCount === totalFiles;
+
+  const [localExpanded, setLocalExpanded] = useState<ExpansionCommand>(() => ({
+    sequence: 0,
+    expanded: totalFiles > 0 || isDefault,
+  }));
+  const expanded = localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded;
+
+  const toggleAll = () => {
+    const nextVal = !allSelected;
+    for (const group of repoGroups) {
+      if (group.files.length > 0) {
+        setFiles(group.repo.meta.id, group.files.map((f) => f.path), nextVal);
+      }
+    }
+  };
+
+  const headerIcon = isUnversioned ? 'question' : isDefault ? 'source-control' : 'list-unordered';
+
+  return (
+    <section className="repo-change-group changelist-group">
+      <div
+        className="repo-heading changelist-heading"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onHeaderContextMenu(e, id);
+        }}
+      >
+        <SelectionCheckbox
+          label={name}
+          checked={allSelected}
+          indeterminate={selectedCount > 0 && !allSelected}
+          disabled={totalFiles === 0}
+          onChange={toggleAll}
+        />
+        <button
+          title={name}
+          onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
+        >
+          <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
+          <Codicon
+            name={headerIcon}
+            style={{
+              color: isUnversioned
+                ? 'var(--vscode-descriptionForeground, #888)'
+                : 'inherit',
+            }}
+          />
+          <strong>{name}</strong>
+        </button>
+        {totalFiles > 0 && (
+          <span className={`count-badge ${selectedCount > 0 ? 'selected' : ''}`}>
+            {selectedCount}/{totalFiles}
+          </span>
+        )}
+      </div>
+
+      {expanded && totalFiles === 0 && (
+        <div className="repo-no-changes">{t('No files in this changelist')}</div>
+      )}
+
+      {expanded && singleRepo && repoGroups.length > 0 && (
+        <SingleRepoFileList
+          repo={repoGroups[0].repo}
+          files={repoGroups[0].files}
+          basePad={20}
+          selected={selected}
+          setFiles={setFiles}
+          onFile={onFile}
+          onContext={onContext}
+          onFolderContext={onFolderContext}
+          viewMode={viewMode}
+          expansion={expansion}
+        />
+      )}
+
+      {expanded && multiRepo && (
+        <div className="changelist-repo-subgroups">
+          {repoGroups.map((group) => (
+            <RepoSubGroup
+              key={group.repo.meta.id}
+              repo={group.repo}
+              files={group.files}
+              changelistId={id}
+              selected={selected}
+              setFiles={setFiles}
+              onFile={onFile}
+              onContext={onContext}
+              onFolderContext={onFolderContext}
+              onRepoContext={onRepoContext}
+              viewMode={viewMode}
+              expansion={expansion}
+              openWorkingChanges={openWorkingChanges}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SingleRepoFileList({
+  repo,
+  files,
+  basePad = 20,
+  selected,
+  setFiles,
+  onFile,
+  onContext,
+  onFolderContext,
+  viewMode,
+  expansion,
+}: {
+  repo: RepositoryStatus;
+  files: FileChange[];
+  basePad?: number;
+  selected: Set<string>;
+  setFiles: (repoId: string, paths: string[], value: boolean) => void;
+  onFile: (repoId: string, file: FileChange) => void;
+  onContext: (event: React.MouseEvent, file: FileChange, repo: RepositoryStatus) => void;
+  onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[], repo: RepositoryStatus) => void;
+  viewMode: 'tree' | 'list';
+  expansion: ExpansionCommand;
+}) {
+  const tree = useMemo(() => buildFileTree(files), [files]);
+
+  if (viewMode === 'tree') {
+    return (
+      <>
+        {tree.map((node) => (
+          <TreeNode
+            key={node.path}
+            node={node}
+            depth={0}
+            basePad={basePad}
+            repo={repo}
+            selected={selected}
+            setFiles={setFiles}
+            onFile={(f) => onFile(repo.meta.id, f)}
+            onContext={(e, f) => onContext(e, f, repo)}
+            onFolderContext={(e, p, fs) => onFolderContext(e, p, fs, repo)}
+            expansion={expansion}
+          />
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {files.map((file) => {
+        const key = `${repo.meta.id}\0${file.path}`;
+        const parts = file.path.split('/');
+        const fileName = parts.pop();
+        return (
+          <div
+            className={`file-row status-${file.status} ${file.conflicted ? 'conflicted' : ''}`}
+            style={{ paddingLeft: basePad }}
+            key={key}
+            onDoubleClick={() => onFile(repo.meta.id, file)}
+            onContextMenu={(event) => onContext(event, file, repo)}
+          >
+            <SelectionCheckbox
+              label={file.path}
+              checked={selected.has(key)}
+              onChange={() => setFiles(repo.meta.id, [file.path], !selected.has(key))}
+            />
+            <button title={file.path} onClick={() => onFile(repo.meta.id, file)}>
+              <FileIcon name={fileName ?? file.path} />
+              <span className="file-name-group">
+                <span className="file-name">{fileName}</span>
+                <small>{parts.join('/')}</small>
+              </span>
+            </button>
+            {file.staged && <span className="staged-dot" />}
+            <StatusMark file={file} />
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function RepoSubGroup({
+  repo,
+  files,
+  changelistId,
+  selected,
+  setFiles,
+  onFile,
+  onContext,
+  onFolderContext,
+  onRepoContext,
+  viewMode,
+  expansion,
+  openWorkingChanges,
+}: {
+  repo: RepositoryStatus;
+  files: FileChange[];
+  changelistId: string;
+  selected: Set<string>;
+  setFiles: (repoId: string, paths: string[], value: boolean) => void;
+  onFile: (repoId: string, file: FileChange) => void;
+  onContext: (event: React.MouseEvent, file: FileChange, repo: RepositoryStatus) => void;
+  onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[], repo: RepositoryStatus) => void;
+  onRepoContext: (event: React.MouseEvent, repo: RepositoryStatus, changelistId?: string) => void;
+  viewMode: 'tree' | 'list';
+  expansion: ExpansionCommand;
+  openWorkingChanges: (repoId: string) => void;
+}) {
+  const { t } = useI18n();
+  const [localExpanded, setLocalExpanded] = useState<ExpansionCommand>(() => ({
+    sequence: 0,
+    expanded: files.length > 0,
+  }));
+  const expanded = localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded;
+
+  const totalFiles = files.length;
+  const selectedCount = files.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
+  const allSelected = totalFiles > 0 && selectedCount === totalFiles;
+  const branch = branchColor(repo.branch || repo.revision);
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div className="repo-sub-group" style={{ margin: 0 }}>
+      <div
+        className="repo-heading"
+        style={{
+          background: `color-mix(in srgb, ${repo.meta.color} 14%, var(--versiondock-surface))`,
+          paddingLeft: 18,
+          height: 26,
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onRepoContext(e, repo, changelistId);
+        }}
+      >
+        <SelectionCheckbox
+          label={repo.meta.name}
+          checked={allSelected}
+          indeterminate={selectedCount > 0 && !allSelected}
+          disabled={totalFiles === 0}
+          onChange={() => setFiles(repo.meta.id, files.map((f) => f.path), !allSelected)}
+        />
+        <button
+          title={repo.meta.name}
+          onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
+        >
+          <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
+          <i style={{ background: repo.meta.color }} />
+          <strong>{repo.meta.name}</strong>
+          <span
+            className="branch-chip"
+            title={repo.branch || repo.revision}
+            style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}
+          >
+            <Codicon name="git-branch" />
+            <span className="branch-name">{repo.branch || repo.revision}</span>
+          </span>
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
+          {files.length > 0 && (
+            <button
+              className="repo-open-changes"
+              style={{
+                opacity: hovered ? 1 : 0,
+                pointerEvents: hovered ? 'auto' : 'none',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px 4px',
+                color: 'inherit',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+              title={t('Open all changes')}
+              onClick={(e) => {
+                e.stopPropagation();
+                openWorkingChanges(repo.meta.id);
+              }}
+            >
+              <Codicon name="diff-multiple" />
+            </button>
+          )}
+          {totalFiles > 0 && (
+            <span className={`count-badge ${selectedCount > 0 ? 'selected' : ''}`}>
+              {selectedCount}/{totalFiles}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <SingleRepoFileList
+          repo={repo}
+          files={files}
+          basePad={36}
+          selected={selected}
+          setFiles={setFiles}
+          onFile={onFile}
+          onContext={onContext}
+          onFolderContext={onFolderContext}
+          viewMode={viewMode}
+          expansion={expansion}
+        />
+      )}
+    </div>
+  );
+}

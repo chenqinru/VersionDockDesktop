@@ -150,7 +150,7 @@ Desktop 可以设计自己的等价交互，但没有必要复制 VS Code 的宿
 | 原生安装包 | 提供 `.app`、`.dmg` 以及 Windows/Linux 安装包配置 |
 | 应用更新器 | 检查版本、显示 Release Notes、下载并安装更新、跳过指定版本 |
 | About 与诊断报告 | 显示应用、平台、Git/SVN 信息，并可复制脱敏诊断信息 |
-| 应用内通知中心 | 保存通知历史、未读状态和操作按钮；系统通知失败时仍保留应用内通知 |
+| 应用内通知中心 | 当前应用会话内保存与 VersionDock 插件一致的结果消息、未读状态和操作按钮；系统通知失败时仍保留应用内通知 |
 | 外部编辑器配置 | 可配置 Zed、Nvim 或其他命令，从 Desktop 打开文件 |
 | 独立主题、语言和 UI 字号 | 可选系统/浅色/深色、中英文和多档字号，不依赖 VS Code 配置 |
 | 结构化操作状态 | 按 Workspace、Repository、Domain 区分 `queued/running/succeeded/failed/cancelled/timedOut` |
@@ -158,7 +158,7 @@ Desktop 可以设计自己的等价交互，但没有必要复制 VS Code 的宿
 | Backend 并发协调 | 每仓库写锁、全局 2 个写并发、4 个读并发，等待信号量时支持取消 |
 | 进程树取消 | CLI 超时、取消和退出时处理整个子进程树，而不是只取消 UI 请求 |
 | 精确 Watcher Scope | 区分 Status、Diff、Index、Refs、History、Operation、Conflicts、SVN Revision 等领域，减少全 Workspace 刷新 |
-| 多窗口调度去重 | Fetch on Startup、自动刷新和通知基线通过共享 Lease 避免重复执行 |
+| 多窗口调度去重 | Fetch on Startup、自动刷新通过共享 Lease 去重；启动通知按 application session、workspace 和消息类型去重 |
 | Runtime Capability 真值 | 功能入口带有 `available/reasonCode/detail`，不只按 Git/SVN 类型粗略开启 |
 | SVN 系统安全存储 | 使用 macOS Keychain、Windows Credential Manager 或 Linux Secret Service；密码只通过 stdin 传入 SVN |
 | File History 不透明 Cursor | Cursor 绑定仓库、路径、VCS 和 Revision，防止跨仓库或路径串用 |

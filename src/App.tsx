@@ -8,8 +8,8 @@ import { CommitChangesWorkspace } from './components/CommitChangesWorkspace';
 import { CommitDetailWorkspace } from './components/CommitDetailWorkspace';
 import { MergeWorkspace } from './components/MergeWorkspace';
 import { Codicon } from './components/Codicon';
-import { useAppStore } from './store/appStore';
-import { createTranslator, I18nContext, resolveLanguage } from './i18n';
+import { resolveNotificationText, useAppStore } from './store/appStore';
+import { createTranslator, I18nContext, resolveLanguage, useI18n } from './i18n';
 import { applyTheme, resolveTheme } from './theme';
 import { useResizable } from './hooks/useResizable';
 import { useBridge } from './platform/context';
@@ -19,7 +19,6 @@ import { StatusBar } from './components/StatusBar/StatusBar';
 import { IdentityPanel } from './components/IdentityPanel';
 import { RemoteManager } from './components/RemoteManager';
 import { AboutDialog } from './components/AboutDialog';
-import { isAbortError } from './platform/bridge';
 import { UpdateProjectReportDialog } from './components/UpdateProjectReportDialog';
 import { choiceDialog } from './components/dialogService';
 
@@ -31,6 +30,35 @@ const UI_FONT_SIZE = {
   maximum: { pixels: '15px', scale: '1.1538461538' },
 } as const;
 
+export function NotificationToast() {
+  const { t } = useI18n();
+  const notifications = useAppStore((state) => state.notifications);
+  const toastNotificationIds = useAppStore((state) => state.toastNotificationIds ?? []);
+  const dismissToast = useAppStore((state) => state.dismissToast);
+  const performNotificationAction = useAppStore((state) => state.performNotificationAction);
+  const notification = notifications.find((item) => item.id === toastNotificationIds[0]);
+
+  useEffect(() => {
+    if (!notification || notification.type === 'warning' || notification.type === 'error') return;
+    const timer = window.setTimeout(dismissToast, 5_000);
+    return () => window.clearTimeout(timer);
+  }, [dismissToast, notification]);
+
+  if (!notification) return null;
+  return <div className={`toast ${notification.type}`} role="alert">
+    <div className={`notification-severity-icon ${notification.type}`}><Codicon name={notification.type === 'error' ? 'error' : notification.type === 'warning' ? 'warning' : notification.type === 'success' ? 'pass' : 'info'} /></div>
+    <div className="toast-content">
+      <div className="toast-header"><strong className="toast-title">{resolveNotificationText(notification.title, t)}</strong></div>
+      <div className="toast-message">{resolveNotificationText(notification.message, t)}</div>
+      {notification.actions.length > 0 && <div className="notification-item-actions">
+        {notification.actions.map((action, index) => <button type="button" className="notification-item-action-btn" key={`${action.type}-${index}`} onClick={() => void performNotificationAction(notification.id, index)}>{resolveNotificationText(action.label, t)}</button>)}
+      </div>}
+      {notification.details && <details className="toast-details"><summary>{t('Technical details')}</summary><pre>{notification.details}</pre></details>}
+    </div>
+    <button type="button" className="toast-close" aria-label={t('Close')} title={t('Close')} onClick={dismissToast}><Codicon name="close" /></button>
+  </div>;
+}
+
 export function App() {
   const bridge = useBridge();
   const bootstrap = useAppStore((state) => state.bootstrap);
@@ -38,11 +66,6 @@ export function App() {
   const mode = useAppStore((state) => state.mode);
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
   const ready = useAppStore((state) => state.ready);
-  const error = useAppStore((state) => state.error);
-  const clearError = useAppStore((state) => state.clearError);
-  const errorDetails = useAppStore((state) => state.errorDetails);
-  const notice = useAppStore((state) => state.notice);
-  const clearNotice = useAppStore((state) => state.clearNotice);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const initializeRepository = useAppStore((state) => state.initializeRepository);
   const setPanelSize = useAppStore((state) => state.setPanelSize);
@@ -157,44 +180,7 @@ export function App() {
           <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span><button className="primary" disabled={!initializeAvailable} title={bootstrap?.capabilities.availability?.initializeRepository?.detail ?? undefined} onClick={() => void initialize()}><Codicon name="repo-create" />{t('Initialize Repository')}</button></div> : mode === 'history' || comparisonDiffOpen ? <><HistoryWorkspace />{comparisonDiffOpen && <div className="comparison-diff-overlay"><DiffWorkspace /></div>}</> : mode === 'commit-detail' ? <CommitDetailWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
         </main>
       )}
-      {error && !isAbortError(error) && (
-        <div className="toast error" role="alert">
-          <div className="toast-icon">
-            <Codicon name="error" />
-          </div>
-          <div className="toast-content">
-            <div className="toast-header">
-              <strong className="toast-title">{t('Operation failed')}</strong>
-            </div>
-            <div className="toast-message">{error}</div>
-            {errorDetails && (
-              <details className="toast-details">
-                <summary>{t('Technical details')}</summary>
-                <pre>{errorDetails}</pre>
-              </details>
-            )}
-          </div>
-          <button type="button" className="toast-close" aria-label={t('Close')} title={t('Close')} onClick={clearError}>
-            <Codicon name="close" />
-          </button>
-        </div>
-      )}
-      {notice && (
-        <div className="toast info" role="status">
-          <div className="toast-icon">
-            <Codicon name="bell" />
-          </div>
-          <div className="toast-content">
-            <div className="toast-header">
-              <strong className="toast-title">VersionDock Desktop</strong>
-            </div>
-            <div className="toast-message">{notice}</div>
-          </div>
-          <button type="button" className="toast-close" aria-label={t('Close')} title={t('Close')} onClick={clearNotice}>
-            <Codicon name="close" />
-          </button>
-        </div>
-      )}
+      <NotificationToast />
       {dropActive && <div className="drop-overlay"><Codicon name="folder-opened" /><strong>{t('Drop folders anywhere in this window')}</strong></div>}
       <StatusBar />
       <DialogHost />

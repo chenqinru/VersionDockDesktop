@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { Codicon } from '../Codicon';
-import { useAppStore, type AppNotification } from '../../store/appStore';
+import { resolveNotificationText, useAppStore, type AppNotification } from '../../store/appStore';
 import { useI18n } from '../../i18n';
 
 interface NotificationCenterPopoverProps {
   anchorRect: DOMRect | null;
+  anchorRef: RefObject<HTMLElement | null>;
   onClose: () => void;
 }
 
@@ -19,18 +20,14 @@ function formatRelativeTime(timestamp: number, t: (key: string, ...args: Array<s
   return new Date(timestamp).toLocaleDateString();
 }
 
-export function NotificationCenterPopover({ anchorRect, onClose }: NotificationCenterPopoverProps) {
+export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: NotificationCenterPopoverProps) {
   const { t } = useI18n();
   const notifications = useAppStore((state) => state.notifications);
   const markNotificationAsRead = useAppStore((state) => state.markNotificationAsRead);
   const markAllNotificationsAsRead = useAppStore((state) => state.markAllNotificationsAsRead);
   const removeNotification = useAppStore((state) => state.removeNotification);
   const clearNotifications = useAppStore((state) => state.clearNotifications);
-  const sync = useAppStore((state) => state.sync);
-  const setActiveTab = useAppStore((state) => state.setActiveTab);
-  const openIdentityPanel = useAppStore((state) => state.openIdentityPanel);
-  const refresh = useAppStore((state) => state.refresh);
-  const openUpdateDetails = useAppStore((state) => state.openUpdateDetails);
+  const performNotificationAction = useAppStore((state) => state.performNotificationAction);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -38,7 +35,7 @@ export function NotificationCenterPopover({ anchorRect, onClose }: NotificationC
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (popoverRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
       onClose();
     };
 
@@ -55,39 +52,11 @@ export function NotificationCenterPopover({ anchorRect, onClose }: NotificationC
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose]);
+  }, [anchorRef, onClose]);
 
-  const handleAction = async (item: AppNotification) => {
-    markNotificationAsRead(item.id);
-    if (!item.actionKey) return;
+  const handleAction = async (item: AppNotification, actionIndex: number) => {
     onClose();
-
-    switch (item.actionKey) {
-      case 'pullAll':
-        if (item.actionData?.repoId) {
-          await sync(item.actionData.repoId, 'pull');
-        } else {
-          await refresh();
-        }
-        break;
-      case 'pushAll':
-        setActiveTab('push');
-        break;
-      case 'openConflicts':
-        setActiveTab('changes');
-        break;
-      case 'openIdentity':
-        openIdentityPanel(item.actionData?.repoId);
-        break;
-      case 'refresh':
-        await refresh(true);
-        break;
-      case 'viewUpdateDetails':
-        if (item.actionData) await openUpdateDetails(item.actionData);
-        break;
-      default:
-        break;
-    }
+    await performNotificationAction(item.id, actionIndex);
   };
 
   const getNotificationIcon = (type: AppNotification['type']) => {
@@ -162,30 +131,33 @@ export function NotificationCenterPopover({ anchorRect, onClose }: NotificationC
               className={`notification-item ${item.type} ${item.read ? 'read' : 'unread'}`}
               onClick={() => markNotificationAsRead(item.id)}
             >
-              <div className={`notification-item-icon ${item.type}`}>
+              <div className={`notification-severity-icon ${item.type}`}>
                 <Codicon name={getNotificationIcon(item.type)} />
               </div>
               <div className="notification-item-body">
                 <div className="notification-item-row">
-                  <strong className="notification-item-title">{t(item.title)}</strong>
+                  <strong className="notification-item-title">{resolveNotificationText(item.title, t)}</strong>
                   <span className="notification-item-time">
                     {formatRelativeTime(item.timestamp, t)}
                   </span>
                 </div>
-                <p className="notification-item-msg">{item.message}</p>
-                {item.actionLabel && (
-                  <button
-                    type="button"
-                    className="notification-item-action-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleAction(item);
-                    }}
-                  >
-                    <span>{t(item.actionLabel)}</span>
-                    <Codicon name="arrow-right" />
-                  </button>
-                )}
+                <p className="notification-item-msg">{resolveNotificationText(item.message, t)}</p>
+                {item.details && <pre className="notification-item-details">{item.details}</pre>}
+                {item.actions.length > 0 && <div className="notification-item-actions">
+                  {item.actions.map((action, actionIndex) => (
+                    <button
+                      type="button"
+                      className="notification-item-action-btn"
+                      key={`${action.type}-${actionIndex}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleAction(item, actionIndex);
+                      }}
+                    >
+                      <span>{resolveNotificationText(action.label, t)}</span>
+                    </button>
+                  ))}
+                </div>}
               </div>
               <button
                 type="button"

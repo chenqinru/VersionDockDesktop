@@ -15,6 +15,7 @@ const state = (): AppStateSnapshot => ({
 });
 
 const bootstrap = (): BootstrapData => ({
+  applicationSessionId: 'test-session',
   state: state(),
   tools: { git: true, svn: true, svnadmin: true },
   capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false },

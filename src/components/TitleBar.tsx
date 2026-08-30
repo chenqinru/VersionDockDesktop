@@ -334,7 +334,7 @@ export function TitleBar() {
         height: sourceBounds.height,
       }, attachToExisting);
     } catch (error) {
-      useAppStore.setState({ error: error instanceof Error ? error.message : String(error) });
+      useAppStore.getState().addNotification({ type: 'error', title: 'Workspace operation failed', message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: useAppStore.getState().snapshot?.workspace.id });
       return false;
     } finally {
       transferringTabsRef.current.delete(tab.id);

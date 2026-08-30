@@ -9,6 +9,7 @@ import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 
 const bootstrap = (stash: boolean, shelf = false, subtree = false, worktree = false): BootstrapData => ({
+  applicationSessionId: 'test-session',
   state: { theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
   tools: { git: true, svn: true, svnadmin: true },
   capabilities: { ai: false, stash, shelf, changelist: false, worktree, subtree, compare: false, remoteManagement: false },

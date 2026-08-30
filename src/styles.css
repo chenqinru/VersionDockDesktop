@@ -3,6 +3,7 @@
   --versiondock-ui-font-size: 13px;
   --vscode-font-size: var(--versiondock-ui-font-size);
   --versiondock-ui-font-scale: 1;
+  --versiondock-statusbar-height: 24px;
   font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
   --versiondock-bg: #181818;
   --versiondock-surface: #1f1f1f;
@@ -2580,13 +2581,17 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   from { opacity: 0; transform: translateY(12px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.toast { position: fixed; z-index: 110; right: 16px; bottom: 16px; width: min(440px, calc(100vw - 32px)); min-height: 48px; display: grid; grid-template-columns: 28px 1fr 24px; align-items: start; gap: 12px; padding: 12px 14px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 8px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), 0 0 1px rgba(255, 255, 255, 0.08) inset; animation: toast-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1); backdrop-filter: blur(16px); }
+.toast { position: fixed; z-index: 110; right: 16px; bottom: calc(var(--versiondock-statusbar-height) + 8px); width: min(360px, calc(100vw - 32px)); min-height: 48px; display: grid; grid-template-columns: 26px 1fr 22px; align-items: start; gap: 10px; padding: 11px 12px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 7px; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.42), 0 0 1px rgba(255, 255, 255, 0.08) inset; animation: toast-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1); backdrop-filter: blur(16px); }
 .toast.error { border-color: color-mix(in srgb, var(--versiondock-danger) 45%, var(--versiondock-border)); }
+.toast.warning { border-color: color-mix(in srgb, var(--versiondock-warning) 45%, var(--versiondock-border)); }
+.toast.success { border-color: color-mix(in srgb, var(--versiondock-success) 45%, var(--versiondock-border)); }
 .toast.info { border-color: color-mix(in srgb, var(--versiondock-accent) 45%, var(--versiondock-border)); }
-.toast-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
-.toast.error .toast-icon { background: color-mix(in srgb, var(--versiondock-danger) 16%, transparent); color: var(--versiondock-danger); }
-.toast.info .toast-icon { background: color-mix(in srgb, var(--versiondock-accent) 16%, transparent); color: var(--versiondock-accent); }
-.toast-icon .codicon { font-size: calc(16px * var(--versiondock-ui-font-scale, 1)); }
+.notification-severity-icon { width: 26px; height: 26px; flex: 0 0 26px; margin-top: 1px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.notification-severity-icon.error { background: color-mix(in srgb, var(--versiondock-danger) 16%, transparent); color: var(--versiondock-danger); }
+.notification-severity-icon.warning { background: color-mix(in srgb, var(--versiondock-warning) 16%, transparent); color: var(--versiondock-warning); }
+.notification-severity-icon.success { background: color-mix(in srgb, var(--versiondock-success) 16%, transparent); color: var(--versiondock-success); }
+.notification-severity-icon.info { background: color-mix(in srgb, var(--versiondock-accent) 16%, transparent); color: var(--versiondock-accent); }
+.notification-severity-icon .codicon { font-size: calc(15px * var(--versiondock-ui-font-scale, 1)); }
 .toast-content { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .toast-header { display: flex; align-items: center; }
 .toast-title { font-size: calc(12.5px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; color: var(--versiondock-text); line-height: 18px; }
@@ -2635,7 +2640,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .changes-actions { flex: 0 0 29px; height: 29px; padding: 2px 6px; background: var(--versiondock-bg); }
 .changes-actions button { color: var(--versiondock-muted); }
 .changes-scroll { background: var(--versiondock-surface); }
-.repo-change-group { border-bottom: 0; }
+.repo-change-group { border-bottom: 1px solid var(--versiondock-border-soft); margin: 0; }
+.repo-change-group:last-child { border-bottom: 0; }
 .repo-heading { width: 100%; min-width: 0; height: 26px; padding: 0 6px; display: flex; align-items: center; gap: 0; overflow: hidden; white-space: nowrap; background: color-mix(in srgb, var(--versiondock-surface-alt) 72%, transparent); }
 .repo-heading > .selection-checkbox { flex: 0 0 auto; margin: 0 1px 0 0; }
 .repo-heading > button { min-width: 0; flex: 1; height: 100%; padding: 0 2px 0 4px; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; text-align: left; }
@@ -2648,7 +2654,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .repo-heading .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-heading > b { min-width: 18px; height: 16px; flex: 0 0 auto; padding: 0 5px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 16px; text-align: center; }
 .file-row, .directory-row { height: 22px; min-height: 22px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 22px; }
-.file-row { min-width: 0; gap: 3px; padding-right: 8px; overflow: hidden; white-space: nowrap; }
+.file-row { min-width: 0; display: flex; align-items: center; gap: 3px; padding-right: 8px; overflow: hidden; white-space: nowrap; }
 .selection-checkbox { position: relative; width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border)); border-radius: 2px; background: transparent; color: #fff; }
 .selection-checkbox.selected {
   border-color: var(--versiondock-accent-bg);
@@ -2659,7 +2665,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .selection-checkbox .codicon { position: relative; pointer-events: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 11px; font-weight: 700; }
 .selection-checkbox:has(input:focus-visible) { outline: 1px solid var(--versiondock-focusBorder, var(--versiondock-accent)); outline-offset: 1px; }
 .directory-row > .selection-checkbox, .file-row > .selection-checkbox { margin-right: 3px; }
-.file-row button { min-width: 0; gap: 4px; overflow: hidden; white-space: nowrap; }
+.file-row button { min-width: 0; flex: 1; height: 100%; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; text-align: left; }
 .file-row .file-name-group { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 4px; overflow: hidden; }
 .file-row .file-name { min-width: 0; max-width: 100%; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-text); }
 .file-row.status-added .file-name, .file-row.status-untracked .file-name { color: var(--versiondock-success); }
@@ -2672,9 +2678,48 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .directory-row > button { min-width: 0; flex: 1; height: 100%; padding: 0 0 0 4px; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; text-align: left; }
 .directory-row > button > .codicon:first-child { width: 12px; flex: 0 0 12px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .directory-row > button > span:last-child { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.directory-row > b { min-width: 14px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; text-align: center; }
+.directory-row > b { min-width: 14px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; text-align: center; margin-left: 6px; flex-shrink: 0; }
 .repo-no-changes { padding: 12px 8px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
-.status-mark { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 22px; }
+.changelist-group { border-bottom: 0; }
+.changelist-heading {
+  display: flex;
+  align-items: center;
+  padding-right: 8px;
+  border-left: 3px solid var(--vscode-focusBorder, var(--versiondock-accent, #007acc));
+  border-bottom: 1px solid var(--versiondock-border-soft);
+  background: var(--versiondock-surface-alt);
+}
+.changelist-repo-subgroups { display: flex; flex-direction: column; }
+.changelist-repo-subgroups .repo-sub-group { margin: 0; }
+.changelist-repo-subgroups .repo-sub-group .repo-heading { height: 26px; padding-right: 8px; }
+.single-repo-header { border-bottom: 1px solid var(--versiondock-border-soft); height: 26px; padding-right: 8px; }
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 700;
+  color: var(--versiondock-muted);
+  border-radius: 8px;
+  padding: 1px 5px;
+  line-height: 1;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.count-badge.selected {
+  background: var(--versiondock-badge-background, #0078d4);
+  color: var(--versiondock-badge-foreground, #ffffff);
+}
+.status-mark {
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  line-height: 22px;
+  font-weight: 700;
+  width: 14px;
+  min-width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
 .file-type-icon { width: 16px; height: 16px; flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; color: var(--versiondock-muted); }
 .file-type-icon .codicon { font-size: calc(16px * var(--versiondock-ui-font-scale, 1)); }
 .file-type-icon.folder { color: var(--versiondock-muted); }
@@ -3842,8 +3887,8 @@ button.danger:not(:disabled):hover,
 
 /* ===== 现代底部状态栏与通知中心 ===== */
 .app-statusbar {
-  height: 24px;
-  flex: 0 0 24px;
+  height: var(--versiondock-statusbar-height);
+  flex: 0 0 var(--versiondock-statusbar-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4387,16 +4432,6 @@ button.danger:not(:disabled):hover,
   background: var(--versiondock-accent);
 }
 
-.notification-item-icon {
-  flex: 0 0 16px;
-  margin-top: 2px;
-}
-
-.notification-item-icon.error { color: var(--versiondock-danger); }
-.notification-item-icon.warning { color: var(--versiondock-warning); }
-.notification-item-icon.success { color: var(--versiondock-success); }
-.notification-item-icon.info { color: var(--versiondock-accent); }
-
 .notification-item-body {
   flex: 1;
   min-width: 0;
@@ -4434,23 +4469,33 @@ button.danger:not(:disabled):hover,
   line-height: 1.4;
   word-break: break-word;
 }
+.notification-item-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; }
+.notification-item-details { max-height: 120px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; padding: 6px 8px; border: 1px solid var(--versiondock-border-soft); border-radius: 4px; background: var(--versiondock-input); color: var(--versiondock-muted); font: calc(10.5px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); }
 
 .notification-item-action-btn {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 5px;
-  padding: 2px 8px;
-  border-radius: 3px;
-  background: var(--versiondock-accent-bg);
-  color: #ffffff;
-  font-size: 10.5px;
-  font-weight: 500;
+  justify-content: center;
+  height: 25px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--versiondock-accent) 48%, var(--versiondock-border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--versiondock-accent) 14%, var(--versiondock-surface-alt));
+  color: var(--versiondock-accent);
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 23px;
 }
 
-.notification-item-action-btn:hover {
-  opacity: 0.9;
+button.notification-item-action-btn:hover:not(:disabled),
+button.notification-item-action-btn:focus-visible {
+  border-color: var(--versiondock-accent);
+  background: var(--versiondock-accent-bg);
+  color: #ffffff;
+  box-shadow: 0 1px 5px color-mix(in srgb, var(--versiondock-accent) 22%, transparent);
+  opacity: 1;
 }
 
 .notification-item-dismiss {

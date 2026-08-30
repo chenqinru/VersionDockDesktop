@@ -7,6 +7,8 @@ use crate::{
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Default)]
 struct ChangelistIndex {
+    #[serde(default)]
+    active_id: Option<String>,
     changelists: Vec<ChangelistEntry>,
 }
 
@@ -14,7 +16,13 @@ pub async fn list(
     config_dir: &Path,
     repo: &RepositoryMeta,
 ) -> Result<Vec<ChangelistEntry>, DesktopError> {
-    Ok(read_index(config_dir, repo).await?.changelists)
+    let index = read_index(config_dir, repo).await?;
+    let active_id = index.active_id.as_deref();
+    let mut changelists = index.changelists;
+    for entry in &mut changelists {
+        entry.is_active = active_id == Some(&entry.id);
+    }
+    Ok(changelists)
 }
 
 pub async fn operate(
@@ -28,6 +36,8 @@ pub async fn operate(
             id: format!("cl-{}", uuid::Uuid::new_v4().simple()),
             name: valid_name(&name)?,
             files: vec![],
+            is_default: false,
+            is_active: false,
         }),
         ChangelistOperation::Rename {
             changelist_id,
@@ -47,6 +57,9 @@ pub async fn operate(
             index.changelists.retain(|entry| entry.id != changelist_id);
             if index.changelists.len() == before {
                 return Err(not_found());
+            }
+            if index.active_id.as_deref() == Some(&changelist_id) {
+                index.active_id = None;
             }
         }
         ChangelistOperation::Assign {
@@ -72,6 +85,24 @@ pub async fn operate(
                     }
                 }
                 entry.files.sort();
+            }
+        }
+        ChangelistOperation::SetActive { changelist_id } => {
+            if changelist_id == "default"
+                || changelist_id == "unassigned"
+                || changelist_id.is_empty()
+            {
+                index.active_id = None;
+            } else {
+                validate_id(&changelist_id)?;
+                if !index
+                    .changelists
+                    .iter()
+                    .any(|entry| entry.id == changelist_id)
+                {
+                    return Err(not_found());
+                }
+                index.active_id = Some(changelist_id);
             }
         }
     }

@@ -39,16 +39,35 @@ export function workspacePathsEqual(left: string[], right: string[]): boolean {
   return sortedLeft.every((path, index) => path === sortedRight[index]);
 }
 
+export type NotificationText = string | { key: string; args?: Array<string | number> } | { raw: string };
+
+export type AppNotificationAction =
+  | { type: 'updateProject'; label: NotificationText }
+  | { type: 'openPush'; label: NotificationText }
+  | { type: 'openConflicts'; label: NotificationText }
+  | { type: 'openIdentity'; label: NotificationText; repoId?: string }
+  | { type: 'refresh'; label: NotificationText }
+  | { type: 'viewUpdateDetails'; label: NotificationText; result: RepositoryUpdateResult }
+  | { type: 'viewUpdateResults'; label: NotificationText; results: RepositoryUpdateResult[] }
+  | { type: 'disableIncoming'; label: NotificationText };
+
 export interface AppNotification {
   id: string;
   type: 'info' | 'success' | 'warning' | 'error';
-  title: string;
-  message: string;
+  title: NotificationText;
+  message: NotificationText;
   timestamp: number;
   read: boolean;
-  actionLabel?: string;
-  actionKey?: 'pullAll' | 'pushAll' | 'openConflicts' | 'openIdentity' | 'refresh' | 'viewUpdateDetails';
-  actionData?: any;
+  workspaceId?: string;
+  details?: string;
+  urgent?: boolean;
+  actions: AppNotificationAction[];
+}
+
+export function resolveNotificationText(value: NotificationText, t: (key: string, ...args: Array<string | number>) => string): string {
+  if (typeof value === 'string') return t(value);
+  if ('raw' in value) return value.raw;
+  return t(value.key, ...(value.args ?? []));
 }
 
 export interface BatchCommitReport {
@@ -201,10 +220,8 @@ export interface AppStore {
   bridge?: VersionDockBridge;
   ready: boolean;
   operations: Record<string, OperationEvent>;
-  error?: string;
-  errorDetails?: string;
-  notice?: string;
   notifications: AppNotification[];
+  toastNotificationIds: string[];
   aboutOpen: boolean;
   aboutInitialTab: 'about' | 'changelog';
   openAbout: (tab?: 'about' | 'changelog') => void;
@@ -380,9 +397,9 @@ export interface AppStore {
   setPanelSize: (key: 'commit' | 'branches' | 'detail', value: number) => void;
   setBranchSidebarState: (collapsed: boolean, collapsedSections: string[]) => void;
   updateSettings: (patch: Partial<DesktopSettings>) => Promise<void>;
-  clearError: () => void;
-  clearNotice: () => void;
-  addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => void;
+  addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read' | 'actions'> & { actions?: AppNotificationAction[] }) => string;
+  dismissToast: () => void;
+  performNotificationAction: (notificationId: string, actionIndex: number) => Promise<void>;
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
   removeNotification: (id: string) => void;
@@ -394,11 +411,11 @@ export interface AppStore {
 }
 
 const emptyState: AppStateSnapshot = {
-  schemaVersion: 6,
+  schemaVersion: 7,
   settings: {
     theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
     promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false,
-    notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4,
+    notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 4,
     ignoredFolders: ['.git', '.svn', '.hg', 'node_modules', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', 'target'],
     maximumGraphCommits: 1000, projectColors: {}, externalEditor: null, onlineAvatarsEnabled: false, gravatarEnabled: false,
   },
@@ -424,7 +441,7 @@ let branchWorkingDiffGeneration = 0;
 let commitSelectionSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let branchRecoveryDialogQueue: Promise<void> = Promise.resolve();
 const requestControllers = new Map<string, AbortController>();
-const notificationBaseline = new Map<string, { incoming: number; unpushed: number }>();
+const claimedStartupNotifications = new Set<string>();
 const bridgeSubscriptions: Array<() => void> = [];
 let localOperationSequence = 0;
 let currentWindowLabel = `window-${Math.random().toString(36).slice(2)}`;
@@ -443,6 +460,20 @@ function claimSchedulerLease(name: string, ttlMs: number): boolean {
   } catch {
     return true;
   }
+}
+
+function claimStartupNotification(sessionId: string, workspaceId: string, kind: 'conflicts' | 'incoming' | 'unpushed'): boolean {
+  const key = `versiondock:notification:${sessionId}:${workspaceId}:${kind}`;
+  if (claimedStartupNotifications.has(key)) return false;
+  claimedStartupNotifications.add(key);
+  if (typeof localStorage === 'undefined') return true;
+  try {
+    if (localStorage.getItem(key)) return false;
+    localStorage.setItem(key, 'claimed');
+  } catch {
+    // The in-memory claim still prevents duplicates in this window.
+  }
+  return true;
 }
 
 function releaseSchedulerLeases() {
@@ -583,10 +614,18 @@ function queueBranchRecoveryDialog(task: () => Promise<void>): Promise<void> {
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
+  const publishError = (title: string, error: unknown) => get().addNotification({
+    type: 'error', title, message: { raw: errorText(error) }, details: errorDetails(error), workspaceId: get().snapshot?.workspace.id,
+  });
   const ensureRepositoryCapability = (repoId: string, key: string) => {
     const repository = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
     if (!repository || capabilityAvailable(repository.capabilities, key, true)) return true;
-    set({ notice: capabilityReason(repository.capabilities, key) ?? 'Operation is unavailable for this repository' });
+    get().addNotification({
+      type: 'warning',
+      title: 'Operation unavailable',
+      message: { raw: capabilityReason(repository.capabilities, key) ?? 'Operation is unavailable for this repository' },
+      workspaceId: get().snapshot?.workspace.id,
+    });
     return false;
   };
   const withBusy = async <T>(
@@ -597,7 +636,6 @@ export const useAppStore = create<AppStore>((set, get) => {
     const operationId = `client-${Date.now()}-${++localOperationSequence}`;
     const context = { ...operationContext(domain, get()), ...target, visibility: 'background' as const };
     set((state) => ({
-      error: undefined,
       operations: {
         ...state.operations,
         [operationId]: {
@@ -619,8 +657,21 @@ export const useAppStore = create<AppStore>((set, get) => {
     } catch (error) {
       if (!isAbortError(error)) {
         const msg = errorText(error);
-        set({ error: msg, errorDetails: errorDetails(error) });
-        get().addNotification({ type: 'error', title: 'Operation failed', message: msg });
+        const domainTitle: Record<string, string> = {
+          branch: 'Branch operation failed', tag: 'Tag operation failed', commit: 'Commit failed', sync: 'Sync failed',
+          conflict: 'Conflict operation failed', stash: 'Stash operation failed', shelf: 'Shelf operation failed',
+          changelist: 'Changelist operation failed', worktree: 'Worktree operation failed', subtree: 'Subtree operation failed',
+          submodule: 'Submodule operation failed', remote: 'Remote operation failed', identity: 'Identity operation failed',
+          svnAccount: 'SVN account operation failed', history: 'History operation failed', system: 'System operation failed',
+          workspace: 'Workspace operation failed', repository: 'Repository operation failed', application: 'Application operation failed',
+        };
+        get().addNotification({
+          type: 'error',
+          title: domainTitle[domain.split(':', 1)[0]] ?? 'Operation failed',
+          message: { raw: msg },
+          details: errorDetails(error),
+          workspaceId: get().snapshot?.workspace.id,
+        });
       }
       return undefined;
     } finally {
@@ -703,8 +754,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (current) set((state) => ({
         bootstrap: { ...current, state: { ...current.state, settings: previous } },
         snapshot: state.snapshot ? projectSnapshot(state.snapshot, state.allRepositories, previous) : undefined,
-        error: errorText(error),
       }));
+      publishError('Settings update failed', error);
       if (!get().snapshot?.repositories.some((repo) => repo.meta.id === get().selectedRepoId)) {
         set({ selectedRepoId: get().snapshot?.repositories[0]?.meta.id });
       }
@@ -794,7 +845,6 @@ export const useAppStore = create<AppStore>((set, get) => {
     const current = get().snapshot;
     if (current?.workspace.id === snapshot.workspace.id && current.generation > snapshot.generation) return;
     const workspaceChanged = current?.workspace.id !== snapshot.workspace.id;
-    if (workspaceChanged) notificationBaseline.clear();
     const allRepositories = snapshot.repositories;
     const visibleSnapshot = projectSnapshot(snapshot, allRepositories, settings());
     const storedSelections = workspaceChanged
@@ -807,27 +857,59 @@ export const useAppStore = create<AppStore>((set, get) => {
       ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
-    const notificationLeader = claimSchedulerLease('notifications', 5_000);
-    for (const repo of visibleSnapshot.repositories) {
-      const counts = { incoming: repo.behind, unpushed: repo.ahead };
-      const previous = notificationBaseline.get(repo.meta.id);
-      notificationBaseline.set(repo.meta.id, counts);
-      if (!previous || !notificationLeader) continue;
+    const sessionId = get().bootstrap?.applicationSessionId ?? 'browser-session';
+    const startupLeader = claimSchedulerLease(`startup-notifications:${sessionId}:${snapshot.workspace.id}`, 10_000);
+    if (startupLeader) {
       const preferences = settings();
-      const incoming = preferences.notifyIncomingCommits && counts.incoming > previous.incoming;
-      const unpushed = preferences.notifyUnpushedCommits && counts.unpushed > previous.unpushed;
-      if (!incoming && !unpushed) continue;
-      const body = incoming ? `${repo.meta.name}: ${counts.incoming} incoming commits` : `${repo.meta.name}: ${counts.unpushed} unpushed commits`;
-      get().addNotification({
-        type: incoming ? 'info' : 'warning',
-        title: incoming ? 'Incoming Commits' : 'Unpushed Commits',
-        message: body,
-        actionLabel: incoming ? 'Pull' : 'Push',
-        actionKey: incoming ? 'pullAll' : 'pushAll',
-        actionData: { repoId: repo.meta.id },
-      });
-      if (!await bridge().notify('VersionDock Desktop', body)) set({ notice: body });
-      void get().refreshRuntimeCapabilities();
+      const workspaceNotification = { workspaceId: snapshot.workspace.id };
+      const conflictCount = allRepositories.reduce((sum, repo) => sum + repo.conflicts, 0);
+      if (claimStartupNotification(sessionId, snapshot.workspace.id, 'conflicts') && conflictCount > 0) {
+        get().addNotification({
+          ...workspaceNotification,
+          type: 'warning',
+          urgent: true,
+          title: 'Merge conflicts detected',
+          message: 'VersionDock: Merge conflicts detected. Use the Merge Editor to resolve them.',
+          actions: [{ type: 'openConflicts', label: 'Open Merge List' }],
+        });
+      }
+
+      const incomingRepos = allRepositories.filter((repo) => !repo.meta.isWorktree && repo.behind > 0);
+      const totalBehind = incomingRepos.reduce((sum, repo) => sum + repo.behind, 0);
+      if (claimStartupNotification(sessionId, snapshot.workspace.id, 'incoming') && preferences.notifyIncomingCommits && totalBehind > 0) {
+        const message = incomingRepos.length === 1
+          ? { key: totalBehind === 1 ? 'VersionDock: {0} incoming commit available to pull.' : 'VersionDock: {0} incoming commits available to pull.', args: [totalBehind] }
+          : { key: totalBehind === 1 ? 'VersionDock: {0} incoming commit across {1} repository.' : 'VersionDock: {0} incoming commits across {1} repositories.', args: [totalBehind, incomingRepos.length] };
+        get().addNotification({
+          ...workspaceNotification,
+          type: 'info',
+          title: 'Incoming Commits',
+          message,
+          actions: [
+            { type: 'updateProject', label: 'Pull' },
+            { type: 'disableIncoming', label: "Don't show again" },
+          ],
+        });
+        void bridge().notify('VersionDock Desktop', createTranslator(resolveLanguage(preferences.language))(message.key, ...(message.args ?? [])));
+        void get().refreshRuntimeCapabilities();
+      }
+
+      const unpushedRepos = allRepositories.filter((repo) => repo.meta.kind === 'git' && repo.ahead > 0);
+      const totalAhead = unpushedRepos.reduce((sum, repo) => sum + repo.ahead, 0);
+      if (claimStartupNotification(sessionId, snapshot.workspace.id, 'unpushed') && preferences.notifyUnpushedCommits && totalAhead > 0) {
+        const message = unpushedRepos.length === 1
+          ? { key: totalAhead === 1 ? 'VersionDock: {0} unpushed commit ready to push.' : 'VersionDock: {0} unpushed commits ready to push.', args: [totalAhead] }
+          : { key: totalAhead === 1 ? 'VersionDock: {0} unpushed commit across {1} repository.' : 'VersionDock: {0} unpushed commits across {1} repositories.', args: [totalAhead, unpushedRepos.length] };
+        get().addNotification({
+          ...workspaceNotification,
+          type: 'info',
+          title: 'Unpushed Commits',
+          message,
+          actions: [{ type: 'openPush', label: 'Go to Push' }],
+        });
+        void bridge().notify('VersionDock Desktop', createTranslator(resolveLanguage(preferences.language))(message.key, ...(message.args ?? [])));
+        void get().refreshRuntimeCapabilities();
+      }
     }
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     const requests: Promise<void>[] = [get().loadConflicts(silent)];
@@ -990,7 +1072,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, notifications: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined, updateProjectReport: undefined,
+    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined, updateProjectReport: undefined,
 
     operations: {},
 
@@ -1081,9 +1163,6 @@ export const useAppStore = create<AppStore>((set, get) => {
           await Promise.allSettled(gitRepos.map((repo) => get().sync(repo.meta.id, 'fetch')));
         }
       }, 'workspace');
-      if (!get().snapshot) {
-        set({ error: undefined, errorDetails: undefined });
-      }
       set({ ready: true });
       void get().checkUpdateSilently();
     },
@@ -1146,7 +1225,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const requestGeneration = ++workspaceRequestGeneration;
       const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths } }, { signal: controller.signal });
       if (requestGeneration !== workspaceRequestGeneration) return;
-      const current = get().bootstrap ?? { state: emptyState, tools: snapshot.tools, capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false } };
+      const current = get().bootstrap ?? { state: emptyState, tools: snapshot.tools, applicationSessionId: 'frontend-session', capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false } };
       
       const workspaceDescriptor = snapshot.workspace;
       const filteredTabs = get().tabs.filter((item) => item.id !== workspaceDescriptor.id);
@@ -1537,7 +1616,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           await operation();
         } catch (error) {
           if (!isAbortError(error)) {
-            set({ error: errorText(error) });
+            publishError('Workspace refresh failed', error);
           }
         }
       } else {
@@ -1728,7 +1807,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ batchCommitReport: { message, push, targets, results } });
       clearCommittedSelections(results.filter((result) => result.committed).map((result) => result.repoId));
       const failures = results.filter((result) => result.error);
-      if (failures.length) set({ error: failures.map((result) => `${result.repoId}: ${result.error?.message}`).join('\n') });
+      if (failures.length) get().addNotification({
+        type: 'warning', urgent: true, title: 'Commit completed with failures',
+        message: { key: 'VersionDock: {0} error(s): {1}', args: [failures.length, failures.map((result) => result.error?.message ?? result.repoId).join('; ')] },
+        details: failures.map((result) => `${result.repoId}: ${result.error?.message}`).join('\n'), workspaceId: get().snapshot?.workspace.id,
+      });
     }, 'commit', {
       repositoryId: targets.length === 1 ? targets[0].repoId : null,
       target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(targets.map((target) => target.repoId))}`,
@@ -1766,15 +1849,20 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!ensureRepositoryCapability(repoId, capability)) return;
       const result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
       if (notify && result.update) {
-        const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
         const summary = result.update.summary;
+        const commitCount = summary?.commitCount ?? 0;
+        const fileCount = summary?.fileCount ?? 0;
+        const message: NotificationText = result.update.summaryError
+          ? { key: 'VersionDock: Update completed, but update details could not be calculated for {0} repositories.', args: [1] }
+          : summary?.kind === 'noChanges'
+            ? 'VersionDock: Already up to date. No files updated.'
+            : { key: 'VersionDock: Updated {0} files in {1} commits.', args: [fileCount, commitCount] };
         get().addNotification({
           type: result.update.summaryError ? 'warning' : 'success',
-          title: summary?.kind === 'noChanges' ? 'Repository is up to date' : 'Repository updated',
-          message: result.update.summaryError ? `${repo?.meta.name ?? repoId}: update succeeded, summary unavailable` : `${repo?.meta.name ?? repoId}: ${summary?.commitCount ?? 0} commits, ${summary?.fileCount ?? 0} files`,
-          actionLabel: summary?.commitCount ? 'View Update Details' : undefined,
-          actionKey: summary?.commitCount ? 'viewUpdateDetails' : undefined,
-          actionData: result.update,
+          title: 'Repository update',
+          message,
+          workspaceId: get().snapshot?.workspace.id,
+          actions: commitCount ? [{ type: 'viewUpdateDetails', label: 'View update details', result: result.update }] : [],
         });
       }
       return result.update ?? undefined;
@@ -1792,7 +1880,30 @@ export const useAppStore = create<AppStore>((set, get) => {
       const commits = updated.reduce((sum, item) => sum + (item.summary?.commitCount ?? 0), 0);
       const files = updated.reduce((sum, item) => sum + (item.summary?.fileCount ?? 0), 0);
       const failed = settled.filter((item) => item.error).length;
-      get().addNotification({ type: failed ? 'warning' : 'success', title: 'Project update completed', message: `${updated.length} succeeded, ${failed} failed · ${commits} commits, ${files} files` });
+      const summaryFailures = updated.filter((item) => item.summaryError).length;
+      const failureDescription = settled.filter((item) => item.error).map((item) => `${item.repoName}: ${item.error}`).join('; ');
+      const updatedRepoCount = new Set(updated.flatMap((item) => item.summary?.detail.commits.map((commit) => commit.repoId) ?? [])).size;
+      const message: NotificationText = updated.length === 0 && failed > 0
+        ? { key: 'VersionDock: Update failed: {0}', args: [failureDescription] }
+        : failed > 0
+          ? { key: 'VersionDock: {0} repositories updated, {1} failed; {2} files changed in {3} commits. {4}', args: [updated.length, failed, files, commits, failureDescription] }
+        : summaryFailures > 0
+          ? { key: 'VersionDock: Updated {0} files in {1} commits; details could not be calculated for {2} repositories.', args: [files, commits, summaryFailures] }
+          : commits > 0
+            ? updatedRepoCount > 1
+              ? { key: 'VersionDock: {0} repositories updated {1} files in {2} commits.', args: [updatedRepoCount, files, commits] }
+              : { key: 'VersionDock: Updated {0} files in {1} commits.', args: [files, commits] }
+            : 'VersionDock: Already up to date. No files updated.';
+      const detailed = updated.filter((item) => (item.summary?.commitCount ?? 0) > 0);
+      get().addNotification({
+        type: updated.length === 0 && failed > 0 ? 'error' : failed || summaryFailures ? 'warning' : 'success',
+        urgent: failed > 0,
+        title: 'Project update',
+        message,
+        details: failed ? settled.filter((item) => item.error).map((item) => `${item.repoName}: ${item.error}`).join('\n') : undefined,
+        workspaceId: get().snapshot?.workspace.id,
+        actions: detailed.length ? [{ type: 'viewUpdateResults', label: 'View update details', results: detailed }] : [],
+      });
     },
     dismissUpdateProjectReport: () => set({ updateProjectReport: undefined }),
 
@@ -1870,7 +1981,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
       } catch (error) {
         if (!isAbortError(error)) {
-          set({ error: errorText(error) });
+          publishError('History loading failed', error);
           throw error;
         }
       } finally {
@@ -1917,7 +2028,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         return detail;
       } catch (error) {
         if (!isAbortError(error)) {
-          set((state) => ({ error: errorText(error), selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
+          set((state) => ({ selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
           throw error;
         }
         set((state) => ({ selectedCommitLoading: { ...state.selectedCommitLoading, [key]: false } }));
@@ -1972,7 +2083,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         set((state) => ({ mergeCommits: { ...state.mergeCommits, [key]: values }, mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
       } catch (error) {
         if (!isAbortError(error)) {
-          set((state) => ({ error: errorText(error), mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+          set((state) => ({ mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
+          publishError('Merge commit loading failed', error);
         } else {
           set((state) => ({ mergeCommitsLoading: { ...state.mergeCommitsLoading, [key]: false } }));
         }
@@ -2002,9 +2114,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       } catch (error) {
         if (!isAbortError(error)) {
           set((state) => ({
-            error: errorText(error),
             mergeParentFilesLoading: { ...state.mergeParentFilesLoading, [key]: false },
           }));
+          publishError('Merge parent loading failed', error);
           throw error;
         }
         set((state) => ({
@@ -2028,15 +2140,34 @@ export const useAppStore = create<AppStore>((set, get) => {
         const suggestion = `Merge branch '${value.name ?? 'branch'}' into '${repo?.branch ?? 'HEAD'}'`;
         if (get().commitMessage.trim()) set({ mergeMessageSuggestion: suggestion });
         else set({ commitMessage: suggestion, mergeMessageSuggestion: undefined });
-        get().addNotification({ type: 'warning', title: t('Merge conflicts detected'), message: t('{0}: resolve conflicts before committing', repo?.meta.name ?? repoId), actionLabel: t('Open Conflicts'), actionKey: 'openConflicts' });
+        get().addNotification({
+          type: 'warning', urgent: true, workspaceId: get().snapshot?.workspace.id,
+          title: 'Merge conflicts detected',
+          message: { key: '{0}: resolve conflicts before committing', args: [repo?.meta.name ?? repoId] },
+          actions: [{ type: 'openConflicts', label: 'Open Conflicts' }],
+        });
       };
       try {
         const result = await bridge().request<BranchOperationResult>({ type: 'branchOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation: operation as never } });
         if (result.conflicted) suggestMergeMessage();
+        else {
+          const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
+          const branch = operation as { type: string; name?: string; old_name?: string; new_name?: string };
+          const messages: Record<string, NotificationText | undefined> = {
+            create: branch.name ? { key: 'VersionDock [{0}]: branch "{1}" created.', args: [repoName, branch.name] } : undefined,
+            checkout: branch.name ? { key: 'VersionDock [{0}]: switched to "{1}"', args: [repoName, branch.name] } : undefined,
+            merge: branch.name ? { key: 'VersionDock [{0}]: merged "{1}".', args: [repoName, branch.name] } : undefined,
+            rebase: branch.name ? { key: 'VersionDock [{0}]: rebased onto "{1}".', args: [repoName, branch.name] } : undefined,
+            rename: branch.old_name && branch.new_name ? { key: 'VersionDock [{0}]: renamed "{1}" → "{2}".', args: [repoName, branch.old_name, branch.new_name] } : undefined,
+            delete: branch.name ? { key: 'VersionDock [{0}]: deleted "{1}".', args: [repoName, branch.name] } : undefined,
+          };
+          const message = messages[branch.type];
+          if (message) get().addNotification({ type: 'success', title: 'Branch operation completed', message, workspaceId: get().snapshot?.workspace.id });
+        }
         return result;
       } catch (error) {
         if (!(error instanceof BridgeError) || error.code !== 'DIRTY_WORKTREE' || !value.name || (value.type !== 'checkout' && value.type !== 'merge')) {
-          set({ error: errorText(error), errorDetails: errorDetails(error) });
+          publishError('Branch operation failed', error);
           return undefined;
         }
         const target = value.name;
@@ -2058,15 +2189,14 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
     branchRecovery: async (repoId, operation) => {
-      const t = createTranslator(resolveLanguage(settings().language));
       try {
         const result = await bridge().request<BranchRecoveryResult>({ type: 'branchRecovery', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
-        if (result.status === 'partialFailure') get().addNotification({ type: 'warning', title: t('Branch recovery needs attention'), message: result.recoveryHint ? t(result.recoveryHint) : result.error?.message ?? t('Review the repository and retained stash.') });
-        else if (result.stashReference) get().addNotification({ type: result.status === 'conflicted' ? 'warning' : 'success', title: result.status === 'conflicted' ? t('Merge conflicts detected') : t('Branch operation completed'), message: t('{0} was retained for recovery.', result.stashReference) });
+        if (result.status === 'partialFailure') get().addNotification({ type: 'warning', urgent: true, workspaceId: get().snapshot?.workspace.id, title: 'Branch recovery needs attention', message: result.recoveryHint ? { key: result.recoveryHint } : result.error?.message ? { raw: result.error.message } : 'Review the repository and retained stash.' });
+        else if (result.stashReference) get().addNotification({ type: result.status === 'conflicted' ? 'warning' : 'success', urgent: result.status === 'conflicted', workspaceId: get().snapshot?.workspace.id, title: result.status === 'conflicted' ? 'Merge conflicts detected' : 'Branch operation completed', message: { key: '{0} was retained for recovery.', args: [result.stashReference] }, actions: result.status === 'conflicted' ? [{ type: 'openConflicts', label: 'Open Conflicts' }] : [] });
         await get().refresh(true);
         return result;
       } catch (error) {
-        set({ error: errorText(error), errorDetails: errorDetails(error) });
+        get().addNotification({ type: 'error', title: 'Branch operation failed', message: { raw: errorText(error) }, details: errorDetails(error), workspaceId: get().snapshot?.workspace.id });
         return undefined;
       }
     },
@@ -2075,6 +2205,16 @@ export const useAppStore = create<AppStore>((set, get) => {
       const repoId = requestedRepoId ?? get().selectedRepoId; if (!repoId) return;
       await withBusy(async () => {
         await bridge().request({ type: 'tagOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation: operation as never } });
+        const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
+        const tag = operation as { type: string; name: string; remote?: string };
+        const messages: Record<string, NotificationText | undefined> = {
+          push: tag.remote ? { key: 'VersionDock [{0}]: tag "{1}" pushed to "{2}".', args: [repoName, tag.name, tag.remote] } : undefined,
+          checkout: { key: 'VersionDock [{0}]: checked out tag "{1}" (detached HEAD).', args: [repoName, tag.name] },
+          merge: { key: 'VersionDock [{0}]: merged tag "{1}".', args: [repoName, tag.name] },
+          delete: { key: 'VersionDock [{0}]: tag "{1}" deleted.', args: [repoName, tag.name] },
+        };
+        const message = messages[tag.type];
+        if (message) get().addNotification({ type: 'success', title: 'Tag operation completed', message, workspaceId: get().snapshot?.workspace.id });
         await get().selectRepo(repoId, true);
       }, `repository:${repoId}`);
     },
@@ -2156,8 +2296,13 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     worktreeOperation: async (repoId, operation) => withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'worktreeWrite')) return;
+      const previousPaths = new Set((get().worktrees[repoId] ?? []).map((item) => item.path));
       await bridge().request({ type: 'worktreeOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
       await get().loadWorktrees(repoId);
+      if (operation.type === 'create') {
+        const created = (get().worktrees[repoId] ?? []).find((item) => !previousPaths.has(item.path));
+        get().addNotification({ type: 'success', title: 'Worktree operation completed', message: created ? { key: 'VersionDock: Worktree created at {0}', args: [created.path] } : 'VersionDock: Worktree created.', workspaceId: get().snapshot?.workspace.id });
+      }
     }, `worktree:${repoId}`),
     openWorktree: async (repoId, path, reveal) => withBusy(async () => {
       const managedPath = await bridge().request<string>({ type: 'openWorktree', payload: { workspace_id: workspaceId(), repo_id: repoId, path, reveal } });
@@ -2215,8 +2360,19 @@ export const useAppStore = create<AppStore>((set, get) => {
     subtreeOperation: async (repoId, operation) => withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'subtreeWrite')) return;
       const networkOperation = operation.type === 'add' || operation.type === 'pull' || operation.type === 'push';
+      const previous = 'subtree_id' in operation ? get().subtrees[repoId]?.find((item) => item.id === operation.subtree_id) : undefined;
       await bridge().request({ type: 'subtreeOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, networkOperation ? { timeoutMs: 600_000 } : undefined);
       await get().loadSubtrees(repoId);
+      const prefix = 'prefix' in operation ? operation.prefix : previous?.prefix ?? operation.subtree_id;
+      const messages: Partial<Record<typeof operation.type, NotificationText>> = {
+        add: { key: 'VersionDock: Subtree "{0}" added.', args: [prefix] }, register: { key: 'VersionDock: Subtree "{0}" registered.', args: [prefix] },
+        edit: { key: 'VersionDock: Subtree "{0}" updated.', args: [prefix] }, pull: { key: 'VersionDock: Subtree "{0}" pulled.', args: [prefix] },
+        push: { key: 'VersionDock: Subtree "{0}" pushed.', args: [prefix] }, removeFiles: { key: 'VersionDock: Subtree "{0}" removed from working tree.', args: [prefix] },
+        split: operation.type === 'split' && operation.branch ? { key: 'VersionDock: Subtree "{0}" split to branch "{1}".', args: [prefix, operation.branch] } : { key: 'VersionDock: Subtree "{0}" split.', args: [prefix] },
+        merge: { key: 'VersionDock: Subtree "{0}" merged.', args: [prefix] }, deleteRegistry: { key: 'VersionDock: Subtree "{0}" registry deleted.', args: [prefix] },
+      };
+      const message = messages[operation.type];
+      if (message) get().addNotification({ type: 'success', title: 'Subtree operation completed', message, workspaceId: get().snapshot?.workspace.id });
     }, `subtree:${repoId}`),
     loadSubmodules: async (repoId) => {
       const b = get().bridge;
@@ -2257,6 +2413,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return false;
       await bridge().request({ type: 'unpushedOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
       await get().loadUnpushedCommits(repoId);
+      if (operation.type === 'squash') get().addNotification({ type: 'success', title: 'History operation completed', message: 'VersionDock: Squash completed.', workspaceId: get().snapshot?.workspace.id });
+      if (operation.type === 'editMessage') get().addNotification({ type: 'success', title: 'History operation completed', message: 'VersionDock: Commit message updated.', workspaceId: get().snapshot?.workspace.id });
       return true;
     }, `history:${repoId}`)) ?? false,
     historyOperation: async (repoId, operation) => withBusy(async () => {
@@ -2266,6 +2424,13 @@ export const useAppStore = create<AppStore>((set, get) => {
     createPatch: async (repoId, revisions) => bridge().request<PatchDocument>({ type: 'createPatch', payload: { workspace_id: workspaceId(), repo_id: repoId, revisions } }),
     svnOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'svnOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
+      const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
+      let message: NotificationText | undefined;
+      if (operation.type === 'resolveWorking') message = { key: 'VersionDock [{0}]: marked {1} file(s) as resolved.', args: [repoName, operation.paths.length] };
+      if (operation.type === 'lock') message = { key: 'VersionDock [{0}]: locked {1} file(s).', args: [repoName, operation.paths.length] };
+      if (operation.type === 'unlock') message = { key: 'VersionDock [{0}]: unlocked {1} file(s).', args: [repoName, operation.paths.length] };
+      if (operation.type === 'relocate') message = { key: 'VersionDock [{0}]: SVN repository relocated to "{1}".', args: [repoName, operation.to_url] };
+      if (message) get().addNotification({ type: 'success', title: 'SVN operation completed', message, workspaceId: get().snapshot?.workspace.id });
       await get().selectRepo(repoId, true);
     }, `svn:${repoId}`),
     openBranchComparison: (repoId, target) => {
@@ -2309,6 +2474,13 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     remoteOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'remoteOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, operation.type === 'prune' ? { timeoutMs: 600_000 } : undefined);
+      const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
+      let message: NotificationText | undefined;
+      if (operation.type === 'add') message = { key: 'VersionDock [{0}]: remote "{1}" added.', args: [repoName, operation.name] };
+      if (operation.type === 'rename') message = { key: 'VersionDock [{0}]: remote renamed "{1}" → "{2}".', args: [repoName, operation.old_name, operation.new_name] };
+      if (operation.type === 'setUrl') message = { key: 'VersionDock [{0}]: URL of "{1}" updated.', args: [repoName, operation.name] };
+      if (operation.type === 'remove') message = { key: 'VersionDock [{0}]: remote "{1}" removed.', args: [repoName, operation.name] };
+      if (message) get().addNotification({ type: 'success', title: 'Remote operation completed', message, workspaceId: get().snapshot?.workspace.id });
       await get().loadRemotes(repoId);
     }, `remote:${repoId}`),
     systemOpen: async (repoId, relativePath, reveal, external = false) => withBusy(async () => {
@@ -2356,7 +2528,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     openMerge: async (conflict) => withBusy(async () => {
       if (conflict.conflictType && !['text', 'binary'].includes(conflict.conflictType)) {
-        set({ error: `${conflict.path}: ${conflict.conflictType} conflict requires an explicit working-copy resolution` });
+        get().addNotification({ type: 'warning', urgent: true, title: 'Conflict requires attention', message: { raw: `${conflict.path}: ${conflict.conflictType} conflict requires an explicit working-copy resolution` }, workspaceId: get().snapshot?.workspace.id, actions: [{ type: 'openConflicts', label: 'Open Conflicts' }] });
         return;
       }
       const merge = await bridge().request<MergeVersions>({ type: 'conflictVersions', payload: { workspace_id: workspaceId(), repo_id: conflict.repoId, relative_path: conflict.path } });
@@ -2433,19 +2605,41 @@ export const useAppStore = create<AppStore>((set, get) => {
       updateLayout({ ...layout(), branchSidebarCollapsed: collapsed, branchSidebarCollapsedSections: [...new Set(collapsedSections)] });
     },
     updateSettings,
-    clearError: () => set({ error: undefined, errorDetails: undefined }),
-    clearNotice: () => set({ notice: undefined }),
     addNotification: (notification) => {
       const id = crypto.randomUUID();
       const item: AppNotification = {
         id,
         timestamp: Date.now(),
         read: false,
+        actions: [],
         ...notification,
       };
       set((state) => ({
         notifications: [item, ...state.notifications].slice(0, 100),
+        toastNotificationIds: [...(state.toastNotificationIds ?? []), item.id],
       }));
+      return id;
+    },
+    dismissToast: () => set((state) => ({ toastNotificationIds: (state.toastNotificationIds ?? []).slice(1) })),
+    performNotificationAction: async (notificationId, actionIndex) => {
+      const notification = get().notifications.find((item) => item.id === notificationId);
+      const action = notification?.actions[actionIndex];
+      if (!notification || !action) return;
+      get().markNotificationAsRead(notification.id);
+      set((state) => ({ toastNotificationIds: (state.toastNotificationIds ?? []).filter((id) => id !== notification.id) }));
+      if (notification.workspaceId && notification.workspaceId !== get().activeTabId) {
+        await get().switchTab(notification.workspaceId);
+      }
+      switch (action.type) {
+        case 'updateProject': await get().updateProject(); break;
+        case 'openPush': get().setActiveTab('push'); break;
+        case 'openConflicts': get().setActiveTab('changes'); break;
+        case 'openIdentity': get().openIdentityPanel(action.repoId); break;
+        case 'refresh': await get().refresh(true); break;
+        case 'viewUpdateDetails': await get().openUpdateDetails(action.result); break;
+        case 'viewUpdateResults': await get().openUpdateResults(action.results); break;
+        case 'disableIncoming': await get().updateSettings({ notifyIncomingCommits: false }); break;
+      }
     },
     markNotificationAsRead: (id) => {
       set((state) => ({
@@ -2460,9 +2654,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     removeNotification: (id) => {
       set((state) => ({
         notifications: state.notifications.filter((n) => n.id !== id),
+        toastNotificationIds: (state.toastNotificationIds ?? []).filter((item) => item !== id),
       }));
     },
-    clearNotifications: () => set({ notifications: [] }),
+    clearNotifications: () => set({ notifications: [], toastNotificationIds: [] }),
     openIdentityPanel: (repoId) => {
       const targetRepoId = repoId ?? get().selectedRepoId ?? get().snapshot?.repositories[0]?.meta.id ?? null;
       set({ identityPanelRepoId: targetRepoId });

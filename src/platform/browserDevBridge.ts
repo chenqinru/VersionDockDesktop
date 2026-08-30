@@ -301,8 +301,8 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 } : detailFiles;
 
 const initialState: AppStateSnapshot = {
-  schemaVersion: 6, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace], commitSelections: {},
-  settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
+  schemaVersion: 7, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace], commitSelections: {},
+  settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 4, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
   layout: { panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
 };
 
@@ -401,6 +401,7 @@ export class BrowserDevBridge implements VersionDockBridge {
     switch (command.type) {
       case 'bootstrap': return {
         state: this.state, tools: { git: true, svn: true, svnadmin: true },
+        applicationSessionId: 'browser-demo-session',
         capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: true, compare: true, remoteManagement: true },
         runtime: unavailableRuntime,
       } satisfies BootstrapData;

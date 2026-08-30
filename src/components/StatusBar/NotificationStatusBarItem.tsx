@@ -41,6 +41,7 @@ export function NotificationStatusBarItem() {
       {open && (
         <NotificationCenterPopover
           anchorRect={anchorRect}
+          anchorRef={anchorRef}
           onClose={() => setOpen(false)}
         />
       )}

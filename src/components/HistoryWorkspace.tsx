@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
-import { capabilityAvailable, capabilityReason, useAppStore } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, resolveNotificationText, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useResizable } from '../hooks/useResizable';
 import { BranchSidebar } from './BranchSidebar';
@@ -344,7 +344,7 @@ function CommitList({
       const repoName = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
       await editorDialog({ title: t('Edit Commit Message'), message: `${repoName} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, confirmLabel: t('Save'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message });
-        if (!ok) throw new Error(useAppStore.getState().error ?? t('Operation failed'));
+        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed')); }
         return true;
       } });
     }
@@ -354,7 +354,7 @@ function CommitList({
     if (id === 'squash-multi') {
       await editorDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n'), items: oldestFirst.map((item) => ({ id: item.shortHash, label: item.message, description: item.author })), confirmLabel: t('Squash'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'squash', hashes: newestFirst.map((item) => item.hash), message });
-        if (!ok) throw new Error(useAppStore.getState().error ?? t('Operation failed'));
+        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed')); }
         return true;
       } });
     }

@@ -43,6 +43,7 @@ const state = (): AppStateSnapshot => ({
 });
 
 const bootstrap = (): BootstrapData => ({
+  applicationSessionId: 'test-session',
   state: state(),
   tools: { git: true, svn: true, svnadmin: true },
   capabilities: {
@@ -238,8 +239,7 @@ describe('StatusBar', () => {
       type: 'warning',
       title: 'Unpushed Commits',
       message: 'Repo1: 3 unpushed commits',
-      actionLabel: 'Push',
-      actionKey: 'pushAll',
+      actions: [{ type: 'openPush', label: 'Push' }, { type: 'disableIncoming', label: "Don't show again" }],
     });
 
     // 验证角标出现
@@ -257,6 +257,18 @@ describe('StatusBar', () => {
     expect(screen.getByText('Unpushed Commits')).toBeInTheDocument();
     expect(screen.getByText('Repo1: 3 unpushed commits')).toBeInTheDocument();
     expect(screen.getByText('Push')).toBeInTheDocument();
+    expect(screen.getByText("Don't show again")).toBeInTheDocument();
+    expect(screen.getByText('Push').closest('button')?.querySelector('.codicon-arrow-right')).toBeNull();
+    expect(container.querySelector('.notification-severity-icon.warning')).not.toBeNull();
+
+    // 再次点击铃铛应关闭通知中心，pointerdown 不应被误判为外部点击后重新打开。
+    fireEvent.pointerDown(bellBtn);
+    fireEvent.click(bellBtn);
+    expect(container.querySelector('.notification-center-popover')).toBeNull();
+    expect(bellBtn).toHaveAttribute('aria-expanded', 'false');
+
+    // 重新打开后继续验证通知操作。
+    fireEvent.click(bellBtn);
 
     // 点击清空
     const clearBtn = screen.getByTitle('Clear all');

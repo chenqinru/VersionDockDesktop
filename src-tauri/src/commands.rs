@@ -1071,6 +1071,7 @@ async fn dispatch(
             json(BootstrapData {
                 state: snapshot,
                 tools: tools.clone(),
+                application_session_id: state.application_session_id.clone(),
                 launch_workspace_id: state
                     .launch_workspace_id
                     .lock()
