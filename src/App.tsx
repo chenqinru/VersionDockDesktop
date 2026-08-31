@@ -19,6 +19,7 @@ import { StatusBar } from './components/StatusBar/StatusBar';
 import { IdentityPanel } from './components/IdentityPanel';
 import { RemoteManager } from './components/RemoteManager';
 import { AboutDialog } from './components/AboutDialog';
+import { OutputPanel } from './components/OutputPanel/OutputPanel';
 import { choiceDialog } from './components/dialogService';
 
 const UI_FONT_SIZE = {
@@ -145,6 +146,9 @@ export function App() {
             await bridge.openInNewWindow(paths);
           }
         })();
+      } else if (isCmdOrCtrl && event.shiftKey && event.key.toLowerCase() === 'u' && !event.altKey) {
+        event.preventDefault();
+        useAppStore.getState().toggleLogPanel();
       } else if (isCmdOrCtrl && event.key.toLowerCase() === 'o' && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         void (async () => {
@@ -179,6 +183,7 @@ export function App() {
           <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('No repositories were found in this workspace.')}</span><button className="primary" disabled={!initializeAvailable} title={bootstrap?.capabilities.availability?.initializeRepository?.detail ?? undefined} onClick={() => void initialize()}><Codicon name="repo-create" />{t('Initialize Repository')}</button></div> : mode === 'history' || comparisonDiffOpen ? <><HistoryWorkspace />{comparisonDiffOpen && <div className="comparison-diff-overlay"><DiffWorkspace /></div>}</> : mode === 'commit-detail' ? <CommitDetailWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : <MergeWorkspace />}</div>
         </main>
       )}
+      <OutputPanel />
       <NotificationToast />
       {dropActive && <div className="drop-overlay"><Codicon name="folder-opened" /><strong>{t('Drop folders anywhere in this window')}</strong></div>}
       <StatusBar />

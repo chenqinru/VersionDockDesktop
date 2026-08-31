@@ -84,6 +84,14 @@ pub async fn run_with_env(
     cancellation: &CancellationToken,
     secret_env: &[(String, String)],
 ) -> Result<CommandOutput, DesktopError> {
+    let start_time = std::time::Instant::now();
+    let channel = if program.contains("svn") {
+        crate::logger::LogChannel::Svn
+    } else {
+        crate::logger::LogChannel::Git
+    };
+    let formatted_cmd = format_command_for_log(program, args);
+
     let resolved = resolve_executable(program);
     let mut command = Command::new(&resolved);
     command
@@ -106,6 +114,15 @@ pub async fn run_with_env(
     command.creation_flags(0x08000000);
 
     let mut child = command.spawn().map_err(|error| {
+        let duration_ms = start_time.elapsed().as_millis() as u32;
+        crate::logger::log_entry(
+            crate::logger::LogLevel::Error,
+            channel,
+            &formatted_cmd,
+            Some(format!("Unable to start {program}: {error}")),
+            Some(duration_ms),
+            None,
+        );
         DesktopError::new(
             "TOOL_START_FAILED",
             format!("Unable to start {program}: {error}"),
@@ -135,6 +152,15 @@ pub async fn run_with_env(
             terminate_process_tree(&mut child).await;
             stdout_task.abort();
             stderr_task.abort();
+            let duration_ms = start_time.elapsed().as_millis() as u32;
+            crate::logger::log_entry(
+                crate::logger::LogLevel::Warn,
+                channel,
+                &formatted_cmd,
+                Some("Operation cancelled".to_string()),
+                Some(duration_ms),
+                None,
+            );
             return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true));
         }
         result = tokio::time::timeout(timeout, child.wait()) => {
@@ -144,6 +170,15 @@ pub async fn run_with_env(
                     terminate_process_tree(&mut child).await;
                     stdout_task.abort();
                     stderr_task.abort();
+                    let duration_ms = start_time.elapsed().as_millis() as u32;
+                    crate::logger::log_entry(
+                        crate::logger::LogLevel::Error,
+                        channel,
+                        &formatted_cmd,
+                        Some(format!("{program} timed out")),
+                        Some(duration_ms),
+                        None,
+                    );
                     return Err(DesktopError::new("COMMAND_TIMEOUT", format!("{program} timed out"), true));
                 },
             }
@@ -173,9 +208,18 @@ pub async fn run_with_env(
         stderr,
         exit_code: status.code(),
     };
+    let duration_ms = start_time.elapsed().as_millis() as u32;
     if !status.success() {
         let stderr = redact(&String::from_utf8_lossy(&result.stderr));
         let (code, hint) = classify_failure(program, &stderr);
+        crate::logger::log_entry(
+            crate::logger::LogLevel::Error,
+            channel,
+            &formatted_cmd,
+            Some(stderr.clone()),
+            Some(duration_ms),
+            result.exit_code,
+        );
         return Err(DesktopError {
             code: code.into(),
             message: stderr
@@ -194,7 +238,122 @@ pub async fn run_with_env(
             hint: hint.map(str::to_string),
         });
     }
+    let level = if is_read_only_command(program, args) {
+        crate::logger::LogLevel::Debug
+    } else {
+        crate::logger::LogLevel::Info
+    };
+    crate::logger::log_entry(
+        level,
+        channel,
+        &formatted_cmd,
+        None,
+        Some(duration_ms),
+        result.exit_code,
+    );
     Ok(result)
+}
+
+fn is_read_only_command(program: &str, args: &[String]) -> bool {
+    let lower_prog = program.to_ascii_lowercase();
+    if lower_prog.ends_with("git") {
+        let first_cmd = args
+            .iter()
+            .find(|arg| !arg.starts_with('-') && !arg.contains('='))
+            .map(|s| s.as_str());
+        match first_cmd {
+            Some(
+                "status"
+                | "rev-parse"
+                | "check-ref-format"
+                | "for-each-ref"
+                | "rev-list"
+                | "show"
+                | "diff"
+                | "log"
+                | "remote"
+                | "config",
+            ) => true,
+            Some("stash") => args.iter().any(|arg| arg == "list" || arg == "show"),
+            Some("worktree") => args.iter().any(|arg| arg == "list"),
+            Some("branch" | "tag") => args.iter().any(|arg| {
+                arg == "--contains"
+                    || arg == "-l"
+                    || arg == "--list"
+                    || arg == "-a"
+                    || arg == "-r"
+                    || arg.starts_with("--format")
+            }),
+            _ => false,
+        }
+    } else if lower_prog.ends_with("svn") {
+        let first_cmd = args
+            .iter()
+            .find(|arg| !arg.starts_with('-'))
+            .map(|s| s.as_str());
+        match first_cmd {
+            Some("status" | "info" | "log" | "diff" | "cat" | "list" | "ls") => true,
+            _ => false,
+        }
+    } else {
+        false
+    }
+}
+
+fn escape_control_chars(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for c in input.chars() {
+        match c {
+            '\0' => out.push_str("\\0"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c == '\x7f' => {
+                out.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn format_command_for_log(program: &str, args: &[String]) -> String {
+    let mut parts = vec![program.to_string()];
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            parts.push("<redacted>".into());
+            skip_next = false;
+            continue;
+        }
+        let lower = arg.to_ascii_lowercase();
+        let value = if lower == "--password"
+            || lower == "-m"
+            || lower == "--message"
+            || lower == "--token"
+            || lower == "--auth-password"
+        {
+            skip_next = true;
+            arg.clone()
+        } else if lower.starts_with("--password=")
+            || lower.starts_with("--token=")
+            || lower.starts_with("--auth-password=")
+            || lower.starts_with("-m=")
+            || lower.starts_with("--message=")
+        {
+            let key = arg.split('=').next().unwrap_or(arg);
+            format!("{}=<redacted>", key)
+        } else {
+            redact(arg)
+        };
+        let escaped = escape_control_chars(&value);
+        if escaped.contains(' ') || escaped.contains('\\') || escaped.contains('"') {
+            parts.push(format!("\"{}\"", escaped.replace('"', "\\\"")));
+        } else {
+            parts.push(escaped);
+        }
+    }
+    parts.join(" ")
 }
 
 async fn terminate_process_tree(child: &mut tokio::process::Child) {
@@ -342,11 +501,36 @@ pub fn redact(value: &str) -> String {
             {
                 "<redacted>".to_string()
             } else {
-                redact_url_userinfo(line)
+                let with_url = redact_url_userinfo(line);
+                redact_email_and_identities(&with_url)
             }
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn redact_email_and_identities(line: &str) -> String {
+    if !line.contains('@') && !line.contains("user.name") {
+        return line.to_string();
+    }
+    let mut words = Vec::new();
+    for word in line.split(' ') {
+        if word.starts_with("user.name=") {
+            words.push("user.name=<redacted>");
+        } else if word.starts_with("user.email=") {
+            words.push("user.email=<redacted-email>");
+        } else if word.contains('@') && !word.contains("://") && word.contains('.') {
+            let clean = word.trim_matches(|c| c == '<' || c == '>' || c == '"' || c == '\'' || c == ',' || c == ';');
+            if clean.contains('@') && clean.contains('.') && !clean.starts_with('@') && !clean.ends_with('@') {
+                words.push("<redacted-email>");
+            } else {
+                words.push(word);
+            }
+        } else {
+            words.push(word);
+        }
+    }
+    words.join(" ")
 }
 
 fn redact_url_userinfo(value: &str) -> String {
@@ -385,11 +569,11 @@ mod tests {
     #[test]
     fn secrets_are_redacted() {
         let value = redact(
-            "ok https://user:secret@example.test/repo\nAuthorization: bearer secret\npassword=hunter2\n{\"token\":\"secret\"}",
+            "ok https://user:secret@example.test/repo\nAuthorization: bearer secret\npassword=hunter2\n{\"token\":\"secret\"}\nAuthor: developer <alice@example.com>\nconfig user.name=Alice user.email=alice@example.com",
         );
         assert_eq!(
             value,
-            "ok https://<redacted>@example.test/repo\n<redacted>\n<redacted>\n<redacted>"
+            "ok https://<redacted>@example.test/repo\n<redacted>\n<redacted>\n<redacted>\nAuthor: developer <redacted-email>\nconfig user.name=<redacted> user.email=<redacted-email>"
         );
     }
 

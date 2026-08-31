@@ -8,6 +8,7 @@ import type {
   RecentCommitMessage, RefreshScope, RepositoryCapabilities, RepositoryUpdateResult, RuntimeCapabilities,
   SyncResult, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
   BranchRecoveryResult, RepositoryCommitSelection, RestoreConflictsResult,
+  LogEntry, LogLevel, LogChannel,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
@@ -51,7 +52,8 @@ export type AppNotificationAction =
   | { type: 'viewUpdateResults'; label: NotificationText; results: RepositoryUpdateResult[] }
   | { type: 'addUntracked'; label: NotificationText; files: Array<{ repoId: string; path: string }> }
   | { type: 'retryBatchResult'; label: NotificationText; repoId: string }
-  | { type: 'disableIncoming'; label: NotificationText };
+  | { type: 'disableIncoming'; label: NotificationText }
+  | { type: 'openLogPanel'; label: NotificationText };
 
 export interface AppNotification {
   id: string;
@@ -414,6 +416,27 @@ export interface AppStore {
   closeIdentityPanel: () => void;
   openRemoteManager: (repoId?: string) => void;
   closeRemoteManager: () => void;
+  logPanelOpen: boolean;
+  logPanelHeight: number;
+  logEntries: LogEntry[];
+  activeLogChannel: LogChannel | 'all';
+  activeLogLevel: LogLevel | 'all';
+  logSearchQuery: string;
+  logAutoScroll: boolean;
+  unreadErrorCount: number;
+  toggleLogPanel: () => void;
+  setLogPanelOpen: (open: boolean) => void;
+  setLogPanelHeight: (height: number) => void;
+  setLogChannel: (channel: LogChannel | 'all') => void;
+  setLogLevel: (level: LogLevel | 'all') => void;
+  setLogSearchQuery: (query: string) => void;
+  setLogAutoScroll: (autoScroll: boolean) => void;
+  clearLogs: () => Promise<void>;
+  addLogEntry: (entry: LogEntry) => void;
+  loadLogs: () => Promise<void>;
+  openLogFolder: () => Promise<void>;
+  exportLogs: (targetPath: string) => Promise<boolean>;
+  resetUnreadErrors: () => void;
 }
 
 const emptyState: AppStateSnapshot = {
@@ -1137,6 +1160,14 @@ export const useAppStore = create<AppStore>((set, get) => {
 
   return {
     ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined,
+    logPanelOpen: false,
+    logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
+    logEntries: [],
+    activeLogChannel: 'all',
+    activeLogLevel: 'info',
+    logSearchQuery: '',
+    logAutoScroll: true,
+    unreadErrorCount: 0,
 
     operations: {},
 
@@ -1173,6 +1204,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         document.removeEventListener('visibilitychange', refreshRuntimeOnVisibility);
       });
       currentWindowLabel = await value.getWindowLabel().catch(() => currentWindowLabel);
+      void value.onLogEntry((entry) => get().addLogEntry(entry)).then((dispose) => bridgeSubscriptions.push(dispose));
+      void get().loadLogs();
       bridgeSubscriptions.push(value.subscribe((event) => {
         if ('operationId' in event) {
           if (event.context.visibility === 'background') return;
@@ -2666,11 +2699,14 @@ export const useAppStore = create<AppStore>((set, get) => {
     updateSettings,
     addNotification: (notification) => {
       const id = crypto.randomUUID();
+      const defaultActions: AppNotificationAction[] = notification.type === 'error'
+        ? [{ type: 'openLogPanel', label: 'View Log' }]
+        : [];
       const item: AppNotification = {
         id,
         timestamp: Date.now(),
         read: false,
-        actions: [],
+        actions: notification.actions && notification.actions.length > 0 ? notification.actions : defaultActions,
         ...notification,
       };
       set((state) => ({
@@ -2694,6 +2730,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         case 'openPush': get().setActiveTab('push'); break;
         case 'openConflicts': get().setActiveTab('changes'); break;
         case 'openIdentity': get().openIdentityPanel(action.repoId); break;
+        case 'openLogPanel': get().setLogPanelOpen(true); break;
         case 'refresh': await get().refresh(true); break;
         case 'viewUpdateDetails': await get().openUpdateDetails(action.result); break;
         case 'viewUpdateResults': await get().openUpdateResults(action.results); break;
@@ -2734,6 +2771,45 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ remoteManagerRepoId: targetRepoId });
     },
     closeRemoteManager: () => set({ remoteManagerRepoId: null }),
+    toggleLogPanel: () => {
+      const next = !get().logPanelOpen;
+      set({ logPanelOpen: next, unreadErrorCount: next ? 0 : get().unreadErrorCount });
+    },
+    setLogPanelOpen: (open) => set({ logPanelOpen: open, unreadErrorCount: open ? 0 : get().unreadErrorCount }),
+    setLogPanelHeight: (height) => {
+      const clamped = Math.max(120, Math.min(height, 600));
+      set({ logPanelHeight: clamped });
+      try { localStorage.setItem('versiondock:logPanelHeight', String(clamped)); } catch {}
+    },
+    setLogChannel: (channel) => set({ activeLogChannel: channel }),
+    setLogLevel: (level) => set({ activeLogLevel: level }),
+    setLogSearchQuery: (query) => set({ logSearchQuery: query }),
+    setLogAutoScroll: (autoScroll) => set({ logAutoScroll: autoScroll }),
+    clearLogs: async () => {
+      await bridge().clearLogs();
+      set({ logEntries: [] });
+    },
+    addLogEntry: (entry) => set((state) => {
+      const nextEntries = [...state.logEntries, entry];
+      if (nextEntries.length > 3000) nextEntries.shift();
+      const unreadErrorCount = entry.level === 'error' && !state.logPanelOpen
+        ? state.unreadErrorCount + 1
+        : state.unreadErrorCount;
+      return { logEntries: nextEntries, unreadErrorCount };
+    }),
+    loadLogs: async () => {
+      try {
+        const logs = await bridge().getLogs();
+        set({ logEntries: logs });
+      } catch {}
+    },
+    openLogFolder: async () => {
+      await bridge().openLogFolder();
+    },
+    exportLogs: async (targetPath) => {
+      return await bridge().exportLogs(targetPath);
+    },
+    resetUnreadErrors: () => set({ unreadErrorCount: 0 }),
   };
 });
 

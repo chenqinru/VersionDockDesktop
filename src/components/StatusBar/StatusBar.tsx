@@ -3,6 +3,7 @@ import { ProfileStatusBarItem } from './ProfileStatusBarItem';
 import { NotificationStatusBarItem } from './NotificationStatusBarItem';
 import { UpdateStatusBarItem } from './UpdateStatusBarItem';
 import { OperationStatusBarItem } from './OperationStatusBarItem';
+import { LogStatusBarItem } from './LogStatusBarItem';
 import { useAppStore } from '../../store/appStore';
 
 export function StatusBar() {
@@ -22,6 +23,7 @@ export function StatusBar() {
       <div className="statusbar-right">
         <OperationStatusBarItem />
         <UpdateStatusBarItem />
+        <LogStatusBarItem />
         <NotificationStatusBarItem />
       </div>
     </footer>

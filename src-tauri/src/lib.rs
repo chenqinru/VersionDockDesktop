@@ -9,6 +9,7 @@ mod changelist;
 mod cli;
 mod commands;
 mod identity;
+pub mod logger;
 mod models;
 mod provider;
 mod shelf;
@@ -88,6 +89,9 @@ pub fn run() {
         )
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
+            let log_dir = config_dir.join("logs");
+            let logger = logger::init_global_logger(log_dir);
+            logger.set_app_handle(app.handle().clone());
             app.manage(AppState::load(config_dir));
 
             if let Some(window) = app.get_webview_window("main") {

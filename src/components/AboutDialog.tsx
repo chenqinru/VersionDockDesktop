@@ -431,6 +431,27 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                     </span>
                   </div>
                 </div>
+                <div className="about-diag-actions">
+                  <button
+                    type="button"
+                    className="about-pill-btn"
+                    onClick={() => {
+                      onClose();
+                      useAppStore.getState().setLogPanelOpen(true);
+                    }}
+                  >
+                    <Codicon name="output" />
+                    <span>{t('View Output & Logs')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="about-pill-btn"
+                    onClick={() => void useAppStore.getState().openLogFolder()}
+                  >
+                    <Codicon name="folder-opened" />
+                    <span>{t('Open Log Folder')}</span>
+                  </button>
+                </div>
               </section>
             </div>
           )}

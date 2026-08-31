@@ -2,6 +2,7 @@ import type {
   BootstrapData, BridgeCommand, DesktopError, NotificationPermissionState, OperationDomain,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
   RuntimeCapabilities, WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
+  LogEntry, LogLevel, LogChannel,
 } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
@@ -51,6 +52,12 @@ export interface VersionDockBridge {
   getWindowLabel(): Promise<string>;
   broadcastTabDragState(state: TabDragPayload | null): Promise<void>;
   onTabDragState(handler: (state: TabDragPayload | null) => void): Promise<() => void>;
+  onLogEntry(handler: (entry: LogEntry) => void): Promise<() => void>;
+  getLogs(channel?: LogChannel, level?: LogLevel, limit?: number): Promise<LogEntry[]>;
+  clearLogs(): Promise<void>;
+  openLogFolder(): Promise<void>;
+  exportLogs(targetPath: string): Promise<boolean>;
+  pushClientLog(level: LogLevel, channel: LogChannel, message: string, details?: string): Promise<void>;
   window: {
     startDragging(): Promise<void>;
     toggleMaximize(): Promise<void>;
@@ -539,6 +546,47 @@ export class TauriBridge implements VersionDockBridge {
       handler(payload);
     });
   }
+  async onLogEntry(handler: (entry: LogEntry) => void): Promise<() => void> {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<LogEntry>('versiondock://log-entry', ({ payload }) => {
+      handler(payload);
+    });
+  }
+  async getLogs(channel?: LogChannel, level?: LogLevel, limit?: number): Promise<LogEntry[]> {
+    return this.request<LogEntry[]>({
+      type: 'logGet',
+      payload: {
+        channel: channel ?? null,
+        level: level ?? null,
+        limit: limit ?? null,
+      },
+    }, { showProgress: false });
+  }
+  async clearLogs(): Promise<void> {
+    await this.request({ type: 'logClear' }, { showProgress: false });
+  }
+  async openLogFolder(): Promise<void> {
+    await this.request({ type: 'logOpenFolder' }, { showProgress: false });
+  }
+  async exportLogs(targetPath: string): Promise<boolean> {
+    return this.request<boolean>({
+      type: 'logExport',
+      payload: {
+        target_path: targetPath,
+      },
+    }, { showProgress: false });
+  }
+  async pushClientLog(level: LogLevel, channel: LogChannel, message: string, details?: string): Promise<void> {
+    await this.request({
+      type: 'logClientPush',
+      payload: {
+        level,
+        channel,
+        message,
+        details: details ?? null,
+      },
+    }, { showProgress: false });
+  }
 }
 
 export class MockBridge implements VersionDockBridge {
@@ -597,6 +645,24 @@ export class MockBridge implements VersionDockBridge {
   }
   async onTabDragState(): Promise<() => void> {
     return Promise.resolve(() => undefined);
+  }
+  async onLogEntry(): Promise<() => void> {
+    return Promise.resolve(() => undefined);
+  }
+  async getLogs(): Promise<LogEntry[]> {
+    return Promise.resolve([]);
+  }
+  async clearLogs(): Promise<void> {
+    return Promise.resolve();
+  }
+  async openLogFolder(): Promise<void> {
+    return Promise.resolve();
+  }
+  async exportLogs(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+  async pushClientLog(): Promise<void> {
+    return Promise.resolve();
   }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined,

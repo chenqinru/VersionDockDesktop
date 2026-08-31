@@ -3,7 +3,7 @@ import type {
   MergeCommitSummary,
   DiffDocument, GraphCommitNode, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
   RuntimeCapabilities, TagInfo, WorkspaceSnapshot, WorktreeEntry, SubmoduleEntry,
-  WindowTabTransfer,
+  WindowTabTransfer, LogEntry, LogLevel, LogChannel,
 } from '../bindings/generated';
 import type { BridgeEvent, NewWindowPlacement, RequestOptions, VersionDockBridge } from './bridge';
 
@@ -385,6 +385,75 @@ export class BrowserDevBridge implements VersionDockBridge {
   }
   async onTabDragState(): Promise<() => void> {
     return Promise.resolve(() => undefined);
+  }
+
+  private logs: LogEntry[] = [
+    {
+      id: 'demo-log-1',
+      timestamp: new Date(Date.now() - 60000).toISOString(),
+      level: 'info',
+      channel: 'core',
+      message: 'VersionDock Desktop workspace bootstrap initialized',
+      details: null,
+      durationMs: 12,
+      exitCode: 0,
+    },
+    {
+      id: 'demo-log-2',
+      timestamp: new Date(Date.now() - 45000).toISOString(),
+      level: 'info',
+      channel: 'git',
+      message: 'git status --porcelain=v2 -z --untracked-files=all --ignored=matching',
+      details: null,
+      durationMs: 34,
+      exitCode: 0,
+    },
+    {
+      id: 'demo-log-3',
+      timestamp: new Date(Date.now() - 20000).toISOString(),
+      level: 'warn',
+      channel: 'svn',
+      message: 'svn status --xml',
+      details: null,
+      durationMs: 88,
+      exitCode: 0,
+    },
+  ];
+  private logHandlers = new Set<(entry: LogEntry) => void>();
+
+  async onLogEntry(handler: (entry: LogEntry) => void): Promise<() => void> {
+    this.logHandlers.add(handler);
+    return () => this.logHandlers.delete(handler);
+  }
+  async getLogs(channel?: LogChannel, level?: LogLevel, limit?: number): Promise<LogEntry[]> {
+    return this.logs.filter((entry) => {
+      if (channel && entry.channel !== channel) return false;
+      if (level && entry.level !== level) return false;
+      return true;
+    }).slice(-(limit ?? 3000));
+  }
+  async clearLogs(): Promise<void> {
+    this.logs = [];
+  }
+  async openLogFolder(): Promise<void> {
+    console.info('[BrowserDevBridge] openLogFolder called');
+  }
+  async exportLogs(): Promise<boolean> {
+    return true;
+  }
+  async pushClientLog(level: LogLevel, channel: LogChannel, message: string, details?: string): Promise<void> {
+    const entry: LogEntry = {
+      id: `client-log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      level,
+      channel,
+      message,
+      details: details ?? null,
+      durationMs: null,
+      exitCode: null,
+    };
+    this.logs.push(entry);
+    this.logHandlers.forEach((h) => h(entry));
   }
 
   async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {

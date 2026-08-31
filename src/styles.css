@@ -5379,3 +5379,486 @@ button.notification-item-action-btn:focus-visible {
 .merge-conflict-block summary, .merge-result-preview summary { padding: 5px 8px; cursor: pointer; color: var(--versiondock-muted); }
 .merge-result-preview { margin: 0 8px 8px; max-height: 180px; overflow: auto; border: 1px solid var(--versiondock-border); }
 @media (max-width: 900px) { .merge-block-columns { grid-template-columns: 1fr; } .merge-block-columns > div { border-right: 0; border-bottom: 1px solid var(--versiondock-border); } }
+
+/* ===== OutputPanel 底部日志面板（抽屉浮层覆盖，不挤占主界面空间） ===== */
+.output-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--versiondock-surface);
+  border-top: 1px solid var(--versiondock-border);
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.4);
+  position: absolute;
+  bottom: var(--versiondock-statusbar-height, 24px);
+  left: 0;
+  right: 0;
+  z-index: 90;
+  width: 100%;
+  box-sizing: border-box;
+  animation: outputPanelSlideIn 0.15s ease-out;
+}
+
+@keyframes outputPanelSlideIn {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.output-panel-resizer {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 10;
+  transition: background 0.15s ease;
+}
+
+.output-panel-resizer:hover,
+.output-panel-resizer:active {
+  background: var(--versiondock-accent);
+}
+
+.output-panel-toolbar {
+  height: 32px;
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  background: var(--versiondock-surface-alt);
+  border-bottom: 1px solid var(--versiondock-border-soft);
+  gap: 8px;
+  user-select: none;
+}
+
+.output-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text);
+  white-space: nowrap;
+}
+
+.output-count-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--versiondock-hover);
+  color: var(--versiondock-muted);
+}
+
+.output-panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.output-dropdown-container {
+  position: relative;
+  display: inline-flex;
+}
+
+.output-dropdown-channel {
+  width: 130px;
+}
+
+.output-dropdown-level {
+  width: 172px;
+}
+
+.output-dropdown-trigger {
+  width: 100%;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  border-radius: 3px;
+  border: 1px solid var(--versiondock-border);
+  background: var(--versiondock-surface);
+  color: var(--versiondock-text);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.12s ease;
+  user-select: none;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.output-dropdown-trigger:hover,
+.output-dropdown-trigger.active {
+  border-color: var(--versiondock-accent);
+  background: var(--versiondock-hover);
+}
+
+.output-dropdown-trigger .codicon {
+  font-size: 10px;
+  color: var(--versiondock-muted);
+  flex-shrink: 0;
+}
+
+.output-dropdown-label {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.output-dropdown-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--versiondock-surface-alt);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 4px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: outputDropdownFadeIn 0.12s ease-out;
+}
+
+@keyframes outputDropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.output-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 3px;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background 0.1s ease;
+  box-sizing: border-box;
+}
+
+.output-dropdown-item:hover {
+  background: var(--versiondock-hover);
+}
+
+.output-dropdown-item.selected {
+  background: color-mix(in srgb, var(--versiondock-accent) 18%, transparent);
+  color: var(--versiondock-accent);
+  font-weight: 600;
+}
+
+.output-dropdown-item-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.output-dropdown-check {
+  font-size: 11px;
+  color: var(--versiondock-accent);
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.output-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 180px;
+  max-width: 28vw;
+}
+
+.output-search-icon {
+  position: absolute;
+  left: 6px;
+  font-size: 12px;
+  color: var(--versiondock-muted);
+  pointer-events: none;
+}
+
+.output-search-input {
+  width: 100%;
+  height: 22px;
+  padding: 0 20px 0 22px;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  border-radius: 3px;
+  border: 1px solid var(--versiondock-border);
+  background: var(--versiondock-surface);
+  color: var(--versiondock-text);
+  outline: none;
+}
+
+.output-search-input:focus {
+  border-color: var(--versiondock-accent);
+}
+
+.output-search-clear {
+  position: absolute;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--versiondock-muted);
+  cursor: pointer;
+}
+
+.output-search-clear:hover {
+  color: var(--versiondock-text);
+}
+
+.output-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.output-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--versiondock-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.output-btn:hover {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+}
+
+.output-btn.active {
+  background: color-mix(in srgb, var(--versiondock-accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--versiondock-accent) 45%, transparent);
+  color: var(--versiondock-accent);
+}
+
+.output-btn.active:hover {
+  background: color-mix(in srgb, var(--versiondock-accent) 32%, transparent);
+  border-color: var(--versiondock-accent);
+  color: var(--versiondock-accent);
+}
+
+.output-btn.close:hover {
+  background: color-mix(in srgb, var(--versiondock-danger) 20%, transparent);
+  color: var(--versiondock-danger);
+  border-color: transparent;
+}
+
+.output-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  font-family: var(--versiondock-monospace, monospace);
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  line-height: 1.5;
+  padding: 6px 10px;
+  background: var(--versiondock-surface);
+}
+
+.output-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--versiondock-muted);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.output-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.output-log-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  transition: background 0.1s ease;
+}
+
+.output-log-row:hover {
+  background: var(--versiondock-hover);
+}
+
+.output-log-time {
+  flex-shrink: 0;
+  color: var(--versiondock-muted);
+  font-size: 11px;
+  user-select: none;
+}
+
+.output-log-level {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 2px;
+  user-select: none;
+}
+
+.output-log-level.info {
+  background: color-mix(in srgb, var(--versiondock-accent) 20%, transparent);
+  color: var(--versiondock-accent);
+}
+
+.output-log-level.warn {
+  background: color-mix(in srgb, var(--versiondock-warning, #d29922) 22%, transparent);
+  color: var(--versiondock-warning, #d29922);
+}
+
+.output-log-level.error {
+  background: color-mix(in srgb, var(--versiondock-danger, #f85149) 24%, transparent);
+  color: var(--versiondock-danger, #f85149);
+}
+
+.output-log-level.debug,
+.output-log-level.trace {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-muted);
+}
+
+.output-log-channel {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--versiondock-text);
+  user-select: none;
+}
+
+.output-log-msg {
+  flex: 1;
+  min-width: 0;
+  color: var(--versiondock-text);
+}
+
+.output-log-row.error .output-log-msg {
+  color: var(--versiondock-danger, #f85149);
+}
+
+.output-log-row.warn .output-log-msg {
+  color: var(--versiondock-warning, #d29922);
+}
+
+.output-log-duration {
+  flex-shrink: 0;
+  color: var(--versiondock-muted);
+  font-size: 11px;
+}
+
+.output-log-exit-code {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: var(--versiondock-danger, #f85149);
+  color: #ffffff;
+}
+
+.output-log-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: var(--versiondock-accent);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.output-log-details-toggle:hover {
+  text-decoration: underline;
+}
+
+.output-log-details-box {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: var(--versiondock-surface-alt);
+  border: 1px solid var(--versiondock-border-soft);
+  color: var(--versiondock-danger, #f85149);
+  font-size: 11px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.output-log-details-box pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ===== LogStatusBarItem 状态栏日志按钮与徽标 ===== */
+.log-status-item .log-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.log-status-item .log-error-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  background: var(--versiondock-danger, #f85149);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 12px;
+  height: 12px;
+  line-height: 12px;
+  border-radius: 6px;
+  padding: 0 2px;
+  text-align: center;
+}
+
+.about-diag-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--versiondock-border-soft);
+}

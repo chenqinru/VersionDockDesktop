@@ -428,21 +428,43 @@ impl AppState {
                     let Ok(event) = result else {
                         return;
                     };
-                    let vcs_metadata = event.paths.iter().any(|path| {
-                        path.components()
-                            .any(|part| part.as_os_str() == ".git" || part.as_os_str() == ".svn")
-                    });
-                    if !vcs_metadata
-                        && event.paths.iter().all(|path| {
-                            path.components().any(|part| {
-                                ignored
-                                    .iter()
-                                    .any(|item| item == &part.as_os_str().to_string_lossy())
-                            })
+                    let is_ignored = event.paths.iter().all(|path| {
+                        if let Some(ext) = path.extension() {
+                            let ext_str = ext.to_string_lossy();
+                            if ext_str == "log" || ext_str == "tmp" || ext_str == "swp" || ext_str == "lock" {
+                                return true;
+                            }
+                        }
+                        path.components().any(|part| {
+                            let s = part.as_os_str().to_string_lossy();
+                            s == "logs" || s == "log" || s == "target" || s == "dist" || s == ".vite" || ignored.iter().any(|item| item == &s)
                         })
-                    {
+                    });
+                    if is_ignored {
                         return;
                     }
+
+                    // 检查是否为内部 .git 瞬态文件（如 index.lock, COMMIT_EDITMSG 等）
+                    let is_pure_index_touch = event.paths.iter().all(|path| {
+                        let s = path.to_string_lossy().replace('\\', "/");
+                        s.ends_with("/.git/index")
+                            || s.ends_with("/.git/index.lock")
+                            || s.contains("/.git/logs/")
+                            || s.ends_with("/.git/COMMIT_EDITMSG")
+                    });
+                    if is_pure_index_touch {
+                        let key = "pure_git_index_touch";
+                        let Ok(mut last) = last_emit.lock() else {
+                            return;
+                        };
+                        if last.get(key).is_some_and(|instant| {
+                            instant.elapsed() < std::time::Duration::from_millis(2000)
+                        }) {
+                            return;
+                        }
+                        last.insert(key.to_string(), std::time::Instant::now());
+                    }
+
                     let repository_id = event.paths.iter().find_map(|event_path| {
                         repository_roots
                             .iter()

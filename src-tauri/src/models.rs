@@ -565,7 +565,26 @@ pub enum BridgeCommand {
         relative_path: String,
         revision: String,
     },
+    LogGet {
+        channel: Option<crate::logger::LogChannel>,
+        level: Option<crate::logger::LogLevel>,
+        limit: Option<u32>,
+    },
+    LogClear,
+    LogOpenFolder,
+    LogExport {
+        target_path: String,
+    },
+    LogClientPush {
+        level: crate::logger::LogLevel,
+        channel: crate::logger::LogChannel,
+        message: String,
+        details: Option<String>,
+    },
 }
+
+#[allow(unused_imports)]
+pub use crate::logger::{LogChannel, LogEntry, LogLevel};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

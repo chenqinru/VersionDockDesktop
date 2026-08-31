@@ -480,6 +480,25 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                           <Codicon name="history" />
                           <span>{t('View Release Notes')}</span>
                         </button>
+                        <button
+                          type="button"
+                          className="settings-action-btn"
+                          onClick={() => {
+                            onClose();
+                            useAppStore.getState().setLogPanelOpen(true);
+                          }}
+                        >
+                          <Codicon name="output" />
+                          <span>{t('View Output & Logs')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="settings-action-btn"
+                          onClick={() => void useAppStore.getState().openLogFolder()}
+                        >
+                          <Codicon name="folder-opened" />
+                          <span>{t('Open Log Folder')}</span>
+                        </button>
                       </div>
                     </div>
                   </SettingsSection>

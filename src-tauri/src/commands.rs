@@ -2890,6 +2890,41 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(vcs::file_revision_content(&repo, &relative_path, &revision, token).await?)
         }
+        BridgeCommand::LogGet { channel, level, limit } => {
+            if let Some(logger) = crate::logger::get_logger() {
+                let entries = logger.get_entries(channel, level, limit.map(|v| v as usize));
+                json(entries)
+            } else {
+                json(Vec::<crate::logger::LogEntry>::new())
+            }
+        }
+        BridgeCommand::LogClear => {
+            if let Some(logger) = crate::logger::get_logger() {
+                logger.clear();
+            }
+            json(true)
+        }
+        BridgeCommand::LogOpenFolder => {
+            if let Some(logger) = crate::logger::get_logger() {
+                let path = logger.log_dir().to_path_buf();
+                let _ = app.opener().open_path(path.to_string_lossy(), None::<&str>);
+            }
+            json(true)
+        }
+        BridgeCommand::LogExport { target_path } => {
+            if let Some(logger) = crate::logger::get_logger() {
+                logger.export_to_file(Path::new(&target_path)).map_err(|err| {
+                    DesktopError::new("LOG_EXPORT_FAILED", err.to_string(), true)
+                })?;
+                json(true)
+            } else {
+                json(false)
+            }
+        }
+        BridgeCommand::LogClientPush { level, channel, message, details } => {
+            crate::logger::log_entry(level, channel, message, details, None, None);
+            json(true)
+        }
     }
 }
 

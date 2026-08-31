@@ -428,6 +428,17 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	repo_id: string,
 	relative_path: string,
 	revision: string,
+} } | { type: "logGet"; payload: {
+	channel: LogChannel | null,
+	level: LogLevel | null,
+	limit: number | null,
+} } | { type: "logClear" } | { type: "logOpenFolder" } | { type: "logExport"; payload: {
+	target_path: string,
+} } | { type: "logClientPush"; payload: {
+	level: LogLevel,
+	channel: LogChannel,
+	message: string,
+	details: string | null,
 } };
 
 export type CapabilityStatus = {
@@ -710,6 +721,21 @@ export type LayoutState = {
 	branchSidebarCollapsed: boolean,
 	branchSidebarCollapsedSections: string[],
 };
+
+export type LogChannel = "git" | "svn" | "core" | "ui";
+
+export type LogEntry = {
+	id: string,
+	timestamp: string,
+	level: LogLevel,
+	channel: LogChannel,
+	message: string,
+	details: string | null,
+	durationMs: number | null,
+	exitCode: number | null,
+};
+
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type MergeCommitSummary = {
 	hash: string,
