@@ -45,7 +45,10 @@ export type NotificationText = string | { key: string; args?: Array<string | num
 export type AppNotificationAction =
   | { type: 'updateProject'; label: NotificationText }
   | { type: 'openPush'; label: NotificationText }
+  | { type: 'openStash'; label: NotificationText }
   | { type: 'openConflicts'; label: NotificationText }
+  | { type: 'dropAutoStash'; label: NotificationText; workspaceId: string; repoId: string; hash: string }
+  | { type: 'keepAutoStash'; label: NotificationText; workspaceId: string; repoId: string; hash: string }
   | { type: 'openIdentity'; label: NotificationText; repoId?: string }
   | { type: 'refresh'; label: NotificationText }
   | { type: 'viewUpdateDetails'; label: NotificationText; result: RepositoryUpdateResult }
@@ -472,6 +475,7 @@ let commitSelectionSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let branchRecoveryDialogQueue: Promise<void> = Promise.resolve();
 const requestControllers = new Map<string, AbortController>();
 const claimedStartupNotifications = new Set<string>();
+const pendingPullAutoStashes = new Map<string, { hash: string; shortHash: string; prompted: boolean }>();
 const bridgeSubscriptions: Array<() => void> = [];
 let localOperationSequence = 0;
 let currentWindowLabel = `window-${Math.random().toString(36).slice(2)}`;
@@ -647,6 +651,60 @@ export const useAppStore = create<AppStore>((set, get) => {
   const publishError = (title: string, error: unknown) => get().addNotification({
     type: 'error', title, message: { raw: errorText(error) }, details: errorDetails(error), workspaceId: get().snapshot?.workspace.id,
   });
+  const handlePullAutoStashError = async (error: unknown): Promise<boolean> => {
+    if (!(error instanceof BridgeError) || ![
+      'GIT_PULL_CONFLICT_WITH_AUTO_STASH',
+      'GIT_AUTO_STASH_CONFLICT',
+      'GIT_PULL_FAILED_RESTORE_FAILED',
+      'GIT_AUTO_STASH_RESTORE_FAILED',
+    ].includes(error.code)) return false;
+    const conflicted = error.code === 'GIT_PULL_CONFLICT_WITH_AUTO_STASH' || error.code === 'GIT_AUTO_STASH_CONFLICT';
+    const workspace = get().snapshot?.workspace.id;
+    const repository = error.repositoryId;
+    const hash = error.subject?.startsWith('stash:') ? error.subject.slice('stash:'.length) : undefined;
+    if (conflicted && workspace && repository && hash) {
+      pendingPullAutoStashes.set(`${workspace}\0${repository}`, { hash, shortHash: hash.slice(0, 12), prompted: false });
+    }
+    get().addNotification({
+      type: 'warning',
+      urgent: true,
+      title: conflicted ? 'Restoring local changes needs attention' : 'Automatic stash recovery needs attention',
+      message: { raw: error.message },
+      details: errorDetails(error),
+      workspaceId: get().snapshot?.workspace.id,
+      actions: [{ type: conflicted ? 'openConflicts' : 'openStash', label: conflicted ? 'Open Conflicts' : 'Open Stash' }],
+    });
+    if (repository) await get().loadStashes(repository);
+    await get().refresh(true);
+    get().setActiveTab(conflicted ? 'changes' : 'stash');
+    return true;
+  };
+  const promptPendingAutoStashCleanup = () => {
+    const workspace = get().snapshot?.workspace.id;
+    if (!workspace) return;
+    for (const [key, pending] of pendingPullAutoStashes) {
+      const [pendingWorkspace, repoId] = key.split('\0');
+      if (pendingWorkspace !== workspace || pending.prompted) continue;
+      const repository = get().snapshot?.repositories.find((repo) => repo.meta.id === repoId);
+      if (!repository || repository.conflicts > 0 || repository.operation) continue;
+      const stash = get().stashes[repoId]?.find((entry) => entry.hash === pending.hash);
+      if (!stash) {
+        pendingPullAutoStashes.delete(key);
+        continue;
+      }
+      pending.prompted = true;
+      get().addNotification({
+        type: 'info',
+        title: 'Automatic stash recovery completed',
+        message: { key: 'VersionDock [{0}]: All restore conflicts are resolved. Delete auto-stash backup {1}?', args: [repository.meta.name, pending.shortHash] },
+        workspaceId: workspace,
+        actions: [
+          { type: 'dropAutoStash', label: 'Delete Backup', workspaceId: workspace, repoId, hash: pending.hash },
+          { type: 'keepAutoStash', label: 'Keep in Stash', workspaceId: workspace, repoId, hash: pending.hash },
+        ],
+      });
+    }
+  };
   const notifyBatchFailures = (results: RepositoryOperationResult[]) => {
     const failures = results.filter((result) => result.error);
     if (!failures.length) return;
@@ -1001,6 +1059,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const requests: Promise<void>[] = [get().loadConflicts(silent)];
     if (workspaceChanged || reloadRepository) requests.push(get().loadStashes(), get().loadShelves(), get().loadWorktrees(), get().loadSubtrees(), get().loadSubmodules(), get().loadUnpushedCommits());
     await Promise.all(requests);
+    promptPendingAutoStashCleanup();
     if (get().snapshot?.workspace.id === snapshot.workspace.id) {
       const activeSession = extractCurrentSession(get());
       if (activeSession) {
@@ -1276,6 +1335,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       commitSelectionSaveTimer = undefined;
       watcherScopes.clear();
       repositoryEventGenerations.clear();
+      pendingPullAutoStashes.clear();
       releaseSchedulerLeases();
     },
 
@@ -1943,7 +2003,13 @@ export const useAppStore = create<AppStore>((set, get) => {
     sync: async (repoId, action, notify = true) => withBusy(async () => {
       const capability = action === 'fetch' ? 'syncFetch' : action === 'push' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
       if (!ensureRepositoryCapability(repoId, capability)) return;
-      const result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
+      let result: SyncResult;
+      try {
+        result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
+      } catch (error) {
+        if (await handlePullAutoStashError(error)) return undefined;
+        throw error;
+      }
       if (notify && result.update) {
         const summary = result.update.summary;
         const commitCount = summary?.commitCount ?? 0;
@@ -1969,7 +2035,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       const wid = workspaceId();
       const settled = await Promise.all(repositories.map(async (repo) => {
         try { const value = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: repo.meta.kind === 'git' ? 'pull' : 'update', remote: null } }, { timeoutMs: 600_000 }); return { repoId: repo.meta.id, repoName: repo.meta.name, result: value.update ?? undefined }; }
-        catch (error) { return { repoId: repo.meta.id, repoName: repo.meta.name, error: errorText(error) }; }
+        catch (error) {
+          await handlePullAutoStashError(error);
+          return { repoId: repo.meta.id, repoName: repo.meta.name, error: errorText(error) };
+        }
       }));
       const updated = settled.flatMap((item) => item.result ? [item.result] : []);
       const commits = updated.reduce((sum, item) => sum + (item.summary?.commitCount ?? 0), 0);
@@ -2733,7 +2802,15 @@ export const useAppStore = create<AppStore>((set, get) => {
       switch (action.type) {
         case 'updateProject': await get().updateProject(); break;
         case 'openPush': get().setActiveTab('push'); break;
+        case 'openStash': get().setActiveTab('stash'); break;
         case 'openConflicts': get().setActiveTab('changes'); break;
+        case 'dropAutoStash': {
+          const stash = get().stashes[action.repoId]?.find((entry) => entry.hash === action.hash);
+          if (stash) await get().stashOperation(action.repoId, { type: 'drop', reference: stash.reference });
+          if (!get().stashes[action.repoId]?.some((entry) => entry.hash === action.hash)) pendingPullAutoStashes.delete(`${action.workspaceId}\0${action.repoId}`);
+          break;
+        }
+        case 'keepAutoStash': pendingPullAutoStashes.delete(`${action.workspaceId}\0${action.repoId}`); break;
         case 'openIdentity': get().openIdentityPanel(action.repoId); break;
         case 'openLogPanel': get().setLogPanelOpen(true); break;
         case 'refresh': await get().refresh(true); break;

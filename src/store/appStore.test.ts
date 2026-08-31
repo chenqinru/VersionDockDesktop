@@ -761,6 +761,45 @@ describe('appStore async lifecycle', () => {
     expect(action).toMatchObject({ type: 'viewUpdateResults', results: [expect.objectContaining({ repoId: 'a' })] });
   });
 
+  it('opens conflicts and preserves recovery guidance when pull auto-stash restoration conflicts', async () => {
+    const current = snapshot('workspace', 1);
+    current.repositories = [{ ...repository('a', 'A'), conflicts: 1 }];
+    const stashHash = 'abcdef1234567890';
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync') throw new BridgeError({
+        code: 'GIT_AUTO_STASH_CONFLICT',
+        message: 'Update completed, but local changes conflicted. The stash was kept.',
+        command: 'git',
+        exitCode: 1,
+        stderr: 'conflict',
+        recoverable: true,
+        repositoryId: 'a',
+        subject: `stash:${stashHash}`,
+      });
+      if (command.type === 'workspaceRefresh') return current;
+      if (command.type === 'stashes') return [{ reference: 'stash@{0}', hash: stashHash, branch: 'main', message: 'auto', fullMessage: 'auto', date: '', files: [] }];
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'historyTopology') return [];
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, selectedRepoId: 'a' });
+
+    await useAppStore.getState().sync('a', 'pull');
+
+    const notification = useAppStore.getState().notifications.find((item) => item.title === 'Restoring local changes needs attention');
+    expect(notification?.actions.map((action) => action.type)).toEqual(['openConflicts']);
+    expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('changes');
+    expect(useAppStore.getState().notifications.filter((item) => item.title === 'Sync failed')).toHaveLength(0);
+
+    current.generation = 2;
+    current.repositories = [{ ...repository('a', 'A'), conflicts: 0 }];
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().snapshot?.repositories[0]?.conflicts).toBe(0);
+    expect(useAppStore.getState().stashes.a?.[0]?.hash).toBe(stashHash);
+    const cleanupNotification = useAppStore.getState().notifications.find((item) => item.title === 'Automatic stash recovery completed');
+    expect(cleanupNotification?.actions.map((action) => action.type)).toEqual(['dropAutoStash', 'keepAutoStash']);
+  });
+
   it('persists commit selections per workspace and leaves new files unselected', async () => {
     vi.useFakeTimers();
     try {

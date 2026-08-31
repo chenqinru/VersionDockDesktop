@@ -731,6 +731,171 @@ fn repo(path: &Path, kind: VcsKind) -> RepositoryMeta {
 }
 
 #[tokio::test]
+async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let remote = root.path().join("remote.git");
+    let seed = root.path().join("seed");
+    let working = root.path().join("working");
+    let upstream = root.path().join("upstream");
+    command(
+        "git",
+        &["init", "--bare", remote.to_str().unwrap()],
+        root.path(),
+    );
+    command(
+        "git",
+        &["init", "-b", "main", seed.to_str().unwrap()],
+        root.path(),
+    );
+    command("git", &["config", "user.name", "VersionDock Test"], &seed);
+    command("git", &["config", "user.email", "test@example.test"], &seed);
+    std::fs::write(seed.join("local.txt"), "base\n").unwrap();
+    std::fs::write(seed.join("remote.txt"), "base\n").unwrap();
+    command("git", &["add", "."], &seed);
+    command("git", &["commit", "-m", "base"], &seed);
+    command(
+        "git",
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+        &seed,
+    );
+    command("git", &["push", "-u", "origin", "main"], &seed);
+    command("git", &["symbolic-ref", "HEAD", "refs/heads/main"], &remote);
+    command(
+        "git",
+        &["clone", remote.to_str().unwrap(), working.to_str().unwrap()],
+        root.path(),
+    );
+    command(
+        "git",
+        &[
+            "clone",
+            remote.to_str().unwrap(),
+            upstream.to_str().unwrap(),
+        ],
+        root.path(),
+    );
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        &upstream,
+    );
+    command(
+        "git",
+        &["config", "user.email", "test@example.test"],
+        &upstream,
+    );
+    std::fs::write(upstream.join("remote.txt"), "upstream\n").unwrap();
+    command("git", &["add", "remote.txt"], &upstream);
+    command("git", &["commit", "-m", "upstream"], &upstream);
+    command("git", &["push"], &upstream);
+
+    std::fs::write(working.join("local.txt"), "staged\n").unwrap();
+    command("git", &["add", "local.txt"], &working);
+    std::fs::write(working.join("local.txt"), "unstaged\n").unwrap();
+    std::fs::write(working.join("untracked.txt"), "untracked\n").unwrap();
+
+    vcs::sync(
+        &repo(&working, VcsKind::Git),
+        SyncAction::Pull,
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(read_text(working.join("remote.txt")), "upstream\n");
+    assert_eq!(read_text(working.join("local.txt")), "unstaged\n");
+    assert!(
+        command_output("git", &["diff", "--cached", "--", "local.txt"], &working)
+            .contains("+staged")
+    );
+    assert!(command_output("git", &["diff", "--", "local.txt"], &working).contains("+unstaged"));
+    assert!(working.join("untracked.txt").is_file());
+    assert!(command_output("git", &["stash", "list"], &working).is_empty());
+}
+
+#[tokio::test]
+async fn real_git_pull_auto_stash_keeps_backup_when_restore_conflicts() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let remote = root.path().join("remote.git");
+    let seed = root.path().join("seed");
+    let working = root.path().join("working");
+    let upstream = root.path().join("upstream");
+    command(
+        "git",
+        &["init", "--bare", remote.to_str().unwrap()],
+        root.path(),
+    );
+    command(
+        "git",
+        &["init", "-b", "main", seed.to_str().unwrap()],
+        root.path(),
+    );
+    command("git", &["config", "user.name", "VersionDock Test"], &seed);
+    command("git", &["config", "user.email", "test@example.test"], &seed);
+    std::fs::write(seed.join("shared.txt"), "base\n").unwrap();
+    command("git", &["add", "."], &seed);
+    command("git", &["commit", "-m", "base"], &seed);
+    command(
+        "git",
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+        &seed,
+    );
+    command("git", &["push", "-u", "origin", "main"], &seed);
+    command("git", &["symbolic-ref", "HEAD", "refs/heads/main"], &remote);
+    command(
+        "git",
+        &["clone", remote.to_str().unwrap(), working.to_str().unwrap()],
+        root.path(),
+    );
+    command(
+        "git",
+        &[
+            "clone",
+            remote.to_str().unwrap(),
+            upstream.to_str().unwrap(),
+        ],
+        root.path(),
+    );
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        &upstream,
+    );
+    command(
+        "git",
+        &["config", "user.email", "test@example.test"],
+        &upstream,
+    );
+    std::fs::write(upstream.join("shared.txt"), "upstream\n").unwrap();
+    command("git", &["add", "shared.txt"], &upstream);
+    command("git", &["commit", "-m", "upstream"], &upstream);
+    command("git", &["push"], &upstream);
+    std::fs::write(working.join("shared.txt"), "local\n").unwrap();
+
+    let error = vcs::sync(
+        &repo(&working, VcsKind::Git),
+        SyncAction::Pull,
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error.code, "GIT_AUTO_STASH_CONFLICT");
+    assert!(!command_output("git", &["stash", "list"], &working).is_empty());
+    assert!(
+        !command_output("git", &["diff", "--name-only", "--diff-filter=U"], &working).is_empty()
+    );
+}
+
+#[tokio::test]
 async fn real_git_unpushed_history_operations_are_effective_and_safe() {
     if !available("git") {
         eprintln!("SKIP: git not available");

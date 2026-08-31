@@ -17,6 +17,9 @@ export interface PushCommitFile {
 type PushViewMode = 'commits' | 'changes';
 type PushFileViewMode = 'tree' | 'flat';
 
+const PUSH_COLOR = 'var(--versiondock-success, #81c784)';
+const PULL_COLOR = 'var(--versiondock-info, #64b5f6)';
+
 interface FileTreeDir {
   kind: 'dir';
   name: string;
@@ -856,12 +859,12 @@ function RepoSection({
                 <Codicon name={pushViewMode === 'commits' ? 'diff-multiple' : 'list-unordered'} />
               </button>
               {commitCount > 0 ? (
-                <span style={styles.aheadBadge}>
+                <span style={styles.directionBadge(PUSH_COLOR)}>
                   <Codicon name="arrow-up" style={{ fontSize: '10px', marginRight: '2px' }} />
                   {commitCount}
                 </span>
               ) : behind > 0 ? (
-                <span style={styles.behindBadge}>
+                <span style={styles.directionBadge(PULL_COLOR)}>
                   <Codicon name="arrow-down" style={{ fontSize: '10px', marginRight: '2px' }} />
                   {behind}
                 </span>
@@ -1305,20 +1308,15 @@ const styles = {
   branchName: {
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, minWidth: 0,
   } as React.CSSProperties,
-  aheadBadge: {
+  directionBadge: (color: string): React.CSSProperties => ({
     display: 'inline-flex', alignItems: 'center',
-    background: 'var(--versiondock-badge-background, var(--versiondock-accent-bg))',
-    color: 'var(--versiondock-badge-foreground, #ffffff)',
+    color,
+    border: `1px solid color-mix(in srgb, ${color} 38%, transparent)`,
+    background: `color-mix(in srgb, ${color} 12%, transparent)`,
     borderRadius: '8px', padding: '1px 6px', fontSize: '10px', fontWeight: 'bold' as const,
+    lineHeight: '14px',
     flexShrink: 0,
-  } as React.CSSProperties,
-  behindBadge: {
-    display: 'inline-flex', alignItems: 'center',
-    background: 'var(--vscode-inputValidation-warningBackground, #6b4f00)',
-    color: 'var(--vscode-inputValidation-warningForeground, #cca700)',
-    borderRadius: '8px', padding: '1px 6px', fontSize: '10px', fontWeight: 'bold' as const,
-    flexShrink: 0,
-  } as React.CSSProperties,
+  }),
   publishBadge: {
     display: 'inline-flex', alignItems: 'center',
     background: 'var(--versiondock-badge-background, var(--versiondock-accent-bg))',

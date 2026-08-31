@@ -41,6 +41,13 @@ export type SidebarModel = {
   tags: SidebarTag[];
 };
 
+export function sumBranchAheadBehind(branch: SidebarBranch): { ahead: number; behind: number } {
+  return branch.instances.reduce((total, instance) => ({
+    ahead: total.ahead + instance.branch.ahead,
+    behind: total.behind + instance.branch.behind,
+  }), { ahead: 0, behind: 0 });
+}
+
 export type HistoryRefOption = {
   id: string;
   label: string;

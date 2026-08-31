@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryWorkspace } from './HistoryWorkspace';
 import { formatRefLabel } from '../history/refs';
 import { commitKey } from '../history/commitDetails';
-import { buildDetailTree, buildHistoryRefOptions, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches } from './HistoryWorkspace.helpers';
+import { buildDetailTree, buildHistoryRefOptions, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches, sumBranchAheadBehind } from './HistoryWorkspace.helpers';
 import { BranchSidebar } from './BranchSidebar';
 import { useAppStore } from '../store/appStore';
 import type { BootstrapData, WorkspaceSnapshot } from '../bindings/generated';
@@ -198,6 +198,15 @@ describe('HistoryWorkspace data helpers', () => {
     expect(model.local.map((branch) => branch.name)).toEqual(['feature/api']);
     expect(model.tags).toHaveLength(0);
     expect(buildSidebarModel(snapshot.repositories, {}, { repo: [{ name: 'v1.0.0-api', hash: 'a', date: '' }] }, 'api').tags).toHaveLength(1);
+  });
+
+  it('adds ahead and behind counts across merged repository branches', () => {
+    const nested = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'nested', name: 'Nested', rootPath: '/tmp/test/nested' } };
+    const model = buildSidebarModel([...snapshot.repositories, nested], {
+      repo: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: 'origin/main', ahead: 2, behind: 1 }],
+      nested: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: 'origin/main', ahead: 3, behind: 4 }],
+    }, {});
+    expect(sumBranchAheadBehind(model.local[0])).toEqual({ ahead: 5, behind: 5 });
   });
 
   it('sorts sidebar branches like the VersionDock plugin', () => {

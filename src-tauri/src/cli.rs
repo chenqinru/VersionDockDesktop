@@ -1,4 +1,8 @@
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
@@ -84,6 +88,30 @@ pub async fn run_with_env(
     cancellation: &CancellationToken,
     secret_env: &[(String, String)],
 ) -> Result<CommandOutput, DesktopError> {
+    let git_write = is_git_program(program) && !is_read_only_command(program, args);
+    if git_write {
+        wait_for_git_index_lock(cwd, cancellation).await?;
+    }
+    for attempt in 0..=2 {
+        match run_once(program, args, cwd, stdin, timeout, cancellation, secret_env).await {
+            Err(error) if git_write && attempt < 2 && is_git_index_lock_error(&error) => {
+                wait_for_git_index_lock(cwd, cancellation).await?;
+            }
+            result => return result,
+        }
+    }
+    unreachable!("Git index-lock retry loop always returns")
+}
+
+async fn run_once(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    secret_env: &[(String, String)],
+) -> Result<CommandOutput, DesktopError> {
     let start_time = std::time::Instant::now();
     let channel = if program.contains("svn") {
         crate::logger::LogChannel::Svn
@@ -106,6 +134,11 @@ pub async fn run_with_env(
             Stdio::null()
         });
     command.envs(secret_env.iter().map(|(key, value)| (key, value)));
+    if is_git_program(program) {
+        // Read-only Git commands must not refresh the index and contend with
+        // VersionDock or another Git client for index.lock.
+        command.env("GIT_OPTIONAL_LOCKS", "0");
+    }
 
     #[cfg(unix)]
     command.process_group(0);
@@ -254,6 +287,78 @@ pub async fn run_with_env(
     Ok(result)
 }
 
+fn is_git_program(program: &str) -> bool {
+    Path::new(program)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("git"))
+}
+
+fn resolve_git_dir(cwd: &Path) -> Option<PathBuf> {
+    let dot_git = cwd.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    let value = std::fs::read_to_string(&dot_git).ok()?;
+    let path = value.trim().strip_prefix("gitdir:")?.trim();
+    let git_dir = PathBuf::from(path);
+    Some(if git_dir.is_absolute() {
+        git_dir
+    } else {
+        cwd.join(git_dir)
+    })
+}
+
+fn git_index_lock_path(cwd: &Path) -> Option<PathBuf> {
+    resolve_git_dir(cwd).map(|directory| directory.join("index.lock"))
+}
+
+async fn wait_for_git_index_lock(
+    cwd: &Path,
+    cancellation: &CancellationToken,
+) -> Result<(), DesktopError> {
+    let Some(lock_path) = git_index_lock_path(cwd) else {
+        return Ok(());
+    };
+    if !lock_path.exists() {
+        return Ok(());
+    }
+    let started = tokio::time::Instant::now();
+    let mut delay = Duration::from_millis(50);
+    while lock_path.exists() {
+        if started.elapsed() >= Duration::from_secs(5) {
+            return Err(DesktopError::new(
+                "GIT_INDEX_BUSY",
+                format!(
+                    "Git index is busy: {}. Retry after the other Git process finishes.",
+                    lock_path.display()
+                ),
+                true,
+            ));
+        }
+        tokio::select! {
+            _ = cancellation.cancelled() => {
+                return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true));
+            }
+            _ = tokio::time::sleep(delay) => {}
+        }
+        delay = (delay * 2).min(Duration::from_millis(250));
+    }
+    Ok(())
+}
+
+fn is_git_index_lock_error(error: &DesktopError) -> bool {
+    let detail = format!(
+        "{}\n{}",
+        error.message,
+        error.stderr.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    detail.contains("index.lock")
+        || detail.contains("unable to create") && detail.contains("index")
+        || detail.contains("another git process") && detail.contains("repository")
+}
+
 fn is_read_only_command(program: &str, args: &[String]) -> bool {
     let lower_prog = program.to_ascii_lowercase();
     if lower_prog.ends_with("git") {
@@ -264,8 +369,20 @@ fn is_read_only_command(program: &str, args: &[String]) -> bool {
         match first_cmd {
             Some(
                 "status" | "rev-parse" | "check-ref-format" | "for-each-ref" | "rev-list" | "show"
-                | "diff" | "log" | "remote" | "config",
+                | "diff" | "log",
             ) => true,
+            Some("remote") => !args.iter().any(|arg| {
+                matches!(
+                    arg.as_str(),
+                    "add" | "remove" | "rename" | "set-url" | "prune" | "update"
+                )
+            }),
+            Some("config") => args.iter().any(|arg| {
+                matches!(
+                    arg.as_str(),
+                    "--get" | "--get-all" | "--get-regexp" | "--get-urlmatch" | "--list" | "-l"
+                )
+            }),
             Some("stash") => args.iter().any(|arg| arg == "list" || arg == "show"),
             Some("worktree") => args.iter().any(|arg| arg == "list"),
             Some("branch" | "tag") => args.iter().any(|arg| {
@@ -605,6 +722,76 @@ mod tests {
                 Some("Commit, stash, carry, or discard local changes before retrying")
             )
         );
+    }
+
+    #[tokio::test]
+    async fn resolves_git_index_locks_and_waits_without_deleting_them() {
+        let root = tempfile::tempdir().unwrap();
+        let git_dir = root.path().join("actual-git-dir");
+        std::fs::create_dir(&git_dir).unwrap();
+        std::fs::write(root.path().join(".git"), "gitdir: actual-git-dir\n").unwrap();
+        let lock = git_dir.join("index.lock");
+        std::fs::write(&lock, b"owned elsewhere").unwrap();
+        let release = lock.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            std::fs::remove_file(release).unwrap();
+        });
+        wait_for_git_index_lock(root.path(), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(git_index_lock_path(root.path()), Some(lock));
+    }
+
+    #[test]
+    fn recognizes_index_lock_failures_for_retry() {
+        let error = DesktopError::new(
+            "COMMAND_FAILED",
+            "fatal: Unable to create '.git/index.lock': File exists.",
+            true,
+        );
+        assert!(is_git_index_lock_error(&error));
+        assert!(!is_git_index_lock_error(&DesktopError::new(
+            "COMMAND_FAILED",
+            "fatal: unrelated failure",
+            true,
+        )));
+    }
+
+    #[test]
+    fn distinguishes_remote_and_config_reads_from_writes() {
+        assert!(is_read_only_command("git", &["remote".into()]));
+        assert!(is_read_only_command(
+            "git",
+            &["remote".into(), "get-url".into(), "origin".into()]
+        ));
+        assert!(!is_read_only_command(
+            "git",
+            &[
+                "remote".into(),
+                "set-url".into(),
+                "origin".into(),
+                "url".into()
+            ]
+        ));
+        assert!(is_read_only_command(
+            "git",
+            &[
+                "config".into(),
+                "--local".into(),
+                "--get".into(),
+                "user.name".into()
+            ]
+        ));
+        assert!(!is_read_only_command(
+            "git",
+            &[
+                "config".into(),
+                "--local".into(),
+                "user.name".into(),
+                "Ada".into()
+            ]
+        ));
     }
 
     #[cfg(unix)]

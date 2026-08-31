@@ -1802,6 +1802,17 @@ pub async fn sync(
             update: None,
         });
     }
+    if repo.kind == VcsKind::Git
+        && matches!(action, SyncAction::Pull)
+        && (git_has_conflicts(repo, token).await
+            || git_operation_name(Path::new(&repo.root_path)).is_some())
+    {
+        return Err(DesktopError::new(
+            "GIT_UPDATE_BLOCKED",
+            "Cannot pull while conflicts are unresolved or another Git operation is in progress. Resolve, continue, or abort it first.",
+            true,
+        ));
+    }
     let captures_update = matches!(action, SyncAction::Pull | SyncAction::Update);
     let before_revision = if captures_update {
         current_revision(repo, token).await.unwrap_or_default()
@@ -1813,12 +1824,52 @@ pub async fn sync(
     } else {
         String::new()
     };
+    if repo.kind == VcsKind::Git && matches!(action, SyncAction::Pull) {
+        let has_upstream = git(
+            vec![
+                "rev-parse".into(),
+                "--abbrev-ref".into(),
+                "--symbolic-full-name".into(),
+                "@{u}".into(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        .is_ok();
+        if !has_upstream {
+            return Ok(SyncResult {
+                output: "No remote tracking branch — skipped".into(),
+                update: Some(RepositoryUpdateResult {
+                    repo_id: repo.id.clone(),
+                    before_revision: before_revision.clone(),
+                    after_revision: before_revision,
+                    summary: Some(UpdateSummary {
+                        kind: UpdateKind::NoChanges,
+                        commit_count: 0,
+                        file_count: 0,
+                        contains_merge: false,
+                        detail: UpdateDetail {
+                            commits: Vec::new(),
+                            files: Vec::new(),
+                        },
+                    }),
+                    summary_error: None,
+                    before_status: before_status.clone(),
+                    after_status: before_status,
+                }),
+            });
+        }
+    }
     let (program, args) = match (repo.kind, action) {
         (VcsKind::Git, SyncAction::Fetch) => (
             "git",
             vec!["fetch".into(), "--all".into(), "--prune".into()],
         ),
-        (VcsKind::Git, SyncAction::Pull) => ("git", vec!["pull".into(), "--ff-only".into()]),
+        (VcsKind::Git, SyncAction::Pull) => (
+            "git",
+            vec!["pull".into(), "--no-rebase".into(), "--ff".into()],
+        ),
         (VcsKind::Git, SyncAction::Push) => unreachable!(),
         (VcsKind::Svn, SyncAction::Update) | (VcsKind::Svn, SyncAction::Pull) => {
             ("svn", vec!["update".into()])
@@ -1838,7 +1889,12 @@ pub async fn sync(
         safe.push("--non-interactive".into());
     }
     safe.extend(args);
-    let output = cli::run(
+    let auto_stash = if repo.kind == VcsKind::Git && captures_update {
+        create_pull_auto_stash(repo, token).await?
+    } else {
+        None
+    };
+    let operation = cli::run(
         program,
         &safe,
         Path::new(&repo.root_path),
@@ -1846,8 +1902,59 @@ pub async fn sync(
         cli::NETWORK_TIMEOUT,
         token,
     )
-    .await?
-    .stdout_text();
+    .await;
+    let output = match operation {
+        Ok(output) => output.stdout_text(),
+        Err(error) => {
+            if let Some(auto_stash) = auto_stash.as_ref() {
+                if git_has_conflicts(repo, token).await
+                    || git_operation_name(Path::new(&repo.root_path)).is_some()
+                {
+                    return Err(pull_auto_stash_error(
+                        "GIT_PULL_CONFLICT_WITH_AUTO_STASH",
+                        format!(
+                            "Update stopped with conflicts. Local tracked changes remain safe in VersionDock auto-stash {}. Resolve or abort the update, then restore the stash from the Stash panel.",
+                            auto_stash.short_hash
+                        ),
+                        auto_stash,
+                        Some(error),
+                    ));
+                }
+                restore_pull_auto_stash(repo, auto_stash, token)
+                    .await
+                    .map_err(|restore_error| {
+                        pull_auto_stash_error(
+                            "GIT_PULL_FAILED_RESTORE_FAILED",
+                            format!(
+                                "Update failed, and VersionDock could not restore local changes from auto-stash {}.",
+                                auto_stash.short_hash
+                            ),
+                            auto_stash,
+                            Some(restore_error),
+                        )
+                    })?;
+            }
+            return Err(error);
+        }
+    };
+    if let Some(auto_stash) = auto_stash.as_ref() {
+        if let Err(error) = restore_pull_auto_stash(repo, auto_stash, token).await {
+            let code = if git_has_conflicts(repo, token).await || git_has_conflict_error(&error) {
+                "GIT_AUTO_STASH_CONFLICT"
+            } else {
+                "GIT_AUTO_STASH_RESTORE_FAILED"
+            };
+            return Err(pull_auto_stash_error(
+                code,
+                format!(
+                    "Update completed, but VersionDock could not restore local changes from auto-stash {}. The stash was kept for recovery.",
+                    auto_stash.short_hash
+                ),
+                auto_stash,
+                Some(error),
+            ));
+        }
+    }
     if !captures_update {
         return Ok(SyncResult {
             output,
@@ -1882,6 +1989,146 @@ pub async fn sync(
             after_status,
         }),
     })
+}
+
+#[derive(Debug, Clone)]
+struct PullAutoStash {
+    hash: String,
+    short_hash: String,
+}
+
+async fn pull_stash_head(repo: &RepositoryMeta, token: &CancellationToken) -> Option<String> {
+    git(
+        vec!["rev-parse".into(), "--verify".into(), "refs/stash".into()],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .map(|output| output.stdout_text().trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
+async fn create_pull_auto_stash(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Option<PullAutoStash>, DesktopError> {
+    let tracked_status = git(
+        vec![
+            "status".into(),
+            "--porcelain=v1".into(),
+            "--untracked-files=no".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    if tracked_status.trim().is_empty() {
+        return Ok(None);
+    }
+    let before = pull_stash_head(repo, token).await;
+    let marker = format!(
+        "versiondock-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    );
+    git(
+        vec![
+            "stash".into(),
+            "push".into(),
+            "--message".into(),
+            format!("VersionDock automatic stash before update ({marker})"),
+        ],
+        repo,
+        token,
+    )
+    .await?;
+    let after = pull_stash_head(repo, token).await;
+    let Some(hash) = after.filter(|hash| Some(hash) != before.as_ref()) else {
+        // A dirty submodule may not create a superproject stash. Leave it in
+        // place and let Git decide whether the update is safe.
+        return Ok(None);
+    };
+    Ok(Some(PullAutoStash {
+        short_hash: hash.chars().take(12).collect(),
+        hash,
+    }))
+}
+
+async fn pull_auto_stash_ref(
+    repo: &RepositoryMeta,
+    hash: &str,
+    token: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    let output = git(
+        vec!["stash".into(), "list".into(), "--format=%H%x00%gd".into()],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    Ok(output.lines().find_map(|line| {
+        let (candidate, reference) = line.split_once('\0')?;
+        (candidate == hash).then(|| reference.to_string())
+    }))
+}
+
+async fn restore_pull_auto_stash(
+    repo: &RepositoryMeta,
+    auto_stash: &PullAutoStash,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    let reference = pull_auto_stash_ref(repo, &auto_stash.hash, token)
+        .await?
+        .ok_or_else(|| {
+            DesktopError::new(
+                "GIT_AUTO_STASH_MISSING",
+                format!(
+                    "VersionDock auto-stash {} could not be found. Check the Stash panel before making further changes.",
+                    auto_stash.short_hash
+                ),
+                true,
+            )
+        })?;
+    git(
+        vec!["stash".into(), "pop".into(), "--index".into(), reference],
+        repo,
+        token,
+    )
+    .await?;
+    Ok(())
+}
+
+fn git_has_conflict_error(error: &DesktopError) -> bool {
+    let detail = format!(
+        "{}\n{}",
+        error.message,
+        error.stderr.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    detail.contains("conflict") || detail.contains("needs merge")
+}
+
+fn pull_auto_stash_error(
+    code: &str,
+    message: String,
+    auto_stash: &PullAutoStash,
+    cause: Option<DesktopError>,
+) -> DesktopError {
+    DesktopError {
+        code: code.into(),
+        message,
+        command: cause.as_ref().and_then(|error| error.command.clone()),
+        exit_code: cause.as_ref().and_then(|error| error.exit_code),
+        stderr: cause.as_ref().and_then(|error| error.stderr.clone()),
+        recoverable: true,
+        operation: Some("pull".into()),
+        workspace_id: None,
+        repository_id: None,
+        subject: Some(format!("stash:{}", auto_stash.hash)),
+        hint: Some("Open Conflicts, resolve the working copy, and keep the retained stash until the restored changes are verified".into()),
+    }
 }
 
 async fn status_fingerprint(
@@ -6560,9 +6807,25 @@ pub async fn conflict_versions(
 ) -> Result<MergeVersions, DesktopError> {
     let root = Path::new(&repo.root_path);
     let safe = relative_path(root, path, false)?;
-    let working_bytes = tokio::fs::read(root.join(&safe))
-        .await
-        .map_err(|error| DesktopError::new("FILE_READ_FAILED", error.to_string(), true))?;
+    let working_path = root.join(&safe);
+    if working_path.is_dir() {
+        return Err(DesktopError::new(
+            "DIRECTORY_CONFLICT_NOT_EDITABLE",
+            "Directory conflicts cannot be edited as text. Choose a conflict side or resolve the directory manually.",
+            true,
+        ));
+    }
+    let working_bytes = match tokio::fs::read(&working_path).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            return Err(DesktopError::new(
+                "FILE_READ_FAILED",
+                error.to_string(),
+                true,
+            ))
+        }
+    };
     let binary = bytes_are_binary(&working_bytes);
     let working = String::from_utf8_lossy(&working_bytes).into_owned();
     let (base, ours, theirs) = match repo.kind {
@@ -6709,9 +6972,24 @@ pub async fn conflict_save(
     let root = Path::new(&repo.root_path);
     let safe = relative_path(root, path, true)?;
     let target = root.join(&safe);
-    let current = tokio::fs::read(&target)
-        .await
-        .map_err(|error| DesktopError::new("FILE_READ_FAILED", error.to_string(), true))?;
+    if target.is_dir() {
+        return Err(DesktopError::new(
+            "DIRECTORY_CONFLICT_NOT_EDITABLE",
+            "Directory conflicts cannot be saved as text.",
+            true,
+        ));
+    }
+    let current = match tokio::fs::read(&target).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            return Err(DesktopError::new(
+                "FILE_READ_FAILED",
+                error.to_string(),
+                true,
+            ))
+        }
+    };
     if fingerprint(&current) != expected {
         return Err(DesktopError::new(
             "CONFLICT_STALE",
@@ -7084,6 +7362,58 @@ mod tests {
         assert!(conflicts[0].ours_lines.is_empty());
         assert_eq!(conflicts[0].base_lines, ["base"]);
         assert_eq!(conflicts[0].theirs_lines, ["incoming"]);
+    }
+
+    #[tokio::test]
+    async fn loads_missing_svn_conflict_files_from_virtual_artifacts() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("missing.txt.mine"), "local\n").unwrap();
+        std::fs::write(root.path().join("missing.txt.merge-left.r1"), "base\n").unwrap();
+        std::fs::write(root.path().join("missing.txt.merge-right.r2"), "incoming\n").unwrap();
+        let repository = RepositoryMeta {
+            id: "svn".into(),
+            name: "svn".into(),
+            root_path: root.path().to_string_lossy().into_owned(),
+            color: "#4ec9b0".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let versions = conflict_versions(&repository, "missing.txt", &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(versions.working.is_empty());
+        assert_eq!(versions.base, "base\n");
+        assert_eq!(versions.ours, "local\n");
+        assert_eq!(versions.theirs, "incoming\n");
+        assert_eq!(versions.conflicts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rejects_directory_conflicts_as_text_documents() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("conflicted-directory")).unwrap();
+        let repository = RepositoryMeta {
+            id: "svn".into(),
+            name: "svn".into(),
+            root_path: root.path().to_string_lossy().into_owned(),
+            color: "#4ec9b0".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let error = conflict_versions(
+            &repository,
+            "conflicted-directory",
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "DIRECTORY_CONFLICT_NOT_EDITABLE");
     }
 
     #[test]

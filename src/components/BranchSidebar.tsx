@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
-import { buildSidebarModel, type SidebarBranch, type SidebarTag } from './HistoryWorkspace.helpers';
+import { buildSidebarModel, sumBranchAheadBehind, type SidebarBranch, type SidebarTag } from './HistoryWorkspace.helpers';
 import type { RepositoryStatus } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
@@ -277,9 +277,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
   onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const headCount = branch.instances.filter((instance) => instance.branch.current).length;
-  const instance = branch.instances.find((item) => item.branch.current) ?? branch.instances[0];
-  const ahead = instance?.branch.ahead ?? 0;
-  const behind = instance?.branch.behind ?? 0;
+  const { ahead, behind } = sumBranchAheadBehind(branch);
   const isPrimary = ['main', 'master', 'trunk', 'develop', 'dev', 'release'].includes(branch.name.toLowerCase());
   return <div
     className={`branch-ref-row ${branch.current ? 'head' : ''} ${selected ? 'filtered' : ''} ${active ? 'active' : ''}`}

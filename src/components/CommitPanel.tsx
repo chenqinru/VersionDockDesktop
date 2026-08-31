@@ -248,6 +248,17 @@ export function CommitPanel() {
     return map;
   }, [selected]);
   const commitTargets = repos.filter((repo) => (selectedByRepo.get(repo.meta.id)?.length ?? 0) > 0);
+  const amendTarget = commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' ? commitTargets[0] : undefined;
+  const amendBranch = amendTarget ? branchesByRepo[amendTarget.meta.id]?.find((branch) => branch.current) : undefined;
+  const showAmend = Boolean(amendTarget && (
+    (amendBranch?.ahead ?? amendTarget.ahead) > 0
+    || (!amendBranch?.upstream && (unpushedCommits[amendTarget.meta.id]?.length ?? 0) > 0)
+  ));
+  useEffect(() => {
+    const allowedRepoId = showAmend ? amendTarget?.meta.id : undefined;
+    const next = amendRepoIds.filter((repoId) => repoId === allowedRepoId);
+    if (next.length !== amendRepoIds.length) setAmendRepoIds(next);
+  }, [amendRepoIds, amendTarget, setAmendRepoIds, showAmend]);
   const commitTargetKey = commitTargets.map((repo) => repo.meta.id).join('\0');
   const recentCommitMessages = useAppStore((state) => state.recentCommitMessages);
   const lastCommitMessage = useAppStore((state) => state.lastCommitMessage);
@@ -954,7 +965,7 @@ export function CommitPanel() {
       <div className="commit-form">
         <div className="commit-resize-grip" role="separator" tabIndex={0} aria-label={t('Resize commit message')} aria-orientation="horizontal" aria-valuemin={52} aria-valuemax={Math.round(window.innerHeight * 0.55)} aria-valuenow={Math.round(textareaHeight)} onPointerDown={startTextareaResize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTextareaHeight((value) => Math.max(52, Math.min(window.innerHeight * 0.55, value + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>
         {repos.length > 1 && <div className="commit-targets">{commitTargets.length === 0 ? <span>{t('No files selected')}</span> : commitTargets.map((repo) => <em key={repo.meta.id} style={{ color: repo.meta.color, background: `${repo.meta.color}28`, borderColor: `${repo.meta.color}60` }}><button title={t('Remove {0}', repo.meta.name)} onClick={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), false)}><Codicon name="close" /></button>{repo.meta.name}<b>{selectedByRepo.get(repo.meta.id)?.length}</b></em>)}</div>}
-        {commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(commitTargets[0].meta.id)} onChange={() => { const next = new Set(amendRepos); if (next.has(commitTargets[0].meta.id)) next.delete(commitTargets[0].meta.id); else next.add(commitTargets[0].meta.id); setAmendRepoIds([...next]); }} />{t('Amend')}</label></div>}
+        {showAmend && amendTarget && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(amendTarget.meta.id)} onChange={() => { const next = new Set(amendRepos); if (next.has(amendTarget.meta.id)) next.delete(amendTarget.meta.id); else next.add(amendTarget.meta.id); setAmendRepoIds([...next]); }} />{t('Amend')}</label></div>}
         <div className="commit-message-tools"><button type="button" disabled={!commitTargets.length} title={t('View commit message history')} onClick={() => void openMessageHistory()}><Codicon name="history" /></button><button type="button" disabled={!commitTargets.length} title={t('Use Last Commit Message')} onClick={() => void fillLastMessage()}><Codicon name="arrow-circle-down" /></button></div>
         {mergeMessageSuggestion && <div className="merge-message-suggestion" role="status"><span>{t('Merge message suggestion')}: {mergeMessageSuggestion}</span><button type="button" onClick={applyMergeMessageSuggestion}>{t('Use Merge Message')}</button><button type="button" onClick={dismissMergeMessageSuggestion}>{t('Ignore')}</button></div>}
         <textarea style={{ height: textareaHeight }} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(defaultCommitAction === 'commitAndPush'); }} />
