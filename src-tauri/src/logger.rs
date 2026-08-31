@@ -212,11 +212,7 @@ impl LogManager {
     fn append_to_file(&self, entry: &LogEntry) {
         let today = Local::now().format("%Y-%m-%d").to_string();
         let file_path = self.log_dir.join(format!("versiondock-{today}.log"));
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(file_path)
-        {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(file_path) {
             let line = Self::format_entry(entry);
             let _ = writeln!(file, "{}", line);
         }
@@ -251,8 +247,9 @@ impl LogManager {
                     if name.starts_with("versiondock-") && name.ends_with(".log") {
                         if let Ok(metadata) = fs::metadata(&path) {
                             if let Ok(modified) = metadata.modified() {
-                                let duration = now
-                                    .signed_duration_since(chrono::DateTime::<Local>::from(modified));
+                                let duration = now.signed_duration_since(
+                                    chrono::DateTime::<Local>::from(modified),
+                                );
                                 if duration.num_days() > MAX_LOG_FILE_DAYS {
                                     let _ = fs::remove_file(&path);
                                 }

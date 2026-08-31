@@ -263,16 +263,8 @@ fn is_read_only_command(program: &str, args: &[String]) -> bool {
             .map(|s| s.as_str());
         match first_cmd {
             Some(
-                "status"
-                | "rev-parse"
-                | "check-ref-format"
-                | "for-each-ref"
-                | "rev-list"
-                | "show"
-                | "diff"
-                | "log"
-                | "remote"
-                | "config",
+                "status" | "rev-parse" | "check-ref-format" | "for-each-ref" | "rev-list" | "show"
+                | "diff" | "log" | "remote" | "config",
             ) => true,
             Some("stash") => args.iter().any(|arg| arg == "list" || arg == "show"),
             Some("worktree") => args.iter().any(|arg| arg == "list"),
@@ -291,10 +283,10 @@ fn is_read_only_command(program: &str, args: &[String]) -> bool {
             .iter()
             .find(|arg| !arg.starts_with('-'))
             .map(|s| s.as_str());
-        match first_cmd {
-            Some("status" | "info" | "log" | "diff" | "cat" | "list" | "ls") => true,
-            _ => false,
-        }
+        matches!(
+            first_cmd,
+            Some("status" | "info" | "log" | "diff" | "cat" | "list" | "ls")
+        )
     } else {
         false
     }
@@ -520,8 +512,14 @@ fn redact_email_and_identities(line: &str) -> String {
         } else if word.starts_with("user.email=") {
             words.push("user.email=<redacted-email>");
         } else if word.contains('@') && !word.contains("://") && word.contains('.') {
-            let clean = word.trim_matches(|c| c == '<' || c == '>' || c == '"' || c == '\'' || c == ',' || c == ';');
-            if clean.contains('@') && clean.contains('.') && !clean.starts_with('@') && !clean.ends_with('@') {
+            let clean = word.trim_matches(|c| {
+                c == '<' || c == '>' || c == '"' || c == '\'' || c == ',' || c == ';'
+            });
+            if clean.contains('@')
+                && clean.contains('.')
+                && !clean.starts_with('@')
+                && !clean.ends_with('@')
+            {
                 words.push("<redacted-email>");
             } else {
                 words.push(word);

@@ -8,7 +8,7 @@ import { SettingsPanel } from './SettingsPanel';
 
 const state = (): AppStateSnapshot => ({
   schemaVersion: 3,
-  settings: { theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: ['node_modules'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
+  settings: { theme: 'system', language: 'system', uiFontSize: 'standard', fileIconTheme: 'material', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: ['node_modules'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
   layout: { panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
   lastWorkspaceId: null,
   recentWorkspaces: [],
@@ -68,11 +68,15 @@ describe('SettingsPanel', () => {
     expect(Array.from(fontSize.querySelectorAll('option')).map((option) => option.value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
     fireEvent.change(fontSize, { target: { value: 'maximum' } });
 
+    const fileIconThemeSelect = screen.getByRole('combobox', { name: 'File icon theme' });
+    expect(Array.from(fileIconThemeSelect.querySelectorAll('option')).map((option) => option.value)).toEqual(['material', 'catppuccin', 'seti', 'codicon']);
+    fireEvent.change(fileIconThemeSelect, { target: { value: 'catppuccin' } });
+
     // 切换至 Changes and commit 分类
     fireEvent.click(screen.getByRole('link', { name: 'Changes and commit' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'File view' }), { target: { value: 'list' } });
 
-    expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'githubDarkDimmed', language: 'zhCn', uiFontSize: 'maximum' });
+    expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'githubDarkDimmed', language: 'zhCn', uiFontSize: 'maximum', fileIconTheme: 'catppuccin' });
     expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ fileViewMode: 'list' });
   });
 

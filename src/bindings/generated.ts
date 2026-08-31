@@ -591,6 +591,7 @@ export type DesktopSettings = {
 	skippedUpdateVersion?: string | null,
 	onlineAvatarsEnabled?: boolean,
 	gravatarEnabled?: boolean,
+	fileIconTheme?: FileIconThemePreference,
 };
 
 export type DiffDocument = {
@@ -640,6 +641,8 @@ export type FileHistoryPage = {
 	entries: FileHistoryEntry[],
 	nextCursor: string | null,
 };
+
+export type FileIconThemePreference = "material" | "catppuccin" | "seti" | "codicon";
 
 export type FileRevisionDocument = {
 	revision: string,

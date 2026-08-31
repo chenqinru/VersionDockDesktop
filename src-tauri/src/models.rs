@@ -1382,6 +1382,8 @@ pub struct DesktopSettings {
     #[serde(default)]
     #[specta(optional)]
     pub gravatar_enabled: bool,
+    #[serde(default)]
+    pub file_icon_theme: FileIconThemePreference,
 }
 
 fn default_auto_check_updates() -> bool {
@@ -1394,6 +1396,7 @@ impl Default for DesktopSettings {
             theme: ThemePreference::System,
             language: LanguagePreference::System,
             ui_font_size: UiFontSizePreference::Standard,
+            file_icon_theme: FileIconThemePreference::Material,
             changes_display_mode: ChangesDisplayMode::Simplified,
             default_commit_action: DefaultCommitAction::Commit,
             default_save_action: DefaultSaveAction::Stash,
@@ -1578,6 +1581,16 @@ pub enum UiFontSizePreference {
     Standard,
     Large,
     Maximum,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FileIconThemePreference {
+    #[default]
+    Material,
+    Catppuccin,
+    Seti,
+    Codicon,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

@@ -36,7 +36,7 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo] }, selectedRepoId: 'repo' });
     const { container } = renderPanel();
     expect(container.querySelector('.repo-heading')).toHaveAttribute('style', expect.stringContaining('#4ec9b0'));
-    expect(container.querySelector('.file-type-icon.tone-typescript')).toBeInTheDocument();
+    expect(container.querySelector('.file-type-icon')).toBeInTheDocument();
     expect(container.querySelector('.repo-change-group.active')).not.toBeInTheDocument();
   });
 

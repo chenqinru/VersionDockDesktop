@@ -3,7 +3,7 @@ import { Codicon } from '../Codicon';
 import { useI18n } from '../../i18n';
 import { useAppStore } from '../../store/appStore';
 import { useResizable } from '../../hooks/useResizable';
-import type { LogChannel, LogEntry, LogLevel } from '../../bindings/generated';
+import type { LogChannel, LogLevel } from '../../bindings/generated';
 
 const LOG_CHANNELS: Array<{ id: LogChannel | 'all'; label: string }> = [
   { id: 'all', label: 'All Channels' },

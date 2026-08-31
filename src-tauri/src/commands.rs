@@ -2890,7 +2890,11 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(vcs::file_revision_content(&repo, &relative_path, &revision, token).await?)
         }
-        BridgeCommand::LogGet { channel, level, limit } => {
+        BridgeCommand::LogGet {
+            channel,
+            level,
+            limit,
+        } => {
             if let Some(logger) = crate::logger::get_logger() {
                 let entries = logger.get_entries(channel, level, limit.map(|v| v as usize));
                 json(entries)
@@ -2913,15 +2917,20 @@ async fn dispatch(
         }
         BridgeCommand::LogExport { target_path } => {
             if let Some(logger) = crate::logger::get_logger() {
-                logger.export_to_file(Path::new(&target_path)).map_err(|err| {
-                    DesktopError::new("LOG_EXPORT_FAILED", err.to_string(), true)
-                })?;
+                logger
+                    .export_to_file(Path::new(&target_path))
+                    .map_err(|err| DesktopError::new("LOG_EXPORT_FAILED", err.to_string(), true))?;
                 json(true)
             } else {
                 json(false)
             }
         }
-        BridgeCommand::LogClientPush { level, channel, message, details } => {
+        BridgeCommand::LogClientPush {
+            level,
+            channel,
+            message,
+            details,
+        } => {
             crate::logger::log_entry(level, channel, message, details, None, None);
             json(true)
         }

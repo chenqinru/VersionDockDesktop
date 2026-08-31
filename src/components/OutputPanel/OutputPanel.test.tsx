@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LogEntry } from '../../bindings/generated';
 import { I18nContext, createTranslator } from '../../i18n';
 import { MockBridge } from '../../platform/bridge';

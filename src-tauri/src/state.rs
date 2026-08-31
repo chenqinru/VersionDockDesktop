@@ -431,13 +431,22 @@ impl AppState {
                     let is_ignored = event.paths.iter().all(|path| {
                         if let Some(ext) = path.extension() {
                             let ext_str = ext.to_string_lossy();
-                            if ext_str == "log" || ext_str == "tmp" || ext_str == "swp" || ext_str == "lock" {
+                            if ext_str == "log"
+                                || ext_str == "tmp"
+                                || ext_str == "swp"
+                                || ext_str == "lock"
+                            {
                                 return true;
                             }
                         }
                         path.components().any(|part| {
                             let s = part.as_os_str().to_string_lossy();
-                            s == "logs" || s == "log" || s == "target" || s == "dist" || s == ".vite" || ignored.iter().any(|item| item == &s)
+                            s == "logs"
+                                || s == "log"
+                                || s == "target"
+                                || s == "dist"
+                                || s == ".vite"
+                                || ignored.iter().any(|item| item == &s)
                         })
                     });
                     if is_ignored {

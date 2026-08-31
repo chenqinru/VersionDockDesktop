@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
-  BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference,
+  BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference, FileIconThemePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
   DesktopCapabilities, HistoryQuery, InitializeRepositoryResult, CloneRepositoryResult, OperationDomain, OperationEvent,
@@ -398,6 +398,7 @@ export interface AppStore {
   setTheme: (value: ThemePreference) => Promise<void>;
   setLanguage: (value: LanguagePreference) => Promise<void>;
   setUiFontSize: (value: UiFontSizePreference) => void;
+  setFileIconTheme: (value: FileIconThemePreference) => Promise<void>;
   setExternalEditor: (executable: string, args: string[]) => void;
   setFileViewMode: (value: 'tree' | 'list') => void;
   setStashViewMode: (value: 'tree' | 'list') => void;
@@ -2672,6 +2673,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;
       void updateSettings({ uiFontSize });
     },
+    setFileIconTheme: async (fileIconTheme) => {
+      const bootstrap = get().bootstrap; if (!bootstrap) return;
+      await updateSettings({ fileIconTheme });
+    },
     setExternalEditor: (executable, args) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;
       void updateSettings({ externalEditor: executable.trim() ? { executable: executable.trim(), args } : null });
@@ -2779,7 +2784,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     setLogPanelHeight: (height) => {
       const clamped = Math.max(120, Math.min(height, 600));
       set({ logPanelHeight: clamped });
-      try { localStorage.setItem('versiondock:logPanelHeight', String(clamped)); } catch {}
+      try { localStorage.setItem('versiondock:logPanelHeight', String(clamped)); } catch { /* ignore localStorage error */ }
     },
     setLogChannel: (channel) => set({ activeLogChannel: channel }),
     setLogLevel: (level) => set({ activeLogLevel: level }),
@@ -2801,7 +2806,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       try {
         const logs = await bridge().getLogs();
         set({ logEntries: logs });
-      } catch {}
+      } catch {
+        /* ignore bridge logs load failure */
+      }
     },
     openLogFolder: async () => {
       await bridge().openLogFolder();

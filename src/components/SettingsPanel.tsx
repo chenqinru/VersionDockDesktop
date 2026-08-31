@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { DefaultCommitAction, DefaultSaveAction, ExternalEditor, LanguagePreference, ThemePreference, UiFontSizePreference } from '../bindings/generated';
+import type { DefaultCommitAction, DefaultSaveAction, ExternalEditor, FileIconThemePreference, LanguagePreference, ThemePreference, UiFontSizePreference } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
 import { EditorIcon } from './EditorIcons';
+import { FileIcon } from './FileIcon';
 import { ProviderPanel } from './ProviderPanel';
 
 interface SettingsPanelProps {
@@ -35,6 +36,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const theme = settings?.theme ?? 'system';
   const language = settings?.language ?? 'system';
   const uiFontSize = settings?.uiFontSize ?? 'standard';
+  const fileIconTheme = settings?.fileIconTheme ?? 'material';
   const fileViewMode = useAppStore((state) => (state.bootstrap?.state.layout?.fileViewMode ?? state.bootstrap?.state.fileViewMode) === 'list' ? 'list' : 'tree');
   const externalEditor = settings?.externalEditor;
   const repositories = useAppStore((state) => state.allRepositories);
@@ -44,6 +46,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const setTheme = useAppStore((state) => state.setTheme);
   const setLanguage = useAppStore((state) => state.setLanguage);
   const setUiFontSize = useAppStore((state) => state.setUiFontSize);
+  const setFileIconTheme = useAppStore((state) => state.setFileIconTheme);
   const setFileViewMode = useAppStore((state) => state.setFileViewMode);
   const setExternalEditor = useAppStore((state) => state.setExternalEditor);
 
@@ -168,11 +171,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 theme={theme}
                 language={language}
                 uiFontSize={uiFontSize}
+                fileIconTheme={fileIconTheme}
                 fileViewMode={fileViewMode}
                 externalEditor={externalEditor}
                 setTheme={setTheme}
                 setLanguage={setLanguage}
                 setUiFontSize={setUiFontSize}
+                setFileIconTheme={setFileIconTheme}
                 setFileViewMode={setFileViewMode}
                 setExternalEditor={setExternalEditor}
                 updateSettings={updateSettings}
@@ -211,6 +216,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(value) => void setUiFontSize(value as UiFontSizePreference)}
                       />
+                    </SettingsCard>
+                    <SettingsCard title={t('File icon theme')} description={t('Choose the file icon theme')}>
+                      <FileIconThemePreviewSelector value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} />
                     </SettingsCard>
                   </SettingsSection>
                 )}
@@ -1040,6 +1048,66 @@ function ThemePreviewSelector({
   );
 }
 
+function FileIconThemePreviewSelector({
+  value,
+  onChange,
+}: {
+  value: FileIconThemePreference;
+  onChange: (theme: FileIconThemePreference) => void;
+}) {
+  const { t } = useI18n();
+
+  const iconThemes = [
+    { id: 'material' as const, label: t('Material Icons (Default)') },
+    { id: 'catppuccin' as const, label: t('Catppuccin Icons (Soft & Modern)') },
+    { id: 'seti' as const, label: t('Seti / Minimal (Clean & Simple)') },
+    { id: 'codicon' as const, label: t('Codicon (Classic Monochromatic)') },
+  ];
+
+  return (
+    <div className="settings-file-icon-theme-row">
+      <select
+        aria-label={t('File icon theme')}
+        className="settings-theme-hidden-select"
+        value={value}
+        onChange={(e) => onChange(e.target.value as FileIconThemePreference)}
+      >
+        <option value="material">{t('Material Icons (Default)')}</option>
+        <option value="catppuccin">{t('Catppuccin Icons (Soft & Modern)')}</option>
+        <option value="seti">{t('Seti / Minimal (Clean & Simple)')}</option>
+        <option value="codicon">{t('Codicon (Classic Monochromatic)')}</option>
+      </select>
+
+      <div className="settings-file-icon-segmented" role="radiogroup" aria-label={t('File icon theme')}>
+        {iconThemes.map((item) => {
+          const isSelected = value === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              className={`settings-file-icon-card ${isSelected ? 'active' : ''}`}
+              onClick={() => onChange(item.id)}
+            >
+              <div className="settings-file-icon-mock">
+                <FileIcon name="src" folder open={false} theme={item.id} />
+                <FileIcon name="index.ts" theme={item.id} />
+                <FileIcon name="main.rs" theme={item.id} />
+                <FileIcon name="app.py" theme={item.id} />
+                <FileIcon name="package.json" theme={item.id} />
+              </div>
+              <div className="settings-file-icon-caption">
+                <span>{item.label}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 interface EditorOption {
   id: string;
   name: string;
@@ -1265,11 +1333,13 @@ interface SearchResultsProps {
   theme: ThemePreference;
   language: LanguagePreference;
   uiFontSize: UiFontSizePreference;
+  fileIconTheme: FileIconThemePreference;
   fileViewMode: 'tree' | 'list';
   externalEditor: ExternalEditor | null | undefined;
   setTheme: (t: ThemePreference) => void;
   setLanguage: (l: LanguagePreference) => void;
   setUiFontSize: (f: UiFontSizePreference) => void;
+  setFileIconTheme: (t: FileIconThemePreference) => void;
   setFileViewMode: (m: 'tree' | 'list') => void;
   setExternalEditor: (executable: string, args: string[]) => void;
   updateSettings: (s: any) => Promise<any>;
@@ -1284,11 +1354,13 @@ function SearchResults({
   theme,
   language,
   uiFontSize,
+  fileIconTheme,
   fileViewMode,
   externalEditor,
   setTheme,
   setLanguage,
   setUiFontSize,
+  setFileIconTheme,
   setFileViewMode,
   setExternalEditor,
   updateSettings,
@@ -1304,6 +1376,9 @@ function SearchResults({
   const appearanceItems: ReactNode[] = [];
   if (match(t('Theme')) || match(t('Appearance')) || match(t('Choose the application color theme')) || match('dark') || match('light') || match('system') || match('2026') || match('github') || match('one dark') || match('onedark') || match('dracula') || match('nord') || match('classic')) {
     appearanceItems.push(<ThemePreviewSelector key="theme" value={theme} onChange={(val) => void setTheme(val)} />);
+  }
+  if (match(t('File icon theme')) || match(t('Choose the file icon theme')) || match('icon') || match('material') || match('catppuccin') || match('seti') || match('codicon')) {
+    appearanceItems.push(<FileIconThemePreviewSelector key="file-icon-theme" value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} />);
   }
   if (match(t('Language')) || match(t('Simplified Chinese')) || match(t('English')) || match(t('Choose the application language')) || match('chinese') || match('english')) {
     appearanceItems.push(
