@@ -97,7 +97,6 @@
 .provider-repositories strong { overflow: hidden; text-overflow: ellipsis; }
 .provider-device { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 30px; }
 .provider-device strong { font: 700 26px var(--versiondock-code); letter-spacing: 4px; }
-.update-project-report { width: min(640px, calc(100vw - 32px)); }
 
 :root[data-theme="light"] {
   --versiondock-bg: #ffffff;
@@ -2809,8 +2808,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .repo-heading i { width: 8px; height: 8px; }
 .repo-heading strong { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-transform: uppercase; letter-spacing: .05em; }
 .repo-heading .branch-chip { max-width: 46%; height: 19px; align-items: center; padding: 0 5px; border-radius: 3px; }
-.repo-sync-state { margin-left: auto; color: var(--versiondock-success); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); white-space: nowrap; }
-.repo-sync-state + b { margin-left: 2px; }
 .file-row, .tree-directory > button { height: 22px; min-height: 22px; }
 .file-row { gap: 3px; padding-right: 8px; }
 .file-row .selection-checkbox { width: 13px; height: 13px; }
@@ -4511,23 +4508,6 @@ button.notification-item-action-btn:focus-visible {
 
 .notification-item-dismiss:hover {
   color: var(--versiondock-text);
-}
-
-.batch-commit-report { width: min(620px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 32px)); }
-.batch-commit-results { display: grid; gap: 8px; min-width: 0; overflow: auto; padding: 4px 0; }
-.batch-commit-results article { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: 10px; min-width: 0; padding: 10px; border: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
-.batch-commit-results article.success > .codicon { color: var(--versiondock-success); }
-.batch-commit-results article.failed > .codicon { color: var(--versiondock-danger); }
-.batch-commit-results article > div { display: grid; min-width: 0; gap: 3px; }
-.batch-commit-results article strong,
-.batch-commit-results article span,
-.batch-commit-results article code,
-.batch-commit-results article small { min-width: 0; overflow-wrap: anywhere; }
-.batch-commit-results article code { max-height: 72px; overflow: auto; white-space: pre-wrap; }
-
-@media (max-width: 680px) {
-  .batch-commit-results article { grid-template-columns: 20px minmax(0, 1fr); }
-  .batch-commit-results article > button { grid-column: 2; justify-self: start; }
 }
 
 .settings-capability-warning { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 4px 8px; min-width: 0; padding: 8px; color: var(--versiondock-warning); border: 1px solid color-mix(in srgb, var(--versiondock-warning) 45%, transparent); }

@@ -329,10 +329,10 @@ function CommitList({
       if (action === 'create') { const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') }); if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId); }
       if (action?.startsWith('delete:')) await tagOperation({ type: 'delete', name: action.slice('delete:'.length) }, commit.repoId);
     }
-    if (id === 'checkout' && await confirmDialog({ title: t('Checkout revision?'), message: `${commit.shortHash} ${commit.message}\n\n${t('The repository will enter detached HEAD state.')}` })) await historyOperation(commit.repoId, { type: 'checkout', revision: commit.hash });
-    if (id === 'svn-update' && await confirmDialog({ title: t('Update to SVN revision?'), message: `r${commit.hash}` })) await historyOperation(commit.repoId, { type: 'svnUpdateTo', revision: commit.hash });
-    if (id === 'cherry-pick' && await confirmDialog({ title: t('Cherry-pick commit?'), message: `${commit.shortHash} ${commit.message}` })) await historyOperation(commit.repoId, { type: 'cherryPick', revision: commit.hash });
-    if (id === 'cherry-pick-multi' && await confirmDialog({ title: t('Cherry-Pick All'), message: oldestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n') })) for (const item of oldestFirst) await historyOperation(commit.repoId, { type: 'cherryPick', revision: item.hash });
+    if (id === 'checkout') await historyOperation(commit.repoId, { type: 'checkout', revision: commit.hash });
+    if (id === 'svn-update') await historyOperation(commit.repoId, { type: 'svnUpdateTo', revision: commit.hash });
+    if (id === 'cherry-pick') await historyOperation(commit.repoId, { type: 'cherryPick', revision: commit.hash });
+    if (id === 'cherry-pick-multi') for (const item of oldestFirst) await historyOperation(commit.repoId, { type: 'cherryPick', revision: item.hash });
     if (id === 'revert' && await confirmDialog({ title: t('Revert commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('A new inverse commit will be created.')}`, danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: [commit.hash] });
     if (id === 'revert-multi' && await confirmDialog({ title: t('Revert Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: newestFirst.map((item) => item.hash) });
     if (id === 'reset') {

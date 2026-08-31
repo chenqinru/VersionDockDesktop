@@ -1,9 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MergeWorkspace } from './MergeWorkspace';
 import { useAppStore } from '../store/appStore';
 
-afterEach(() => { cleanup(); useAppStore.setState({ merge: undefined, mergeResult: '', selectedFile: undefined, operations: {} }); });
+const originalAcceptConflict = useAppStore.getState().acceptConflict;
+
+afterEach(() => { cleanup(); useAppStore.setState({ merge: undefined, mergeResult: '', selectedFile: undefined, operations: {}, acceptConflict: originalAcceptConflict }); });
 
 describe('advanced merge workspace', () => {
   it('requires every conflict to be resolved and supports a custom result', async () => {
@@ -18,5 +20,18 @@ describe('advanced merge workspace', () => {
     await waitFor(() => expect(useAppStore.getState().mergeResult).toBe('ours'));
     fireEvent.change(screen.getByLabelText('Conflict 1'), { target: { value: 'custom' } });
     await waitFor(() => expect(useAppStore.getState().mergeResult).toBe('custom'));
+  });
+
+  it('accepts a binary side directly without an extra confirmation dialog', async () => {
+    const acceptConflict = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({
+      merge: { path: 'image.png', base: '', ours: '', theirs: '', working: '', markerContent: '', conflicts: [], oursLabel: 'HEAD', theirsLabel: 'feature', language: 'binary', fingerprint: 'binary', binary: true },
+      selectedFile: { repoId: 'repo', path: 'image.png', staged: false },
+      acceptConflict,
+      operations: {},
+    });
+    render(<MergeWorkspace />);
+    fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }));
+    await waitFor(() => expect(acceptConflict).toHaveBeenCalledWith('mine'));
   });
 });

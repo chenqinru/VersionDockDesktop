@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Codicon } from './Codicon';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
-import { confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, promptDialog } from './dialogService';
 import { branchColor, headColor, readableAccentColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, WorktreeEntry as BoundWorktreeEntry } from '../bindings/generated';
@@ -361,6 +361,7 @@ export function WorktreePanel({
   const storeWorktrees = useAppStore((state) => state.worktrees);
   const loadWorktrees = useAppStore((state) => state.loadWorktrees);
   const worktreeOperation = useAppStore((state) => state.worktreeOperation);
+  const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const openWorktree = useAppStore((state) => state.openWorktree);
   const loadWorktreeDiff = useAppStore((state) => state.loadWorktreeDiff);
   const worktreeDiff = useAppStore((state) => state.worktreeDiff);
@@ -373,10 +374,8 @@ export function WorktreePanel({
     }
   }, [customRepos, loadWorktrees, repos]);
 
-  const defaultDelete = async (repoId: string, worktreePath: string, force: boolean) => {
-    if (await confirmDialog({ title: force ? t('Force remove worktree {0}?', worktreePath) : t('Remove worktree {0}?', worktreePath), message: worktreePath, danger: force })) {
-      void worktreeOperation(repoId, { type: 'remove', path: worktreePath, force });
-    }
+  const defaultDelete = (repoId: string, worktreePath: string, force: boolean) => {
+    void worktreeOperation(repoId, { type: 'remove', path: worktreePath, force });
   };
 
   const defaultLock = (repoId: string, worktreePath: string) => {
@@ -392,10 +391,29 @@ export function WorktreePanel({
   };
 
   const defaultCreate = async (repoId: string) => {
-    const branch = await promptDialog({ title: t('Create new branch'), message: t('Branch name'), inputLabel: t('Branch name') });
-    if (!branch?.trim()) return;
-    const newBranch = await confirmDialog({ title: t('Create new branch'), message: branch.trim() });
-    void worktreeOperation(repoId, { type: 'create', branch: branch.trim(), new_branch: newBranch });
+    const branches = [...new Map((branchesByRepo[repoId] ?? []).map((branch) => [branch.name, branch])).values()];
+    const branchChoices = new Map(branches.map((branch, index) => [`branch:${index}`, branch]));
+    const selected = await choiceDialog({
+      title: t('New Worktree — Branch'),
+      message: t('Select branch for new worktree'),
+      choices: [
+        { id: 'new', label: t('Create new branch…'), icon: 'add' },
+        ...branches.map((branch, index) => ({
+          id: `branch:${index}`,
+          label: branch.name,
+          description: branch.current ? t('(current)') : undefined,
+          icon: branch.remote ? 'cloud' : 'git-branch',
+        })),
+      ],
+    });
+    if (!selected) return;
+    if (selected === 'new') {
+      const branch = await promptDialog({ title: t('New Worktree — New Branch Name'), message: t('New branch name'), inputLabel: t('Branch name') });
+      if (branch?.trim()) void worktreeOperation(repoId, { type: 'create', branch: branch.trim(), new_branch: true });
+      return;
+    }
+    const branch = branchChoices.get(selected);
+    if (branch) void worktreeOperation(repoId, { type: 'create', branch: branch.name, new_branch: false });
   };
   const defaultCompare = (repoId: string, entry: NormalizedWorktreeEntry) => {
     void loadWorktreeDiff(repoId, entry.path, 'HEAD');

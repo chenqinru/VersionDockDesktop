@@ -19,7 +19,6 @@ import { StatusBar } from './components/StatusBar/StatusBar';
 import { IdentityPanel } from './components/IdentityPanel';
 import { RemoteManager } from './components/RemoteManager';
 import { AboutDialog } from './components/AboutDialog';
-import { UpdateProjectReportDialog } from './components/UpdateProjectReportDialog';
 import { choiceDialog } from './components/dialogService';
 
 const UI_FONT_SIZE = {
@@ -184,7 +183,6 @@ export function App() {
       {dropActive && <div className="drop-overlay"><Codicon name="folder-opened" /><strong>{t('Drop folders anywhere in this window')}</strong></div>}
       <StatusBar />
       <DialogHost />
-      <UpdateProjectReportDialog />
       <FileHistoryPanel />
       {identityPanelRepoId && <IdentityPanel repoId={identityPanelRepoId} close={closeIdentityPanel} />}
       {remoteManagerRepoId && <RemoteManager repoId={remoteManagerRepoId} close={closeRemoteManager} />}

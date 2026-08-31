@@ -5,6 +5,7 @@ import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, WorktreeEntry } from '../bindings/generated';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
+import { currentDialog, publishDialog } from './dialogService';
 
 const gitRepo: RepositoryStatus = {
   meta: {
@@ -47,10 +48,12 @@ const snapshot = {
   tools: { git: true, svn: true, svnadmin: true },
   repositories: [gitRepo],
 };
+const originalWorktreeOperation = useAppStore.getState().worktreeOperation;
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ worktrees: {}, worktreeDiff: undefined, snapshot: undefined, bridge: undefined });
+  publishDialog(undefined);
+  useAppStore.setState({ worktrees: {}, worktreeDiff: undefined, snapshot: undefined, bridge: undefined, branchesByRepo: {}, worktreeOperation: originalWorktreeOperation });
 });
 
 describe('WorktreePanel', () => {
@@ -142,5 +145,36 @@ describe('WorktreePanel', () => {
     expect(screen.getByText('Force Remove')).toBeInTheDocument();
     expect(screen.queryByText('Open Worktree')).not.toBeInTheDocument();
     expect(screen.queryByText('Show Worktree Diff')).not.toBeInTheDocument();
+  });
+
+  it('removes a worktree directly without an App-only confirmation dialog', async () => {
+    const linked = { ...sampleWorktrees[0], path: '/tmp/managed-linked', branch: 'feature/worktree', main: false };
+    const worktreeOperation = vi.fn().mockResolvedValue(undefined);
+    const bridge = new MockBridge((command) => command.type === 'worktrees' ? [sampleWorktrees[0], linked] : true);
+    useAppStore.setState({ bridge, snapshot, worktrees: { 'repo-1': [sampleWorktrees[0], linked] }, worktreeOperation });
+    render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
+    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    fireEvent.click(screen.getByText('Remove Worktree'));
+    await vi.waitFor(() => expect(worktreeOperation).toHaveBeenCalledWith('repo-1', { type: 'remove', path: '/tmp/managed-linked', force: false }));
+  });
+
+  it('selects an existing branch for a new worktree like VersionDock', async () => {
+    const worktreeOperation = vi.fn().mockResolvedValue(undefined);
+    const bridge = new MockBridge((command) => command.type === 'worktrees' ? sampleWorktrees : true);
+    useAppStore.setState({
+      bridge,
+      snapshot,
+      worktrees: { 'repo-1': sampleWorktrees },
+      branchesByRepo: { 'repo-1': [
+        { name: 'main', current: true, remote: false, upstream: null, ahead: 0, behind: 0 },
+        { name: 'feature/ui', current: false, remote: false, upstream: null, ahead: 0, behind: 0 },
+      ] },
+      worktreeOperation,
+    });
+    render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByTitle('Add worktree'));
+    await vi.waitFor(() => expect(currentDialog()?.kind).toBe('choice'));
+    currentDialog()?.resolve('branch:1');
+    await vi.waitFor(() => expect(worktreeOperation).toHaveBeenCalledWith('repo-1', { type: 'create', branch: 'feature/ui', new_branch: false }));
   });
 });

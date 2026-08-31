@@ -12,7 +12,7 @@ import type {
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
 import { checkAppUpdate, type AppUpdateCheckResult } from '../services/updater';
-import { choiceDialog, confirmDialog } from '../components/dialogService';
+import { choiceDialog } from '../components/dialogService';
 import { createTranslator, resolveLanguage } from '../i18n';
 
 export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'merge';
@@ -49,6 +49,8 @@ export type AppNotificationAction =
   | { type: 'refresh'; label: NotificationText }
   | { type: 'viewUpdateDetails'; label: NotificationText; result: RepositoryUpdateResult }
   | { type: 'viewUpdateResults'; label: NotificationText; results: RepositoryUpdateResult[] }
+  | { type: 'addUntracked'; label: NotificationText; files: Array<{ repoId: string; path: string }> }
+  | { type: 'retryBatchResult'; label: NotificationText; repoId: string }
   | { type: 'disableIncoming'; label: NotificationText };
 
 export interface AppNotification {
@@ -76,7 +78,13 @@ export interface BatchCommitReport {
   targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>;
   results: RepositoryOperationResult[];
 }
-export interface UpdateProjectReport { results: Array<{ repoId: string; repoName: string; result?: RepositoryUpdateResult; error?: string }> }
+
+const batchFailedStageLabels: Record<string, string> = {
+  prepare: 'Preparation',
+  identity: 'Identity check',
+  commit: 'Commit',
+  push: 'Push',
+};
 
 const HISTORY_PAGE_SIZE = 100;
 const EMPTY_HISTORY_QUERY: HistoryQuery = { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null };
@@ -287,7 +295,6 @@ export interface AppStore {
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
   batchCommitReport?: BatchCommitReport;
-  updateProjectReport?: UpdateProjectReport;
   initialize: (bridge: VersionDockBridge) => Promise<void>;
   dispose: () => void;
   openWorkspace: (paths: string[], focus?: boolean, options?: OpenWorkspaceOptions) => Promise<boolean>;
@@ -326,7 +333,6 @@ export interface AppStore {
   dismissBatchReport: () => void;
   sync: (repoId: string, action: 'fetch' | 'pull' | 'push' | 'update', notify?: boolean) => Promise<RepositoryUpdateResult | undefined>;
   updateProject: () => Promise<void>;
-  dismissUpdateProjectReport: () => void;
   openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
   openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
   recentCommitMessages: (repoIds: string[], signal?: AbortSignal) => Promise<RecentCommitMessage[]>;
@@ -617,6 +623,29 @@ export const useAppStore = create<AppStore>((set, get) => {
   const publishError = (title: string, error: unknown) => get().addNotification({
     type: 'error', title, message: { raw: errorText(error) }, details: errorDetails(error), workspaceId: get().snapshot?.workspace.id,
   });
+  const notifyBatchFailures = (results: RepositoryOperationResult[]) => {
+    const failures = results.filter((result) => result.error);
+    if (!failures.length) return;
+    const t = createTranslator(resolveLanguage(settings().language));
+    const repositories = get().snapshot?.repositories ?? [];
+    const repositoryName = (repoId: string) => repositories.find((repo) => repo.meta.id === repoId)?.meta.name ?? repoId;
+    get().addNotification({
+      type: 'warning',
+      urgent: true,
+      title: 'Commit completed with failures',
+      message: { key: 'VersionDock: {0} error(s): {1}', args: [failures.length, failures.map((result) => result.error?.message ?? result.repoId).join('; ')] },
+      details: failures.map((result) => {
+        const stage = result.failedStage ? t('Failed stage: {0}', t(batchFailedStageLabels[result.failedStage] ?? result.failedStage)) : '';
+        return [`${repositoryName(result.repoId)}${stage ? ` · ${stage}` : ''}`, result.error?.message, result.recoveryHint ? t(result.recoveryHint) : undefined].filter(Boolean).join('\n');
+      }).join('\n\n'),
+      workspaceId: get().snapshot?.workspace.id,
+      actions: failures.map((result) => ({
+        type: 'retryBatchResult' as const,
+        label: { raw: `${repositoryName(result.repoId)}: ${t(result.committed ? 'Retry push' : 'Retry repository')}` },
+        repoId: result.repoId,
+      })),
+    });
+  };
   const ensureRepositoryCapability = (repoId: string, key: string) => {
     const repository = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
     if (!repository || capabilityAvailable(repository.capabilities, key, true)) return true;
@@ -841,11 +870,44 @@ export const useAppStore = create<AppStore>((set, get) => {
     await bridge().syncWindowTabs(tabs.map((item) => item.paths), activeId);
   };
 
+  const notifyNewUntrackedFiles = (
+    previousRepositories: RepositoryStatus[],
+    nextRepositories: RepositoryStatus[],
+    targetWorkspaceId: string,
+  ) => {
+    const preferences = settings();
+    if (!preferences.promptBeforeAddingUntracked || preferences.changesDisplayMode === 'simplified') return;
+    const previousByRepo = new Map(previousRepositories.map((repo) => [
+      repo.meta.id,
+      new Set(repo.files.filter((file) => file.status === 'untracked').map((file) => file.path)),
+    ]));
+    const newFiles = nextRepositories.flatMap((repo) => {
+      const previous = previousByRepo.get(repo.meta.id);
+      if (!previous) return [];
+      return repo.files
+        .filter((file) => file.status === 'untracked' && !previous.has(file.path))
+        .map((file) => ({ repoId: repo.meta.id, path: file.path, kind: repo.meta.kind }));
+    });
+    if (!newFiles.length) return;
+    const kind = newFiles.some((file) => file.kind === 'svn') ? 'SVN' : 'Git';
+    const message: NotificationText = newFiles.length === 1
+      ? { key: 'Do you want to add "{0}" to {1}?', args: [newFiles[0].path, kind] }
+      : { key: 'Do you want to add {0} new files to {1}?', args: [newFiles.length, kind] };
+    get().addNotification({
+      type: 'info',
+      title: 'Prompt before adding untracked files',
+      message,
+      workspaceId: targetWorkspaceId,
+      actions: [{ type: 'addUntracked', label: 'Add', files: newFiles.map(({ repoId, path }) => ({ repoId, path })) }],
+    });
+  };
+
   const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true, silent = false) => {
     const current = get().snapshot;
     if (current?.workspace.id === snapshot.workspace.id && current.generation > snapshot.generation) return;
     const workspaceChanged = current?.workspace.id !== snapshot.workspace.id;
     const allRepositories = snapshot.repositories;
+    if (!workspaceChanged) notifyNewUntrackedFiles(get().allRepositories, allRepositories, snapshot.workspace.id);
     const visibleSnapshot = projectSnapshot(snapshot, allRepositories, settings());
     const storedSelections = workspaceChanged
       ? selectionRecord(get().bootstrap?.state.commitSelections?.[snapshot.workspace.id])
@@ -1001,6 +1063,8 @@ export const useAppStore = create<AppStore>((set, get) => {
             { showProgress: false },
           );
           if (get().snapshot?.workspace.id !== workspaceId) return;
+          const previous = get().allRepositories.find((repo) => repo.meta.id === repoId);
+          if (previous) notifyNewUntrackedFiles([previous], [status], workspaceId);
           set((state) => {
             const allRepositories = state.allRepositories.map((repo) => repo.meta.id === repoId ? status : repo);
             return {
@@ -1072,7 +1136,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined, updateProjectReport: undefined,
+    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined,
 
     operations: {},
 
@@ -1806,12 +1870,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
       set({ batchCommitReport: { message, push, targets, results } });
       clearCommittedSelections(results.filter((result) => result.committed).map((result) => result.repoId));
-      const failures = results.filter((result) => result.error);
-      if (failures.length) get().addNotification({
-        type: 'warning', urgent: true, title: 'Commit completed with failures',
-        message: { key: 'VersionDock: {0} error(s): {1}', args: [failures.length, failures.map((result) => result.error?.message ?? result.repoId).join('; ')] },
-        details: failures.map((result) => `${result.repoId}: ${result.error?.message}`).join('\n'), workspaceId: get().snapshot?.workspace.id,
-      });
+      notifyBatchFailures(results);
     }, 'commit', {
       repositoryId: targets.length === 1 ? targets[0].repoId : null,
       target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(targets.map((target) => target.repoId))}`,
@@ -1840,7 +1899,10 @@ export const useAppStore = create<AppStore>((set, get) => {
           },
         }, { timeoutMs: 600_000 });
       }
-      set({ batchCommitReport: { ...report, results: report.results.map((item) => item.repoId === repoId ? next : item) } });
+      const nextReport = { ...report, results: report.results.map((item) => item.repoId === repoId ? next : item) };
+      const remainingFailures = nextReport.results.filter((result) => result.error);
+      set({ batchCommitReport: remainingFailures.length ? nextReport : undefined });
+      notifyBatchFailures(remainingFailures);
     }, `commit:${repoId}`),
     dismissBatchReport: () => set({ batchCommitReport: undefined }),
 
@@ -1875,7 +1937,6 @@ export const useAppStore = create<AppStore>((set, get) => {
         try { const value = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: repo.meta.kind === 'git' ? 'pull' : 'update', remote: null } }, { timeoutMs: 600_000 }); return { repoId: repo.meta.id, repoName: repo.meta.name, result: value.update ?? undefined }; }
         catch (error) { return { repoId: repo.meta.id, repoName: repo.meta.name, error: errorText(error) }; }
       }));
-      set({ updateProjectReport: { results: settled } });
       const updated = settled.flatMap((item) => item.result ? [item.result] : []);
       const commits = updated.reduce((sum, item) => sum + (item.summary?.commitCount ?? 0), 0);
       const files = updated.reduce((sum, item) => sum + (item.summary?.fileCount ?? 0), 0);
@@ -1905,7 +1966,6 @@ export const useAppStore = create<AppStore>((set, get) => {
         actions: detailed.length ? [{ type: 'viewUpdateResults', label: 'View update details', results: detailed }] : [],
       });
     },
-    dismissUpdateProjectReport: () => set({ updateProjectReport: undefined }),
 
     openUpdateDetails: async (result) => {
       const commits = result.summary?.detail.commits ?? [];
@@ -2181,7 +2241,6 @@ export const useAppStore = create<AppStore>((set, get) => {
           return;
         }
         const selected = await choiceDialog({ title: t('Uncommitted changes'), message: t('Choose how to handle local changes before switching to "{0}".', target), choices: [{ id: 'stash', label: t('Stash and checkout'), description: t('Keep changes in a stash and switch branches.'), icon: 'archive' }, { id: 'carry', label: t('Carry changes'), description: t('Switch branches and apply the changes there.'), icon: 'arrow-right' }, { id: 'force', label: t('Force checkout'), description: t('Discard tracked local changes and switch branches.'), icon: 'warning', danger: true }, { id: 'cancel', label: t('Cancel'), icon: 'close' }] });
-        if (selected === 'force' && !await confirmDialog({ title: t('Force checkout?'), message: t('Tracked working tree and index changes will be discarded. Untracked files are not deleted.'), danger: true, confirmLabel: t('Force Checkout') })) return;
         const recovery = selected === 'stash' ? { type: 'stashAndCheckout', target } as const : selected === 'carry' ? { type: 'carryChanges', target } as const : selected === 'force' ? { type: 'forceCheckout', target } as const : undefined;
         if (recovery) await get().branchRecovery(repoId, recovery);
         });
@@ -2638,6 +2697,13 @@ export const useAppStore = create<AppStore>((set, get) => {
         case 'refresh': await get().refresh(true); break;
         case 'viewUpdateDetails': await get().openUpdateDetails(action.result); break;
         case 'viewUpdateResults': await get().openUpdateResults(action.results); break;
+        case 'addUntracked': {
+          const pathsByRepo = new Map<string, string[]>();
+          for (const file of action.files) pathsByRepo.set(file.repoId, [...(pathsByRepo.get(file.repoId) ?? []), file.path]);
+          for (const [repoId, paths] of pathsByRepo) await get().stage(repoId, paths);
+          break;
+        }
+        case 'retryBatchResult': await get().retryBatchResult(action.repoId); break;
         case 'disableIncoming': await get().updateSettings({ notifyIncomingCommits: false }); break;
       }
     },

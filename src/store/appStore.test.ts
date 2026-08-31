@@ -754,7 +754,11 @@ describe('appStore async lifecycle', () => {
     });
     useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories });
     await useAppStore.getState().updateProject();
-    expect(useAppStore.getState().updateProjectReport?.results).toEqual([expect.objectContaining({ repoId: 'a', result: expect.anything() }), expect.objectContaining({ repoId: 'b', error: 'offline' })]);
+    const notification = useAppStore.getState().notifications.find((item) => item.actions.some((action) => action.type === 'viewUpdateResults'));
+    expect(notification).toBeDefined();
+    expect(notification?.details).toContain('B: offline');
+    const action = notification?.actions.find((item) => item.type === 'viewUpdateResults');
+    expect(action).toMatchObject({ type: 'viewUpdateResults', results: [expect.objectContaining({ repoId: 'a' })] });
   });
 
   it('persists commit selections per workspace and leaves new files unselected', async () => {
@@ -771,6 +775,38 @@ describe('appStore async lifecycle', () => {
       expect(useAppStore.getState().commitSelections).toEqual({ a: ['kept.ts'] });
       expect(requests.find((command) => command.type === 'saveCommitSelections')).toMatchObject({ payload: { workspace_id: 'workspace', selections: [{ repoId: 'a', paths: ['kept.ts'] }] } });
     } finally { vi.useRealTimers(); }
+  });
+
+  it('reports newly detected untracked files non-modally outside simplified view', async () => {
+    const previous = snapshot('workspace', 1);
+    previous.repositories = [repository('a', 'A')];
+    const next = snapshot('workspace', 2);
+    next.repositories = [{ ...repository('a', 'A'), files: [{ path: 'new.ts', status: 'untracked', staged: false, unstaged: true, conflicted: false }] }];
+    const requests: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command);
+      if (command.type === 'workspaceRefresh') return next;
+      return [];
+    });
+    const configured: BootstrapData = {
+      ...bootstrap,
+      state: {
+        ...bootstrap.state,
+        settings: {
+          theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'changelists', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
+          promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false,
+          notifyIncomingCommits: false, notifyUnpushedCommits: false, repositoryScanDepth: 4, ignoredFolders: [], maximumGraphCommits: 1000,
+          projectColors: {}, externalEditor: null,
+        },
+      },
+    };
+    useAppStore.setState({ bridge, bootstrap: configured, snapshot: previous, allRepositories: previous.repositories, selectedRepoId: 'a' });
+    await useAppStore.getState().refresh(true);
+    expect(currentDialog()).toBeUndefined();
+    const notification = useAppStore.getState().notifications.find((item) => item.actions.some((action) => action.type === 'addUntracked'));
+    expect(notification).toBeDefined();
+    await useAppStore.getState().performNotificationAction(notification!.id, 0);
+    expect(requests.find((command) => command.type === 'stage')).toMatchObject({ payload: { repo_id: 'a', paths: ['new.ts'] } });
   });
 
   it('does not overwrite a non-empty commit draft when merge enters conflicts', async () => {
@@ -800,5 +836,26 @@ describe('appStore async lifecycle', () => {
     currentDialog()?.resolve('stash');
     await operation;
     expect(operations.find((command) => command.type === 'branchRecovery')).toMatchObject({ payload: { operation: { type: 'stashAndCheckout', target: 'feature' } } });
+  });
+
+  it('runs force checkout after the recovery choice without a second confirmation', async () => {
+    const current = snapshot('workspace', 1); current.repositories = [repository('a', 'A')];
+    const operations: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      operations.push(command);
+      if (command.type === 'branchOperation') throw new BridgeError({ code: 'DIRTY_WORKTREE', message: 'dirty', command: 'git', exitCode: 1, stderr: null, recoverable: true });
+      if (command.type === 'branchRecovery') return { status: 'completed', target: 'feature', stashReference: null, changesRestored: false, error: null, recoveryHint: null };
+      if (command.type === 'workspaceRefresh') return current;
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, selectedRepoId: 'a' });
+    const operation = useAppStore.getState().branchOperation({ type: 'checkout', name: 'feature' }, 'a');
+    await vi.waitFor(() => expect(currentDialog()?.kind).toBe('choice'));
+    const dialog = currentDialog();
+    publishDialog(undefined);
+    dialog?.resolve('force');
+    await operation;
+    expect(currentDialog()).toBeUndefined();
+    expect(operations.find((command) => command.type === 'branchRecovery')).toMatchObject({ payload: { operation: { type: 'forceCheckout', target: 'feature' } } });
   });
 });

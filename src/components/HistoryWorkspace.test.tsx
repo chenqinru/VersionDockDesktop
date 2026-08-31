@@ -21,10 +21,11 @@ const bootstrap = (compare: boolean, remoteManagement: boolean): BootstrapData =
   tools: snapshot.tools,
   capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: false, compare, remoteManagement },
 });
+const originalHistoryOperation = useAppStore.getState().historyOperation;
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, historyOperation: originalHistoryOperation });
 });
 
 describe('HistoryWorkspace capabilities', () => {
@@ -63,6 +64,16 @@ describe('HistoryWorkspace capabilities', () => {
     expect(screen.getByText('New Branch...')).toBeInTheDocument();
     expect(screen.getByText('Cherry-Pick')).toBeInTheDocument();
     fireEvent.click(document.body);
+  });
+
+  it('runs cherry-pick directly without an App-only confirmation dialog', async () => {
+    const historyOperation = vi.fn().mockResolvedValue(undefined);
+    const commit = { repoId: 'repo', hash: 'abcdef1234567', shortHash: 'abcdef1', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: cherry-pick directly', refs: [] };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit], historyOperation });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feat: cherry-pick directly').closest('.commit-row')!);
+    fireEvent.click(screen.getByText('Cherry-Pick'));
+    await waitFor(() => expect(historyOperation).toHaveBeenCalledWith('repo', { type: 'cherryPick', revision: commit.hash }));
   });
 
   it('uses the row action to open commit details rather than previewing the first file', async () => {

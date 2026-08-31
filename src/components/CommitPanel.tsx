@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
-import { capabilityAvailable, capabilityReason, isOperationActive, isOperationActiveForRepositories, useAppStore, type BatchCommitReport } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, isOperationActive, isOperationActiveForRepositories, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { FileChange, RecentCommitMessage, RepositoryStatus } from '../bindings/generated';
 import { StashPanel } from './StashPanel';
@@ -21,39 +21,6 @@ import { ConflictBanner } from './ConflictBanner';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 
 const emptyRepositories: RepositoryStatus[] = [];
-const batchFailedStageLabels: Record<string, string> = {
-  prepare: 'Preparation',
-  identity: 'Identity check',
-  commit: 'Commit',
-  push: 'Push',
-};
-
-function BatchCommitReportDialog({ report, repositories }: { report: BatchCommitReport; repositories: RepositoryStatus[] }) {
-  const retry = useAppStore((state) => state.retryBatchResult);
-  const dismiss = useAppStore((state) => state.dismissBatchReport);
-  const { t } = useI18n();
-  return <div className="dialog-backdrop" role="presentation">
-    <section className="app-dialog batch-commit-report" role="dialog" aria-modal="true" aria-labelledby="batch-commit-report-title">
-      <header><Codicon name="checklist" /><strong id="batch-commit-report-title">{t('Batch commit results')}</strong></header>
-      <div className="batch-commit-results">
-        {report.results.map((result) => {
-          const name = repositories.find((repo) => repo.meta.id === result.repoId)?.meta.name ?? result.repoId;
-          const complete = result.committed && (!result.pushAttempted || result.pushed);
-          const failedStage = result.failedStage
-            ? t('Failed stage: {0}', t(batchFailedStageLabels[result.failedStage] ?? result.failedStage))
-            : undefined;
-          return <article key={result.repoId} className={complete ? 'success' : 'failed'}>
-            <Codicon name={complete ? 'pass-filled' : 'error'} />
-            <div><strong>{name}</strong><span>{result.committed ? `${t('Committed')} ${result.revision?.slice(0, 12) ?? ''}` : t('Commit failed')}</span>{result.pushAttempted && <span>{result.pushed ? t('Push succeeded') : t('Push failed')}</span>}{failedStage && <span>{failedStage}</span>}{result.error && <code>{result.error.message}</code>}{result.recoveryHint && <small>{t(result.recoveryHint)}</small>}</div>
-            {!complete && <button disabled={isOperationActive(useAppStore.getState().operations, { repositoryId: result.repoId, domain: result.committed ? 'sync' : 'commit' })} onClick={() => void retry(result.repoId)}>{t(result.committed ? 'Retry push' : 'Retry repository')}</button>}
-          </article>;
-        })}
-      </div>
-      <footer><button className="primary" onClick={dismiss}>{t('Close')}</button></footer>
-    </section>
-  </div>;
-}
-
 function StatusMark({ file }: { file: FileChange }) {
   const value = file.conflicted ? 'C' : file.status === 'untracked' ? 'U' : file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : file.status === 'renamed' ? 'R' : 'M';
   return <span className={`status-mark status-${file.status}`}>{value}</span>;
@@ -119,7 +86,6 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
       >
         <SelectionCheckbox label={repo.meta.name} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!repo.files.length} onChange={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), !allSelected)} />
         <button title={repo.meta.name} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><span className="branch-chip" title={repo.branch || repo.revision} style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}><Codicon name="git-branch" /><span className="branch-name">{repo.branch || repo.revision}</span></span></button>
-        {(repo.ahead > 0 || repo.behind > 0) && <span className="repo-sync-state">{repo.ahead > 0 && `↑${repo.ahead}`}{repo.behind > 0 && ` ↓${repo.behind}`}</span>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
           {repo.files.length > 0 && (
             <button
@@ -182,7 +148,6 @@ export function CommitPanel() {
   const deletePaths = useAppStore((state) => state.deletePaths);
   const addIgnore = useAppStore((state) => state.addIgnore);
   const commitMany = useAppStore((state) => state.commitMany);
-  const batchCommitReport = useAppStore((state) => state.batchCommitReport);
   const conflicts = useAppStore((state) => state.conflicts);
   const openMerge = useAppStore((state) => state.openMerge);
   const resolveConflict = useAppStore((state) => state.resolveConflict);
@@ -206,7 +171,6 @@ export function CommitPanel() {
   const defaultCommitAction = useAppStore((state) => state.bootstrap?.state.settings?.defaultCommitAction ?? 'commit');
   const defaultSaveAction = useAppStore((state) => state.bootstrap?.state.settings?.defaultSaveAction ?? 'stash');
   const changesDisplayMode = useAppStore((state) => state.bootstrap?.state.settings?.changesDisplayMode ?? 'simplified');
-  const promptBeforeAddingUntracked = useAppStore((state) => state.bootstrap?.state.settings?.promptBeforeAddingUntracked ?? true);
   const pushEnabled = snapshot?.repositories.some((repo) => repo.meta.kind === 'git') ?? false;
   const tab = pushEnabled && storedTab === 'push' ? 'push' : stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : subtreeEnabled && storedTab === 'subtree' ? 'subtree' : 'changes';
   const setTab = useAppStore((state) => state.setActiveTab);
@@ -329,8 +293,6 @@ export function CommitPanel() {
   const setFiles = (repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value);
   const doCommit = async (push: boolean) => {
     if (!message.trim() || !commitTargets.length || commitBusy || commitUnavailable || (push && pushUnavailable)) return;
-    const untracked = commitTargets.flatMap((repo) => repo.files.filter((file) => file.status === 'untracked' && (selectedByRepo.get(repo.meta.id) ?? []).includes(file.path)).map((file) => `${repo.meta.name}: ${file.path}`));
-    if (promptBeforeAddingUntracked && untracked.length > 0 && !await confirmDialog({ title: t('Prompt before adding untracked files'), message: untracked.join('\n'), confirmLabel: t('Commit') })) return;
     await commitMany(commitTargets.map((repo) => {
       const paths = selectedByRepo.get(repo.meta.id) ?? [];
       return {
@@ -344,6 +306,7 @@ export function CommitPanel() {
     if (failedRepoIds.size === 0) {
       setMessage('');
       setAmendRepoIds([]);
+      useAppStore.getState().dismissBatchReport();
     } else {
       setAmendRepoIds(amendRepoIds.filter((repoId) => failedRepoIds.has(repoId)));
     }
@@ -794,7 +757,7 @@ export function CommitPanel() {
   }, [commitMenu, saveMenu, viewMenu]);
 
   const panelToolbar = <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span /><button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void Promise.all(fetchTargets.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>;
-  const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}{batchCommitReport && snapshot && <BatchCommitReportDialog report={batchCommitReport} repositories={repos} />}</>;
+  const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
 
@@ -834,29 +797,37 @@ export function CommitPanel() {
             const fileSummary = fileCount === 1 ? t('{0} unresolved conflict file', fileCount) : t('{0} unresolved conflict files', fileCount);
             return `${repoSummary} · ${fileSummary}`;
           })()}
-          actions={[
-            {
-              id: 'resolve',
-              label: t('Resolve Conflicts'),
-              title: t('Open the conflicts panel to resolve files'),
-              tone: 'primary',
-              onClick: () => {
-                const conflict = conflicts[0];
-                if (!conflict.conflictType || ['text', 'binary'].includes(conflict.conflictType)) {
-                  void openMerge(conflict);
-                } else {
-                  void confirmDialog({
-                    title: t('{0} conflict', conflict.conflictType),
-                    message: `${conflict.path}\n${t('Mark the current working-copy state as resolved?')}`,
-                    danger: true,
-                  }).then((yes) => {
-                    if (yes) return resolveConflict(conflict, 'working');
-                  });
-                }
+          actions={(() => {
+            const conflict = conflicts[0];
+            const requiresSideSelection = Boolean(conflict.conflictType && !['text', 'binary'].includes(conflict.conflictType));
+            const resolutionActions = requiresSideSelection ? [
+              {
+                id: 'accept-current',
+                label: t('Accept Current'),
+                title: t('Accept Current'),
+                tone: 'primary' as const,
+                onClick: () => { void resolveConflict(conflict, 'mine'); },
               },
-            },
-            ...(activeOperationRepo?.operation
-              ? [
+              {
+                id: 'accept-incoming',
+                label: t('Accept Incoming'),
+                title: t('Accept Incoming'),
+                tone: 'primary' as const,
+                onClick: () => { void resolveConflict(conflict, 'theirs'); },
+              },
+            ] : [
+              {
+                id: 'resolve',
+                label: t('Resolve Conflicts'),
+                title: t('Open the conflicts panel to resolve files'),
+                tone: 'primary' as const,
+                onClick: () => { void openMerge(conflict); },
+              },
+            ];
+            return [
+              ...resolutionActions,
+              ...(activeOperationRepo?.operation
+                ? [
                   {
                     id: 'abort',
                     label: activeOperationRepo.operation === 'rebase' ? t('Abort Rebase') : t('Abort Merge'),
@@ -873,9 +844,9 @@ export function CommitPanel() {
                     },
                   },
                 ]
-              : []),
-            ...(restorableConflictRepoIds.length
-              ? [{
+                : []),
+              ...(restorableConflictRepoIds.length
+                ? [{
                   id: 'restore-current',
                   label: t('Restore Current Branch'),
                   title: t('Discard conflicted index and working tree changes'),
@@ -886,8 +857,9 @@ export function CommitPanel() {
                     });
                   },
                 }]
-              : []),
-          ]}
+                : []),
+            ];
+          })()}
         />
       ) : activeOperationRepo?.operation ? (
         <ConflictBanner

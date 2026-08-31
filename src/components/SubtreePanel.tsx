@@ -5,7 +5,7 @@ import { useI18n } from '../i18n';
 import { branchColor, readableAccentColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, SubtreeEntry as BoundSubtreeEntry } from '../bindings/generated';
-import { confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
 
 export interface NormalizedSubtreeEntry {
   id: string;
@@ -480,12 +480,16 @@ export function SubtreePanel({
       initialValue: existing?.ref ?? 'main',
     });
     if (!branch) return;
-    const squash = await confirmDialog({
+    const historyMode = await choiceDialog({
       title: t('Subtree History Mode'),
-      message: t('Use squash mode? Choose Full History to preserve the complete imported history.'),
-      confirmLabel: t('Squash'),
-      cancelLabel: t('Full History'),
+      message: t('Choose how subtree history is merged'),
+      choices: [
+        { id: 'squash', label: t('Squash history'), description: t('Use --squash') },
+        { id: 'full', label: t('Keep full history'), description: t('Do not use --squash') },
+      ],
     });
+    if (!historyMode) return;
+    const squash = historyMode === 'squash';
     if (existing) {
       await subtreeOperation(repoId, { type: 'edit', subtree_id: existing.id, prefix, remote, branch, squash });
     } else if (registerOnly) {
