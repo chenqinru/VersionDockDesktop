@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { bundledLanguages, codeToTokensBase, type BundledLanguage, type BundledTheme, type ThemedToken } from 'shiki';
+import { bundledLanguages, codeToTokensBase, type BundledLanguage, type BundledTheme, type ThemeRegistrationRaw, type ThemedToken } from 'shiki';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
+import { resolveShikiTheme } from '../theme';
 
 type DiffSide = 'old' | 'new';
 type DiffCellKind = 'context' | 'deletion' | 'addition' | 'empty';
@@ -78,7 +79,7 @@ export function resolveDiffHighlightLanguage(language: string, path: string, lin
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export async function highlightDiffLines(lines: string[], language: string, path: string, theme: BundledTheme): Promise<ThemedToken[][]> {
+export async function highlightDiffLines(lines: string[], language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw): Promise<ThemedToken[][]> {
   const resolved = resolveDiffHighlightLanguage(language, path, lines);
   if (!resolved) return lines.map(() => []);
   return codeToTokensBase(lines.join('\n'), { lang: resolved, theme });
@@ -106,7 +107,7 @@ function diffCellGroups(parsed: ParsedUnifiedDiff, side: DiffSide): DiffCell[][]
 // template hunks without their surrounding SFC tags; treating the entire patch
 // as one fragment makes one section's grammar corrupt every other section.
 // eslint-disable-next-line react-refresh/only-export-components
-export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: DiffSide, language: string, path: string, theme: BundledTheme): Promise<WeakMap<DiffCell, ThemedToken[]>> {
+export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: DiffSide, language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw): Promise<WeakMap<DiffCell, ThemedToken[]>> {
   const groups = diffCellGroups(parsed, side);
   const tokenGroups = await Promise.all(groups.map((cells) => highlightDiffLines(cells.map((cell) => cell.content || ' '), language, path, theme)));
   const highlighted = new WeakMap<DiffCell, ThemedToken[]>();
@@ -468,7 +469,7 @@ function renderRow(
 export function UnifiedDiffView({ content, path = '', language = 'text', className = '', splitBreakpoint = 700 }: { content: string; path?: string; language?: string; className?: string; splitBreakpoint?: number }) {
   const { t } = useI18n();
   const [view, setView] = useState<'split' | 'inline'>('split');
-  const [theme, setTheme] = useState<BundledTheme>(() => document.documentElement.dataset.theme === 'light' ? 'light-plus' : 'dark-plus');
+  const [theme, setTheme] = useState<BundledTheme | ThemeRegistrationRaw>(() => resolveShikiTheme(document.documentElement.dataset.theme));
   const [collapsed, setCollapsed] = useState<boolean>(true);
   const [expandedFolds, setExpandedFolds] = useState<Record<string, FoldExpansion>>({});
   const parsed = useMemo(() => parseUnifiedDiff(content, path), [content, path]);
@@ -557,7 +558,7 @@ export function UnifiedDiffView({ content, path = '', language = 'text', classNa
   }, [splitBreakpoint]);
   useEffect(() => {
     if (typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(() => setTheme(document.documentElement.dataset.theme === 'light' ? 'light-plus' : 'dark-plus'));
+    const observer = new MutationObserver(() => setTheme(resolveShikiTheme(document.documentElement.dataset.theme)));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => observer.disconnect();
   }, []);

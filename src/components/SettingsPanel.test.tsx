@@ -50,7 +50,19 @@ describe('SettingsPanel', () => {
   it('changes theme, language, and file view immediately', () => {
     renderPanel();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), { target: { value: 'dark' } });
+    const themeSelect = screen.getByRole('combobox', { name: 'Theme' });
+    expect(Array.from(themeSelect.querySelectorAll('option')).map((option) => option.value)).toEqual([
+      'system',
+      'dark2026',
+      'light2026',
+      'githubDarkDimmed',
+      'oneDarkPro',
+      'dracula',
+      'nord',
+      'dark',
+      'light',
+    ]);
+    fireEvent.change(themeSelect, { target: { value: 'githubDarkDimmed' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'zhCn' } });
     const fontSize = screen.getByRole('combobox', { name: 'UI font size' });
     expect(Array.from(fontSize.querySelectorAll('option')).map((option) => option.value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
@@ -60,7 +72,7 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Changes and commit' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'File view' }), { target: { value: 'list' } });
 
-    expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'dark', language: 'zhCn', uiFontSize: 'maximum' });
+    expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'githubDarkDimmed', language: 'zhCn', uiFontSize: 'maximum' });
     expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ fileViewMode: 'list' });
   });
 

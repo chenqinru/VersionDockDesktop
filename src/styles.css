@@ -1,26 +1,27 @@
-:root {
+:root,
+:root[data-theme="dark2026"] {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --versiondock-ui-font-size: 13px;
   --vscode-font-size: var(--versiondock-ui-font-size);
   --versiondock-ui-font-scale: 1;
   --versiondock-statusbar-height: 24px;
   font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
-  --versiondock-bg: #181818;
-  --versiondock-surface: #1f1f1f;
-  --versiondock-surface-alt: #252525;
-  --versiondock-hover: #2a2d2e;
-  --versiondock-selected: #04395e;
-  --versiondock-border: #353535;
-  --versiondock-border-soft: #2b2b2b;
-  --versiondock-text: #cccccc;
-  --versiondock-muted: #969696;
-  --versiondock-faint: #6e6e6e;
-  --versiondock-accent: #3794ff;
-  --versiondock-accent-bg: #0e639c;
-  --versiondock-success: #73c991;
-  --versiondock-danger: #f48771;
-  --versiondock-warning: #cca700;
-  --versiondock-input: #313131;
+  --versiondock-bg: #121314;
+  --versiondock-surface: #191A1B;
+  --versiondock-surface-alt: #202122;
+  --versiondock-hover: #242526;
+  --versiondock-selected: #297AA0;
+  --versiondock-border: #2A2B2C;
+  --versiondock-border-soft: #242526;
+  --versiondock-text: #BBBEBF;
+  --versiondock-muted: #8C8C8C;
+  --versiondock-faint: #555555;
+  --versiondock-accent: #3994BC;
+  --versiondock-accent-bg: #297AA0;
+  --versiondock-success: #72C892;
+  --versiondock-danger: #F28772;
+  --versiondock-warning: #CCA700;
+  --versiondock-input: #191A1B;
   --versiondock-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --vscode-editor-background: var(--versiondock-bg);
   --vscode-editor-foreground: var(--versiondock-text);
@@ -59,44 +60,119 @@
   --vscode-menu-separatorBackground: var(--versiondock-border-soft);
 }
 
-.clone-dialog { width: min(560px, calc(100vw - 32px)); }
-.dialog-input-row { display: flex; gap: 8px; }
-.dialog-input-row input { flex: 1; }
-.dialog-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; }
-.commit-message-tools { display: flex; justify-content: flex-end; gap: 4px; padding: 2px 8px 0; }
-.commit-message-tools button { border: 0; background: transparent; color: var(--versiondock-muted); padding: 3px 5px; border-radius: 4px; }
-.commit-message-tools button:hover:not(:disabled) { background: var(--versiondock-hover); color: var(--versiondock-text); }
-.commit-message-history-dialog { width: min(640px, calc(100vw - 32px)); }
-.dialog-choice-list { display: flex; flex-direction: column; max-height: min(55vh, 520px); overflow: auto; gap: 3px; }
-.dialog-choice-list > button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; border: 0; border-radius: 5px; padding: 8px 10px; background: transparent; color: var(--versiondock-text); }
-.dialog-choice-list > button:hover, .dialog-choice-list > button:focus-visible { background: var(--versiondock-hover); }
-.dialog-choice-list small { color: var(--versiondock-muted); }
-.dialog-editor { width: 100%; min-height: 180px; max-height: 55vh; resize: both; font: inherit; line-height: 1.45; }
-.dialog-commit-list { max-height: 180px; overflow: auto; border: 1px solid var(--versiondock-border); border-radius: 5px; }
-.dialog-commit-list > div { display: flex; gap: 10px; padding: 7px 9px; border-bottom: 1px solid var(--versiondock-border); }
-.dialog-commit-list > div:last-child { border-bottom: 0; }
-.dialog-commit-list code { flex: 0 0 auto; }
-.dialog-commit-list span { display: flex; min-width: 0; flex-direction: column; }
-.dialog-commit-list small, .dialog-error { color: var(--versiondock-muted); }
-.dialog-error { color: var(--versiondock-danger); white-space: pre-wrap; }
-.provider-panel { width: min(900px, calc(100vw - 40px)); height: min(680px, calc(100vh - 60px)); }
-.provider-body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; flex: 1; }
-.provider-accounts { padding: 12px; border-right: 1px solid var(--versiondock-border); display: flex; flex-direction: column; gap: 6px; overflow: auto; }
-.provider-accounts > div { display: flex; border-radius: 5px; }
-.provider-accounts > div.selected { background: var(--versiondock-selected); }
-.provider-accounts > div > button:first-child { flex: 1; display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
-.provider-accounts small { color: var(--versiondock-muted); overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
-.provider-content { padding: 16px; min-width: 0; overflow: auto; }
-.provider-form { display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
-.provider-form label { display: flex; flex-direction: column; gap: 5px; }
-.provider-search { display: flex; gap: 6px; margin-bottom: 10px; }
-.provider-search input { flex: 1; }
-.provider-repositories { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 6px; }
-.provider-repositories button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 9px; }
-.provider-repositories span { display: flex; flex-direction: column; min-width: 0; }
-.provider-repositories strong { overflow: hidden; text-overflow: ellipsis; }
-.provider-device { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 30px; }
-.provider-device strong { font: 700 26px var(--versiondock-code); letter-spacing: 4px; }
+:root[data-theme="githubDarkDimmed"] {
+  --versiondock-bg: #22272e;
+  --versiondock-surface: #1c2128;
+  --versiondock-surface-alt: #2d333b;
+  --versiondock-hover: #373e47;
+  --versiondock-selected: #316dca;
+  --versiondock-border: #444c56;
+  --versiondock-border-soft: #373e47;
+  --versiondock-text: #adbac7;
+  --versiondock-muted: #768390;
+  --versiondock-faint: #545d68;
+  --versiondock-accent: #539bf5;
+  --versiondock-accent-bg: #316dca;
+  --versiondock-success: #57ab5a;
+  --versiondock-danger: #f47067;
+  --versiondock-warning: #c69026;
+  --versiondock-input: #1c2128;
+}
+
+:root[data-theme="oneDarkPro"] {
+  --versiondock-bg: #282c34;
+  --versiondock-surface: #21252b;
+  --versiondock-surface-alt: #2c313a;
+  --versiondock-hover: #3a3f4b;
+  --versiondock-selected: #3e4451;
+  --versiondock-border: #3a3f4b;
+  --versiondock-border-soft: #2c313a;
+  --versiondock-text: #abb2bf;
+  --versiondock-muted: #7f848e;
+  --versiondock-faint: #5c6370;
+  --versiondock-accent: #61afef;
+  --versiondock-accent-bg: #4d78cc;
+  --versiondock-success: #98c379;
+  --versiondock-danger: #e06c75;
+  --versiondock-warning: #e5c07b;
+  --versiondock-input: #1e2227;
+}
+
+:root[data-theme="dracula"] {
+  --versiondock-bg: #282a36;
+  --versiondock-surface: #21222c;
+  --versiondock-surface-alt: #343746;
+  --versiondock-hover: #44475a;
+  --versiondock-selected: #44475a;
+  --versiondock-border: #44475a;
+  --versiondock-border-soft: #343746;
+  --versiondock-text: #f8f8f2;
+  --versiondock-muted: #9ea3c0;
+  --versiondock-faint: #6272a4;
+  --versiondock-accent: #bd93f9;
+  --versiondock-accent-bg: #9575cd;
+  --versiondock-success: #50fa7b;
+  --versiondock-danger: #ff5555;
+  --versiondock-warning: #f1fa8c;
+  --versiondock-input: #21222c;
+}
+
+:root[data-theme="nord"] {
+  --versiondock-bg: #2e3440;
+  --versiondock-surface: #272c36;
+  --versiondock-surface-alt: #3b4252;
+  --versiondock-hover: #434c5e;
+  --versiondock-selected: #4c566a;
+  --versiondock-border: #434c5e;
+  --versiondock-border-soft: #3b4252;
+  --versiondock-text: #d8dee9;
+  --versiondock-muted: #9aa5b8;
+  --versiondock-faint: #616e88;
+  --versiondock-accent: #88c0d0;
+  --versiondock-accent-bg: #5e81ac;
+  --versiondock-success: #a3be8c;
+  --versiondock-danger: #bf616a;
+  --versiondock-warning: #ebcb8b;
+  --versiondock-input: #242933;
+}
+
+:root[data-theme="dark"] {
+  --versiondock-bg: #181818;
+  --versiondock-surface: #1f1f1f;
+  --versiondock-surface-alt: #252525;
+  --versiondock-hover: #2a2d2e;
+  --versiondock-selected: #04395e;
+  --versiondock-border: #353535;
+  --versiondock-border-soft: #2b2b2b;
+  --versiondock-text: #cccccc;
+  --versiondock-muted: #969696;
+  --versiondock-faint: #6e6e6e;
+  --versiondock-accent: #3794ff;
+  --versiondock-accent-bg: #0e639c;
+  --versiondock-success: #73c991;
+  --versiondock-danger: #f48771;
+  --versiondock-warning: #cca700;
+  --versiondock-input: #313131;
+}
+
+:root[data-theme="light2026"] {
+  --versiondock-bg: #FFFFFF;
+  --versiondock-surface: #FAFAFD;
+  --versiondock-surface-alt: #F0F0F3;
+  --versiondock-hover: #EAEAEA;
+  --versiondock-selected: #D6D6D8;
+  --versiondock-border: #F0F1F2;
+  --versiondock-border-soft: #EEEEF1;
+  --versiondock-text: #202020;
+  --versiondock-muted: #606060;
+  --versiondock-faint: #999999;
+  --versiondock-accent: #0069CC;
+  --versiondock-accent-bg: #0069CC;
+  --versiondock-success: #587c0c;
+  --versiondock-danger: #ad0707;
+  --versiondock-warning: #B69500;
+  --versiondock-input: #FFFFFF;
+}
 
 :root[data-theme="light"] {
   --versiondock-bg: #ffffff;
@@ -117,13 +193,16 @@
   --versiondock-input: #ffffff;
 }
 
-:root[data-theme="light"] .detail-message-card {
+:root[data-theme="light"] .detail-message-card,
+:root[data-theme="light2026"] .detail-message-card {
   background: var(--versiondock-surface);
   border: 0;
 }
 
 :root[data-theme="light"] .detail-message-title strong,
-:root[data-theme="light"] .detail-message-card pre {
+:root[data-theme="light2026"] .detail-message-title strong,
+:root[data-theme="light"] .detail-message-card pre,
+:root[data-theme="light2026"] .detail-message-card pre {
   color: #222222;
 }
 
@@ -1642,55 +1721,277 @@ body.is-tab-drop-target * {
 
 .settings-theme-mock {
   width: 100%;
-  height: 56px;
-  border-radius: 5px;
+  height: 64px;
+  border-radius: 6px;
   border: 1px solid var(--versiondock-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  position: relative;
 }
 
 .mock-window-bar {
-  height: 12px;
+  height: 13px;
   display: flex;
   align-items: center;
   gap: 3px;
   padding: 0 5px;
-  background: rgba(128, 128, 128, 0.15);
+  background: rgba(128, 128, 128, 0.12);
   border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  flex-shrink: 0;
 }
 
-.mock-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
+.mock-title-tab {
+  margin-left: 5px;
+  width: 24px;
+  height: 6px;
+  border-radius: 2px;
+  background: rgba(128, 128, 128, 0.22);
 }
-
-.mock-dot.red { background: #ff5f56; }
-.mock-dot.yellow { background: #ffbd2e; }
-.mock-dot.green { background: #27c93f; }
 
 .mock-window-content {
   flex: 1;
   display: grid;
   grid-template-columns: 24px 1fr;
+  min-height: 0;
 }
 
-/* 浅色预览 */
-.theme-preview-light { background: #f3f3f3; }
-.theme-preview-light .mock-sidebar { background: #e6e6e6; border-right: 1px solid #d4d4d4; }
-.theme-preview-light .mock-main { background: #ffffff; }
+.mock-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 3px;
+}
 
-/* 深色预览 */
-.theme-preview-dark { background: #1e1e1e; }
+.mock-side-line {
+  height: 2.5px;
+  border-radius: 1.5px;
+  background: rgba(128, 128, 128, 0.22);
+  width: 75%;
+}
+.mock-side-line.active {
+  width: 90%;
+  background: var(--mock-accent, #3794ff);
+}
+
+.mock-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3.5px;
+  padding: 5px 6px;
+  justify-content: center;
+  min-width: 0;
+}
+
+.mock-code-line {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 4px;
+}
+.mock-code-line.indent {
+  padding-left: 6px;
+}
+.mock-code-line.diff-add {
+  background: var(--mock-diff-add, rgba(80, 250, 123, 0.15));
+  border-radius: 2px;
+  margin: 0 -2px;
+  padding-left: 8px;
+}
+
+.mock-code-line span {
+  display: inline-block;
+  height: 3px;
+  border-radius: 1.5px;
+  flex-shrink: 0;
+}
+
+.token-kw { width: 12px; background: var(--token-kw, #ff7b72); }
+.token-fn { width: 16px; background: var(--token-fn, #d2a8ff); }
+.token-punct { width: 3px; background: var(--token-punct, #858889); }
+.token-var { width: 11px; background: var(--token-var, #ffa657); }
+.token-op { width: 4px; background: var(--token-op, #ff7b72); }
+.token-str { width: 20px; background: var(--token-str, #a5d6ff); }
+.token-ret { width: 9px; background: var(--token-ret, #ff7b72); }
+.token-num { width: 7px; background: var(--token-num, #79c0ff); }
+
+/* 系统预览分屏 */
+.mock-system-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+.mock-system-split .mock-half {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  min-height: 0;
+  position: relative;
+}
+.mock-system-split .mock-half.light-half {
+  background: #FFFFFF;
+  border-right: 1px solid #c8c8c8;
+  --mock-accent: #0069CC;
+  --mock-diff-add: rgba(17, 99, 41, 0.14);
+  --token-kw: #cf222e;
+  --token-fn: #8250df;
+  --token-str: #0a3069;
+  --token-ret: #cf222e;
+}
+.mock-system-split .mock-half.light-half .mock-sidebar {
+  background: #FAFAFD;
+  border-right: 1px solid #E4E5E6;
+}
+.mock-system-split .mock-half.dark-half {
+  background: #121314;
+  --mock-accent: #3994BC;
+  --mock-diff-add: rgba(126, 231, 135, 0.15);
+  --token-kw: #ff7b72;
+  --token-fn: #d2a8ff;
+  --token-str: #a5d6ff;
+  --token-ret: #ff7b72;
+}
+.mock-system-split .mock-half.dark-half .mock-sidebar {
+  background: #191A1B;
+  border-right: 1px solid #2A2B2C;
+}
+
+/* 2026 浅色 */
+.theme-preview-light2026 {
+  background: #FFFFFF;
+  --mock-accent: #0069CC;
+  --mock-diff-add: rgba(17, 99, 41, 0.14);
+  --token-kw: #cf222e;
+  --token-fn: #8250df;
+  --token-punct: #606060;
+  --token-var: #953800;
+  --token-op: #cf222e;
+  --token-str: #0a3069;
+  --token-ret: #cf222e;
+  --token-num: #0550ae;
+}
+.theme-preview-light2026 .mock-sidebar { background: #FAFAFD; border-right: 1px solid #E4E5E6; }
+.theme-preview-light2026 .mock-main { background: #FFFFFF; }
+
+/* 2026 深色 */
+.theme-preview-dark2026 {
+  background: #121314;
+  --mock-accent: #3994BC;
+  --mock-diff-add: rgba(126, 231, 135, 0.15);
+  --token-kw: #ff7b72;
+  --token-fn: #d2a8ff;
+  --token-punct: #858889;
+  --token-var: #ffa657;
+  --token-op: #ff7b72;
+  --token-str: #a5d6ff;
+  --token-ret: #ff7b72;
+  --token-num: #79c0ff;
+}
+.theme-preview-dark2026 .mock-sidebar { background: #191A1B; border-right: 1px solid #2A2B2C; }
+.theme-preview-dark2026 .mock-main { background: #121314; }
+
+/* GitHub Dark Dimmed */
+.theme-preview-githubDarkDimmed {
+  background: #22272e;
+  --mock-accent: #539bf5;
+  --mock-diff-add: rgba(87, 171, 90, 0.2);
+  --token-kw: #f47067;
+  --token-fn: #dcbdfb;
+  --token-punct: #768390;
+  --token-var: #f69d50;
+  --token-op: #f47067;
+  --token-str: #96d0ff;
+  --token-ret: #f47067;
+  --token-num: #6cb6ff;
+}
+.theme-preview-githubDarkDimmed .mock-sidebar { background: #1c2128; border-right: 1px solid #444c56; }
+.theme-preview-githubDarkDimmed .mock-main { background: #22272e; }
+
+/* One Dark Pro */
+.theme-preview-oneDarkPro {
+  background: #282c34;
+  --mock-accent: #61afef;
+  --mock-diff-add: rgba(152, 195, 121, 0.2);
+  --token-kw: #c678dd;
+  --token-fn: #61afef;
+  --token-punct: #7f848e;
+  --token-var: #e06c75;
+  --token-op: #56b6c2;
+  --token-str: #98c379;
+  --token-ret: #c678dd;
+  --token-num: #d19a66;
+}
+.theme-preview-oneDarkPro .mock-sidebar { background: #21252b; border-right: 1px solid #3a3f4b; }
+.theme-preview-oneDarkPro .mock-main { background: #282c34; }
+
+/* Dracula */
+.theme-preview-dracula {
+  background: #282a36;
+  --mock-accent: #ff79c6;
+  --mock-diff-add: rgba(80, 250, 123, 0.22);
+  --token-kw: #ff79c6;
+  --token-fn: #50fa7b;
+  --token-punct: #6272a4;
+  --token-var: #bd93f9;
+  --token-op: #ff79c6;
+  --token-str: #f1fa8c;
+  --token-ret: #ff79c6;
+  --token-num: #8be9fd;
+}
+.theme-preview-dracula .mock-sidebar { background: #21222c; border-right: 1px solid #44475a; }
+.theme-preview-dracula .mock-main { background: #282a36; }
+
+/* Nord */
+.theme-preview-nord {
+  background: #2e3440;
+  --mock-accent: #88c0d0;
+  --mock-diff-add: rgba(163, 190, 140, 0.22);
+  --token-kw: #81a1c1;
+  --token-fn: #88c0d0;
+  --token-punct: #616e88;
+  --token-var: #8fbcbb;
+  --token-op: #81a1c1;
+  --token-str: #a3be8c;
+  --token-ret: #81a1c1;
+  --token-num: #b48ead;
+}
+.theme-preview-nord .mock-sidebar { background: #272c36; border-right: 1px solid #434c5e; }
+.theme-preview-nord .mock-main { background: #2e3440; }
+
+/* 经典深色 */
+.theme-preview-dark {
+  background: #1e1e1e;
+  --mock-accent: #007acc;
+  --mock-diff-add: rgba(78, 201, 176, 0.18);
+  --token-kw: #569cd6;
+  --token-fn: #dcdcaa;
+  --token-punct: #808080;
+  --token-var: #9cdcfe;
+  --token-op: #d4d4d4;
+  --token-str: #ce9178;
+  --token-ret: #c586c0;
+  --token-num: #b5cea8;
+}
 .theme-preview-dark .mock-sidebar { background: #252526; border-right: 1px solid #333333; }
 .theme-preview-dark .mock-main { background: #1e1e1e; }
 
-/* 系统预览 (第一版经典对角线) */
-.theme-preview-system { background: linear-gradient(135deg, #ffffff 50%, #1e1e1e 50%); }
-.theme-preview-system .mock-sidebar { background: linear-gradient(135deg, #e6e6e6 50%, #252526 50%); border-right: 1px solid #444; }
-.theme-preview-system .mock-main { background: transparent; }
+/* 经典浅色 */
+.theme-preview-light {
+  background: #ffffff;
+  --mock-accent: #007acc;
+  --mock-diff-add: rgba(22, 130, 93, 0.14);
+  --token-kw: #0000ff;
+  --token-fn: #795e26;
+  --token-punct: #808080;
+  --token-var: #001080;
+  --token-op: #000000;
+  --token-str: #a31515;
+  --token-ret: #af00db;
+  --token-num: #098658;
+}
+.theme-preview-light .mock-sidebar { background: #f3f3f3; border-right: 1px solid #d4d4d4; }
+.theme-preview-light .mock-main { background: #ffffff; }
 
 .settings-theme-caption {
   display: flex;
@@ -3849,8 +4150,8 @@ button.danger:not(:disabled):hover,
 .diff-code-cell code, .diff-inline-row code { min-width: 0; flex: 1; display: block; padding: 0 10px 0 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/20px var(--versiondock-code); white-space: pre; tab-size: 4; overflow: visible; }
 .unified-diff ::selection, .unified-diff-scroll ::selection, .unified-diff-virtual ::selection, .unified-diff-pane ::selection, .diff-code-cell ::selection, .diff-code-cell code::selection, .diff-code-cell span::selection, .diff-inline-row ::selection, .diff-inline-row code::selection, .diff-inline-row span::selection { background: #264f78 !important; color: inherit !important; }
 .unified-diff ::-moz-selection, .unified-diff-scroll ::-moz-selection, .unified-diff-virtual ::-moz-selection, .unified-diff-pane ::-moz-selection, .diff-code-cell ::-moz-selection, .diff-code-cell code::-moz-selection, .diff-code-cell span::-moz-selection, .diff-inline-row ::-moz-selection, .diff-inline-row code::-moz-selection, .diff-inline-row span::-moz-selection { background: #264f78 !important; color: inherit !important; }
-[data-theme='light'] .unified-diff ::selection, [data-theme='light'] .unified-diff-scroll ::selection, [data-theme='light'] .unified-diff-virtual ::selection, [data-theme='light'] .unified-diff-pane ::selection, [data-theme='light'] .diff-code-cell ::selection, [data-theme='light'] .diff-code-cell code::selection, [data-theme='light'] .diff-code-cell span::selection, [data-theme='light'] .diff-inline-row ::selection, [data-theme='light'] .diff-inline-row code::selection, [data-theme='light'] .diff-inline-row span::selection { background: #add6ff !important; color: inherit !important; }
-[data-theme='light'] .unified-diff ::-moz-selection, [data-theme='light'] .unified-diff-scroll ::-moz-selection, [data-theme='light'] .unified-diff-virtual ::-moz-selection, [data-theme='light'] .unified-diff-pane ::-moz-selection, [data-theme='light'] .diff-code-cell ::-moz-selection, [data-theme='light'] .diff-code-cell code::-moz-selection, [data-theme='light'] .diff-code-cell span::-moz-selection, [data-theme='light'] .diff-inline-row ::-moz-selection, [data-theme='light'] .diff-inline-row code::-moz-selection, [data-theme='light'] .diff-inline-row span::-moz-selection { background: #add6ff !important; color: inherit !important; }
+[data-theme='light'] .unified-diff ::selection, [data-theme='light2026'] .unified-diff ::selection, [data-theme='light'] .unified-diff-scroll ::selection, [data-theme='light2026'] .unified-diff-scroll ::selection, [data-theme='light'] .unified-diff-virtual ::selection, [data-theme='light2026'] .unified-diff-virtual ::selection, [data-theme='light'] .unified-diff-pane ::selection, [data-theme='light2026'] .unified-diff-pane ::selection, [data-theme='light'] .diff-code-cell ::selection, [data-theme='light2026'] .diff-code-cell ::selection, [data-theme='light'] .diff-code-cell code::selection, [data-theme='light2026'] .diff-code-cell code::selection, [data-theme='light'] .diff-code-cell span::selection, [data-theme='light2026'] .diff-code-cell span::selection, [data-theme='light'] .diff-inline-row ::selection, [data-theme='light2026'] .diff-inline-row ::selection, [data-theme='light'] .diff-inline-row code::selection, [data-theme='light2026'] .diff-inline-row code::selection, [data-theme='light'] .diff-inline-row span::selection, [data-theme='light2026'] .diff-inline-row span::selection { background: #add6ff !important; color: inherit !important; }
+[data-theme='light'] .unified-diff ::-moz-selection, [data-theme='light2026'] .unified-diff ::-moz-selection, [data-theme='light'] .unified-diff-scroll ::-moz-selection, [data-theme='light2026'] .unified-diff-scroll ::-moz-selection, [data-theme='light'] .unified-diff-virtual ::-moz-selection, [data-theme='light2026'] .unified-diff-virtual ::-moz-selection, [data-theme='light'] .unified-diff-pane ::-moz-selection, [data-theme='light2026'] .unified-diff-pane ::-moz-selection, [data-theme='light'] .diff-code-cell ::-moz-selection, [data-theme='light2026'] .diff-code-cell ::-moz-selection, [data-theme='light'] .diff-code-cell code::-moz-selection, [data-theme='light2026'] .diff-code-cell code::-moz-selection, [data-theme='light'] .diff-code-cell span::-moz-selection, [data-theme='light2026'] .diff-code-cell span::-moz-selection, [data-theme='light'] .diff-inline-row ::-moz-selection, [data-theme='light2026'] .diff-inline-row ::-moz-selection, [data-theme='light'] .diff-inline-row code::-moz-selection, [data-theme='light2026'] .diff-inline-row code::-moz-selection, [data-theme='light'] .diff-inline-row span::-moz-selection, [data-theme='light2026'] .diff-inline-row span::-moz-selection { background: #add6ff !important; color: inherit !important; }
 .diff-code-cell mark, .diff-inline-row mark { padding: 0; color: inherit; background: color-mix(in srgb, currentColor 20%, transparent); border-radius: 2px; }
 .diff-code-cell.deletion mark, .diff-inline-row.deletion mark { background: color-mix(in srgb, var(--versiondock-danger) 32%, transparent); }
 .diff-code-cell.addition mark, .diff-inline-row.addition mark { background: color-mix(in srgb, var(--versiondock-success) 30%, transparent); }

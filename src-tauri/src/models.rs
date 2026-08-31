@@ -1550,6 +1550,12 @@ pub struct SettingsUpdateResult {
 pub enum ThemePreference {
     #[default]
     System,
+    Dark2026,
+    Light2026,
+    GithubDarkDimmed,
+    OneDarkPro,
+    Dracula,
+    Nord,
     Light,
     Dark,
 }

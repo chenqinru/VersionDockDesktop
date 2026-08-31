@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { codeToHtml, type BundledTheme } from 'shiki';
+import { codeToHtml, type BundledTheme, type ThemeRegistrationRaw } from 'shiki';
 import { resolveDiffHighlightLanguage } from './UnifiedDiffView';
+import { resolveShikiTheme } from '../theme';
 
 export function SourceCodeView({ content, path, language = 'text' }: { content: string; path: string; language?: string }) {
-  const [theme, setTheme] = useState<BundledTheme>(() => document.documentElement.dataset.theme === 'light' ? 'light-plus' : 'dark-plus');
+  const [theme, setTheme] = useState<BundledTheme | ThemeRegistrationRaw>(() => resolveShikiTheme(document.documentElement.dataset.theme));
   const [html, setHtml] = useState('');
 
   useEffect(() => {
     if (typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(() => setTheme(document.documentElement.dataset.theme === 'light' ? 'light-plus' : 'dark-plus'));
+    const observer = new MutationObserver(() => setTheme(resolveShikiTheme(document.documentElement.dataset.theme)));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => observer.disconnect();
   }, []);

@@ -443,7 +443,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     <div className="settings-about-hero-card">
                       <div className="settings-about-brand">
                         <img
-                          src={theme === 'light' ? './icons/versiondock-logo-light.png' : './icons/versiondock-logo-dark.png'}
+                          src={theme === 'light' || theme === 'light2026' ? './icons/versiondock-logo-light.png' : './icons/versiondock-logo-dark.png'}
                           alt="VersionDock Logo"
                           className="settings-about-logo"
                           onError={(e) => {
@@ -912,9 +912,15 @@ function ThemePreviewSelector({
   const { t } = useI18n();
 
   const themes = [
-    { id: 'system' as const, label: t('System'), icon: 'color-mode', previewClass: 'theme-preview-system' },
-    { id: 'light' as const, label: t('Light'), icon: 'sun', previewClass: 'theme-preview-light' },
-    { id: 'dark' as const, label: t('Dark'), icon: 'moon', previewClass: 'theme-preview-dark' },
+    { id: 'system' as const, label: t('System (Default 2026)'), icon: 'color-mode', previewClass: 'theme-preview-system' },
+    { id: 'dark2026' as const, label: t('2026 Dark'), icon: 'moon', previewClass: 'theme-preview-dark2026' },
+    { id: 'light2026' as const, label: t('2026 Light'), icon: 'sun', previewClass: 'theme-preview-light2026' },
+    { id: 'githubDarkDimmed' as const, label: t('GitHub Dark Dimmed'), icon: 'github', previewClass: 'theme-preview-githubDarkDimmed' },
+    { id: 'oneDarkPro' as const, label: t('One Dark Pro'), icon: 'symbol-color', previewClass: 'theme-preview-oneDarkPro' },
+    { id: 'dracula' as const, label: t('Dracula'), icon: 'symbol-color', previewClass: 'theme-preview-dracula' },
+    { id: 'nord' as const, label: t('Nord'), icon: 'symbol-color', previewClass: 'theme-preview-nord' },
+    { id: 'dark' as const, label: t('Classic Dark'), icon: 'symbol-color', previewClass: 'theme-preview-dark' },
+    { id: 'light' as const, label: t('Classic Light'), icon: 'symbol-color', previewClass: 'theme-preview-light' },
   ];
 
   return (
@@ -926,9 +932,15 @@ function ThemePreviewSelector({
         value={value}
         onChange={(e) => onChange(e.target.value as ThemePreference)}
       >
-        <option value="system">{t('System')}</option>
-        <option value="light">{t('Light')}</option>
-        <option value="dark">{t('Dark')}</option>
+        <option value="system">{t('System (Default 2026)')}</option>
+        <option value="dark2026">{t('2026 Dark')}</option>
+        <option value="light2026">{t('2026 Light')}</option>
+        <option value="githubDarkDimmed">{t('GitHub Dark Dimmed')}</option>
+        <option value="oneDarkPro">{t('One Dark Pro')}</option>
+        <option value="dracula">{t('Dracula')}</option>
+        <option value="nord">{t('Nord')}</option>
+        <option value="dark">{t('Classic Dark')}</option>
+        <option value="light">{t('Classic Light')}</option>
       </select>
 
       {/* 现代分段预览控件 */}
@@ -949,11 +961,72 @@ function ThemePreviewSelector({
                   <div className="mock-dot red" />
                   <div className="mock-dot yellow" />
                   <div className="mock-dot green" />
+                  <div className="mock-title-tab" />
                 </div>
-                <div className="mock-window-content">
-                  <div className="mock-sidebar" />
-                  <div className="mock-main" />
-                </div>
+                {item.id === 'system' ? (
+                  <div className="mock-system-split">
+                    <div className="mock-half light-half">
+                      <div className="mock-sidebar">
+                        <div className="mock-side-line active" />
+                        <div className="mock-side-line" />
+                      </div>
+                      <div className="mock-main">
+                        <div className="mock-code-line">
+                          <span className="token-kw" />
+                          <span className="token-fn" />
+                        </div>
+                        <div className="mock-code-line indent diff-add">
+                          <span className="token-str" />
+                        </div>
+                        <div className="mock-code-line">
+                          <span className="token-ret" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mock-half dark-half">
+                      <div className="mock-sidebar">
+                        <div className="mock-side-line active" />
+                        <div className="mock-side-line" />
+                      </div>
+                      <div className="mock-main">
+                        <div className="mock-code-line">
+                          <span className="token-kw" />
+                          <span className="token-fn" />
+                        </div>
+                        <div className="mock-code-line indent diff-add">
+                          <span className="token-str" />
+                        </div>
+                        <div className="mock-code-line">
+                          <span className="token-ret" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mock-window-content">
+                    <div className="mock-sidebar">
+                      <div className="mock-side-line active" />
+                      <div className="mock-side-line" />
+                      <div className="mock-side-line" />
+                    </div>
+                    <div className="mock-main">
+                      <div className="mock-code-line">
+                        <span className="token-kw" />
+                        <span className="token-fn" />
+                        <span className="token-punct" />
+                      </div>
+                      <div className="mock-code-line indent diff-add">
+                        <span className="token-var" />
+                        <span className="token-op" />
+                        <span className="token-str" />
+                      </div>
+                      <div className="mock-code-line indent">
+                        <span className="token-ret" />
+                        <span className="token-num" />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="settings-theme-caption">
                 <Codicon name={item.icon} />
@@ -1229,7 +1302,7 @@ function SearchResults({
 
   // 1. 外观匹配项
   const appearanceItems: ReactNode[] = [];
-  if (match(t('Theme')) || match(t('Appearance')) || match(t('Choose the application color theme')) || match('dark') || match('light') || match('system')) {
+  if (match(t('Theme')) || match(t('Appearance')) || match(t('Choose the application color theme')) || match('dark') || match('light') || match('system') || match('2026') || match('github') || match('one dark') || match('onedark') || match('dracula') || match('nord') || match('classic')) {
     appearanceItems.push(<ThemePreviewSelector key="theme" value={theme} onChange={(val) => void setTheme(val)} />);
   }
   if (match(t('Language')) || match(t('Simplified Chinese')) || match(t('English')) || match(t('Choose the application language')) || match('chinese') || match('english')) {

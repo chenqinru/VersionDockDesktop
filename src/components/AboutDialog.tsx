@@ -423,11 +423,23 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                   <div className="diag-item">
                     <span className="diag-name">{t('Theme')}:</span>
                     <span className="diag-val">
-                      {settings?.theme === 'light'
-                        ? t('Light')
-                        : settings?.theme === 'dark'
-                          ? t('Dark')
-                          : t('System')}
+                      {settings?.theme === 'dark2026'
+                        ? t('2026 Dark')
+                        : settings?.theme === 'light2026'
+                          ? t('2026 Light')
+                          : settings?.theme === 'githubDarkDimmed'
+                            ? t('GitHub Dark Dimmed')
+                            : settings?.theme === 'oneDarkPro'
+                              ? t('One Dark Pro')
+                              : settings?.theme === 'dracula'
+                                ? t('Dracula')
+                                : settings?.theme === 'nord'
+                                  ? t('Nord')
+                                  : settings?.theme === 'light'
+                                    ? t('Classic Light')
+                                    : settings?.theme === 'dark'
+                                      ? t('Classic Dark')
+                                      : t('System (Default 2026)')}
                     </span>
                   </div>
                 </div>
