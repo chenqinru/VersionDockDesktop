@@ -3,6 +3,7 @@ import type { RepositoryStatus, UnpushedCommit, BranchInfo, CommitDetail, Commit
 import { useI18n } from '../i18n';
 import { capabilityAvailable, capabilityReason, isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
+import { BranchRefBadge } from './BranchRefBadge';
 import { FileIcon } from './FileIcon';
 import { branchColor, readableAccentColor } from './branchColor';
 import { confirmDialog, promptDialog } from './dialogService';
@@ -837,10 +838,13 @@ function RepoSection({
           <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} style={{ fontSize: '11px', flexShrink: 0 }} />
           <span style={styles.dot(repoColor)} />
           <span style={styles.repoName}>{repoName}</span>
-          <span style={styles.branchBadge(branchClr)} title={branchTitle}>
-            <Codicon name={branch?.detachedTag ? 'tag' : branch?.detachedHash ? 'git-commit' : 'git-branch'} style={{ fontSize: '10px', flexShrink: 0 }} />
-            <span style={styles.branchName}>{branchLabel}</span>
-          </span>
+          <BranchRefBadge
+            label={branchLabel}
+            kind={repo.meta.isWorktree ? 'worktree' : branch?.detachedTag ? 'tag' : branch?.detachedHash ? 'head' : 'branch'}
+            color={branchClr}
+            title={branchTitle}
+            style={{ marginLeft: 4 }}
+          />
           {(commitCount > 0 || canTogglePushView || behind > 0 || !hasUpstream) && (
             <div style={styles.repoRightGroup}>
               <button
@@ -1297,17 +1301,6 @@ const styles = {
     textTransform: 'uppercase' as const, letterSpacing: 0, minWidth: 0,
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, flexShrink: 1,
   },
-  branchBadge: (color: string): React.CSSProperties => ({
-    display: 'inline-flex', alignItems: 'center', gap: '3px',
-    fontSize: '10px', fontWeight: 600,
-    background: `${color}33`, color, border: `1px solid ${color}88`,
-    borderRadius: '3px', padding: '1px 5px',
-    flexShrink: 1, minWidth: 0, maxWidth: '160px', marginLeft: '4px',
-    overflow: 'hidden',
-  }),
-  branchName: {
-    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, minWidth: 0,
-  } as React.CSSProperties,
   directionBadge: (color: string): React.CSSProperties => ({
     display: 'inline-flex', alignItems: 'center',
     color,

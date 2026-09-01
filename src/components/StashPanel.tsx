@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Codicon } from './Codicon';
+import { BranchRefBadge } from './BranchRefBadge';
 import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
@@ -433,16 +434,7 @@ function StashRow({
               {messageTitle}
             </span>
             {branchName && (
-              <span
-                style={rowStyle.branchBadge(branchColorHex)}
-                title={branchName}
-              >
-                <Codicon
-                  name="git-branch"
-                  style={{ fontSize: '10px', flexShrink: 0 }}
-                />
-                <span style={rowStyle.branchBadgeLabel}>{branchName}</span>
-              </span>
+              <BranchRefBadge label={branchName} color={branchColorHex} style={{ maxWidth: 'min(160px, 40%)', flexShrink: 0 }} />
             )}
           </span>
           <span style={rowStyle.meta}>
@@ -636,6 +628,7 @@ export function StashPanel({
         {repos.map((repo) => {
           const list = (stashes[repo.meta.id] ?? []) as StashItem[];
           const projectColor = repo.meta.color || '#4ec9b0';
+          const worktreeBranch = repo.meta.isWorktree ? repo.branch : undefined;
 
           return (
             <section key={repo.meta.id} style={css.repoSection} className="stash-repo">
@@ -643,6 +636,7 @@ export function StashPanel({
               <div style={css.repoHeader(projectColor)}>
                 <span style={css.dot(projectColor)} />
                 <span style={css.repoName}>{repo.meta.name}</span>
+                {worktreeBranch && <BranchRefBadge label={worktreeBranch} kind="worktree" color={branchColor(worktreeBranch)} />}
               </div>
 
               {/* Stash items or empty */}
@@ -773,28 +767,6 @@ const rowStyle = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap' as const,
     color: 'var(--versiondock-foreground, var(--vscode-foreground, #ccc))',
-  } as React.CSSProperties,
-  branchBadge: (color: string): React.CSSProperties => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '3px',
-    fontSize: '10px',
-    fontWeight: 600,
-    padding: '1px 5px',
-    borderRadius: '3px',
-    flexShrink: 0,
-    minWidth: 0,
-    maxWidth: 'min(160px, 40%)',
-    overflow: 'hidden',
-    background: `${color}33`,
-    color,
-    border: `1px solid ${color}88`,
-  }),
-  branchBadgeLabel: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-    minWidth: 0,
   } as React.CSSProperties,
   meta: {
     display: 'flex',

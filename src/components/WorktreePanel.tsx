@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Codicon } from './Codicon';
+import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { choiceDialog, promptDialog } from './dialogService';
@@ -165,10 +166,7 @@ function WorktreeRow({
             )}
           </span>
           <span style={row.meta}>
-            <span style={row.branch(branchClr)} title={branchLabel}>
-              <Codicon name={entry.isDetached ? 'git-commit' : 'git-branch'} style={{ fontSize: '10px', flexShrink: 0 }} />
-              <span style={row.branchName}>{branchLabel}</span>
-            </span>
+            <BranchRefBadge label={branchLabel} kind={entry.isDetached ? 'head' : 'branch'} color={branchClr} />
             {entry.isPrunable && (
               <span style={row.prunableBadge}>{t('prunable')}</span>
             )}
@@ -596,24 +594,6 @@ const row = {
     lineHeight: '13px',
   } as React.CSSProperties,
   meta: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' } as React.CSSProperties,
-  branch: (color: string): React.CSSProperties => ({
-    fontSize: '10px',
-    fontWeight: 600,
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '3px',
-    background: `${color}33`,
-    color,
-    border: `1px solid ${color}88`,
-    borderRadius: '3px',
-    padding: '1px 5px',
-    flexShrink: 1,
-    overflow: 'hidden',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
-    maxWidth: '160px',
-  }),
-  branchName: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, minWidth: 0 },
   prunableBadge: {
     fontSize: '9px',
     padding: '0 4px',

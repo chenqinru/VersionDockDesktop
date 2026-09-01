@@ -60,7 +60,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByText('src/main', { selector: '.directory-row span' })).toBeInTheDocument();
   });
 
-  it('matches the VersionDock title actions and keeps commit metadata left aligned', () => {
+  it('matches the VersionDock title actions and keeps commit metadata left aligned', async () => {
     const changedRepo = { ...gitRepo, ahead: 1, files: [{ path: 'src/App.tsx', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
     const emptyRepo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'empty', name: 'Empty' } };
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo, emptyRepo] }, selectedRepoId: 'repo' });
@@ -78,7 +78,9 @@ describe('CommitPanel capabilities and file view', () => {
     expect(childRow).toHaveStyle({ paddingLeft: '40px' });
     fireEvent.click(screen.getByLabelText('src/App.tsx'));
     expect(container.querySelector('.commit-targets em')).toHaveTextContent('Repository');
-    expect(screen.getByText('Amend')).toBeInTheDocument();
+    expect(screen.getByText('Amend last commit')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Commit message history' })).toBeEnabled());
+    expect(screen.queryByTitle('Use Last Commit Message')).not.toBeInTheDocument();
   });
 
   it('collapses empty repositories by default while keeping them expandable', () => {

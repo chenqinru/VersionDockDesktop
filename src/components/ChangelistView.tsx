@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { ChangelistGroup, type ChangelistRepoGroup, type ExpansionCommand } from './ChangelistGroup';
-import { Codicon } from './Codicon';
 import { branchColor } from './branchColor';
+import { BranchRefBadge } from './BranchRefBadge';
 import { useI18n } from '../i18n';
 import type { FileChange, RepositoryStatus, ChangelistEntry } from '../bindings/generated';
 
@@ -173,14 +173,7 @@ export function ChangelistView({
             >
               {singleRepoStatus.meta.name}
             </strong>
-            <span
-              className="branch-chip"
-              title={singleRepoStatus.branch || singleRepoStatus.revision}
-              style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}
-            >
-              <Codicon name="git-branch" />
-              <span className="branch-name">{singleRepoStatus.branch || singleRepoStatus.revision}</span>
-            </span>
+            <BranchRefBadge label={singleRepoStatus.branch || singleRepoStatus.revision} kind={singleRepoStatus.meta.kind === 'svn' ? 'revision' : singleRepoStatus.meta.isWorktree ? 'worktree' : 'branch'} color={singleRepoStatus.meta.kind === 'svn' ? undefined : branch} className="branch-chip" style={{ marginLeft: 4 }} />
           </div>
         </div>
       )}

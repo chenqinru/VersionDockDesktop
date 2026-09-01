@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
 import { capabilityAvailable, capabilityReason, resolveNotificationText, useAppStore } from '../store/appStore';
@@ -18,6 +19,7 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog, editorDialog, promptDialog } from './dialogService';
 import { CommitSearch, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
 import { AuthorAvatar } from './AuthorAvatar';
+import { BranchRefBadge, type BranchRefKind } from './BranchRefBadge';
 
 type FilterMenu = 'authors' | 'repos' | 'refs' | 'dates' | null;
 type ViewFilters = { author: string; repoId: string; ref: string; from: string; to: string };
@@ -47,14 +49,22 @@ function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { ope
   </div>}</div>;
 }
 
-function RefBadgeIcon({ group }: { group: RefGroup }) {
-  if (group.isSvnRevision) return <Codicon name="versions" />;
-  if (group.isRemoteHead) return <Codicon name="milestone" />;
-  if (group.isDetached && group.isHead) return <Codicon name="warning" />;
-  if (group.isTag) return <Codicon name="tag" />;
-  if (group.isLocal && group.isRemote) return <><Codicon name="git-branch" /><Codicon name="cloud" /></>;
-  if (group.isRemote) return <Codicon name="cloud" />;
-  return <Codicon name="git-branch" />;
+function badgeIcons(group: RefGroup): string[] {
+  if (group.isSvnRevision) return ['versions'];
+  if (group.isRemoteHead) return ['milestone'];
+  if (group.isDetached && group.isHead) return ['warning'];
+  if (group.isTag) return ['tag'];
+  if (group.isLocal && group.isRemote) return ['git-branch', 'cloud'];
+  if (group.isRemote) return ['cloud'];
+  return ['git-branch'];
+}
+
+function badgeKind(group: RefGroup): BranchRefKind {
+  if (group.isSvnRevision) return 'revision';
+  if (group.isTag) return 'tag';
+  if (group.isRemote) return 'remote';
+  if (group.isHead || group.isDetached) return 'head';
+  return 'branch';
 }
 
 function badgeColor(group: RefGroup): string {
@@ -92,23 +102,9 @@ function RefBadges({
     <span className="commit-refs">
       {visible.map((group) => {
         const color = badgeColor(group);
-        return (
-          <em
-            key={group.key}
-            className={`${group.isTag ? 'tag' : group.isRemote ? 'remote' : group.isHead ? 'head' : group.isSvnRevision ? 'svn' : 'branch'} ${isSelected ? 'selected' : ''}`}
-            style={{ '--ref-color': color } as React.CSSProperties}
-            title={group.label}
-          >
-            <RefBadgeIcon group={group} />
-            <span className="ref-label">{formatRefLabel(group, t('Remote'))}</span>
-          </em>
-        );
+        return <BranchRefBadge key={group.key} label={formatRefLabel(group, t('Remote'))} kind={badgeKind(group)} color={color} variant="ref" selected={isSelected} icons={badgeIcons(group)} className={group.isTag ? 'tag' : group.isRemote ? 'remote' : group.isHead ? 'head' : group.isSvnRevision ? 'svn' : 'branch'} title={group.label} />;
       })}
-      {overflow.length > 0 && (
-        <em className={`ref-overflow ${isSelected ? 'selected' : ''}`} title={overflow.map((g) => g.label).join('\n')}>
-          {visible.length === 0 ? overflow.length : `+${overflow.length}`}
-        </em>
-      )}
+      {overflow.length > 0 && <BranchRefBadge label={visible.length === 0 ? String(overflow.length) : `+${overflow.length}`} kind={badgeKind(overflow[0])} color={badgeColor(overflow[0])} variant="ref" selected={isSelected} icons={[]} className="ref-overflow" title={overflow.map((group) => group.label).join('\n')} />}
     </span>
   );
 }
@@ -116,7 +112,7 @@ function RefBadges({
 type CommitWithIndicators = CommitNode & { incoming?: boolean; unpushed?: boolean };
 type CommitPopoverAnchor = { rowTop: number; listTop: number; listBottom: number; listLeft: number; listRight: number; mouseX: number };
 
-function CommitPopover({ detail, anchor, onEnter, onLeave }: { detail: CommitDetail; anchor: CommitPopoverAnchor; onEnter: () => void; onLeave: () => void }) {
+function CommitPopover({ detail, anchor, repoKind, remoteNames, onClose, onEnter, onLeave }: { detail: CommitDetail; anchor: CommitPopoverAnchor; repoKind: 'git' | 'svn'; remoteNames: readonly string[]; onClose: () => void; onEnter: () => void; onLeave: () => void }) {
   const { t } = useI18n();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number }>();
@@ -129,19 +125,20 @@ function CommitPopover({ detail, anchor, onEnter, onLeave }: { detail: CommitDet
     const height = element.offsetHeight;
     const left = Math.max(anchor.listLeft, Math.min(anchor.listRight - width, anchor.mouseX - width / 2));
     const preferredTop = anchor.rowTop - height - 6;
-    const belowTop = anchor.rowTop + COMMIT_ROW_HEIGHT + 6;
-    const top = preferredTop >= anchor.listTop
-      ? preferredTop
-      : Math.max(anchor.listTop, Math.min(belowTop, anchor.listBottom - height));
+    const top = preferredTop >= anchor.listTop ? preferredTop : anchor.rowTop + COMMIT_ROW_HEIGHT + 6;
     setPosition({ top, left });
   }, [anchor]);
-  return <div ref={popoverRef} className="commit-popover" style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden', pointerEvents: position ? 'auto' : 'none' }} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+  useEffect(() => {
+    window.addEventListener('blur', onClose);
+    return () => window.removeEventListener('blur', onClose);
+  }, [onClose]);
+  return createPortal(<div ref={popoverRef} className="commit-popover" style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden', pointerEvents: position ? 'auto' : 'none' }} onMouseEnter={onEnter} onMouseLeave={onLeave}>
     <div className="popover-line"><Codicon name="git-commit" /><code>{detail.commit.shortHash}</code></div>
-    <div className="popover-line"><AuthorAvatar className="mini-avatar" name={detail.commit.author} email={detail.commit.email} size={18} /><span>{detail.commit.author}</span><i>·</i><time>{formatDate(detail.commit.authorDate)}</time></div>
+    <div className="popover-line"><AuthorAvatar className="mini-avatar" name={detail.commit.author} email={detail.commit.email} size={16} /><span className="popover-author">{detail.commit.author}</span><i>·</i><time>{formatDate(detail.commit.authorDate)}</time></div>
     <div className="popover-line"><Codicon name="diff" /><span>{detail.files.length} {detail.files.length === 1 ? t('file changed') : t('files changed')}</span>{added > 0 && <b className="added">+{added}</b>}{removed > 0 && <b className="removed">-{removed}</b>}</div>
-    <RefBadges refs={detail.commit.refs} />
+    <RefBadges refs={detail.commit.refs} repoKind={repoKind} remoteNames={remoteNames} maxVisible={Number.MAX_SAFE_INTEGER} />
     <small>{t('Click to view more details')}</small>
-  </div>;
+  </div>, document.body);
 }
 
 function CommitList({
@@ -249,6 +246,8 @@ function CommitList({
     const key = commitKey(commit.repoId, commit.hash);
     setHoveredKey(key);
     hoveredKeyRef.current = key;
+    if (popover?.detail.commit.repoId === commit.repoId && popover.detail.commit.hash === commit.hash) return;
+    setPopover(undefined);
     const row = event.currentTarget;
     const mouseX = event.clientX;
     hoverTimer.current = setTimeout(() => {
@@ -260,18 +259,19 @@ function CommitList({
           setPopover({ detail, anchor: { rowTop: rect.top, listTop: listRect.top, listBottom: listRect.bottom, listLeft: listRect.left, listRight: listRect.right, mouseX } });
         }
       }).catch(() => undefined);
-    }, 650);
+    }, 1000);
   };
   const closePopoverSoon = () => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
     setHoveredKey(undefined);
     hoveredKeyRef.current = undefined;
-    closeTimer.current = setTimeout(() => { if (!popoverActive.current) setPopover(undefined); }, 140);
+    closeTimer.current = setTimeout(() => { if (!popoverActive.current) setPopover(undefined); }, 120);
   };
   const allExpanded = repoBlocks.length > 0 && repoBlocks.every((block) => expandedRepoIds.has(block.repoId));
   const refsSpace = containerWidth - labelColWidth - 340;
   const maxVisibleRefs = refsSpace < 80 ? 0 : refsSpace < 170 ? 1 : 2;
   const virtualItems = virtualizer.getVirtualItems();
+  const scrollTop = virtualizer.scrollOffset ?? 0;
   const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: index * COMMIT_ROW_HEIGHT }));
   const contextItems = (commit: CommitNode): ContextMenuEntry[] => {
     const git = repoKindById[commit.repoId] !== 'svn';
@@ -365,7 +365,7 @@ function CommitList({
     setContext(undefined);
   };
 
-  return <div className="commit-list" ref={parent} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) { if (onLoadMore) onLoadMore(); else void loadHistory(false); } }}>
+  return <div className="commit-list" ref={parent} onClick={() => { setContext(undefined); setPopover(undefined); }} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) { if (onLoadMore) onLoadMore(); else void loadHistory(false); } }}>
     <div className="commit-list-content" style={{ height: virtualizer.getTotalSize() }}>
       {multiRepo && repoBlocks.map((block) => {
         const blockTopPx = block.start * COMMIT_ROW_HEIGHT;
@@ -374,7 +374,8 @@ function CommitList({
         const top = blockTopPx + leadingGap;
         const height = Math.max(0, blockHeightPx - leadingGap);
         const expanded = expandedRepoIds.has(block.repoId);
-        return <button key={`${block.repoId}:${block.start}`} className={`repo-strip ${expanded ? 'expanded' : ''}`} style={{ top, height, '--repo-color': block.color } as React.CSSProperties} onClick={() => onToggleRepoName(block.repoId)} title={block.name}><span className="repo-strip-bar" />{expanded && <strong>{block.name}</strong>}</button>;
+        const nameOffset = Math.min(Math.max(scrollTop - top, 0), Math.max(0, height - COMMIT_ROW_HEIGHT));
+        return <button key={`${block.repoId}:${block.start}`} className={`repo-strip ${expanded ? 'expanded' : ''}`} style={{ top, height, '--repo-color': block.color, '--repo-name-offset': `${nameOffset}px` } as React.CSSProperties} onClick={() => onToggleRepoName(block.repoId)} title={block.name}><span className="repo-strip-bar" />{expanded && <strong>{block.name}</strong>}</button>;
       })}
       {renderedItems.map((item) => {
         const commit = commits[item.index] as GraphCommit & CommitWithIndicators;
@@ -382,24 +383,22 @@ function CommitList({
         const key = commitKey(commit.repoId, commit.hash);
         const isSelected = selected.has(key);
         const isMergeCommit = commit.parents.length > 1;
-        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, commit }); if (!isSelected) void selectCommit(commit, 'single', commits); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }}>
+        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (hoverTimer.current) clearTimeout(hoverTimer.current); setPopover(undefined); setContext({ x: event.clientX, y: event.clientY, commit }); if (!isSelected) void selectCommit(commit, 'single', commits); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }}>
           {labelColWidth > 0 && <div style={{ width: labelColWidth, flexShrink: 0 }} />}
           <CommitGraph commit={commit} selected={isSelected} />
           <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} maxVisible={maxVisibleRefs} />
           <span className={`commit-subject-text ${isMergeCommit ? 'merge-commit' : ''}`}>{commit.message}</span>
+          {hoveredKey === key && <span className="commit-row-actions"><button title={t('Open Commit Detail')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openCommitDetail); }}><Codicon name="open-preview" /></button><button title={t('Open Changes')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openChanges); }}><Codicon name="diff-multiple" /></button></span>}
+          {commit.incoming && <span className="commit-flow-indicator" title={t('Not pulled')}><Codicon name="arrow-down" className="commit-flow-icon incoming" /></span>}
+          {commit.unpushed && <span className="commit-flow-indicator" title={t('Not pushed')}><Codicon name="arrow-up" className="commit-flow-icon unpushed" /></span>}
           <span className="commit-author">
-            {hoveredKey === key && <span className="commit-row-actions"><button title={t('Open Commit Detail')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openCommitDetail); }}><Codicon name="open-preview" /></button><button title={t('Open Changes')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openChanges); }}><Codicon name="diff-multiple" /></button></span>}
-            <span className={`commit-flow-indicators ${commit.incoming || commit.unpushed ? 'has-flow' : ''} ${commit.incoming && commit.unpushed ? 'has-both' : ''}`}>
-              {commit.incoming && <span title={t('Not pulled')}><Codicon name="arrow-down" className="commit-flow-icon incoming" /></span>}
-              {commit.unpushed && <span title={t('Not pushed')}><Codicon name="arrow-up" className="commit-flow-icon unpushed" /></span>}
-            </span>
             <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.email} size={18} /><span className="commit-author-name">{commit.author}</span>
           </span>
           <time>{formatDate(commit.committerDate)}</time>
         </div>;
       })}
     </div>
-    {popover && <CommitPopover detail={popover.detail} anchor={popover.anchor} onEnter={() => { popoverActive.current = true; if (closeTimer.current) clearTimeout(closeTimer.current); }} onLeave={() => { popoverActive.current = false; setPopover(undefined); }} />}
+    {popover && <CommitPopover detail={popover.detail} anchor={popover.anchor} repoKind={repoKindById[popover.detail.commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[popover.detail.commit.repoId] ?? []} onClose={() => setPopover(undefined)} onEnter={() => { popoverActive.current = true; if (closeTimer.current) clearTimeout(closeTimer.current); }} onLeave={() => { popoverActive.current = false; setPopover(undefined); }} />}
     {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context.commit)} onSelect={(id) => void runContext(id)} onClose={() => setContext(undefined)} />}
     {loading && <div className="history-loading" role="status" aria-live="polite"><Codicon name="loading codicon-modifier-spin" /><span>{t('Loading commits…')}</span></div>}
     {!loading && !commits.length && <div className="empty-state"><Codicon name="history" /><span>{t('No history')}</span></div>}

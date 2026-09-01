@@ -19,6 +19,7 @@ import { ChangelistView } from './ChangelistView';
 import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { ConflictBanner } from './ConflictBanner';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
+import { BranchRefBadge } from './BranchRefBadge';
 
 const emptyRepositories: RepositoryStatus[] = [];
 function StatusMark({ file }: { file: FileChange }) {
@@ -85,7 +86,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
         onContextMenu={onRepoContext}
       >
         <SelectionCheckbox label={repo.meta.name} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!repo.files.length} onChange={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), !allSelected)} />
-        <button title={repo.meta.name} onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><span className="branch-chip" title={repo.branch || repo.revision} style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}><Codicon name="git-branch" /><span className="branch-name">{repo.branch || repo.revision}</span></span></button>
+        <button title={repo.meta.name} onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" style={{ marginLeft: 4 }} /></button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
           {repo.files.length > 0 && (
             <button
@@ -213,12 +214,37 @@ export function CommitPanel() {
   const [historyMessages, setHistoryMessages] = useState<RecentCommitMessage[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const messageRequestRef = useRef<AbortController | null>(null);
+  const amendMessageRequestRef = useRef<AbortController | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyIndexRef = useRef(-1);
+  const historyDraftRef = useRef(message);
+  const messageRef = useRef(message);
+  const appliedHistoryMessageRef = useRef<string | null>(null);
   const [context, setContext] = useState<ChangeContext>();
   const [clHeaderContext, setClHeaderContext] = useState<{ x: number; y: number; changelistId: string }>();
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  useEffect(() => {
+    if (!historyOpen) return;
+    const closeOnBlur = () => setHistoryOpen(false);
+    const closeWhenHidden = () => { if (document.visibilityState !== 'visible') setHistoryOpen(false); };
+    const closeOnOutsideInteraction = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && !historyDialog.current?.contains(target)) setHistoryOpen(false);
+    };
+    window.addEventListener('blur', closeOnBlur);
+    document.addEventListener('visibilitychange', closeWhenHidden);
+    document.addEventListener('pointerdown', closeOnOutsideInteraction, true);
+    document.addEventListener('focusin', closeOnOutsideInteraction, true);
+    return () => {
+      window.removeEventListener('blur', closeOnBlur);
+      document.removeEventListener('visibilitychange', closeWhenHidden);
+      document.removeEventListener('pointerdown', closeOnOutsideInteraction, true);
+      document.removeEventListener('focusin', closeOnOutsideInteraction, true);
+    };
+  }, [historyDialog, historyOpen]);
   const repos = snapshot?.repositories ?? emptyRepositories;
   const totalChanges = repos.reduce((sum, repo) => sum + repo.files.length, 0);
   const gitRepos = useMemo(() => repos.filter((repo) => repo.meta.kind === 'git'), [repos]);
@@ -268,33 +294,79 @@ export function CommitPanel() {
     const next = amendRepoIds.filter((repoId) => repoId === allowedRepoId);
     if (next.length !== amendRepoIds.length) setAmendRepoIds(next);
   }, [amendRepoIds, amendTarget, setAmendRepoIds, showAmend]);
-  const commitTargetKey = commitTargets.map((repo) => repo.meta.id).join('\0');
+  const messageHistoryRepoKey = repos.map((repo) => repo.meta.id).sort().join('\0');
   const recentCommitMessages = useAppStore((state) => state.recentCommitMessages);
   const lastCommitMessage = useAppStore((state) => state.lastCommitMessage);
-  const openMessageHistory = async () => {
-    if (!commitTargets.length) return;
+  useEffect(() => {
     messageRequestRef.current?.abort();
+    if (!messageHistoryRepoKey) {
+      queueMicrotask(() => {
+        setHistoryMessages([]);
+        setHistoryLoading(false);
+      });
+      return;
+    }
     const controller = new AbortController();
     messageRequestRef.current = controller;
-    setHistoryOpen(true); setHistoryLoading(true); setHistoryMessages([]);
-    try { const values = await recentCommitMessages(commitTargets.map((repo) => repo.meta.id), controller.signal); if (!controller.signal.aborted && messageRequestRef.current === controller) setHistoryMessages(values); }
-    catch { /* store handles non-cancellation errors */ }
-    finally { if (!controller.signal.aborted) setHistoryLoading(false); }
-  };
-  const fillLastMessage = async () => {
-    if (!commitTargets.length) return;
-    let repoId = commitTargets[0].meta.id;
-    if (commitTargets.length > 1) {
-      const selected = await choiceDialog({ title: t('Use Last Commit Message'), message: t('Select a repository.'), choices: commitTargets.map((repo) => ({ id: repo.meta.id, label: repo.meta.name, icon: 'repo' })) });
-      if (!selected) return;
-      repoId = selected;
+    queueMicrotask(() => {
+      if (controller.signal.aborted || messageRequestRef.current !== controller) return;
+      setHistoryLoading(true);
+      setHistoryMessages([]);
+    });
+    void recentCommitMessages(messageHistoryRepoKey.split('\0'), controller.signal)
+      .then((values) => { if (!controller.signal.aborted && messageRequestRef.current === controller) setHistoryMessages(values); })
+      .catch(() => undefined)
+      .finally(() => { if (!controller.signal.aborted && messageRequestRef.current === controller) setHistoryLoading(false); });
+    return () => controller.abort();
+  }, [messageHistoryRepoKey, recentCommitMessages, snapshot?.workspace.id]);
+  useEffect(() => { messageRef.current = message; }, [message]);
+  useEffect(() => {
+    historyIndexRef.current = -1;
+    historyDraftRef.current = messageRef.current;
+    appliedHistoryMessageRef.current = null;
+  }, [historyMessages]);
+  useEffect(() => {
+    if (appliedHistoryMessageRef.current === message) {
+      appliedHistoryMessageRef.current = null;
+      return;
     }
-    messageRequestRef.current?.abort();
-    const controller = new AbortController(); messageRequestRef.current = controller;
-    const value = await lastCommitMessage(repoId, controller.signal);
-    if (!controller.signal.aborted && messageRequestRef.current === controller) { if (value) setMessage(value); else useAppStore.getState().addNotification({ type: 'info', title: 'VersionDock Desktop', message: 'No commit message is available for this repository.', workspaceId: snapshot?.workspace.id }); }
+    historyIndexRef.current = -1;
+    historyDraftRef.current = message;
+  }, [message]);
+  const applyMessageFromHistory = (nextMessage: string) => {
+    historyIndexRef.current = -1;
+    historyDraftRef.current = nextMessage;
+    appliedHistoryMessageRef.current = null;
+    setMessage(nextMessage);
+    setHistoryOpen(false);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(nextMessage.length, nextMessage.length);
+    });
   };
-  useEffect(() => () => messageRequestRef.current?.abort(), [snapshot?.workspace.id, commitTargetKey]);
+  const toggleAmend = async (repoId: string) => {
+    const enabled = !amendRepos.has(repoId);
+    setAmendRepoIds(enabled ? [...amendRepos, repoId] : amendRepoIds.filter((id) => id !== repoId));
+    amendMessageRequestRef.current?.abort();
+    if (!enabled || message.trim()) return;
+    const controller = new AbortController();
+    amendMessageRequestRef.current = controller;
+    try {
+      const value = await lastCommitMessage(repoId, controller.signal);
+      if (!controller.signal.aborted && amendMessageRequestRef.current === controller && value && !useAppStore.getState().commitMessage.trim() && useAppStore.getState().amendRepoIds.includes(repoId)) {
+        setMessage(value);
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current;
+          if (!textarea) return;
+          textarea.focus();
+          textarea.setSelectionRange(value.length, value.length);
+        });
+      }
+    } catch { /* store reports non-cancellation errors */ }
+  };
+  useEffect(() => () => amendMessageRequestRef.current?.abort(), [snapshot?.workspace.id]);
   const commitBusy = workspaceBusy || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
     workspaceId: snapshot?.workspace.id,
     domain: ['commit', 'sync'],
@@ -984,10 +1056,50 @@ export function CommitPanel() {
       <div className="commit-form">
         <div className="commit-resize-grip" role="separator" tabIndex={0} aria-label={t('Resize commit message')} aria-orientation="horizontal" aria-valuemin={52} aria-valuemax={Math.round(window.innerHeight * 0.55)} aria-valuenow={Math.round(textareaHeight)} onPointerDown={startTextareaResize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTextareaHeight((value) => Math.max(52, Math.min(window.innerHeight * 0.55, value + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>
         {repos.length > 1 && <div className="commit-targets">{commitTargets.length === 0 ? <span>{t('No files selected')}</span> : commitTargets.map((repo) => <em key={repo.meta.id} style={{ color: repo.meta.color, background: `${repo.meta.color}28`, borderColor: `${repo.meta.color}60` }}><button title={t('Remove {0}', repo.meta.name)} onClick={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), false)}><Codicon name="close" /></button>{repo.meta.name}<b>{selectedByRepo.get(repo.meta.id)?.length}</b></em>)}</div>}
-        {showAmend && amendTarget && <div className="commit-options"><label title={t('Amend')}><input type="checkbox" checked={amendRepos.has(amendTarget.meta.id)} onChange={() => { const next = new Set(amendRepos); if (next.has(amendTarget.meta.id)) next.delete(amendTarget.meta.id); else next.add(amendTarget.meta.id); setAmendRepoIds([...next]); }} />{t('Amend')}</label></div>}
-        <div className="commit-message-tools"><button type="button" disabled={!commitTargets.length} title={t('View commit message history')} onClick={() => void openMessageHistory()}><Codicon name="history" /></button><button type="button" disabled={!commitTargets.length} title={t('Use Last Commit Message')} onClick={() => void fillLastMessage()}><Codicon name="arrow-circle-down" /></button></div>
+        <div className="commit-options">
+          {showAmend && amendTarget && <label title={t('Amend last commit')}><input type="checkbox" checked={amendRepos.has(amendTarget.meta.id)} onChange={() => void toggleAmend(amendTarget.meta.id)} />{t('Amend last commit')}</label>}
+          <div className="commit-option-actions"><button type="button" disabled={!repos.length || workspaceBusy || historyLoading} aria-label={t('Commit message history')} title={t('View commit message history')} onClick={() => setHistoryOpen(true)}><Codicon name="history" /></button></div>
+        </div>
         {mergeMessageSuggestion && <div className="merge-message-suggestion" role="status"><span>{t('Merge message suggestion')}: {mergeMessageSuggestion}</span><button type="button" onClick={applyMergeMessageSuggestion}>{t('Use Merge Message')}</button><button type="button" onClick={dismissMergeMessageSuggestion}>{t('Ignore')}</button></div>}
-        <textarea style={{ height: textareaHeight }} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void doCommit(defaultCommitAction === 'commitAndPush'); }} />
+        <textarea ref={textareaRef} style={{ height: textareaHeight }} value={message} onChange={(event) => { historyIndexRef.current = -1; historyDraftRef.current = event.target.value; appliedHistoryMessageRef.current = null; setMessage(event.target.value); }} onPointerDown={() => { if (historyIndexRef.current < 0) return; historyIndexRef.current = -1; historyDraftRef.current = message; }} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { void doCommit(defaultCommitAction === 'commitAndPush'); return; }
+          if ((event.key !== 'ArrowUp' && event.key !== 'ArrowDown') || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.nativeEvent.isComposing) return;
+          const historyActive = historyIndexRef.current >= 0;
+          const selectionCollapsed = event.currentTarget.selectionStart === event.currentTarget.selectionEnd;
+          const caretOnFirstLine = selectionCollapsed && event.currentTarget.value.lastIndexOf('\n', event.currentTarget.selectionStart - 1) < 0;
+          if (event.key === 'ArrowUp' && (historyActive || caretOnFirstLine)) {
+            if (!historyActive) historyDraftRef.current = message;
+            let nextIndex = historyIndexRef.current + 1;
+            while (nextIndex < historyMessages.length && historyMessages[nextIndex].message === message) nextIndex += 1;
+            if (nextIndex < historyMessages.length) {
+              event.preventDefault();
+              historyIndexRef.current = nextIndex;
+              const nextMessage = historyMessages[nextIndex].message;
+              appliedHistoryMessageRef.current = nextMessage;
+              setMessage(nextMessage);
+              requestAnimationFrame(() => textareaRef.current?.setSelectionRange(0, 0));
+            } else if (historyActive) event.preventDefault();
+            return;
+          }
+          if (event.key === 'ArrowDown' && historyActive) {
+            event.preventDefault();
+            let nextIndex = historyIndexRef.current - 1;
+            while (nextIndex >= 0 && historyMessages[nextIndex].message === message) nextIndex -= 1;
+            if (nextIndex >= 0) {
+              historyIndexRef.current = nextIndex;
+              const nextMessage = historyMessages[nextIndex].message;
+              appliedHistoryMessageRef.current = nextMessage;
+              setMessage(nextMessage);
+              requestAnimationFrame(() => textareaRef.current?.setSelectionRange(nextMessage.length, nextMessage.length));
+            } else {
+              historyIndexRef.current = -1;
+              const draft = historyDraftRef.current;
+              appliedHistoryMessageRef.current = draft;
+              setMessage(draft);
+              requestAnimationFrame(() => textareaRef.current?.setSelectionRange(draft.length, draft.length));
+            }
+          }
+        }} />
         <div className="commit-actions">
           <div ref={saveMenuRef} className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</button><button disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu"><button disabled={saveBusy} onClick={() => { void doSave('stash'); setSaveMenu(false); }}><Codicon name="save" />{t('Stash changes')}</button><button disabled={saveBusy} onClick={() => { void doSave('shelf'); setSaveMenu(false); }}><Codicon name="archive" />{t('Shelve changes')}</button></div>}</div>
           <div ref={commitMenuRef} className="split-button commit-action"><button title={commitDisabledReason} disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable) || (defaultCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(defaultCommitAction === 'commitAndPush')}><Codicon name={defaultCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(defaultCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button><button disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button disabled={commitBusy || Boolean(commitUnavailable)} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : undefined} onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button disabled={commitBusy || Boolean(commitUnavailable || pushUnavailable)} title={commitDisabledReason} onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
@@ -995,10 +1107,14 @@ export function CommitPanel() {
       </div>
       {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context)} onSelect={(id) => void handleContextAction(id)} onClose={() => setContext(undefined)} />}
       {clHeaderContext && <ContextMenu x={clHeaderContext.x} y={clHeaderContext.y} items={clHeaderItems(clHeaderContext.changelistId)} onSelect={(id) => void handleClHeaderAction(id)} onClose={() => setClHeaderContext(undefined)} />}
-      {historyOpen && <div className="dialog-backdrop" role="presentation"><section ref={historyDialog} className="app-dialog commit-message-history-dialog" role="dialog" aria-modal="true" aria-label={t('Commit Message History')}>
-        <header><Codicon name="history" /><strong>{t('Commit Message History')}</strong></header>
-        <div className="dialog-choice-list">{historyLoading ? <span>{t('Loading…')}</span> : historyMessages.length ? historyMessages.map((item) => <button key={`${item.repoId}:${item.revision}`} type="button" onClick={() => { setMessage(item.message); setHistoryOpen(false); messageRequestRef.current?.abort(); }}><strong>{item.message.split('\n')[0]}</strong><small>{item.committedAt}</small></button>) : <span>{t('No commit message history')}</span>}</div>
-        <footer><button type="button" onClick={() => { setHistoryOpen(false); messageRequestRef.current?.abort(); }}>{t('Close')}</button></footer>
+      {historyOpen && <div className="commit-history-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false); }}><section ref={historyDialog} className="commit-history-modal" role="dialog" aria-modal="true" aria-label={t('Commit message history')}>
+        <header className="commit-history-header"><Codicon name="history" /><strong>{t('Commit message history')}</strong><button type="button" aria-label={t('Cancel')} title={t('Cancel')} onClick={() => setHistoryOpen(false)}><Codicon name="close" /></button></header>
+        <div className="commit-history-subtitle">{t('Select a previous commit message to use.')}</div>
+        <div className="commit-history-list">{historyLoading && historyMessages.length === 0 ? <div className="commit-history-empty"><Codicon name="loading codicon-modifier-spin" /><span>{t('Loading…')}</span></div> : historyMessages.length ? historyMessages.map((item) => {
+          const [subject, ...bodyLines] = item.message.split('\n');
+          const body = bodyLines.join('\n').trim();
+          return <button key={`${item.repoId}:${item.revision}`} type="button" title={item.message} onClick={() => applyMessageFromHistory(item.message)}><strong>{subject}</strong>{body && <span>{body}</span>}</button>;
+        }) : <div className="commit-history-empty"><Codicon name="history" /><span>{t('No commit message history')}</span></div>}</div>
       </section></div>}
       </>}
     </aside>

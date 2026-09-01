@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
+import { BranchRefBadge } from './BranchRefBadge';
 import { useI18n } from '../i18n';
 import { buildFileTree, type FileTreeNode } from './fileTree';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
@@ -423,14 +424,7 @@ function RepoSubGroup({
           <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
           <i style={{ background: repo.meta.color }} />
           <strong>{repo.meta.name}</strong>
-          <span
-            className="branch-chip"
-            title={repo.branch || repo.revision}
-            style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}
-          >
-            <Codicon name="git-branch" />
-            <span className="branch-name">{repo.branch || repo.revision}</span>
-          </span>
+          <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" style={{ marginLeft: 4 }} />
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
           {files.length > 0 && (

@@ -9,6 +9,7 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { confirmDialog } from './dialogService';
 import { AuthorAvatar } from './AuthorAvatar';
 import { branchColor, headColor, isPrimaryBranch, tagColor } from './branchColor';
+import { BranchRefBadge } from './BranchRefBadge';
 
 type DetailTreeNode = { name: string; path: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
 
@@ -519,10 +520,7 @@ function RefBadges({ detail, collapsible = false }: { detail: CommitDetail; coll
           : ref.kind === 'tag'
             ? tagColor()
             : branchColor(remoteBranch);
-        return <em className={ref.kind} key={`${ref.kind}:${ref.value}`} style={{ '--ref-color': color } as React.CSSProperties} title={ref.label}>
-          <Codicon name={ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : ref.kind === 'head' ? 'arrow-right' : 'git-branch'} />
-          {ref.label}
-        </em>;
+        return <BranchRefBadge key={`${ref.kind}:${ref.value}`} label={ref.label} kind={ref.kind} color={color} variant="ref" icons={[ref.kind === 'head' ? 'arrow-right' : ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : 'git-branch']} className={ref.kind} />;
       })}
       {collapsible && !expanded && overflow.length > 0 && <button type="button" className="detail-ref-overflow" title={t('Show {0} more', overflow.length)} onClick={() => setExpanded(true)}>{t('+{0} more', overflow.length)}</button>}
       {collapsible && expanded && refs.length > 5 && <button type="button" className="detail-ref-overflow expanded" onClick={() => setExpanded(false)}>{t('Show less')}</button>}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Codicon } from './Codicon';
+import { BranchRefBadge } from './BranchRefBadge';
 import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
@@ -446,16 +447,7 @@ function ShelfRow({
               {messageTitle}
             </span>
             {branchName && (
-              <span
-                style={rowStyle.branchBadge(branchColorHex)}
-                title={branchName}
-              >
-                <Codicon
-                  name="git-branch"
-                  style={{ fontSize: '10px', flexShrink: 0 }}
-                />
-                <span style={rowStyle.branchBadgeLabel}>{branchName}</span>
-              </span>
+              <BranchRefBadge label={branchName} color={branchColorHex} style={{ maxWidth: 'min(160px, 40%)', flexShrink: 0 }} />
             )}
           </span>
           <span style={rowStyle.meta}>
@@ -615,28 +607,6 @@ const rowStyle = {
     whiteSpace: 'nowrap' as const,
     fontWeight: 500,
   } as React.CSSProperties,
-  branchBadge: (color: string): React.CSSProperties => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '3px',
-    fontSize: '10px',
-    fontWeight: 600,
-    padding: '1px 5px',
-    borderRadius: '3px',
-    flexShrink: 0,
-    minWidth: 0,
-    maxWidth: 'min(160px, 40%)',
-    overflow: 'hidden',
-    background: `${color}33`,
-    color,
-    border: `1px solid ${color}88`,
-  }),
-  branchBadgeLabel: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-    minWidth: 0,
-  } as React.CSSProperties,
   meta: { display: 'flex', gap: '8px', marginTop: '2px' } as React.CSSProperties,
   fileCount: {
     fontSize: '10px',
@@ -732,16 +702,7 @@ export function ShelfPanel({
                   <span style={css.dot(projectColor)} />
                   <span style={css.repoName}>{repo.meta.name}</span>
                   {worktreeBranch && (
-                    <span
-                      style={css.worktreeBadge(branchColor(worktreeBranch))}
-                      title={worktreeBranch}
-                    >
-                      <Codicon
-                        name="repo-clone"
-                        style={{ fontSize: '10px', flexShrink: 0 }}
-                      />
-                      <span style={css.branchBadgeLabel}>{worktreeBranch}</span>
-                    </span>
+                    <BranchRefBadge label={worktreeBranch} kind="worktree" color={branchColor(worktreeBranch)} />
                   )}
                 </div>
               )}
@@ -814,28 +775,6 @@ const css = {
     textTransform: 'uppercase' as const,
     letterSpacing: '0.04em',
   },
-  worktreeBadge: (color: string): React.CSSProperties => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '3px',
-    fontSize: '10px',
-    fontWeight: 600,
-    background: `${color}33`,
-    color,
-    border: `1px solid ${color}88`,
-    borderRadius: '3px',
-    padding: '1px 5px',
-    flexShrink: 1,
-    minWidth: 0,
-    maxWidth: '160px',
-    overflow: 'hidden',
-  }),
-  branchBadgeLabel: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-    minWidth: 0,
-  } as React.CSSProperties,
   empty: {
     padding: '16px 12px',
     fontSize: '12px',

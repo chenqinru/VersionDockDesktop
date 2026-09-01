@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
+import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { branchColor, readableAccentColor } from './branchColor';
@@ -224,10 +225,7 @@ function SubtreeRow({
             <span style={row.name}>{entry.name}</span>
             <span style={row.badge}>{entry.defaultSquash ? t('squash') : t('full history')}</span>
             {entry.lastSplitBranch && (
-              <span style={row.branchBadge(branchColor(entry.lastSplitBranch))} title={entry.lastSplitBranch}>
-                <Codicon name="git-branch" style={{ fontSize: '10px', flexShrink: 0 }} />
-                <span style={row.branchBadgeLabel}>{entry.lastSplitBranch}</span>
-              </span>
+              <BranchRefBadge label={entry.lastSplitBranch} color={branchColor(entry.lastSplitBranch)} />
             )}
             <span style={row.statusBadge(statusTone)} title={status?.error ?? statusLabel}>{statusLabel}</span>
           </div>
@@ -767,28 +765,6 @@ const row = {
     background: 'var(--versiondock-badge-background, #0e639c)',
     color: 'var(--versiondock-badge-foreground, #ffffff)',
     flexShrink: 0,
-  } as React.CSSProperties,
-  branchBadge: (color: string): React.CSSProperties => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '3px',
-    fontSize: '10px',
-    fontWeight: 600,
-    padding: '1px 5px',
-    borderRadius: '3px',
-    background: `${color}33`,
-    color,
-    border: `1px solid ${color}88`,
-    flexShrink: 1,
-    minWidth: 0,
-    maxWidth: '160px',
-    overflow: 'hidden',
-  }),
-  branchBadgeLabel: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-    minWidth: 0,
   } as React.CSSProperties,
   statusBadge: (tone: 'loading' | 'updated' | 'clean' | 'error'): React.CSSProperties => {
     const color = tone === 'updated'
