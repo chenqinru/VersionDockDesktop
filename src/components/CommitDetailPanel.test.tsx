@@ -95,6 +95,28 @@ afterEach(() => {
 });
 
 describe('CommitDetailPanel merge commits', () => {
+  it('shows HEAD explicitly and excludes symbolic remote HEAD references', () => {
+    const detail: CommitDetail = {
+      ...mergeDetail,
+      branches: { local: ['main', 'feature/ui', 'zeta'], remote: ['origin/main', 'origin/HEAD'], tags: ['v1.0.0'], isHead: true },
+    };
+    useAppStore.setState({
+      snapshot,
+      selectedCommit: detail,
+      selectedCommits: [mergeCommit],
+      selectedCommitDetails: { [commitKey(mergeCommit.repoId, mergeCommit.hash)]: detail },
+    });
+    const { container } = render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    const labels = [...container.querySelectorAll('.detail-refs em')].map((element) => element.textContent);
+    expect(labels[0]).toBe('HEAD');
+    expect(labels).toContain('main');
+    expect(labels).toContain('origin/main');
+    expect(labels).not.toContain('origin/HEAD');
+    fireEvent.click(screen.getByRole('button', { name: '+1 more' }));
+    expect(screen.getByText('v1.0.0')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
+  });
+
   it('keeps the selected detail visible while an unrelated hover preview loads', () => {
     useAppStore.setState({
       snapshot,

@@ -1147,8 +1147,8 @@ async fn dispatch(
                 layout.stash_view_mode = "tree".into();
             }
             layout.panel_sizes.commit = layout.panel_sizes.commit.clamp(280, 620);
-            layout.panel_sizes.branches = layout.panel_sizes.branches.clamp(160, 520);
-            layout.panel_sizes.detail = layout.panel_sizes.detail.clamp(240, 720);
+            layout.panel_sizes.branches = layout.panel_sizes.branches.clamp(120, 400);
+            layout.panel_sizes.detail = layout.panel_sizes.detail.clamp(220, 680);
             let mut snapshot = state.app.read().await.clone();
             snapshot.layout = layout.clone();
             state.save_app_state(snapshot).await?;

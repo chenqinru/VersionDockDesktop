@@ -226,6 +226,7 @@ function TreeDirNode({
   repoId,
   entry,
   expansion,
+  onManualExpansionChange,
   onOpenFileDiff,
 }: {
   node: TreeDir;
@@ -233,6 +234,7 @@ function TreeDirNode({
   repoId: string;
   entry: StashItem;
   expansion: ExpansionCommand;
+  onManualExpansionChange: () => void;
   onOpenFileDiff?: (repoId: string, reference: string, filePath: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -275,7 +277,7 @@ function TreeDirNode({
             userSelect: 'none',
             paddingLeft: '2px',
           }}
-          onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !open })}
+          onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !open }); }}
           title={node.path}
         >
           <Codicon
@@ -315,6 +317,7 @@ function TreeDirNode({
               repoId={repoId}
               entry={entry}
               expansion={expansion}
+              onManualExpansionChange={onManualExpansionChange}
               onOpenFileDiff={onOpenFileDiff}
             />
           ) : (
@@ -339,6 +342,7 @@ function StashRow({
   repoId,
   viewMode,
   expansion,
+  onManualExpansionChange,
   onApply,
   onPop,
   onDrop,
@@ -348,6 +352,7 @@ function StashRow({
   repoId: string;
   viewMode: 'tree' | 'list';
   expansion: ExpansionCommand;
+  onManualExpansionChange: () => void;
   onApply: (repoId: string, reference: string) => void;
   onPop: (repoId: string, reference: string) => void;
   onDrop: (repoId: string, reference: string) => void;
@@ -412,6 +417,7 @@ function StashRow({
           style={rowStyle.chevronBtn}
           onClick={(e) => {
             e.stopPropagation();
+            onManualExpansionChange();
             setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded });
           }}
         >
@@ -507,6 +513,7 @@ function StashRow({
                   repoId={repoId}
                   entry={entry}
                   expansion={expansion}
+                  onManualExpansionChange={onManualExpansionChange}
                   onOpenFileDiff={onOpenFileDiff}
                 />
               ) : (
@@ -586,12 +593,14 @@ export function StashPanel({
   repos,
   viewMode = 'tree',
   expansion = { sequence: 0, expanded: false },
+  onManualExpansionChange = () => undefined,
   onOpenFileDiff,
 }: {
   repos: RepositoryStatus[];
   selectedPaths?: Map<string, string[]>;
   viewMode?: 'tree' | 'list';
   expansion?: ExpansionCommand;
+  onManualExpansionChange?: () => void;
   onOpenFileDiff?: (repoId: string, reference: string, filePath: string) => void;
 }) {
   const stashes = useAppStore((state) => state.stashes);
@@ -649,6 +658,7 @@ export function StashPanel({
                     repoId={repo.meta.id}
                     viewMode={viewMode}
                     expansion={expansion}
+                    onManualExpansionChange={onManualExpansionChange}
                     onApply={handleApply}
                     onPop={handlePop}
                     onDrop={handleDrop}

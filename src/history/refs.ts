@@ -41,10 +41,7 @@ export function branchRevisionRef(branch: { name: string; fullName?: string; isR
     return branch.isRemote ? `refs/remotes/${branch.name}` : `refs/heads/${branch.name}`;
   }
   if (branch.name === 'SVN') return 'HEAD';
-  if (branch.name === 'trunk' || branch.name.startsWith('branches/') || branch.name.startsWith('tags/')) {
-    return branch.name;
-  }
-  return `branches/${branch.name}`;
+  return branch.name;
 }
 
 export function tagRevisionRef(tagName: string, vcsKind: 'git' | 'svn'): string {
@@ -215,12 +212,22 @@ export function groupRefs(
   }
 
   groups.sort((a, b) => {
-    if (a.isRemoteHead !== b.isRemoteHead) return a.isRemoteHead ? -1 : 1;
-    if (a.isHead !== b.isHead) return a.isHead ? -1 : 1;
-    if (a.isTag !== b.isTag) return a.isTag ? 1 : -1;
-    if (a.label !== b.label) return a.label.localeCompare(b.label);
-    if (a.isLocal !== b.isLocal) return a.isLocal ? -1 : 1;
-    return 0;
+    const specialHead = (group: RefGroup) => (group.isHead && group.isDetached)
+      || (group.isSvnRevision && group.label === 'HEAD');
+    if (specialHead(a) !== specialHead(b)) return specialHead(a) ? -1 : 1;
+    if (a.isRemoteHead !== b.isRemoteHead) return a.isRemoteHead ? 1 : -1;
+    const rank = (group: RefGroup): number => {
+      if (group.isTag) return 5;
+      if (group.isLocal) return isPrimaryBranch(group.label) ? 1 : 2;
+      if (group.isRemote) return isPrimaryBranch(group.label) ? 3 : 4;
+      return 6;
+    };
+    const leftRank = rank(a);
+    const rightRank = rank(b);
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    const leftName = a.isRemote && a.remoteName ? `${a.remoteName}/${a.label}` : a.label;
+    const rightName = b.isRemote && b.remoteName ? `${b.remoteName}/${b.label}` : b.label;
+    return leftName.localeCompare(rightName);
   });
 
   return groups;
@@ -252,18 +259,20 @@ export function mergeLocalRemote(groups: RefGroup[]): RefGroup[] {
     }
   }
   merged.sort((a, b) => {
-    const rank = (g: RefGroup): number => {
-      if (g.isSvnRevision) return g.label === 'HEAD' ? 0 : 1;
-      if (g.isDetached) return 0;
-      if (g.isRemoteHead) return 5;
-      if (g.isTag) return 4;
-      if (g.isRemote) return 3;
-      return 2;
+    const rank = (group: RefGroup): number => {
+      if ((group.isHead && group.isDetached) || (group.isSvnRevision && group.label === 'HEAD')) return 0;
+      if (group.isLocal) return isPrimaryBranch(group.label) ? 1 : 2;
+      if (group.isRemote && !group.isRemoteHead) return isPrimaryBranch(group.label) ? 3 : 4;
+      if (group.isTag) return 5;
+      if (group.isRemoteHead) return 6;
+      return 7;
     };
     const ra = rank(a);
     const rb = rank(b);
     if (ra !== rb) return ra - rb;
-    return a.label.localeCompare(b.label);
+    const leftName = a.isRemote && a.remoteName ? `${a.remoteName}/${a.label}` : a.label;
+    const rightName = b.isRemote && b.remoteName ? `${b.remoteName}/${b.label}` : b.label;
+    return leftName.localeCompare(rightName);
   });
   return merged;
 }

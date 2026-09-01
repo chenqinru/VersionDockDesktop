@@ -12,7 +12,7 @@ import { buildHistoryRefOptions } from './HistoryWorkspace.helpers';
 import { assignLanes, COMMIT_ROW_HEIGHT, layoutVisibleCommits, type GraphCommit } from './commitGraphLayout';
 import { commitKey } from '../history/commitDetails';
 import { formatRefLabel, groupRefs, mergeLocalRemote, type RefGroup } from '../history/refs';
-import { branchColor, headColor, isPrimaryBranch, primaryBranchColor, tagColor } from './branchColor';
+import { branchColor, headColor, tagColor } from './branchColor';
 import type { CommitDetail, CommitNode, GraphCommitNode } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog, editorDialog, promptDialog } from './dialogService';
@@ -49,17 +49,19 @@ function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { ope
 
 function RefBadgeIcon({ group }: { group: RefGroup }) {
   if (group.isSvnRevision) return <Codicon name="versions" />;
+  if (group.isRemoteHead) return <Codicon name="milestone" />;
+  if (group.isDetached && group.isHead) return <Codicon name="warning" />;
   if (group.isTag) return <Codicon name="tag" />;
+  if (group.isLocal && group.isRemote) return <><Codicon name="git-branch" /><Codicon name="cloud" /></>;
   if (group.isRemote) return <Codicon name="cloud" />;
-  if (group.isHead || group.isDetached) return <Codicon name="arrow-right" />;
   return <Codicon name="git-branch" />;
 }
 
 function badgeColor(group: RefGroup): string {
+  if (group.isSvnRevision && group.label === 'HEAD') return headColor();
+  if (group.isRemoteHead || (group.isHead && group.isDetached)) return headColor();
   if (group.isTag || group.isSvnRevision) return tagColor();
-  if (group.isHead || group.isDetached) return headColor();
-  if (isPrimaryBranch(group.label)) return primaryBranchColor();
-  return branchColor(group.label);
+  return branchColor(group.label, false);
 }
 
 function RefBadges({
@@ -67,11 +69,13 @@ function RefBadges({
   repoKind = 'git',
   remoteNames = [],
   isSelected = false,
+  maxVisible = 2,
 }: {
   refs: string[];
   repoKind?: 'git' | 'svn';
   remoteNames?: readonly string[];
   isSelected?: boolean;
+  maxVisible?: number;
 }) {
   const { t } = useI18n();
   const allGroups = useMemo(
@@ -80,15 +84,9 @@ function RefBadges({
   );
   if (allGroups.length === 0) return null;
 
-  const headGroup = allGroups.find((g) => g.isHead && !g.isDetached && !g.isSvnRevision);
-  const remoteHeadGroups = allGroups.filter((g) => g.isRemoteHead);
-  const remoteHeadGroup = remoteHeadGroups.length === 1 ? remoteHeadGroups[0] : undefined;
-  const headAndRemoteHead = headGroup && remoteHeadGroup;
-  const otherGroups = allGroups.filter((g) => !(headAndRemoteHead && g.key === remoteHeadGroup.key));
-
-  const visible = otherGroups.slice(0, 2);
-  const overflow = otherGroups.slice(2);
-  const hc = headColor();
+  const displayGroups = allGroups.filter((group) => !group.isRemoteHead);
+  const visible = displayGroups.slice(0, maxVisible);
+  const overflow = displayGroups.slice(maxVisible);
 
   return (
     <span className="commit-refs">
@@ -106,19 +104,9 @@ function RefBadges({
           </em>
         );
       })}
-      {headGroup && (
-        <em
-          className={`head ${isSelected ? 'selected' : ''}`}
-          style={{ '--ref-color': hc } as React.CSSProperties}
-          title="HEAD"
-        >
-          {headAndRemoteHead ? <Codicon name="milestone" /> : <Codicon name="arrow-right" />}
-          <span className="ref-label">{headAndRemoteHead ? `${remoteHeadGroup!.remoteName}/HEAD & HEAD` : 'HEAD'}</span>
-        </em>
-      )}
       {overflow.length > 0 && (
         <em className={`ref-overflow ${isSelected ? 'selected' : ''}`} title={overflow.map((g) => g.label).join('\n')}>
-          +{overflow.length}
+          {visible.length === 0 ? overflow.length : `+${overflow.length}`}
         </em>
       )}
     </span>
@@ -232,6 +220,7 @@ function CommitList({
     overscan: 14,
   });
   const [hoveredKey, setHoveredKey] = useState<string>();
+  const [containerWidth, setContainerWidth] = useState(0);
   const [context, setContext] = useState<{ x: number; y: number; commit: CommitNode }>();
   const [popover, setPopover] = useState<{ detail: CommitDetail; anchor: CommitPopoverAnchor }>();
   const hoveredKeyRef = useRef<string>();
@@ -240,6 +229,19 @@ function CommitList({
   const popoverActive = useRef(false);
 
   useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+  useLayoutEffect(() => {
+    const element = parent.current;
+    if (!element) return;
+    const update = () => setContainerWidth(element.clientWidth);
+    update();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    observer?.observe(element);
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
 
   const schedulePopover = (event: React.MouseEvent<HTMLDivElement>, commit: CommitNode) => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -267,6 +269,8 @@ function CommitList({
     closeTimer.current = setTimeout(() => { if (!popoverActive.current) setPopover(undefined); }, 140);
   };
   const allExpanded = repoBlocks.length > 0 && repoBlocks.every((block) => expandedRepoIds.has(block.repoId));
+  const refsSpace = containerWidth - labelColWidth - 340;
+  const maxVisibleRefs = refsSpace < 80 ? 0 : refsSpace < 170 ? 1 : 2;
   const virtualItems = virtualizer.getVirtualItems();
   const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: index * COMMIT_ROW_HEIGHT }));
   const contextItems = (commit: CommitNode): ContextMenuEntry[] => {
@@ -381,7 +385,7 @@ function CommitList({
         return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, commit }); if (!isSelected) void selectCommit(commit, 'single', commits); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }}>
           {labelColWidth > 0 && <div style={{ width: labelColWidth, flexShrink: 0 }} />}
           <CommitGraph commit={commit} selected={isSelected} />
-          <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} />
+          <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} maxVisible={maxVisibleRefs} />
           <span className={`commit-subject-text ${isMergeCommit ? 'merge-commit' : ''}`}>{commit.message}</span>
           <span className="commit-author">
             {hoveredKey === key && <span className="commit-row-actions"><button title={t('Open Commit Detail')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openCommitDetail); }}><Codicon name="open-preview" /></button><button title={t('Open Changes')} onClick={(event) => { event.stopPropagation(); void selectCommit(commit).then(openChanges); }}><Codicon name="diff-multiple" /></button></span>}
@@ -431,8 +435,10 @@ export function HistoryWorkspace() {
   const loadHistory = useAppStore((state) => state.loadHistory);
   const refresh = useAppStore((state) => state.refresh);
   const sync = useAppStore((state) => state.sync);
-  const branchWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.branches ?? state.bootstrap?.state.panelSizes?.branches ?? 220);
-  const detailWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.detail ?? state.bootstrap?.state.panelSizes?.detail ?? 380);
+  const storedBranchWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.branches ?? state.bootstrap?.state.panelSizes?.branches ?? 220);
+  const storedDetailWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.detail ?? state.bootstrap?.state.panelSizes?.detail ?? 380);
+  const branchWidth = Math.min(400, Math.max(120, storedBranchWidth));
+  const detailWidth = Math.min(680, Math.max(220, storedDetailWidth));
   const setPanelSize = useAppStore((state) => state.setPanelSize);
   const branchSidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
   const collapsedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
@@ -441,8 +447,8 @@ export function HistoryWorkspace() {
   const compareTarget = useAppStore((state) => state.comparisonTarget);
   const openBranchComparison = useAppStore((state) => state.openBranchComparison);
   const closeBranchComparison = useAppStore((state) => state.closeBranchComparison);
-  const resizeBranches = useResizable(branchWidth, 190, 420, (value) => setPanelSize('branches', value));
-  const resizeDetail = useResizable(detailWidth, 300, 620, (value) => setPanelSize('detail', value), -1);
+  const resizeBranches = useResizable(branchWidth, 120, 400, (value) => setPanelSize('branches', value));
+  const resizeDetail = useResizable(detailWidth, 220, 680, (value) => setPanelSize('detail', value), -1);
 
   const repoKindById = useMemo(() => {
     const map: Record<string, 'git' | 'svn'> = {};
@@ -479,8 +485,12 @@ export function HistoryWorkspace() {
   }, [allHistory]);
   const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repo.meta.name, color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
   const refOptions = useMemo(
-    () => buildHistoryRefOptions(snapshotRepos, branchesByRepo, tagsByRepo),
-    [branchesByRepo, snapshotRepos, tagsByRepo],
+    () => buildHistoryRefOptions(
+      filters.repoId ? snapshotRepos.filter((repo) => repo.meta.id === filters.repoId) : snapshotRepos,
+      branchesByRepo,
+      tagsByRepo,
+    ),
+    [branchesByRepo, filters.repoId, snapshotRepos, tagsByRepo],
   );
   const selectedRepo = repoOptions.find((option) => option.id === filters.repoId);
   const selectedRepoLabel = selectedRepo?.label ?? t('Repository');
@@ -489,6 +499,14 @@ export function HistoryWorkspace() {
   const visibleHistory = allHistory;
   const updateFilters = (next: Partial<ViewFilters>) => {
     const updated = { ...filters, ...next };
+    if (Object.hasOwn(next, 'repoId') && updated.repoId && updated.ref) {
+      const repositoryRefs = buildHistoryRefOptions(
+        snapshotRepos.filter((repo) => repo.meta.id === updated.repoId),
+        branchesByRepo,
+        tagsByRepo,
+      );
+      if (!repositoryRefs.some((option) => option.id === updated.ref)) updated.ref = '';
+    }
     setFilters(updated);
     setHistoryQuery({ ...historyQuery, author: updated.author || null, fromDate: updated.from || null, toDate: updated.to || null });
     if (!Object.hasOwn(next, 'repoId') && !Object.hasOwn(next, 'ref')) {
@@ -552,7 +570,7 @@ export function HistoryWorkspace() {
     </div>}
     <div className="history-columns">
       <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} onRefFilter={(ref) => updateFilters({ ref })} onCompare={openBranchComparison} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
-      {!branchSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize branch sidebar')} aria-orientation="vertical" aria-valuemin={190} aria-valuemax={420} aria-valuenow={branchWidth} onPointerDown={resizeBranches} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('branches', Math.min(420, Math.max(190, branchWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />}
+      {!branchSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize branch sidebar')} aria-orientation="vertical" aria-valuemin={120} aria-valuemax={400} aria-valuenow={branchWidth} onPointerDown={resizeBranches} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('branches', Math.min(400, Math.max(120, branchWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />}
       <div className="log-pane">{compareTarget ? <BranchComparePanel
         key={`${compareTarget.repoId}:${compareTarget.target}`}
         repoId={compareTarget.repoId}
@@ -560,7 +578,7 @@ export function HistoryWorkspace() {
         close={closeBranchComparison}
         renderCommits={(commits) => <CommitList history={commits} loading={false} expandedRepoIds={new Set()} onToggleRepoName={() => undefined} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} isFiltered repoSortKeyById={repoSortKeyById} hasMoreOverride={false} singleRepository />}
       /> : <CommitList history={visibleHistory} loading={historyLoading} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} hasRevisionFilter={hasBranchFilter} repoSortKeyById={repoSortKeyById} />}</div>
-      {!detailSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize detail sidebar')} aria-orientation="vertical" aria-valuemin={300} aria-valuemax={620} aria-valuenow={detailWidth} onPointerDown={resizeDetail} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('detail', Math.min(620, Math.max(300, detailWidth + (event.key === 'ArrowLeft' ? 10 : -10)))); } }} />}
+      {!detailSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize detail sidebar')} aria-orientation="vertical" aria-valuemin={220} aria-valuemax={680} aria-valuenow={detailWidth} onPointerDown={resizeDetail} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('detail', Math.min(680, Math.max(220, detailWidth + (event.key === 'ArrowLeft' ? 10 : -10)))); } }} />}
       <div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <button className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></button> : <CommitDetailPanel onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
     </div>
   </section>;

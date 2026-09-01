@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
 
@@ -17,7 +17,26 @@ export function CommitSearch({ value, onChange, onSubmit, onClear }: {
   onClear?: () => void;
 }) {
   const { t } = useI18n();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const submitNow = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    onSubmit?.();
+  };
+  const change = (next: string) => {
+    onChange(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      onSubmit?.();
+    }, 250);
+  };
   const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
     onChange('');
     onClear?.();
   };
@@ -25,9 +44,9 @@ export function CommitSearch({ value, onChange, onSubmit, onClear }: {
     <Codicon name="search" />
     <input
       value={value}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={(event) => change(event.target.value)}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') onSubmit?.();
+        if (event.key === 'Enter') submitNow();
         if (event.key === 'Escape' && value) {
           clear();
           event.currentTarget.blur();
@@ -88,8 +107,27 @@ export function FilterPopover({ title, values, selected, onSelect, onClear, quer
   </div>;
 }
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+function localizedWeekdays(locale: string): string[] {
+  try {
+    const sunday = new Date(2021, 7, 1);
+    const formatter = new Intl.DateTimeFormat(locale, { weekday: locale.startsWith('zh') ? 'narrow' : 'short' });
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(sunday);
+      date.setDate(sunday.getDate() + index);
+      return formatter.format(date);
+    });
+  } catch {
+    return ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  }
+}
+
+function formatYearMonth(year: number, month: number, locale: string): string {
+  try {
+    return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short' }).format(new Date(year, month, 1));
+  } catch {
+    return `${year}-${String(month + 1).padStart(2, '0')}`;
+  }
+}
 
 function toYmd(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -106,7 +144,7 @@ function shiftMonth(value: { year: number; month: number }, delta: number) {
   return { year: next.getFullYear(), month: next.getMonth() };
 }
 
-function CalendarMonth({ year, month, from, to, hovered, onDay, onHover }: {
+function CalendarMonth({ year, month, from, to, hovered, onDay, onHover, weekdays }: {
   year: number;
   month: number;
   from: Date | null;
@@ -114,6 +152,7 @@ function CalendarMonth({ year, month, from, to, hovered, onDay, onHover }: {
   hovered: Date | null;
   onDay: (date: Date) => void;
   onHover: (date: Date | null) => void;
+  weekdays: string[];
 }) {
   const firstDay = new Date(year, month, 1).getDay();
   const days = new Date(year, month + 1, 0).getDate();
@@ -123,7 +162,7 @@ function CalendarMonth({ year, month, from, to, hovered, onDay, onHover }: {
   const low = from && end && from <= end ? from : end;
   const high = from && end && from <= end ? end : from;
   return <div className="calendar-month">
-    <div className="calendar-weekdays">{WEEKDAYS.map((day) => <span key={day}>{day}</span>)}</div>
+    <div className="calendar-weekdays">{weekdays.map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
     <div className="calendar-grid">
       {cells.map((date, index) => date ? (() => {
         const ymd = toYmd(date);
@@ -141,7 +180,7 @@ export function DatePopover({ from, to, onChange, onClear }: {
   onChange: (from: string, to: string) => void;
   onClear: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [horizontalOffset, setHorizontalOffset] = useState(0);
   const today = new Date();
@@ -149,7 +188,22 @@ export function DatePopover({ from, to, onChange, onClear }: {
   const toDate = parseYmd(to);
   const [left, setLeft] = useState(() => { const date = fromDate ?? new Date(today.getFullYear(), today.getMonth() - 1, 1); return { year: date.getFullYear(), month: date.getMonth() }; });
   const [right, setRight] = useState(() => { const date = toDate ?? new Date(today.getFullYear(), today.getMonth(), 1); return { year: date.getFullYear(), month: date.getMonth() }; });
+  const [single, setSingle] = useState(() => { const date = toDate ?? fromDate ?? today; return { year: date.getFullYear(), month: date.getMonth() }; });
+  const [dual, setDual] = useState(true);
   const [hovered, setHovered] = useState<Date | null>(null);
+  const weekdays = localizedWeekdays(language);
+  useLayoutEffect(() => {
+    const anchor = popoverRef.current?.parentElement;
+    const updateLayout = () => setDual((anchor?.clientWidth ?? 0) === 0 || (anchor?.clientWidth ?? 0) >= 310);
+    updateLayout();
+    const observer = typeof ResizeObserver === 'undefined' || !anchor ? undefined : new ResizeObserver(updateLayout);
+    if (observer && anchor) observer.observe(anchor);
+    window.addEventListener('resize', updateLayout);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateLayout);
+    };
+  }, []);
   useLayoutEffect(() => {
     const reposition = () => {
       const element = popoverRef.current;
@@ -171,12 +225,14 @@ export function DatePopover({ from, to, onChange, onClear }: {
     if (fromDate && date < fromDate) onChange(value, from);
     else onChange(from, value);
   };
-  return <div ref={popoverRef} className="date-popover filter-popover" style={{ '--date-popover-offset': `${horizontalOffset}px` } as CSSProperties}>
+  return <div ref={popoverRef} className={`date-popover filter-popover ${dual ? 'dual' : 'single'}`} style={{ '--date-popover-offset': `${horizontalOffset}px` } as CSSProperties}>
     <header><strong>{t('Date range')}</strong><button type="button" disabled={!from && !to} onClick={onClear}>{t('Clear')}</button></header>
-    <div className="calendar-panes">
-      <div className="calendar-pane"><div className="calendar-nav"><button type="button" onClick={() => setLeft(shiftMonth(left, -1))}><Codicon name="chevron-left" /></button><strong>{MONTH_NAMES[left.month]} {left.year}</strong><button type="button" onClick={() => setLeft(shiftMonth(left, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...left} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} /></div>
+    {dual ? <div className="calendar-panes">
+      <div className="calendar-pane"><div className="calendar-nav"><button type="button" title={t('Previous month')} onClick={() => setLeft(shiftMonth(left, -1))}><Codicon name="chevron-left" /></button><strong>{formatYearMonth(left.year, left.month, language)}</strong><button type="button" title={t('Next month')} onClick={() => setLeft(shiftMonth(left, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...left} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
       <i className="calendar-divider" />
-      <div className="calendar-pane"><div className="calendar-nav"><button type="button" onClick={() => setRight(shiftMonth(right, -1))}><Codicon name="chevron-left" /></button><strong>{MONTH_NAMES[right.month]} {right.year}</strong><button type="button" onClick={() => setRight(shiftMonth(right, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...right} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} /></div>
-    </div>
+      <div className="calendar-pane"><div className="calendar-nav"><button type="button" title={t('Previous month')} onClick={() => setRight(shiftMonth(right, -1))}><Codicon name="chevron-left" /></button><strong>{formatYearMonth(right.year, right.month, language)}</strong><button type="button" title={t('Next month')} onClick={() => setRight(shiftMonth(right, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...right} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
+    </div> : <div className="calendar-panes single-calendar">
+      <div className="calendar-pane"><div className="calendar-nav"><button type="button" title={t('Previous month')} onClick={() => setSingle(shiftMonth(single, -1))}><Codicon name="chevron-left" /></button><strong>{formatYearMonth(single.year, single.month, language)}</strong><button type="button" title={t('Next month')} onClick={() => setSingle(shiftMonth(single, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...single} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
+    </div>}
   </div>;
 }

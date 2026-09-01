@@ -38,13 +38,13 @@ function SelectionCheckbox({ label, checked, indeterminate = false, disabled = f
 type ExpansionCommand = { sequence: number; expanded: boolean };
 type ChangeContext = { x: number; y: number; kind: 'file' | 'folder' | 'repo'; repo: RepositoryStatus; files: FileChange[]; path?: string; changelistId?: string };
 
-function TreeNode({ node, depth, repo, selected, setFiles, onFile, onContext, onFolderContext, expansion }: { node: FileTreeNode; depth: number; repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; expansion: ExpansionCommand }) {
+function TreeNode({ node, depth, repo, selected, setFiles, onFile, onContext, onFolderContext, expansion, onManualExpansionChange }: { node: FileTreeNode; depth: number; repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; expansion: ExpansionCommand; onManualExpansionChange: () => void }) {
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
   const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
   if (!node.file) {
     const selectedCount = node.files.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
     const allSelected = node.files.length > 0 && selectedCount === node.files.length;
-    return <div className="tree-directory"><div className="directory-row" style={{ paddingLeft: 20 + depth * 20 }} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} onChange={() => setFiles(repo.meta.id, node.files.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><b>{node.files.length}</b></div>{expanded && node.children.map((child) => <TreeNode key={child.path} node={child} depth={depth + 1} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} onFolderContext={onFolderContext} expansion={expansion} />)}</div>;
+    return <div className="tree-directory"><div className="directory-row" style={{ paddingLeft: 20 + depth * 20 }} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} onChange={() => setFiles(repo.meta.id, node.files.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><b>{node.files.length}</b></div>{expanded && node.children.map((child) => <TreeNode key={child.path} node={child} depth={depth + 1} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} onFolderContext={onFolderContext} expansion={expansion} onManualExpansionChange={onManualExpansionChange} />)}</div>;
   }
   const key = `${repo.meta.id}\0${node.file.path}`;
   return <div className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''}`} style={{ paddingLeft: 20 + depth * 20 }} onDoubleClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
@@ -54,7 +54,7 @@ function TreeNode({ node, depth, repo, selected, setFiles, onFile, onContext, on
   </div>;
 }
 
-function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContext, onRepoContext, viewMode, expansion }: { repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; onRepoContext: (event: React.MouseEvent) => void; viewMode: 'tree' | 'list'; expansion: ExpansionCommand }) {
+function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContext, onRepoContext, viewMode, expansion, onManualExpansionChange }: { repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; onRepoContext: (event: React.MouseEvent) => void; viewMode: 'tree' | 'list'; expansion: ExpansionCommand; onManualExpansionChange: () => void }) {
   const { t } = useI18n();
   const openWorkingChanges = useAppStore((state) => state.openWorkingChanges);
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>(() => ({ sequence: 0, expanded: repo.files.length > 0 }));
@@ -85,7 +85,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
         onContextMenu={onRepoContext}
       >
         <SelectionCheckbox label={repo.meta.name} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!repo.files.length} onChange={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), !allSelected)} />
-        <button title={repo.meta.name} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><span className="branch-chip" title={repo.branch || repo.revision} style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}><Codicon name="git-branch" /><span className="branch-name">{repo.branch || repo.revision}</span></span></button>
+        <button title={repo.meta.name} onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repo.meta.name}</strong><span className="branch-chip" title={repo.branch || repo.revision} style={{ color: branch, background: `${branch}33`, borderColor: `${branch}88` }}><Codicon name="git-branch" /><span className="branch-name">{repo.branch || repo.revision}</span></span></button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
           {repo.files.length > 0 && (
             <button
@@ -118,7 +118,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
         </div>
       </div>
       {expanded && !repo.files.length && <div className="repo-no-changes">{t('No changes')}</div>}
-      {expanded && viewMode === 'tree' && tree.map((node) => <TreeNode key={node.path} node={node} depth={0} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} onFolderContext={onFolderContext} expansion={expansion} />)}
+      {expanded && viewMode === 'tree' && tree.map((node) => <TreeNode key={node.path} node={node} depth={0} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} onFolderContext={onFolderContext} expansion={expansion} onManualExpansionChange={onManualExpansionChange} />)}
       {expanded && viewMode === 'list' && repo.files.map((file) => {
         const key = `${repo.meta.id}\0${file.path}`;
         const parts = file.path.split('/');
@@ -205,6 +205,7 @@ export function CommitPanel() {
   const [shelfViewMode, setShelfViewMode] = useState<'tree' | 'list'>('tree');
   const [shelfExpansion, setShelfExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: false });
   const [stashExpansion, setStashExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: false });
+  const [expandedByTab, setExpandedByTab] = useState<Record<'changes' | 'shelf' | 'stash', boolean | null>>({ changes: true, shelf: false, stash: false });
   const [textareaHeight, setTextareaHeight] = useState(54);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyDialog = useDialogFocusTrap(historyOpen, () => setHistoryOpen(false));
@@ -224,10 +225,6 @@ export function CommitPanel() {
     workspaceId: snapshot?.workspace.id,
     domain: 'sync',
   }));
-  const allRepoCommitBusy = workspaceBusy || isOperationActiveForRepositories(operations, repos.map((repo) => repo.meta.id), {
-    workspaceId: snapshot?.workspace.id,
-    domain: 'commit',
-  });
   const unpushedCommits = useAppStore((state) => state.unpushedCommits);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const stashCount = useMemo(() => gitRepos.reduce((sum, repo) => sum + (stashes[repo.meta.id]?.length ?? 0), 0), [gitRepos, stashes]);
@@ -239,6 +236,17 @@ export function CommitPanel() {
     if (branch?.upstream) return sum + (r.ahead ?? 0);
     return sum + (unpushedCommits[r.meta.id]?.length ?? (r.ahead || 0));
   }, 0), [branchesByRepo, gitRepos, unpushedCommits]);
+  const refreshPanel = async () => {
+    const store = useAppStore.getState();
+    const requests: Promise<unknown>[] = [store.refresh()];
+    if (tab === 'changes' && changelistEnabled) requests.push(store.loadChangelists());
+    if (tab === 'shelf') requests.push(store.loadShelves());
+    if (tab === 'stash') requests.push(store.loadStashes());
+    if (tab === 'worktree') requests.push(store.loadWorktrees());
+    if (tab === 'subtree') requests.push(store.loadSubtrees());
+    if (tab === 'push') requests.push(store.loadUnpushedCommits());
+    await Promise.all(requests);
+  };
   const activeOperationRepo = repos.find((repo) => repo.meta.kind === 'git' && repo.operation);
   const restoreConflicts = useAppStore((state) => state.restoreConflicts);
   const restorableConflictRepoIds = repos.filter((repo) => repo.meta.kind === 'git' && !repo.operation && (repo.conflicts > 0 || repo.files.some((file) => file.conflicted))).map((repo) => repo.meta.id);
@@ -329,20 +337,6 @@ export function CommitPanel() {
       if (kind === 'stash') await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: message.trim() || t('WIP stash'), paths, include_untracked: true });
       else await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: message.trim() || t('WIP shelf'), paths });
     }
-  };
-  const discardAll = async () => {
-    const total = repos.reduce((sum, repo) => sum + repo.files.length, 0);
-    if (!total) return;
-    const tracked = repos.flatMap((repo) => repo.files.filter((file) => file.status !== 'untracked').map((file) => `${repo.meta.name}: ${file.path}`));
-    const untracked = repos.flatMap((repo) => repo.files.filter((file) => file.status === 'untracked').map((file) => `${repo.meta.name}: ${file.path}`));
-    const message = [
-      t('Discard changes to {0} files? This cannot be undone.', total),
-      tracked.length ? `Tracked (${tracked.length}):\n${tracked.join('\n')}` : '',
-      untracked.length ? `Untracked files will be deleted (${untracked.length}):\n${untracked.join('\n')}` : '',
-    ].filter(Boolean).join('\n\n');
-    if (!await confirmDialog({ title: t('Rollback'), message, danger: true })) return;
-    for (const repo of repos) await discard(repo.meta.id, repo.files.map((file) => file.path));
-    for (const repo of repos) setFiles(repo.meta.id, repo.files.map((file) => file.path), false);
   };
   const confirmDiscard = async (repo: RepositoryStatus, files: FileChange[]) => {
     const tracked = files.filter((file) => file.status !== 'untracked');
@@ -711,7 +705,7 @@ export function CommitPanel() {
         if (currentSettings) await useAppStore.getState().updateSettings({ hiddenRepositoryIds: [...new Set([...(currentSettings.hiddenRepositoryIds ?? []), repo.meta.id])] });
         break;
       }
-      case 'refresh': await useAppStore.getState().refresh(); break;
+      case 'refresh': await refreshPanel(); break;
       default:
         if (id.startsWith('changelist:')) {
           const target = id.slice('changelist:'.length);
@@ -761,7 +755,45 @@ export function CommitPanel() {
     };
   }, [commitMenu, saveMenu, viewMenu]);
 
-  const panelToolbar = <div className="panel-toolbar"><strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong><span /><button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void Promise.all(fetchTargets.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button><button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button><button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button></div>;
+  const panelViewMode = tab === 'shelf' ? shelfViewMode : tab === 'stash' ? stashViewMode : viewMode;
+  const setPanelViewMode = (mode: 'tree' | 'list') => {
+    if (tab === 'shelf') setShelfViewMode(mode);
+    else if (tab === 'stash') setStashViewMode(mode);
+    else setFileViewMode(mode);
+    setViewMenu(false);
+  };
+  const setPanelExpansion = (expanded: boolean) => {
+    if (tab === 'shelf') setShelfExpansion((current) => ({ sequence: current.sequence + 1, expanded }));
+    else if (tab === 'stash') setStashExpansion((current) => ({ sequence: current.sequence + 1, expanded }));
+    else setExpansion((current) => ({ sequence: current.sequence + 1, expanded }));
+    if (tab === 'changes' || tab === 'shelf' || tab === 'stash') {
+      setExpandedByTab((current) => ({ ...current, [tab]: expanded }));
+    }
+    setViewMenu(false);
+  };
+  const markPanelExpansionMixed = (target: 'changes' | 'shelf' | 'stash') => {
+    setExpandedByTab((current) => current[target] === null ? current : { ...current, [target]: null });
+  };
+  const showPanelViewOptions = tab === 'changes' || tab === 'shelf' || tab === 'stash';
+  const panelExpanded = showPanelViewOptions ? expandedByTab[tab as 'changes' | 'shelf' | 'stash'] : null;
+  const panelToolbar = <div className="panel-toolbar">
+    <strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong>
+    <span />
+    <button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void Promise.all(fetchTargets.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button>
+    <button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></button>
+    {showPanelViewOptions && <div ref={viewMenuRef} className="view-options panel-view-options">
+      <button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>
+      {viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}>
+        <strong>{t('Expand Mode')}</strong>
+        <button className={panelExpanded === true ? 'selected' : ''} onClick={() => setPanelExpansion(true)}><Codicon name="expand-all" />{t('Expand all')}{panelExpanded === true && <Codicon name="check" />}</button>
+        <button className={panelExpanded === false ? 'selected' : ''} onClick={() => setPanelExpansion(false)}><Codicon name="collapse-all" />{t('Collapse all')}{panelExpanded === false && <Codicon name="check" />}</button>
+        <strong>{t('View options')}</strong>
+        <button className={panelViewMode === 'list' ? 'selected' : ''} onClick={() => setPanelViewMode('list')}><Codicon name="list-unordered" />{t('Flat list')}{panelViewMode === 'list' && <Codicon name="check" />}</button>
+        <button className={panelViewMode === 'tree' ? 'selected' : ''} onClick={() => setPanelViewMode('tree')}><Codicon name="list-tree" />{t('Tree view')}{panelViewMode === 'tree' && <Codicon name="check" />}</button>
+      </div>}
+    </div>}
+    <button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button>
+  </div>;
   const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
@@ -770,28 +802,8 @@ export function CommitPanel() {
     <aside className="commit-panel" onClick={() => setContext(undefined)}>
       {panelToolbar}
       {panelOverlays}
-      <div className="commit-commandbar">
-        <button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void useAppStore.getState().refresh()}><Codicon name="refresh" /></button>
-        {tab === 'changes' && <>
-          <button disabled={!repos.some((repo) => repo.files.length) || allRepoCommitBusy} title={t('Rollback')} onClick={() => void discardAll()}><Codicon name="discard" /></button>
-          <button title={t('Expand all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: true }))}><Codicon name="expand-all" /></button>
-          <button title={t('Collapse all')} onClick={() => setExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button>
-          <div ref={viewMenuRef} className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={viewMode === 'list' ? 'selected' : ''} onClick={() => { setFileViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{viewMode === 'list' && <Codicon name="check" />}</button><button className={viewMode === 'tree' ? 'selected' : ''} onClick={() => { setFileViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{viewMode === 'tree' && <Codicon name="check" />}</button></div>}</div>
-        </>}
-        {tab === 'shelf' && <>
-          <button title={t('Expand all')} onClick={() => setShelfExpansion((current) => ({ sequence: current.sequence + 1, expanded: true }))}><Codicon name="expand-all" /></button>
-          <button title={t('Collapse all')} onClick={() => setShelfExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button>
-          <div ref={viewMenuRef} className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={shelfViewMode === 'list' ? 'selected' : ''} onClick={() => { setShelfViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{shelfViewMode === 'list' && <Codicon name="check" />}</button><button className={shelfViewMode === 'tree' ? 'selected' : ''} onClick={() => { setShelfViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{shelfViewMode === 'tree' && <Codicon name="check" />}</button></div>}</div>
-        </>}
-        {tab === 'stash' && <>
-          <button title={t('Expand all')} onClick={() => setStashExpansion((current) => ({ sequence: current.sequence + 1, expanded: true }))}><Codicon name="expand-all" /></button>
-          <button title={t('Collapse all')} onClick={() => setStashExpansion((current) => ({ sequence: current.sequence + 1, expanded: false }))}><Codicon name="collapse-all" /></button>
-          <div ref={viewMenuRef} className="view-options"><button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>{viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}><strong>{t('View')}</strong><button className={stashViewMode === 'list' ? 'selected' : ''} onClick={() => { setStashViewMode('list'); setViewMenu(false); }}><Codicon name="list-unordered" />{t('List view')}{stashViewMode === 'list' && <Codicon name="check" />}</button><button className={stashViewMode === 'tree' ? 'selected' : ''} onClick={() => { setStashViewMode('tree'); setViewMenu(false); }}><Codicon name="list-tree" />{t('Tree view')}{stashViewMode === 'tree' && <Codicon name="check" />}</button></div>}</div>
-        </>}
-        <span />
-      </div>
       <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Push')} className={tab === 'push' ? 'active' : ''} onClick={() => { setTab('push'); void useAppStore.getState().loadUnpushedCommits(); }}><Codicon name="cloud-upload" />{tab === 'push' && <span>{t('Push')}</span>}{totalToPush > 0 && <b>{totalToPush}</b>}</button>}</div>
-      {tab === 'push' ? <PushPanel repos={gitRepos} /> : tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={shelfViewMode} expansion={shelfExpansion} onOpenFileDiff={(repoId, shelfId, path) => void openShelfDiff(repoId, shelfId, path)} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={stashViewMode} expansion={stashExpansion} onOpenFileDiff={(repoId, reference, path) => void openStashDiff(repoId, reference, path)} /> : <>
+      {tab === 'push' ? <PushPanel repos={gitRepos} /> : tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={shelfViewMode} expansion={shelfExpansion} onManualExpansionChange={() => markPanelExpansionMixed('shelf')} onOpenFileDiff={(repoId, shelfId, path) => void openShelfDiff(repoId, shelfId, path)} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={stashViewMode} expansion={stashExpansion} onManualExpansionChange={() => markPanelExpansionMixed('stash')} onOpenFileDiff={(repoId, reference, path) => void openStashDiff(repoId, reference, path)} /> : <>
       {conflicts.length > 0 ? (
         <ConflictBanner
           summary={(() => {
@@ -947,6 +959,7 @@ export function CommitPanel() {
               },
               viewMode: viewMode as 'tree' | 'list',
               expansion,
+              onManualExpansionChange: () => markPanelExpansionMixed('changes'),
             };
             return (
               <div key={repo.meta.id} onMouseDown={() => void selectRepo(repo.meta.id)}>

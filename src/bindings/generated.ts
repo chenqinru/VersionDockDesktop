@@ -468,6 +468,7 @@ export type CommitBranches = {
 	local: string[],
 	remote: string[],
 	tags: string[],
+	isHead?: boolean | null,
 };
 
 export type CommitDetail = {

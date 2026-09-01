@@ -2965,23 +2965,20 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
 
 /* VersionDock plugin visual alignment: dense, divider-led desktop workbench. */
-.panel-toolbar { min-width: 0; height: 30px; padding: 0 6px 0 10px; overflow: hidden; display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--versiondock-border-soft); background: var(--versiondock-surface); }
+.panel-toolbar { min-width: 0; height: 30px; padding: 0 6px 0 10px; overflow: visible; display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--versiondock-border-soft); background: var(--versiondock-surface); }
 .panel-toolbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 16px; letter-spacing: 0; }
 .panel-toolbar > span { flex: 1; min-width: 0; }
 .panel-toolbar button { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; }
 .panel-toolbar button:hover, .panel-toolbar button.selected { color: var(--versiondock-text); background: var(--versiondock-hover); }
 
-.commit-commandbar { flex: 0 0 29px; height: 29px; padding: 2px 6px; display: flex; align-items: center; gap: 1px; border-bottom: 1px solid var(--versiondock-border-soft); background: color-mix(in srgb, var(--versiondock-surface) 88%, var(--versiondock-bg)); }
-.commit-commandbar > span { flex: 1; }
-.commit-commandbar button { width: 24px; height: 24px; display: grid; place-items: center; color: var(--versiondock-muted); }
-.commit-commandbar button:hover, .commit-commandbar button.selected { color: var(--versiondock-text); background: var(--versiondock-hover); }
 .view-options { position: relative; }
 .view-options-menu { position: absolute; z-index: 140; top: 27px; left: 0; width: 152px; padding: 4px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 18px #0008; }
 .view-options-menu strong { display: block; padding: 3px 6px 5px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; text-transform: uppercase; }
 .view-options-menu button { width: 100%; height: 27px; padding: 0 6px; display: flex; align-items: center; justify-content: flex-start; gap: 7px; color: var(--versiondock-text); }
 .view-options-menu button > .codicon:last-child { margin-left: auto; }
+.panel-view-options .view-options-menu { left: auto; right: 0; width: 184px; }
 
-.commit-tabs { flex: 0 0 29px; height: 29px; display: flex; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-bg); border-bottom: 1px solid var(--versiondock-border-soft); }
+.commit-tabs { flex: 0 0 29px; height: 29px; display: flex; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border-soft); }
 .commit-tabs::-webkit-scrollbar { display: none; }
 .commit-tabs button { min-width: 0; flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-start; gap: 0; padding: 5px 10px; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 17px; border-bottom: 2px solid transparent; transition: color .1s, border-color .1s; }
 .commit-tabs button.active { padding: 5px 12px; color: var(--versiondock-text); font-weight: 600; border-bottom: 2px solid var(--versiondock-accent); }
@@ -2989,10 +2986,11 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .commit-tabs button > .codicon { margin-right: 0; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); transition: margin .15s; }
 .commit-tabs button.active > .codicon { margin-right: 5px; }
 .commit-tabs button > span { min-width: 0; overflow: hidden; display: inline-block; }
-.commit-tabs b { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 5px; border-radius: 8px; line-height: 16px; text-align: center; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); color: var(--versiondock-badge-foreground, #ffffff); flex-shrink: 0; }
+.commit-tabs b { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 5px; border-radius: 8px; line-height: 16px; text-align: center; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); color: var(--versiondock-badge-foreground, #ffffff); flex-shrink: 0; opacity: .65; transition: opacity .15s; }
+.commit-tabs button.active b { opacity: 1; }
 
-.commit-panel { background: var(--versiondock-bg); }
-.changes-actions { flex: 0 0 29px; height: 29px; padding: 2px 6px; background: var(--versiondock-bg); }
+.commit-panel { background: var(--versiondock-surface); }
+.changes-actions { flex: 0 0 29px; height: 29px; padding: 2px 6px; background: var(--versiondock-surface); }
 .changes-actions button { color: var(--versiondock-muted); }
 .changes-scroll { background: var(--versiondock-surface); }
 .repo-change-group { border-bottom: 1px solid var(--versiondock-border-soft); margin: 0; }
@@ -3106,7 +3104,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .file-type-icon.tone-npm { color: #cb3837; }
 .file-type-icon.tone-docker { color: #2496ed; }
 .file-type-icon.tone-git { color: #f05032; }
-.commit-form { position: relative; flex: 0 0 auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--versiondock-bg); border-top: 1px solid var(--versiondock-border); }
+.commit-form { position: relative; flex: 0 0 auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--versiondock-surface); border-top: 1px solid var(--versiondock-border); }
 .commit-resize-grip { position: absolute; z-index: 2; top: -4px; left: 0; right: 0; height: 9px; display: flex; align-items: center; justify-content: center; cursor: ns-resize; touch-action: none; }
 .commit-resize-grip i { width: 32px; height: 2px; border-radius: 2px; background: var(--versiondock-border); }
 .commit-resize-grip:hover i, .commit-resize-grip:active i { background: var(--versiondock-accent); }
@@ -3134,7 +3132,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .split-menu button { width: 100%; height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 7px; text-align: left; }
 .split-menu button:hover { background: var(--versiondock-hover); }
 
-.push-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; background: var(--versiondock-bg); }
+.push-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; background: var(--versiondock-surface); }
 .push-scroll { min-height: 0; flex: 1; overflow: auto; }
 .push-repo-section { border-bottom: 1px solid var(--versiondock-border-soft); }
 .push-repo-section > header { height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 6px; background: color-mix(in srgb, var(--versiondock-surface-alt) 72%, transparent); }
@@ -3156,7 +3154,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .push-commit-row em b { color: var(--versiondock-success); }.push-commit-row em i { color: var(--versiondock-danger); font-style: normal; }
 .push-state { min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .push-state.success { color: var(--versiondock-success); }
-.push-panel > footer { flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--versiondock-border); background: var(--versiondock-bg); }
+.push-panel > footer { flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
 .push-panel > footer > span { display: block; padding: 0 2px 5px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .push-panel > footer > button { width: 100%; height: 29px; display: flex; align-items: center; justify-content: center; gap: 6px; color: white; background: var(--versiondock-accent-bg); }
 
@@ -3424,6 +3422,10 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-message-card pre { margin-top: 8px; padding-top: 0; border-top: 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); }
 .detail-refs { margin: 0; }
 .detail-refs em { height: 16px; padding: 0 6px; line-height: 16px; }
+.detail-refs em:not(.overflow) { color: var(--ref-color, var(--versiondock-accent)); border-color: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 55%, transparent); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 20%, transparent); }
+.detail-ref-overflow { height: 18px; padding: 0 5px; color: var(--versiondock-muted); border: 1px solid var(--versiondock-border); border-radius: 3px; background: transparent; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
+.detail-ref-overflow:hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+.detail-ref-overflow.expanded { width: 100%; margin-top: 2px; justify-content: center; }
 .detail-repo-pill { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); margin-left: 2px; }
 .detail-dir-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); margin-left: 4px; }
 .detail-line-stats { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; flex-shrink: 0; font: 400 calc(10px * var(--versiondock-ui-font-scale, 1))/1 var(--versiondock-code); }
@@ -3502,7 +3504,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .compare-header > button { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; margin-left: auto; padding: 0; }
 .compare-stack { min-height: 0; flex: 1; display: grid; grid-template-rows: minmax(110px, 1fr) 4px minmax(110px, 1fr); overflow: hidden; }
 .compare-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: visible; }
-.compare-pane-filters.history-filters { position: relative; z-index: 20; width: 100%; min-width: 0; min-height: 36px; flex: 0 0 36px; background: var(--versiondock-bg); }
+.compare-pane-filters.history-filters { position: relative; z-index: 20; width: 100%; min-width: 0; min-height: 38px; flex: 0 0 38px; background: var(--versiondock-bg); }
 .compare-pane > h3 { min-width: 0; height: 28px; flex: 0 0 28px; margin: 0; padding: 0 8px; display: flex; align-items: center; overflow: hidden; color: var(--versiondock-warning, #d7ba7d); background: color-mix(in srgb, var(--versiondock-warning, #d7ba7d) 18%, var(--versiondock-bg)); border-bottom: 1px solid var(--versiondock-border-soft); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .compare-pane-list { min-height: 0; flex: 1; overflow: hidden; }
 .compare-pane-list > .commit-list { height: 100%; }
@@ -3511,7 +3513,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .compare-splitter:hover { background: var(--versiondock-accent); }
 .compare-splitter > i { position: absolute; inset: -2px 0; }
 
-.branch-working-diff-panel { width: 100%; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--versiondock-bg); border-right: 1px solid var(--versiondock-border); }
+.branch-working-diff-panel { width: 100%; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--versiondock-surface); border-right: 1px solid var(--versiondock-border); }
 .branch-working-diff-panel > header { min-width: 0; min-height: 62px; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--versiondock-border); }
 .branch-working-diff-panel > header > button { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; padding: 0; border: 1px solid var(--versiondock-border); border-radius: 4px; }
 .branch-working-title { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
@@ -3602,7 +3604,7 @@ button.danger:not(:disabled):hover,
 .worktree-row strong { display: flex; align-items: center; gap: 5px; }
 .worktree-row strong em { padding: 1px 4px; border-radius: 2px; color: #fff; background: var(--versiondock-accent-bg); font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-style: normal; }
 .changelist-popover { position: fixed; z-index: 120; left: 8px; top: 102px; width: min(330px, calc(100vw - 16px)); max-height: 55vh; overflow: auto; padding: 5px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 6px 20px #0008; }.changelist-popover > header { height: 28px; display: flex; align-items: center; }.changelist-popover > header strong { flex: 1; }.changelist-create { display: flex; gap: 4px; padding: 4px 0; }.changelist-create input { min-width: 0; flex: 1; height: 27px; padding: 0 6px; border: 1px solid var(--versiondock-border); background: var(--versiondock-input); }.changelist-create button, .changelist-manage-row > button { width: 27px; border: 1px solid var(--versiondock-border); }.changelist-manage-row { min-height: 35px; display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--versiondock-border-soft); }.changelist-manage-row > span { min-width: 0; flex: 1; display: flex; flex-direction: column; }.changelist-manage-row small { color: var(--versiondock-muted); }.context-menu .context-label { display: block; padding: 3px 8px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
-.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.42);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--vscode-editor-background,var(--versiondock-panel));border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 16px 48px rgba(0,0,0,.35);padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent}.dialog-choices>button:hover{background:var(--versiondock-hover);border-color:var(--versiondock-border)}.dialog-choices>button>.codicon{color:var(--versiondock-accent)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.dialog-choices .danger-choice strong{color:var(--versiondock-danger)}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
+.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:color-mix(in srgb,var(--versiondock-surface) 55%,transparent);backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--versiondock-surface);border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 8px 24px var(--vscode-widget-shadow,rgba(0,0,0,.2));padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent}.dialog-choices>button:hover{background:var(--versiondock-hover);border-color:var(--versiondock-border)}.dialog-choices>button>.codicon{color:var(--versiondock-accent)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.dialog-choices .danger-choice strong{color:var(--versiondock-danger)}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
 .file-history-backdrop { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .46); }
 .file-history-panel { width: min(1320px, calc(100vw - 48px)); height: min(760px, calc(100vh - 48px)); min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: 38px minmax(0, 1fr); background: var(--versiondock-bg); border: 1px solid var(--versiondock-border); box-shadow: 0 18px 54px rgba(0, 0, 0, .44); }
 .file-history-header { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }

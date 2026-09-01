@@ -152,6 +152,19 @@ describe('HistoryWorkspace capabilities', () => {
     render(<HistoryWorkspace />);
     expect(screen.getByText('Loading branches…')).toBeInTheDocument();
     expect(screen.getByText('Loading commits…')).toBeInTheDocument();
+    expect(document.querySelector('.ref-overflow')).toHaveTextContent('1');
+    expect(document.querySelector('.ref-overflow')).not.toHaveTextContent('+1');
+  });
+
+  it('clamps legacy persisted sidebar widths as soon as the history view mounts', () => {
+    const data = bootstrap(true, true);
+    data.state.layout = { panelSizes: { commit: 360, branches: 40, detail: 900 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
+    useAppStore.setState({ bootstrap: data, snapshot, selectedRepoId: 'repo' });
+    render(<HistoryWorkspace />);
+    expect(screen.getByRole('separator', { name: 'Resize branch sidebar' })).toHaveAttribute('aria-valuenow', '120');
+    expect(screen.getByRole('separator', { name: 'Resize detail sidebar' })).toHaveAttribute('aria-valuenow', '680');
+    expect(document.querySelector('.branch-slot')).toHaveStyle({ width: '120px' });
+    expect(document.querySelector('.detail-slot')).toHaveStyle({ width: '680px' });
   });
 
   it('formats a merged local and remote ref without translation placeholders', () => {
@@ -281,24 +294,19 @@ describe('HistoryWorkspace data helpers', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Repo 2GIT' }));
     expect(screen.queryByRole('radio', { name: 'Repo 2GIT' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Repo 2' })[0]).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Repo 2' })[0]);
-    expect(screen.getByRole('radio', { name: 'Repo 2GIT' })).toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: 'RepoGIT' }));
-    expect(screen.queryByRole('radio', { name: 'RepoGIT' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Repo' })[0]);
-    expect(screen.getByRole('radio', { name: 'RepoGIT' })).toBeChecked();
-    expect(screen.getAllByRole('button', { name: 'Repo' })[0]).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole('button', { name: 'Branch / Tags' }));
+    expect(screen.queryByRole('radio', { name: 'main' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'feature/ui' }));
     expect(screen.queryByRole('radio', { name: 'feature/ui' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'feature/ui' }));
     expect(screen.getByRole('radio', { name: 'feature/ui' })).toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: 'main' }));
-    expect(screen.queryByRole('radio', { name: 'main' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'main' }));
-    expect(screen.getByRole('radio', { name: 'main' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'feature/ui' })).not.toBeChecked();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Repo 2' })[0]);
+    fireEvent.click(screen.getByRole('radio', { name: 'RepoGIT' }));
+    expect(screen.queryByRole('radio', { name: 'RepoGIT' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Repo' })[0]).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Branch / Tags' }));
+    expect(screen.getByRole('radio', { name: 'main' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'feature/ui' })).not.toBeInTheDocument();
   }, 15000);
 
   it('merges branch instances and only exposes shared, current, or mainline branches by default', () => {

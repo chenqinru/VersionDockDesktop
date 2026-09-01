@@ -2167,6 +2167,29 @@ async fn real_git_core_workflow() {
         .refs
         .iter()
         .any(|value| value == "HEAD -> refs/heads/main"));
+    let head_detail = vcs::commit_detail(&repository, &history.commits[0].hash, &token)
+        .await
+        .unwrap();
+    assert_eq!(head_detail.branches.is_head, Some(true));
+    assert!(head_detail
+        .branches
+        .local
+        .iter()
+        .any(|value| value == "main"));
+    assert!(!head_detail
+        .branches
+        .remote
+        .iter()
+        .any(|value| value.ends_with("/HEAD")));
+    let pushed_detail = vcs::commit_detail(&repository, &history.commits[1].hash, &token)
+        .await
+        .unwrap();
+    assert_eq!(pushed_detail.branches.is_head, Some(false));
+    assert!(pushed_detail
+        .branches
+        .remote
+        .iter()
+        .any(|value| value == "origin/main"));
     vcs::branch_operation(
         &repository,
         BranchOperation::Create {

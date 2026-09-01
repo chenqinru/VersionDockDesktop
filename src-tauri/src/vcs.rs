@@ -3745,8 +3745,8 @@ fn svn_history_target(
         if revision.bytes().all(|byte| byte.is_ascii_digit()) {
             return Ok(Some(format!("{}@{revision}", repo.root_path)));
         }
-        safe_relative(Path::new("/"), revision, true)?;
-        relative.push_str(revision.trim_matches('/'));
+        let target = svn_repository_target(revision)?;
+        relative.push_str(target.trim_start_matches("^/"));
     }
     if let Some(path) = path {
         relative_path(Path::new(&repo.root_path), path, false)?;
@@ -4208,48 +4208,65 @@ async fn containing_branches(
     if !matches!(repo.kind, VcsKind::Git) {
         return Ok(CommitBranches::default());
     }
-    let local = git(
-        vec![
-            "branch".into(),
-            "--contains".into(),
-            revision.into(),
-            "--format=%(refname:short)".into(),
-        ],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text();
-    let remote = git(
-        vec![
-            "for-each-ref".into(),
-            "--contains".into(),
-            revision.into(),
-            "--format=%(refname:short)".into(),
-            "refs/remotes".into(),
-        ],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text();
-    let tags = git(
-        vec![
-            "tag".into(),
-            "--contains".into(),
-            revision.into(),
-            "--format=%(refname:short)".into(),
-        ],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text();
+    let (local, remote, tags, head) = tokio::try_join!(
+        git(
+            vec![
+                "branch".into(),
+                "--contains".into(),
+                revision.into(),
+                "--format=%(refname)".into(),
+            ],
+            repo,
+            token,
+        ),
+        git(
+            vec![
+                "for-each-ref".into(),
+                "--contains".into(),
+                revision.into(),
+                "--format=%(refname)".into(),
+                "refs/remotes".into(),
+            ],
+            repo,
+            token,
+        ),
+        git(
+            vec![
+                "tag".into(),
+                "--points-at".into(),
+                revision.into(),
+                "--format=%(refname)".into(),
+            ],
+            repo,
+            token,
+        ),
+        git(vec!["rev-parse".into(), "HEAD".into()], repo, token),
+    )?;
+    let local = local.stdout_text();
+    let remote = remote.stdout_text();
+    let tags = tags.stdout_text();
+    let head = head.stdout_text();
 
     Ok(CommitBranches {
-        local: lines(&local),
-        remote: lines(&remote),
-        tags: lines(&tags),
+        local: lines(&local)
+            .into_iter()
+            .filter_map(|value| value.strip_prefix("refs/heads/").map(str::to_string))
+            .collect(),
+        remote: lines(&remote)
+            .into_iter()
+            .filter_map(|value| value.strip_prefix("refs/remotes/").map(str::to_string))
+            .filter(|value| !value.ends_with("/HEAD"))
+            .collect(),
+        tags: lines(&tags)
+            .into_iter()
+            .filter_map(|value| value.strip_prefix("refs/tags/").map(str::to_string))
+            .collect(),
+        is_head: Some(
+            !head.trim().is_empty()
+                && (head.trim() == revision
+                    || head.trim().starts_with(revision)
+                    || revision.starts_with(head.trim())),
+        ),
     })
 }
 
@@ -7818,6 +7835,18 @@ mod tests {
         assert_eq!(
             svn_display_ref("^/tags/v1.0.0"),
             ("tags/v1.0.0".into(), Some("v1.0.0".into()))
+        );
+        assert_eq!(
+            svn_repository_target("release").unwrap(),
+            "^/branches/release"
+        );
+        assert_eq!(
+            svn_repository_target("branches/release").unwrap(),
+            "^/branches/release"
+        );
+        assert_eq!(
+            svn_repository_target("tags/v1.0.0").unwrap(),
+            "^/tags/v1.0.0"
         );
     }
 }

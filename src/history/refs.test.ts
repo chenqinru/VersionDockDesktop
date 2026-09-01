@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyRef, commitRefs, groupRefs, isPrimaryBranch, mergeLocalRemote, primaryBranchRef } from './refs';
+import { branchRevisionRef, classifyRef, commitRefs, groupRefs, isPrimaryBranch, mergeLocalRemote, primaryBranchRef } from './refs';
 
 describe('history refs', () => {
   it('classifies local, remote, tag and HEAD refs', () => {
@@ -34,5 +34,27 @@ describe('history refs', () => {
 
     const tagGroup = merged.find((g) => g.isTag);
     expect(tagGroup?.label).toBe('v1.0.0');
+  });
+
+  it('sorts primary branches first and leaves remote HEAD at the end for callers to hide', () => {
+    const groups = groupRefs([
+      'refs/remotes/origin/HEAD',
+      'refs/remotes/origin/zeta',
+      'refs/heads/feature/ui',
+      'refs/heads/main',
+      'refs/tags/v1.0.0',
+    ], 'git', ['origin']);
+    expect(groups.map((group) => group.key)).toEqual([
+      'main',
+      'feature/ui',
+      'remote:origin:zeta',
+      'tag:v1.0.0',
+      'origin/HEAD',
+    ]);
+  });
+
+  it('passes SVN branch names without adding a branches prefix', () => {
+    expect(branchRevisionRef({ name: 'feature/ui' }, 'svn')).toBe('feature/ui');
+    expect(branchRevisionRef({ name: 'trunk' }, 'svn')).toBe('trunk');
   });
 });

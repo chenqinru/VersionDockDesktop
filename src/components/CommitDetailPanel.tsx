@@ -8,6 +8,7 @@ import type { CommitDetail, CommitNode, CommitPathOperationEntry, MergeParentCha
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { confirmDialog } from './dialogService';
 import { AuthorAvatar } from './AuthorAvatar';
+import { branchColor, headColor, isPrimaryBranch, tagColor } from './branchColor';
 
 type DetailTreeNode = { name: string; path: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
 
@@ -22,28 +23,49 @@ function statusClass(status: string): string {
 }
 
 function refLabel(ref: string): string {
-  return ref.replace('HEAD -> ', '').replace('tag: ', '').replace('refs/heads/', '').replace('refs/remotes/', '');
+  return ref
+    .replace('HEAD -> ', '')
+    .replace('tag: ', '')
+    .replace('refs/heads/', '')
+    .replace('refs/remotes/', '')
+    .replace('refs/tags/', '');
 }
 
-type DetailRef = { value: string; kind: 'branch' | 'remote' | 'tag' | 'head' };
+type DetailRef = { value: string; label: string; kind: 'branch' | 'remote' | 'tag' | 'head'; source: 'commit' | 'containing' };
 
 function refsFor(detail: CommitDetail): DetailRef[] {
   const local = new Set(detail.branches.local);
-  const remote = new Set(detail.branches.remote);
+  const remote = new Set(detail.branches.remote.filter((branch) => !branch.endsWith('/HEAD')));
   const tags = new Set(detail.branches.tags);
-  const existingLabels = new Set(detail.commit.refs.map(refLabel));
-  const refs = [...new Set([
-    ...detail.commit.refs,
-    ...detail.branches.local.filter((branch) => !existingLabels.has(refLabel(branch))),
-    ...detail.branches.remote.filter((branch) => !existingLabels.has(refLabel(branch))),
-    ...detail.branches.tags.map((tag) => `tag: ${tag}`).filter((tag) => !existingLabels.has(refLabel(tag))),
-  ])];
-  return refs.map((value) => {
-    if (value.includes('HEAD')) return { value, kind: 'head' };
-    if (value.startsWith('tag: ') || value.startsWith('refs/tags/') || tags.has(value)) return { value, kind: 'tag' };
-    if (remote.has(value) || value.startsWith('refs/remotes/')) return { value, kind: 'remote' };
-    return { value, kind: local.has(value) ? 'branch' : value.includes('/') ? 'remote' : 'branch' };
+  const values: Array<{ value: string; source: DetailRef['source'] }> = [
+    ...(detail.branches.isHead ? [{ value: 'HEAD', source: 'commit' as const }] : []),
+    ...detail.commit.refs.map((value) => ({ value, source: 'commit' as const })),
+    ...detail.branches.local.map((branch) => ({ value: `refs/heads/${branch}`, source: 'containing' as const })),
+    ...[...remote].map((branch) => ({ value: `refs/remotes/${branch}`, source: 'containing' as const })),
+    ...detail.branches.tags.map((tag) => ({ value: `refs/tags/${tag}`, source: 'containing' as const })),
+  ];
+  const refs = values.flatMap(({ value, source }): DetailRef[] => {
+    const label = refLabel(value);
+    if (value.startsWith('refs/remotes/') && label.endsWith('/HEAD')) return [];
+    if (!value.startsWith('refs/') && label.endsWith('/HEAD') && !local.has(label)) return [];
+    if (value === 'HEAD' || value.startsWith('HEAD -> ')) return [{ value, label: 'HEAD', kind: 'head', source }];
+    if (value.startsWith('tag: ') || value.startsWith('refs/tags/') || tags.has(label)) return [{ value, label, kind: 'tag', source }];
+    if (value.startsWith('refs/remotes/') || remote.has(label)) return [{ value, label, kind: 'remote', source }];
+    return [{ value, label, kind: 'branch', source }];
   });
+  const unique = [...new Map(refs.map((ref) => [`${ref.kind}:${ref.label}`, ref])).values()];
+  const rank = (ref: DetailRef): number => {
+    if (ref.kind === 'head') return 0;
+    if (ref.kind === 'tag' && ref.source === 'commit') return 1;
+    if (ref.kind === 'branch') return isPrimaryBranch(ref.label) ? 2 : 3;
+    if (ref.kind === 'remote') {
+      const primary = ['main', 'master', 'trunk', 'develop', 'dev', 'release']
+        .some((name) => ref.label.toLowerCase() === name || ref.label.toLowerCase().endsWith(`/${name}`));
+      return primary ? 4 : 5;
+    }
+    return 6;
+  };
+  return unique.sort((left, right) => rank(left) - rank(right) || left.label.localeCompare(right.label));
 }
 
 function sortTreeNodes(nodes: DetailTreeNode[]): DetailTreeNode[] {
@@ -480,15 +502,30 @@ function MergeParentChangeGroup({
   );
 }
 
-function RefBadges({ detail }: { detail: CommitDetail }) {
+function RefBadges({ detail, collapsible = false }: { detail: CommitDetail; collapsible?: boolean }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const refs = refsFor(detail);
+  const visible = collapsible && !expanded ? refs.slice(0, 5) : refs;
+  const overflow = refs.slice(5);
   return (
     <div className="detail-refs">
-      {refsFor(detail).map((ref) => (
-        <em className={ref.kind} key={`${ref.kind}:${ref.value}`}>
+      {visible.map((ref) => {
+        const remoteBranch = ref.kind === 'remote' && ref.label.includes('/')
+          ? ref.label.slice(ref.label.indexOf('/') + 1)
+          : ref.label;
+        const color = ref.kind === 'head'
+          ? headColor()
+          : ref.kind === 'tag'
+            ? tagColor()
+            : branchColor(remoteBranch);
+        return <em className={ref.kind} key={`${ref.kind}:${ref.value}`} style={{ '--ref-color': color } as React.CSSProperties} title={ref.label}>
           <Codicon name={ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : ref.kind === 'head' ? 'arrow-right' : 'git-branch'} />
-          {refLabel(ref.value)}
-        </em>
-      ))}
+          {ref.label}
+        </em>;
+      })}
+      {collapsible && !expanded && overflow.length > 0 && <button type="button" className="detail-ref-overflow" title={t('Show {0} more', overflow.length)} onClick={() => setExpanded(true)}>{t('+{0} more', overflow.length)}</button>}
+      {collapsible && expanded && refs.length > 5 && <button type="button" className="detail-ref-overflow expanded" onClick={() => setExpanded(false)}>{t('Show less')}</button>}
     </div>
   );
 }
@@ -834,7 +871,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
               })}
             />
             <AuthorMeta commit={detail.commit} />
-            <RefBadges detail={detail} />
+            <RefBadges detail={detail} collapsible />
           </div>
         )}
       </section>}

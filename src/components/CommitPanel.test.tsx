@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommitPanel } from './CommitPanel';
 import { SubtreePanel } from './SubtreePanel';
 import { buildFileTree } from './fileTree';
@@ -18,8 +18,10 @@ const bridge = new MockBridge(() => []);
 const renderPanel = () => render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
 const gitRepo: RepositoryStatus = { meta: { id: 'repo', name: 'Repository', rootPath: '/tmp/repo', color: '#4ec9b0', kind: 'git', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false }, branch: 'main', revision: 'abc', ahead: 0, behind: 0, files: [], conflicts: 0, operation: null };
 const gitSnapshot: WorkspaceSnapshot = { workspace: { id: 'workspace', name: 'Workspace', paths: ['/tmp/repo'], lastOpenedAt: '', available: true }, generation: 1, tools: { git: true, svn: true, svnadmin: true }, repositories: [gitRepo] };
+const originalRefresh = useAppStore.getState().refresh;
+const originalLoadStashes = useAppStore.getState().loadStashes;
 
-afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {} }); });
+afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, loadStashes: originalLoadStashes }); });
 
 describe('CommitPanel capabilities and file view', () => {
   it('compacts single-child directory chains while preserving file paths', () => {
@@ -58,15 +60,16 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByText('src/main', { selector: '.directory-row span' })).toBeInTheDocument();
   });
 
-  it('matches the VersionDock toolbar and keeps commit metadata left aligned', () => {
+  it('matches the VersionDock title actions and keeps commit metadata left aligned', () => {
     const changedRepo = { ...gitRepo, ahead: 1, files: [{ path: 'src/App.tsx', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
     const emptyRepo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'empty', name: 'Empty' } };
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo, emptyRepo] }, selectedRepoId: 'repo' });
     const { container } = renderPanel();
-    expect(screen.getByTitle('Rollback')).toBeInTheDocument();
-    expect(screen.getByTitle('Expand all')).toBeInTheDocument();
-    expect(screen.getByTitle('Collapse all')).toBeInTheDocument();
+    expect(screen.queryByTitle('Rollback')).not.toBeInTheDocument();
     expect(screen.getByTitle('View options')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('View options'));
+    expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse all' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stage' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Unstage' })).not.toBeInTheDocument();
     const parentRow = container.querySelector('.directory-row')!;
@@ -89,10 +92,24 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getAllByText('No changes')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Empty Twomain' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
-    fireEvent.click(screen.getByTitle('Collapse all'));
+    fireEvent.click(screen.getByTitle('View options'));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('Expand all'));
+    fireEvent.click(screen.getByTitle('View options'));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
+  });
+
+  it('shows a mixed expansion state after a repository is toggled manually', () => {
+    const changedRepo = { ...gitRepo, files: [{ path: 'src/App.tsx', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
+    useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo] }, selectedRepoId: 'repo' });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Repositorymain' }));
+    fireEvent.click(screen.getByTitle('View options'));
+
+    expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveClass('selected');
+    expect(screen.getByRole('button', { name: 'Collapse all' })).not.toHaveClass('selected');
   });
 
   it('auto-expands a repository when changes appear after an empty initial state', async () => {
@@ -244,9 +261,22 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo' });
     renderPanel();
     fireEvent.click(screen.getByTitle('View options'));
-    fireEvent.click(screen.getByRole('button', { name: 'List view' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Flat list' }));
     expect(useAppStore.getState().bootstrap?.state.layout?.stashViewMode).toBe('list');
     expect(useAppStore.getState().bootstrap?.state.layout?.fileViewMode).toBe('tree');
+  });
+
+  it('refreshes the active stash data together with the workspace snapshot', async () => {
+    const data = bootstrap(true);
+    data.state.layout = { panelSizes: { commit: 360, branches: 220, detail: 380 }, activeTab: 'stash', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const loadStashes = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo', refresh, loadStashes });
+    renderPanel();
+    loadStashes.mockClear();
+    fireEvent.click(screen.getAllByTitle('Refresh')[0]);
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+    expect(loadStashes).toHaveBeenCalledOnce();
   });
 
   it('shows shelf only after its storage and backend capability is enabled', () => {

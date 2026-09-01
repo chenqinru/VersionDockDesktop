@@ -1615,7 +1615,7 @@ impl Default for PanelSizes {
         Self {
             commit: 360,
             branches: 220,
-            detail: 360,
+            detail: 380,
         }
     }
 }
@@ -1912,6 +1912,9 @@ pub struct CommitBranches {
     pub local: Vec<String>,
     pub remote: Vec<String>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_head: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

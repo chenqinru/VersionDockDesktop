@@ -246,6 +246,7 @@ function TreeDirNode({
   repoId,
   entry,
   expansion,
+  onManualExpansionChange,
   onUnshelveFile,
   onOpenFileDiff,
 }: {
@@ -254,6 +255,7 @@ function TreeDirNode({
   repoId: string;
   entry: ShelfEntry;
   expansion: ExpansionCommand;
+  onManualExpansionChange: () => void;
   onUnshelveFile: (repoId: string, shelveId: string, filePath: string) => void;
   onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
 }) {
@@ -306,7 +308,7 @@ function TreeDirNode({
             userSelect: 'none',
             paddingLeft: '2px',
           }}
-          onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !open })}
+          onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !open }); }}
           title={node.path}
         >
           <Codicon
@@ -346,6 +348,7 @@ function TreeDirNode({
               repoId={repoId}
               entry={entry}
               expansion={expansion}
+              onManualExpansionChange={onManualExpansionChange}
               onUnshelveFile={onUnshelveFile}
               onOpenFileDiff={onOpenFileDiff}
             />
@@ -372,6 +375,7 @@ function ShelfRow({
   repoId,
   viewMode,
   expansion,
+  onManualExpansionChange,
   onUnshelve,
   onUnshelveFile,
   onOpenFileDiff,
@@ -381,6 +385,7 @@ function ShelfRow({
   repoId: string;
   viewMode: 'tree' | 'list';
   expansion: ExpansionCommand;
+  onManualExpansionChange: () => void;
   onUnshelve: (repoId: string, shelveId: string) => void;
   onUnshelveFile: (repoId: string, shelveId: string, filePath: string) => void;
   onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
@@ -425,6 +430,7 @@ function ShelfRow({
           style={rowStyle.chevronBtn}
           onClick={(e) => {
             e.stopPropagation();
+            onManualExpansionChange();
             setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded });
           }}
         >
@@ -504,7 +510,8 @@ function ShelfRow({
                     depth={0}
                     repoId={repoId}
                     entry={entry}
-                    expansion={expansion}
+                  expansion={expansion}
+                  onManualExpansionChange={onManualExpansionChange}
                     onUnshelveFile={onUnshelveFile}
                     onOpenFileDiff={onOpenFileDiff}
                   />
@@ -666,12 +673,14 @@ export function ShelfPanel({
   repos,
   viewMode = 'tree',
   expansion = { sequence: 0, expanded: false },
+  onManualExpansionChange = () => undefined,
   onOpenFileDiff,
 }: {
   repos: RepositoryStatus[];
   selectedPaths?: Map<string, string[]>;
   viewMode?: 'tree' | 'list';
   expansion?: ExpansionCommand;
+  onManualExpansionChange?: () => void;
   onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
 }) {
   const shelves = useAppStore((state) => state.shelves);
@@ -750,6 +759,7 @@ export function ShelfPanel({
                     repoId={repo.meta.id}
                     viewMode={viewMode}
                     expansion={expansion}
+                    onManualExpansionChange={onManualExpansionChange}
                     onUnshelve={handleUnshelve}
                     onUnshelveFile={handleUnshelveFile}
                     onOpenFileDiff={onOpenFileDiff}
