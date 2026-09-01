@@ -474,7 +474,7 @@ export function WorktreePanel({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const css = {
-  root: { display: 'flex', flexDirection: 'column' as const, flex: 1, overflowY: 'auto' as const, background: 'var(--vscode-editor-background, var(--versiondock-bg))' },
+  root: { display: 'flex', flexDirection: 'column' as const, flex: 1, overflowY: 'auto' as const, minHeight: 0 },
   repoSection: { borderBottom: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))' } as React.CSSProperties,
   repoHeader: (color: string): React.CSSProperties => ({
     display: 'flex',

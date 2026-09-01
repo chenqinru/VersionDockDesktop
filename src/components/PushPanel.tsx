@@ -1237,7 +1237,7 @@ const css = {
     display: 'flex', flexDirection: 'column' as const, gap: '6px',
     padding: '8px',
     borderTop: '1px solid var(--vscode-panel-border, var(--versiondock-border))',
-    background: 'var(--vscode-editor-background, var(--versiondock-bg))',
+    background: 'var(--vscode-sideBar-background, var(--versiondock-surface))',
     position: 'sticky' as const,
     bottom: 0,
     zIndex: 2,
@@ -1341,7 +1341,7 @@ const styles = {
   behindRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     padding: '12px 8px', fontSize: '12px',
-    color: 'var(--vscode-inputValidation-warningForeground, #cca700)',
+    color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))',
   } as React.CSSProperties,
   unpublishedRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',

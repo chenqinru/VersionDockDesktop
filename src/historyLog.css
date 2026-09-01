@@ -78,7 +78,7 @@
 .commit-row { position: absolute; left: 0; right: 0; z-index: 2; height: 28px; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 0; color: var(--versiondock-text); background: transparent; border: 0; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: left; }
 .commit-row { cursor: pointer; }
 .commit-row:hover { background: var(--versiondock-hover); }
-.commit-row.selected { background: var(--versiondock-selected); }
+.commit-row.selected { background: var(--versiondock-hover); }
 .commit-graph { flex: 0 0 auto; height: 28px; overflow: visible; }
 .commit-refs { min-width: 0; display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .commit-refs em { min-width: 0; max-width: 150px; height: 17px; display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; overflow: hidden; padding: 0 5px; color: var(--ref-color, var(--versiondock-accent)); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 20%, transparent); border: 1px solid color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 55%, transparent); border-radius: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-style: normal; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
@@ -86,9 +86,9 @@
 .commit-refs em.head { --ref-color: var(--versiondock-warning); }
 .commit-refs em.tag { --ref-color: var(--versiondock-muted); }
 .commit-refs em.svn { --ref-color: var(--versiondock-muted); }
-.commit-refs em.selected { color: var(--versiondock-bg); background: var(--ref-color, var(--versiondock-accent)); border-color: var(--ref-color, var(--versiondock-accent)); }
+.commit-refs em.selected { color: var(--ref-color, var(--versiondock-accent)); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 20%, transparent); border-color: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 55%, transparent); }
 .commit-refs em.ref-overflow { color: var(--versiondock-muted); background: transparent; border-color: var(--versiondock-border); }
-.commit-refs em.ref-overflow.selected { color: var(--versiondock-bg); background: var(--versiondock-accent); border-color: var(--versiondock-accent); }
+.commit-refs em.ref-overflow.selected { color: var(--versiondock-muted); background: transparent; border-color: var(--versiondock-border); }
 .commit-subject-text { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .commit-subject-text.merge-commit { color: var(--versiondock-muted); }
 .commit-row.selected .commit-subject-text.merge-commit { color: inherit; }

@@ -90,9 +90,9 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
     expect(document.querySelectorAll('.repo-heading > b')).toHaveLength(0);
     expect(screen.getByLabelText('Repository')).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Repositorymain' }));
+    fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
     expect(screen.getAllByText('No changes')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Empty Twomain' }));
+    fireEvent.click(screen.getByRole('button', { name: /Empty Two/ }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
     fireEvent.click(screen.getByTitle('More'));
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
@@ -107,7 +107,7 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo] }, selectedRepoId: 'repo' });
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Repositorymain' }));
+    fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
     fireEvent.click(screen.getByTitle('More'));
 
     expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveClass('selected');
