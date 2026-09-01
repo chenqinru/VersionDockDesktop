@@ -190,7 +190,12 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         if (id === 'diff-working') await loadBranchWorkingDiff(instance.repoId, instance.branch.remote ? `refs/remotes/${instance.branch.name}` : `refs/heads/${instance.branch.name}`);
         if (id === 'merge') await branchOperation({ type: 'merge', name: target }, instance.repoId);
         if (id === 'rebase') await branchOperation({ type: 'rebase', name: target }, instance.repoId);
-        if (id === 'pull') await sync(instance.repoId, branch.vcsKind === 'svn' ? 'update' : 'pull');
+        if (id === 'pull') await sync(
+          instance.repoId,
+          branch.vcsKind === 'svn' ? 'update' : 'pull',
+          true,
+          { branch: branch.vcsKind === 'svn' ? branch.ref : instance.branch.name },
+        );
         if (id === 'push') await sync(instance.repoId, 'push');
         if (id === 'delete') {
           const mode = await choiceDialog({

@@ -33,6 +33,11 @@ export interface OpenWorkspaceOptions {
   insertionIndex?: number;
 }
 
+export interface SyncOptions {
+  remote?: string;
+  branch?: string;
+}
+
 export function workspacePathsEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   const sortedLeft = [...left].sort();
@@ -336,8 +341,8 @@ export interface AppStore {
   commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>, message: string, push: boolean) => Promise<void>;
   retryBatchResult: (repoId: string) => Promise<void>;
   dismissBatchReport: () => void;
-  sync: (repoId: string, action: 'fetch' | 'pull' | 'push' | 'update', notify?: boolean) => Promise<RepositoryUpdateResult | undefined>;
-  updateProject: () => Promise<void>;
+  sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'push' | 'update', notify?: boolean, options?: SyncOptions) => Promise<RepositoryUpdateResult | undefined>;
+  updateProject: (strategy?: 'merge' | 'rebase') => Promise<void>;
   openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
   openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
   recentCommitMessages: (repoIds: string[], signal?: AbortSignal) => Promise<RecentCommitMessage[]>;
@@ -1820,7 +1825,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       await withBusy(async () => {
         set({ branchesLoading: true });
         const requests: Promise<unknown>[] = [get().loadHistory(true)];
-        if (get().bootstrap?.capabilities.changelist && repo.capabilities?.changelist !== false) requests.push(get().loadChangelists(repoId));
+        if (get().bootstrap?.capabilities.changelist && repo.capabilities?.changelist !== false) requests.push(get().loadChangelists());
         if (repo.meta.kind === 'git' && get().bootstrap?.capabilities.subtree && repo.capabilities?.subtree !== false) requests.push(get().loadSubtrees(repoId));
         const currentWorkspace = workspaceId();
         for (const item of get().snapshot?.repositories ?? []) {
@@ -1935,7 +1940,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     commit: async (repoId, message, amend, paths, push) => withBusy(async () => {
       await bridge().request({ type: 'commit', payload: { workspace_id: workspaceId(), repo_id: repoId, message, amend, paths } });
       clearCommittedSelections([repoId]);
-      if (push) await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null } }, { timeoutMs: 600_000 });
+      if (push) await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null, branch: null } }, { timeoutMs: 600_000 });
     }, `commit:${repoId}`),
 
     commitMany: async (targets, message, push) => withBusy(async () => {
@@ -1978,7 +1983,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       let next: RepositoryOperationResult;
       if (previous.committed && previous.pushAttempted && !previous.pushed) {
         try {
-          await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null } }, { timeoutMs: 600_000 });
+          await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null, branch: null } }, { timeoutMs: 600_000 });
           next = { ...previous, pushed: true, failedStage: null, recoveryHint: null, error: null };
         } catch (error) {
           next = { ...previous, error: error instanceof BridgeError ? error : previous.error };
@@ -2000,12 +2005,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     }, `commit:${repoId}`),
     dismissBatchReport: () => set({ batchCommitReport: undefined }),
 
-    sync: async (repoId, action, notify = true) => withBusy(async () => {
+    sync: async (repoId, action, notify = true, options = {}) => withBusy(async () => {
       const capability = action === 'fetch' ? 'syncFetch' : action === 'push' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
       if (!ensureRepositoryCapability(repoId, capability)) return;
       let result: SyncResult;
       try {
-        result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: null } }, { timeoutMs: 600_000 });
+        result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null } }, { timeoutMs: 600_000 });
       } catch (error) {
         if (await handlePullAutoStashError(error)) return undefined;
         throw error;
@@ -2030,11 +2035,25 @@ export const useAppStore = create<AppStore>((set, get) => {
       return result.update ?? undefined;
     }, `sync:${repoId}`),
 
-    updateProject: async () => {
+    updateProject: async (strategy) => {
       const repositories = get().snapshot?.repositories ?? [];
+      if (!strategy && repositories.some((repo) => repo.meta.kind === 'git')) {
+        const t = createTranslator(resolveLanguage(settings().language));
+        const selected = await choiceDialog({
+          title: t('Update Project — Strategy'),
+          message: t('Choose how incoming Git changes are integrated.'),
+          choices: [
+            { id: 'merge', label: t('Merge incoming changes into the current branch'), icon: 'git-merge' },
+            { id: 'rebase', label: t('Rebase the current branch on top of incoming changes'), icon: 'repo-forked' },
+          ],
+        });
+        if (!selected) return;
+        strategy = selected === 'rebase' ? 'rebase' : 'merge';
+      }
+      const gitAction: 'pull' | 'pullRebase' = strategy === 'rebase' ? 'pullRebase' : 'pull';
       const wid = workspaceId();
       const settled = await Promise.all(repositories.map(async (repo) => {
-        try { const value = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: repo.meta.kind === 'git' ? 'pull' : 'update', remote: null } }, { timeoutMs: 600_000 }); return { repoId: repo.meta.id, repoName: repo.meta.name, result: value.update ?? undefined }; }
+        try { const value = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: repo.meta.kind === 'git' ? gitAction : 'update', remote: null, branch: null } }, { timeoutMs: 600_000 }); return { repoId: repo.meta.id, repoName: repo.meta.name, result: value.update ?? undefined }; }
         catch (error) {
           await handlePullAutoStashError(error);
           return { repoId: repo.meta.id, repoName: repo.meta.name, error: errorText(error) };
@@ -2428,15 +2447,20 @@ export const useAppStore = create<AppStore>((set, get) => {
     loadChangelists: async (repoId) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
-      const id = repoId ?? get().selectedRepoId;
-      if (!b || !wid || !id) return;
-      const values = await b.request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: wid, repo_id: id } }).catch(() => []);
+      if (!b || !wid) return;
+      const repositories = repoId
+        ? (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.id === repoId)
+        : (get().snapshot?.repositories ?? []).filter((repo) => capabilityAvailable(repo.capabilities, 'changelist', true));
+      const values = await Promise.all(repositories.map(async (repo) => ({
+        repoId: repo.meta.id,
+        changelists: await b.request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+      })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ changelists: { ...state.changelists, [id]: values } }));
+      set((state) => ({ changelists: values.reduce((next, value) => ({ ...next, [value.repoId]: value.changelists }), state.changelists) }));
     },
     changelistOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'changelistOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-      await get().loadChangelists(repoId);
+      await get().loadChangelists();
     }, `changelist:${repoId}`),
     loadWorktrees: async (repoId) => {
       const b = get().bridge;

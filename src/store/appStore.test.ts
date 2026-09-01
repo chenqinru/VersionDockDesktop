@@ -753,12 +753,45 @@ describe('appStore async lifecycle', () => {
       return [];
     });
     useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories });
-    await useAppStore.getState().updateProject();
+    await useAppStore.getState().updateProject('merge');
     const notification = useAppStore.getState().notifications.find((item) => item.actions.some((action) => action.type === 'viewUpdateResults'));
     expect(notification).toBeDefined();
     expect(notification?.details).toContain('B: offline');
     const action = notification?.actions.find((item) => item.type === 'viewUpdateResults');
     expect(action).toMatchObject({ type: 'viewUpdateResults', results: [expect.objectContaining({ repoId: 'a' })] });
+  });
+
+  it('sends the selected branch and rebase strategy to the sync backend', async () => {
+    const requests: BridgeCommand[] = [];
+    const current = snapshot('workspace', 1);
+    const bridge = new MockBridge((command) => {
+      requests.push(command);
+      if (command.type === 'sync') return { output: 'pulled', update: null };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, selectedRepoId: 'repo' });
+    await useAppStore.getState().sync('repo', 'pullRebase', false, { remote: 'origin', branch: 'origin/main' });
+    expect(requests.find((command) => command.type === 'sync')).toMatchObject({
+      type: 'sync',
+      payload: { repo_id: 'repo', action: 'pullRebase', remote: 'origin', branch: 'origin/main' },
+    });
+  });
+
+  it('uses the selected Update Project strategy for every Git repository', async () => {
+    const requests: BridgeCommand[] = [];
+    const current = snapshot('workspace', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const bridge = new MockBridge((command) => {
+      requests.push(command);
+      if (command.type === 'sync') return { output: '', update: { repoId: command.payload.repo_id, beforeRevision: '1', afterRevision: '1', beforeStatus: '', afterStatus: '', summary: { kind: 'noChanges', commitCount: 0, fileCount: 0, containsMerge: false, detail: { commits: [], files: [] } }, summaryError: null } };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories });
+    await useAppStore.getState().updateProject('rebase');
+    expect(requests.filter((command) => command.type === 'sync')).toEqual([
+      expect.objectContaining({ payload: expect.objectContaining({ repo_id: 'a', action: 'pullRebase' }) }),
+      expect.objectContaining({ payload: expect.objectContaining({ repo_id: 'b', action: 'pullRebase' }) }),
+    ]);
   });
 
   it('opens conflicts and preserves recovery guidance when pull auto-stash restoration conflicts', async () => {

@@ -621,6 +621,9 @@ fn sync_phase(action: &crate::models::SyncAction) -> (&'static str, &'static str
     match action {
         crate::models::SyncAction::Fetch => ("fetching", "Fetching remote references"),
         crate::models::SyncAction::Pull => ("pulling", "Pulling repository changes"),
+        crate::models::SyncAction::PullRebase => {
+            ("pullingRebase", "Pulling and rebasing repository changes")
+        }
         crate::models::SyncAction::Push => ("pushing", "Pushing repository changes"),
         crate::models::SyncAction::Update => ("updating", "Updating SVN working copy"),
     }
@@ -1813,6 +1816,11 @@ async fn dispatch(
                 VcsKind::Svn => workspace::svn_status(repo, token).await?,
             };
             workspace::apply_runtime_capabilities(&mut status, &tools, &secure_credentials);
+            let metas = state.cached_repositories(&workspace_id).await;
+            workspace::apply_nested_git_ownership_with_metas(
+                std::slice::from_mut(&mut status),
+                &metas,
+            );
             json(status)
         }
         BridgeCommand::FileDiff {
@@ -2085,7 +2093,8 @@ async fn dispatch(
                                     Some(index as u32),
                                     Some(total),
                                 );
-                                vcs::sync(&repo, crate::models::SyncAction::Push, None, token).await
+                                vcs::sync(&repo, crate::models::SyncAction::Push, None, None, token)
+                                    .await
                             })
                             .await
                             .map(|_| true)
@@ -2177,6 +2186,7 @@ async fn dispatch(
             repo_id,
             action,
             remote,
+            branch,
         } => {
             let (phase, message) = sync_phase(&action);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
@@ -2191,7 +2201,7 @@ async fn dispatch(
                     None,
                     None,
                 );
-                vcs::sync(&repo, action, remote, token).await
+                vcs::sync(&repo, action, remote, branch, token).await
             })
             .await?;
             json(value)
@@ -2457,7 +2467,7 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(changelist::list(&state.config_dir, &repo).await?)
+            json(changelist::list(&state.config_dir, &workspace_id, &repo).await?)
         }
         BridgeCommand::ChangelistOperation {
             workspace_id,
@@ -2466,7 +2476,7 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
-                changelist::operate(&state.config_dir, &repo, operation).await
+                changelist::operate(&state.config_dir, &workspace_id, &repo, operation).await
             })
             .await?;
             json(true)

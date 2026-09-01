@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore } from '../../store/appStore';
 import { useI18n } from '../../i18n';
-import { promptDialog, confirmDialog } from '../dialogService';
+import { promptDialog, confirmDialog, choiceDialog } from '../dialogService';
 import type { RepositoryStatus } from '../../bindings/generated';
 import { useBridge } from '../../platform/context';
 import { resolveSubmoduleOperationTarget } from './submoduleTarget';
@@ -136,6 +136,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   const repositories = useMemo(() => snapshot?.repositories ?? [], [snapshot?.repositories]);
   const gitRepos = useMemo(() => repositories.filter((r) => r.meta.kind === 'git'), [repositories]);
   const conflictRepos = useMemo(() => repositories.filter((r) => r.conflicts > 0), [repositories]);
+  const operationRepos = useMemo(() => repositories.filter((r) => r.operation === 'merge' || r.operation === 'rebase'), [repositories]);
 
   // 计算公共分支与公共 Tag
   const { commonLocalBranches, commonRemoteBranches, commonTags } = useMemo(() => {
@@ -179,7 +180,18 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   // 全局动作：更新全部仓库
   const handleUpdateAll = async () => {
     onClose();
-    await updateProject();
+    const strategy = gitRepos.length > 0
+      ? await choiceDialog({
+        title: t('Update Project — Strategy'),
+        message: t('Choose how incoming Git changes are integrated.'),
+        choices: [
+          { id: 'merge', label: t('Merge incoming changes into the current branch'), icon: 'git-merge' },
+          { id: 'rebase', label: t('Rebase the current branch on top of incoming changes'), icon: 'repo-forked' },
+        ],
+      })
+      : 'merge';
+    if (!strategy) return;
+    await updateProject(strategy === 'rebase' ? 'rebase' : 'merge');
   };
 
   // 全局动作：推送全部仓库
@@ -347,25 +359,25 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
       <div ref={popoverRef} className="statusbar-popover branch-menu-popover" style={popoverStyle}>
         <div className="statusbar-popover-content">
           {/* 冲突处理 */}
-          {conflictRepos.length > 0 && (
+          {(conflictRepos.length > 0 || operationRepos.length > 0) && (
             <div className="statusbar-menu-section warning-section">
-              <button
-                type="button"
-                className="statusbar-menu-item danger"
-                onClick={() => {
-                  onClose();
-                  setActiveTab('changes');
-                }}
-              >
-                <Codicon name="git-merge" />
-                <div className="statusbar-menu-item-text">
-                  <span className="statusbar-menu-item-title">
-                    {t('Resolve Conflicts in {0} repository', conflictRepos.length)}
-                  </span>
-                  <span className="statusbar-menu-item-desc">{t('Open the conflicts panel to resolve files')}</span>
-                </div>
-              </button>
-              {conflictRepos.map((repo) => (
+              {conflictRepos.length > 0 && <button
+                  type="button"
+                  className="statusbar-menu-item danger"
+                  onClick={() => {
+                    onClose();
+                    setActiveTab('changes');
+                  }}
+                >
+                  <Codicon name="git-merge" />
+                  <div className="statusbar-menu-item-text">
+                    <span className="statusbar-menu-item-title">
+                      {t('Resolve Conflicts in {0} repository', conflictRepos.length)}
+                    </span>
+                    <span className="statusbar-menu-item-desc">{t('Open the conflicts panel to resolve files')}</span>
+                  </div>
+                </button>}
+              {operationRepos.map((repo) => (
                 <button
                   key={repo.meta.id}
                   type="button"
@@ -378,7 +390,8 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       danger: true,
                     });
                     if (confirmed) {
-                      await abortRepositoryOperation(repo.meta.id, 'merge');
+                      await abortRepositoryOperation(repo.meta.id, repo.operation ?? 'merge');
+                      await refresh(true);
                     }
                   }}
                 >
@@ -677,6 +690,27 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
 
                   {activeSubmenuRepo.meta.kind === 'svn' && (
                     <>
+                      {activeSubmenuRepo.operation === 'merge' && (
+                        <button
+                          type="button"
+                          className="statusbar-menu-item danger"
+                          onClick={async () => {
+                            onClose();
+                            const confirmed = await confirmDialog({
+                              title: t('Abort Merge'),
+                              message: t('Abort merge in {0}? This will restore the repository to its pre-merge state.', activeSubmenuRepo.meta.name),
+                              danger: true,
+                            });
+                            if (confirmed) {
+                              await abortRepositoryOperation(activeSubmenuRepo.meta.id, 'merge');
+                              await refresh(true);
+                            }
+                          }}
+                        >
+                          <Codicon name="error" />
+                          <span>{t('Abort Merge')}</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="statusbar-menu-item"
@@ -998,7 +1032,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await Promise.allSettled(gitRepos.map((r) => sync(r.meta.id, 'pull')));
+                        await Promise.allSettled(gitRepos.map((r) => sync(r.meta.id, 'pull', true, { branch: activeCommonBranch.name })));
                       }}
                     >
                       <Codicon name="cloud-download" />
@@ -1058,9 +1092,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       onClick={async () => {
                         onClose();
                         await Promise.allSettled(
-                          gitRepos.map((r) =>
-                            branchOperation({ type: 'rebase', name: activeCommonBranch.name }, r.meta.id)
-                          )
+                          gitRepos.map((r) => branchOperation({ type: 'rebase', name: activeCommonBranch.name }, r.meta.id))
                         );
                         await refresh(true);
                       }}
@@ -1075,9 +1107,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       onClick={async () => {
                         onClose();
                         await Promise.allSettled(
-                          gitRepos.map((r) =>
-                            branchOperation({ type: 'merge', name: activeCommonBranch.name }, r.meta.id)
-                          )
+                          gitRepos.map((r) => branchOperation({ type: 'merge', name: activeCommonBranch.name }, r.meta.id))
                         );
                         await refresh(true);
                       }}
@@ -1126,9 +1156,10 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       onClick={async () => {
                         onClose();
                         await Promise.allSettled(
-                          gitRepos.map((r) =>
-                            branchOperation({ type: 'rebase', name: activeCommonBranch.name }, r.meta.id)
-                          )
+                          gitRepos.map((r) => {
+                            const branch = (branchesByRepo[r.meta.id] ?? []).find((item) => item.remote && item.name === activeCommonBranch.name);
+                            return sync(r.meta.id, 'pullRebase', true, { remote: branch?.remoteName ?? activeCommonBranch.name.split('/')[0], branch: activeCommonBranch.name });
+                          })
                         );
                         await refresh(true);
                       }}
@@ -1143,9 +1174,10 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       onClick={async () => {
                         onClose();
                         await Promise.allSettled(
-                          gitRepos.map((r) =>
-                            branchOperation({ type: 'merge', name: activeCommonBranch.name }, r.meta.id)
-                          )
+                          gitRepos.map((r) => {
+                            const branch = (branchesByRepo[r.meta.id] ?? []).find((item) => item.remote && item.name === activeCommonBranch.name);
+                            return sync(r.meta.id, 'pull', true, { remote: branch?.remoteName ?? activeCommonBranch.name.split('/')[0], branch: activeCommonBranch.name });
+                          })
                         );
                         await refresh(true);
                       }}
@@ -1301,7 +1333,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await sync(activeBranchAction.repoId, 'pull');
+                        await sync(activeBranchAction.repoId, 'pull', true, { branch: activeBranchAction.branchName });
                       }}
                     >
                       <Codicon name="cloud-download" />
@@ -1428,10 +1460,8 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await branchOperation(
-                          { type: 'rebase', name: activeBranchAction.branchName },
-                          activeBranchAction.repoId
-                        );
+                        const branch = (branchesByRepo[activeBranchAction.repoId] ?? []).find((item) => item.remote && item.name === activeBranchAction.branchName);
+                        await sync(activeBranchAction.repoId, 'pullRebase', true, { remote: branch?.remoteName ?? activeBranchAction.branchName.split('/')[0], branch: activeBranchAction.branchName });
                         await refresh(true);
                       }}
                     >
@@ -1444,10 +1474,8 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       className="statusbar-menu-item"
                       onClick={async () => {
                         onClose();
-                        await branchOperation(
-                          { type: 'merge', name: activeBranchAction.branchName },
-                          activeBranchAction.repoId
-                        );
+                        const branch = (branchesByRepo[activeBranchAction.repoId] ?? []).find((item) => item.remote && item.name === activeBranchAction.branchName);
+                        await sync(activeBranchAction.repoId, 'pull', true, { remote: branch?.remoteName ?? activeBranchAction.branchName.split('/')[0], branch: activeBranchAction.branchName });
                         await refresh(true);
                       }}
                     >

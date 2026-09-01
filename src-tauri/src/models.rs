@@ -319,6 +319,7 @@ pub enum BridgeCommand {
         repo_id: String,
         action: SyncAction,
         remote: Option<String>,
+        branch: Option<String>,
     },
     History {
         workspace_id: String,
@@ -779,11 +780,12 @@ pub struct IgnoreRules {
     pub patterns: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncAction {
     Fetch,
     Pull,
+    PullRebase,
     Push,
     Update,
 }

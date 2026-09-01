@@ -398,7 +398,7 @@ export function CommitPanel() {
       { id: 'ignore', label: t(git ? 'Add to .gitignore' : 'Add to SVN Ignore'), icon: 'exclude' },
     );
     if (files.length && kind !== 'repo') items.push({ separator: true }, { id: 'delete', label: t('Delete'), icon: 'trash', danger: true });
-    if (changelistEnabled && files.length && !allUntracked) items.push(
+    if (changelistEnabled && files.length) items.push(
       { separator: true },
       { id: 'move-to-changelist', label: t('Move to Changelist…'), icon: 'list-unordered' },
     );
@@ -507,9 +507,8 @@ export function CommitPanel() {
           initialValue: '',
         });
         if (name?.trim()) {
-          for (const r of repos) {
-            await changelistOperation(r.meta.id, { type: 'create', name: name.trim() });
-          }
+          const target = repos[0];
+          if (target) await changelistOperation(target.meta.id, { type: 'create', name: name.trim() });
         }
         break;
       }
@@ -526,12 +525,8 @@ export function CommitPanel() {
           initialValue: currentName,
         });
         if (newName && newName !== currentName) {
-          for (const r of repos) {
-            const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
-            if (e) {
-              await changelistOperation(r.meta.id, { type: 'rename', changelist_id: clId, name: newName });
-            }
-          }
+          const target = repos.find((r) => (changelists[r.meta.id] ?? []).some((entry) => entry.id === clId));
+          if (target) await changelistOperation(target.meta.id, { type: 'rename', changelist_id: clId, name: newName });
         }
         break;
       }
@@ -547,12 +542,8 @@ export function CommitPanel() {
           message: `${t('Delete changelist {0}?', currentName || clId)}\n${total} ${t('file')}`,
           danger: true,
         })) {
-          for (const r of repos) {
-            const e = (changelists[r.meta.id] ?? []).find((entry) => entry.id === clId);
-            if (e) {
-              await changelistOperation(r.meta.id, { type: 'delete', changelist_id: clId });
-            }
-          }
+          const target = repos.find((r) => (changelists[r.meta.id] ?? []).some((entry) => entry.id === clId));
+          if (target) await changelistOperation(target.meta.id, { type: 'delete', changelist_id: clId });
         }
         break;
       }
@@ -648,6 +639,7 @@ export function CommitPanel() {
       case 'ignore': if (value.path) await addIgnore(repo.meta.id, value.path); break;
       case 'manage-ignore': setIgnoreManager({ repoId: repo.meta.id, directory: value.kind === 'folder' ? (value.path ?? '') : '' }); break;
       case 'move-to-changelist': {
+        const untrackedPaths = files.filter((file) => file.status === 'untracked').map((file) => file.path);
         const customEntries = (changelists[repo.meta.id] ?? []);
         const choices = [
           { id: '__new__', label: `+ ${t('New Changelist…')}`, icon: 'add' },
@@ -667,6 +659,7 @@ export function CommitPanel() {
             initialValue: '',
           });
           if (newName?.trim()) {
+            if (untrackedPaths.length > 0) await stage(repo.meta.id, untrackedPaths);
             await changelistOperation(repo.meta.id, { type: 'create', name: newName.trim() });
             const updatedList = useAppStore.getState().changelists[repo.meta.id] ?? [];
             const created = updatedList.find((e) => e.name === newName.trim());
@@ -675,6 +668,7 @@ export function CommitPanel() {
             }
           }
         } else if (target) {
+          if (untrackedPaths.length > 0) await stage(repo.meta.id, untrackedPaths);
           await changelistOperation(repo.meta.id, { type: 'assign', changelist_id: target === 'none' ? null : target, paths });
         }
         break;

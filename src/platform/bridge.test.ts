@@ -13,6 +13,6 @@ describe('VersionDockBridge', () => {
     expect(commandShowsProgressByDefault({ type: 'gitIdentity', payload: { workspace_id: 'workspace', repo_id: 'repo' } })).toBe(false);
     expect(commandShowsProgressByDefault({ type: 'repositoryStatus', payload: { workspace_id: 'workspace', repo_id: 'repo' } })).toBe(false);
     expect(commandShowsProgressByDefault({ type: 'history', payload: { workspace_id: 'workspace', repo_id: 'repo', skip: 0, limit: 100, query: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null } } })).toBe(false);
-    expect(commandShowsProgressByDefault({ type: 'sync', payload: { workspace_id: 'workspace', repo_id: 'repo', action: 'fetch', remote: null } })).toBe(true);
+    expect(commandShowsProgressByDefault({ type: 'sync', payload: { workspace_id: 'workspace', repo_id: 'repo', action: 'fetch', remote: null, branch: null } })).toBe(true);
   });
 });

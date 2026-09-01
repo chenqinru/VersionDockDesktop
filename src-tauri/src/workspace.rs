@@ -147,13 +147,62 @@ pub async fn snapshot(
         );
     }
     indexed.sort_by_key(|(index, _)| *index);
-    let repositories = indexed.into_iter().map(|(_, status)| status).collect();
+    let mut repositories = indexed
+        .into_iter()
+        .map(|(_, status)| status)
+        .collect::<Vec<_>>();
+    apply_nested_git_ownership(&mut repositories);
     Ok(WorkspaceSnapshot {
         workspace,
         repositories,
         generation,
         tools,
     })
+}
+
+pub fn apply_nested_git_ownership(repositories: &mut [RepositoryStatus]) {
+    let metas = repositories
+        .iter()
+        .map(|repository| repository.meta.clone())
+        .collect::<Vec<_>>();
+    apply_nested_git_ownership_with_metas(repositories, &metas);
+}
+
+pub fn apply_nested_git_ownership_with_metas(
+    repositories: &mut [RepositoryStatus],
+    metas: &[RepositoryMeta],
+) {
+    let nested = metas
+        .iter()
+        .filter(|repository| repository.kind == VcsKind::Git && !repository.is_submodule)
+        .cloned()
+        .collect::<Vec<_>>();
+    for parent in repositories
+        .iter_mut()
+        .filter(|repository| repository.meta.kind == VcsKind::Git)
+    {
+        let parent_root = Path::new(&parent.meta.root_path);
+        let child_paths = nested
+            .iter()
+            .filter_map(|child| {
+                let child_root = Path::new(&child.root_path);
+                (child.id != parent.meta.id && child_root.starts_with(parent_root))
+                    .then(|| child_root.strip_prefix(parent_root).ok())
+                    .flatten()
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .filter(|path| !path.is_empty())
+            })
+            .collect::<Vec<_>>();
+        if child_paths.is_empty() {
+            continue;
+        }
+        parent.files.retain(|file| {
+            !child_paths
+                .iter()
+                .any(|child| file.path == *child || file.path.starts_with(&format!("{child}/")))
+        });
+        parent.conflicts = parent.files.iter().filter(|file| file.conflicted).count() as u32;
+    }
 }
 
 pub fn scan(
@@ -192,7 +241,12 @@ pub fn scan(
                 .filter(|(candidate, _, candidate_id)| {
                     candidate_id != id && path.starts_with(candidate) && path != candidate
                 })
-                .max_by_key(|(candidate, _, _)| candidate.components().count());
+                .max_by_key(|(candidate, candidate_kind, _)| {
+                    (
+                        candidate.components().count(),
+                        u8::from(*kind == VcsKind::Git && *candidate_kind == VcsKind::Git),
+                    )
+                });
             let depth = parent
                 .map(|_| {
                     paths
@@ -206,15 +260,20 @@ pub fn scan(
             let git_file = path.join(".git");
             let is_worktree = *kind == VcsKind::Git && git_file.is_file();
             let is_submodule = *kind == VcsKind::Git
-                && parent.is_some_and(|(parent_path, _, _)| {
+                && paths.iter().any(|(parent_path, parent_kind, parent_id)| {
+                    if *parent_kind != VcsKind::Git
+                        || parent_id == id
+                        || !path.starts_with(parent_path)
+                        || path == parent_path
+                    {
+                        return false;
+                    }
                     let relative = path
                         .strip_prefix(parent_path)
                         .ok()
                         .map(|value| value.to_string_lossy().replace('\\', "/"));
-                    git_file.exists()
-                        || relative.is_some_and(|value| {
-                            declared_submodule_paths(parent_path).contains(&value)
-                        })
+                    relative
+                        .is_some_and(|value| declared_submodule_paths(parent_path).contains(&value))
                 });
             RepositoryMeta {
                 id: id.clone(),
@@ -515,6 +574,9 @@ pub async fn svn_status(
     .map(|value| value.stdout_text().trim().to_string())
     .unwrap_or_default();
     let conflicts = files.iter().filter(|file| file.conflicted).count() as u32;
+    let operation = crate::vcs::svn_merge_active(&meta, token)
+        .await
+        .then(|| "merge".into());
     Ok(RepositoryStatus {
         meta,
         branch: info,
@@ -523,7 +585,7 @@ pub async fn svn_status(
         behind: 0,
         files,
         conflicts,
-        operation: None,
+        operation,
         capabilities: repository_capabilities(VcsKind::Svn, true),
         tool_available: true,
     })
@@ -608,6 +670,7 @@ fn repository_capabilities(kind: VcsKind, tool_available: bool) -> RepositoryCap
             sync: true,
             history: true,
             conflict: true,
+            changelist: true,
             svn_account: true,
             file_history: true,
             ..RepositoryCapabilities::default()
@@ -1006,7 +1069,9 @@ mod tests {
         assert!(repos
             .iter()
             .any(|repo| repo.name == "three" && repo.kind == VcsKind::Svn));
-        assert!(repos.iter().any(|repo| repo.name == "deep"));
+        assert!(repos
+            .iter()
+            .any(|repo| repo.name == "deep" && !repo.is_submodule));
         let settings = DesktopSettings {
             repository_scan_depth: 1,
             ..DesktopSettings::default()
@@ -1031,6 +1096,57 @@ mod tests {
         assert!(repos
             .iter()
             .any(|repo| repo.name == "deep" && repo.is_submodule));
+    }
+
+    #[test]
+    fn nested_git_files_are_owned_only_by_the_nested_repository() {
+        let root = tempdir().unwrap();
+        let parent_root = root.path().join("parent");
+        let child_root = parent_root.join("nested");
+        std::fs::create_dir_all(&child_root).unwrap();
+        let status = |id: &str, root_path: &Path, files: Vec<FileChange>| RepositoryStatus {
+            meta: RepositoryMeta {
+                id: id.into(),
+                name: id.into(),
+                root_path: root_path.to_string_lossy().into_owned(),
+                color: "#000".into(),
+                kind: VcsKind::Git,
+                parent_repo_id: None,
+                depth: 0,
+                is_submodule: false,
+                is_worktree: false,
+            },
+            branch: "main".into(),
+            revision: "abcdef0".into(),
+            ahead: 0,
+            behind: 0,
+            files,
+            conflicts: 0,
+            operation: None,
+            capabilities: repository_capabilities(VcsKind::Git, true),
+            tool_available: true,
+        };
+        let file = |path: &str| FileChange {
+            path: path.into(),
+            status: "untracked".into(),
+            staged: false,
+            unstaged: true,
+            conflicted: false,
+            conflict_type: None,
+            submodule: false,
+        };
+        let mut repositories = vec![
+            status(
+                "parent",
+                &parent_root,
+                vec![file("nested"), file("owned.txt")],
+            ),
+            status("child", &child_root, vec![file("child.txt")]),
+        ];
+        apply_nested_git_ownership(&mut repositories);
+        assert_eq!(repositories[0].files.len(), 1);
+        assert_eq!(repositories[0].files[0].path, "owned.txt");
+        assert_eq!(repositories[1].files[0].path, "child.txt");
     }
 
     #[test]

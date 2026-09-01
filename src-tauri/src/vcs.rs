@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
 };
 
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,18 @@ const RECORD: char = '\u{1e}';
 const DIFF_MAX_BYTES: usize = 5 * 1024 * 1024;
 const DIFF_MAX_LINES: usize = 50_000;
 const SUBTREE_CONFIG_PREFIX: &str = "versiondock.subtree.";
+
+#[derive(Debug, Clone, Default)]
+struct PendingSvnMerge {
+    paths: Vec<String>,
+    added_paths: Vec<String>,
+}
+
+static SVN_MERGES: OnceLock<Mutex<HashMap<String, PendingSvnMerge>>> = OnceLock::new();
+
+fn svn_merges() -> &'static Mutex<HashMap<String, PendingSvnMerge>> {
+    SVN_MERGES.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 pub fn validate_commit_selection_paths(
     repo: &RepositoryMeta,
@@ -1264,6 +1277,7 @@ pub async fn commit_with_identity(
                 token,
             )
             .await?;
+            refresh_svn_merge(repo, token).await;
             Ok(output.stdout_text())
         }
     }
@@ -1559,12 +1573,51 @@ pub async fn abort_operation(
     operation: &str,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
-    if repo.kind != VcsKind::Git {
-        return Err(DesktopError::new(
-            "UNSUPPORTED_OPERATION",
-            "SVN does not expose a matching abort operation",
-            false,
-        ));
+    if repo.kind == VcsKind::Svn {
+        if operation != "merge" {
+            return Err(DesktopError::new(
+                "OPERATION_NOT_ACTIVE",
+                "The requested SVN operation is not active",
+                true,
+            ));
+        }
+        let pending = svn_merges()
+            .lock()
+            .ok()
+            .and_then(|merges| merges.get(&repo.id).cloned())
+            .ok_or_else(|| {
+                DesktopError::new(
+                    "OPERATION_NOT_ACTIVE",
+                    "No VersionDock-managed SVN merge is active",
+                    true,
+                )
+            })?;
+        if !pending.paths.is_empty() {
+            let mut args = vec![
+                "revert".into(),
+                "--depth".into(),
+                "infinity".into(),
+                "--".into(),
+            ];
+            args.extend(pending.paths.iter().cloned());
+            svn(args, repo, token).await?;
+        }
+        for path in &pending.added_paths {
+            let target = safe_relative(Path::new(&repo.root_path), path, true)?;
+            let Ok(metadata) = std::fs::symlink_metadata(&target) else {
+                continue;
+            };
+            if metadata.is_dir() {
+                std::fs::remove_dir_all(&target)
+            } else {
+                std::fs::remove_file(&target)
+            }
+            .map_err(|error| DesktopError::new("SVN_ABORT_FAILED", error.to_string(), true))?;
+        }
+        if let Ok(mut merges) = svn_merges().lock() {
+            merges.remove(&repo.id);
+        }
+        return Ok(());
     }
     let args = match operation {
         "merge" => vec!["merge".into(), "--abort".into()],
@@ -1790,10 +1843,84 @@ async fn prepare_svn_commit(
     Ok(())
 }
 
+fn explicit_remote_branch(
+    remote: Option<&str>,
+    branch: Option<&str>,
+) -> Result<Option<(String, String)>, DesktopError> {
+    let Some(remote) = remote else {
+        return Ok(None);
+    };
+    let Some(branch) = branch else {
+        return Err(DesktopError::new(
+            "REMOTE_BRANCH_INVALID",
+            "A remote branch is required when a remote is selected",
+            true,
+        ));
+    };
+    validate_ref(remote)?;
+    validate_ref(branch)?;
+    let short = branch.trim_start_matches("refs/remotes/");
+    let Some(remote_branch) = short.strip_prefix(&format!("{remote}/")) else {
+        return Err(DesktopError::new(
+            "REMOTE_BRANCH_INVALID",
+            format!("Remote branch {branch} does not belong to {remote}"),
+            true,
+        ));
+    };
+    validate_ref(remote_branch)?;
+    Ok(Some((remote.into(), remote_branch.into())))
+}
+
+async fn pull_non_current_branch(
+    repo: &RepositoryMeta,
+    branch: &str,
+    token: &CancellationToken,
+) -> Result<SyncResult, DesktopError> {
+    validate_ref(branch)?;
+    let full_ref = format!("refs/heads/{branch}");
+    let raw = git(
+        vec![
+            "for-each-ref".into(),
+            "--format=%(upstream:remotename)%00%(upstream:remoteref)".into(),
+            full_ref.clone(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let mut fields = raw.trim().split('\0');
+    let remote = fields.next().unwrap_or_default().trim();
+    let upstream = fields.next().unwrap_or_default().trim();
+    if remote.is_empty() || upstream.is_empty() {
+        return Ok(SyncResult {
+            output: format!("No remote tracking branch for {branch} — skipped"),
+            update: None,
+        });
+    }
+    validate_ref(remote)?;
+    validate_ref(upstream)?;
+    git_network(
+        vec![
+            "fetch".into(),
+            remote.into(),
+            format!("{upstream}:{full_ref}"),
+        ],
+        repo,
+        token,
+    )
+    .await?;
+    Ok(SyncResult {
+        output: format!("pulled {branch}"),
+        update: None,
+    })
+}
+
 pub async fn sync(
     repo: &RepositoryMeta,
     action: SyncAction,
     remote: Option<String>,
+    branch: Option<String>,
     token: &CancellationToken,
 ) -> Result<SyncResult, DesktopError> {
     if repo.kind == VcsKind::Git && matches!(action, SyncAction::Push) {
@@ -1803,7 +1930,7 @@ pub async fn sync(
         });
     }
     if repo.kind == VcsKind::Git
-        && matches!(action, SyncAction::Pull)
+        && matches!(action, SyncAction::Pull | SyncAction::PullRebase)
         && (git_has_conflicts(repo, token).await
             || git_operation_name(Path::new(&repo.root_path)).is_some())
     {
@@ -1813,7 +1940,27 @@ pub async fn sync(
             true,
         ));
     }
-    let captures_update = matches!(action, SyncAction::Pull | SyncAction::Update);
+    if repo.kind == VcsKind::Svn {
+        if let Some(branch_name) = branch.as_deref() {
+            let relative = svn_relative_url(repo, token).await?;
+            let (current, _) = svn_display_ref(&relative);
+            let requested = branch_name
+                .trim_start_matches("branches/")
+                .trim_start_matches("tags/");
+            let current = current.trim_start_matches("tags/");
+            if requested != current {
+                return Err(DesktopError::new(
+                    "SVN_UPDATE_BRANCH_MISMATCH",
+                    "SVN Update can only update the currently switched working-copy branch",
+                    true,
+                ));
+            }
+        }
+    }
+    let captures_update = matches!(
+        action,
+        SyncAction::Pull | SyncAction::PullRebase | SyncAction::Update
+    );
     let before_revision = if captures_update {
         current_revision(repo, token).await.unwrap_or_default()
     } else {
@@ -1824,7 +1971,28 @@ pub async fn sync(
     } else {
         String::new()
     };
-    if repo.kind == VcsKind::Git && matches!(action, SyncAction::Pull) {
+    let explicit_remote_branch = if repo.kind == VcsKind::Git {
+        explicit_remote_branch(remote.as_deref(), branch.as_deref())?
+    } else {
+        None
+    };
+    if repo.kind == VcsKind::Git {
+        if let Some(branch_name) = branch.as_deref() {
+            validate_ref(branch_name)?;
+            let current = git(vec!["branch".into(), "--show-current".into()], repo, token)
+                .await?
+                .stdout_text()
+                .trim()
+                .to_string();
+            if explicit_remote_branch.is_none() && !current.is_empty() && current != branch_name {
+                return pull_non_current_branch(repo, branch_name, token).await;
+            }
+        }
+    }
+    if repo.kind == VcsKind::Git
+        && matches!(action, SyncAction::Pull | SyncAction::PullRebase)
+        && explicit_remote_branch.is_none()
+    {
         let has_upstream = git(
             vec![
                 "rev-parse".into(),
@@ -1866,10 +2034,18 @@ pub async fn sync(
             "git",
             vec!["fetch".into(), "--all".into(), "--prune".into()],
         ),
-        (VcsKind::Git, SyncAction::Pull) => (
-            "git",
-            vec!["pull".into(), "--no-rebase".into(), "--ff".into()],
-        ),
+        (VcsKind::Git, SyncAction::Pull | SyncAction::PullRebase) => {
+            let mut args = vec!["pull".into()];
+            if matches!(action, SyncAction::PullRebase) {
+                args.push("--rebase".into());
+            } else {
+                args.extend(["--no-rebase".into(), "--ff".into()]);
+            }
+            if let Some((remote_name, remote_branch)) = explicit_remote_branch {
+                args.extend([remote_name, remote_branch]);
+            }
+            ("git", args)
+        }
         (VcsKind::Git, SyncAction::Push) => unreachable!(),
         (VcsKind::Svn, SyncAction::Update) | (VcsKind::Svn, SyncAction::Pull) => {
             ("svn", vec!["update".into()])
@@ -4244,6 +4420,10 @@ pub async fn branch_operation(
     token: &CancellationToken,
 ) -> Result<BranchOperationResult, DesktopError> {
     if repo.kind == VcsKind::Svn {
+        let is_merge = matches!(&operation, BranchOperation::Merge { .. });
+        if is_merge {
+            prepare_svn_merge(repo, token).await?;
+        }
         let args = match operation {
             BranchOperation::Checkout { name } => {
                 vec![
@@ -4293,7 +4473,11 @@ pub async fn branch_operation(
                 ));
             }
         };
-        svn(args, repo, token).await?;
+        let result = svn(args, repo, token).await;
+        if is_merge {
+            record_svn_merge(repo, token).await;
+        }
+        result?;
         return Ok(BranchOperationResult {
             completed: true,
             conflicted: false,
@@ -4606,6 +4790,120 @@ async fn svn_branch_target(
     svn_repository_target(value)
 }
 
+async fn svn_working_changes(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<PendingSvnMerge, DesktopError> {
+    let raw = svn(vec!["status".into(), "--xml".into()], repo, token)
+        .await?
+        .stdout_text();
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let mut pending = PendingSvnMerge::default();
+    for entry in document
+        .descendants()
+        .filter(|node| node.has_tag_name("entry"))
+    {
+        let Some(path) = entry.attribute("path") else {
+            continue;
+        };
+        let item = entry
+            .children()
+            .find(|node| node.has_tag_name("wc-status"))
+            .and_then(|node| node.attribute("item"))
+            .unwrap_or("normal");
+        if item == "normal" || item == "external" || item == "ignored" {
+            continue;
+        }
+        let path = path.replace('\\', "/");
+        pending.paths.push(path.clone());
+        if item == "added" {
+            pending.added_paths.push(path);
+        }
+    }
+    pending.paths.sort();
+    pending.paths.dedup();
+    pending
+        .added_paths
+        .sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
+    pending.added_paths.dedup();
+    Ok(pending)
+}
+
+async fn prepare_svn_merge(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if svn_working_changes(repo, token).await?.paths.is_empty() {
+        Ok(())
+    } else {
+        Err(DesktopError::new(
+            "SVN_WORKING_COPY_NOT_CLEAN",
+            "SVN merge requires a clean working copy so it can be aborted without losing local changes",
+            true,
+        ))
+    }
+}
+
+async fn record_svn_merge(repo: &RepositoryMeta, token: &CancellationToken) {
+    let pending = svn_working_changes(repo, token).await.unwrap_or_default();
+    if let Ok(mut merges) = svn_merges().lock() {
+        if pending.paths.is_empty() {
+            merges.remove(&repo.id);
+        } else {
+            merges.insert(repo.id.clone(), pending);
+        }
+    }
+}
+
+async fn refresh_svn_merge(repo: &RepositoryMeta, token: &CancellationToken) {
+    let Some(mut pending) = svn_merges()
+        .lock()
+        .ok()
+        .and_then(|merges| merges.get(&repo.id).cloned())
+    else {
+        return;
+    };
+    let current = svn_working_changes(repo, token).await.unwrap_or_default();
+    let current_paths = current.paths.into_iter().collect::<HashSet<_>>();
+    pending.paths.retain(|path| current_paths.contains(path));
+    pending
+        .added_paths
+        .retain(|path| current_paths.contains(path));
+    if let Ok(mut merges) = svn_merges().lock() {
+        if pending.paths.is_empty() {
+            merges.remove(&repo.id);
+        } else {
+            merges.insert(repo.id.clone(), pending);
+        }
+    }
+}
+
+pub async fn svn_merge_active(repo: &RepositoryMeta, token: &CancellationToken) -> bool {
+    if repo.kind != VcsKind::Svn {
+        return false;
+    }
+    let Some(pending) = svn_merges()
+        .lock()
+        .ok()
+        .and_then(|merges| merges.get(&repo.id).cloned())
+    else {
+        return false;
+    };
+    let current = svn_working_changes(repo, token).await.unwrap_or_default();
+    let current_paths = current.paths.into_iter().collect::<HashSet<_>>();
+    let still_active = pending
+        .paths
+        .iter()
+        .any(|path| current_paths.contains(path));
+    if !still_active {
+        if let Ok(mut merges) = svn_merges().lock() {
+            merges.remove(&repo.id);
+        }
+    }
+    still_active
+}
+
 pub async fn tags(
     repo: &RepositoryMeta,
     token: &CancellationToken,
@@ -4774,6 +5072,10 @@ pub async fn tag_operation(
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     if repo.kind == VcsKind::Svn {
+        let is_merge = matches!(&operation, TagOperation::Merge { .. });
+        if is_merge {
+            prepare_svn_merge(repo, token).await?;
+        }
         let args = match operation {
             TagOperation::Checkout { name } => {
                 vec![
@@ -4826,7 +5128,11 @@ pub async fn tag_operation(
                 ));
             }
         };
-        svn(args, repo, token).await?;
+        let result = svn(args, repo, token).await;
+        if is_merge {
+            record_svn_merge(repo, token).await;
+        }
+        result?;
         return Ok(());
     }
     ensure_git(repo)?;
@@ -6953,6 +7259,41 @@ fn synthetic_conflict_content(base: &str, ours: &str, theirs: &str) -> String {
     lines.join("\n")
 }
 
+async fn complete_git_merge_if_resolved(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<bool, DesktopError> {
+    if repo.kind != VcsKind::Git || git_operation_name(Path::new(&repo.root_path)) != Some("merge")
+    {
+        return Ok(false);
+    }
+    let unresolved = git(
+        vec![
+            "diff".into(),
+            "--name-only".into(),
+            "--diff-filter=U".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    if !unresolved.trim().is_empty() {
+        return Ok(false);
+    }
+    git(vec!["commit".into(), "--no-edit".into()], repo, token)
+        .await
+        .map_err(|error| {
+            DesktopError::new(
+                "MERGE_AUTO_COMMIT_FAILED",
+                "All conflicts were resolved, but the merge commit could not be created",
+                true,
+            )
+            .hint(error.message)
+        })?;
+    Ok(true)
+}
+
 pub async fn conflict_save(
     repo: &RepositoryMeta,
     path: &str,
@@ -7007,6 +7348,7 @@ pub async fn conflict_save(
     match repo.kind {
         VcsKind::Git => {
             stage(repo, &[safe], token).await?;
+            complete_git_merge_if_resolved(repo, token).await?;
         }
         VcsKind::Svn => {
             svn(
@@ -7066,6 +7408,7 @@ pub async fn conflict_accept(
                 ConflictChoice::Working => {}
             }
             stage(repo, &[safe], token).await?;
+            complete_git_merge_if_resolved(repo, token).await?;
         }
         VcsKind::Svn => {
             let accept = match choice {

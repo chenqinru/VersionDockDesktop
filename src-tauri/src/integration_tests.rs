@@ -801,6 +801,7 @@ async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
         &repo(&working, VcsKind::Git),
         SyncAction::Pull,
         None,
+        None,
         &CancellationToken::new(),
     )
     .await
@@ -883,6 +884,7 @@ async fn real_git_pull_auto_stash_keeps_backup_when_restore_conflicts() {
         &repo(&working, VcsKind::Git),
         SyncAction::Pull,
         None,
+        None,
         &CancellationToken::new(),
     )
     .await
@@ -892,6 +894,154 @@ async fn real_git_pull_auto_stash_keeps_backup_when_restore_conflicts() {
     assert!(!command_output("git", &["stash", "list"], &working).is_empty());
     assert!(
         !command_output("git", &["diff", "--name-only", "--diff-filter=U"], &working).is_empty()
+    );
+}
+
+#[tokio::test]
+async fn real_git_pull_targets_non_current_and_remote_branches() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let parent = tempdir().unwrap();
+    let remote = parent.path().join("remote.git");
+    let seed = parent.path().join("seed");
+    let working = parent.path().join("working");
+    let upstream = parent.path().join("upstream");
+    command(
+        "git",
+        &["init", "--bare", remote.to_str().unwrap()],
+        parent.path(),
+    );
+    command(
+        "git",
+        &["init", "-b", "main", seed.to_str().unwrap()],
+        parent.path(),
+    );
+    command("git", &["config", "user.name", "VersionDock Test"], &seed);
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.com"],
+        &seed,
+    );
+    std::fs::write(seed.join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "."], &seed);
+    command("git", &["commit", "-m", "base"], &seed);
+    command(
+        "git",
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+        &seed,
+    );
+    command("git", &["push", "-u", "origin", "main"], &seed);
+    command("git", &["symbolic-ref", "HEAD", "refs/heads/main"], &remote);
+    command("git", &["switch", "-c", "feature"], &seed);
+    std::fs::write(seed.join("feature.txt"), "feature one\n").unwrap();
+    command("git", &["add", "."], &seed);
+    command("git", &["commit", "-m", "feature one"], &seed);
+    command("git", &["push", "-u", "origin", "feature"], &seed);
+    command(
+        "git",
+        &["clone", remote.to_str().unwrap(), working.to_str().unwrap()],
+        parent.path(),
+    );
+    command(
+        "git",
+        &["-C", working.to_str().unwrap(), "switch", "main"],
+        parent.path(),
+    );
+    command(
+        "git",
+        &[
+            "-C",
+            working.to_str().unwrap(),
+            "branch",
+            "--track",
+            "feature",
+            "origin/feature",
+        ],
+        parent.path(),
+    );
+    command(
+        "git",
+        &[
+            "clone",
+            remote.to_str().unwrap(),
+            upstream.to_str().unwrap(),
+        ],
+        parent.path(),
+    );
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        &upstream,
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.com"],
+        &upstream,
+    );
+    command("git", &["switch", "feature"], &upstream);
+    std::fs::write(upstream.join("feature.txt"), "feature two\n").unwrap();
+    command("git", &["add", "."], &upstream);
+    command("git", &["commit", "-m", "feature two"], &upstream);
+    command("git", &["push"], &upstream);
+
+    let repository = repo(&working, VcsKind::Git);
+    let token = CancellationToken::new();
+    vcs::sync(
+        &repository,
+        SyncAction::Pull,
+        None,
+        Some("feature".into()),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        command_output("git", &["branch", "--show-current"], &working),
+        "main"
+    );
+    assert_eq!(
+        command_output("git", &["rev-parse", "feature"], &working),
+        command_output("git", &["rev-parse", "origin/feature"], &working)
+    );
+
+    command("git", &["switch", "main"], &upstream);
+    std::fs::write(upstream.join("remote-main.txt"), "remote\n").unwrap();
+    command("git", &["add", "."], &upstream);
+    command("git", &["commit", "-m", "remote main"], &upstream);
+    command("git", &["push"], &upstream);
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        &working,
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.com"],
+        &working,
+    );
+    std::fs::write(working.join("local-main.txt"), "local\n").unwrap();
+    command("git", &["add", "."], &working);
+    command("git", &["commit", "-m", "local main"], &working);
+    vcs::sync(
+        &repository,
+        SyncAction::PullRebase,
+        Some("origin".into()),
+        Some("origin/main".into()),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(read_text(working.join("remote-main.txt")), "remote\n");
+    assert_eq!(read_text(working.join("local-main.txt")), "local\n");
+    assert_eq!(
+        command_output(
+            "git",
+            &["rev-list", "--count", "origin/main..HEAD"],
+            &working
+        ),
+        "1"
     );
 }
 
@@ -1735,6 +1885,50 @@ async fn real_svn_advanced_working_copy_operations() {
             .ends_with("/branches/release")
     );
 
+    let trunk_copy = working_parent.path().join("trunk-wc");
+    command(
+        "svn",
+        &[
+            "checkout",
+            &format!("{repository_url}/trunk"),
+            trunk_copy.to_str().unwrap(),
+        ],
+        working_parent.path(),
+    );
+    std::fs::write(trunk_copy.join("locked file.txt"), "changed on trunk\n").unwrap();
+    command("svn", &["commit", "-m", "change trunk"], &trunk_copy);
+    vcs::branch_operation(
+        &repository,
+        BranchOperation::Merge {
+            name: "trunk".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(vcs::svn_merge_active(&repository, &token).await);
+    assert_eq!(
+        read_text(working_copy.join("locked file.txt")),
+        "changed on trunk\n"
+    );
+    vcs::abort_operation(&repository, "merge", &token)
+        .await
+        .unwrap();
+    assert!(!vcs::svn_merge_active(&repository, &token).await);
+    assert_eq!(read_text(working_copy.join("locked file.txt")), "content\n");
+    std::fs::write(working_copy.join("locked file.txt"), "local dirty\n").unwrap();
+    let dirty_error = vcs::branch_operation(
+        &repository,
+        BranchOperation::Merge {
+            name: "trunk".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(dirty_error.code, "SVN_WORKING_COPY_NOT_CLEAN");
+    command("svn", &["revert", "locked file.txt"], &working_copy);
+
     let error = vcs::svn_operation(
         &repository,
         SvnOperation::Relocate {
@@ -2267,13 +2461,13 @@ async fn real_git_core_workflow() {
         .iter()
         .any(|entry| entry.branch == "worktree/integration"));
 
-    vcs::sync(&repository, SyncAction::Push, None, &token)
+    vcs::sync(&repository, SyncAction::Push, None, None, &token)
         .await
         .unwrap();
-    vcs::sync(&repository, SyncAction::Fetch, None, &token)
+    vcs::sync(&repository, SyncAction::Fetch, None, None, &token)
         .await
         .unwrap();
-    let pull = vcs::sync(&repository, SyncAction::Pull, None, &token)
+    let pull = vcs::sync(&repository, SyncAction::Pull, None, None, &token)
         .await
         .unwrap();
     assert_eq!(pull.update.unwrap().summary.unwrap().commit_count, 0);
@@ -2340,11 +2534,17 @@ async fn real_git_core_workflow() {
         .await
         .unwrap();
     assert!(!resolved.files.iter().any(|file| file.conflicted));
+    assert_eq!(resolved.operation, None);
     assert!(resolved
         .files
         .iter()
-        .any(|file| file.path == "conflict.txt" && file.staged));
-    command("git", &["merge", "--abort"], directory.path());
+        .all(|file| file.path != "conflict.txt"));
+    assert!(
+        command_output("git", &["log", "-1", "--format=%P"], directory.path())
+            .split_whitespace()
+            .count()
+            >= 2
+    );
 
     command("git", &["switch", "conflict-side"], directory.path());
     std::fs::write(directory.path().join("binary.bin"), [0_u8, 1, 2]).unwrap();

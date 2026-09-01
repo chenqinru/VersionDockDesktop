@@ -231,6 +231,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	repo_id: string,
 	action: SyncAction,
 	remote: string | null,
+	branch: string | null,
 } } | { type: "history"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -1092,7 +1093,7 @@ export type SvnNativeCredential = {
 
 export type SvnOperation = { type: "cleanup"; break_locks: boolean; remove_unversioned: boolean; remove_ignored: boolean; include_externals: boolean } | { type: "resolveWorking"; paths: string[] } | { type: "lock"; paths: string[]; message: string | null; force: boolean } | { type: "unlock"; paths: string[]; force: boolean } | { type: "relocate"; from_url: string; to_url: string } | { type: "switch"; url: string; revision: string | null; ignore_ancestry: boolean } | { type: "copy"; source_url: string; destination_url: string; revision: string | null; message: string };
 
-export type SyncAction = "fetch" | "pull" | "push" | "update";
+export type SyncAction = "fetch" | "pull" | "pullRebase" | "push" | "update";
 
 export type SyncResult = {
 	output: string,
