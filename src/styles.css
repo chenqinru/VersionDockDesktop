@@ -2972,11 +2972,21 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .panel-toolbar button:hover, .panel-toolbar button.selected { color: var(--versiondock-text); background: var(--versiondock-hover); }
 
 .view-options { position: relative; }
-.view-options-menu { position: absolute; z-index: 140; top: 27px; left: 0; width: 152px; padding: 4px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 18px #0008; }
-.view-options-menu strong { display: block; padding: 3px 6px 5px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; text-transform: uppercase; }
-.view-options-menu button { width: 100%; height: 27px; padding: 0 6px; display: flex; align-items: center; justify-content: flex-start; gap: 7px; color: var(--versiondock-text); }
+.view-options-menu, .view-options-submenu { color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 6px; box-shadow: 0 5px 18px #0008; }
+.view-options-menu { position: absolute; z-index: 140; top: 27px; left: 0; width: 154px; padding: 4px; }
+.view-submenu-entry { position: relative; }
+.view-options-menu button { width: 100%; height: 31px; padding: 0 8px; display: flex; align-items: center; justify-content: flex-start; gap: 7px; color: var(--versiondock-text); border-radius: 3px; text-align: left; }
+.view-options-menu button > span:not(.view-menu-check) { min-width: 0; flex: 1; white-space: nowrap; }
 .view-options-menu button > .codicon:last-child { margin-left: auto; }
-.panel-view-options .view-options-menu { left: auto; right: 0; width: 184px; }
+.view-options-menu > .view-submenu-entry > button:hover,
+.view-options-menu > .view-submenu-entry > button:focus-visible,
+.view-options-menu > .view-submenu-entry > button.active { color: #fff; background: var(--versiondock-accent-bg); outline: 1px solid color-mix(in srgb, #fff 28%, transparent); outline-offset: -1px; }
+.view-options-submenu { position: absolute; z-index: 1; top: -5px; left: calc(100% + 4px); width: 150px; padding: 4px; }
+.view-options-submenu button:hover,
+.view-options-submenu button:focus-visible { color: #fff; background: var(--versiondock-accent-bg); outline: 1px solid color-mix(in srgb, #fff 28%, transparent); outline-offset: -1px; }
+.view-menu-check { width: 15px; height: 15px; flex: 0 0 15px; display: grid; place-items: center; }
+.view-menu-check .codicon { font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
+.panel-view-options .view-options-menu { left: auto; right: 0; }
 
 .commit-tabs { flex: 0 0 29px; height: 29px; display: flex; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border-soft); }
 .commit-tabs::-webkit-scrollbar { display: none; }
@@ -3487,7 +3497,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 @media (max-width: 1120px) { .detail-slot { min-width: 300px; } .changes-columns { grid-template-columns: 230px minmax(0, 1fr); } }
 
 @media (max-width: 1220px) {
-  .history-filters .filter-button { display: none; }
   .commit-author { display: none; }
 }
 @media (max-width: 1120px) { .history-columns { grid-template-columns: 190px minmax(340px, 1fr) 280px; }.commit-author { display: none; }.commit-row { grid-template-columns: 5px 30px minmax(160px,1fr) 100px; }.welcome { grid-template-columns: 1fr 1fr; } }

@@ -66,8 +66,8 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo, emptyRepo] }, selectedRepoId: 'repo' });
     const { container } = renderPanel();
     expect(screen.queryByTitle('Rollback')).not.toBeInTheDocument();
-    expect(screen.getByTitle('View options')).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('View options'));
+    expect(screen.getByTitle('More')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('More'));
     expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Collapse all' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stage' })).not.toBeInTheDocument();
@@ -92,10 +92,10 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getAllByText('No changes')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Empty Twomain' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
-    fireEvent.click(screen.getByTitle('View options'));
+    fireEvent.click(screen.getByTitle('More'));
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('View options'));
+    fireEvent.click(screen.getByTitle('More'));
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
   });
@@ -106,7 +106,7 @@ describe('CommitPanel capabilities and file view', () => {
     renderPanel();
 
     fireEvent.click(screen.getByRole('button', { name: 'Repositorymain' }));
-    fireEvent.click(screen.getByTitle('View options'));
+    fireEvent.click(screen.getByTitle('More'));
 
     expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveClass('selected');
     expect(screen.getByRole('button', { name: 'Collapse all' })).not.toHaveClass('selected');
@@ -260,7 +260,8 @@ describe('CommitPanel capabilities and file view', () => {
     data.state.layout = { panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'stash', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
     useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo' });
     renderPanel();
-    fireEvent.click(screen.getByTitle('View options'));
+    fireEvent.click(screen.getByTitle('More'));
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'View options' }));
     fireEvent.click(screen.getByRole('button', { name: 'Flat list' }));
     expect(useAppStore.getState().bootstrap?.state.layout?.stashViewMode).toBe('list');
     expect(useAppStore.getState().bootstrap?.state.layout?.fileViewMode).toBe('tree');

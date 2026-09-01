@@ -1,20 +1,23 @@
 /* Git log parity layer: compact geometry and interaction states from the plugin reference. */
-.history-workspace { min-width: 0; background: var(--versiondock-bg); }
+.history-workspace { min-width: 0; container: history-workspace / inline-size; background: var(--versiondock-bg); }
 .history-filters { flex: 0 0 38px; height: 38px; padding: 6px 10px; gap: 6px; box-sizing: border-box; background: var(--versiondock-bg); border-bottom: 1px solid var(--versiondock-border); }
-.history-filters .commit-search { width: auto; min-width: 130px; flex: 1.2 1 180px; height: 26px; padding: 0 6px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; }
+.history-filters .commit-search { width: auto; min-width: 200px; flex: 1.7 1 240px; height: 26px; padding: 0 6px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; }
 .history-filters .commit-search > .codicon { color: var(--versiondock-muted); }
 .history-filters .commit-search input { font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
-.history-filters .filter-anchor { min-width: 100px; height: 26px; flex: 1 1 150px; }
-.history-filters .branch-filter-anchor { min-width: 110px; flex: 1.1 1 160px; }
-.history-filters .date-filter-anchor { width: auto; min-width: 160px; max-width: none; flex: 1.5 1 220px; }
+.history-filters .filter-anchor { min-width: 110px; height: 26px; flex: .85 1 135px; }
+.history-filters .branch-filter-anchor { min-width: 125px; flex: 1 1 155px; }
+.history-filters .date-filter-anchor { width: auto; min-width: 150px; max-width: none; flex: 1.15 1 185px; }
 .history-filters .filter-button { width: 100%; min-width: 0; height: 26px; padding: 0 6px; gap: 5px; color: var(--versiondock-muted); border: 1px solid var(--versiondock-border); background: var(--versiondock-input); border-radius: 4px; }
+.history-path-chip { min-width: 0; max-width: 260px; height: 26px; flex: 0 1 260px; display: flex; align-items: center; gap: 5px; padding: 0 7px; color: var(--versiondock-text); background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; }
+.history-path-chip > .codicon { flex: 0 0 auto; color: var(--versiondock-muted); }
+.history-path-chip > span { flex: 0 0 auto; color: var(--versiondock-muted); }
+.history-path-chip > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; }
 .history-filters .filter-button > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .history-filters .filter-button > i { width: 5px; height: 5px; flex: 0 0 5px; margin-left: 0; border-radius: 50%; background: var(--versiondock-accent); }
 .history-filters .filter-button.active, .history-filters .filter-button.open { color: var(--versiondock-text); border-color: color-mix(in srgb, var(--versiondock-accent) 60%, var(--versiondock-border)); background: color-mix(in srgb, var(--versiondock-accent) 7%, var(--versiondock-input)); }
 .history-filters .filter-button > .codicon { flex: 0 0 auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .history-filters .filter-button > .codicon:last-child { margin-left: 0; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .history-filters .filter-button > .filter-repo-dot { width: 7px; min-width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
-.history-filter-spacer { display: block; min-width: 0; flex: 1 1 auto; }
 .history-clear-filters, .more-button { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; padding: 0; color: var(--versiondock-muted); border: 1px solid transparent; border-radius: 3px; }
 .history-clear-filters { color: var(--versiondock-danger); }
 .history-filters button.history-clear-filters:hover { color: var(--versiondock-danger); background: color-mix(in srgb, var(--versiondock-danger) 14%, transparent); border-color: transparent; }
@@ -114,19 +117,26 @@
 .commit-popover .removed { color: var(--versiondock-danger); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 @media (max-width: 1320px) {
-  .history-filters .commit-search { min-width: 140px; flex-basis: 160px; }
-  .history-filters .filter-anchor { min-width: 105px; flex-basis: 115px; }
-  .history-filters .branch-filter-anchor { flex-grow: .75; }
-  .history-filters .date-filter-anchor { width: auto; min-width: 150px; flex: 1.2 1 150px; }
+  .history-filters .commit-search { min-width: 180px; flex-basis: 210px; }
+  .history-filters .filter-anchor { min-width: 100px; flex-basis: 120px; }
+  .history-filters .branch-filter-anchor { min-width: 110px; flex-grow: .9; }
+  .history-filters .date-filter-anchor { width: auto; min-width: 140px; flex: 1 1 160px; }
+  .history-path-chip { max-width: 220px; flex-basis: 220px; }
   .commit-author { width: 100px; flex-basis: 100px; }
   .commit-row time { width: max(94px, calc(100px * var(--versiondock-ui-font-scale, 1))); flex-basis: max(94px, calc(100px * var(--versiondock-ui-font-scale, 1))); }
 }
 
 @media (max-width: 1100px) {
-  .history-filters .commit-search { min-width: 120px; flex-basis: 140px; }
+  .history-filters .commit-search { min-width: 170px; flex-basis: 190px; }
   .history-filters .filter-anchor { min-width: 90px; flex-basis: 100px; }
   .history-filters .branch-filter-anchor { flex-grow: .75; }
   .history-filters .date-filter-anchor { min-width: 120px; flex-basis: 120px; }
+  .history-path-chip { max-width: 180px; flex-basis: 180px; }
+}
+
+@container history-workspace (max-width: 940px) {
+  .history-workspace > .history-filters .filter-anchor { display: none; }
+  .history-workspace > .history-filters .commit-search { min-width: 0; flex: 1 1 auto; }
 }
 
 .compare-pane-filters .date-filter-anchor { width: 215px; min-width: 190px; max-width: 225px; flex: 0 1 215px; }

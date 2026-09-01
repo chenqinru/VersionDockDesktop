@@ -198,6 +198,7 @@ export function CommitPanel() {
   const [commitMenu, setCommitMenu] = useState(false);
   const [saveMenu, setSaveMenu] = useState(false);
   const [viewMenu, setViewMenu] = useState(false);
+  const [viewSubmenu, setViewSubmenu] = useState<'expand' | 'view'>('expand');
   const [settings, setSettings] = useState(false);
   const openIdentityPanel = useAppStore((state) => state.openIdentityPanel);
   const [ignoreManager, setIgnoreManager] = useState<{ repoId: string; directory: string }>();
@@ -759,40 +760,51 @@ export function CommitPanel() {
   const setPanelViewMode = (mode: 'tree' | 'list') => {
     if (tab === 'shelf') setShelfViewMode(mode);
     else if (tab === 'stash') setStashViewMode(mode);
-    else setFileViewMode(mode);
+    else if (tab === 'changes') setFileViewMode(mode);
     setViewMenu(false);
+    setViewSubmenu('expand');
   };
   const setPanelExpansion = (expanded: boolean) => {
     if (tab === 'shelf') setShelfExpansion((current) => ({ sequence: current.sequence + 1, expanded }));
     else if (tab === 'stash') setStashExpansion((current) => ({ sequence: current.sequence + 1, expanded }));
-    else setExpansion((current) => ({ sequence: current.sequence + 1, expanded }));
+    else if (tab === 'changes') setExpansion((current) => ({ sequence: current.sequence + 1, expanded }));
     if (tab === 'changes' || tab === 'shelf' || tab === 'stash') {
       setExpandedByTab((current) => ({ ...current, [tab]: expanded }));
     }
     setViewMenu(false);
+    setViewSubmenu('expand');
   };
   const markPanelExpansionMixed = (target: 'changes' | 'shelf' | 'stash') => {
     setExpandedByTab((current) => current[target] === null ? current : { ...current, [target]: null });
   };
-  const showPanelViewOptions = tab === 'changes' || tab === 'shelf' || tab === 'stash';
-  const panelExpanded = showPanelViewOptions ? expandedByTab[tab as 'changes' | 'shelf' | 'stash'] : null;
+  const panelExpanded = tab === 'changes' || tab === 'shelf' || tab === 'stash'
+    ? expandedByTab[tab]
+    : true;
   const panelToolbar = <div className="panel-toolbar">
     <strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong>
     <span />
     <button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void Promise.all(fetchTargets.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button>
     <button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></button>
-    {showPanelViewOptions && <div ref={viewMenuRef} className="view-options panel-view-options">
-      <button title={t('View options')} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewMenu((value) => !value); }}><Codicon name="eye" /></button>
-      {viewMenu && <div className="view-options-menu" onClick={(event) => event.stopPropagation()}>
-        <strong>{t('Expand Mode')}</strong>
-        <button className={panelExpanded === true ? 'selected' : ''} onClick={() => setPanelExpansion(true)}><Codicon name="expand-all" />{t('Expand all')}{panelExpanded === true && <Codicon name="check" />}</button>
-        <button className={panelExpanded === false ? 'selected' : ''} onClick={() => setPanelExpansion(false)}><Codicon name="collapse-all" />{t('Collapse all')}{panelExpanded === false && <Codicon name="check" />}</button>
-        <strong>{t('View options')}</strong>
-        <button className={panelViewMode === 'list' ? 'selected' : ''} onClick={() => setPanelViewMode('list')}><Codicon name="list-unordered" />{t('Flat list')}{panelViewMode === 'list' && <Codicon name="check" />}</button>
-        <button className={panelViewMode === 'tree' ? 'selected' : ''} onClick={() => setPanelViewMode('tree')}><Codicon name="list-tree" />{t('Tree view')}{panelViewMode === 'tree' && <Codicon name="check" />}</button>
+    <button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></button>
+    <div ref={viewMenuRef} className="view-options panel-view-options">
+      <button title={t('More')} aria-label={t('More')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu('expand'); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></button>
+      {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+        <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('expand')} onFocus={() => setViewSubmenu('expand')}>
+          <button type="button" role="menuitem" className={viewSubmenu === 'expand' ? 'active' : ''} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
+          {viewSubmenu === 'expand' && <div className="view-options-submenu" role="menu">
+            <button type="button" aria-pressed={panelExpanded === true} className={panelExpanded === true ? 'selected' : ''} onClick={() => setPanelExpansion(true)}><span className="view-menu-check">{panelExpanded === true && <Codicon name="check" />}</span><span>{t('Expand all')}</span></button>
+            <button type="button" aria-pressed={panelExpanded === false} className={panelExpanded === false ? 'selected' : ''} onClick={() => setPanelExpansion(false)}><span className="view-menu-check">{panelExpanded === false && <Codicon name="check" />}</span><span>{t('Collapse all')}</span></button>
+          </div>}
+        </div>
+        <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('view')} onFocus={() => setViewSubmenu('view')}>
+          <button type="button" role="menuitem" className={viewSubmenu === 'view' ? 'active' : ''} onClick={() => setViewSubmenu('view')}><span>{t('View options')}</span><Codicon name="chevron-right" /></button>
+          {viewSubmenu === 'view' && <div className="view-options-submenu" role="menu">
+            <button type="button" aria-pressed={panelViewMode === 'list'} className={panelViewMode === 'list' ? 'selected' : ''} onClick={() => setPanelViewMode('list')}><span className="view-menu-check">{panelViewMode === 'list' && <Codicon name="check" />}</span><span>{t('Flat list')}</span></button>
+            <button type="button" aria-pressed={panelViewMode === 'tree'} className={panelViewMode === 'tree' ? 'selected' : ''} onClick={() => setPanelViewMode('tree')}><span className="view-menu-check">{panelViewMode === 'tree' && <Codicon name="check" />}</span><span>{t('Tree view')}</span></button>
+          </div>}
+        </div>
       </div>}
-    </div>}
-    <button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => setSettings(!settings)}><Codicon name="settings-gear" /></button>
+    </div>
   </div>;
   const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
 
