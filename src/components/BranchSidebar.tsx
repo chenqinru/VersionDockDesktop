@@ -6,6 +6,7 @@ import { buildSidebarModel, sumBranchAheadBehind, type SidebarBranch, type Sideb
 import type { RepositoryStatus } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { isBranchProtected } from '../history/branchProtection';
 
 interface Props {
   repoFilter: Set<string>;
@@ -198,6 +199,15 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         );
         if (id === 'push') await sync(instance.repoId, 'push');
         if (id === 'delete') {
+          if (branch.vcsKind === 'git' && isBranchProtected(branch.name)) {
+            await confirmDialog({
+              title: t('Protected branch'),
+              message: t('VersionDock: Protected branch "{0}" cannot be deleted.', branch.name),
+              confirmLabel: t('OK'),
+            });
+            setContext(undefined);
+            return;
+          }
           const mode = await choiceDialog({
             title: t(branch.vcsKind === 'svn' ? 'Delete SVN branch' : 'Delete branch'),
             message: `${branch.name}\n${t('{0} repositories', branch.repoIds.length)}`,

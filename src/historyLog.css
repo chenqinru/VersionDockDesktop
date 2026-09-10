@@ -1,5 +1,5 @@
 /* Git log parity layer: compact geometry and interaction states from the plugin reference. */
-.history-workspace { min-width: 0; container: history-workspace / inline-size; background: var(--versiondock-bg); }
+.history-workspace { min-width: 0; container: history-workspace / inline-size; background: var(--versiondock-bg); user-select: none; -webkit-user-select: none; }
 .history-filters { flex: 0 0 38px; height: 38px; padding: 6px 10px; gap: 6px; box-sizing: border-box; background: var(--versiondock-bg); border-bottom: 1px solid var(--versiondock-border); }
 .history-filters .commit-search { width: auto; min-width: 200px; flex: 1.7 1 240px; height: 26px; padding: 0 6px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; }
 .history-filters .commit-search > .codicon { color: var(--versiondock-muted); }
@@ -12,6 +12,9 @@
 .history-path-chip > .codicon { flex: 0 0 auto; color: var(--versiondock-muted); }
 .history-path-chip > span { flex: 0 0 auto; color: var(--versiondock-muted); }
 .history-path-chip > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; }
+.history-path-clear { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; padding: 0; background: transparent; border: none; border-radius: 2px; color: var(--versiondock-muted); cursor: pointer; }
+.history-path-clear:hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+.history-path-clear > .codicon { font-size: 10px; }
 .history-filters .filter-button > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .history-filters .filter-button > i { width: 5px; height: 5px; flex: 0 0 5px; margin-left: 0; border-radius: 50%; background: var(--versiondock-accent); }
 .history-filters .filter-button.active, .history-filters .filter-button.open { color: var(--versiondock-text); border-color: color-mix(in srgb, var(--versiondock-accent) 60%, var(--versiondock-border)); background: color-mix(in srgb, var(--versiondock-accent) 7%, var(--versiondock-input)); }
@@ -75,7 +78,7 @@
 .repo-strip:hover { filter: brightness(1.15); }
 .repo-strip-bar { width: 6px; height: 100%; flex: 0 0 6px; display: block; background: var(--repo-color); }
 .repo-strip strong { position: absolute; top: 0; left: 6px; right: 0; height: 28px; padding: 0 6px; overflow: hidden; color: var(--versiondock-text); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: .06em; line-height: 28px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; transform: translateY(var(--repo-name-offset, 0)); }
-.commit-row { position: absolute; left: 0; right: 0; z-index: 2; height: 28px; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 0; color: var(--versiondock-text); background: transparent; border: 0; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: left; }
+.commit-row { position: absolute; left: 0; right: 0; z-index: 2; height: 28px; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 0; color: var(--versiondock-text); background: transparent; border: 0; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: left; user-select: none; -webkit-user-select: none; }
 .commit-row { cursor: pointer; }
 .commit-row:hover { background: var(--versiondock-hover); }
 .commit-row.selected { background: var(--versiondock-hover); }

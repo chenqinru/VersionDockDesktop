@@ -28,6 +28,7 @@ export type BatchCommitTarget = {
 	amend: boolean,
 	paths: string[],
 	unstagePaths?: string[],
+	noVerify?: boolean,
 };
 
 export type BootstrapData = {
@@ -215,6 +216,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	message: string,
 	amend: boolean,
 	paths: string[],
+	no_verify?: boolean,
+} } | { type: "commitSafetyCheck"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	paths: string[],
 } } | { type: "batchCommit"; payload: {
 	workspace_id: string,
 	targets: BatchCommitTarget[],
@@ -232,6 +238,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	action: SyncAction,
 	remote: string | null,
 	branch: string | null,
+	force?: boolean | null,
 } } | { type: "history"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -448,6 +455,8 @@ export type CapabilityStatus = {
 	detail: string | null,
 };
 
+export type CatFileFilterMode = "filters" | "textconv" | "none";
+
 export type ChangelistEntry = {
 	id: string,
 	name: string,
@@ -459,6 +468,8 @@ export type ChangelistEntry = {
 export type ChangelistOperation = { type: "create"; name: string } | { type: "rename"; changelist_id: string; name: string } | { type: "delete"; changelist_id: string } | { type: "assign"; changelist_id: string | null; paths: string[] } | { type: "setActive"; changelist_id: string };
 
 export type ChangesDisplayMode = "simplified" | "changelists";
+
+export type CleanWorkingTreeMethod = "shelve" | "stash";
 
 export type CloneRepositoryResult = {
 	path: string,
@@ -505,6 +516,14 @@ export type CommitPathOperationEntry = {
 	revision: string,
 	path: string,
 	status: string,
+};
+
+export type CommitSafetyCheckResult = {
+	hasIssues: boolean,
+	sensitiveFiles: string[],
+	largeFiles: LargeFileInfo[],
+	invalidFileNames: InvalidFileNameInfo[],
+	crlfFiles: string[],
 };
 
 export type ConflictBlock = {
@@ -594,6 +613,28 @@ export type DesktopSettings = {
 	onlineAvatarsEnabled?: boolean,
 	gravatarEnabled?: boolean,
 	fileIconTheme?: FileIconThemePreference,
+	noVerify?: boolean,
+	autoCommitResolvedMerge?: boolean,
+	warnOnLargeFiles?: boolean,
+	largeFileSizeLimitMb?: number,
+	warnOnDetachedHead?: boolean,
+	warnOnCrlf?: boolean,
+	warnOnInvalidFileNames?: boolean,
+	protectedBranches?: string[],
+	syncProtectedBranchesFromGithub?: boolean,
+	showPushDialogForProtectedBranches?: boolean,
+	onPushRejected?: OnPushRejectedAction,
+	branchCleanCharacter?: string,
+	cherryPickAddSuffix?: boolean,
+	useSafeForcePush?: boolean,
+	updateProjectMethod?: UpdateProjectMethod,
+	updateProjectCleanWorkingTree?: CleanWorkingTreeMethod,
+	updateProjectShowNotification?: boolean,
+	cloneRecursiveSubmodules?: boolean,
+	shelveComparisonBase?: ShelveComparisonBase,
+	catFileFilterMode?: CatFileFilterMode,
+	fetchTags?: FetchTagsMode,
+	excludeIgnoredDirectories?: boolean,
 };
 
 export type DiffDocument = {
@@ -617,6 +658,8 @@ export type ExternalEditor = {
 	executable: string,
 	args: string[],
 };
+
+export type FetchTagsMode = "auto" | "all" | "none";
 
 export type FileChange = {
 	path: string,
@@ -716,7 +759,18 @@ export type InitializeRepositoryResult = {
 	repositoryId: string,
 };
 
+export type InvalidFileNameInfo = {
+	path: string,
+	reason: string,
+};
+
 export type LanguagePreference = "system" | "zhCn" | "en";
+
+export type LargeFileInfo = {
+	path: string,
+	sizeBytes: number | null,
+	sizeFormatted: string,
+};
 
 export type LayoutState = {
 	panelSizes: PanelSizes,
@@ -777,6 +831,8 @@ export type MergeVersions = {
 };
 
 export type NotificationPermissionState = "notRequested" | "allowed" | "denied" | "restricted" | "unavailable";
+
+export type OnPushRejectedAction = "prompt" | "rebaseAndRetry" | "error";
 
 export type OperationDomain = "application" | "workspace" | "status" | "diff" | "history" | "branch" | "tag" | "commit" | "sync" | "conflict" | "stash" | "shelf" | "changelist" | "worktree" | "subtree" | "submodule" | "remote" | "identity" | "svnAccount" | "fileHistory" | "system";
 
@@ -1035,6 +1091,8 @@ export type ShelfFileEntry = {
 
 export type ShelfOperation = { type: "create"; name: string; paths: string[] } | { type: "apply"; shelf_id: string; paths?: string[] | null } | { type: "drop"; shelf_id: string };
 
+export type ShelveComparisonBase = "local" | "parent";
+
 export type StashEntry = {
 	reference: string,
 	hash: string,
@@ -1140,6 +1198,8 @@ export type UpdateDetail = {
 };
 
 export type UpdateKind = "noChanges" | "fastForward" | "updated";
+
+export type UpdateProjectMethod = "rebase" | "merge" | "prompt";
 
 export type UpdateSummary = {
 	kind: UpdateKind,

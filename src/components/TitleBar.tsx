@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { useBridge } from '../platform/context';
@@ -132,18 +133,6 @@ export function TitleBar() {
 
   const closeOtherTabs = useAppStore((state) => state.closeOtherTabs);
   const reorderTabs = useAppStore((state) => state.reorderTabs);
-
-  useEffect(() => {
-    if (!contextMenu?.visible) return;
-    const handleCloseMenu = () => setContextMenu(null);
-    const handleEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setContextMenu(null); };
-    document.addEventListener('pointerdown', handleCloseMenu);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('pointerdown', handleCloseMenu);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [contextMenu?.visible]);
 
   const toggleNewTabMenu = () => {
     if (!newTabMenuOpen && addAnchorRef.current) {
@@ -776,59 +765,24 @@ export function TitleBar() {
       )}
 
       {contextMenu?.visible && (
-        <div
-          className="tab-context-menu"
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 1000,
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          {(() => {
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            { id: 'new-window', label: t('Open in New Window'), icon: 'window' },
+            { separator: true },
+            { id: 'close', label: t('Close Tab'), icon: 'close' },
+            ...(tabs.length > 1 ? [{ id: 'close-others', label: t('Close Other Tabs'), icon: 'close-all' } as ContextMenuEntry] : []),
+          ]}
+          onSelect={(id) => {
             const targetTab = tabs.find((t) => t.id === contextMenu.tabId);
-            return (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (targetTab) {
-                      void moveTabToNewWindow(targetTab);
-                    }
-                    setContextMenu(null);
-                  }}
-                >
-                  <Codicon name="window" />
-                  <span>{t('Open in New Window')}</span>
-                </button>
-                <div className="tab-context-menu-divider" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    void closeTab(contextMenu.tabId);
-                    setContextMenu(null);
-                  }}
-                >
-                  <Codicon name="close" />
-                  <span>{t('Close Tab')}</span>
-                </button>
-                {tabs.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void closeOtherTabs(contextMenu.tabId);
-                      setContextMenu(null);
-                    }}
-                  >
-                    <Codicon name="close-all" />
-                    <span>{t('Close Other Tabs')}</span>
-                  </button>
-                )}
-              </>
-            );
-          })()}
-        </div>
+            if (id === 'new-window' && targetTab) void moveTabToNewWindow(targetTab);
+            else if (id === 'close') void closeTab(contextMenu.tabId);
+            else if (id === 'close-others') void closeOtherTabs(contextMenu.tabId);
+            setContextMenu(null);
+          }}
+          onClose={() => setContextMenu(null)}
+        />
       )}
 
       {newTabMenuOpen && (

@@ -299,6 +299,13 @@ pub enum BridgeCommand {
         message: String,
         amend: bool,
         paths: Vec<String>,
+        #[serde(default)]
+        no_verify: bool,
+    },
+    CommitSafetyCheck {
+        workspace_id: String,
+        repo_id: String,
+        paths: Vec<String>,
     },
     BatchCommit {
         workspace_id: String,
@@ -320,6 +327,8 @@ pub enum BridgeCommand {
         action: SyncAction,
         remote: Option<String>,
         branch: Option<String>,
+        #[serde(default)]
+        force: Option<bool>,
     },
     History {
         workspace_id: String,
@@ -597,6 +606,9 @@ pub struct BatchCommitTarget {
     #[serde(default)]
     #[specta(optional)]
     pub unstage_paths: Vec<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub no_verify: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1386,10 +1398,80 @@ pub struct DesktopSettings {
     pub gravatar_enabled: bool,
     #[serde(default)]
     pub file_icon_theme: FileIconThemePreference,
+
+    // ── Commit & Safety Guard ──────────────────────────────────────────────
+    #[serde(default)]
+    pub no_verify: bool,
+    #[serde(default = "default_true")]
+    pub auto_commit_resolved_merge: bool,
+    #[serde(default = "default_true")]
+    pub warn_on_large_files: bool,
+    #[serde(default = "default_large_file_size_limit_mb")]
+    pub large_file_size_limit_mb: u32,
+    #[serde(default = "default_true")]
+    pub warn_on_detached_head: bool,
+    #[serde(default = "default_true")]
+    pub warn_on_crlf: bool,
+    #[serde(default = "default_true")]
+    pub warn_on_invalid_file_names: bool,
+
+    // ── Branch & Push Protection ───────────────────────────────────────────
+    #[serde(default = "default_protected_branches")]
+    pub protected_branches: Vec<String>,
+    #[serde(default = "default_true")]
+    pub sync_protected_branches_from_github: bool,
+    #[serde(default = "default_true")]
+    pub show_push_dialog_for_protected_branches: bool,
+    #[serde(default)]
+    pub on_push_rejected: OnPushRejectedAction,
+    #[serde(default = "default_branch_clean_character")]
+    pub branch_clean_character: String,
+    #[serde(default = "default_true")]
+    pub cherry_pick_add_suffix: bool,
+    #[serde(default = "default_true")]
+    pub use_safe_force_push: bool,
+
+    // ── Update Project & Submodules ────────────────────────────────────────
+    #[serde(default)]
+    pub update_project_method: UpdateProjectMethod,
+    #[serde(default)]
+    pub update_project_clean_working_tree: CleanWorkingTreeMethod,
+    #[serde(default = "default_true")]
+    pub update_project_show_notification: bool,
+    #[serde(default = "default_true")]
+    pub clone_recursive_submodules: bool,
+
+    // ── Diff & Shelve ──────────────────────────────────────────────────────
+    #[serde(default)]
+    pub shelve_comparison_base: ShelveComparisonBase,
+
+    // ── Git Advanced ───────────────────────────────────────────────────────
+    #[serde(default)]
+    pub cat_file_filter_mode: CatFileFilterMode,
+    #[serde(default)]
+    pub fetch_tags: FetchTagsMode,
+    #[serde(default = "default_true")]
+    pub exclude_ignored_directories: bool,
 }
 
 fn default_auto_check_updates() -> bool {
     true
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_large_file_size_limit_mb() -> u32 {
+    50
+}
+
+fn default_protected_branches() -> Vec<String> {
+    vec!["master".into(), "main".into()]
+}
+
+fn default_branch_clean_character() -> String {
+    "-".into()
 }
 
 impl Default for DesktopSettings {
@@ -1432,6 +1514,33 @@ impl Default for DesktopSettings {
             project_colors: BTreeMap::new(),
             hidden_repository_ids: Vec::new(),
             external_editor: None,
+
+            no_verify: false,
+            auto_commit_resolved_merge: true,
+            warn_on_large_files: true,
+            large_file_size_limit_mb: 50,
+            warn_on_detached_head: true,
+            warn_on_crlf: true,
+            warn_on_invalid_file_names: true,
+
+            protected_branches: vec!["master".into(), "main".into()],
+            sync_protected_branches_from_github: true,
+            show_push_dialog_for_protected_branches: true,
+            on_push_rejected: OnPushRejectedAction::Prompt,
+            branch_clean_character: "-".into(),
+            cherry_pick_add_suffix: true,
+            use_safe_force_push: true,
+
+            update_project_method: UpdateProjectMethod::Rebase,
+            update_project_clean_working_tree: CleanWorkingTreeMethod::Shelve,
+            update_project_show_notification: true,
+            clone_recursive_submodules: true,
+
+            shelve_comparison_base: ShelveComparisonBase::Local,
+
+            cat_file_filter_mode: CatFileFilterMode::Filters,
+            fetch_tags: FetchTagsMode::Auto,
+            exclude_ignored_directories: true,
         }
     }
 }
@@ -1441,6 +1550,25 @@ impl DesktopSettings {
         self.repository_scan_depth = self.repository_scan_depth.min(10);
         self.maximum_graph_commits = self.maximum_graph_commits.clamp(100, 10_000);
         self.auto_refresh_interval = self.auto_refresh_interval.min(86_400);
+        self.large_file_size_limit_mb = self.large_file_size_limit_mb.clamp(1, 1000);
+        if self.branch_clean_character.len() > 1 {
+            self.branch_clean_character = self
+                .branch_clean_character
+                .chars()
+                .next()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".into());
+        }
+        if self.branch_clean_character.is_empty() {
+            self.branch_clean_character = "-".into();
+        }
+        let mut seen_branches = std::collections::HashSet::new();
+        self.protected_branches = self
+            .protected_branches
+            .into_iter()
+            .map(|b| b.trim().to_string())
+            .filter(|b| !b.is_empty() && seen_branches.insert(b.clone()))
+            .collect();
         let mut seen = std::collections::HashSet::new();
         self.ignored_folders = self
             .ignored_folders
@@ -1503,12 +1631,64 @@ pub enum DefaultCommitAction {
     CommitAndPush,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum DefaultSaveAction {
     #[default]
     Stash,
     Shelf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OnPushRejectedAction {
+    #[default]
+    Prompt,
+    RebaseAndRetry,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateProjectMethod {
+    #[default]
+    Rebase,
+    Merge,
+    Prompt,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CleanWorkingTreeMethod {
+    #[default]
+    Shelve,
+    Stash,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ShelveComparisonBase {
+    #[default]
+    Local,
+    Parent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CatFileFilterMode {
+    #[default]
+    Filters,
+    Textconv,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FetchTagsMode {
+    #[default]
+    Auto,
+    All,
+    None,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2234,3 +2414,29 @@ pub struct RestoreConflictsResult {
     pub restored_paths: Vec<String>,
     pub failures: Vec<RestoreConflictFailure>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LargeFileInfo {
+    pub path: String,
+    pub size_bytes: f64,
+    pub size_formatted: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InvalidFileNameInfo {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitSafetyCheckResult {
+    pub has_issues: bool,
+    pub sensitive_files: Vec<String>,
+    pub large_files: Vec<LargeFileInfo>,
+    pub invalid_file_names: Vec<InvalidFileNameInfo>,
+    pub crlf_files: Vec<String>,
+}
+

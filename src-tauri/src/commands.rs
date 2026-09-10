@@ -568,6 +568,7 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
             ("index", "Updating repository index")
         }
         BridgeCommand::Discard { .. } => ("discard", "Restoring selected paths"),
+        BridgeCommand::CommitSafetyCheck { .. } => ("safetyCheck", "Checking commit safety"),
         BridgeCommand::Commit { .. } | BridgeCommand::BatchCommit { .. } => {
             ("commit", "Creating repository commit")
         }
@@ -941,6 +942,16 @@ fn command_error_context(
             Some(repo_id.clone()),
             None,
         ),
+        BridgeCommand::CommitSafetyCheck {
+            workspace_id,
+            repo_id,
+            ..
+        } => (
+            operation,
+            Some(workspace_id.clone()),
+            Some(repo_id.clone()),
+            None,
+        ),
         BridgeCommand::BatchCommit { workspace_id, .. } => {
             (operation, Some(workspace_id.clone()), None, None)
         }
@@ -1128,7 +1139,8 @@ async fn dispatch(
             let settings = settings.normalize();
             let effects = crate::models::SettingsEffects {
                 rescan_workspace: previous.repository_scan_depth != settings.repository_scan_depth
-                    || previous.ignored_folders != settings.ignored_folders,
+                    || previous.ignored_folders != settings.ignored_folders
+                    || previous.exclude_ignored_directories != settings.exclude_ignored_directories,
                 reload_history: previous.maximum_graph_commits != settings.maximum_graph_commits
                     || previous.hidden_repository_ids != settings.hidden_repository_ids,
                 restart_auto_refresh: previous.auto_refresh_interval
@@ -1335,8 +1347,9 @@ async fn dispatch(
                 .as_deref()
                 .map(|id| provider::credentials_for_url(&state.config_dir, id, &url))
                 .transpose()?;
+            let recurse = state.app.read().await.settings.clone_recursive_submodules;
             let path = with_write(state, &lock_key, token, async {
-                vcs::clone_repository(&url, &parent, &target_name, credentials.as_ref(), token)
+                vcs::clone_repository(&url, &parent, &target_name, credentials.as_ref(), recurse, token)
                     .await
             })
             .await?;
@@ -1955,6 +1968,7 @@ async fn dispatch(
             message,
             amend,
             paths,
+            no_verify,
         } => {
             emit_operation_phase(
                 app,
@@ -1995,11 +2009,124 @@ async fn dispatch(
                     None,
                     None,
                 );
-                vcs::commit_with_identity(&repo, &message, amend, &paths, identity.as_ref(), token)
+                vcs::commit_with_identity(&repo, &message, amend, &paths, identity.as_ref(), no_verify, token)
                     .await
             })
             .await?;
             json(value)
+        }
+        BridgeCommand::CommitSafetyCheck {
+            workspace_id,
+            repo_id,
+            paths,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let settings = state.app.read().await.settings.clone();
+            let root = Path::new(&repo.root_path);
+            let mut result = crate::models::CommitSafetyCheckResult::default();
+            let max_size_bytes = (settings.large_file_size_limit_mb.max(1) as u64) * 1024 * 1024;
+            let forbidden_chars = ['<', '>', ':', '"', '|', '?', '*'];
+            let reserved_names = [
+                "con", "prn", "aux", "nul",
+                "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+                "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+            ];
+
+            let mut seen_lower = std::collections::HashMap::new();
+
+            for rel_path in paths {
+                let base = Path::new(&rel_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| rel_path.clone());
+
+                // 1. Sensitive
+                if !base.ends_with(".example") && !base.ends_with(".sample") && !base.ends_with(".template") {
+                    let is_sensitive = base.starts_with(".env")
+                        || base.ends_with(".pem")
+                        || base.ends_with(".key")
+                        || base.ends_with(".pfx")
+                        || base.ends_with(".p12")
+                        || base.ends_with(".kdbx")
+                        || base.starts_with("id_rsa")
+                        || base.starts_with("id_ed25519");
+                    if is_sensitive {
+                        result.sensitive_files.push(rel_path.clone());
+                    }
+                }
+
+                // 2. Invalid names
+                if settings.warn_on_invalid_file_names {
+                    let base_no_ext = base.split('.').next().unwrap_or("").to_ascii_lowercase();
+                    if base.chars().any(|c| forbidden_chars.contains(&c) || (c as u32) < 32) {
+                        result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
+                            path: rel_path.clone(),
+                            reason: "contains characters forbidden on Windows (: * ? \" < > |)".into(),
+                        });
+                    } else if base.ends_with(' ') || base.ends_with('.') {
+                        result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
+                            path: rel_path.clone(),
+                            reason: "ends with space or dot".into(),
+                        });
+                    } else if reserved_names.contains(&base_no_ext.as_str()) {
+                        result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
+                            path: rel_path.clone(),
+                            reason: format!("uses Windows-reserved name \"{base_no_ext}\""),
+                        });
+                    }
+
+                    let lower = rel_path.to_ascii_lowercase();
+                    if let Some(existing) = seen_lower.get(&lower) {
+                        if existing != &rel_path {
+                            result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
+                                path: rel_path.clone(),
+                                reason: format!("case collision with \"{existing}\""),
+                            });
+                        }
+                    } else {
+                        seen_lower.insert(lower, rel_path.clone());
+                    }
+                }
+
+                // 3. File size & CRLF
+                let full_path = root.join(&rel_path);
+                if let Ok(metadata) = std::fs::symlink_metadata(&full_path) {
+                    if metadata.is_file() {
+                        let len = metadata.len();
+                        if settings.warn_on_large_files && len > max_size_bytes {
+                            let formatted = if len < 1024 * 1024 {
+                                format!("{:.1} KB", len as f64 / 1024.0)
+                            } else {
+                                format!("{:.1} MB", len as f64 / (1024.0 * 1024.0))
+                            };
+                            result.large_files.push(crate::models::LargeFileInfo {
+                                path: rel_path.clone(),
+                                size_bytes: len as f64,
+                                size_formatted: formatted,
+                            });
+                        }
+
+                        if settings.warn_on_crlf && len > 0 && len < 5 * 1024 * 1024 {
+                            if let Ok(mut f) = std::fs::File::open(&full_path) {
+                                use std::io::Read;
+                                let mut buffer = [0u8; 64 * 1024];
+                                if let Ok(read_bytes) = f.read(&mut buffer) {
+                                    if buffer[..read_bytes].windows(2).any(|w| w == b"\r\n") {
+                                        result.crlf_files.push(rel_path.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            result.has_issues = !result.sensitive_files.is_empty()
+                || !result.large_files.is_empty()
+                || !result.invalid_file_names.is_empty()
+                || !result.crlf_files.is_empty();
+
+            json(result)
         }
         BridgeCommand::BatchCommit {
             workspace_id,
@@ -2074,6 +2201,7 @@ async fn dispatch(
                         target.amend,
                         &target.paths,
                         identity.as_ref(),
+                        target.no_verify,
                         token,
                     )
                     .await
@@ -2093,7 +2221,8 @@ async fn dispatch(
                                     Some(index as u32),
                                     Some(total),
                                 );
-                                vcs::sync(&repo, crate::models::SyncAction::Push, None, None, token)
+                                let settings = state.app.read().await.settings.clone();
+                                vcs::sync(&repo, crate::models::SyncAction::Push, None, None, false, &settings, token)
                                     .await
                             })
                             .await
@@ -2187,6 +2316,7 @@ async fn dispatch(
             action,
             remote,
             branch,
+            force,
         } => {
             let (phase, message) = sync_phase(&action);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
@@ -2201,7 +2331,8 @@ async fn dispatch(
                     None,
                     None,
                 );
-                vcs::sync(&repo, action, remote, branch, token).await
+                let settings = state.app.read().await.settings.clone();
+                vcs::sync(&repo, action, remote, branch, force.unwrap_or(false), &settings, token).await
             })
             .await?;
             json(value)
@@ -2312,8 +2443,9 @@ async fn dispatch(
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let add_suffix = state.app.read().await.settings.cherry_pick_add_suffix;
             with_write(state, &repo_id, token, async {
-                vcs::history_operation(&repo, operation, token).await
+                vcs::history_operation(&repo, operation, add_suffix, token).await
             })
             .await?;
             json(true)
@@ -2760,12 +2892,14 @@ async fn dispatch(
             expected_fingerprint,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let auto_commit = state.app.read().await.settings.auto_commit_resolved_merge;
             with_write(state, &repo_id, token, async {
                 vcs::conflict_save(
                     &repo,
                     &relative_path,
                     &content,
                     &expected_fingerprint,
+                    auto_commit,
                     token,
                 )
                 .await
@@ -2780,8 +2914,9 @@ async fn dispatch(
             choice,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let auto_commit = state.app.read().await.settings.auto_commit_resolved_merge;
             with_write(state, &repo_id, token, async {
-                vcs::conflict_accept(&repo, &relative_path, choice, token).await
+                vcs::conflict_accept(&repo, &relative_path, choice, auto_commit, token).await
             })
             .await?;
             json(true)
@@ -2898,7 +3033,8 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::file_revision_content(&repo, &relative_path, &revision, token).await?)
+            let filter_mode = state.app.read().await.settings.cat_file_filter_mode.clone();
+            json(vcs::file_revision_content(&repo, &relative_path, &revision, filter_mode, token).await?)
         }
         BridgeCommand::LogGet {
             channel,

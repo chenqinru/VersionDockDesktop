@@ -219,6 +219,7 @@ pub fn scan(
             0,
             settings.repository_scan_depth as usize,
             &settings.ignored_folders,
+            settings.exclude_ignored_directories,
             &mut discovered,
             &mut seen,
         )?;
@@ -278,10 +279,10 @@ pub fn scan(
             RepositoryMeta {
                 id: id.clone(),
                 name: path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("repository")
-                    .to_string(),
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("repository")
+                .to_string(),
                 root_path: path.to_string_lossy().into_owned(),
                 color: settings
                     .project_colors
@@ -298,12 +299,34 @@ pub fn scan(
         .collect())
 }
 
+fn parse_gitignore_ignored_dirs(dir: &Path) -> Vec<String> {
+    let gitignore = dir.join(".gitignore");
+    let Ok(content) = std::fs::read_to_string(gitignore) else {
+        return Vec::new();
+    };
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('!') {
+                return None;
+            }
+            let pattern = trimmed.trim_start_matches('/').trim_end_matches('/');
+            if pattern.is_empty() || pattern.contains('*') || pattern.contains('/') {
+                return None;
+            }
+            Some(pattern.to_string())
+        })
+        .collect()
+}
+
 fn walk(
     root: &Path,
     current: &Path,
     depth: usize,
     max_depth: usize,
     ignored_folders: &[String],
+    exclude_ignored_directories: bool,
     result: &mut Vec<(PathBuf, VcsKind)>,
     seen: &mut HashSet<String>,
 ) -> Result<(), DesktopError> {
@@ -324,6 +347,11 @@ fn walk(
     if depth >= max_depth {
         return Ok(());
     }
+    let local_ignored = if exclude_ignored_directories {
+        parse_gitignore_ignored_dirs(current)
+    } else {
+        Vec::new()
+    };
     for entry in std::fs::read_dir(current)
         .map_err(|error| DesktopError::new("WORKSPACE_SCAN_FAILED", error.to_string(), true))?
     {
@@ -348,6 +376,7 @@ fn walk(
             || ignored_folders
                 .iter()
                 .any(|ignored| ignored == &name || relative.as_ref() == Some(ignored))
+            || local_ignored.iter().any(|ignored| ignored == &name)
         {
             continue;
         }
@@ -364,6 +393,7 @@ fn walk(
                 next_depth,
                 max_depth,
                 ignored_folders,
+                exclude_ignored_directories,
                 result,
                 seen,
             )?;

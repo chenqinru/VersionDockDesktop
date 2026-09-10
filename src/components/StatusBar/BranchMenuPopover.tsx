@@ -6,6 +6,7 @@ import { promptDialog, confirmDialog, choiceDialog } from '../dialogService';
 import type { RepositoryStatus } from '../../bindings/generated';
 import { useBridge } from '../../platform/context';
 import { resolveSubmoduleOperationTarget } from './submoduleTarget';
+import { isBranchProtected, sanitizeBranchName } from '../../history/branchProtection';
 
 interface BranchMenuPopoverProps {
   anchorRect: DOMRect | null;
@@ -214,9 +215,11 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
       inputLabel: t('Branch Name'),
     });
     if (!branchName) return;
+    const sanitized = sanitizeBranchName(branchName);
+    if (!sanitized) return;
 
     await Promise.allSettled(
-      gitRepos.map((r) => branchOperation({ type: 'create', name: branchName, from: null }, r.meta.id))
+      gitRepos.map((r) => branchOperation({ type: 'create', name: sanitized, from: null }, r.meta.id))
     );
     await refresh(true);
   };
@@ -614,8 +617,11 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                             inputLabel: t('Branch Name'),
                           });
                           if (name) {
-                            await branchOperation({ type: 'create', name, from: null }, activeSubmenuRepo.meta.id);
-                            await refresh(true);
+                            const sanitized = sanitizeBranchName(name);
+                            if (sanitized) {
+                              await branchOperation({ type: 'create', name: sanitized, from: null }, activeSubmenuRepo.meta.id);
+                              await refresh(true);
+                            }
                           }
                         }}
                       >
@@ -1011,12 +1017,15 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       inputLabel: t('Branch Name'),
                     });
                     if (newName) {
-                      await Promise.allSettled(
-                        gitRepos.map((r) =>
-                          branchOperation({ type: 'create', name: newName, from: activeCommonBranch.name }, r.meta.id)
-                        )
-                      );
-                      await refresh(true);
+                      const sanitized = sanitizeBranchName(newName);
+                      if (sanitized) {
+                        await Promise.allSettled(
+                          gitRepos.map((r) =>
+                            branchOperation({ type: 'create', name: sanitized, from: activeCommonBranch.name }, r.meta.id)
+                          )
+                        );
+                        await refresh(true);
+                      }
                     }
                   }}
                 >
@@ -1122,6 +1131,14 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                         className="statusbar-menu-item danger"
                         onClick={async () => {
                           onClose();
+                          if (isBranchProtected(activeCommonBranch.name)) {
+                            await confirmDialog({
+                              title: t('Protected branch'),
+                              message: t('VersionDock: Protected branch "{0}" cannot be deleted.', activeCommonBranch.name),
+                              confirmLabel: t('OK'),
+                            });
+                            return;
+                          }
                           const confirmed = await confirmDialog({
                             title: t("Delete branch '{0}'?", activeCommonBranch.name),
                             message: t("Delete branch '{0}' in all repos?", activeCommonBranch.name),
@@ -1313,11 +1330,14 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                       inputLabel: t('Branch Name'),
                     });
                     if (newBranch) {
-                      await branchOperation(
-                        { type: 'create', name: newBranch, from: activeBranchAction.branchName },
-                        activeBranchAction.repoId
-                      );
-                      await refresh(true);
+                      const sanitized = sanitizeBranchName(newBranch);
+                      if (sanitized) {
+                        await branchOperation(
+                          { type: 'create', name: sanitized, from: activeBranchAction.branchName },
+                          activeBranchAction.repoId
+                        );
+                        await refresh(true);
+                      }
                     }
                   }}
                 >
@@ -1352,11 +1372,14 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                           initialValue: activeBranchAction.branchName,
                         });
                         if (newName && newName !== activeBranchAction.branchName) {
-                          await branchOperation(
-                            { type: 'rename', old_name: activeBranchAction.branchName, new_name: newName },
-                            activeBranchAction.repoId
-                          );
-                          await refresh(true);
+                          const sanitized = sanitizeBranchName(newName);
+                          if (sanitized) {
+                            await branchOperation(
+                              { type: 'rename', old_name: activeBranchAction.branchName, new_name: sanitized },
+                              activeBranchAction.repoId
+                            );
+                            await refresh(true);
+                          }
                         }
                       }}
                     >
@@ -1431,6 +1454,14 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
                         className="statusbar-menu-item danger"
                         onClick={async () => {
                           onClose();
+                          if (isBranchProtected(activeBranchAction.branchName)) {
+                            await confirmDialog({
+                              title: t('Protected branch'),
+                              message: t('VersionDock: Protected branch "{0}" cannot be deleted.', activeBranchAction.branchName),
+                              confirmLabel: t('OK'),
+                            });
+                            return;
+                          }
                           const confirmed = await confirmDialog({
                             title: t("Delete branch '{0}'?", activeBranchAction.branchName),
                             message: t("Delete branch '{0}'?", activeBranchAction.branchName),

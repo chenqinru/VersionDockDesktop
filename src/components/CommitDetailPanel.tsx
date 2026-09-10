@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { useAppStore, type AppStore } from '../store/appStore';
@@ -143,7 +143,8 @@ function commitPathEntries(
   }])).values()];
 }
 
-function openTarget(target: DetailFileTarget, openDiff: AppStore['openDiff']): void {
+function openTarget(target: DetailFileTarget, openDiff: AppStore['openDiff'], onOpening?: (path: string) => void): void {
+  onOpening?.(target.path);
   const range = target.fromRevision && target.toRevision ? { fromRevision: target.fromRevision, toRevision: target.toRevision } : undefined;
   void openDiff(target.repoId, target.path, false, range ? undefined : target.commitHash, range);
 }
@@ -233,6 +234,8 @@ function DetailTreeNodeView({
   selectedFile,
   allExpanded,
   clearAllExpanded,
+  openingDiffPath,
+  onOpeningDiff,
 }: {
   node: DetailTreeNode;
   depth: number;
@@ -240,6 +243,8 @@ function DetailTreeNodeView({
   selectedFile?: AppStore['selectedFile'];
   allExpanded: boolean | null;
   clearAllExpanded: () => void;
+  openingDiffPath?: string | null;
+  onOpeningDiff?: (path: string) => void;
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(true);
@@ -253,11 +258,14 @@ function DetailTreeNodeView({
         className={`detail-file-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''}`}
         style={{ paddingLeft: 18 + depth * 14 }}
         title={`${file.path}\n${t('Click to open diff')}`}
-        onClick={() => openTarget(file, openDiff)}
+        onClick={() => openTarget(file, openDiff, onOpeningDiff)}
         onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY }); }}
       >
         <FileIcon name={node.name} />
         <span className="detail-file-name">{node.name}</span>
+        {openingDiffPath === file.path && (
+          <Codicon name="loading~spin" style={{ fontSize: '12px', marginLeft: '6px' }} />
+        )}
         {(file.added !== null || file.removed !== null) && (
           <span className="detail-line-stats">
             {file.added !== null && <b className="added">+{file.added}</b>}
@@ -298,6 +306,8 @@ function DetailTreeNodeView({
             selectedFile={selectedFile}
             allExpanded={allExpanded}
             clearAllExpanded={clearAllExpanded}
+            openingDiffPath={openingDiffPath}
+            onOpeningDiff={onOpeningDiff}
           />
         ))}
       </div>
@@ -312,12 +322,16 @@ function DetailFlatFileRow({
   showRepo,
   selectedFile,
   openDiff,
+  openingDiffPath,
+  onOpeningDiff,
 }: {
   file: DetailFileTarget;
   repoName?: string;
   showRepo?: boolean;
   selectedFile?: AppStore['selectedFile'];
   openDiff: AppStore['openDiff'];
+  openingDiffPath?: string | null;
+  onOpeningDiff?: (path: string) => void;
 }) {
   const { t } = useI18n();
   const [context, setContext] = useState<{ x: number; y: number }>();
@@ -330,11 +344,14 @@ function DetailFlatFileRow({
       key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
       className={`detail-file-row detail-list-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''}`}
       title={`${file.path}\n${t('Click to open diff')}`}
-      onClick={() => openTarget(file, openDiff)}
+      onClick={() => openTarget(file, openDiff, onOpeningDiff)}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY }); }}
     >
       <FileIcon name={fileName} />
       <span className="detail-file-name">{fileName}</span>
+      {openingDiffPath === file.path && (
+        <Codicon name="loading~spin" style={{ fontSize: '12px', marginLeft: '6px' }} />
+      )}
       {dir && <span className="detail-dir-path">{dir}</span>}
       {showRepo && repoName && <small className="detail-repo-pill">{repoName}</small>}
       {(file.added !== null || file.removed !== null) && (
@@ -357,6 +374,8 @@ function DetailRepoGroup({
   selectedFile,
   allExpanded,
   clearAllExpanded,
+  openingDiffPath,
+  onOpeningDiff,
 }: {
   files: DetailFileTarget[];
   repoName: string;
@@ -365,6 +384,8 @@ function DetailRepoGroup({
   selectedFile?: AppStore['selectedFile'];
   allExpanded: boolean | null;
   clearAllExpanded: () => void;
+  openingDiffPath?: string | null;
+  onOpeningDiff?: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [context, setContext] = useState<{ x: number; y: number }>();
@@ -396,6 +417,8 @@ function DetailRepoGroup({
             selectedFile={selectedFile}
             allExpanded={allExpanded}
             clearAllExpanded={clearAllExpanded}
+            openingDiffPath={openingDiffPath}
+            onOpeningDiff={onOpeningDiff}
           />
         ))}
       </div>
@@ -689,11 +712,28 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   const openFileHistory = useAppStore((state) => state.openFileHistory);
   const openCommitDetail = useAppStore((state) => state.openCommitDetail);
   const openChanges = useAppStore((state) => state.openCommitChanges);
+  const diff = useAppStore((state) => state.diff);
   const { t } = useI18n();
+  const [openingDiffPath, setOpeningDiffPath] = useState<string | null>(null);
+  const openingDiffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fileMode, setFileMode] = useState<'tree' | 'list'>('tree');
   const [allTreeExpanded, setAllTreeExpanded] = useState<boolean | null>(null);
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
   const [infoHeight, setInfoHeight] = useState<number>();
+
+  useEffect(() => {
+    setOpeningDiffPath(null);
+  }, [diff]);
+
+  const handleOpeningDiff = useCallback((path: string) => {
+    if (openingDiffTimerRef.current) clearTimeout(openingDiffTimerRef.current);
+    openingDiffTimerRef.current = setTimeout(() => {
+      setOpeningDiffPath(path);
+    }, 120);
+    setTimeout(() => {
+      setOpeningDiffPath((current) => (current === path ? null : current));
+    }, 6000);
+  }, []);
   const repoMap = useMemo(() => new Map(repositories.map((repo) => [repo.meta.id, repo])), [repositories]);
   const targets = useMemo(() => buildCommitFileTargets(selectedCommits, selectedDetails, repositories), [selectedCommits, selectedDetails, repositories]);
   const targetsByRepo = useMemo(() => {
@@ -771,6 +811,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                   selectedFile={selectedFile}
                   allExpanded={allTreeExpanded}
                   clearAllExpanded={() => setAllTreeExpanded(null)}
+                  openingDiffPath={openingDiffPath}
+                  onOpeningDiff={handleOpeningDiff}
                 />
               ))
             ) : (
@@ -782,6 +824,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                   showRepo={selectedCommits.length > 1}
                   selectedFile={selectedFile}
                   openDiff={openDiff}
+                  openingDiffPath={openingDiffPath}
+                  onOpeningDiff={handleOpeningDiff}
                 />
               ))
             )
@@ -812,7 +856,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
             <button type="button" title={t('Open Commit Detail')} onClick={openCommitDetail}><Codicon name="open-preview" /></button>
             <button type="button" title={t('Open Changes')} onClick={openChanges}><Codicon name="diff-multiple" /></button>
             <button type="button" title={allMessagesExpanded ? t('Collapse commit messages by default') : t('Expand commit messages by default')} onClick={toggleAllMessages}><Codicon name={allMessagesExpanded ? 'collapse-all' : 'expand-all'} /></button>
-            <button type="button" title={t('Close commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></button>
+            <button type="button" title={t('Collapse commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></button>
           </div>
         </header>
         {selectedCommits.length > 1 ? (

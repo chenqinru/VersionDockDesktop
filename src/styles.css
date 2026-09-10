@@ -207,7 +207,39 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--versiondock-bg); color: var(--versiondock-text); }
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--versiondock-bg);
+  color: var(--versiondock-text);
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+
+input, textarea, select, [contenteditable="true"] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
+.selectable-text,
+.unified-diff-view code,
+.diff-code-cell code,
+.diff-inline-row code,
+.code-view code,
+.detail-message-card pre,
+.detail-commit-summary,
+.output-panel pre,
+.toast-details pre,
+.commit-popover code {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
 button, input, textarea, select { font: inherit; color: inherit; }
 button { border: 0; background: transparent; cursor: default; }
 button:not(:disabled) { cursor: pointer; transition: background-color .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
@@ -3018,7 +3050,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .repo-heading .branch-chip > .codicon { flex: 0 0 auto; }
 .repo-heading .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-heading > b { min-width: 18px; height: 16px; flex: 0 0 auto; padding: 0 5px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 16px; text-align: center; }
-.file-row, .directory-row { height: 22px; min-height: 22px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 22px; }
+.file-row, .directory-row { height: 22px; min-height: 22px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 22px; user-select: none; -webkit-user-select: none; }
 .file-row { min-width: 0; display: flex; align-items: center; gap: 3px; padding-right: 8px; overflow: hidden; white-space: nowrap; }
 .selection-checkbox { position: relative; width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border)); border-radius: 2px; background: transparent; color: #fff; }
 .selection-checkbox.selected {
@@ -3322,7 +3354,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-root-label strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-root-label b { min-width: 17px; padding: 0 4px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; text-align: center; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); line-height: 14px; }
 .detail-list-row { padding-left: 9px; }
-.detail-tree-dir > button, .detail-file-row { width: 100%; height: 24px; padding-right: 7px; display: flex; align-items: center; gap: 5px; text-align: left; }
+.detail-tree-dir > button, .detail-file-row { width: 100%; height: 24px; padding-right: 7px; display: flex; align-items: center; gap: 5px; text-align: left; user-select: none; -webkit-user-select: none; }
 .detail-tree-dir > button:hover, .detail-file-row:hover { background: var(--versiondock-hover); }
 .detail-tree-dir .detail-node-label, .detail-file-row .detail-file-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-directory-count { min-width: 17px; padding: 0 4px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; text-align: center; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); }
@@ -3504,7 +3536,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .changes-commit-group h4 code { flex: 0 0 auto; color: var(--versiondock-accent); font: calc(10px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }
 .changes-commit-group h4 span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .changes-commit-group h4 b { flex: 0 0 auto; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; }
-.changes-file-row { width: 100%; min-height: 28px; display: flex; align-items: center; gap: 5px; padding: 3px 8px; text-align: left; }
+.changes-file-row { width: 100%; min-height: 28px; display: flex; align-items: center; gap: 5px; padding: 3px 8px; text-align: left; user-select: none; -webkit-user-select: none; }
 .changes-file-row:hover, .changes-file-row.selected { background: var(--versiondock-hover); }
 .changes-file-row.selected { box-shadow: inset 2px 0 var(--versiondock-accent); }
 .changes-file-row > .changes-file-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

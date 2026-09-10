@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Codicon } from './Codicon';
 import { BranchRefBadge } from './BranchRefBadge';
+import { ContextMenu } from './ContextMenu';
 import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
@@ -533,33 +534,21 @@ function ShelfRow({
       )}
 
       {ctxMenu && (
-        <div
-          className="context-menu"
-          style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 1000 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setCtxMenu(null);
-              onUnshelve(repoId, entry.id);
-            }}
-          >
-            <Codicon name="desktop-download" />
-            {t('Unshelve')}
-          </button>
-          <button
-            type="button"
-            className="danger"
-            onClick={() => {
-              setCtxMenu(null);
-              onDrop(repoId, entry.id);
-            }}
-          >
-            <Codicon name="trash" />
-            {t('Delete')}
-          </button>
-        </div>
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={[
+            { id: 'unshelve', label: t('Unshelve'), icon: 'desktop-download' },
+            { separator: true },
+            { id: 'drop', label: t('Delete'), icon: 'trash', danger: true },
+          ]}
+          onSelect={(id) => {
+            if (id === 'unshelve') onUnshelve(repoId, entry.id);
+            else if (id === 'drop') onDrop(repoId, entry.id);
+            setCtxMenu(null);
+          }}
+          onClose={() => setCtxMenu(null)}
+        />
       )}
     </div>
   );

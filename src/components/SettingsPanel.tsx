@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { DefaultCommitAction, DefaultSaveAction, ExternalEditor, FileIconThemePreference, LanguagePreference, ThemePreference, UiFontSizePreference } from '../bindings/generated';
+import type {
+  CatFileFilterMode,
+  CleanWorkingTreeMethod,
+  DefaultCommitAction,
+  DefaultSaveAction,
+  ExternalEditor,
+  FetchTagsMode,
+  FileIconThemePreference,
+  LanguagePreference,
+  OnPushRejectedAction,
+  ShelveComparisonBase,
+  ThemePreference,
+  UiFontSizePreference,
+  UpdateProjectMethod,
+} from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
@@ -14,6 +28,10 @@ interface SettingsPanelProps {
 const settingsCategories = [
   { id: 'settings-section-appearance-title', sectionId: 'settings-section-appearance', icon: 'color-mode', label: 'Appearance' },
   { id: 'settings-section-changes-title', sectionId: 'settings-section-changes', icon: 'source-control', label: 'Changes and commit' },
+  { id: 'settings-section-guard-title', sectionId: 'settings-section-guard', icon: 'shield', label: 'Commit & Safety Guard' },
+  { id: 'settings-section-protection-title', sectionId: 'settings-section-protection', icon: 'lock', label: 'Branch & Push Protection' },
+  { id: 'settings-section-update-title', sectionId: 'settings-section-update', icon: 'cloud-download', label: 'Update Project & Submodules' },
+  { id: 'settings-section-diff-title', sectionId: 'settings-section-diff', icon: 'diff', label: 'Diff & Shelve' },
   { id: 'settings-section-refresh-title', sectionId: 'settings-section-refresh', icon: 'sync', label: 'Refresh and startup' },
   { id: 'settings-section-repository-title', sectionId: 'settings-section-repository', icon: 'repo', label: 'Repository and history' },
   { id: 'settings-section-external-editor-title', sectionId: 'settings-section-external-editor', icon: 'terminal', label: 'External editor' },
@@ -286,7 +304,172 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </SettingsSection>
                 )}
 
-                {/* 3. 刷新与启动 Refresh and startup */}
+                {/* 3. 提交与安全防御 Commit & Safety Guard */}
+                {activeCategory === 'settings-section-guard-title' && (
+                  <SettingsSection id="settings-section-guard" titleId="settings-section-guard-title" icon="shield" title={t('Commit & Safety Guard')}>
+                    <SettingsCard title={t('Commit & Safety Guard')}>
+                      <SettingToggle
+                        label={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
+                        description={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
+                        checked={settings?.noVerify ?? false}
+                        onChange={(val) => void updateSettings({ noVerify: val })}
+                      />
+                      <SettingToggle
+                        label={t('Auto-commit resolved merge')}
+                        description={t('Automatically commit the merge when all conflicts in a repository are resolved (enabled by default).')}
+                        checked={settings?.autoCommitResolvedMerge ?? true}
+                        onChange={(val) => void updateSettings({ autoCommitResolvedMerge: val })}
+                      />
+                      <SettingToggle
+                        label={t('Warn on large files')}
+                        description={t('Warn before committing files larger than the specified size limit.')}
+                        checked={settings?.warnOnLargeFiles ?? true}
+                        onChange={(val) => void updateSettings({ warnOnLargeFiles: val })}
+                      />
+                      <SettingNumber
+                        label={t('Large file size limit (MB)')}
+                        description={t('Size threshold in megabytes for large file commit warning (default: 50MB).')}
+                        value={settings?.largeFileSizeLimitMb ?? 50}
+                        min={1}
+                        max={1000}
+                        suffix="MB"
+                        onChange={(val) => void updateSettings({ largeFileSizeLimitMb: val })}
+                      />
+                      <SettingToggle
+                        label={t('Warn on detached HEAD')}
+                        description={t('Warn before committing in detached HEAD or during an ongoing rebase, offering to create a branch.')}
+                        checked={settings?.warnOnDetachedHead ?? true}
+                        onChange={(val) => void updateSettings({ warnOnDetachedHead: val })}
+                      />
+                      <SettingToggle
+                        label={t('Warn on CRLF line separators')}
+                        description={t('Warn if CRLF line separators are about to be committed in text files.')}
+                        checked={settings?.warnOnCrlf ?? true}
+                        onChange={(val) => void updateSettings({ warnOnCrlf: val })}
+                      />
+                      <SettingToggle
+                        label={t('Warn on invalid file names')}
+                        description={t('Warn when committing files with names that may cause issues on Windows or other operating systems (e.g. invalid characters or case collisions).')}
+                        checked={settings?.warnOnInvalidFileNames ?? true}
+                        onChange={(val) => void updateSettings({ warnOnInvalidFileNames: val })}
+                      />
+                    </SettingsCard>
+                  </SettingsSection>
+                )}
+
+                {/* 4. 分支与推送防护 Branch & Push Protection */}
+                {activeCategory === 'settings-section-protection-title' && (
+                  <SettingsSection id="settings-section-protection" titleId="settings-section-protection-title" icon="lock" title={t('Branch & Push Protection')}>
+                    <SettingsCard title={t('Branch & Push Protection')}>
+                      <SettingProtectedBranches
+                        branches={settings?.protectedBranches ?? ['master', 'main']}
+                        onChange={(branches) => void updateSettings({ protectedBranches: branches })}
+                      />
+                      <SettingToggle
+                        label={t('Sync protected branches from remote')}
+                        description={t('Automatically sync branch protection rules from GitHub and GitLab for remote repositories.')}
+                        checked={settings?.syncProtectedBranchesFromGithub ?? true}
+                        onChange={(val) => void updateSettings({ syncProtectedBranchesFromGithub: val })}
+                      />
+                      <SettingToggle
+                        label={t('Confirm before pushing to protected branches')}
+                        description={t('Show confirmation dialog before pushing to protected branches.')}
+                        checked={settings?.showPushDialogForProtectedBranches ?? true}
+                        onChange={(val) => void updateSettings({ showPushDialogForProtectedBranches: val })}
+                      />
+                      <SettingSelect
+                        label={t('On push rejected')}
+                        description={t('Behavior when a push is rejected because the remote is ahead (non-fast-forward).')}
+                        value={settings?.onPushRejected ?? 'prompt'}
+                        options={[
+                          ['prompt', t('Prompt')],
+                          ['rebaseAndRetry', t('Rebase and retry')],
+                          ['error', t('Error only')],
+                        ]}
+                        onChange={(val) => void updateSettings({ onPushRejected: val as OnPushRejectedAction })}
+                      />
+                      <SettingToggle
+                        label={t('Use safe force push (--force-with-lease)')}
+                        description={t("Use '--force-with-lease' (safe force push) when force pushing from the extension, or '--force' when disabled.")}
+                        checked={settings?.useSafeForcePush ?? true}
+                        onChange={(val) => void updateSettings({ useSafeForcePush: val })}
+                      />
+                      <SettingToggle
+                        label={t('Add suffix when cherry-picking')}
+                        description={t("Add 'cherry-picked from <hash>' suffix when cherry-picking commits (git cherry-pick -x).")}
+                        checked={settings?.cherryPickAddSuffix ?? true}
+                        onChange={(val) => void updateSettings({ cherryPickAddSuffix: val })}
+                      />
+                      <SettingCharInput
+                        label={t('Branch clean character')}
+                        description={t("Character to replace invalid characters and whitespace in Git branch names (e.g. '-').")}
+                        value={settings?.branchCleanCharacter ?? '-'}
+                        onChange={(val) => void updateSettings({ branchCleanCharacter: val })}
+                      />
+                    </SettingsCard>
+                  </SettingsSection>
+                )}
+
+                {/* 5. 更新项目与子模块 Update Project & Submodules */}
+                {activeCategory === 'settings-section-update-title' && (
+                  <SettingsSection id="settings-section-update" titleId="settings-section-update-title" icon="cloud-download" title={t('Update Project & Submodules')}>
+                    <SettingsCard title={t('Update Project & Submodules')}>
+                      <SettingSelect
+                        label={t('Update project method')}
+                        description={t('Strategy used when updating projects from remote (Merge or Rebase).')}
+                        value={settings?.updateProjectMethod ?? 'rebase'}
+                        options={[
+                          ['rebase', t('Rebase')],
+                          ['merge', t('Merge')],
+                          ['prompt', t('Prompt')],
+                        ]}
+                        onChange={(val) => void updateSettings({ updateProjectMethod: val as UpdateProjectMethod })}
+                      />
+                      <SettingSelect
+                        label={t('Clean working tree before update')}
+                        description={t('How to clean and automatically restore uncommitted local changes during project update.')}
+                        value={settings?.updateProjectCleanWorkingTree ?? 'shelve'}
+                        options={[
+                          ['shelve', t('Shelve')],
+                          ['stash', t('Stash')],
+                        ]}
+                        onChange={(val) => void updateSettings({ updateProjectCleanWorkingTree: val as CleanWorkingTreeMethod })}
+                      />
+                      <SettingToggle
+                        label={t('Show update notification')}
+                        description={t('Show a notification with update details when new commits are received after project update.')}
+                        checked={settings?.updateProjectShowNotification ?? true}
+                        onChange={(val) => void updateSettings({ updateProjectShowNotification: val })}
+                      />
+                      <SettingToggle
+                        label={t('Recursively clone submodules')}
+                        description={t("Recursively clone submodules when cloning a repository ('git clone --recurse-submodules').")}
+                        checked={settings?.cloneRecursiveSubmodules ?? true}
+                        onChange={(val) => void updateSettings({ cloneRecursiveSubmodules: val })}
+                      />
+                    </SettingsCard>
+                  </SettingsSection>
+                )}
+
+                {/* 6. 差异对比与搁置 Diff & Shelve */}
+                {activeCategory === 'settings-section-diff-title' && (
+                  <SettingsSection id="settings-section-diff" titleId="settings-section-diff-title" icon="diff" title={t('Diff & Shelve')}>
+                    <SettingsCard title={t('Diff & Shelve')}>
+                      <SettingSelect
+                        label={t('Shelve diff comparison base')}
+                        description={t('Comparison base when viewing differences for shelved or stashed changes.')}
+                        value={settings?.shelveComparisonBase ?? 'local'}
+                        options={[
+                          ['local', t('Local working tree')],
+                          ['parent', t('Parent (Base commit)')],
+                        ]}
+                        onChange={(val) => void updateSettings({ shelveComparisonBase: val as ShelveComparisonBase })}
+                      />
+                    </SettingsCard>
+                  </SettingsSection>
+                )}
+
+                {/* 7. 刷新与启动 Refresh and startup */}
                 {activeCategory === 'settings-section-refresh-title' && (
                   <SettingsSection id="settings-section-refresh" titleId="settings-section-refresh-title" icon="sync" title={t('Refresh and startup')}>
                     <SettingsCard title={t('Refresh and startup')}>
@@ -335,7 +518,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </SettingsSection>
                 )}
 
-                {/* 4. 仓库与历史 Repository and history */}
+                {/* 8. 仓库与历史 Repository and history */}
                 {activeCategory === 'settings-section-repository-title' && (
                   <SettingsSection id="settings-section-repository" titleId="settings-section-repository-title" icon="repo" title={t('Repository and history')}>
                     <SettingsCard title={t('Repository')}>
@@ -358,6 +541,37 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       <IgnoredFoldersSetting
                         folders={settings?.ignoredFolders ?? []}
                         onChange={(folders) => void updateSettings({ ignoredFolders: folders })}
+                      />
+                    </SettingsCard>
+
+                    <SettingsCard title={t('Git Advanced')}>
+                      <SettingSelect
+                        label={t('Cat-file filter mode')}
+                        description={t('Filter transformation mode applied when reading file content from Git revisions or stages.')}
+                        value={settings?.catFileFilterMode ?? 'filters'}
+                        options={[
+                          ['filters', t('Filters (Recommended)')],
+                          ['textconv', t('Textconv')],
+                          ['none', t('None')],
+                        ]}
+                        onChange={(val) => void updateSettings({ catFileFilterMode: val as CatFileFilterMode })}
+                      />
+                      <SettingSelect
+                        label={t('Fetch tags')}
+                        description={t('Policy for fetching tags when fetching branches from remote repositories.')}
+                        value={settings?.fetchTags ?? 'auto'}
+                        options={[
+                          ['auto', t('Auto')],
+                          ['all', t('All tags')],
+                          ['none', t('No tags')],
+                        ]}
+                        onChange={(val) => void updateSettings({ fetchTags: val as FetchTagsMode })}
+                      />
+                      <SettingToggle
+                        label={t('Exclude ignored directories')}
+                        description={t('Automatically exclude directories ignored by .gitignore when scanning and analyzing repositories.')}
+                        checked={settings?.excludeIgnoredDirectories ?? true}
+                        onChange={(val) => void updateSettings({ excludeIgnoredDirectories: val })}
                       />
                     </SettingsCard>
 
@@ -873,6 +1087,143 @@ function IgnoredFoldersSetting({
             <span>{t('Add')}</span>
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingProtectedBranches({
+  branches,
+  onChange,
+}: {
+  branches: string[];
+  onChange: (branches: string[]) => void;
+}) {
+  const { t } = useI18n();
+  const [inputValue, setInputValue] = useState('');
+
+  const handleAdd = () => {
+    const trimmed = inputValue.trim();
+    if (!trimmed) return;
+    if (!branches.includes(trimmed)) {
+      onChange([...branches, trimmed]);
+    }
+    setInputValue('');
+  };
+
+  const handleRemove = (branchToRemove: string) => {
+    onChange(branches.filter((b) => b !== branchToRemove));
+  };
+
+  const handleReset = () => {
+    onChange(['master', 'main']);
+  };
+
+  return (
+    <div className="settings-row settings-row-block">
+      <span className="settings-label">
+        <strong>{t('Protected branches')}</strong>
+        <small>{t('List of protected branch name patterns (e.g. master, main, release/*) that trigger warnings on push and force push.')}</small>
+      </span>
+
+      <div className="settings-tags-container">
+        <div className="settings-tags-list">
+          {branches.length === 0 ? (
+            <span className="settings-tags-empty">{t('No protected branches configured')}</span>
+          ) : (
+            branches.map((branch) => (
+              <span key={branch} className="settings-tag-chip" title={branch}>
+                <Codicon name="git-branch" className="settings-tag-icon" />
+                <span className="settings-tag-text">{branch}</span>
+                <button
+                  type="button"
+                  className="settings-tag-remove-btn"
+                  aria-label={`${t('Remove')} ${branch}`}
+                  title={`${t('Remove')} ${branch}`}
+                  onClick={() => handleRemove(branch)}
+                >
+                  <Codicon name="close" />
+                </button>
+              </span>
+            ))
+          )}
+        </div>
+
+        <div className="settings-tag-input-row">
+          <div className="settings-tag-input-wrapper">
+            <Codicon name="git-branch" className="settings-tag-input-icon" />
+            <input
+              type="text"
+              className="settings-tag-input"
+              placeholder={t('Pattern (e.g. release/*)')}
+              value={inputValue}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            className="settings-tag-add-btn"
+            disabled={!inputValue.trim()}
+            onClick={() => handleAdd()}
+          >
+            <Codicon name="add" />
+            <span>{t('Add branch pattern')}</span>
+          </button>
+          <button
+            type="button"
+            className="settings-tag-add-btn"
+            style={{ marginLeft: 6 }}
+            onClick={handleReset}
+            title={t('Reset to defaults')}
+          >
+            <Codicon name="discard" />
+            <span>{t('Reset to defaults')}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingCharInput({
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="settings-row">
+      <span className="settings-label">
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
+      <div className="settings-stepper-input-wrapper" style={{ width: 80 }}>
+        <input
+          type="text"
+          maxLength={1}
+          style={{ textAlign: 'center' }}
+          className="settings-stepper-input"
+          value={value}
+          onChange={(e) => {
+            const val = e.target.value;
+            onChange(val.length > 0 ? val[0] : '-');
+          }}
+        />
       </div>
     </div>
   );
@@ -1500,7 +1851,247 @@ function SearchResults({
     );
   }
 
-  // 3. 刷新与启动匹配项
+  // 3. 提交与安全防御匹配项
+  const guardItems: ReactNode[] = [];
+  if (match(t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")) || match('no-verify') || match('noverify') || match('hook') || match('pre-commit')) {
+    guardItems.push(
+      <SettingToggle
+        key="no-verify"
+        label={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
+        description={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
+        checked={settings?.noVerify ?? false}
+        onChange={(val) => void updateSettings({ noVerify: val })}
+      />,
+    );
+  }
+  if (match(t('Auto-commit resolved merge')) || match(t('Automatically commit the merge when all conflicts in a repository are resolved (enabled by default).')) || match('merge') || match('conflict')) {
+    guardItems.push(
+      <SettingToggle
+        key="auto-commit-merge"
+        label={t('Auto-commit resolved merge')}
+        description={t('Automatically commit the merge when all conflicts in a repository are resolved (enabled by default).')}
+        checked={settings?.autoCommitResolvedMerge ?? true}
+        onChange={(val) => void updateSettings({ autoCommitResolvedMerge: val })}
+      />,
+    );
+  }
+  if (match(t('Warn on large files')) || match(t('Warn before committing files larger than the specified size limit.')) || match('large file') || match('limit')) {
+    guardItems.push(
+      <SettingToggle
+        key="warn-large-files"
+        label={t('Warn on large files')}
+        description={t('Warn before committing files larger than the specified size limit.')}
+        checked={settings?.warnOnLargeFiles ?? true}
+        onChange={(val) => void updateSettings({ warnOnLargeFiles: val })}
+      />,
+    );
+  }
+  if (match(t('Large file size limit (MB)')) || match(t('Size threshold in megabytes for large file commit warning (default: 50MB).')) || match('mb') || match('50mb') || match('threshold')) {
+    guardItems.push(
+      <SettingNumber
+        key="large-file-limit"
+        label={t('Large file size limit (MB)')}
+        description={t('Size threshold in megabytes for large file commit warning (default: 50MB).')}
+        value={settings?.largeFileSizeLimitMb ?? 50}
+        min={1}
+        max={1000}
+        suffix="MB"
+        onChange={(val) => void updateSettings({ largeFileSizeLimitMb: val })}
+      />,
+    );
+  }
+  if (match(t('Warn on detached HEAD')) || match(t('Warn before committing in detached HEAD or during an ongoing rebase, offering to create a branch.')) || match('detached') || match('head')) {
+    guardItems.push(
+      <SettingToggle
+        key="warn-detached"
+        label={t('Warn on detached HEAD')}
+        description={t('Warn before committing in detached HEAD or during an ongoing rebase, offering to create a branch.')}
+        checked={settings?.warnOnDetachedHead ?? true}
+        onChange={(val) => void updateSettings({ warnOnDetachedHead: val })}
+      />,
+    );
+  }
+  if (match(t('Warn on CRLF line separators')) || match(t('Warn if CRLF line separators are about to be committed in text files.')) || match('crlf') || match('newline')) {
+    guardItems.push(
+      <SettingToggle
+        key="warn-crlf"
+        label={t('Warn on CRLF line separators')}
+        description={t('Warn if CRLF line separators are about to be committed in text files.')}
+        checked={settings?.warnOnCrlf ?? true}
+        onChange={(val) => void updateSettings({ warnOnCrlf: val })}
+      />,
+    );
+  }
+  if (match(t('Warn on invalid file names')) || match(t('Warn when committing files with names that may cause issues on Windows or other operating systems (e.g. invalid characters or case collisions).')) || match('invalid') || match('filename')) {
+    guardItems.push(
+      <SettingToggle
+        key="warn-invalid-names"
+        label={t('Warn on invalid file names')}
+        description={t('Warn when committing files with names that may cause issues on Windows or other operating systems (e.g. invalid characters or case collisions).')}
+        checked={settings?.warnOnInvalidFileNames ?? true}
+        onChange={(val) => void updateSettings({ warnOnInvalidFileNames: val })}
+      />,
+    );
+  }
+
+  // 4. 分支与推送防护匹配项
+  const protectionItems: ReactNode[] = [];
+  if (match(t('Protected branches')) || match(t('List of protected branch name patterns (e.g. master, main, release/*) that trigger warnings on push and force push.')) || match('protect') || match('master') || match('main')) {
+    protectionItems.push(
+      <SettingProtectedBranches
+        key="protected-branches"
+        branches={settings?.protectedBranches ?? ['master', 'main']}
+        onChange={(branches) => void updateSettings({ protectedBranches: branches })}
+      />,
+    );
+  }
+  if (match(t('Sync protected branches from remote')) || match(t('Automatically sync branch protection rules from GitHub and GitLab for remote repositories.')) || match('github') || match('gitlab')) {
+    protectionItems.push(
+      <SettingToggle
+        key="sync-protected-branches"
+        label={t('Sync protected branches from remote')}
+        description={t('Automatically sync branch protection rules from GitHub and GitLab for remote repositories.')}
+        checked={settings?.syncProtectedBranchesFromGithub ?? true}
+        onChange={(val) => void updateSettings({ syncProtectedBranchesFromGithub: val })}
+      />,
+    );
+  }
+  if (match(t('Confirm before pushing to protected branches')) || match(t('Show confirmation dialog before pushing to protected branches.')) || match('confirm push')) {
+    protectionItems.push(
+      <SettingToggle
+        key="confirm-push-protected"
+        label={t('Confirm before pushing to protected branches')}
+        description={t('Show confirmation dialog before pushing to protected branches.')}
+        checked={settings?.showPushDialogForProtectedBranches ?? true}
+        onChange={(val) => void updateSettings({ showPushDialogForProtectedBranches: val })}
+      />,
+    );
+  }
+  if (match(t('On push rejected')) || match(t('Behavior when a push is rejected because the remote is ahead (non-fast-forward).')) || match('rejected') || match('non-fast-forward')) {
+    protectionItems.push(
+      <SettingSelect
+        key="push-rejected"
+        label={t('On push rejected')}
+        description={t('Behavior when a push is rejected because the remote is ahead (non-fast-forward).')}
+        value={settings?.onPushRejected ?? 'prompt'}
+        options={[
+          ['prompt', t('Prompt')],
+          ['rebaseAndRetry', t('Rebase and retry')],
+          ['error', t('Error only')],
+        ]}
+        onChange={(val) => void updateSettings({ onPushRejected: val as OnPushRejectedAction })}
+      />,
+    );
+  }
+  if (match(t('Use safe force push (--force-with-lease)')) || match(t("Use '--force-with-lease' (safe force push) when force pushing from the extension, or '--force' when disabled.")) || match('force-with-lease') || match('force push')) {
+    protectionItems.push(
+      <SettingToggle
+        key="safe-force-push"
+        label={t('Use safe force push (--force-with-lease)')}
+        description={t("Use '--force-with-lease' (safe force push) when force pushing from the extension, or '--force' when disabled.")}
+        checked={settings?.useSafeForcePush ?? true}
+        onChange={(val) => void updateSettings({ useSafeForcePush: val })}
+      />,
+    );
+  }
+  if (match(t('Add suffix when cherry-picking')) || match(t("Add 'cherry-picked from <hash>' suffix when cherry-picking commits (git cherry-pick -x).")) || match('cherry-pick') || match('-x')) {
+    protectionItems.push(
+      <SettingToggle
+        key="cherry-pick-suffix"
+        label={t('Add suffix when cherry-picking')}
+        description={t("Add 'cherry-picked from <hash>' suffix when cherry-picking commits (git cherry-pick -x).")}
+        checked={settings?.cherryPickAddSuffix ?? true}
+        onChange={(val) => void updateSettings({ cherryPickAddSuffix: val })}
+      />,
+    );
+  }
+  if (match(t('Branch clean character')) || match(t("Character to replace invalid characters and whitespace in Git branch names (e.g. '-').")) || match('sanitize') || match('character')) {
+    protectionItems.push(
+      <SettingCharInput
+        key="branch-clean-char"
+        label={t('Branch clean character')}
+        description={t("Character to replace invalid characters and whitespace in Git branch names (e.g. '-').")}
+        value={settings?.branchCleanCharacter ?? '-'}
+        onChange={(val) => void updateSettings({ branchCleanCharacter: val })}
+      />,
+    );
+  }
+
+  // 5. 更新项目与子模块匹配项
+  const updateItems: ReactNode[] = [];
+  if (match(t('Update project method')) || match(t('Strategy used when updating projects from remote (Merge or Rebase).')) || match('update project') || match('rebase') || match('merge')) {
+    updateItems.push(
+      <SettingSelect
+        key="update-project-method"
+        label={t('Update project method')}
+        description={t('Strategy used when updating projects from remote (Merge or Rebase).')}
+        value={settings?.updateProjectMethod ?? 'rebase'}
+        options={[
+          ['rebase', t('Rebase')],
+          ['merge', t('Merge')],
+          ['prompt', t('Prompt')],
+        ]}
+        onChange={(val) => void updateSettings({ updateProjectMethod: val as UpdateProjectMethod })}
+      />,
+    );
+  }
+  if (match(t('Clean working tree before update')) || match(t('How to clean and automatically restore uncommitted local changes during project update.')) || match('clean working tree')) {
+    updateItems.push(
+      <SettingSelect
+        key="update-clean-working-tree"
+        label={t('Clean working tree before update')}
+        description={t('How to clean and automatically restore uncommitted local changes during project update.')}
+        value={settings?.updateProjectCleanWorkingTree ?? 'shelve'}
+        options={[
+          ['shelve', t('Shelve')],
+          ['stash', t('Stash')],
+        ]}
+        onChange={(val) => void updateSettings({ updateProjectCleanWorkingTree: val as CleanWorkingTreeMethod })}
+      />,
+    );
+  }
+  if (match(t('Show update notification')) || match(t('Show a notification with update details when new commits are received after project update.')) || match('notification')) {
+    updateItems.push(
+      <SettingToggle
+        key="update-notification"
+        label={t('Show update notification')}
+        description={t('Show a notification with update details when new commits are received after project update.')}
+        checked={settings?.updateProjectShowNotification ?? true}
+        onChange={(val) => void updateSettings({ updateProjectShowNotification: val })}
+      />,
+    );
+  }
+  if (match(t('Recursively clone submodules')) || match(t("Recursively clone submodules when cloning a repository ('git clone --recurse-submodules').")) || match('submodule') || match('recurse')) {
+    updateItems.push(
+      <SettingToggle
+        key="clone-recursive-submodules"
+        label={t('Recursively clone submodules')}
+        description={t("Recursively clone submodules when cloning a repository ('git clone --recurse-submodules').")}
+        checked={settings?.cloneRecursiveSubmodules ?? true}
+        onChange={(val) => void updateSettings({ cloneRecursiveSubmodules: val })}
+      />,
+    );
+  }
+
+  // 6. 差异对比与搁置匹配项
+  const diffItems: ReactNode[] = [];
+  if (match(t('Shelve diff comparison base')) || match(t('Comparison base when viewing differences for shelved or stashed changes.')) || match('comparison base') || match('shelve diff')) {
+    diffItems.push(
+      <SettingSelect
+        key="shelve-comparison-base"
+        label={t('Shelve diff comparison base')}
+        description={t('Comparison base when viewing differences for shelved or stashed changes.')}
+        value={settings?.shelveComparisonBase ?? 'local'}
+        options={[
+          ['local', t('Local working tree')],
+          ['parent', t('Parent (Base commit)')],
+        ]}
+        onChange={(val) => void updateSettings({ shelveComparisonBase: val as ShelveComparisonBase })}
+      />,
+    );
+  }
+
+  // 7. 刷新与启动匹配项
   const refreshItems: ReactNode[] = [];
   if (match(t('Auto-refresh interval')) || match(t('Auto-refresh interval in seconds; 0 disables it.')) || match(t('seconds'))) {
     refreshItems.push(
@@ -1561,7 +2152,7 @@ function SearchResults({
     );
   }
 
-  // 4. 仓库与历史匹配项
+  // 8. 仓库与历史匹配项
   const repoItems: ReactNode[] = [];
   if (match(t('Repository scan depth')) || match(t('Maximum depth of workspace subfolders to scan for repositories.'))) {
     repoItems.push(
@@ -1598,11 +2189,54 @@ function SearchResults({
       />,
     );
   }
+  if (match(t('Cat-file filter mode')) || match(t('Filter transformation mode applied when reading file content from Git revisions or stages.')) || match('cat-file') || match('filters') || match('textconv')) {
+    repoItems.push(
+      <SettingSelect
+        key="cat-file-filter"
+        label={t('Cat-file filter mode')}
+        description={t('Filter transformation mode applied when reading file content from Git revisions or stages.')}
+        value={settings?.catFileFilterMode ?? 'filters'}
+        options={[
+          ['filters', t('Filters (Recommended)')],
+          ['textconv', t('Textconv')],
+          ['none', t('None')],
+        ]}
+        onChange={(val) => void updateSettings({ catFileFilterMode: val as CatFileFilterMode })}
+      />,
+    );
+  }
+  if (match(t('Fetch tags')) || match(t('Policy for fetching tags when fetching branches from remote repositories.')) || match('tags') || match('--tags')) {
+    repoItems.push(
+      <SettingSelect
+        key="fetch-tags"
+        label={t('Fetch tags')}
+        description={t('Policy for fetching tags when fetching branches from remote repositories.')}
+        value={settings?.fetchTags ?? 'auto'}
+        options={[
+          ['auto', t('Auto')],
+          ['all', t('All tags')],
+          ['none', t('No tags')],
+        ]}
+        onChange={(val) => void updateSettings({ fetchTags: val as FetchTagsMode })}
+      />,
+    );
+  }
+  if (match(t('Exclude ignored directories')) || match(t('Automatically exclude directories ignored by .gitignore when scanning and analyzing repositories.')) || match('.gitignore') || match('exclude')) {
+    repoItems.push(
+      <SettingToggle
+        key="exclude-ignored-dirs"
+        label={t('Exclude ignored directories')}
+        description={t('Automatically exclude directories ignored by .gitignore when scanning and analyzing repositories.')}
+        checked={settings?.excludeIgnoredDirectories ?? true}
+        onChange={(val) => void updateSettings({ excludeIgnoredDirectories: val })}
+      />,
+    );
+  }
 
-  // 5. 外部编辑器匹配项
+  // 9. 外部编辑器匹配项
   const isEditorMatched = match(t('External editor')) || match('editor') || match('vscode') || match('cursor') || match('sublime') || match('windsurf') || match('webstorm') || match('idea') || match('zed') || match('nvim');
 
-  // 6. 关于与更新匹配项
+  // 10. 关于与更新匹配项
   const aboutItems: ReactNode[] = [];
   if (match(t('Check for updates automatically')) || match(t('Automatically check for new VersionDock releases on startup.')) || match(t('About and updates')) || match(t('View Release Notes')) || match(t('About VersionDock & Check Updates'))) {
     aboutItems.push(
@@ -1646,6 +2280,18 @@ function SearchResults({
   }
   if (changesItems.length > 0) {
     sections.push(<SettingsCard key="sec-changes" title={t('Changes and commit')}>{changesItems}</SettingsCard>);
+  }
+  if (guardItems.length > 0) {
+    sections.push(<SettingsCard key="sec-guard" title={t('Commit & Safety Guard')}>{guardItems}</SettingsCard>);
+  }
+  if (protectionItems.length > 0) {
+    sections.push(<SettingsCard key="sec-protection" title={t('Branch & Push Protection')}>{protectionItems}</SettingsCard>);
+  }
+  if (updateItems.length > 0) {
+    sections.push(<SettingsCard key="sec-update" title={t('Update Project & Submodules')}>{updateItems}</SettingsCard>);
+  }
+  if (diffItems.length > 0) {
+    sections.push(<SettingsCard key="sec-diff" title={t('Diff & Shelve')}>{diffItems}</SettingsCard>);
   }
   if (refreshItems.length > 0) {
     sections.push(<SettingsCard key="sec-refresh" title={t('Refresh and startup')}>{refreshItems}</SettingsCard>);

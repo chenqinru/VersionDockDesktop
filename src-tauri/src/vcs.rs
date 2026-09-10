@@ -278,6 +278,7 @@ pub async fn clone_repository(
     parent: &Path,
     target_name: &str,
     credentials: Option<&(String, String)>,
+    recurse_submodules: bool,
     token: &CancellationToken,
 ) -> Result<PathBuf, DesktopError> {
     let url = url.trim();
@@ -340,16 +341,18 @@ pub async fn clone_repository(
             ("VERSIONDOCK_GIT_PASSWORD".into(), password.clone()),
         ]);
     }
+    let mut clone_args = vec![
+        "-c".into(),
+        "core.quotepath=false".into(),
+        "clone".into(),
+    ];
+    if recurse_submodules {
+        clone_args.push("--recurse-submodules".into());
+    }
+    clone_args.extend(["--".into(), url.into(), target_name.into()]);
     let result = cli::run_with_env(
         "git",
-        &[
-            "-c".into(),
-            "core.quotepath=false".into(),
-            "clone".into(),
-            "--".into(),
-            url.into(),
-            target_name.into(),
-        ],
+        &clone_args,
         parent,
         None,
         cli::NETWORK_TIMEOUT,
@@ -1099,31 +1102,81 @@ pub async fn discard(
                 .stdout_text();
                 if status.trim_start().starts_with("??") {
                     let target = root.join(&safe);
-                    let metadata = std::fs::symlink_metadata(&target).map_err(|error| {
-                        DesktopError::new("DISCARD_FAILED", error.to_string(), true)
-                    })?;
-                    if metadata.is_dir() {
-                        std::fs::remove_dir_all(&target)
-                    } else {
-                        std::fs::remove_file(&target)
+                    if let Ok(metadata) = std::fs::symlink_metadata(&target) {
+                        if metadata.is_dir() {
+                            let _ = std::fs::remove_dir_all(&target);
+                        } else {
+                            let _ = std::fs::remove_file(&target);
+                        }
                     }
-                    .map_err(|error| {
-                        DesktopError::new("DISCARD_FAILED", error.to_string(), true)
-                    })?;
                 } else {
-                    git(
+                    let exists_in_head = git(
+                        vec!["cat-file".into(), "-e".into(), format!("HEAD:{safe}")],
+                        repo,
+                        token,
+                    )
+                    .await
+                    .is_ok();
+
+                    if !exists_in_head {
+                        let target = root.join(&safe);
+                        if let Ok(metadata) = std::fs::symlink_metadata(&target) {
+                            if metadata.is_dir() {
+                                let _ = std::fs::remove_dir_all(&target);
+                            } else {
+                                let _ = std::fs::remove_file(&target);
+                            }
+                        }
+                        let _ = git(
+                            vec![
+                                "rm".into(),
+                                "-f".into(),
+                                "--cached".into(),
+                                "--ignore-unmatch".into(),
+                                "--".into(),
+                                pathspec,
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await;
+                    } else if git(
                         vec![
                             "restore".into(),
                             "--source=HEAD".into(),
                             "--staged".into(),
                             "--worktree".into(),
                             "--".into(),
-                            pathspec,
+                            pathspec.clone(),
                         ],
                         repo,
                         token,
                     )
-                    .await?;
+                    .await
+                    .is_err()
+                    {
+                        if git(
+                            vec![
+                                "restore".into(),
+                                "--staged".into(),
+                                "--worktree".into(),
+                                "--".into(),
+                                pathspec.clone(),
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            let _ = git(
+                                vec!["checkout".into(), "HEAD".into(), "--".into(), pathspec],
+                                repo,
+                                token,
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
             VcsKind::Svn => {
@@ -1189,7 +1242,7 @@ pub async fn commit(
     paths: &[String],
     token: &CancellationToken,
 ) -> Result<String, DesktopError> {
-    commit_with_identity(repo, message, amend, paths, None, token).await
+    commit_with_identity(repo, message, amend, paths, None, false, token).await
 }
 
 pub async fn commit_with_identity(
@@ -1198,6 +1251,7 @@ pub async fn commit_with_identity(
     amend: bool,
     paths: &[String],
     identity: Option<&EffectiveGitIdentity>,
+    no_verify: bool,
     token: &CancellationToken,
 ) -> Result<String, DesktopError> {
     let message = validate_message(message)?;
@@ -1209,6 +1263,9 @@ pub async fn commit_with_identity(
             let mut args = vec!["commit".into(), "--file=-".into()];
             if amend {
                 args.push("--amend".into());
+            }
+            if no_verify {
+                args.push("--no-verify".into());
             }
             let mut safe = vec!["-c".into(), "core.quotepath=false".into()];
             if let Some(identity) = identity {
@@ -1519,6 +1576,7 @@ pub async fn file_revision_content(
     repo: &RepositoryMeta,
     relative_path_value: &str,
     revision: &str,
+    cat_file_filter_mode: crate::models::CatFileFilterMode,
     token: &CancellationToken,
 ) -> Result<FileRevisionDocument, DesktopError> {
     let path = relative_path(Path::new(&repo.root_path), relative_path_value, true)?;
@@ -1528,13 +1586,26 @@ pub async fn file_revision_content(
     }
     let bytes = match repo.kind {
         VcsKind::Git => {
-            git(
-                vec!["show".into(), format!("{revision}:{path}")],
-                repo,
-                token,
-            )
-            .await?
-            .stdout
+            let spec = format!("{revision}:{path}");
+            let cat_flag = match cat_file_filter_mode {
+                crate::models::CatFileFilterMode::Filters => "--filters",
+                crate::models::CatFileFilterMode::Textconv => "--textconv",
+                crate::models::CatFileFilterMode::None => "-p",
+            };
+            if cat_flag == "-p" {
+                git(vec!["cat-file".into(), "-p".into(), spec], repo, token)
+                    .await?
+                    .stdout
+            } else {
+                match git(vec!["cat-file".into(), cat_flag.into(), spec.clone()], repo, token).await {
+                    Ok(output) => output.stdout,
+                    Err(_) => {
+                        git(vec!["cat-file".into(), "-p".into(), spec], repo, token)
+                            .await?
+                            .stdout
+                    }
+                }
+            }
         }
         VcsKind::Svn => {
             svn(
@@ -1623,6 +1694,7 @@ pub async fn abort_operation(
         "merge" => vec!["merge".into(), "--abort".into()],
         "rebase" => vec!["rebase".into(), "--abort".into()],
         "cherry-pick" => vec!["cherry-pick".into(), "--abort".into()],
+        "revert" => vec!["revert".into(), "--abort".into()],
         _ => {
             return Err(DesktopError::new(
                 "OPERATION_NOT_ACTIVE",
@@ -1655,6 +1727,8 @@ fn git_operation_name(root: &Path) -> Option<&'static str> {
         Some("rebase")
     } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
         Some("cherry-pick")
+    } else if git_dir.join("REVERT_HEAD").exists() {
+        Some("revert")
     } else {
         None
     }
@@ -1921,11 +1995,13 @@ pub async fn sync(
     action: SyncAction,
     remote: Option<String>,
     branch: Option<String>,
+    force: bool,
+    settings: &crate::models::DesktopSettings,
     token: &CancellationToken,
 ) -> Result<SyncResult, DesktopError> {
     if repo.kind == VcsKind::Git && matches!(action, SyncAction::Push) {
         return Ok(SyncResult {
-            output: git_push(repo, remote, token).await?,
+            output: git_push(repo, remote, force, settings.use_safe_force_push, token).await?,
             update: None,
         });
     }
@@ -2030,10 +2106,15 @@ pub async fn sync(
         }
     }
     let (program, args) = match (repo.kind, action) {
-        (VcsKind::Git, SyncAction::Fetch) => (
-            "git",
-            vec!["fetch".into(), "--all".into(), "--prune".into()],
-        ),
+        (VcsKind::Git, SyncAction::Fetch) => {
+            let mut args = vec!["fetch".into(), "--all".into(), "--prune".into()];
+            match settings.fetch_tags {
+                crate::models::FetchTagsMode::All => args.push("--tags".into()),
+                crate::models::FetchTagsMode::None => args.push("--no-tags".into()),
+                crate::models::FetchTagsMode::Auto => {}
+            }
+            ("git", args)
+        }
         (VcsKind::Git, SyncAction::Pull | SyncAction::PullRebase) => {
             let mut args = vec!["pull".into()];
             if matches!(action, SyncAction::PullRebase) {
@@ -2523,13 +2604,24 @@ async fn update_summary(
 async fn git_push(
     repo: &RepositoryMeta,
     requested_remote: Option<String>,
+    force: bool,
+    use_safe_force_push: bool,
     token: &CancellationToken,
 ) -> Result<String, DesktopError> {
+    let mut extra_args: Vec<String> = Vec::new();
+    if force {
+        if use_safe_force_push {
+            extra_args.push("--force-with-lease".into());
+        } else {
+            extra_args.push("--force".into());
+        }
+    }
     if let Some(remote) = requested_remote {
         validate_ref(&remote)?;
-        return Ok(git(vec!["push".into(), remote], repo, token)
-            .await?
-            .stdout_text());
+        let mut args = vec!["push".into()];
+        args.extend(extra_args);
+        args.push(remote);
+        return Ok(git(args, repo, token).await?.stdout_text());
     }
     if git(
         vec![
@@ -2544,7 +2636,9 @@ async fn git_push(
     .await
     .is_ok()
     {
-        return Ok(git(vec!["push".into()], repo, token).await?.stdout_text());
+        let mut args = vec!["push".into()];
+        args.extend(extra_args);
+        return Ok(git(args, repo, token).await?.stdout_text());
     }
     let branch = git(
         vec!["symbolic-ref".into(), "--short".into(), "HEAD".into()],
@@ -2576,13 +2670,10 @@ async fn git_push(
         ));
     };
     validate_ref(&remote)?;
-    Ok(git(
-        vec!["push".into(), "--set-upstream".into(), remote, branch],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text())
+    let mut args = vec!["push".into()];
+    args.extend(extra_args);
+    args.extend(["--set-upstream".into(), remote, branch]);
+    Ok(git(args, repo, token).await?.stdout_text())
 }
 
 pub async fn history(
@@ -2993,6 +3084,7 @@ async fn operate_commit_paths(
 pub async fn history_operation(
     repo: &RepositoryMeta,
     operation: HistoryOperation,
+    cherry_pick_add_suffix: bool,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     match operation {
@@ -3028,7 +3120,12 @@ pub async fn history_operation(
                 HistoryOperation::CherryPick { revision } => {
                     validate_revision(&revision)?;
                     ensure_clean_worktree(repo, token).await?;
-                    git(vec!["cherry-pick".into(), revision], repo, token).await?;
+                    let mut args = vec!["cherry-pick".into()];
+                    if cherry_pick_add_suffix {
+                        args.push("-x".into());
+                    }
+                    args.push(revision);
+                    git(args, repo, token).await?;
                 }
                 HistoryOperation::Revert { revisions } => {
                     ensure_clean_worktree(repo, token).await?;
@@ -3075,18 +3172,37 @@ pub async fn history_operation(
                 HistoryOperation::RevertFile { revision, path } => {
                     validate_revision(&revision)?;
                     let safe = literal_path(Path::new(&repo.root_path), &path, true)?;
-                    git(
-                        vec![
-                            "restore".into(),
-                            "--source".into(),
-                            format!("{revision}^"),
-                            "--".into(),
-                            safe,
-                        ],
+                    let parent_ref = format!("{revision}^");
+                    let exists_in_parent = git(
+                        vec!["cat-file".into(), "-e".into(), format!("{parent_ref}:{safe}")],
                         repo,
                         token,
                     )
-                    .await?;
+                    .await
+                    .is_ok();
+                    if exists_in_parent {
+                        git(
+                            vec![
+                                "restore".into(),
+                                "--source".into(),
+                                parent_ref,
+                                "--".into(),
+                                safe,
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await?;
+                    } else {
+                        let abs_path = Path::new(&repo.root_path).join(&safe);
+                        if abs_path.exists() {
+                            if abs_path.is_dir() {
+                                let _ = std::fs::remove_dir_all(&abs_path);
+                            } else {
+                                let _ = std::fs::remove_file(&abs_path);
+                            }
+                        }
+                    }
                 }
                 HistoryOperation::ApplyPaths { entries } => {
                     operate_commit_paths(repo, entries, CommitPathDirection::Apply, token).await?;
@@ -4431,6 +4547,26 @@ async fn svn_branches(
     Ok(branches)
 }
 
+pub fn is_branch_protected(name: &str) -> bool {
+    let normalized = name
+        .trim()
+        .trim_start_matches("refs/heads/")
+        .trim_start_matches("heads/");
+    let clean = if let Some(slash) = normalized.rfind('/') {
+        if normalized.starts_with("remotes/") || normalized.starts_with("origin/") {
+            &normalized[slash + 1..]
+        } else {
+            normalized
+        }
+    } else {
+        normalized
+    };
+    clean.eq_ignore_ascii_case("main")
+        || clean.eq_ignore_ascii_case("master")
+        || clean.to_ascii_lowercase().starts_with("release/")
+        || clean.to_ascii_lowercase().starts_with("release-")
+}
+
 pub async fn branch_operation(
     repo: &RepositoryMeta,
     operation: BranchOperation,
@@ -4546,6 +4682,13 @@ pub async fn branch_operation(
         }
         BranchOperation::Delete { name, force } => {
             validate_ref(&name)?;
+            if is_branch_protected(&name) {
+                return Err(DesktopError::new(
+                    "PROTECTED_BRANCH_DELETE",
+                    format!("Cannot delete protected branch '{name}'"),
+                    true,
+                ));
+            }
             vec![
                 "branch".into(),
                 if force { "-D".into() } else { "-d".into() },
@@ -7209,13 +7352,19 @@ fn parse_conflict_blocks(content: &str) -> Vec<ConflictBlock> {
     let mut state = MarkerState::Normal;
     let mut result = Vec::new();
     let mut current: Option<ConflictBlock> = None;
-    for (line_index, line) in content.split('\n').enumerate() {
+    for (line_index, raw_line) in content.split('\n').enumerate() {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
         match state {
             MarkerState::Normal => {
-                if let Some(label) = line.strip_prefix("<<<<<<< ") {
+                if line.starts_with("<<<<<<<") {
+                    let label = line
+                        .strip_prefix("<<<<<<< ")
+                        .unwrap_or_else(|| line.strip_prefix("<<<<<<<").unwrap_or(""))
+                        .trim();
+                    let ours_label = if label.is_empty() { "OURS" } else { label };
                     current = Some(ConflictBlock {
                         index: result.len() as u32,
-                        ours_label: label.to_string(),
+                        ours_label: ours_label.to_string(),
                         theirs_label: String::new(),
                         ours_lines: Vec::new(),
                         base_lines: Vec::new(),
@@ -7227,7 +7376,7 @@ fn parse_conflict_blocks(content: &str) -> Vec<ConflictBlock> {
                 }
             }
             MarkerState::Ours => {
-                if line.starts_with("||||||| ") {
+                if line.starts_with("|||||||") {
                     state = MarkerState::Base;
                 } else if line == "=======" {
                     state = MarkerState::Theirs;
@@ -7243,9 +7392,14 @@ fn parse_conflict_blocks(content: &str) -> Vec<ConflictBlock> {
                 }
             }
             MarkerState::Theirs => {
-                if let Some(label) = line.strip_prefix(">>>>>>> ") {
+                if line.starts_with(">>>>>>>") {
+                    let label = line
+                        .strip_prefix(">>>>>>> ")
+                        .unwrap_or_else(|| line.strip_prefix(">>>>>>>").unwrap_or(""))
+                        .trim();
+                    let theirs_label = if label.is_empty() { "THEIRS" } else { label };
                     if let Some(mut block) = current.take() {
-                        block.theirs_label = label.to_string();
+                        block.theirs_label = theirs_label.to_string();
                         block.end_line = line_index as u32;
                         result.push(block);
                     }
@@ -7316,10 +7470,12 @@ pub async fn conflict_save(
     path: &str,
     content: &str,
     expected: &str,
+    auto_commit_resolved_merge: bool,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
-    if content.lines().any(|line| {
-        line.starts_with("<<<<<<< ") || line == "=======" || line.starts_with(">>>>>>> ")
+    if content.lines().any(|raw_line| {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        line.starts_with("<<<<<<<") || line == "=======" || line.starts_with(">>>>>>>")
     }) {
         return Err(DesktopError::new(
             "UNRESOLVED_MARKERS",
@@ -7365,7 +7521,9 @@ pub async fn conflict_save(
     match repo.kind {
         VcsKind::Git => {
             stage(repo, &[safe], token).await?;
-            complete_git_merge_if_resolved(repo, token).await?;
+            if auto_commit_resolved_merge {
+                complete_git_merge_if_resolved(repo, token).await?;
+            }
         }
         VcsKind::Svn => {
             svn(
@@ -7389,6 +7547,7 @@ pub async fn conflict_accept(
     repo: &RepositoryMeta,
     path: &str,
     choice: ConflictChoice,
+    auto_commit_resolved_merge: bool,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     let root = Path::new(&repo.root_path);
@@ -7425,7 +7584,9 @@ pub async fn conflict_accept(
                 ConflictChoice::Working => {}
             }
             stage(repo, &[safe], token).await?;
-            complete_git_merge_if_resolved(repo, token).await?;
+            if auto_commit_resolved_merge {
+                complete_git_merge_if_resolved(repo, token).await?;
+            }
         }
         VcsKind::Svn => {
             let accept = match choice {

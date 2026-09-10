@@ -127,6 +127,21 @@ export function App() {
   }, [bridge, openWorkspace]);
 
   useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isSelectable = target?.closest('input, textarea, select, [contenteditable="true"], .selectable-text, .unified-diff-view code, .diff-code-cell code, .diff-inline-row code, .code-view code, .detail-message-card pre, .output-panel pre');
+      if (!isSelectable) {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) {
+          sel.removeAllRanges();
+        }
+      }
+    };
+    window.addEventListener('contextmenu', handleContextMenu, true);
+    return () => window.removeEventListener('contextmenu', handleContextMenu, true);
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isCmdOrCtrl = event.metaKey || event.ctrlKey;
       if (isCmdOrCtrl && event.key.toLowerCase() === 'w' && !event.shiftKey && !event.altKey) {

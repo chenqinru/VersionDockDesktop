@@ -85,7 +85,7 @@ export function resolveNotificationText(value: NotificationText, t: (key: string
 export interface BatchCommitReport {
   message: string;
   push: boolean;
-  targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>;
+  targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean; noVerify?: boolean }>;
   results: RepositoryOperationResult[];
 }
 
@@ -337,11 +337,11 @@ export interface AppStore {
   discard: (repoId: string, paths: string[]) => Promise<void>;
   deletePaths: (repoId: string, paths: string[]) => Promise<void>;
   addIgnore: (repoId: string, path: string) => Promise<void>;
-  commit: (repoId: string, message: string, amend: boolean, paths: string[], push: boolean) => Promise<void>;
-  commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean }>, message: string, push: boolean) => Promise<void>;
+  commit: (repoId: string, message: string, amend: boolean, paths: string[], push: boolean, noVerify?: boolean) => Promise<void>;
+  commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean; noVerify?: boolean }>, message: string, push: boolean) => Promise<void>;
   retryBatchResult: (repoId: string) => Promise<void>;
   dismissBatchReport: () => void;
-  sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'push' | 'update', notify?: boolean, options?: SyncOptions) => Promise<RepositoryUpdateResult | undefined>;
+  sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'push' | 'update', notify?: boolean, options?: SyncOptions & { force?: boolean }) => Promise<RepositoryUpdateResult | undefined>;
   updateProject: (strategy?: 'merge' | 'rebase') => Promise<void>;
   openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
   openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
@@ -1937,10 +1937,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       await bridge().request({ type: 'addIgnore', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: path } });
     }, `repository:${repoId}`),
 
-    commit: async (repoId, message, amend, paths, push) => withBusy(async () => {
-      await bridge().request({ type: 'commit', payload: { workspace_id: workspaceId(), repo_id: repoId, message, amend, paths } });
+    commit: async (repoId, message, amend, paths, push, noVerify) => withBusy(async () => {
+      await bridge().request({ type: 'commit', payload: { workspace_id: workspaceId(), repo_id: repoId, message, amend, paths, no_verify: Boolean(noVerify) } });
       clearCommittedSelections([repoId]);
-      if (push) await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null, branch: null } }, { timeoutMs: 600_000 });
+      if (push) await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null, branch: null, force: false } }, { timeoutMs: 600_000 });
     }, `commit:${repoId}`),
 
     commitMany: async (targets, message, push) => withBusy(async () => {
@@ -1957,6 +1957,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             amend: target.amend,
             paths: target.paths,
             unstagePaths: target.unstagePaths,
+            noVerify: Boolean(target.noVerify),
           })),
           push,
         },
@@ -1983,7 +1984,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       let next: RepositoryOperationResult;
       if (previous.committed && previous.pushAttempted && !previous.pushed) {
         try {
-          await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null, branch: null } }, { timeoutMs: 600_000 });
+          await bridge().request({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action: 'push', remote: null, branch: null, force: false } }, { timeoutMs: 600_000 });
           next = { ...previous, pushed: true, failedStage: null, recoveryHint: null, error: null };
         } catch (error) {
           next = { ...previous, error: error instanceof BridgeError ? error : previous.error };
@@ -1993,7 +1994,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           type: 'batchCommit',
           payload: {
             workspace_id: workspaceId(),
-            targets: [{ repoId, message: report.message, amend: target.amend, paths: target.paths, unstagePaths: target.unstagePaths }],
+            targets: [{ repoId, message: report.message, amend: target.amend, paths: target.paths, unstagePaths: target.unstagePaths, noVerify: Boolean(target.noVerify) }],
             push: report.push,
           },
         }, { timeoutMs: 600_000 });
@@ -2010,7 +2011,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!ensureRepositoryCapability(repoId, capability)) return;
       let result: SyncResult;
       try {
-        result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null } }, { timeoutMs: 600_000 });
+        result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: workspaceId(), repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null, force: options.force ?? false } }, { timeoutMs: 600_000 });
       } catch (error) {
         if (await handlePullAutoStashError(error)) return undefined;
         throw error;
@@ -2037,18 +2038,24 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     updateProject: async (strategy) => {
       const repositories = get().snapshot?.repositories ?? [];
+      const currentSettings = settings();
       if (!strategy && repositories.some((repo) => repo.meta.kind === 'git')) {
-        const t = createTranslator(resolveLanguage(settings().language));
-        const selected = await choiceDialog({
-          title: t('Update Project — Strategy'),
-          message: t('Choose how incoming Git changes are integrated.'),
-          choices: [
-            { id: 'merge', label: t('Merge incoming changes into the current branch'), icon: 'git-merge' },
-            { id: 'rebase', label: t('Rebase the current branch on top of incoming changes'), icon: 'repo-forked' },
-          ],
-        });
-        if (!selected) return;
-        strategy = selected === 'rebase' ? 'rebase' : 'merge';
+        const configuredMethod = currentSettings.updateProjectMethod ?? 'rebase';
+        if (configuredMethod === 'prompt') {
+          const t = createTranslator(resolveLanguage(currentSettings.language));
+          const selected = await choiceDialog({
+            title: t('Update Project — Strategy'),
+            message: t('Choose how incoming Git changes are integrated.'),
+            choices: [
+              { id: 'merge', label: t('Merge incoming changes into the current branch'), icon: 'git-merge' },
+              { id: 'rebase', label: t('Rebase the current branch on top of incoming changes'), icon: 'repo-forked' },
+            ],
+          });
+          if (!selected) return;
+          strategy = selected === 'rebase' ? 'rebase' : 'merge';
+        } else {
+          strategy = configuredMethod;
+        }
       }
       const gitAction: 'pull' | 'pullRebase' = strategy === 'rebase' ? 'pullRebase' : 'pull';
       const wid = workspaceId();
@@ -2078,6 +2085,9 @@ export const useAppStore = create<AppStore>((set, get) => {
               : { key: 'VersionDock: Updated {0} files in {1} commits.', args: [files, commits] }
             : 'VersionDock: Already up to date. No files updated.';
       const detailed = updated.filter((item) => (item.summary?.commitCount ?? 0) > 0);
+      if (failed === 0 && summaryFailures === 0 && (currentSettings.updateProjectShowNotification ?? true) === false) {
+        return;
+      }
       get().addNotification({
         type: updated.length === 0 && failed > 0 ? 'error' : failed || summaryFailures ? 'warning' : 'success',
         urgent: failed > 0,

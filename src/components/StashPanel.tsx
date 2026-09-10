@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Codicon } from './Codicon';
 import { BranchRefBadge } from './BranchRefBadge';
+import { ContextMenu } from './ContextMenu';
 import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
@@ -362,7 +363,6 @@ function StashRow({
   const [hovered, setHovered] = useState(false);
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: false });
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const ctxRef = useRef<HTMLDivElement>(null);
   const { t, language } = useI18n();
   const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
   const fullMessage = entry.fullMessage || entry.message || entry.reference;
@@ -375,24 +375,6 @@ function StashRow({
 
   const branchName = entry.branch;
   const branchColorHex = branchName ? branchColor(branchName) : '#11b0ff';
-
-  useEffect(() => {
-    if (!ctxMenu) return;
-    const handleDown = (e: MouseEvent) => {
-      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
-        setCtxMenu(null);
-      }
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setCtxMenu(null);
-    };
-    document.addEventListener('pointerdown', handleDown);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('pointerdown', handleDown);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [ctxMenu]);
 
   return (
     <div style={rowStyle.root}>
@@ -535,45 +517,23 @@ function StashRow({
 
       {/* Context Menu */}
       {ctxMenu && (
-        <div
-          ref={ctxRef}
-          className="context-menu"
-          style={{ left: ctxMenu.x, top: ctxMenu.y, position: 'fixed', zIndex: 1000 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              onPop(repoId, entry.reference);
-              setCtxMenu(null);
-            }}
-          >
-            <Codicon name="desktop-download" />
-            {t('Pop (apply & drop)')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onApply(repoId, entry.reference);
-              setCtxMenu(null);
-            }}
-          >
-            <Codicon name="arrow-down" />
-            {t('Apply (keep stash)')}
-          </button>
-          <i />
-          <button
-            type="button"
-            className="danger"
-            onClick={() => {
-              onDrop(repoId, entry.reference);
-              setCtxMenu(null);
-            }}
-          >
-            <Codicon name="trash" />
-            {t('Delete')}
-          </button>
-        </div>
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={[
+            { id: 'pop', label: t('Pop (apply & drop)'), icon: 'desktop-download' },
+            { id: 'apply', label: t('Apply (keep stash)'), icon: 'arrow-down' },
+            { separator: true },
+            { id: 'drop', label: t('Delete'), icon: 'trash', danger: true },
+          ]}
+          onSelect={(id) => {
+            if (id === 'pop') onPop(repoId, entry.reference);
+            else if (id === 'apply') onApply(repoId, entry.reference);
+            else if (id === 'drop') onDrop(repoId, entry.reference);
+            setCtxMenu(null);
+          }}
+          onClose={() => setCtxMenu(null)}
+        />
       )}
     </div>
   );

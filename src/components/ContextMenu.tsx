@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Codicon } from './Codicon';
 
 export interface ContextMenuItem {
@@ -28,14 +29,22 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
   useLayoutEffect(() => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) {
+      const activeEl = document.activeElement;
+      if (activeEl?.tagName !== 'INPUT' && activeEl?.tagName !== 'TEXTAREA') {
+        sel.removeAllRanges();
+      }
+    }
     const el = ref.current;
     if (!el) return;
     const { offsetWidth: w, offsetHeight: h } = el;
-    const margin = 4;
-    setPos({
-      x: Math.max(margin, Math.min(x, window.innerWidth - w - margin)),
-      y: Math.max(margin, Math.min(y, window.innerHeight - h - margin)),
-    });
+    const margin = 6;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const posX = x + w > vw - margin ? Math.max(margin, vw - w - margin) : Math.max(margin, x);
+    const posY = y + h > vh - margin ? Math.max(margin, vh - h - margin) : Math.max(margin, y);
+    setPos({ x: posX, y: posY });
   }, [x, y]);
 
   useEffect(() => {
@@ -77,13 +86,16 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
 
   const style: React.CSSProperties = {
     position: 'fixed',
-    top: pos?.y ?? y,
-    left: pos?.x ?? x,
-    zIndex: 9999,
+    top: pos ? pos.y : y,
+    left: pos ? pos.x : x,
+    zIndex: 99999,
     visibility: pos ? 'visible' : 'hidden',
+    pointerEvents: pos ? 'auto' : 'none',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
   };
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       role="menu"
@@ -112,7 +124,8 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

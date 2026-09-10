@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { RepositoryStatus, UnpushedCommit, BranchInfo, CommitDetail, CommitFile } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { capabilityAvailable, capabilityReason, isOperationActive, useAppStore } from '../store/appStore';
@@ -6,7 +7,10 @@ import { Codicon } from './Codicon';
 import { BranchRefBadge } from './BranchRefBadge';
 import { FileIcon } from './FileIcon';
 import { branchColor, readableAccentColor } from './branchColor';
-import { confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { isBranchProtected } from '../history/branchProtection';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { buildPullRequestUrl } from '../history/prUrlHelper';
 
 export interface PushCommitFile {
   path: string;
@@ -305,14 +309,17 @@ function CommitContextMenu({
 
   const [pos, setPos] = useState({ x: state.x, y: state.y });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) sel.removeAllRanges();
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const margin = 6;
     setPos({
-      x: state.x + rect.width > vw ? Math.max(0, vw - rect.width - 4) : state.x,
-      y: state.y + rect.height > vh ? Math.max(0, vh - rect.height - 4) : state.y,
+      x: state.x + rect.width > vw - margin ? Math.max(margin, vw - rect.width - margin) : Math.max(margin, state.x),
+      y: state.y + rect.height > vh - margin ? Math.max(margin, vh - rect.height - margin) : Math.max(margin, state.y),
     });
   }, [state.x, state.y]);
 
@@ -321,8 +328,8 @@ function CommitContextMenu({
     onClose();
   };
 
-  return (
-    <div ref={ref} style={{ ...ctxStyles.menu, left: pos.x, top: pos.y }} onContextMenu={(event) => event.preventDefault()}>
+  return createPortal(
+    <div ref={ref} style={{ ...ctxStyles.menu, left: pos.x, top: pos.y, zIndex: 99999 }} onContextMenu={(event) => event.preventDefault()}>
       {n === 1 && (
         <>
           <MenuItem icon="go-to-file" label={t('View in Git Log')} onClick={wrap(onViewInLog)} />
@@ -345,7 +352,8 @@ function CommitContextMenu({
           <MenuItem icon="fold" label={t('Squash {0} commits…', n)} onClick={wrap(onSquash)} />
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -782,6 +790,7 @@ function RepoSection({
   const handleCommitContextMenu = (event: React.MouseEvent, commit: UnpushedCommit, isHead: boolean) => {
     event.preventDefault();
     event.stopPropagation();
+    window.getSelection()?.removeAllRanges();
     let selectedHashes: Set<string>;
     if (multiSelectHashes.has(commit.hash) && multiSelectHashes.size > 1) {
       selectedHashes = multiSelectHashes;
@@ -1083,10 +1092,96 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
     void openDiff(repoId, file.path, false, hash);
   };
 
-  const handlePush = async (targets: RepositoryStatus[]) => {
+  const handlePush = async (targets: RepositoryStatus[], force = false) => {
     if (targets.length === 0 || targets.some((repo) => isRepoBusy(repo.meta.id))) return;
+
     for (const repo of targets) {
-      await sync(repo.meta.id, 'push');
+      const branch = branchesByRepo[repo.meta.id]?.find((item) => item.current);
+      const branchName = branch?.name || 'HEAD';
+      if (isBranchProtected(branchName)) {
+        if (force) {
+          const confirmed = await confirmDialog({
+            title: t('Protected Branch Force Push'),
+            message: t('VersionDock [{0}]: You are about to Force Push to protected branch "{1}"! This may permanently overwrite remote commits. Are you sure you want to proceed?', repo.meta.name, branchName),
+            confirmLabel: t('Force Push Anyway'),
+            danger: true,
+          });
+          if (!confirmed) return;
+        } else {
+          const showPushDialog = useAppStore.getState().bootstrap?.state.settings?.showPushDialogForProtectedBranches ?? true;
+          if (showPushDialog) {
+            const confirmed = await confirmDialog({
+              title: t('Push to Protected Branch'),
+              message: t('VersionDock [{0}]: You are pushing to protected branch "{1}". Do you want to proceed?', repo.meta.name, branchName),
+              confirmLabel: t('Push'),
+            });
+            if (!confirmed) return;
+          }
+        }
+      }
+    }
+
+    for (const repo of targets) {
+      let pushSuccess = false;
+      const branch = branchesByRepo[repo.meta.id]?.find((item) => item.current);
+      const branchName = branch?.name || 'HEAD';
+      try {
+        await sync(repo.meta.id, 'push', true, { force });
+        pushSuccess = true;
+      } catch (error: unknown) {
+        const errStr = String(error);
+        const isRejected = errStr.includes('[rejected]') || errStr.includes('non-fast-forward') || errStr.includes('fetch first');
+        if (isRejected) {
+          const onPushRejectedSetting = useAppStore.getState().bootstrap?.state.settings?.onPushRejected ?? 'prompt';
+          if (onPushRejectedSetting === 'rebaseAndRetry') {
+            await sync(repo.meta.id, 'pullRebase');
+            await sync(repo.meta.id, 'push');
+          } else if (onPushRejectedSetting === 'error') {
+            throw error;
+          } else {
+            const choice = await choiceDialog({
+              title: t('Push Rejected'),
+              message: t('VersionDock [{0}]: Push was rejected because the remote contains work that you do not have locally.', repo.meta.name),
+              choices: [
+                { id: 'rebase', label: t('Rebase & Push'), icon: 'repo-forked' },
+                { id: 'merge', label: t('Merge & Push'), icon: 'git-merge' },
+                { id: 'force', label: t('Force Push'), icon: 'alert' },
+              ],
+            });
+            if (choice === 'rebase') {
+              await sync(repo.meta.id, 'pullRebase');
+              await sync(repo.meta.id, 'push');
+            } else if (choice === 'merge') {
+              await sync(repo.meta.id, 'pull');
+              await sync(repo.meta.id, 'push');
+            } else if (choice === 'force') {
+              await handlePush([repo], true);
+            }
+          }
+        } else {
+          throw error;
+        }
+      }
+      if (pushSuccess && targets.length === 1 && branchName !== 'HEAD') {
+        const remotesList = useAppStore.getState().remotes[repo.meta.id] ?? [];
+        const matchingRemote = remotesList[0];
+        const remoteUrl = matchingRemote?.pushUrl || matchingRemote?.fetchUrl || '';
+        const prInfo = remoteUrl ? buildPullRequestUrl(remoteUrl, branchName) : undefined;
+        if (prInfo) {
+          void choiceDialog({
+            title: t('Branch Pushed'),
+            message: t('VersionDock: Branch "{0}" pushed to {1}.', branchName, prInfo.platform),
+            choices: [
+              { id: 'create-pr', label: t('Create Pull Request'), icon: 'link-external' },
+              { id: 'dismiss', label: t('Dismiss'), icon: 'close' },
+            ],
+          }).then((choice) => {
+            if (choice === 'create-pr') {
+              void openUrl(prInfo.url);
+            }
+          });
+        }
+      }
     }
     await loadUnpushedCommits();
   };
@@ -1212,6 +1307,7 @@ const ctxStyles = {
     boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
     fontSize: '12px',
     color: 'var(--vscode-menu-foreground, var(--versiondock-text))',
+    userSelect: 'none' as const,
   },
   item: {
     display: 'flex',

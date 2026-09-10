@@ -313,6 +313,28 @@ fn git_index_lock_path(cwd: &Path) -> Option<PathBuf> {
     resolve_git_dir(cwd).map(|directory| directory.join("index.lock"))
 }
 
+fn try_remove_stale_index_lock(lock_path: &Path, reason: &str) -> bool {
+    match std::fs::remove_file(lock_path) {
+        Ok(_) => {
+            eprintln!(
+                "[VersionDock] Automatically removed {} Git index lock: {}",
+                reason,
+                lock_path.display()
+            );
+            true
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+        Err(err) => {
+            eprintln!(
+                "[VersionDock] Failed to remove Git index lock {}: {}",
+                lock_path.display(),
+                err
+            );
+            false
+        }
+    }
+}
+
 async fn wait_for_git_index_lock(
     cwd: &Path,
     cancellation: &CancellationToken,
@@ -323,10 +345,51 @@ async fn wait_for_git_index_lock(
     if !lock_path.exists() {
         return Ok(());
     }
+
+    let initial_meta = std::fs::metadata(&lock_path).ok();
+    let initial_mtime = initial_meta.as_ref().and_then(|m| m.modified().ok());
+    let initial_size = initial_meta.as_ref().map(|m| m.len()).unwrap_or(0);
+
+    // Fast path: if the lock file already existed more than 10 seconds ago,
+    // verify it is static for 200ms and remove it safely.
+    if let Some(mtime) = initial_mtime {
+        if let Ok(age) = mtime.elapsed() {
+            if age >= Duration::from_secs(10) {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                if let Ok(meta) = std::fs::metadata(&lock_path) {
+                    if meta.len() == initial_size && meta.modified().ok() == initial_mtime {
+                        if try_remove_stale_index_lock(
+                            &lock_path,
+                            &format!("stale ({}s old)", age.as_secs()),
+                        ) {
+                            return Ok(());
+                        }
+                    }
+                } else {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
     let started = tokio::time::Instant::now();
     let mut delay = Duration::from_millis(50);
+    let mut last_mtime = initial_mtime;
+    let mut last_size = initial_size;
+
     while lock_path.exists() {
         if started.elapsed() >= Duration::from_secs(5) {
+            if let Ok(final_meta) = std::fs::metadata(&lock_path) {
+                let final_mtime = final_meta.modified().ok();
+                let final_size = final_meta.len();
+                if final_mtime == last_mtime && final_size == last_size {
+                    if try_remove_stale_index_lock(&lock_path, "abandoned") {
+                        return Ok(());
+                    }
+                }
+            } else {
+                return Ok(());
+            }
             return Err(DesktopError::new(
                 "GIT_INDEX_BUSY",
                 format!(
@@ -341,6 +404,12 @@ async fn wait_for_git_index_lock(
                 return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true));
             }
             _ = tokio::time::sleep(delay) => {}
+        }
+        if let Ok(meta) = std::fs::metadata(&lock_path) {
+            last_mtime = meta.modified().ok();
+            last_size = meta.len();
+        } else {
+            return Ok(());
         }
         delay = (delay * 2).min(Duration::from_millis(250));
     }

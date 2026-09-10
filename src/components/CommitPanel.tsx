@@ -20,6 +20,7 @@ import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { ConflictBanner } from './ConflictBanner';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 import { BranchRefBadge } from './BranchRefBadge';
+import { checkCommitSafety, performCommitSafetyCheck } from '../history/safetyCheck';
 
 const emptyRepositories: RepositoryStatus[] = [];
 function StatusMark({ file }: { file: FileChange }) {
@@ -382,9 +383,79 @@ export function CommitPanel() {
     : pushUnavailable
       ? capabilityReason(pushUnavailable.capabilities, 'syncPush')
       : undefined;
+  const settingsNoVerify = useAppStore((state) => state.bootstrap?.state.settings?.noVerify ?? false);
+  const [noVerify, setNoVerify] = useState(settingsNoVerify);
   const setFiles = (repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value);
   const doCommit = async (push: boolean) => {
     if (!message.trim() || !commitTargets.length || commitBusy || commitUnavailable || (push && pushUnavailable)) return;
+
+    // Safety check for sensitive files, large files, CRLF, invalid names, detached head, and rebase
+    const wid = useAppStore.getState().snapshot?.workspace.id ?? '';
+    const safetyResults = await Promise.all(
+      commitTargets.map(async (repo) => {
+        const paths = selectedByRepo.get(repo.meta.id) ?? [];
+        if (paths.length === 0) return null;
+        return performCommitSafetyCheck(wid, repo.meta.id, paths);
+      })
+    );
+
+    const sensitiveFiles = Array.from(new Set(safetyResults.flatMap((r) => r?.sensitiveFiles ?? [])));
+    const largeFiles = safetyResults.flatMap((r) => r?.largeFiles ?? []);
+    const invalidFileNameFiles = safetyResults.flatMap((r) => r?.invalidFileNameFiles ?? []);
+    const crlfFiles = Array.from(new Set(safetyResults.flatMap((r) => r?.crlfFiles ?? [])));
+
+    const settings = useAppStore.getState().bootstrap?.state.settings;
+    const detachedHeadWarning = (settings?.warnOnDetachedHead ?? true)
+      ? commitTargets.filter((repo) => {
+          if (repo.meta.kind !== 'git') return false;
+          const branches = branchesByRepo[repo.meta.id];
+          if (!branches || branches.length === 0) return false;
+          const current = branches.find((b) => b.current);
+          return current?.name === 'HEAD' || Boolean(current?.detachedHash);
+        })
+      : [];
+
+    const rebaseInProgressRepos = commitTargets.filter((repo) => repo.operation === 'rebase');
+
+    const hasIssues =
+      sensitiveFiles.length > 0 ||
+      largeFiles.length > 0 ||
+      invalidFileNameFiles.length > 0 ||
+      crlfFiles.length > 0 ||
+      detachedHeadWarning.length > 0 ||
+      rebaseInProgressRepos.length > 0;
+
+    if (hasIssues) {
+      const issues: string[] = [];
+      if (rebaseInProgressRepos.length > 0) {
+        issues.push(`${t('Rebase in progress')}: ${rebaseInProgressRepos.map((r) => r.meta.name).join(', ')}`);
+      }
+      if (detachedHeadWarning.length > 0) {
+        issues.push(`${t('Warn on detached HEAD')}: ${detachedHeadWarning.map((r) => r.meta.name).join(', ')}`);
+      }
+      if (sensitiveFiles.length > 0) {
+        issues.push(`${t('Sensitive files')}: ${sensitiveFiles.join(', ')}`);
+      }
+      if (largeFiles.length > 0) {
+        const list = largeFiles.map((f) => `${f.path} (${f.sizeFormatted})`).join(', ');
+        issues.push(`${t('Large files: {0}', list)}`);
+      }
+      if (invalidFileNameFiles.length > 0) {
+        issues.push(`${t('Incompatible / invalid file names: {0}', invalidFileNameFiles.map((f) => `${f.path} (${f.reason})`).join(', '))}`);
+      }
+      if (crlfFiles.length > 0) {
+        const list = crlfFiles.slice(0, 5).join(', ') + (crlfFiles.length > 5 ? ` (+${crlfFiles.length - 5})` : '');
+        issues.push(`${t('CRLF line separators: {0}', list)}`);
+      }
+      const confirmed = await confirmDialog({
+        title: t('Commit Safety Check'),
+        message: t('VersionDock Warning: The commit contains potential issues:\n{0}\nDo you want to commit anyway?', issues.join('\n')),
+        confirmLabel: t('Commit Anyway'),
+        danger: true,
+      });
+      if (!confirmed) return;
+    }
+
     await commitMany(commitTargets.map((repo) => {
       const paths = selectedByRepo.get(repo.meta.id) ?? [];
       return {
@@ -392,6 +463,7 @@ export function CommitPanel() {
         paths,
         unstagePaths: repo.files.filter((file) => file.staged && !paths.includes(file.path)).map((file) => file.path),
         amend: amendRepos.has(repo.meta.id),
+        noVerify,
       };
     }), message, push);
     const failedRepoIds = new Set(useAppStore.getState().batchCommitReport?.results.filter((result) => result.error).map((result) => result.repoId) ?? []);
@@ -964,12 +1036,38 @@ export function CommitPanel() {
         />
       ) : activeOperationRepo?.operation ? (
         <ConflictBanner
-          title={activeOperationRepo.operation === 'rebase' ? t('Rebase in progress') : t('Merge in progress')}
+          title={
+            activeOperationRepo.operation === 'merge'
+              ? t('All conflicts resolved. Complete merge commit?')
+              : activeOperationRepo.operation === 'rebase'
+                ? t('Rebase in progress')
+                : t('Merge in progress')
+          }
           summary={activeOperationRepo.meta.name}
           actions={[
+            ...(activeOperationRepo.operation === 'merge'
+              ? [
+                  {
+                    id: 'commit-merge',
+                    label: t('Commit Merge'),
+                    title: t('Commit Merge'),
+                    tone: 'primary' as const,
+                    onClick: () => {
+                      void doCommit(false);
+                    },
+                  },
+                ]
+              : []),
             {
               id: 'abort',
-              label: activeOperationRepo.operation === 'rebase' ? t('Abort Rebase') : t('Abort Merge'),
+              label:
+                activeOperationRepo.operation === 'rebase'
+                  ? t('Abort Rebase')
+                  : activeOperationRepo.operation === 'cherry-pick'
+                    ? t('Abort Cherry-Pick')
+                    : activeOperationRepo.operation === 'revert'
+                      ? t('Abort Revert')
+                      : t('Abort Merge'),
               title: t('Abort {0}?', activeOperationRepo.operation),
               tone: 'danger',
               onClick: () => {
@@ -1058,6 +1156,12 @@ export function CommitPanel() {
         {repos.length > 1 && <div className="commit-targets">{commitTargets.length === 0 ? <span>{t('No files selected')}</span> : commitTargets.map((repo) => <em key={repo.meta.id} style={{ color: repo.meta.color, background: `${repo.meta.color}28`, borderColor: `${repo.meta.color}60` }}><button title={t('Remove {0}', repo.meta.name)} onClick={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), false)}><Codicon name="close" /></button>{repo.meta.name}<b>{selectedByRepo.get(repo.meta.id)?.length}</b></em>)}</div>}
         <div className="commit-options">
           {showAmend && amendTarget && <label title={t('Amend last commit')}><input type="checkbox" checked={amendRepos.has(amendTarget.meta.id)} onChange={() => void toggleAmend(amendTarget.meta.id)} />{t('Amend last commit')}</label>}
+          {commitTargets.some((r) => r.meta.kind === 'git') && (
+            <label title={t('Bypass Git pre-commit hooks')}>
+              <input type="checkbox" checked={noVerify} onChange={(e) => setNoVerify(e.target.checked)} />
+              {t('Bypass hooks (--no-verify)')}
+            </label>
+          )}
           <div className="commit-option-actions"><button type="button" disabled={!repos.length || workspaceBusy || historyLoading} aria-label={t('Commit message history')} title={t('View commit message history')} onClick={() => setHistoryOpen(true)}><Codicon name="history" /></button></div>
         </div>
         {mergeMessageSuggestion && <div className="merge-message-suggestion" role="status"><span>{t('Merge message suggestion')}: {mergeMessageSuggestion}</span><button type="button" onClick={applyMergeMessageSuggestion}>{t('Use Merge Message')}</button><button type="button" onClick={dismissMergeMessageSuggestion}>{t('Ignore')}</button></div>}

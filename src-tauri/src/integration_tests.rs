@@ -80,12 +80,12 @@ async fn v5_init_clone_commit_messages_and_structured_history_are_real() {
 
     let clones = root.path().join("clones");
     std::fs::create_dir(&clones).unwrap();
-    let cloned = vcs::clone_repository(source.to_str().unwrap(), &clones, "副本", None, &token)
+    let cloned = vcs::clone_repository(source.to_str().unwrap(), &clones, "副本", None, false, &token)
         .await
         .unwrap();
     assert!(cloned.join(".git").is_dir());
     assert!(
-        vcs::clone_repository("--upload-pack=evil", &clones, "bad", None, &token)
+        vcs::clone_repository("--upload-pack=evil", &clones, "bad", None, false, &token)
             .await
             .is_err()
     );
@@ -296,9 +296,15 @@ async fn real_git_file_history_follows_rename_and_loads_revision_content() {
         .iter()
         .any(|entry| entry.message == "initial file"));
     let newest = &history.entries[0];
-    let content = vcs::file_revision_content(&repository, &newest.path, &newest.revision, &token)
-        .await
-        .unwrap();
+    let content = vcs::file_revision_content(
+        &repository,
+        &newest.path,
+        &newest.revision,
+        crate::models::CatFileFilterMode::Filters,
+        &token,
+    )
+    .await
+    .unwrap();
     assert!(content.content.contains("second"));
     assert!(!content.binary);
     let oldest = history
@@ -307,10 +313,15 @@ async fn real_git_file_history_follows_rename_and_loads_revision_content() {
         .find(|entry| entry.message == "initial file")
         .unwrap();
     assert_eq!(oldest.path, "旧 文件.txt");
-    let old_content =
-        vcs::file_revision_content(&repository, &oldest.path, &oldest.revision, &token)
-            .await
-            .unwrap();
+    let old_content = vcs::file_revision_content(
+        &repository,
+        &oldest.path,
+        &oldest.revision,
+        crate::models::CatFileFilterMode::Filters,
+        &token,
+    )
+    .await
+    .unwrap();
     assert!(old_content.content.contains("first"));
 }
 
@@ -359,6 +370,7 @@ async fn real_git_file_history_follows_copy_source_and_loads_oldest_content() {
         &repository,
         &history.entries[1].path,
         &history.entries[1].revision,
+        crate::models::CatFileFilterMode::Filters,
         &token,
     )
     .await
@@ -464,8 +476,13 @@ async fn real_svn_file_history_loads_revisions_and_content() {
         .unwrap();
     assert!(history.entries.len() >= 2);
     let newest = &history.entries[0];
-    let content =
-        vcs::file_revision_content(&repository, "历史 文件.txt", &newest.revision, &token)
+    let content = vcs::file_revision_content(
+        &repository,
+        "历史 文件.txt",
+        &newest.revision,
+        crate::models::CatFileFilterMode::Filters,
+        &token,
+    )
             .await
             .unwrap();
     assert!(content.content.contains("second"));
@@ -802,6 +819,8 @@ async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
         SyncAction::Pull,
         None,
         None,
+        false,
+        &crate::models::DesktopSettings::default(),
         &CancellationToken::new(),
     )
     .await
@@ -885,6 +904,8 @@ async fn real_git_pull_auto_stash_keeps_backup_when_restore_conflicts() {
         SyncAction::Pull,
         None,
         None,
+        false,
+        &crate::models::DesktopSettings::default(),
         &CancellationToken::new(),
     )
     .await
@@ -993,6 +1014,8 @@ async fn real_git_pull_targets_non_current_and_remote_branches() {
         SyncAction::Pull,
         None,
         Some("feature".into()),
+        false,
+        &crate::models::DesktopSettings::default(),
         &token,
     )
     .await
@@ -1029,6 +1052,8 @@ async fn real_git_pull_targets_non_current_and_remote_branches() {
         SyncAction::PullRebase,
         Some("origin".into()),
         Some("origin/main".into()),
+        false,
+        &crate::models::DesktopSettings::default(),
         &token,
     )
     .await
@@ -1218,6 +1243,7 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
     vcs::history_operation(
         &repository,
         HistoryOperation::CherryPick { revision: side },
+        false,
         &token,
     )
     .await
@@ -1229,6 +1255,7 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
         HistoryOperation::Revert {
             revisions: vec![picked],
         },
+        false,
         &token,
     )
     .await
@@ -1242,6 +1269,7 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
             revision: second.clone(),
             path: "value.txt".into(),
         },
+        false,
         &token,
     )
     .await
@@ -1259,6 +1287,7 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
             revision: before_reset.clone(),
             mode: "mixed".into(),
         },
+        false,
         &token,
     )
     .await
@@ -1276,6 +1305,7 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
         HistoryOperation::Checkout {
             revision: base.clone(),
         },
+        false,
         &token,
     )
     .await
@@ -1294,6 +1324,7 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
             revision: second,
             mode: "unsafe".into(),
         },
+        false,
         &token,
     )
     .await
@@ -1379,6 +1410,7 @@ async fn real_git_commit_path_batches_apply_and_revert_directory_scopes() {
         HistoryOperation::RevertPaths {
             entries: entries.clone(),
         },
+        false,
         &token,
     )
     .await
@@ -1411,6 +1443,7 @@ async fn real_git_commit_path_batches_apply_and_revert_directory_scopes() {
         HistoryOperation::ApplyPaths {
             entries: entries.clone(),
         },
+        false,
         &token,
     )
     .await
@@ -1437,6 +1470,7 @@ async fn real_git_commit_path_batches_apply_and_revert_directory_scopes() {
                 status: "A".into(),
             }],
         },
+        false,
         &token,
     )
     .await
@@ -2484,15 +2518,39 @@ async fn real_git_core_workflow() {
         .iter()
         .any(|entry| entry.branch == "worktree/integration"));
 
-    vcs::sync(&repository, SyncAction::Push, None, None, &token)
-        .await
-        .unwrap();
-    vcs::sync(&repository, SyncAction::Fetch, None, None, &token)
-        .await
-        .unwrap();
-    let pull = vcs::sync(&repository, SyncAction::Pull, None, None, &token)
-        .await
-        .unwrap();
+    vcs::sync(
+        &repository,
+        SyncAction::Push,
+        None,
+        None,
+        false,
+        &crate::models::DesktopSettings::default(),
+        &token,
+    )
+    .await
+    .unwrap();
+    vcs::sync(
+        &repository,
+        SyncAction::Fetch,
+        None,
+        None,
+        false,
+        &crate::models::DesktopSettings::default(),
+        &token,
+    )
+    .await
+    .unwrap();
+    let pull = vcs::sync(
+        &repository,
+        SyncAction::Pull,
+        None,
+        None,
+        false,
+        &crate::models::DesktopSettings::default(),
+        &token,
+    )
+    .await
+    .unwrap();
     assert_eq!(pull.update.unwrap().summary.unwrap().commit_count, 0);
 
     command("git", &["switch", "main"], directory.path());
@@ -2527,6 +2585,7 @@ async fn real_git_core_workflow() {
         "conflict.txt",
         "<<<<<<< ours\n=======\n>>>>>>> theirs\n",
         &versions.fingerprint,
+        true,
         &token,
     )
     .await
@@ -2538,6 +2597,7 @@ async fn real_git_core_workflow() {
         "conflict.txt",
         "resolved\n",
         &versions.fingerprint,
+        true,
         &token,
     )
     .await
@@ -2549,6 +2609,7 @@ async fn real_git_core_workflow() {
         "conflict.txt",
         "resolved\n",
         &versions.fingerprint,
+        true,
         &token,
     )
     .await
@@ -2589,9 +2650,15 @@ async fn real_git_core_workflow() {
             .unwrap()
             .binary
     );
-    vcs::conflict_accept(&repository, "binary.bin", ConflictChoice::Theirs, &token)
-        .await
-        .unwrap();
+    vcs::conflict_accept(
+        &repository,
+        "binary.bin",
+        ConflictChoice::Theirs,
+        true,
+        &token,
+    )
+    .await
+    .unwrap();
     let binary_status = workspace::git_status(repository.clone(), &token)
         .await
         .unwrap();
