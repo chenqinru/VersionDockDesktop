@@ -78,6 +78,7 @@ export function BranchStatusBarItem() {
     const classes = ['statusbar-item', 'branch-status-item'];
     if (open) classes.push('active');
     if (isWarningBg) classes.push('warning-bg');
+    else if (totalBehind > 0 && totalAhead > 0) classes.push('needs-sync');
     else if (totalBehind > 0) classes.push('has-behind');
     else if (totalAhead > 0) classes.push('has-ahead');
     else if (hasUncommitted) classes.push('has-dirty');

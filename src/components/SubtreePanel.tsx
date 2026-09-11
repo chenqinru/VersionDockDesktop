@@ -5,8 +5,10 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { branchColor, readableAccentColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
-import type { RepositoryStatus, SubtreeEntry as BoundSubtreeEntry } from '../bindings/generated';
+import type { RepositoryStatus, SubtreeEntry as BoundSubtreeEntry, SubtreePushStatus as BoundSubtreePushStatus } from '../bindings/generated';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { useSpeedSearch } from '../hooks/useSpeedSearch';
+import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 
 export interface NormalizedSubtreeEntry {
   id: string;
@@ -115,7 +117,7 @@ function subtreeOpLabel(op: SubtreeOp | undefined, t: (key: string, ...args: Arr
 }
 
 function subtreeStatusLabel(status: SubtreePushStatus | undefined, t: (key: string, ...args: Array<string | number>) => string): string {
-  if (!status) return t('Up to date');
+  if (!status) return t('Checking...');
   if (status.loading) return t('Checking...');
   if (status.error && status.hasUpdates) return t('Updates');
   if (status.error) return t('Status unavailable');
@@ -125,7 +127,7 @@ function subtreeStatusLabel(status: SubtreePushStatus | undefined, t: (key: stri
 }
 
 function subtreeStatusTone(status: SubtreePushStatus | undefined): 'loading' | 'updated' | 'clean' | 'error' {
-  if (!status) return 'clean';
+  if (!status) return 'loading';
   if (status.loading) return 'loading';
   if (status.error && !status.hasUpdates) return 'error';
   if (status.hasUpdates || (status.aheadCount ?? 0) > 0) return 'updated';
@@ -137,7 +139,7 @@ function repoStatusSummary(entries: NormalizedSubtreeEntry[], statuses: Record<s
   let hasUnknownUpdates = false;
   let totalAhead = 0;
   for (const entry of entries) {
-    const status = statuses[entry.id];
+    const status = statuses[`${entry.repoId}\0${entry.id}`] ?? statuses[entry.id];
     if (!status) continue;
     if (status.loading) {
       loading = true;
@@ -361,7 +363,7 @@ function RepoSection({
             entry={entry}
             repoColor={meta.color}
             activeOp={activeOps[entry.id]}
-            status={statuses[entry.id]}
+            status={statuses[`${entry.repoId}\0${entry.id}`] ?? statuses[entry.id]}
             onPull={onPull}
             onPush={onPush}
             onSplit={onSplit}
@@ -410,10 +412,14 @@ export function SubtreePanel({
   onReveal,
 }: SubtreePanelProps) {
   const { t } = useI18n();
+  const speedSearch = useSpeedSearch('subtree');
   const storeSubtrees = useAppStore((state) => state.subtrees);
   const loadSubtrees = useAppStore((state) => state.loadSubtrees);
   const subtreeOperation = useAppStore((state) => state.subtreeOperation);
   const systemOpen = useAppStore((state) => state.systemOpen);
+  const bridge = useAppStore((state) => state.bridge);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
+  const [loadedStatuses, setLoadedStatuses] = useState<Record<string, SubtreePushStatus | undefined>>({});
 
   useEffect(() => {
     if (!explicitEntries && repos.length > 0) {
@@ -442,9 +448,52 @@ export function SubtreePanel({
     return list;
   }, [explicitEntries, repos, storeSubtrees]);
 
+  useEffect(() => {
+    if (explicitEntries || !bridge || !workspaceId || repos.length === 0) return;
+    let active = true;
+    const controller = new AbortController();
+    void Promise.all(repos.map(async (repo) => {
+      try {
+        return {
+          repoId: repo.meta.id,
+          statuses: await bridge.request<BoundSubtreePushStatus[]>({ type: 'subtreeStatuses', payload: { workspace_id: workspaceId, repo_id: repo.meta.id } }, { timeoutMs: 600_000, showProgress: false, signal: controller.signal }),
+        };
+      } catch (error: unknown) {
+        return { repoId: repo.meta.id, statuses: [], error: String(error) };
+      }
+    })).then((groups) => {
+      if (!active) return;
+      const next: Record<string, SubtreePushStatus | undefined> = {};
+      for (const group of groups) {
+        const entries = resolvedEntries.filter((entry) => entry.repoId === group.repoId);
+        if (group.error) {
+          for (const entry of entries) next[`${group.repoId}\0${entry.id}`] = { loading: false, error: group.error };
+          continue;
+        }
+        const byId = new Map(group.statuses.map((status) => [status.subtreeId, status]));
+        for (const entry of entries) {
+          const status = byId.get(entry.id);
+          next[`${group.repoId}\0${entry.id}`] = status ? {
+            loading: false,
+            aheadCount: status.aheadCount ?? undefined,
+            hasUpdates: status.hasUpdates,
+            remoteRef: status.remoteRef ?? undefined,
+            splitHash: status.splitHash ?? undefined,
+            remoteHash: status.remoteHash ?? undefined,
+            error: status.error ?? undefined,
+          } : { loading: false, error: t('Unable to determine subtree status.') };
+        }
+      }
+      setLoadedStatuses(next);
+    });
+    return () => { active = false; controller.abort(); };
+  }, [bridge, explicitEntries, repos, resolvedEntries, t, workspaceId]);
+  const resolvedStatuses = explicitEntries ? statuses : loadedStatuses;
+
   const grouped = useMemo(() => {
+    const needle = speedSearch.query.trim().toLocaleLowerCase();
     const byRepo = new Map<string, NormalizedSubtreeEntry[]>();
-    for (const entry of resolvedEntries) {
+    for (const entry of resolvedEntries.filter((entry) => !needle || `${entry.name} ${entry.prefix} ${entry.repository} ${entry.ref}`.toLocaleLowerCase().includes(needle))) {
       const key = entry.repoId || (resolvedRepoMetas[0]?.id ?? '');
       if (!byRepo.has(key)) byRepo.set(key, []);
       byRepo.get(key)!.push(entry);
@@ -453,7 +502,7 @@ export function SubtreePanel({
       meta,
       entries: (byRepo.get(meta.id) ?? []).sort((left, right) => left.prefix.localeCompare(right.prefix)),
     }));
-  }, [resolvedEntries, resolvedRepoMetas]);
+  }, [resolvedEntries, resolvedRepoMetas, speedSearch.query]);
 
   const entryById = (entryId: string) => resolvedEntries.find((entry) => entry.id === entryId);
   const askRegistration = async (repoId: string, existing?: NormalizedSubtreeEntry, registerOnly = false) => {
@@ -602,13 +651,14 @@ export function SubtreePanel({
 
   return (
     <div style={css.root}>
+      <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
       {grouped.map((group) => (
         <RepoSection
           key={group.meta.id}
           meta={group.meta}
           entries={group.entries}
           activeOps={activeOps}
-          statuses={statuses}
+          statuses={resolvedStatuses}
           multiRepo={multiRepo}
           onAdd={onAdd ?? defaultAdd}
           onRegister={onRegister ?? defaultRegister}

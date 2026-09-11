@@ -489,6 +489,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         onChange={(value) => void updateSettings({ fetchOnStartup: value })}
                       />
                       <SettingToggle
+                        label={t('Fetch when window regains focus')}
+                        description={t('Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.')}
+                        checked={settings?.autoFetchOnFocus ?? true}
+                        onChange={(value) => void updateSettings({ autoFetchOnFocus: value })}
+                      />
+                      <SettingToggle
                         label={t('Reset view locations on startup')}
                         description={t('Reset the saved workbench view positions when the app starts.')}
                         checked={settings?.resetViewLocationsOnStartup ?? false}
@@ -2115,6 +2121,17 @@ function SearchResults({
         description={t('Automatically fetch all remotes when the app starts.')}
         checked={settings?.fetchOnStartup ?? false}
         onChange={(val) => void updateSettings({ fetchOnStartup: val })}
+      />,
+    );
+  }
+  if (match(t('Fetch when window regains focus')) || match(t('Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.'))) {
+    refreshItems.push(
+      <SettingToggle
+        key="fetch-focus"
+        label={t('Fetch when window regains focus')}
+        description={t('Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.')}
+        checked={settings?.autoFetchOnFocus ?? true}
+        onChange={(val) => void updateSettings({ autoFetchOnFocus: val })}
       />,
     );
   }

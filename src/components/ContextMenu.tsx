@@ -75,11 +75,13 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
     document.addEventListener('keydown', keyHandler);
     document.addEventListener('visibilitychange', visibilityHandler);
     window.addEventListener('blur', blurHandler);
+    window.addEventListener('pagehide', blurHandler);
     return () => {
       document.removeEventListener('mousedown', handler, true);
       document.removeEventListener('keydown', keyHandler);
       document.removeEventListener('visibilitychange', visibilityHandler);
       window.removeEventListener('blur', blurHandler);
+      window.removeEventListener('pagehide', blurHandler);
       trigger?.focus();
     };
   }, [onClose]);

@@ -448,9 +448,12 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
         ],
         BridgeCommand::SubmoduleOperation {
             operation:
-                crate::models::SubmoduleOperation::Init { .. }
+                crate::models::SubmoduleOperation::Add { .. }
+                | crate::models::SubmoduleOperation::Init { .. }
                 | crate::models::SubmoduleOperation::Deinit { .. }
-                | crate::models::SubmoduleOperation::Update { init: true, .. },
+                | crate::models::SubmoduleOperation::Update { init: true, .. }
+                | crate::models::SubmoduleOperation::UpdateAll { init: true, .. }
+                | crate::models::SubmoduleOperation::Remove { .. },
             ..
         } => vec![RefreshScope::WorkspaceSnapshot, RefreshScope::Submodules],
         BridgeCommand::SubmoduleOperation { .. } => vec![
@@ -588,7 +591,9 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         }
         BridgeCommand::History { .. }
         | BridgeCommand::HistoryTopology { .. }
-        | BridgeCommand::FileHistory { .. } => ("history", "Loading repository history"),
+        | BridgeCommand::FileHistory { .. }
+        | BridgeCommand::UnpushedChanges { .. }
+        | BridgeCommand::IncomingChanges { .. } => ("history", "Loading repository history"),
         BridgeCommand::BranchRecovery { .. } => ("branchRecovery", "Recovering branch operation"),
         BridgeCommand::ConflictSave { .. }
         | BridgeCommand::ConflictAccept { .. }
@@ -603,9 +608,9 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         BridgeCommand::Submodules { .. } | BridgeCommand::SubmoduleOperation { .. } => {
             ("submodule", "Updating Git submodule state")
         }
-        BridgeCommand::Subtrees { .. } | BridgeCommand::SubtreeOperation { .. } => {
-            ("subtree", "Updating Git subtree state")
-        }
+        BridgeCommand::Subtrees { .. }
+        | BridgeCommand::SubtreeStatuses { .. }
+        | BridgeCommand::SubtreeOperation { .. } => ("subtree", "Updating Git subtree state"),
         BridgeCommand::SvnOperation { .. } => ("svn", "Updating SVN working copy"),
         BridgeCommand::UnpushedOperation { .. } => ("history", "Updating unpushed commit history"),
         BridgeCommand::UpdateSettings { .. }
@@ -625,7 +630,12 @@ fn sync_phase(action: &crate::models::SyncAction) -> (&'static str, &'static str
         crate::models::SyncAction::PullRebase => {
             ("pullingRebase", "Pulling and rebasing repository changes")
         }
+        crate::models::SyncAction::PullFfOnly => (
+            "pulling",
+            "Pulling repository changes with fast-forward only",
+        ),
         crate::models::SyncAction::Push => ("pushing", "Pushing repository changes"),
+        crate::models::SyncAction::PushTags => ("pushingTags", "Pushing repository tags"),
         crate::models::SyncAction::Update => ("updating", "Updating SVN working copy"),
     }
 }
@@ -648,6 +658,7 @@ fn svn_phase(operation: &crate::models::SvnOperation) -> (&'static str, &'static
 
 fn submodule_phase(operation: &crate::models::SubmoduleOperation) -> (&'static str, &'static str) {
     match operation {
+        crate::models::SubmoduleOperation::Add { .. } => ("submoduleAdd", "Adding submodule"),
         crate::models::SubmoduleOperation::Init { .. } => {
             ("submoduleInit", "Initializing submodule")
         }
@@ -659,6 +670,21 @@ fn submodule_phase(operation: &crate::models::SubmoduleOperation) -> (&'static s
         }
         crate::models::SubmoduleOperation::Sync { .. } => {
             ("submoduleSync", "Synchronizing submodule URLs")
+        }
+        crate::models::SubmoduleOperation::UpdateAll { .. } => {
+            ("submoduleUpdateAll", "Updating all submodules")
+        }
+        crate::models::SubmoduleOperation::Remove { .. } => {
+            ("submoduleRemove", "Removing submodule")
+        }
+        crate::models::SubmoduleOperation::ResolveConflict { .. } => {
+            ("submoduleResolve", "Resolving submodule conflict")
+        }
+        crate::models::SubmoduleOperation::Push { .. } => {
+            ("submodulePush", "Pushing submodule commits")
+        }
+        crate::models::SubmoduleOperation::Pull { .. } => {
+            ("submodulePull", "Pulling submodule commits")
         }
     }
 }
@@ -736,6 +762,10 @@ fn command_error_context(
             workspace_id,
             repo_id,
         }
+        | BridgeCommand::SubtreeStatuses {
+            workspace_id,
+            repo_id,
+        }
         | BridgeCommand::Submodules {
             workspace_id,
             repo_id,
@@ -745,6 +775,15 @@ fn command_error_context(
             repo_id,
         }
         | BridgeCommand::UnpushedCommits {
+            workspace_id,
+            repo_id,
+        }
+        | BridgeCommand::UnpushedChanges {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::IncomingChanges {
             workspace_id,
             repo_id,
         }
@@ -1349,8 +1388,15 @@ async fn dispatch(
                 .transpose()?;
             let recurse = state.app.read().await.settings.clone_recursive_submodules;
             let path = with_write(state, &lock_key, token, async {
-                vcs::clone_repository(&url, &parent, &target_name, credentials.as_ref(), recurse, token)
-                    .await
+                vcs::clone_repository(
+                    &url,
+                    &parent,
+                    &target_name,
+                    credentials.as_ref(),
+                    recurse,
+                    token,
+                )
+                .await
             })
             .await?;
             json(CloneRepositoryResult {
@@ -2009,8 +2055,16 @@ async fn dispatch(
                     None,
                     None,
                 );
-                vcs::commit_with_identity(&repo, &message, amend, &paths, identity.as_ref(), no_verify, token)
-                    .await
+                vcs::commit_with_identity(
+                    &repo,
+                    &message,
+                    amend,
+                    &paths,
+                    identity.as_ref(),
+                    no_verify,
+                    token,
+                )
+                .await
             })
             .await?;
             json(value)
@@ -2027,9 +2081,9 @@ async fn dispatch(
             let max_size_bytes = (settings.large_file_size_limit_mb.max(1) as u64) * 1024 * 1024;
             let forbidden_chars = ['<', '>', ':', '"', '|', '?', '*'];
             let reserved_names = [
-                "con", "prn", "aux", "nul",
-                "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-                "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+                "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7",
+                "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8",
+                "lpt9",
             ];
 
             let mut seen_lower = std::collections::HashMap::new();
@@ -2041,7 +2095,10 @@ async fn dispatch(
                     .unwrap_or_else(|| rel_path.clone());
 
                 // 1. Sensitive
-                if !base.ends_with(".example") && !base.ends_with(".sample") && !base.ends_with(".template") {
+                if !base.ends_with(".example")
+                    && !base.ends_with(".sample")
+                    && !base.ends_with(".template")
+                {
                     let is_sensitive = base.starts_with(".env")
                         || base.ends_with(".pem")
                         || base.ends_with(".key")
@@ -2058,30 +2115,42 @@ async fn dispatch(
                 // 2. Invalid names
                 if settings.warn_on_invalid_file_names {
                     let base_no_ext = base.split('.').next().unwrap_or("").to_ascii_lowercase();
-                    if base.chars().any(|c| forbidden_chars.contains(&c) || (c as u32) < 32) {
-                        result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
-                            path: rel_path.clone(),
-                            reason: "contains characters forbidden on Windows (: * ? \" < > |)".into(),
-                        });
+                    if base
+                        .chars()
+                        .any(|c| forbidden_chars.contains(&c) || (c as u32) < 32)
+                    {
+                        result
+                            .invalid_file_names
+                            .push(crate::models::InvalidFileNameInfo {
+                                path: rel_path.clone(),
+                                reason: "contains characters forbidden on Windows (: * ? \" < > |)"
+                                    .into(),
+                            });
                     } else if base.ends_with(' ') || base.ends_with('.') {
-                        result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
-                            path: rel_path.clone(),
-                            reason: "ends with space or dot".into(),
-                        });
+                        result
+                            .invalid_file_names
+                            .push(crate::models::InvalidFileNameInfo {
+                                path: rel_path.clone(),
+                                reason: "ends with space or dot".into(),
+                            });
                     } else if reserved_names.contains(&base_no_ext.as_str()) {
-                        result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
-                            path: rel_path.clone(),
-                            reason: format!("uses Windows-reserved name \"{base_no_ext}\""),
-                        });
+                        result
+                            .invalid_file_names
+                            .push(crate::models::InvalidFileNameInfo {
+                                path: rel_path.clone(),
+                                reason: format!("uses Windows-reserved name \"{base_no_ext}\""),
+                            });
                     }
 
                     let lower = rel_path.to_ascii_lowercase();
                     if let Some(existing) = seen_lower.get(&lower) {
                         if existing != &rel_path {
-                            result.invalid_file_names.push(crate::models::InvalidFileNameInfo {
-                                path: rel_path.clone(),
-                                reason: format!("case collision with \"{existing}\""),
-                            });
+                            result
+                                .invalid_file_names
+                                .push(crate::models::InvalidFileNameInfo {
+                                    path: rel_path.clone(),
+                                    reason: format!("case collision with \"{existing}\""),
+                                });
                         }
                     } else {
                         seen_lower.insert(lower, rel_path.clone());
@@ -2222,8 +2291,16 @@ async fn dispatch(
                                     Some(total),
                                 );
                                 let settings = state.app.read().await.settings.clone();
-                                vcs::sync(&repo, crate::models::SyncAction::Push, None, None, false, &settings, token)
-                                    .await
+                                vcs::sync(
+                                    &repo,
+                                    crate::models::SyncAction::Push,
+                                    None,
+                                    None,
+                                    false,
+                                    &settings,
+                                    token,
+                                )
+                                .await
                             })
                             .await
                             .map(|_| true)
@@ -2332,7 +2409,16 @@ async fn dispatch(
                     None,
                 );
                 let settings = state.app.read().await.settings.clone();
-                vcs::sync(&repo, action, remote, branch, force.unwrap_or(false), &settings, token).await
+                vcs::sync(
+                    &repo,
+                    action,
+                    remote,
+                    branch,
+                    force.unwrap_or(false),
+                    &settings,
+                    token,
+                )
+                .await
             })
             .await?;
             json(value)
@@ -2416,6 +2502,31 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(vcs::unpushed_commits(&repo, token).await?)
         }
+        BridgeCommand::UnpushedChanges {
+            workspace_id,
+            repo_id,
+            oldest_revision,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::unpushed_changes(&repo, oldest_revision, token).await?)
+        }
+        BridgeCommand::IncomingCommits {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::incoming_commits(&repo, token).await?)
+        }
+        BridgeCommand::IncomingChanges {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::incoming_changes(&repo, token).await?)
+        }
         BridgeCommand::UnpushedOperation {
             workspace_id,
             repo_id,
@@ -2468,6 +2579,9 @@ async fn dispatch(
                 vcs::branch_operation(&repo, operation, token).await
             })
             .await?;
+            if repo.kind == crate::models::VcsKind::Svn {
+                vcs::invalidate_svn_ref_caches(&repo_id);
+            }
             json(result)
         }
         BridgeCommand::BranchRecovery {
@@ -2500,6 +2614,9 @@ async fn dispatch(
                 vcs::tag_operation(&repo, operation, token).await
             })
             .await?;
+            if repo.kind == crate::models::VcsKind::Svn {
+                vcs::invalidate_svn_ref_caches(&repo_id);
+            }
             json(true)
         }
         BridgeCommand::Stashes {
@@ -2709,6 +2826,18 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(vcs::subtrees(&repo, token).await?)
         }
+        BridgeCommand::SubtreeStatuses {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            json(
+                with_write(state, &repo_id, token, async {
+                    vcs::subtree_statuses(&repo, token).await
+                })
+                .await?,
+            )
+        }
         BridgeCommand::SubtreeOperation {
             workspace_id,
             repo_id,
@@ -2730,6 +2859,7 @@ async fn dispatch(
                 vcs::subtree_operation(&repo, operation, token).await
             })
             .await?;
+            vcs::invalidate_subtree_status_cache(&repo_id);
             json(true)
         }
         BridgeCommand::Submodules {
@@ -2784,6 +2914,7 @@ async fn dispatch(
                 vcs::svn_operation(&repo, operation, token).await
             })
             .await?;
+            vcs::invalidate_svn_ref_caches(&repo_id);
             json(true)
         }
         BridgeCommand::BranchCompare {
@@ -3034,7 +3165,10 @@ async fn dispatch(
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
             let filter_mode = state.app.read().await.settings.cat_file_filter_mode.clone();
-            json(vcs::file_revision_content(&repo, &relative_path, &revision, filter_mode, token).await?)
+            json(
+                vcs::file_revision_content(&repo, &relative_path, &revision, filter_mode, token)
+                    .await?,
+            )
         }
         BridgeCommand::LogGet {
             channel,

@@ -75,7 +75,7 @@ describe('appStore async lifecycle', () => {
     const item = useAppStore.getState().notifications[0];
     expect(resolveNotificationText(item.message, (key, ...args) => `zh:${key}:${args.join(',')}`)).toBe('zh:{0} incoming commits:3');
     await useAppStore.getState().performNotificationAction(id, 0);
-    expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('push');
+    expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('sync');
     expect(useAppStore.getState().notifications[0].read).toBe(true);
   });
 

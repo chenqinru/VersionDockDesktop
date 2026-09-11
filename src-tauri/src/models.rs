@@ -364,6 +364,19 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
     },
+    UnpushedChanges {
+        workspace_id: String,
+        repo_id: String,
+        oldest_revision: Option<String>,
+    },
+    IncomingCommits {
+        workspace_id: String,
+        repo_id: String,
+    },
+    IncomingChanges {
+        workspace_id: String,
+        repo_id: String,
+    },
     UnpushedOperation {
         workspace_id: String,
         repo_id: String,
@@ -476,6 +489,10 @@ pub enum BridgeCommand {
         relative_path: String,
     },
     Subtrees {
+        workspace_id: String,
+        repo_id: String,
+    },
+    SubtreeStatuses {
         workspace_id: String,
         repo_id: String,
     },
@@ -798,7 +815,9 @@ pub enum SyncAction {
     Fetch,
     Pull,
     PullRebase,
+    PullFfOnly,
     Push,
+    PushTags,
     Update,
 }
 
@@ -987,17 +1006,60 @@ pub enum SubtreeOperation {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleEntry {
+    pub name: String,
     pub path: String,
     pub url: String,
     pub initialized: bool,
     pub revision: Option<String>,
     pub branch: Option<String>,
     pub dirty: bool,
+    pub sync_status: SubmoduleSyncStatus,
+    pub recorded_commit: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub index_commit: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub conflict_stages: Option<SubmoduleConflictStages>,
+    pub current_branch: Option<String>,
+    pub detached: bool,
+    pub unpushed_count: u32,
+    #[serde(default)]
+    pub type_change: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub companion_path: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub diff_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmoduleConflictStages {
+    pub base: Option<String>,
+    pub ours: Option<String>,
+    pub theirs: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SubmoduleSyncStatus {
+    Synced,
+    OutOfSync,
+    Uninitialized,
+    Conflict,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SubmoduleOperation {
+    Add {
+        url: String,
+        path: String,
+        branch: Option<String>,
+        allow_file_protocol: bool,
+    },
     Init {
         path: String,
         recursive: bool,
@@ -1015,6 +1077,26 @@ pub enum SubmoduleOperation {
     Sync {
         path: String,
         recursive: bool,
+    },
+    UpdateAll {
+        init: bool,
+        recursive: bool,
+        remote: bool,
+    },
+    Remove {
+        path: String,
+        force: bool,
+    },
+    ResolveConflict {
+        path: String,
+        choice: ConflictChoice,
+    },
+    Push {
+        path: String,
+    },
+    Pull {
+        path: String,
+        rebase: bool,
     },
 }
 
@@ -1374,6 +1456,9 @@ pub struct DesktopSettings {
     pub suppress_diverged_warning: bool,
     pub auto_refresh_interval: u32,
     pub fetch_on_startup: bool,
+    #[serde(default = "default_true")]
+    #[specta(optional)]
+    pub auto_fetch_on_focus: bool,
     pub reset_view_locations_on_startup: bool,
     pub notify_incoming_commits: bool,
     pub notify_unpushed_commits: bool,
@@ -1488,6 +1573,7 @@ impl Default for DesktopSettings {
             suppress_diverged_warning: false,
             auto_refresh_interval: 0,
             fetch_on_startup: false,
+            auto_fetch_on_focus: true,
             reset_view_locations_on_startup: false,
             notify_incoming_commits: true,
             notify_unpushed_commits: true,
@@ -2065,6 +2151,14 @@ pub struct CommitFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct RevisionChanges {
+    pub from_revision: String,
+    pub to_revision: String,
+    pub files: Vec<CommitFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct MergeParentChange {
     pub hash: String,
     pub short_hash: String,
@@ -2151,11 +2245,38 @@ pub struct UnpushedCommit {
     pub hash: String,
     pub short_hash: String,
     pub message: String,
+    #[serde(default)]
+    #[specta(optional)]
+    pub body: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub full_message: Option<String>,
     pub author: String,
     pub date: String,
     pub files_changed: u32,
     pub additions: u32,
     pub deletions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    #[serde(default)]
+    #[specta(optional)]
+    pub body: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub full_message: Option<String>,
+    pub author: String,
+    pub date: String,
+    pub files_changed: u32,
+    pub additions: u32,
+    pub deletions: u32,
+    pub parents: Vec<String>,
+    pub potential_conflict_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2341,6 +2462,18 @@ pub struct SubtreeEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct SubtreePushStatus {
+    pub subtree_id: String,
+    pub ahead_count: Option<u32>,
+    pub has_updates: bool,
+    pub remote_ref: Option<String>,
+    pub split_hash: Option<String>,
+    pub remote_hash: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteInfo {
     pub name: String,
     pub fetch_url: String,
@@ -2439,4 +2572,3 @@ pub struct CommitSafetyCheckResult {
     pub invalid_file_names: Vec<InvalidFileNameInfo>,
     pub crlf_files: Vec<String>,
 }
-

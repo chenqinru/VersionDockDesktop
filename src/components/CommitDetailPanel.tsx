@@ -722,7 +722,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   const [infoHeight, setInfoHeight] = useState<number>();
 
   useEffect(() => {
-    setOpeningDiffPath(null);
+    const frame = requestAnimationFrame(() => setOpeningDiffPath(null));
+    return () => cancelAnimationFrame(frame);
   }, [diff]);
 
   const handleOpeningDiff = useCallback((path: string) => {

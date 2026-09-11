@@ -281,9 +281,10 @@ function CommitList({
     const selection = selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
     if (selection.length > 1) {
       const allUnpushed = selection.every((item) => item.unpushed);
+      const containsMerge = selection.some((item) => item.parents.length > 1);
       return [
         { id: 'patch-multi', label: t('Create Patch...'), icon: 'diff' },
-        ...(git ? [{ id: 'cherry-pick-multi', label: t('Cherry-Pick All'), icon: 'git-commit' } as ContextMenuEntry, { separator: true } as ContextMenuEntry, { id: 'revert-multi', label: t('Revert Commits'), icon: 'discard' } as ContextMenuEntry] : []),
+        ...(git ? [{ id: 'cherry-pick-multi', label: t('Cherry-Pick All'), icon: 'git-commit', disabled: containsMerge, disabledReason: containsMerge ? t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') : undefined } as ContextMenuEntry, { separator: true } as ContextMenuEntry, { id: 'revert-multi', label: t('Revert Commits'), icon: 'discard' } as ContextMenuEntry] : []),
         ...(allUnpushed ? [{ separator: true } as ContextMenuEntry, { id: 'drop-multi', label: t('Drop Commits'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'squash-multi', label: t('Squash {0} Commits...', selection.length), icon: 'fold-down', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
       ];
     }
@@ -300,7 +301,7 @@ function CommitList({
     ];
     if (!git) return items;
     items.push(
-      { id: 'cherry-pick', label: t('Cherry-Pick'), icon: 'git-commit' },
+      { id: 'cherry-pick', label: t('Cherry-Pick'), icon: 'git-commit', disabled: commit.parents.length > 1, disabledReason: commit.parents.length > 1 ? t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') : undefined },
       { separator: true },
       { id: 'reset', label: t('Reset Current Branch to Here...'), icon: 'history', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason },
       { id: 'revert', label: t('Revert Commit'), icon: 'discard' },
@@ -335,8 +336,8 @@ function CommitList({
     }
     if (id === 'checkout') await historyOperation(commit.repoId, { type: 'checkout', revision: commit.hash });
     if (id === 'svn-update') await historyOperation(commit.repoId, { type: 'svnUpdateTo', revision: commit.hash });
-    if (id === 'cherry-pick') await historyOperation(commit.repoId, { type: 'cherryPick', revision: commit.hash });
-    if (id === 'cherry-pick-multi') for (const item of oldestFirst) await historyOperation(commit.repoId, { type: 'cherryPick', revision: item.hash });
+    if (id === 'cherry-pick' && commit.parents.length <= 1) await historyOperation(commit.repoId, { type: 'cherryPick', revision: commit.hash });
+    if (id === 'cherry-pick-multi' && oldestFirst.every((item) => item.parents.length <= 1)) for (const item of oldestFirst) await historyOperation(commit.repoId, { type: 'cherryPick', revision: item.hash });
     if (id === 'revert' && await confirmDialog({ title: t('Revert commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('A new inverse commit will be created.')}`, danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: [commit.hash] });
     if (id === 'revert-multi' && await confirmDialog({ title: t('Revert Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: newestFirst.map((item) => item.hash) });
     if (id === 'reset') {
@@ -383,7 +384,7 @@ function CommitList({
         const key = commitKey(commit.repoId, commit.hash);
         const isSelected = selected.has(key);
         const isMergeCommit = commit.parents.length > 1;
-        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); window.getSelection()?.removeAllRanges(); if (hoverTimer.current) clearTimeout(hoverTimer.current); setPopover(undefined); setContext({ x: event.clientX, y: event.clientY, commit }); if (!isSelected) void selectCommit(commit, 'single', commits); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }}>
+        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); window.getSelection()?.removeAllRanges(); if (hoverTimer.current) clearTimeout(hoverTimer.current); setPopover(undefined); setContext({ x: event.clientX, y: event.clientY, commit }); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }}>
           {labelColWidth > 0 && <div style={{ width: labelColWidth, flexShrink: 0 }} />}
           <CommitGraph commit={commit} selected={isSelected} />
           <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} maxVisible={maxVisibleRefs} />

@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -16,11 +17,12 @@ use crate::{
         CommitDetail, CommitFile, CommitNode, CommitPathOperationEntry, ConflictBlock,
         ConflictChoice, DesktopError, DiffDocument, EffectiveGitIdentity, FileHistoryEntry,
         FileHistoryPage, FileRevisionDocument, GraphCommitNode, HistoryOperation, HistoryPage,
-        HistoryQuery, IgnoreRules, MergeCommitSummary, MergeParentChange, MergeVersions,
-        PatchDocument, RecentCommitMessage, RemoteInfo, RemoteOperation, RepositoryMeta,
-        RepositoryUpdateResult, RestoreConflictFailure, RestoreConflictsResult, ShelfFileEntry,
-        StashEntry, StashOperation, SubmoduleEntry, SubmoduleOperation, SubtreeEntry,
-        SubtreeOperation, SubtreeState, SvnOperation, SyncAction, SyncResult, TagInfo,
+        HistoryQuery, IgnoreRules, IncomingCommit, MergeCommitSummary, MergeParentChange,
+        MergeVersions, PatchDocument, RecentCommitMessage, RemoteInfo, RemoteOperation,
+        RepositoryMeta, RepositoryUpdateResult, RestoreConflictFailure, RestoreConflictsResult,
+        RevisionChanges, ShelfFileEntry, StashEntry, StashOperation, SubmoduleConflictStages,
+        SubmoduleEntry, SubmoduleOperation, SubmoduleSyncStatus, SubtreeEntry, SubtreeOperation,
+        SubtreePushStatus, SubtreeState, SvnOperation, SyncAction, SyncResult, TagInfo,
         TagOperation, UnpushedCommit, UnpushedOperation, UpdateDetail, UpdateKind, UpdateSummary,
         VcsKind, WorktreeDiffResult, WorktreeEntry, WorktreeOperation,
     },
@@ -29,6 +31,8 @@ use crate::{
 
 const FIELD: char = '\u{1f}';
 const RECORD: char = '\u{1e}';
+const META_END: char = '\u{1d}';
+const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const DIFF_MAX_BYTES: usize = 5 * 1024 * 1024;
 const DIFF_MAX_LINES: usize = 50_000;
 const SUBTREE_CONFIG_PREFIX: &str = "versiondock.subtree.";
@@ -40,9 +44,44 @@ struct PendingSvnMerge {
 }
 
 static SVN_MERGES: OnceLock<Mutex<HashMap<String, PendingSvnMerge>>> = OnceLock::new();
+static SUBTREE_SPLIT_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+static SUBTREE_STATUS_CACHE: OnceLock<Mutex<HashMap<String, (Instant, SubtreePushStatus)>>> =
+    OnceLock::new();
+type SvnBranchCacheEntry = (Instant, bool, Vec<String>);
+static SVN_BRANCH_CACHE: OnceLock<Mutex<HashMap<String, SvnBranchCacheEntry>>> = OnceLock::new();
+static SVN_TAG_CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<TagInfo>)>>> = OnceLock::new();
+static SVN_INCOMING_CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64, u32)>>> = OnceLock::new();
+static STASH_FILES_CACHE: OnceLock<Mutex<HashMap<String, Vec<ShelfFileEntry>>>> = OnceLock::new();
 
 fn svn_merges() -> &'static Mutex<HashMap<String, PendingSvnMerge>> {
     SVN_MERGES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn subtree_split_cache() -> &'static Mutex<HashMap<String, (String, String)>> {
+    SUBTREE_SPLIT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn subtree_status_cache() -> &'static Mutex<HashMap<String, (Instant, SubtreePushStatus)>> {
+    SUBTREE_STATUS_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn invalidate_subtree_status_cache(repo_id: &str) {
+    if let Ok(mut cache) = subtree_status_cache().lock() {
+        let prefix = format!("{repo_id}\0");
+        cache.retain(|key, _| !key.starts_with(&prefix));
+    }
+}
+
+pub fn invalidate_svn_ref_caches(repo_id: &str) {
+    if let Ok(mut cache) = SVN_BRANCH_CACHE.get_or_init(Default::default).lock() {
+        cache.remove(repo_id);
+    }
+    if let Ok(mut cache) = SVN_TAG_CACHE.get_or_init(Default::default).lock() {
+        cache.remove(repo_id);
+    }
+    if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
+        cache.remove(repo_id);
+    }
 }
 
 pub fn validate_commit_selection_paths(
@@ -168,10 +207,37 @@ async fn git_network(
     .await
 }
 
+async fn git_network_quick(
+    args: Vec<String>,
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<cli::CommandOutput, DesktopError> {
+    let mut safe = vec!["-c".into(), "core.quotepath=false".into()];
+    safe.extend(args);
+    cli::run(
+        "git",
+        &safe,
+        Path::new(&repo.root_path),
+        None,
+        Duration::from_secs(8),
+        token,
+    )
+    .await
+}
+
 async fn svn(
     args: Vec<String>,
     repo: &RepositoryMeta,
     token: &CancellationToken,
+) -> Result<cli::CommandOutput, DesktopError> {
+    svn_with_timeout(args, repo, token, cli::DEFAULT_TIMEOUT).await
+}
+
+async fn svn_with_timeout(
+    args: Vec<String>,
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+    timeout: Duration,
 ) -> Result<cli::CommandOutput, DesktopError> {
     let auth = crate::svn_account::cached_auth(repo);
     let mut safe = vec!["--non-interactive".into()];
@@ -190,7 +256,7 @@ async fn svn(
         &safe,
         Path::new(&repo.root_path),
         auth_input.as_ref().map(|value| value.as_bytes()),
-        cli::DEFAULT_TIMEOUT,
+        timeout,
         token,
     )
     .await
@@ -341,11 +407,7 @@ pub async fn clone_repository(
             ("VERSIONDOCK_GIT_PASSWORD".into(), password.clone()),
         ]);
     }
-    let mut clone_args = vec![
-        "-c".into(),
-        "core.quotepath=false".into(),
-        "clone".into(),
-    ];
+    let mut clone_args = vec!["-c".into(), "core.quotepath=false".into(), "clone".into()];
     if recurse_submodules {
         clone_args.push("--recurse-submodules".into());
     }
@@ -1154,8 +1216,7 @@ pub async fn discard(
                     )
                     .await
                     .is_err()
-                    {
-                        if git(
+                        && git(
                             vec![
                                 "restore".into(),
                                 "--staged".into(),
@@ -1168,14 +1229,13 @@ pub async fn discard(
                         )
                         .await
                         .is_err()
-                        {
-                            let _ = git(
-                                vec!["checkout".into(), "HEAD".into(), "--".into(), pathspec],
-                                repo,
-                                token,
-                            )
-                            .await;
-                        }
+                    {
+                        let _ = git(
+                            vec!["checkout".into(), "HEAD".into(), "--".into(), pathspec],
+                            repo,
+                            token,
+                        )
+                        .await;
                     }
                 }
             }
@@ -1597,7 +1657,13 @@ pub async fn file_revision_content(
                     .await?
                     .stdout
             } else {
-                match git(vec!["cat-file".into(), cat_flag.into(), spec.clone()], repo, token).await {
+                match git(
+                    vec!["cat-file".into(), cat_flag.into(), spec.clone()],
+                    repo,
+                    token,
+                )
+                .await
+                {
                     Ok(output) => output.stdout,
                     Err(_) => {
                         git(vec!["cat-file".into(), "-p".into(), spec], repo, token)
@@ -1999,6 +2065,12 @@ pub async fn sync(
     settings: &crate::models::DesktopSettings,
     token: &CancellationToken,
 ) -> Result<SyncResult, DesktopError> {
+    if repo.kind == VcsKind::Git && matches!(action, SyncAction::PushTags) {
+        return Ok(SyncResult {
+            output: git_push_tags(repo, remote, token).await?,
+            update: None,
+        });
+    }
     if repo.kind == VcsKind::Git && matches!(action, SyncAction::Push) {
         return Ok(SyncResult {
             output: git_push(repo, remote, force, settings.use_safe_force_push, token).await?,
@@ -2006,7 +2078,10 @@ pub async fn sync(
         });
     }
     if repo.kind == VcsKind::Git
-        && matches!(action, SyncAction::Pull | SyncAction::PullRebase)
+        && matches!(
+            action,
+            SyncAction::Pull | SyncAction::PullRebase | SyncAction::PullFfOnly
+        )
         && (git_has_conflicts(repo, token).await
             || git_operation_name(Path::new(&repo.root_path)).is_some())
     {
@@ -2035,7 +2110,7 @@ pub async fn sync(
     }
     let captures_update = matches!(
         action,
-        SyncAction::Pull | SyncAction::PullRebase | SyncAction::Update
+        SyncAction::Pull | SyncAction::PullRebase | SyncAction::PullFfOnly | SyncAction::Update
     );
     let before_revision = if captures_update {
         current_revision(repo, token).await.unwrap_or_default()
@@ -2066,7 +2141,10 @@ pub async fn sync(
         }
     }
     if repo.kind == VcsKind::Git
-        && matches!(action, SyncAction::Pull | SyncAction::PullRebase)
+        && matches!(
+            action,
+            SyncAction::Pull | SyncAction::PullRebase | SyncAction::PullFfOnly
+        )
         && explicit_remote_branch.is_none()
     {
         let has_upstream = git(
@@ -2115,10 +2193,12 @@ pub async fn sync(
             }
             ("git", args)
         }
-        (VcsKind::Git, SyncAction::Pull | SyncAction::PullRebase) => {
+        (VcsKind::Git, SyncAction::Pull | SyncAction::PullRebase | SyncAction::PullFfOnly) => {
             let mut args = vec!["pull".into()];
             if matches!(action, SyncAction::PullRebase) {
                 args.push("--rebase".into());
+            } else if matches!(action, SyncAction::PullFfOnly) {
+                args.push("--ff-only".into());
             } else {
                 args.extend(["--no-rebase".into(), "--ff".into()]);
             }
@@ -2127,7 +2207,7 @@ pub async fn sync(
             }
             ("git", args)
         }
-        (VcsKind::Git, SyncAction::Push) => unreachable!(),
+        (VcsKind::Git, SyncAction::Push | SyncAction::PushTags) => unreachable!(),
         (VcsKind::Svn, SyncAction::Update) | (VcsKind::Svn, SyncAction::Pull) => {
             ("svn", vec!["update".into()])
         }
@@ -2676,6 +2756,42 @@ async fn git_push(
     Ok(git(args, repo, token).await?.stdout_text())
 }
 
+async fn git_push_tags(
+    repo: &RepositoryMeta,
+    requested_remote: Option<String>,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    let remote = if let Some(remote) = requested_remote {
+        validate_ref(&remote)?;
+        remote
+    } else {
+        let remotes = git(vec!["remote".into()], repo, token)
+            .await?
+            .stdout_text()
+            .lines()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(String::from)
+            .collect::<Vec<_>>();
+        if remotes.iter().any(|value| value == "origin") {
+            "origin".into()
+        } else if remotes.len() == 1 {
+            remotes[0].clone()
+        } else {
+            return Err(DesktopError::new(
+                "PUSH_REMOTE_REQUIRED",
+                "No unambiguous remote is available for pushing tags",
+                true,
+            ));
+        }
+    };
+    Ok(
+        git_network(vec!["push".into(), remote, "--tags".into()], repo, token)
+            .await?
+            .stdout_text(),
+    )
+}
+
 pub async fn history(
     repo: &RepositoryMeta,
     skip: u32,
@@ -2698,7 +2814,7 @@ pub async fn history_topology(
 ) -> Result<Vec<GraphCommitNode>, DesktopError> {
     match repo.kind {
         VcsKind::Git => git_history_topology(repo, revision, token).await,
-        VcsKind::Svn => svn_history_topology(repo, svn_limit.clamp(1, 5_000), token).await,
+        VcsKind::Svn => svn_history_topology(repo, svn_limit.clamp(1, 100), token).await,
     }
 }
 
@@ -2732,9 +2848,9 @@ pub async fn unpushed_commits(
     };
     range.push("--max-count=100".into());
     range.push(format!(
-        "--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%an{FIELD}%aI"
+        "--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%B{FIELD}%an{FIELD}%aI{META_END}"
     ));
-    range.push("--shortstat".into());
+    range.push("--numstat".into());
     let raw = git(
         std::iter::once("log".into()).chain(range).collect(),
         repo,
@@ -2746,36 +2862,359 @@ pub async fn unpushed_commits(
     Ok(raw
         .split(RECORD)
         .filter_map(|record| {
-            let mut lines = record.lines().filter(|line| !line.trim().is_empty());
-            let fields = lines.next()?.split(FIELD).collect::<Vec<_>>();
-            if fields.len() < 5 || fields[0].is_empty() {
+            let (metadata, stats) = record.split_once(META_END)?;
+            let fields = metadata.split(FIELD).collect::<Vec<_>>();
+            if fields.len() < 6 || fields[0].is_empty() {
                 return None;
             }
-            let stat = lines.find(|line| line.contains("changed"));
-            let number_before = |needle: &str| -> u32 {
-                stat.and_then(|line| {
-                    line.split(',').find_map(|part| {
-                        let trimmed = part.trim();
-                        trimmed
-                            .contains(needle)
-                            .then(|| trimmed.split_whitespace().next()?.parse().ok())
-                            .flatten()
-                    })
-                })
-                .unwrap_or(0)
-            };
+            let (files_changed, additions, deletions, _) = parse_numstat(stats);
             Some(UnpushedCommit {
                 hash: fields[0].into(),
                 short_hash: fields[1].into(),
                 message: fields[2].into(),
-                author: fields[3].into(),
-                date: fields[4].into(),
-                files_changed: number_before("file changed").max(number_before("files changed")),
-                additions: number_before("insertion"),
-                deletions: number_before("deletion"),
+                body: commit_message_body(fields[3], fields[2]),
+                full_message: Some(fields[3].trim().to_string()),
+                author: fields[4].into(),
+                date: fields[5].into(),
+                files_changed,
+                additions,
+                deletions,
             })
         })
         .collect())
+}
+
+fn parse_numstat(raw: &str) -> (u32, u32, u32, Vec<String>) {
+    let mut files = 0;
+    let mut additions = 0;
+    let mut deletions = 0;
+    let mut paths = Vec::new();
+    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+        let fields = line.splitn(3, '\t').collect::<Vec<_>>();
+        if fields.len() != 3 {
+            continue;
+        }
+        files += 1;
+        additions += fields[0].parse::<u32>().unwrap_or(0);
+        deletions += fields[1].parse::<u32>().unwrap_or(0);
+        paths.push(fields[2].to_string());
+    }
+    (files, additions, deletions, paths)
+}
+
+fn parse_git_name_status_z(raw: &str) -> Vec<(String, String)> {
+    let fields = raw.split('\0').collect::<Vec<_>>();
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let code = fields[index];
+        index += 1;
+        if code.is_empty() {
+            continue;
+        }
+        let rename_or_copy = code.starts_with('R') || code.starts_with('C');
+        if rename_or_copy {
+            index += 1;
+        }
+        let Some(path) = fields.get(index).filter(|path| !path.is_empty()) else {
+            break;
+        };
+        index += 1;
+        files.push((
+            code.trim_end_matches(|character: char| character.is_ascii_digit())
+                .to_string(),
+            (*path).to_string(),
+        ));
+    }
+    files
+}
+
+fn parse_numstat_z(raw: &str) -> HashMap<String, (Option<u32>, Option<u32>)> {
+    let fields = raw.split('\0').collect::<Vec<_>>();
+    let mut stats = HashMap::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let record = fields[index];
+        index += 1;
+        if record.is_empty() {
+            continue;
+        }
+        let parts = record.splitn(3, '\t').collect::<Vec<_>>();
+        if parts.len() != 3 {
+            continue;
+        }
+        let path = if parts[2].is_empty() {
+            index += 1;
+            let next = fields.get(index).copied().unwrap_or_default();
+            index += 1;
+            next
+        } else {
+            parts[2]
+        };
+        if path.is_empty() {
+            continue;
+        }
+        stats.insert(
+            path.to_string(),
+            (parts[0].parse().ok(), parts[1].parse().ok()),
+        );
+    }
+    stats
+}
+
+async fn git_revision_changes(
+    repo: &RepositoryMeta,
+    from_revision: String,
+    to_revision: String,
+    token: &CancellationToken,
+) -> Result<RevisionChanges, DesktopError> {
+    let (statuses, stats) = tokio::try_join!(
+        git(
+            vec![
+                "diff".into(),
+                "--name-status".into(),
+                "-z".into(),
+                "-M".into(),
+                from_revision.clone(),
+                to_revision.clone(),
+                "--".into(),
+            ],
+            repo,
+            token,
+        ),
+        git(
+            vec![
+                "diff".into(),
+                "--numstat".into(),
+                "-z".into(),
+                "-M".into(),
+                from_revision.clone(),
+                to_revision.clone(),
+                "--".into(),
+            ],
+            repo,
+            token,
+        ),
+    )?;
+    let stats = parse_numstat_z(&stats.stdout_text());
+    let files = parse_git_name_status_z(&statuses.stdout_text())
+        .into_iter()
+        .map(|(status, path)| {
+            let (added, removed) = stats.get(&path).copied().unwrap_or((None, None));
+            CommitFile {
+                path,
+                status,
+                added,
+                removed,
+            }
+        })
+        .collect();
+    Ok(RevisionChanges {
+        from_revision,
+        to_revision,
+        files,
+    })
+}
+
+fn commit_message_body(full_message: &str, subject: &str) -> Option<String> {
+    let full_message = full_message.trim();
+    let body = full_message
+        .strip_prefix(subject)
+        .unwrap_or(full_message)
+        .trim();
+    (!body.is_empty()).then(|| body.to_string())
+}
+
+pub async fn incoming_commits(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<IncomingCommit>, DesktopError> {
+    ensure_git(repo)?;
+    if git(
+        vec![
+            "rev-parse".into(),
+            "--abbrev-ref".into(),
+            "--symbolic-full-name".into(),
+            "@{upstream}".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .is_err()
+    {
+        return Ok(Vec::new());
+    }
+
+    let raw = git(
+        vec![
+            "log".into(),
+            "HEAD..@{upstream}".into(),
+            "--max-count=100".into(),
+            format!("--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%B{FIELD}%an{FIELD}%aI{FIELD}%P{META_END}"),
+            "--numstat".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+
+    let potential_conflict_paths = incoming_conflict_paths(repo, token)
+        .await
+        .into_iter()
+        .collect::<HashSet<_>>();
+    Ok(raw
+        .split(RECORD)
+        .filter_map(|record| {
+            let (metadata, stats) = record.split_once(META_END)?;
+            let fields = metadata.split(FIELD).collect::<Vec<_>>();
+            if fields.len() < 7 || fields[0].is_empty() {
+                return None;
+            }
+            let (files_changed, additions, deletions, changed_paths) = parse_numstat(stats);
+            Some(IncomingCommit {
+                hash: fields[0].into(),
+                short_hash: fields[1].into(),
+                message: fields[2].into(),
+                body: commit_message_body(fields[3], fields[2]),
+                full_message: Some(fields[3].trim().to_string()),
+                author: fields[4].into(),
+                date: fields[5].into(),
+                files_changed,
+                additions,
+                deletions,
+                parents: fields[6].split_whitespace().map(str::to_string).collect(),
+                potential_conflict_paths: changed_paths
+                    .into_iter()
+                    .filter(|path| potential_conflict_paths.contains(path))
+                    .collect(),
+            })
+        })
+        .collect())
+}
+
+pub async fn unpushed_changes(
+    repo: &RepositoryMeta,
+    oldest_revision: Option<String>,
+    token: &CancellationToken,
+) -> Result<RevisionChanges, DesktopError> {
+    ensure_git(repo)?;
+    let from_revision = if let Some(oldest) = oldest_revision {
+        validate_revision(&oldest)?;
+        git(
+            vec!["rev-parse".into(), "--verify".into(), format!("{oldest}^")],
+            repo,
+            token,
+        )
+        .await
+        .ok()
+        .map(|output| output.stdout_text().trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| EMPTY_TREE_HASH.into())
+    } else {
+        git(
+            vec!["merge-base".into(), "HEAD".into(), "@{upstream}".into()],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text()
+        .trim()
+        .to_string()
+    };
+    let to_revision = git(vec!["rev-parse".into(), "HEAD".into()], repo, token)
+        .await?
+        .stdout_text()
+        .trim()
+        .to_string();
+    git_revision_changes(repo, from_revision, to_revision, token).await
+}
+
+pub async fn incoming_changes(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<RevisionChanges, DesktopError> {
+    ensure_git(repo)?;
+    let to_revision = git(
+        vec!["rev-parse".into(), "--verify".into(), "@{upstream}".into()],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text()
+    .trim()
+    .to_string();
+    let from_revision = git(
+        vec!["merge-base".into(), "HEAD".into(), to_revision.clone()],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .map(|output| output.stdout_text().trim().to_string())
+    .filter(|value| !value.is_empty())
+    .unwrap_or_else(|| "HEAD".into());
+    git_revision_changes(repo, from_revision, to_revision, token).await
+}
+
+async fn incoming_conflict_paths(repo: &RepositoryMeta, token: &CancellationToken) -> Vec<String> {
+    let Some(base) = git(
+        vec!["merge-base".into(), "HEAD".into(), "@{upstream}".into()],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .map(|output| output.stdout_text().trim().to_string())
+    .filter(|value| !value.is_empty()) else {
+        return Vec::new();
+    };
+    let collect = |raw: String| {
+        raw.lines()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect::<HashSet<_>>()
+    };
+    let mut local = git(
+        vec!["diff".into(), "--name-only".into(), format!("{base}..HEAD")],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .map(|output| collect(output.stdout_text()))
+    .unwrap_or_default();
+    for args in [
+        vec!["diff".into(), "--name-only".into()],
+        vec!["diff".into(), "--cached".into(), "--name-only".into()],
+        vec![
+            "ls-files".into(),
+            "--others".into(),
+            "--exclude-standard".into(),
+        ],
+    ] {
+        if let Ok(output) = git(args, repo, token).await {
+            local.extend(collect(output.stdout_text()));
+        }
+    }
+    let remote = git(
+        vec![
+            "diff".into(),
+            "--name-only".into(),
+            format!("{base}..@{{upstream}}"),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .map(|output| collect(output.stdout_text()))
+    .unwrap_or_default();
+    let mut paths = local.intersection(&remote).cloned().collect::<Vec<_>>();
+    paths.sort();
+    paths
 }
 
 pub async fn unpushed_operation(
@@ -3174,7 +3613,11 @@ pub async fn history_operation(
                     let safe = literal_path(Path::new(&repo.root_path), &path, true)?;
                     let parent_ref = format!("{revision}^");
                     let exists_in_parent = git(
-                        vec!["cat-file".into(), "-e".into(), format!("{parent_ref}:{safe}")],
+                        vec![
+                            "cat-file".into(),
+                            "-e".into(),
+                            format!("{parent_ref}:{safe}"),
+                        ],
                         repo,
                         token,
                     )
@@ -3759,13 +4202,18 @@ async fn svn_history(
     }
     let target = svn_history_target(repo, query.revision.as_deref(), query.path.as_deref())?;
     let mut args = vec!["log".into(), "--xml".into(), "-r".into(), "HEAD:0".into()];
-    if !backend_filter {
-        args.extend(["--limit".into(), requested.to_string()]);
-    }
+    let scan_limit = if backend_filter {
+        requested.max(1_000)
+    } else {
+        requested
+    };
+    args.extend(["--limit".into(), scan_limit.to_string()]);
     if let Some(target) = target {
         args.extend(["--".into(), target]);
     }
-    let raw = svn(args, repo, token).await?.stdout_text();
+    let raw = svn_with_timeout(args, repo, token, Duration::from_secs(15))
+        .await?
+        .stdout_text();
     let document = roxmltree::Document::parse(&raw)
         .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
     let needle = query.text.unwrap_or_default().to_lowercase();
@@ -4523,25 +4971,46 @@ async fn svn_branches(
         });
     };
 
-    if svn(
-        vec!["ls".into(), "--xml".into(), "^/trunk".into()],
-        repo,
-        token,
-    )
-    .await
-    .is_ok()
-    {
+    let cached = SVN_BRANCH_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&repo.id).cloned())
+        .filter(|(checked_at, _, _)| checked_at.elapsed() < Duration::from_secs(300));
+    let (has_trunk, branch_names) = if let Some((_, has_trunk, branch_names)) = cached {
+        (has_trunk, branch_names)
+    } else {
+        let (trunk, listed) = tokio::join!(
+            svn_with_timeout(
+                vec!["ls".into(), "--xml".into(), "^/trunk".into()],
+                repo,
+                token,
+                Duration::from_secs(3),
+            ),
+            svn_with_timeout(
+                vec!["ls".into(), "--xml".into(), "^/branches".into()],
+                repo,
+                token,
+                Duration::from_secs(3),
+            ),
+        );
+        let names = listed
+            .ok()
+            .and_then(|output| parse_svn_list_entries(&output.stdout_text()).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect::<Vec<_>>();
+        let value = (trunk.is_ok(), names);
+        if let Ok(mut cache) = SVN_BRANCH_CACHE.get_or_init(Default::default).lock() {
+            cache.insert(repo.id.clone(), (Instant::now(), value.0, value.1.clone()));
+        }
+        value
+    };
+    if has_trunk {
         add("trunk".into(), &mut branches);
     }
-    let raw = svn(
-        vec!["ls".into(), "--xml".into(), "^/branches".into()],
-        repo,
-        token,
-    )
-    .await
-    .map(|value| value.stdout_text())
-    .unwrap_or_default();
-    for (name, _, _) in parse_svn_list_entries(&raw)? {
+    for name in branch_names {
         add(name, &mut branches);
     }
     Ok(branches)
@@ -5069,15 +5538,25 @@ pub async fn tags(
     token: &CancellationToken,
 ) -> Result<Vec<TagInfo>, DesktopError> {
     if repo.kind == VcsKind::Svn {
-        let raw = svn(
+        if let Some((_, tags)) = SVN_TAG_CACHE
+            .get_or_init(Default::default)
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&repo.id).cloned())
+            .filter(|(checked_at, _)| checked_at.elapsed() < Duration::from_secs(300))
+        {
+            return Ok(tags);
+        }
+        let raw = svn_with_timeout(
             vec!["ls".into(), "--xml".into(), "^/tags".into()],
             repo,
             token,
+            Duration::from_secs(3),
         )
         .await
         .map(|value| value.stdout_text())
         .unwrap_or_default();
-        return Ok(parse_svn_list_entries(&raw)?
+        let tags = parse_svn_list_entries(&raw)?
             .into_iter()
             .map(|(name, revision, date)| TagInfo {
                 hash: revision
@@ -5086,7 +5565,11 @@ pub async fn tags(
                 name,
                 date,
             })
-            .collect());
+            .collect::<Vec<_>>();
+        if let Ok(mut cache) = SVN_TAG_CACHE.get_or_init(Default::default).lock() {
+            cache.insert(repo.id.clone(), (Instant::now(), tags.clone()));
+        }
+        return Ok(tags);
     }
     let format =
         format!("%(refname:short){FIELD}%(objectname){FIELD}%(creatordate:iso-strict){RECORD}");
@@ -5198,10 +5681,21 @@ async fn svn_incoming_revisions(repo: &RepositoryMeta, token: &CancellationToken
     .ok()
     .and_then(|value| value.stdout_text().trim().parse::<u64>().ok());
     let Some(revision) = revision else { return 0 };
+    let cached = SVN_INCOMING_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&repo.id).cloned())
+        .filter(|(_, cached_revision, _)| *cached_revision == revision);
+    if let Some((checked_at, _, behind)) = cached {
+        if checked_at.elapsed() < Duration::from_secs(60) {
+            return behind;
+        }
+    }
     let Some(start) = revision.checked_add(1) else {
         return 0;
     };
-    let raw = svn(
+    let raw = match svn_with_timeout(
         vec![
             "log".into(),
             "--xml".into(),
@@ -5210,11 +5704,20 @@ async fn svn_incoming_revisions(repo: &RepositoryMeta, token: &CancellationToken
         ],
         repo,
         token,
+        Duration::from_secs(20),
     )
     .await
-    .map(|value| value.stdout_text())
-    .unwrap_or_default();
-    roxmltree::Document::parse(&raw)
+    {
+        Ok(value) => value.stdout_text(),
+        Err(_) => {
+            let behind = cached.map(|(_, _, behind)| behind).unwrap_or(0);
+            if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
+                cache.insert(repo.id.clone(), (Instant::now(), revision, behind));
+            }
+            return behind;
+        }
+    };
+    let behind = roxmltree::Document::parse(&raw)
         .ok()
         .map(|document| {
             document
@@ -5223,7 +5726,11 @@ async fn svn_incoming_revisions(repo: &RepositoryMeta, token: &CancellationToken
                 .count()
                 .min(u32::MAX as usize) as u32
         })
-        .unwrap_or(0)
+        .unwrap_or(0);
+    if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
+        cache.insert(repo.id.clone(), (Instant::now(), revision, behind));
+    }
+    behind
 }
 
 pub async fn tag_operation(
@@ -5441,6 +5948,23 @@ pub async fn stashes(
                 )
             };
 
+        let cached_files = STASH_FILES_CACHE
+            .get_or_init(Default::default)
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&hash).cloned());
+        if let Some(files) = cached_files {
+            entries.push(StashEntry {
+                reference,
+                hash,
+                branch,
+                message,
+                full_message,
+                date,
+                files,
+            });
+            continue;
+        }
         let mut files = Vec::new();
         if let Ok(show_out) = git(
             vec![
@@ -5482,6 +6006,10 @@ pub async fn stashes(
                     });
                 }
             }
+        }
+
+        if let Ok(mut cache) = STASH_FILES_CACHE.get_or_init(Default::default).lock() {
+            cache.insert(hash.clone(), files.clone());
         }
 
         entries.push(StashEntry {
@@ -5753,29 +6281,206 @@ pub async fn subtrees(
     Ok(entries)
 }
 
+pub async fn subtree_statuses(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<SubtreePushStatus>, DesktopError> {
+    ensure_git(repo)?;
+    let entries = subtrees(repo, token).await?;
+    let mut statuses = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let cache_key = format!(
+            "{}\0{}\0{}\0{}\0{}\0{:?}",
+            repo.id, entry.id, entry.prefix, entry.remote, entry.branch, entry.state
+        );
+        let cached = subtree_status_cache()
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&cache_key).cloned())
+            .filter(|(checked_at, _)| checked_at.elapsed() < Duration::from_secs(60))
+            .map(|(_, status)| status);
+        if let Some(status) = cached {
+            statuses.push(status);
+            continue;
+        }
+        let status = subtree_status(repo, &entry, token).await;
+        if let Ok(mut cache) = subtree_status_cache().lock() {
+            cache.insert(cache_key, (Instant::now(), status.clone()));
+        }
+        statuses.push(status);
+    }
+    Ok(statuses)
+}
+
+async fn subtree_split_hash(
+    repo: &RepositoryMeta,
+    prefix: &str,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    let last_commit = git(
+        vec![
+            "log".into(),
+            "-1".into(),
+            "--format=%H".into(),
+            "HEAD".into(),
+            "--".into(),
+            format!(":(literal){prefix}"),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text()
+    .trim()
+    .to_string();
+    let cache_key = format!("{}\0{prefix}", repo.id);
+    if !last_commit.is_empty() {
+        if let Some((_, split_hash)) = subtree_split_cache()
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&cache_key).cloned())
+            .filter(|(cached_commit, _)| cached_commit == &last_commit)
+        {
+            return Ok(split_hash);
+        }
+    }
+    let split_hash = git(
+        vec![
+            "subtree".into(),
+            "split".into(),
+            format!("--prefix={prefix}"),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text()
+    .lines()
+    .rev()
+    .map(str::trim)
+    .find(|line| line.len() >= 40 && line.chars().all(|character| character.is_ascii_hexdigit()))
+    .map(str::to_string)
+    .ok_or_else(|| {
+        DesktopError::new(
+            "SUBTREE_SPLIT_HASH_MISSING",
+            "Cannot determine subtree split commit",
+            true,
+        )
+    })?;
+    if !last_commit.is_empty() {
+        if let Ok(mut cache) = subtree_split_cache().lock() {
+            cache.insert(cache_key, (last_commit, split_hash.clone()));
+        }
+    }
+    Ok(split_hash)
+}
+
+async fn subtree_status(
+    repo: &RepositoryMeta,
+    entry: &SubtreeEntry,
+    token: &CancellationToken,
+) -> SubtreePushStatus {
+    if entry.state != SubtreeState::Active {
+        return SubtreePushStatus {
+            subtree_id: entry.id.clone(),
+            ahead_count: None,
+            has_updates: false,
+            remote_ref: None,
+            split_hash: None,
+            remote_hash: None,
+            error: Some("Subtree registration is pending recovery".into()),
+        };
+    }
+    let split_hash = match subtree_split_hash(repo, &entry.prefix, token).await {
+        Ok(value) => Some(value),
+        Err(error) => {
+            return SubtreePushStatus {
+                subtree_id: entry.id.clone(),
+                ahead_count: None,
+                has_updates: false,
+                remote_ref: None,
+                split_hash: None,
+                remote_hash: None,
+                error: Some(error.message),
+            };
+        }
+    };
+    let remote_ref = if entry.branch.starts_with("refs/") {
+        entry.branch.clone()
+    } else {
+        format!("refs/heads/{}", entry.branch)
+    };
+    let remote = git_network_quick(
+        vec!["ls-remote".into(), entry.remote.clone(), remote_ref.clone()],
+        repo,
+        token,
+    )
+    .await;
+    let (remote_hash, remote_error) = match remote {
+        Ok(output) => (
+            output
+                .stdout_text()
+                .split_whitespace()
+                .next()
+                .map(str::to_string),
+            None,
+        ),
+        Err(error) => (None, Some(error.message)),
+    };
+    let ahead_count = match (&remote_hash, &split_hash) {
+        (Some(remote_hash), Some(split_hash)) => git(
+            vec![
+                "rev-list".into(),
+                "--count".into(),
+                format!("{remote_hash}..{split_hash}"),
+            ],
+            repo,
+            token,
+        )
+        .await
+        .ok()
+        .and_then(|output| output.stdout_text().trim().parse().ok()),
+        _ => None,
+    };
+    SubtreePushStatus {
+        subtree_id: entry.id.clone(),
+        ahead_count,
+        has_updates: match (&remote_hash, &split_hash) {
+            (Some(remote_hash), Some(split_hash)) => remote_hash != split_hash,
+            (None, Some(_)) if remote_error.is_none() => true,
+            _ => false,
+        },
+        remote_ref: Some(remote_ref),
+        split_hash,
+        remote_hash,
+        error: remote_error,
+    }
+}
+
 pub async fn submodules(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Vec<SubmoduleEntry>, DesktopError> {
     ensure_git(repo)?;
     let modules_file = Path::new(&repo.root_path).join(".gitmodules");
-    if !modules_file.is_file() {
-        return Ok(Vec::new());
-    }
-    let raw = git(
-        vec![
-            "config".into(),
-            "--file".into(),
-            ".gitmodules".into(),
-            "--null".into(),
-            "--get-regexp".into(),
-            r"^submodule\..*\.".into(),
-        ],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text();
+    let raw = if modules_file.is_file() {
+        git(
+            vec![
+                "config".into(),
+                "--file".into(),
+                ".gitmodules".into(),
+                "--null".into(),
+                "--get-regexp".into(),
+                r"^submodule\..*\.".into(),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text()
+    } else {
+        String::new()
+    };
     #[derive(Default)]
     struct Record {
         path: Option<String>,
@@ -5801,8 +6506,29 @@ pub async fn submodules(
             _ => {}
         }
     }
+    let unmerged = git(
+        vec!["ls-files".into(), "-u".into(), "-z".into()],
+        repo,
+        token,
+    )
+    .await
+    .map(|output| output.stdout_text())
+    .unwrap_or_default();
+    for entry in unmerged.split('\0').filter(|entry| !entry.is_empty()) {
+        let Some((metadata, path)) = entry.split_once('\t') else {
+            continue;
+        };
+        if !metadata.starts_with("160000 ") || path.is_empty() {
+            continue;
+        }
+        records.entry(path.to_string()).or_insert_with(|| Record {
+            path: Some(path.to_string()),
+            url: Some(String::new()),
+            branch: None,
+        });
+    }
     let mut entries = Vec::new();
-    for record in records.into_values() {
+    for (name, record) in records {
         let (Some(path), Some(url)) = (record.path, record.url) else {
             continue;
         };
@@ -5817,25 +6543,219 @@ pub async fn submodules(
             repo,
             token,
         )
-        .await?
-        .stdout_text();
+        .await
+        .map(|output| output.stdout_text())
+        .unwrap_or_default();
         let marker = status.chars().next().unwrap_or('-');
         let revision = status
             .get(1..)
             .and_then(|value| value.split_whitespace().next())
             .filter(|value| value.len() >= 7)
             .map(str::to_string);
+        let initialized = marker != '-';
+        let current_branch = if initialized {
+            git(
+                vec![
+                    "-C".into(),
+                    path.clone(),
+                    "symbolic-ref".into(),
+                    "--quiet".into(),
+                    "--short".into(),
+                    "HEAD".into(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .ok()
+            .map(|output| output.stdout_text().trim().to_string())
+            .filter(|value| !value.is_empty())
+        } else {
+            None
+        };
+        let recorded_commit = git(
+            vec!["rev-parse".into(), format!("HEAD:{path}")],
+            repo,
+            token,
+        )
+        .await
+        .ok()
+        .map(|output| output.stdout_text().trim().to_string())
+        .filter(|value| !value.is_empty());
+        let (index_commit, conflict_stages, type_change, companion_path) =
+            submodule_index_state(repo, &path, token).await;
+        let unpushed_count = if initialized && current_branch.is_some() {
+            git(
+                vec![
+                    "-C".into(),
+                    path.clone(),
+                    "rev-list".into(),
+                    "--count".into(),
+                    "@{upstream}..HEAD".into(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .ok()
+            .and_then(|output| output.stdout_text().trim().parse().ok())
+            .unwrap_or(0)
+        } else {
+            0
+        };
+        let working_dirty = initialized
+            && git(
+                vec![
+                    "-C".into(),
+                    path.clone(),
+                    "status".into(),
+                    "--porcelain".into(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .ok()
+            .is_some_and(|output| !output.stdout_text().trim().is_empty());
+        let sync_status = if marker == 'U' || conflict_stages.is_some() || type_change {
+            SubmoduleSyncStatus::Conflict
+        } else if !initialized {
+            SubmoduleSyncStatus::Uninitialized
+        } else if marker == '+' {
+            SubmoduleSyncStatus::OutOfSync
+        } else {
+            SubmoduleSyncStatus::Synced
+        };
+        let diff_summary = submodule_diff_summary(repo, &path, token).await;
         entries.push(SubmoduleEntry {
+            name,
             initialized: marker != '-',
-            dirty: matches!(marker, '+' | 'U'),
+            dirty: matches!(marker, '+' | 'U') || working_dirty,
             path,
             url: redact_url(&url),
             revision,
             branch: record.branch,
+            sync_status,
+            recorded_commit,
+            index_commit,
+            conflict_stages,
+            detached: current_branch.is_none(),
+            current_branch,
+            unpushed_count,
+            type_change,
+            companion_path,
+            diff_summary,
         });
     }
     entries.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(entries)
+}
+
+async fn submodule_index_state(
+    repo: &RepositoryMeta,
+    path: &str,
+    token: &CancellationToken,
+) -> (
+    Option<String>,
+    Option<SubmoduleConflictStages>,
+    bool,
+    Option<String>,
+) {
+    let pathspec = format!(":(literal){path}");
+    let raw = git(
+        vec![
+            "ls-files".into(),
+            "--stage".into(),
+            "-z".into(),
+            "--".into(),
+            pathspec,
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|output| output.stdout_text())
+    .unwrap_or_default();
+    let mut index_commit = None;
+    let mut stages = SubmoduleConflictStages::default();
+    let mut has_conflict = false;
+    let mut type_change = false;
+    for entry in raw.split('\0').filter(|entry| !entry.is_empty()) {
+        let Some((metadata, entry_path)) = entry.split_once('\t') else {
+            continue;
+        };
+        let fields = metadata.split_whitespace().collect::<Vec<_>>();
+        if fields.len() < 3 || entry_path != path {
+            continue;
+        }
+        let mode = fields[0];
+        let hash = fields[1].to_string();
+        match fields[2] {
+            "0" if mode == "160000" => index_commit = Some(hash),
+            "1" => {
+                has_conflict = true;
+                type_change |= mode != "160000";
+                stages.base = Some(hash);
+            }
+            "2" => {
+                has_conflict = true;
+                type_change |= mode != "160000";
+                stages.ours = Some(hash);
+            }
+            "3" => {
+                has_conflict = true;
+                type_change |= mode != "160000";
+                stages.theirs = Some(hash);
+            }
+            _ => {}
+        }
+    }
+    let unmerged = git(
+        vec!["ls-files".into(), "-u".into(), "-z".into()],
+        repo,
+        token,
+    )
+    .await
+    .map(|output| output.stdout_text())
+    .unwrap_or_default();
+    let companion_path = unmerged.split('\0').find_map(|entry| {
+        let (_, entry_path) = entry.split_once('\t')?;
+        entry_path
+            .starts_with(&format!("{path}~"))
+            .then(|| entry_path.to_string())
+    });
+    if companion_path.is_some() {
+        type_change = true;
+        has_conflict = true;
+    }
+    (
+        index_commit,
+        has_conflict.then_some(stages),
+        type_change,
+        companion_path,
+    )
+}
+
+async fn submodule_diff_summary(
+    repo: &RepositoryMeta,
+    path: &str,
+    token: &CancellationToken,
+) -> Option<String> {
+    git(
+        vec![
+            "diff".into(),
+            "--submodule=log".into(),
+            "HEAD".into(),
+            "--".into(),
+            format!(":(literal){path}"),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .ok()
+    .map(|output| output.stdout_text().trim().to_string())
+    .filter(|value| !value.is_empty())
 }
 
 pub async fn submodule_operation(
@@ -5844,13 +6764,47 @@ pub async fn submodule_operation(
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     ensure_git(repo)?;
-    let (path, mut args, network) = match operation {
+    let mut permit_file_protocol = true;
+    let (path, mut args, network, requires_existing) = match operation {
+        SubmoduleOperation::Add {
+            url,
+            path,
+            branch,
+            allow_file_protocol,
+        } => {
+            validate_remote_url(&url)?;
+            if !allow_file_protocol
+                && (url.starts_with("file://")
+                    || url.starts_with('/')
+                    || url.starts_with("./")
+                    || url.starts_with("../"))
+            {
+                return Err(DesktopError::new(
+                    "SUBMODULE_FILE_PROTOCOL_BLOCKED",
+                    "Local-path submodules require an explicit file-protocol confirmation",
+                    true,
+                ));
+            }
+            let path = relative_path(Path::new(&repo.root_path), &path, false)?;
+            permit_file_protocol = allow_file_protocol;
+            let mut args = Vec::new();
+            if allow_file_protocol {
+                args.extend(["-c".into(), "protocol.file.allow=always".into()]);
+            }
+            args.extend(["submodule".into(), "add".into()]);
+            if let Some(branch) = branch.filter(|value| !value.trim().is_empty()) {
+                validate_ref(&branch)?;
+                args.extend(["--branch".into(), branch]);
+            }
+            args.extend(["--".into(), url, path.clone()]);
+            (path, args, true, false)
+        }
         SubmoduleOperation::Init { path, recursive } => {
             let mut args = vec!["submodule".into(), "update".into(), "--init".into()];
             if recursive {
                 args.push("--recursive".into());
             }
-            (path, args, true)
+            (path, args, true, true)
         }
         SubmoduleOperation::Update {
             path,
@@ -5868,37 +6822,212 @@ pub async fn submodule_operation(
             if remote {
                 args.push("--remote".into());
             }
-            (path, args, true)
+            (path, args, true, true)
         }
         SubmoduleOperation::Deinit { path, force } => {
             let mut args = vec!["submodule".into(), "deinit".into()];
             if force {
                 args.push("--force".into());
             }
-            (path, args, false)
+            (path, args, false, true)
         }
         SubmoduleOperation::Sync { path, recursive } => {
             let mut args = vec!["submodule".into(), "sync".into()];
             if recursive {
                 args.push("--recursive".into());
             }
-            (path, args, false)
+            (path, args, false, true)
         }
-    };
-    let entry = submodules(repo, token)
-        .await?
-        .into_iter()
-        .find(|entry| entry.path == path)
-        .ok_or_else(|| {
-            DesktopError::new(
-                "SUBMODULE_NOT_FOUND",
-                "The path is not declared in .gitmodules",
+        SubmoduleOperation::UpdateAll {
+            init,
+            recursive,
+            remote,
+        } => {
+            let mut args = vec!["submodule".into(), "update".into()];
+            if init {
+                args.push("--init".into());
+            }
+            if recursive {
+                args.push("--recursive".into());
+            }
+            if remote {
+                args.push("--remote".into());
+            }
+            (String::new(), args, true, false)
+        }
+        SubmoduleOperation::Remove { path, force } => {
+            let path = relative_path(Path::new(&repo.root_path), &path, false)?;
+            if !force {
+                let dirty_worktree = git(
+                    vec![
+                        "-C".into(),
+                        path.clone(),
+                        "status".into(),
+                        "--porcelain".into(),
+                    ],
+                    repo,
+                    token,
+                )
+                .await
+                .ok()
+                .is_some_and(|output| !output.stdout_text().trim().is_empty());
+                let local_only_commits = git(
+                    vec![
+                        "-C".into(),
+                        path.clone(),
+                        "rev-list".into(),
+                        "--all".into(),
+                        "--not".into(),
+                        "--remotes".into(),
+                        "--max-count=1".into(),
+                    ],
+                    repo,
+                    token,
+                )
+                .await
+                .ok()
+                .is_some_and(|output| !output.stdout_text().trim().is_empty());
+                if dirty_worktree || local_only_commits {
+                    return Err(DesktopError::new(
+                        "SUBMODULE_DIRTY",
+                        "The submodule has local changes or commits not reachable from a remote; confirm force removal before continuing",
+                        true,
+                    ));
+                }
+            }
+            let mut args = vec!["rm".into()];
+            if force {
+                args.push("--force".into());
+            }
+            args.extend(["--".into(), path.clone()]);
+            (path, args, false, true)
+        }
+        SubmoduleOperation::ResolveConflict { path, choice } => {
+            let path = relative_path(Path::new(&repo.root_path), &path, false)?;
+            if !matches!(choice, ConflictChoice::Working) {
+                let (_, stages, _, _) = submodule_index_state(repo, &path, token).await;
+                let selected = stages.and_then(|stages| match choice {
+                    ConflictChoice::Mine => stages.ours,
+                    ConflictChoice::Theirs => stages.theirs,
+                    ConflictChoice::Working => None,
+                });
+                if let Some(hash) = selected {
+                    git(
+                        vec![
+                            "update-index".into(),
+                            "--add".into(),
+                            "--cacheinfo".into(),
+                            format!("160000,{hash},{path}"),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?;
+                } else {
+                    git(
+                        vec![
+                            "rm".into(),
+                            "--cached".into(),
+                            "--ignore-unmatch".into(),
+                            "--".into(),
+                            path,
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?;
+                }
+                return Ok(());
+            }
+            (
+                path.clone(),
+                vec!["add".into(), "--".into(), path],
+                false,
                 true,
             )
-        })?;
-    args.extend(["--".into(), entry.path]);
+        }
+        SubmoduleOperation::Push { path } => {
+            let path = relative_path(Path::new(&repo.root_path), &path, false)?;
+            if git(
+                vec![
+                    "-C".into(),
+                    path.clone(),
+                    "symbolic-ref".into(),
+                    "--quiet".into(),
+                    "HEAD".into(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .is_err()
+            {
+                return Err(DesktopError::new(
+                    "SUBMODULE_DETACHED_HEAD",
+                    "Checkout a branch in the submodule before pushing",
+                    true,
+                ));
+            }
+            (
+                path.clone(),
+                vec!["-C".into(), path, "push".into()],
+                true,
+                true,
+            )
+        }
+        SubmoduleOperation::Pull { path, rebase } => {
+            let path = relative_path(Path::new(&repo.root_path), &path, false)?;
+            let attached = git(
+                vec![
+                    "-C".into(),
+                    path.clone(),
+                    "symbolic-ref".into(),
+                    "--quiet".into(),
+                    "HEAD".into(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .is_ok();
+            let mut args = vec![
+                "-C".into(),
+                path.clone(),
+                if attached {
+                    "pull".into()
+                } else {
+                    "fetch".into()
+                },
+            ];
+            if attached && rebase {
+                args.push("--rebase".into());
+            }
+            (path, args, true, true)
+        }
+    };
+    if requires_existing {
+        let entry = submodules(repo, token)
+            .await?
+            .into_iter()
+            .find(|entry| entry.path == path)
+            .ok_or_else(|| {
+                DesktopError::new(
+                    "SUBMODULE_NOT_FOUND",
+                    "The path is not declared in .gitmodules",
+                    true,
+                )
+            })?;
+        if !matches!(
+            args.first().map(String::as_str),
+            Some("rm" | "add" | "checkout" | "-C")
+        ) {
+            args.extend(["--".into(), entry.path]);
+        }
+    }
     if network {
-        args.splice(0..0, ["-c".into(), "protocol.file.allow=always".into()]);
+        if permit_file_protocol && args.first().is_some_and(|value| value == "submodule") {
+            args.splice(0..0, ["-c".into(), "protocol.file.allow=always".into()]);
+        }
         git_network(args, repo, token).await?;
     } else {
         git(args, repo, token).await?;

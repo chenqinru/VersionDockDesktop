@@ -12,7 +12,7 @@ const bootstrap = (stash: boolean, shelf = false, subtree = false, worktree = fa
   applicationSessionId: 'test-session',
   state: { theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
   tools: { git: true, svn: true, svnadmin: true },
-  capabilities: { ai: false, stash, shelf, changelist: false, worktree, subtree, compare: false, remoteManagement: false },
+  capabilities: { ai: false, stash, shelf, changelist: false, worktree, subtree, submodule: true, compare: false, remoteManagement: false },
 });
 const bridge = new MockBridge(() => []);
 const renderPanel = () => render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
@@ -331,7 +331,7 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: bootstrap(true, true, true, true), snapshot: gitSnapshot });
     const { container } = renderPanel();
     const tabs = Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('title'));
-    expect(tabs).toEqual(['Changes', 'Shelf', 'Stash', 'Worktrees', 'Subtree', 'Push']);
+    expect(tabs).toEqual(['Changes', 'Shelf', 'Stash', 'Worktrees', 'Subtree', 'Submodules', 'Sync']);
   });
 
   it('shows a branch-to-working-tree diff across the whole commit panel instead of the Worktrees tab', async () => {
@@ -385,11 +385,11 @@ describe('CommitPanel capabilities and file view', () => {
     expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('changes');
   });
 
-  it('keeps the real push tab visible while AI stays hidden', async () => {
+  it('migrates the push tab to sync while AI stays hidden', async () => {
     const pushBridge = new MockBridge((command) => command.type === 'unpushedCommits' ? [{ hash: 'abc', shortHash: 'abc', message: 'local commit', author: 'Test', date: '2026-08-13T00:00:00Z', filesChanged: 1, additions: 2, deletions: 0 }] : []);
     useAppStore.setState({ bridge: pushBridge, bootstrap: { ...bootstrap(false), state: { ...bootstrap(false).state, activeTab: 'push' } }, snapshot: { ...gitSnapshot, repositories: [{ ...gitRepo, ahead: 1 }] }, selectedRepoId: 'repo', unpushedCommits: {} });
     render(<BridgeContext.Provider value={pushBridge}><CommitPanel /></BridgeContext.Provider>);
-    expect(screen.getByTitle('Push')).toBeInTheDocument();
+    expect(screen.getByTitle('Sync')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('local commit')).toBeInTheDocument());
     expect(screen.queryByText('AI Commit Message')).not.toBeInTheDocument();
     expect(screen.queryByText('AI Code Review')).not.toBeInTheDocument();
@@ -429,11 +429,11 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByText('View Git Log')).toBeInTheDocument();
   });
 
-  it('matches VersionDock by keeping a gitlink menu minimal and adding no Submodule tab', () => {
+  it('keeps the gitlink menu focused and exposes the dedicated Submodule tab', () => {
     const submoduleRepo = { ...gitRepo, files: [{ path: 'vendor/module', status: 'submodule', staged: false, unstaged: true, conflicted: false, submodule: true }] };
-    useAppStore.setState({ bridge, bootstrap: bootstrap(true, true, true, true), snapshot: { ...gitSnapshot, repositories: [submoduleRepo] }, selectedRepoId: 'repo', submodules: { repo: [{ path: 'vendor/module', url: 'https://example.test/module.git', initialized: true, revision: 'abcdef1', branch: 'main', dirty: true }] } });
+    useAppStore.setState({ bridge, bootstrap: bootstrap(true, true, true, true), snapshot: { ...gitSnapshot, repositories: [submoduleRepo] }, selectedRepoId: 'repo', submodules: { repo: [{ name: 'module', path: 'vendor/module', url: 'https://example.test/module.git', initialized: true, revision: 'abcdef1', branch: 'main', dirty: true, syncStatus: 'outOfSync', recordedCommit: '1234567', currentBranch: 'main', detached: false, unpushedCount: 0 }] } });
     const { container } = render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
-    expect(Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('title'))).not.toContain('Submodules');
+    expect(Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('title'))).toContain('Submodules');
     fireEvent.contextMenu(screen.getByTitle('vendor/module').closest('.file-row')!);
     expect(screen.getByText('Stage')).toBeInTheDocument();
     expect(screen.getByText('Refresh')).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Codicon } from './Codicon';
 import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu } from './ContextMenu';
@@ -8,6 +8,8 @@ import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { confirmDialog } from './dialogService';
 import type { RepositoryStatus, ShelfFileEntry, StashEntry } from '../bindings/generated';
+import { useSpeedSearch } from '../hooks/useSpeedSearch';
+import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 
 export type StashItem = StashEntry;
 
@@ -559,6 +561,7 @@ export function StashPanel({
   const loadStashes = useAppStore((state) => state.loadStashes);
   const stashOperation = useAppStore((state) => state.stashOperation);
   const { t } = useI18n();
+  const speedSearch = useSpeedSearch('stash');
 
   useEffect(() => {
     for (const repo of repos) {
@@ -584,9 +587,11 @@ export function StashPanel({
 
   return (
     <div style={css.root} className="stash-panel">
+      <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
       <div style={css.list} className="stash-list">
         {repos.map((repo) => {
-          const list = (stashes[repo.meta.id] ?? []) as StashItem[];
+          const needle = speedSearch.query.trim().toLocaleLowerCase();
+          const list = ((stashes[repo.meta.id] ?? []) as StashItem[]).filter((entry) => !needle || `${repo.meta.name} ${entry.message} ${entry.fullMessage} ${entry.branch} ${entry.files.map((file) => file.path).join(' ')}`.toLocaleLowerCase().includes(needle));
           const projectColor = repo.meta.color || '#4ec9b0';
           const worktreeBranch = repo.meta.isWorktree ? repo.branch : undefined;
 

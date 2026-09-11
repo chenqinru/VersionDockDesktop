@@ -1,6 +1,6 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { RepositoryStatus, UnpushedCommit, BranchInfo, CommitDetail, CommitFile } from '../bindings/generated';
+import type { RepositoryStatus, UnpushedCommit, BranchInfo, CommitDetail, CommitFile, RevisionChanges } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { capabilityAvailable, capabilityReason, isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
@@ -20,7 +20,7 @@ export interface PushCommitFile {
 }
 
 type PushViewMode = 'commits' | 'changes';
-type PushFileViewMode = 'tree' | 'flat';
+export type PushFileViewMode = 'tree' | 'flat';
 
 const PUSH_COLOR = 'var(--versiondock-success, #81c784)';
 const PULL_COLOR = 'var(--versiondock-info, #64b5f6)';
@@ -229,23 +229,6 @@ function collectDirectoryKeys(files: PushCommitFile[]): string[] {
   return keys;
 }
 
-function mergeUniqueFiles(fileGroups: PushCommitFile[][]): PushCommitFile[] {
-  const merged = new Map<string, PushCommitFile>();
-  for (const files of fileGroups) {
-    for (const file of files) {
-      if (!merged.has(file.path)) merged.set(file.path, file);
-    }
-  }
-  return [...merged.values()];
-}
-
-function findSourceCommitHash(commits: UnpushedCommit[], filesByHash: Record<string, PushCommitFile[]>, file: PushCommitFile): string | null {
-  for (const commit of commits) {
-    if ((filesByHash[commit.hash] ?? []).some((item) => item.path === file.path)) return commit.hash;
-  }
-  return null;
-}
-
 function MenuItem({ icon, label, danger, onClick }: { icon: string; label: string; danger?: boolean; onClick: () => void }) {
   return (
     <div
@@ -428,16 +411,21 @@ function PushFileTreeNode({ node, depth, collapsed, onToggle, onOpenFile }: {
   );
 }
 
-function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, description }: {
+export function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, description, query }: {
   files: PushCommitFile[];
   loading: boolean;
   viewMode: PushFileViewMode;
   onViewModeChange: (mode: PushFileViewMode) => void;
   onOpenFile: (file: PushCommitFile) => void;
   description?: string;
+  query?: string;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const directoryKeys = useMemo(() => collectDirectoryKeys(files), [files]);
+  const visibleFiles = useMemo(() => {
+    const needle = query?.trim().toLocaleLowerCase();
+    return needle ? files.filter((file) => file.path.toLocaleLowerCase().includes(needle)) : files;
+  }, [files, query]);
+  const directoryKeys = useMemo(() => collectDirectoryKeys(visibleFiles), [visibleFiles]);
   const canToggleFolders = viewMode === 'tree' && directoryKeys.length > 0;
   const { t } = useI18n();
 
@@ -450,7 +438,7 @@ function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, 
     <div style={styles.fileListRoot}>
       {description && <div style={styles.fileListDescription}>{description}</div>}
       <div style={styles.filesHeader}>
-        <span style={styles.filesTitle}>{loading ? '' : formatFileCount(files.length, t)}</span>
+        <span style={styles.filesTitle}>{loading ? '' : formatFileCount(visibleFiles.length, t)}</span>
         <div style={styles.filesHeaderActions}>
           <div style={styles.expandBtns}>
             <button
@@ -501,11 +489,11 @@ function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, 
       </div>
       {loading ? (
         <div style={styles.loadingRow}>{t('Loading files...')}</div>
-      ) : files.length === 0 ? (
+      ) : visibleFiles.length === 0 ? (
         <div style={styles.loadingRow}>{t('No changed files')}</div>
       ) : viewMode === 'tree' ? (
         <div style={styles.treeRoot}>
-          {buildFileTree(files).map((node) => (
+          {buildFileTree(visibleFiles).map((node) => (
             <PushFileTreeNode
               key={node.kind === 'dir' ? node.path : node.file.path}
               node={node}
@@ -518,7 +506,7 @@ function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, 
         </div>
       ) : (
         <div style={styles.treeRoot}>
-          {files.map((file) => (
+          {visibleFiles.map((file) => (
             <PushFileRow key={file.path} file={file} depth={0} onOpenFile={onOpenFile} />
           ))}
         </div>
@@ -527,14 +515,13 @@ function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, 
   );
 }
 
-function AggregatedChangesView({ commits, filesByHash, files, loading, fileViewMode, onFileViewModeChange, onOpenCommitFile }: {
-  commits: UnpushedCommit[];
-  filesByHash: Record<string, PushCommitFile[]>;
+function AggregatedChangesView({ files, loading, fileViewMode, onFileViewModeChange, onOpenFile, query }: {
   files: PushCommitFile[];
   loading: boolean;
   fileViewMode: PushFileViewMode;
   onFileViewModeChange: (mode: PushFileViewMode) => void;
-  onOpenCommitFile: (hash: string, file: PushCommitFile) => void;
+  onOpenFile: (file: PushCommitFile) => void;
+  query?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -544,10 +531,8 @@ function AggregatedChangesView({ commits, filesByHash, files, loading, fileViewM
       viewMode={fileViewMode}
       description={t('Aggregated changes from all commits to push')}
       onViewModeChange={onFileViewModeChange}
-      onOpenFile={(file) => {
-        const hash = findSourceCommitHash(commits, filesByHash, file);
-        if (hash) onOpenCommitFile(hash, file);
-      }}
+      onOpenFile={onOpenFile}
+      query={query}
     />
   );
 }
@@ -694,7 +679,10 @@ function RepoSection({
   onOpenInLog,
   onUndoCommit,
   onRequestCommitFiles,
+  onRequestAggregatedChanges,
   onOpenCommitFile,
+  onOpenAggregatedFile,
+  query,
   singleRepo,
 }: {
   repo: RepositoryStatus;
@@ -706,7 +694,10 @@ function RepoSection({
   onOpenInLog: (hash: string, repoId: string) => void;
   onUndoCommit: (repoId: string) => void;
   onRequestCommitFiles: (repoId: string, hash: string) => Promise<PushCommitFile[]>;
+  onRequestAggregatedChanges: (repoId: string, oldestRevision?: string) => Promise<RevisionChanges | undefined>;
   onOpenCommitFile: (repoId: string, hash: string, file: PushCommitFile) => void;
+  onOpenAggregatedFile: (repoId: string, changes: RevisionChanges, file: PushCommitFile) => void;
+  query?: string;
   singleRepo?: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -714,6 +705,8 @@ function RepoSection({
   const [fileViewMode, setFileViewMode] = useState<PushFileViewMode>('tree');
   const [expandedCommitHash, setExpandedCommitHash] = useState<string | null>(null);
   const [filesByHash, setFilesByHash] = useState<Record<string, PushCommitFile[]>>({});
+  const [aggregatedChanges, setAggregatedChanges] = useState<RevisionChanges>();
+  const [aggregatedError, setAggregatedError] = useState<{ key: string; message: string }>();
   const [multiSelectHashes, setMultiSelectHashes] = useState<Set<string>>(new Set());
   const [ctxMenu, setCtxMenu] = useState<CommitCtxMenuState | null>(null);
   const [hovered, setHovered] = useState(false);
@@ -729,6 +722,9 @@ function RepoSection({
   const behind = branch?.behind ?? repo.behind;
   const hasUpstream = Boolean(branch?.upstream);
   const commitCount = hasUpstream ? ahead : commits.length;
+  const needle = query?.trim().toLocaleLowerCase() ?? '';
+  const repoMatches = `${repoName} ${branchLabel}`.toLocaleLowerCase().includes(needle);
+  const visibleCommits = !needle || repoMatches ? commits : commits.filter((commit) => `${commit.hash} ${commit.message} ${commit.author}`.toLocaleLowerCase().includes(needle));
 
   const selectedCommitFiles = expandedCommitHash ? (filesByHash[expandedCommitHash] ?? []) : [];
   const canTogglePushView = commits.length > 0;
@@ -756,27 +752,17 @@ function RepoSection({
   useEffect(() => {
     let active = true;
     if (pushViewMode !== 'changes' || commits.length === 0) return;
-
-    const missing = commits.filter((c) => !filesByHash[c.hash]);
-    if (missing.length === 0) return;
-
-    void Promise.all(missing.map((c) => onRequestCommitFiles(repo.meta.id, c.hash))).then((groups) => {
+    const key = `${commits.at(-1)?.hash ?? ''}\0${commits[0]?.hash ?? ''}`;
+    void onRequestAggregatedChanges(repo.meta.id, commits.at(-1)?.hash).then((changes) => {
       if (active) {
-        const fetched = Object.fromEntries(missing.map((c, i) => [c.hash, groups[i] ?? []]));
-        setFilesByHash((prev) => ({ ...prev, ...fetched }));
+        setAggregatedChanges(changes);
+        setAggregatedError(undefined);
       }
+    }).catch((error: unknown) => {
+      if (active) setAggregatedError({ key, message: String(error) });
     });
-
-    return () => {
-      active = false;
-    };
-  }, [commits, filesByHash, onRequestCommitFiles, pushViewMode, repo.meta.id]);
-
-  const aggregatedFiles = useMemo(() => {
-    if (pushViewMode !== 'changes') return [];
-    const cachedGroups = commits.map((c) => filesByHash[c.hash]).filter((f): f is PushCommitFile[] => Array.isArray(f));
-    return mergeUniqueFiles(cachedGroups);
-  }, [commits, filesByHash, pushViewMode]);
+    return () => { active = false; };
+  }, [commits, onRequestAggregatedChanges, pushViewMode, repo.meta.id]);
 
   const toggleCommitSelection = (hash: string) => {
     setMultiSelectHashes((prev) => {
@@ -906,23 +892,22 @@ function RepoSection({
             </div>
           ) : commits.length > 0 ? (
             pushViewMode === 'changes' ? (
-              <AggregatedChangesView
-                commits={commits}
-                filesByHash={filesByHash}
-                files={aggregatedFiles}
-                loading={false}
+              aggregatedError?.key === `${commits.at(-1)?.hash ?? ''}\0${commits[0]?.hash ?? ''}` ? <div style={styles.loadingRow}><Codicon name="warning" />{aggregatedError.message}</div> : <AggregatedChangesView
+                files={aggregatedChanges?.files ?? []}
+                loading={!aggregatedChanges || aggregatedChanges.toRevision !== commits[0]?.hash}
                 fileViewMode={fileViewMode}
                 onFileViewModeChange={setFileViewMode}
-                onOpenCommitFile={(hash, file) => onOpenCommitFile(repo.meta.id, hash, file)}
+                onOpenFile={(file) => aggregatedChanges && onOpenAggregatedFile(repo.meta.id, aggregatedChanges, file)}
+                query={query}
               />
             ) : (
               <div style={styles.commitList}>
-                {commits.map((commit, index) => (
+                {visibleCommits.map((commit) => (
                   <CommitRow
                     key={commit.hash}
                     commit={commit}
                     repoId={repo.meta.id}
-                    isHead={index === 0}
+                    isHead={commit.hash === commits[0]?.hash}
                     expanded={commit.hash === expandedCommitHash}
                     selected={multiSelectHashes.has(commit.hash)}
                     files={commit.hash === expandedCommitHash ? selectedCommitFiles : []}
@@ -933,13 +918,14 @@ function RepoSection({
                       setExpandedCommitHash((current) => (current === commit.hash ? null : commit.hash));
                     }}
                     onSelect={() => toggleCommitSelection(commit.hash)}
-                    onContextMenu={(event) => handleCommitContextMenu(event, commit, index === 0)}
+                    onContextMenu={(event) => handleCommitContextMenu(event, commit, commit.hash === commits[0]?.hash)}
                     onFileViewModeChange={setFileViewMode}
                     onOpenFile={(file) => onOpenCommitFile(repo.meta.id, commit.hash, file)}
                     onOpenInLog={onOpenInLog}
                     onUndoCommit={onUndoCommit}
                   />
                 ))}
+                {visibleCommits.length === 0 && <div style={styles.loadingRow}>{t('No commits found')}</div>}
               </div>
             )
           ) : !hasUpstream ? (
@@ -976,7 +962,12 @@ function RepoSection({
   );
 }
 
-export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
+export function PushPanel({ repos, selectedRepoIds, onToggleRepo, query }: {
+  repos: RepositoryStatus[];
+  selectedRepoIds?: Set<string>;
+  onToggleRepo?: (repoId: string) => void;
+  query?: string;
+}) {
   const unpushedMap = useAppStore((state) => state.unpushedCommits);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const loadUnpushedCommits = useAppStore((state) => state.loadUnpushedCommits);
@@ -990,7 +981,8 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
     domain: 'sync',
   });
   const { t } = useI18n();
-  const [checked, setChecked] = useState<Set<string>>(() => new Set<string>());
+  const [internalChecked, setInternalChecked] = useState<Set<string>>(() => new Set<string>());
+  const checked = selectedRepoIds ?? internalChecked;
   const [pushButtonHovered, setPushButtonHovered] = useState(false);
   const [pushButtonPressed, setPushButtonPressed] = useState(false);
 
@@ -1017,7 +1009,11 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
   };
 
   const toggleRepo = (repoId: string) => {
-    setChecked((prev) => {
+    if (onToggleRepo) {
+      onToggleRepo(repoId);
+      return;
+    }
+    setInternalChecked((prev) => {
       const next = new Set(prev);
       if (next.has(repoId)) next.delete(repoId);
       else next.add(repoId);
@@ -1088,12 +1084,40 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
     }
   };
 
+  const requestAggregatedChanges = useCallback(async (repoId: string, oldestRevision?: string): Promise<RevisionChanges | undefined> => {
+    const workspaceId = useAppStore.getState().snapshot?.workspace.id;
+    const bridge = useAppStore.getState().bridge;
+    if (!bridge || !workspaceId) return undefined;
+    return bridge.request<RevisionChanges>({
+      type: 'unpushedChanges',
+      payload: { workspace_id: workspaceId, repo_id: repoId, oldest_revision: oldestRevision ?? null },
+    });
+  }, []);
+
   const handleOpenCommitFile = (repoId: string, hash: string, file: PushCommitFile) => {
     void openDiff(repoId, file.path, false, hash);
   };
 
+  const handleOpenAggregatedFile = useCallback((repoId: string, changes: RevisionChanges, file: PushCommitFile) => {
+    void openDiff(repoId, file.path, false, undefined, {
+      fromRevision: changes.fromRevision,
+      toRevision: changes.toRevision,
+    });
+  }, [openDiff]);
+
   const handlePush = async (targets: RepositoryStatus[], force = false) => {
     if (targets.length === 0 || targets.some((repo) => isRepoBusy(repo.meta.id))) return;
+
+    await Promise.all(targets.map((repo) => useAppStore.getState().loadSubmodules(repo.meta.id)));
+    const unsafeSubmodules = targets.flatMap((repo) => (useAppStore.getState().submodules[repo.meta.id] ?? [])
+      .filter((entry) => entry.dirty || entry.unpushedCount > 0)
+      .map((entry) => `${repo.meta.name}/${entry.path}${entry.unpushedCount > 0 ? ` (${t('{0} unpushed', entry.unpushedCount)})` : ` (${t('Dirty')})`}`));
+    if (unsafeSubmodules.length && !await confirmDialog({
+      title: t('Submodule changes are not published'),
+      message: `${unsafeSubmodules.join('\n')}\n\n${t('Push the parent repository anyway? Other users may not be able to fetch the referenced submodule commits.')}`,
+      confirmLabel: t('Push Anyway'),
+      danger: true,
+    })) return;
 
     for (const repo of targets) {
       const branch = branchesByRepo[repo.meta.id]?.find((item) => item.current);
@@ -1201,7 +1225,8 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
 
   if (isSingleRepo) {
     const solo = repos[0];
-    const canPush = canPushRepo(solo);
+    const soloSelected = selectedRepoIds ? checked.has(solo.meta.id) : true;
+    const canPush = soloSelected && canPushRepo(solo);
     const soloBusy = isRepoBusy(solo.meta.id);
     const pushReason = capabilityReason(solo.capabilities, 'syncPush');
     const branch = branchesByRepo[solo.meta.id]?.find((item) => item.current);
@@ -1219,7 +1244,10 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
             onOpenInLog={handleOpenInLog}
             onUndoCommit={handleUndoCommit}
             onRequestCommitFiles={requestCommitFiles}
+            onRequestAggregatedChanges={requestAggregatedChanges}
             onOpenCommitFile={handleOpenCommitFile}
+            onOpenAggregatedFile={handleOpenAggregatedFile}
+            query={query}
             singleRepo
           />
         </div>
@@ -1256,7 +1284,10 @@ export function PushPanel({ repos }: { repos: RepositoryStatus[] }) {
             onOpenInLog={handleOpenInLog}
             onUndoCommit={handleUndoCommit}
             onRequestCommitFiles={requestCommitFiles}
+            onRequestAggregatedChanges={requestAggregatedChanges}
             onOpenCommitFile={handleOpenCommitFile}
+            onOpenAggregatedFile={handleOpenAggregatedFile}
+            query={query}
           />
         ))}
       </div>

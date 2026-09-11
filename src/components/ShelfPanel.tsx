@@ -7,6 +7,8 @@ import { branchColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { confirmDialog } from './dialogService';
+import { useSpeedSearch } from '../hooks/useSpeedSearch';
+import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import type { RepositoryStatus, ShelfEntry, ShelfFileEntry } from '../bindings/generated';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -646,6 +648,7 @@ export function ShelfPanel({
   const loadShelves = useAppStore((state) => state.loadShelves);
   const shelfOperation = useAppStore((state) => state.shelfOperation);
   const { t } = useI18n();
+  const speedSearch = useSpeedSearch('shelf');
 
   useEffect(() => {
     for (const repo of repos) {
@@ -679,9 +682,11 @@ export function ShelfPanel({
 
   return (
     <div style={css.root}>
+      <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
       <div style={css.list}>
         {repos.map((repo) => {
-          const repoShelves = shelves[repo.meta.id] ?? [];
+          const needle = speedSearch.query.trim().toLocaleLowerCase();
+          const repoShelves = (shelves[repo.meta.id] ?? []).filter((entry) => !needle || `${repo.meta.name} ${entry.name} ${entry.branch ?? ''} ${entry.files.map((file) => file.path).join(' ')}`.toLocaleLowerCase().includes(needle));
           const projectColor = repo.meta.color || '#4aaa9a';
           const worktreeBranch = repo.meta.isWorktree ? repo.branch : undefined;
           return (

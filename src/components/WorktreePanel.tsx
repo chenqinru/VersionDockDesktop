@@ -4,6 +4,8 @@ import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { choiceDialog, promptDialog } from './dialogService';
+import { useSpeedSearch } from '../hooks/useSpeedSearch';
+import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import { branchColor, headColor, readableAccentColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, WorktreeEntry as BoundWorktreeEntry } from '../bindings/generated';
@@ -356,6 +358,7 @@ export function WorktreePanel({
   onRequestCreate,
 }: WorktreePanelProps) {
   const { t } = useI18n();
+  const speedSearch = useSpeedSearch('worktrees');
   const storeWorktrees = useAppStore((state) => state.worktrees);
   const loadWorktrees = useAppStore((state) => state.loadWorktrees);
   const worktreeOperation = useAppStore((state) => state.worktreeOperation);
@@ -420,7 +423,7 @@ export function WorktreePanel({
   const defaultOpen = (repoId: string, worktreePath: string) => { void openWorktree(repoId, worktreePath, false); };
   const defaultOpenInOS = (repoId: string, worktreePath: string) => { void openWorktree(repoId, worktreePath, true); };
 
-  const resolvedRepos: RepoWorktrees[] = customRepos ?? repos.map((r) => {
+  const resolvedRepos: RepoWorktrees[] = (customRepos ?? repos.map((r) => {
     const list = storeWorktrees[r.meta.id] ?? [];
     return {
       repoId: r.meta.id,
@@ -429,6 +432,11 @@ export function WorktreePanel({
       isLinkedWorktree: Boolean(r.meta.isWorktree),
       worktrees: list.map(normalizeEntry),
     };
+  })).flatMap((repo) => {
+    const needle = speedSearch.query.trim().toLocaleLowerCase();
+    if (!needle || repo.repoName.toLocaleLowerCase().includes(needle)) return [repo];
+    const worktrees = repo.worktrees.filter((entry) => `${entry.path} ${entry.branch ?? ''} ${entry.head}`.toLocaleLowerCase().includes(needle));
+    return worktrees.length ? [{ ...repo, worktrees }] : [];
   });
 
   const multiRepo = forcedMultiRepo ?? (resolvedRepos.length >= 1);
@@ -448,6 +456,7 @@ export function WorktreePanel({
   if (worktreeDiff) return <WorktreeDiffView />;
   return (
     <div style={css.root}>
+      <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
       {allEmpty && resolvedRepos.length === 0 ? (
         <div style={css.empty}>{t('No worktrees')}</div>
       ) : (

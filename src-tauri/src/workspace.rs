@@ -279,10 +279,10 @@ pub fn scan(
             RepositoryMeta {
                 id: id.clone(),
                 name: path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("repository")
-                .to_string(),
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("repository")
+                    .to_string(),
                 root_path: path.to_string_lossy().into_owned(),
                 color: settings
                     .project_colors

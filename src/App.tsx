@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { WorkspaceChooser } from './components/WorkspaceChooser';
 import { CommitPanel } from './components/CommitPanel';
@@ -66,6 +66,7 @@ export function App() {
   const mode = useAppStore((state) => state.mode);
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
   const ready = useAppStore((state) => state.ready);
+  const sync = useAppStore((state) => state.sync);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const initializeRepository = useAppStore((state) => state.initializeRepository);
   const setPanelSize = useAppStore((state) => state.setPanelSize);
@@ -78,6 +79,7 @@ export function App() {
   const closeAbout = useAppStore((state) => state.closeAbout);
   const [pluginMessages, setPluginMessages] = useState<Record<string, string>>({});
   const [dropActive, setDropActive] = useState(false);
+  const focusFetchRunning = useRef(false);
   const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
   const languagePreference = bootstrap?.state.settings?.language ?? bootstrap?.state.language ?? 'system';
   const uiFontSize = bootstrap?.state.settings?.uiFontSize ?? bootstrap?.state.uiFontSize ?? 'standard';
@@ -94,6 +96,23 @@ export function App() {
   };
   const comparisonDiffOpen = mode === 'diff' && Boolean(comparisonTarget);
   const resizeCommit = useResizable(commitWidth, 280, 620, (value) => setPanelSize('commit', value));
+
+  useEffect(() => {
+    const handleFocus = () => {
+      if (!ready || focusFetchRunning.current || (bootstrap?.state.settings?.autoFetchOnFocus ?? true) === false) return;
+      const gitRepos = useAppStore.getState().snapshot?.repositories.filter((repo) => repo.meta.kind === 'git' && !repo.meta.isWorktree) ?? [];
+      if (!gitRepos.length) return;
+      const storageKey = 'versiondock:auto-fetch-on-focus-at';
+      const previous = Number(localStorage.getItem(storageKey) ?? 0);
+      if (Date.now() - previous < 3 * 60 * 1000) return;
+      localStorage.setItem(storageKey, String(Date.now()));
+      focusFetchRunning.current = true;
+      void Promise.allSettled(gitRepos.map((repo) => sync(repo.meta.id, 'fetch', false)))
+        .finally(() => { focusFetchRunning.current = false; });
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [bootstrap?.state.settings?.autoFetchOnFocus, ready, sync]);
 
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');

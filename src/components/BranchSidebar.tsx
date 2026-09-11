@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
@@ -30,8 +30,15 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const sidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
   const setBranchSidebarState = useAppStore((state) => state.setBranchSidebarState);
   const [filter, setFilter] = useState('');
+  const deferredFilter = useDeferredValue(filter);
   const [activeItem, setActiveItem] = useState<string | null>(null);
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set(persistedSections));
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    const initial = new Set(persistedSections);
+    const tagCount = Object.values(tagsByRepo).reduce((count, tags) => count + tags.length, 0);
+    const detachedOnTag = Object.values(branchesByRepo).some((branches) => branches.some((branch) => Boolean(branch.detachedTag)));
+    if (tagCount > 25 && !detachedOnTag) initial.add('tags');
+    return initial;
+  });
   const [context, setContext] = useState<{ x: number; y: number; kind: 'branch' | 'tag'; branch?: SidebarBranch; tag?: SidebarTag }>();
   const branchOperation = useAppStore((state) => state.branchOperation);
   const sync = useAppStore((state) => state.sync);
@@ -39,7 +46,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const { t } = useI18n();
 
   const visibleRepos = repoFilter.size ? repos.filter((repo) => repoFilter.has(repo.meta.id)) : repos;
-  const model = useMemo(() => buildSidebarModel(visibleRepos, branchesByRepo, tagsByRepo, filter), [branchesByRepo, filter, tagsByRepo, visibleRepos]);
+  const model = useMemo(() => buildSidebarModel(visibleRepos, branchesByRepo, tagsByRepo, deferredFilter), [branchesByRepo, deferredFilter, tagsByRepo, visibleRepos]);
   const showVcsBadges = repos.some((repo) => repo.meta.kind === 'git') && repos.some((repo) => repo.meta.kind === 'svn');
   const repoColors = useMemo(() => Object.fromEntries(repos.map((repo) => [repo.meta.id, repo.meta.color])), [repos]);
   const toggleSection = (key: SectionKey) => {

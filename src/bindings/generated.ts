@@ -267,6 +267,16 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 } } | { type: "unpushedCommits"; payload: {
 	workspace_id: string,
 	repo_id: string,
+} } | { type: "unpushedChanges"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	oldest_revision: string | null,
+} } | { type: "incomingCommits"; payload: {
+	workspace_id: string,
+	repo_id: string,
+} } | { type: "incomingChanges"; payload: {
+	workspace_id: string,
+	repo_id: string,
 } } | { type: "unpushedOperation"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -357,6 +367,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	base_ref: string,
 	relative_path: string,
 } } | { type: "subtrees"; payload: {
+	workspace_id: string,
+	repo_id: string,
+} } | { type: "subtreeStatuses"; payload: {
 	workspace_id: string,
 	repo_id: string,
 } } | { type: "subtreeOperation"; payload: {
@@ -599,6 +612,7 @@ export type DesktopSettings = {
 	suppressDivergedWarning: boolean,
 	autoRefreshInterval: number,
 	fetchOnStartup: boolean,
+	autoFetchOnFocus?: boolean,
 	resetViewLocationsOnStartup: boolean,
 	notifyIncomingCommits: boolean,
 	notifyUnpushedCommits: boolean,
@@ -752,6 +766,21 @@ export type IgnoreRules = {
 	directory: string,
 	source: string,
 	patterns: string[],
+};
+
+export type IncomingCommit = {
+	hash: string,
+	shortHash: string,
+	message: string,
+	body?: string | null,
+	fullMessage?: string | null,
+	author: string,
+	date: string,
+	filesChanged: number,
+	additions: number,
+	deletions: number,
+	parents: string[],
+	potentialConflictPaths: string[],
 };
 
 export type InitializeRepositoryResult = {
@@ -1053,6 +1082,12 @@ export type RestoreConflictsResult = {
 	failures: RestoreConflictFailure[],
 };
 
+export type RevisionChanges = {
+	fromRevision: string,
+	toRevision: string,
+	files: CommitFile[],
+};
+
 export type RuntimeCapabilities = {
 	systemNotifications: CapabilityStatus,
 	notificationPermission: NotificationPermissionState,
@@ -1105,16 +1140,35 @@ export type StashEntry = {
 
 export type StashOperation = { type: "create"; message: string; paths: string[]; include_untracked: boolean } | { type: "apply"; reference: string } | { type: "pop"; reference: string } | { type: "drop"; reference: string };
 
+export type SubmoduleConflictStages = {
+	base: string | null,
+	ours: string | null,
+	theirs: string | null,
+};
+
 export type SubmoduleEntry = {
+	name: string,
 	path: string,
 	url: string,
 	initialized: boolean,
 	revision: string | null,
 	branch: string | null,
 	dirty: boolean,
+	syncStatus: SubmoduleSyncStatus,
+	recordedCommit: string | null,
+	indexCommit?: string | null,
+	conflictStages?: SubmoduleConflictStages | null,
+	currentBranch: string | null,
+	detached: boolean,
+	unpushedCount: number,
+	typeChange?: boolean,
+	companionPath?: string | null,
+	diffSummary?: string | null,
 };
 
-export type SubmoduleOperation = { type: "init"; path: string; recursive: boolean } | { type: "update"; path: string; init: boolean; recursive: boolean; remote: boolean } | { type: "deinit"; path: string; force: boolean } | { type: "sync"; path: string; recursive: boolean };
+export type SubmoduleOperation = { type: "add"; url: string; path: string; branch: string | null; allow_file_protocol: boolean } | { type: "init"; path: string; recursive: boolean } | { type: "update"; path: string; init: boolean; recursive: boolean; remote: boolean } | { type: "deinit"; path: string; force: boolean } | { type: "sync"; path: string; recursive: boolean } | { type: "updateAll"; init: boolean; recursive: boolean; remote: boolean } | { type: "remove"; path: string; force: boolean } | { type: "resolveConflict"; path: string; choice: ConflictChoice } | { type: "push"; path: string } | { type: "pull"; path: string; rebase: boolean };
+
+export type SubmoduleSyncStatus = "synced" | "outOfSync" | "uninitialized" | "conflict";
 
 export type SubtreeEntry = {
 	id: string,
@@ -1126,6 +1180,16 @@ export type SubtreeEntry = {
 };
 
 export type SubtreeOperation = { type: "add"; prefix: string; remote: string; branch: string; squash: boolean } | { type: "pull"; subtree_id: string } | { type: "push"; subtree_id: string } | { type: "register"; prefix: string; remote: string; branch: string; squash: boolean } | { type: "edit"; subtree_id: string; prefix: string; remote: string; branch: string; squash: boolean } | { type: "deleteRegistry"; subtree_id: string } | { type: "removeFiles"; subtree_id: string } | { type: "split"; subtree_id: string; branch: string | null } | { type: "merge"; subtree_id: string; revision: string; squash: boolean; message: string | null };
+
+export type SubtreePushStatus = {
+	subtreeId: string,
+	aheadCount: number | null,
+	hasUpdates: boolean,
+	remoteRef: string | null,
+	splitHash: string | null,
+	remoteHash: string | null,
+	error: string | null,
+};
 
 export type SubtreeState = "active" | "pending";
 
@@ -1152,7 +1216,7 @@ export type SvnNativeCredential = {
 
 export type SvnOperation = { type: "cleanup"; break_locks: boolean; remove_unversioned: boolean; remove_ignored: boolean; include_externals: boolean } | { type: "resolveWorking"; paths: string[] } | { type: "lock"; paths: string[]; message: string | null; force: boolean } | { type: "unlock"; paths: string[]; force: boolean } | { type: "relocate"; from_url: string; to_url: string } | { type: "switch"; url: string; revision: string | null; ignore_ancestry: boolean } | { type: "copy"; source_url: string; destination_url: string; revision: string | null; message: string };
 
-export type SyncAction = "fetch" | "pull" | "pullRebase" | "push" | "update";
+export type SyncAction = "fetch" | "pull" | "pullRebase" | "pullFfOnly" | "push" | "pushTags" | "update";
 
 export type SyncResult = {
 	output: string,
@@ -1183,6 +1247,8 @@ export type UnpushedCommit = {
 	hash: string,
 	shortHash: string,
 	message: string,
+	body?: string | null,
+	fullMessage?: string | null,
 	author: string,
 	date: string,
 	filesChanged: number,

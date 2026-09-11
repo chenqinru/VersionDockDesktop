@@ -80,9 +80,16 @@ async fn v5_init_clone_commit_messages_and_structured_history_are_real() {
 
     let clones = root.path().join("clones");
     std::fs::create_dir(&clones).unwrap();
-    let cloned = vcs::clone_repository(source.to_str().unwrap(), &clones, "副本", None, false, &token)
-        .await
-        .unwrap();
+    let cloned = vcs::clone_repository(
+        source.to_str().unwrap(),
+        &clones,
+        "副本",
+        None,
+        false,
+        &token,
+    )
+    .await
+    .unwrap();
     assert!(cloned.join(".git").is_dir());
     assert!(
         vcs::clone_repository("--upload-pack=evil", &clones, "bad", None, false, &token)
@@ -483,8 +490,8 @@ async fn real_svn_file_history_loads_revisions_and_content() {
         crate::models::CatFileFilterMode::Filters,
         &token,
     )
-            .await
-            .unwrap();
+    .await
+    .unwrap();
     assert!(content.content.contains("second"));
 }
 

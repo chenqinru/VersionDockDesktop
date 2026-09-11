@@ -3,7 +3,7 @@ import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference, FileIconThemePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
-  UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
+  IncomingCommit, UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
   DesktopCapabilities, HistoryQuery, InitializeRepositoryResult, CloneRepositoryResult, OperationDomain, OperationEvent,
   RecentCommitMessage, RefreshScope, RepositoryCapabilities, RepositoryUpdateResult, RuntimeCapabilities,
   SyncResult, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
@@ -228,6 +228,7 @@ export interface WorkspaceSessionState {
   subtrees: Record<string, SubtreeEntry[]>;
   submodules: Record<string, SubmoduleEntry[]>;
   unpushedCommits: Record<string, UnpushedCommit[]>;
+  incomingCommits: Record<string, IncomingCommit[]>;
   comparisonTarget?: { repoId: string; target: string };
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
@@ -301,6 +302,7 @@ export interface AppStore {
   subtrees: Record<string, SubtreeEntry[]>;
   submodules: Record<string, SubmoduleEntry[]>;
   unpushedCommits: Record<string, UnpushedCommit[]>;
+  incomingCommits: Record<string, IncomingCommit[]>;
   comparisonTarget?: { repoId: string; target: string };
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
@@ -341,7 +343,7 @@ export interface AppStore {
   commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean; noVerify?: boolean }>, message: string, push: boolean) => Promise<void>;
   retryBatchResult: (repoId: string) => Promise<void>;
   dismissBatchReport: () => void;
-  sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'push' | 'update', notify?: boolean, options?: SyncOptions & { force?: boolean }) => Promise<RepositoryUpdateResult | undefined>;
+  sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'pullFfOnly' | 'push' | 'pushTags' | 'update', notify?: boolean, options?: SyncOptions & { force?: boolean }) => Promise<RepositoryUpdateResult | undefined>;
   updateProject: (strategy?: 'merge' | 'rebase') => Promise<void>;
   openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
   openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
@@ -380,6 +382,7 @@ export interface AppStore {
   loadSubmodules: (repoId?: string) => Promise<void>;
   submoduleOperation: (repoId: string, operation: SubmoduleOperation) => Promise<void>;
   loadUnpushedCommits: (repoId?: string) => Promise<void>;
+  loadIncomingCommits: (repoId?: string) => Promise<void>;
   unpushedOperation: (repoId: string, operation: UnpushedOperation) => Promise<boolean>;
   historyOperation: (repoId: string, operation: HistoryOperation) => Promise<void>;
   createPatch: (repoId: string, revisions: string[]) => Promise<PatchDocument>;
@@ -410,7 +413,7 @@ export interface AppStore {
   setExternalEditor: (executable: string, args: string[]) => void;
   setFileViewMode: (value: 'tree' | 'list') => void;
   setStashViewMode: (value: 'tree' | 'list') => void;
-  setActiveTab: (value: 'changes' | 'shelf' | 'stash' | 'worktree' | 'subtree' | 'push') => void;
+  setActiveTab: (value: 'changes' | 'shelf' | 'stash' | 'worktree' | 'subtree' | 'submodule' | 'sync' | 'push') => void;
   setPanelSize: (key: 'commit' | 'branches' | 'detail', value: number) => void;
   setBranchSidebarState: (collapsed: boolean, collapsedSections: string[]) => void;
   updateSettings: (patch: Partial<DesktopSettings>) => Promise<void>;
@@ -452,7 +455,7 @@ const emptyState: AppStateSnapshot = {
   schemaVersion: 7,
   settings: {
     theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
-    promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false,
+    promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, autoFetchOnFocus: true, resetViewLocationsOnStartup: false,
     notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 4,
     ignoredFolders: ['.git', '.svn', '.hg', 'node_modules', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', 'target'],
     maximumGraphCommits: 1000, projectColors: {}, externalEditor: null, onlineAvatarsEnabled: false, gravatarEnabled: false,
@@ -935,6 +938,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       subtrees: state.subtrees,
       submodules: state.submodules,
       unpushedCommits: state.unpushedCommits,
+      incomingCommits: state.incomingCommits,
       comparisonTarget: state.comparisonTarget,
       comparison: state.comparison,
       remotes: state.remotes,
@@ -1003,7 +1007,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
+      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     const sessionId = get().bootstrap?.applicationSessionId ?? 'browser-session';
@@ -1054,7 +1058,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           type: 'info',
           title: 'Unpushed Commits',
           message,
-          actions: [{ type: 'openPush', label: 'Go to Push' }],
+          actions: [{ type: 'openPush', label: 'Go to Sync' }],
         });
         void bridge().notify('VersionDock Desktop', createTranslator(resolveLanguage(preferences.language))(message.key, ...(message.args ?? [])));
         void get().refreshRuntimeCapabilities();
@@ -1062,7 +1066,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     }
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     const requests: Promise<void>[] = [get().loadConflicts(silent)];
-    if (workspaceChanged || reloadRepository) requests.push(get().loadStashes(), get().loadShelves(), get().loadWorktrees(), get().loadSubtrees(), get().loadSubmodules(), get().loadUnpushedCommits());
+    if (workspaceChanged || reloadRepository) requests.push(get().loadStashes(), get().loadShelves(), get().loadWorktrees(), get().loadSubtrees(), get().loadSubmodules(), get().loadUnpushedCommits(), get().loadIncomingCommits());
     await Promise.all(requests);
     promptPendingAutoStashCleanup();
     if (get().snapshot?.workspace.id === snapshot.workspace.id) {
@@ -1177,7 +1181,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
         if (scopes.has('unpushed') || scopes.has('refs')) {
           const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
-          if (repo?.meta.kind === 'git') await get().loadUnpushedCommits(repoId);
+          if (repo?.meta.kind === 'git') await Promise.all([get().loadUnpushedCommits(repoId), get().loadIncomingCommits(repoId)]);
         }
         if (scopes.has('conflicts')) await get().loadConflicts(true, repoId);
         if (scopes.has('worktrees')) await get().loadWorktrees(repoId);
@@ -1224,7 +1228,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, remotes: {}, batchCommitReport: undefined,
+    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined,
     logPanelOpen: false,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
     logEntries: [],
@@ -1516,6 +1520,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           subtrees: cachedSession.subtrees,
           submodules: cachedSession.submodules,
           unpushedCommits: cachedSession.unpushedCommits,
+          incomingCommits: cachedSession.incomingCommits ?? {},
           comparisonTarget: cachedSession.comparisonTarget,
           comparison: cachedSession.comparison,
           remotes: cachedSession.remotes,
@@ -1601,6 +1606,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             subtrees: {},
             submodules: {},
             unpushedCommits: {},
+            incomingCommits: {},
             comparisonTarget: undefined,
             comparison: undefined,
             remotes: {},
@@ -1681,6 +1687,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         subtrees: {},
         submodules: {},
         unpushedCommits: {},
+        incomingCommits: {},
         comparisonTarget: undefined,
         comparison: undefined,
         remotes: {},
@@ -2007,7 +2014,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     dismissBatchReport: () => set({ batchCommitReport: undefined }),
 
     sync: async (repoId, action, notify = true, options = {}) => withBusy(async () => {
-      const capability = action === 'fetch' ? 'syncFetch' : action === 'push' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
+      const capability = action === 'fetch' ? 'syncFetch' : action === 'push' || action === 'pushTags' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
       if (!ensureRepositoryCapability(repoId, capability)) return;
       let result: SyncResult;
       try {
@@ -2032,6 +2039,9 @@ export const useAppStore = create<AppStore>((set, get) => {
           workspaceId: get().snapshot?.workspace.id,
           actions: commitCount ? [{ type: 'viewUpdateDetails', label: 'View update details', result: result.update }] : [],
         });
+      }
+      if (action !== 'update') {
+        await Promise.all([get().loadUnpushedCommits(repoId), get().loadIncomingCommits(repoId)]);
       }
       return result.update ?? undefined;
     }, `sync:${repoId}`),
@@ -2605,6 +2615,24 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ unpushedCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.unpushedCommits) }));
     },
+    loadIncomingCommits: async (repoId) => {
+      const b = get().bridge;
+      const wid = get().snapshot?.workspace.id;
+      if (!b || !wid) return;
+      if (repoId) {
+        const values = await b.request<IncomingCommit[]>({ type: 'incomingCommits', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
+        if (get().snapshot?.workspace.id !== wid) return;
+        set((state) => ({ incomingCommits: { ...state.incomingCommits, [repoId]: values } }));
+        return;
+      }
+      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
+      const values = await Promise.all(repositories.map(async (repo) => ({
+        repoId: repo.meta.id,
+        commits: await b.request<IncomingCommit[]>({ type: 'incomingCommits', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+      })));
+      if (get().snapshot?.workspace.id !== wid) return;
+      set((state) => ({ incomingCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.incomingCommits) }));
+    },
     unpushedOperation: async (repoId, operation) => (await withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return false;
       await bridge().request({ type: 'unpushedOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
@@ -2835,7 +2863,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       switch (action.type) {
         case 'updateProject': await get().updateProject(); break;
-        case 'openPush': get().setActiveTab('push'); break;
+        case 'openPush': get().setActiveTab('sync'); break;
         case 'openStash': get().setActiveTab('stash'); break;
         case 'openConflicts': get().setActiveTab('changes'); break;
         case 'dropAutoStash': {

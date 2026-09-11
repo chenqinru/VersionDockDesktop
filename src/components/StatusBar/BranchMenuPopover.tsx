@@ -202,7 +202,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
     if (needPushRepos.length > 0) {
       await Promise.allSettled(needPushRepos.map((r) => sync(r.meta.id, 'push')));
     } else {
-      setActiveTab('push');
+      setActiveTab('sync');
     }
   };
 

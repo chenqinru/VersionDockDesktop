@@ -357,13 +357,14 @@ async fn wait_for_git_index_lock(
             if age >= Duration::from_secs(10) {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 if let Ok(meta) = std::fs::metadata(&lock_path) {
-                    if meta.len() == initial_size && meta.modified().ok() == initial_mtime {
-                        if try_remove_stale_index_lock(
+                    if meta.len() == initial_size
+                        && meta.modified().ok() == initial_mtime
+                        && try_remove_stale_index_lock(
                             &lock_path,
                             &format!("stale ({}s old)", age.as_secs()),
-                        ) {
-                            return Ok(());
-                        }
+                        )
+                    {
+                        return Ok(());
                     }
                 } else {
                     return Ok(());
@@ -382,10 +383,11 @@ async fn wait_for_git_index_lock(
             if let Ok(final_meta) = std::fs::metadata(&lock_path) {
                 let final_mtime = final_meta.modified().ok();
                 let final_size = final_meta.len();
-                if final_mtime == last_mtime && final_size == last_size {
-                    if try_remove_stale_index_lock(&lock_path, "abandoned") {
-                        return Ok(());
-                    }
+                if final_mtime == last_mtime
+                    && final_size == last_size
+                    && try_remove_stale_index_lock(&lock_path, "abandoned")
+                {
+                    return Ok(());
                 }
             } else {
                 return Ok(());

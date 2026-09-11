@@ -108,7 +108,7 @@ export function checkIncomingAndUnpushedCommits({
         actions: [
           {
             type: 'goToPush',
-            label: t('Go to Push'),
+            label: t('Go to Sync'),
             action: onGoToPush,
           },
         ],
