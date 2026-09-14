@@ -3,7 +3,8 @@ import { Codicon } from '../Codicon';
 import { useAppStore } from '../../store/appStore';
 import { useBridge } from '../../platform/context';
 import { useI18n } from '../../i18n';
-import type { GitIdentityState, RepositoryStatus, SvnAccountState } from '../../bindings/generated';
+import type { GitIdentityState, RemoteProviderAccount, RepositoryStatus, SvnAccountState } from '../../bindings/generated';
+import { ProviderPanel } from '../ProviderPanel';
 
 interface ProfileMenuPopoverProps {
   anchorRect: DOMRect | null;
@@ -27,6 +28,8 @@ export function ProfileMenuPopover({ anchorRect, onClose }: ProfileMenuPopoverPr
   const [submenuPos, setSubmenuPos] = useState<{ left: number; top: number; centerY: number; maxHeight: number } | null>(null);
   const [identitiesByRepo, setIdentitiesByRepo] = useState<Record<string, GitIdentityState>>({});
   const [svnAccountsByRepo, setSvnAccountsByRepo] = useState<Record<string, SvnAccountState>>({});
+  const [remoteAccounts, setRemoteAccounts] = useState<RemoteProviderAccount[]>([]);
+  const [providersOpen, setProvidersOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
 
@@ -89,6 +92,14 @@ export function ProfileMenuPopover({ anchorRect, onClose }: ProfileMenuPopoverPr
       active = false;
     };
   }, [bridge, workspaceId, repositories]);
+
+  useEffect(() => {
+    let active = true;
+    void bridge.request<RemoteProviderAccount[]>({ type: 'providerAccounts' }, { showProgress: false })
+      .then((accounts) => { if (active) setRemoteAccounts(accounts); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [bridge]);
 
   // 监听子菜单真实高度，使展开位置的正中完美对齐点击项中心，并做视口边界保护
   useLayoutEffect(() => {
@@ -368,6 +379,7 @@ export function ProfileMenuPopover({ anchorRect, onClose }: ProfileMenuPopoverPr
     <>
       <div ref={popoverRef} className="statusbar-popover profile-menu-popover" style={popoverStyle}>
         <div className="statusbar-popover-content">
+          {remoteAccounts.length > 0 && <><div className="statusbar-menu-section"><div className="statusbar-menu-group-header">{t('Remote provider accounts')}</div>{remoteAccounts.map((account) => <div key={account.id} className="statusbar-menu-item active-ref"><Codicon name={account.provider === 'github' ? 'github' : 'cloud'} /><div className="statusbar-menu-item-text"><span className="statusbar-menu-item-title">{account.login}</span><span className="statusbar-menu-item-desc">{account.provider === 'github' ? 'GitHub' : account.provider === 'gitee' ? 'Gitee' : 'GitLab'} · {account.host}</span></div></div>)}</div><div className="statusbar-menu-divider" /></>}
           {/* 多仓库视图：按 Git identities 和 SVN Accounts 列出仓库列表并级联展开 */}
           {isMultiRepo ? (
             <>
@@ -455,6 +467,8 @@ export function ProfileMenuPopover({ anchorRect, onClose }: ProfileMenuPopoverPr
           ) : (
             <div className="statusbar-popover-empty">{t('No profile')}</div>
           )}
+          <div className="statusbar-menu-divider" />
+          <div className="statusbar-menu-section footer-section"><button type="button" className="statusbar-menu-item" onClick={() => setProvidersOpen(true)}><Codicon name="cloud" /><div className="statusbar-menu-item-text"><span className="statusbar-menu-item-title">{t('Manage remote provider accounts…')}</span></div></button></div>
         </div>
       </div>
 
@@ -478,6 +492,7 @@ export function ProfileMenuPopover({ anchorRect, onClose }: ProfileMenuPopoverPr
           </div>
         </div>
       )}
+      {providersOpen && <ProviderPanel mode="manage" close={() => { setProvidersOpen(false); onClose(); }} />}
     </>
   );
 }

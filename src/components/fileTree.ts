@@ -23,6 +23,17 @@ export function buildFileTree(files: FileChange[]): FileTreeNode[] {
       parent = node;
     });
   }
+  const exposeTruncatedDirectory = (nodes: FileTreeNode[]) => {
+    for (const node of nodes) {
+      if (node.file?.isTruncated && node.children.length > 0) {
+        const marker = node.file;
+        node.file = undefined;
+        node.children.push({ name: node.name, path: `${node.path}\0truncated`, children: [], files: [marker], file: marker });
+      }
+      exposeTruncatedDirectory(node.children);
+    }
+  };
+  exposeTruncatedDirectory(root.children);
   const sort = (nodes: FileTreeNode[]) => nodes.sort((left, right) => Number(!!left.file) - Number(!!right.file) || left.name.localeCompare(right.name)).forEach((node) => sort(node.children));
   sort(root.children);
   return collapseSingleChildDirectories(root.children);

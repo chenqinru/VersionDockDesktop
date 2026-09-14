@@ -496,6 +496,86 @@ async fn real_svn_file_history_loads_revisions_and_content() {
 }
 
 #[tokio::test]
+async fn real_svn_commit_keeps_unselected_children_out_of_revision() {
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let repository_dir = tempdir().unwrap();
+    let checkout_parent = tempdir().unwrap();
+    command(
+        "svnadmin",
+        &["create", repository_dir.path().to_str().unwrap()],
+        checkout_parent.path(),
+    );
+    let checkout = checkout_parent.path().join("working");
+    command(
+        "svn",
+        &[
+            "checkout",
+            &svn_file_url(repository_dir.path()),
+            checkout.to_str().unwrap(),
+        ],
+        checkout_parent.path(),
+    );
+    let directory = checkout.join("new");
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("selected.txt"), "selected\n").unwrap();
+    std::fs::write(directory.join("other.txt"), "other\n").unwrap();
+    let repository = repo(&checkout, VcsKind::Svn);
+    let token = CancellationToken::new();
+    vcs::commit(
+        &repository,
+        "selected only",
+        false,
+        &["new/selected.txt".into()],
+        &token,
+    )
+    .await
+    .unwrap();
+    let changed = command_output("svn", &["log", "-v", "-r", "HEAD"], &checkout);
+    assert!(changed.contains("/new/selected.txt"));
+    assert!(!changed.contains("/new/other.txt"));
+    assert!(command_output("svn", &["status"], &checkout).contains("?       new/other.txt"));
+
+    std::fs::write(directory.join("selected.txt"), "changed\n").unwrap();
+    command(
+        "svn",
+        &["propset", "test:mark", "directory", "new"],
+        &checkout,
+    );
+    vcs::commit(
+        &repository,
+        "directory only",
+        false,
+        &["new".into()],
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(command_output("svn", &["status"], &checkout).contains("M       new/selected.txt"));
+
+    let overflow = checkout.join("overflow");
+    std::fs::create_dir(&overflow).unwrap();
+    for index in 0..501 {
+        std::fs::write(overflow.join(format!("{index:03}.txt")), "file\n").unwrap();
+    }
+    std::fs::create_dir(overflow.join(".git")).unwrap();
+    std::fs::write(overflow.join(".git/config"), "secret\n").unwrap();
+    let status = workspace::svn_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    assert!(status
+        .files
+        .iter()
+        .any(|file| file.path == "overflow" && file.is_truncated));
+    assert!(!status.files.iter().any(|file| file.path.contains(".git")));
+    let error = vcs::stage(&repository, &["overflow".into()], true, &token)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "SVN_NESTED_VCS_METADATA");
+}
+
+#[tokio::test]
 async fn real_git_branch_compare_and_remote_management() {
     if !available("git") {
         eprintln!("SKIP: git not available");
@@ -2150,7 +2230,7 @@ async fn real_git_core_workflow() {
     .await
     .unwrap();
     assert!(!diff.binary);
-    vcs::stage(&repository, &["hello world 中文.txt".into()], &token)
+    vcs::stage(&repository, &["hello world 中文.txt".into()], false, &token)
         .await
         .unwrap();
     vcs::commit(&repository, "initial commit", false, &[], &token)
@@ -2179,13 +2259,13 @@ async fn real_git_core_workflow() {
     .await
     .unwrap();
     assert!(diff.content.contains("+two"));
-    vcs::stage(&repository, &["hello world 中文.txt".into()], &token)
+    vcs::stage(&repository, &["hello world 中文.txt".into()], false, &token)
         .await
         .unwrap();
     vcs::unstage(&repository, &["hello world 中文.txt".into()], &token)
         .await
         .unwrap();
-    vcs::stage(&repository, &["hello world 中文.txt".into()], &token)
+    vcs::stage(&repository, &["hello world 中文.txt".into()], false, &token)
         .await
         .unwrap();
     vcs::commit(&repository, "second commit", false, &[], &token)
@@ -2816,7 +2896,7 @@ async fn real_svn_core_workflow() {
     let status = workspace::svn_status(repository.clone(), &token)
         .await
         .unwrap();
-    assert_eq!(status.files[0].status, "unversioned");
+    assert_eq!(status.files[0].status, "untracked");
     vcs::commit(
         &repository,
         "initial svn commit",

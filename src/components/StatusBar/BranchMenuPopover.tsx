@@ -11,9 +11,11 @@ import { isBranchProtected, sanitizeBranchName } from '../../history/branchProte
 interface BranchMenuPopoverProps {
   anchorRect: DOMRect | null;
   onClose: () => void;
+  initialRepoId?: string;
+  repoOnly?: boolean;
 }
 
-export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProps) {
+export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly = false }: BranchMenuPopoverProps) {
   const { t } = useI18n();
   const bridge = useBridge();
   const snapshot = useAppStore((state) => state.snapshot);
@@ -33,10 +35,18 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   const refresh = useAppStore((state) => state.refresh);
 
   // 二级菜单状态
-  const [activeSubmenuRepoId, setActiveSubmenuRepoId] = useState<string | null>(null);
+  const [activeSubmenuRepoId, setActiveSubmenuRepoId] = useState<string | null>(initialRepoId ?? null);
   const [activeCommonBranch, setActiveCommonBranch] = useState<{ name: string; isRemote: boolean } | null>(null);
   const [activeCommonTag, setActiveCommonTag] = useState<string | null>(null);
-  const [submenuPos, setSubmenuPos] = useState<{ left: number; top: number; centerY: number; maxHeight: number } | null>(null);
+  const [submenuPos, setSubmenuPos] = useState<{ left: number; top: number; centerY: number; maxHeight: number } | null>(() => {
+    if (!initialRepoId || !anchorRect) return null;
+    return {
+      left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - 288)),
+      top: anchorRect.bottom + 4,
+      centerY: anchorRect.top + anchorRect.height / 2,
+      maxHeight: Math.max(160, window.innerHeight - 20),
+    };
+  });
 
   // 三级动作菜单状态
   const [activeBranchAction, setActiveBranchAction] = useState<{
@@ -62,9 +72,9 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
       const h = submenuRef.current.offsetHeight;
       const minTop = 10;
       const maxBottom = window.innerHeight - 30; // 底部状态栏 28px + 2px 安全距离
-      let nextTop = submenuPos.centerY - h / 2;
+      let nextTop = repoOnly && anchorRect ? anchorRect.bottom + 4 : submenuPos.centerY - h / 2;
       if (nextTop + h > maxBottom) {
-        nextTop = maxBottom - h;
+        nextTop = repoOnly && anchorRect ? anchorRect.top - h - 4 : maxBottom - h;
       }
       if (nextTop < minTop) {
         nextTop = minTop;
@@ -73,7 +83,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
         setSubmenuPos((prev) => (prev ? { ...prev, top: nextTop } : null));
       }
     }
-  }, [submenuPos, activeSubmenuRepoId, activeCommonBranch, activeCommonTag]);
+  }, [submenuPos, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, anchorRect, repoOnly]);
 
   // 监听三级动作子菜单真实高度，使其正中心精确对齐被点击的二级分支条目中心
   useLayoutEffect(() => {
@@ -111,7 +121,9 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (activeBranchAction || activeTagAction) {
+        if (repoOnly && !activeBranchAction && !activeTagAction) {
+          onClose();
+        } else if (activeBranchAction || activeTagAction) {
           setActiveBranchAction(null);
           setActiveTagAction(null);
           setActionMenuPos(null);
@@ -132,7 +144,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag]);
+  }, [onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, repoOnly]);
 
   const repositories = useMemo(() => snapshot?.repositories ?? [], [snapshot?.repositories]);
   const gitRepos = useMemo(() => repositories.filter((r) => r.meta.kind === 'git'), [repositories]);
@@ -359,7 +371,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
   return (
     <>
       {/* ──────────────── 1. 一级主菜单面板 ──────────────── */}
-      <div ref={popoverRef} className="statusbar-popover branch-menu-popover" style={popoverStyle}>
+      {!repoOnly && <div ref={popoverRef} className="statusbar-popover branch-menu-popover" style={popoverStyle}>
         <div className="statusbar-popover-content">
           {/* 冲突处理 */}
           {(conflictRepos.length > 0 || operationRepos.length > 0) && (
@@ -583,7 +595,7 @@ export function BranchMenuPopover({ anchorRect, onClose }: BranchMenuPopoverProp
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ──────────────── 2. 二级菜单面板（仓库分支列表 / 公共分支动作 / 公共标签动作） ──────────────── */}
       {submenuPos && (activeSubmenuRepo || activeCommonBranch || activeCommonTag) && (

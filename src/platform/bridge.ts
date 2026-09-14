@@ -90,8 +90,10 @@ export function isAbortError(error: unknown): boolean {
     const candidate = error as { name?: string; code?: string | number; message?: string };
     if (candidate.name === 'AbortError') return true;
     if (candidate.code === 'ABORT_ERR' || candidate.code === 20) return true;
+    if (candidate.code === 'REQUEST_CANCELLED') return true;
     if (typeof candidate.message === 'string' && (
       candidate.message.includes('Operation aborted') ||
+      candidate.message.includes('Operation cancelled') ||
       candidate.message.includes('The user aborted a request') ||
       candidate.message.includes('AbortError') ||
       candidate.message.includes('BodyStreamBuffer was aborted')
@@ -100,7 +102,7 @@ export function isAbortError(error: unknown): boolean {
     }
   }
   if (typeof error === 'string') {
-    return error.includes('Operation aborted') || error.includes('AbortError');
+    return error.includes('Operation aborted') || error.includes('Operation cancelled') || error.includes('AbortError');
   }
   return false;
 }
@@ -145,7 +147,7 @@ function requestId(): string {
 const commandDomain = (command: BridgeCommand): OperationDomain => {
   switch (command.type) {
     case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'saveCommitSelections': case 'updateSettings': case 'updateLayout': return 'application';
-    case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent': case 'initializeRepository': case 'cloneRepository': return 'workspace';
+    case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent': case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository': return 'workspace';
     case 'repositoryStatus': return 'status';
     case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff':
     case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
@@ -186,7 +188,7 @@ const commandIdentifiers = (command: BridgeCommand) => {
 export const commandShowsProgressByDefault = (command: BridgeCommand): boolean => {
   switch (command.type) {
     case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent':
-    case 'initializeRepository': case 'cloneRepository':
+    case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository':
     case 'stage': case 'unstage': case 'discard': case 'deletePaths': case 'addIgnore': case 'updateIgnoreRules':
     case 'commit': case 'batchCommit': case 'sync': case 'branchOperation': case 'branchRecovery': case 'tagOperation':
     case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'restoreConflicts':

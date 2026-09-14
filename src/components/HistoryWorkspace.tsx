@@ -19,6 +19,7 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog, editorDialog, promptDialog } from './dialogService';
 import { CommitSearch, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
 import { AuthorAvatar } from './AuthorAvatar';
+import { hasMixedRepositoryKinds, repositoryLabel } from './repoLabel';
 import { BranchRefBadge, type BranchRefKind } from './BranchRefBadge';
 
 type FilterMenu = 'authors' | 'repos' | 'refs' | 'dates' | null;
@@ -134,7 +135,7 @@ function CommitPopover({ detail, anchor, repoKind, remoteNames, onClose, onEnter
   }, [onClose]);
   return createPortal(<div ref={popoverRef} className="commit-popover" style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden', pointerEvents: position ? 'auto' : 'none' }} onMouseEnter={onEnter} onMouseLeave={onLeave}>
     <div className="popover-line"><Codicon name="git-commit" /><code>{detail.commit.shortHash}</code></div>
-    <div className="popover-line"><AuthorAvatar className="mini-avatar" name={detail.commit.author} email={detail.commit.email} size={16} /><span className="popover-author">{detail.commit.author}</span><i>·</i><time>{formatDate(detail.commit.authorDate)}</time></div>
+    <div className="popover-line"><AuthorAvatar className="mini-avatar" name={detail.commit.author} email={detail.commit.email} repoId={detail.commit.repoId} size={16} /><span className="popover-author">{detail.commit.author}</span><i>·</i><time>{formatDate(detail.commit.authorDate)}</time></div>
     <div className="popover-line"><Codicon name="diff" /><span>{detail.files.length} {detail.files.length === 1 ? t('file changed') : t('files changed')}</span>{added > 0 && <b className="added">+{added}</b>}{removed > 0 && <b className="removed">-{removed}</b>}</div>
     <RefBadges refs={detail.commit.refs} repoKind={repoKind} remoteNames={remoteNames} maxVisible={Number.MAX_SAFE_INTEGER} />
     <small>{t('Click to view more details')}</small>
@@ -393,7 +394,7 @@ function CommitList({
           {commit.incoming && <span className="commit-flow-indicator" title={t('Not pulled')}><Codicon name="arrow-down" className="commit-flow-icon incoming" /></span>}
           {commit.unpushed && <span className="commit-flow-indicator" title={t('Not pushed')}><Codicon name="arrow-up" className="commit-flow-icon unpushed" /></span>}
           <span className="commit-author">
-            <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.email} size={18} /><span className="commit-author-name">{commit.author}</span>
+            <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.email} repoId={commit.repoId} size={18} /><span className="commit-author-name">{commit.author}</span>
           </span>
           <time>{formatDate(commit.committerDate)}</time>
         </div>;
@@ -477,11 +478,12 @@ export function HistoryWorkspace() {
     : undefined;
 
   const authorOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    allHistory.forEach((commit) => counts.set(commit.author, (counts.get(commit.author) ?? 0) + 1));
-    return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([author, count]) => ({ id: author, label: author, detail: String(count), icon: 'person' }));
+    const counts = new Map<string, { count: number; email: string; repoId: string }>();
+    allHistory.forEach((commit) => { const current = counts.get(commit.author); counts.set(commit.author, { count: (current?.count ?? 0) + 1, email: current?.email || commit.email, repoId: current?.repoId || commit.repoId }); });
+    return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([author, value]) => ({ id: author, label: author, detail: String(value.count), avatarName: author, avatarEmail: value.email, avatarRepoId: value.repoId }));
   }, [allHistory]);
-  const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repo.meta.name, color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
+  const mixedKinds = hasMixedRepositoryKinds(snapshotRepos);
+  const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repositoryLabel(repo, mixedKinds), color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
   const refOptions = useMemo(
     () => buildHistoryRefOptions(
       filters.repoId ? snapshotRepos.filter((repo) => repo.meta.id === filters.repoId) : snapshotRepos,
@@ -557,7 +559,7 @@ export function HistoryWorkspace() {
   return <section className="history-workspace">
     {!compareTarget && <div className="history-filters" onClick={(event) => event.stopPropagation()}>
       <CommitSearch value={historySearch} onChange={setHistorySearch} onSubmit={() => void loadHistory(true).catch(() => undefined)} onClear={() => queueMicrotask(() => void loadHistory(true).catch(() => undefined))} />
-      <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover title={t('Author suggestions from current results')} values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} query={authorQuery} onQuery={setAuthorQuery} allowCustom />}</div>
+      <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" leading={authorOptions.find((option) => option.id === filters.author)?.avatarName ? <AuthorAvatar name={authorOptions.find((option) => option.id === filters.author)!.avatarName!} email={authorOptions.find((option) => option.id === filters.author)!.avatarEmail ?? ''} repoId={authorOptions.find((option) => option.id === filters.author)!.avatarRepoId} size={16} /> : undefined} label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover title={t('Author suggestions from current results')} values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} query={authorQuery} onQuery={setAuthorQuery} allowCustom />}</div>
       <div ref={menu === 'repos' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon={selectedRepo ? undefined : 'repo'} leading={selectedRepo ? <span className="filter-repo-dot" style={{ background: selectedRepo.color }} /> : undefined} label={selectedRepoLabel} active={!!filters.repoId} open={menu === 'repos'} onClick={() => setMenu(menu === 'repos' ? null : 'repos')} />{menu === 'repos' && <FilterPopover title={t('Repository')} values={repoOptions} selected={filters.repoId} onSelect={(repoId) => { updateFilters({ repoId }); setMenu(null); }} onClear={() => updateFilters({ repoId: '' })} />}</div>
       <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor branch-filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!filters.ref} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <FilterPopover title={t('Branch / Tags')} values={refOptions} selected={filters.ref} onSelect={(ref) => { updateFilters({ ref }); setMenu(null); }} onClear={() => updateFilters({ ref: '' })} query={refQuery} onQuery={setRefQuery} />}</div>
       <div ref={menu === 'dates' ? activeFilter : undefined} className="filter-anchor date-filter-anchor"><ToggleFilter icon="calendar" label={filters.from || filters.to ? `${filters.from || '…'} → ${filters.to || '…'}` : t('From → To')} active={!!filters.from || !!filters.to} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} />{menu === 'dates' && <DatePopover from={filters.from} to={filters.to} onChange={(from, to) => updateFilters({ from, to })} onClear={() => updateFilters({ from: '', to: '' })} />}</div>

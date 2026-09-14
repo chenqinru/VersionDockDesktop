@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
+import { AuthorAvatar } from './AuthorAvatar';
 
 export type HistoryFilterOption = {
   id: string;
@@ -8,6 +9,9 @@ export type HistoryFilterOption = {
   color?: string;
   detail?: string;
   icon?: string;
+  avatarName?: string;
+  avatarEmail?: string;
+  avatarRepoId?: string;
 };
 
 export function CommitSearch({ value, onChange, onSubmit, onClear }: {
@@ -98,7 +102,7 @@ export function FilterPopover({ title, values, selected, onSelect, onClear, quer
       {displayed.map((value) => <label key={value.id} title={value.detail}>
         <input name={radioGroup} aria-label={`${value.label}${value.detail ?? ''}`} type="radio" checked={selected === value.id} onChange={() => onSelect(value.id)} />
         {value.color && <i style={{ background: value.color }} />}
-        {value.icon && <Codicon name={value.icon} />}
+        {value.avatarName ? <AuthorAvatar name={value.avatarName} email={value.avatarEmail ?? ''} repoId={value.avatarRepoId} size={20} /> : value.icon && <Codicon name={value.icon} />}
         <span><span className="filter-option-name">{value.label}</span>{value.detail && <small>{value.detail}</small>}</span>
         {selected === value.id && <Codicon name="check" />}
       </label>)}

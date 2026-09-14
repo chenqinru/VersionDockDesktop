@@ -563,6 +563,9 @@ fn classify_failure(program: &str, stderr: &str) -> (&'static str, Option<&'stat
     let lower = stderr.to_ascii_lowercase();
     if lower.contains("authentication failed")
         || lower.contains("authorization failed")
+        || lower.contains("e170001")
+        || lower.contains("e215004")
+        || lower.contains("can't get username or password")
         || lower.contains("could not read username")
         || lower.contains("could not read password")
     {

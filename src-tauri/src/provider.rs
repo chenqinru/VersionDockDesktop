@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use base64::Engine;
 use reqwest::{Client, Method, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -18,6 +19,8 @@ use crate::models::{
 const SERVICE: &str = "com.versiondock.desktop.remote-provider";
 const GITHUB_HOST: &str = "https://github.com";
 const GITHUB_API: &str = "https://api.github.com";
+const GITEE_HOST: &str = "https://gitee.com";
+const GITEE_API: &str = "https://gitee.com/api/v5";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct AccountFile {
@@ -128,7 +131,7 @@ async fn send(
     scope: &str,
     cancel: &CancellationToken,
 ) -> Result<Value, DesktopError> {
-    tokio::select! { _ = cancel.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)), result = builder.send() => checked(result.map_err(|e| DesktopError::new(if e.is_timeout() { "PROVIDER_TIMEOUT" } else { "PROVIDER_NETWORK_ERROR" }, e.to_string(), true))?, scope).await }
+    tokio::select! { _ = cancel.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)), result = builder.send() => checked(result.map_err(|e| DesktopError::new(if e.is_timeout() { "PROVIDER_TIMEOUT" } else { "PROVIDER_NETWORK_ERROR" }, if e.is_timeout() { "Provider request timed out" } else { "Provider network request failed" }, true))?, scope).await }
 }
 
 pub async fn github_begin(
@@ -366,6 +369,42 @@ pub async fn gitlab_save(
     )
 }
 
+pub async fn gitee_save(
+    config_dir: &Path,
+    account_id: Option<String>,
+    secret: &str,
+    cancel: &CancellationToken,
+) -> Result<RemoteProviderAccount, DesktopError> {
+    if secret.trim().is_empty() {
+        return Err(DesktopError::new(
+            "PROVIDER_TOKEN_REQUIRED",
+            "Gitee token is required",
+            false,
+        ));
+    }
+    let user = send(
+        client()?
+            .get(format!("{GITEE_API}/user"))
+            .query(&[("access_token", secret.trim())]),
+        "Gitee",
+        cancel,
+    )
+    .await?;
+    persist_account(
+        config_dir,
+        account_id,
+        RemoteProviderKind::Gitee,
+        GITEE_HOST.into(),
+        user["login"]
+            .as_str()
+            .or_else(|| user["name"].as_str())
+            .unwrap_or("gitee")
+            .into(),
+        user["name"].as_str().map(String::from),
+        secret.trim(),
+    )
+}
+
 fn persist_account(
     config_dir: &Path,
     id: Option<String>,
@@ -424,6 +463,7 @@ fn authenticated(
             .bearer_auth(secret)
             .header("Accept", "application/vnd.github+json"),
         RemoteProviderKind::Gitlab => builder.header("PRIVATE-TOKEN", secret),
+        RemoteProviderKind::Gitee => builder.query(&[("access_token", secret)]),
     }
 }
 
@@ -439,18 +479,66 @@ pub async fn repositories(
     let secret = token(&account)?;
     let page = page.max(1);
     let per_page = per_page.clamp(1, 100);
-    let url = match account.provider { RemoteProviderKind::Github => format!("{GITHUB_API}/user/repos?affiliation=owner,collaborator,organization_member&visibility=all&sort=updated&per_page={per_page}&page={page}"), RemoteProviderKind::Gitlab => format!("{}/api/v4/projects?membership=true&order_by=last_activity_at&sort=desc&per_page={per_page}&page={page}&search={}", account.host, url::form_urlencoded::byte_serialize(query.as_deref().unwrap_or("").as_bytes()).collect::<String>()) };
+    let needle = query.as_deref().unwrap_or("").trim().to_lowercase();
+    if !needle.is_empty() && account.provider != RemoteProviderKind::Gitlab {
+        let mut matching = Vec::new();
+        for source_page in 1..=20 {
+            let url = if account.provider == RemoteProviderKind::Github {
+                format!("{GITHUB_API}/user/repos?affiliation=owner,collaborator,organization_member&visibility=all&sort=updated&per_page=100&page={source_page}")
+            } else {
+                format!(
+                    "{GITEE_API}/user/repos?type=all&sort=updated&per_page=100&page={source_page}"
+                )
+            };
+            let value = send(
+                authenticated(client()?.get(url), &account, &secret),
+                "Provider repositories",
+                cancel,
+            )
+            .await?;
+            let values = value.as_array().cloned().unwrap_or_default();
+            matching.extend(
+                values
+                    .iter()
+                    .filter_map(|item| map_repository(&account, item))
+                    .filter(|item| {
+                        item.name.to_lowercase().contains(&needle)
+                            || item.full_name.to_lowercase().contains(&needle)
+                    }),
+            );
+            if values.len() < 100 {
+                break;
+            }
+        }
+        let skip = (page as usize - 1).saturating_mul(per_page as usize);
+        let has_more = matching.len() > skip.saturating_add(per_page as usize);
+        return Ok(RemoteRepositoryPage {
+            items: matching
+                .into_iter()
+                .skip(skip)
+                .take(per_page as usize)
+                .collect(),
+            page,
+            has_more,
+        });
+    }
+    let url = match account.provider {
+        RemoteProviderKind::Github => format!("{GITHUB_API}/user/repos?affiliation=owner,collaborator,organization_member&visibility=all&sort=updated&per_page={per_page}&page={page}"),
+        RemoteProviderKind::Gitlab => format!("{}/api/v4/projects?membership=true&order_by=last_activity_at&sort=desc&per_page={per_page}&page={page}&search={}", account.host, url::form_urlencoded::byte_serialize(query.as_deref().unwrap_or("").as_bytes()).collect::<String>()),
+        RemoteProviderKind::Gitee => format!("{GITEE_API}/user/repos?type=all&sort=updated&per_page={per_page}&page={page}"),
+    };
     let value = send(
         authenticated(client()?.request(Method::GET, url), &account, &secret),
         if account.provider == RemoteProviderKind::Github {
             "GitHub"
+        } else if account.provider == RemoteProviderKind::Gitee {
+            "Gitee"
         } else {
             "GitLab"
         },
         cancel,
     )
     .await?;
-    let needle = query.unwrap_or_default().to_lowercase();
     let values = value.as_array().cloned().unwrap_or_default();
     let items = values
         .iter()
@@ -514,6 +602,39 @@ fn map_repository(account: &RemoteProviderAccount, item: &Value) -> Option<Remot
             }),
             private: item["visibility"].as_str() == Some("private"),
         }),
+        RemoteProviderKind::Gitee => Some(RemoteRepository {
+            id: item["id"].as_u64()?.to_string(),
+            provider: RemoteProviderKind::Gitee,
+            host: account.host.clone(),
+            name: item["name"].as_str()?.into(),
+            full_name: item["full_name"]
+                .as_str()
+                .or_else(|| item["path"].as_str())?
+                .into(),
+            clone_url: format!("{GITEE_HOST}/{}.git", item["full_name"].as_str()?),
+            web_url: item["html_url"].as_str().map(String::from).or_else(|| {
+                item["full_name"]
+                    .as_str()
+                    .map(|name| format!("{GITEE_HOST}/{name}"))
+            }),
+            default_branch: item["default_branch"].as_str().map(String::from),
+            namespace: item["namespace"].as_object().map(|ns| RemoteNamespace {
+                id: ns["id"].as_u64().unwrap_or_default().to_string(),
+                name: ns["name"]
+                    .as_str()
+                    .or_else(|| item["owner"]["login"].as_str())
+                    .unwrap_or("")
+                    .into(),
+                full_path: ns["path"]
+                    .as_str()
+                    .or_else(|| item["owner"]["login"].as_str())
+                    .unwrap_or("")
+                    .into(),
+                kind: ns["type"].as_str().unwrap_or("user").into(),
+                host: account.host.clone(),
+            }),
+            private: item["private"].as_bool().unwrap_or(false),
+        }),
     }
 }
 
@@ -526,8 +647,10 @@ pub async fn namespaces(
     let secret = token(&account)?;
     let url = if account.provider == RemoteProviderKind::Github {
         format!("{GITHUB_API}/user")
-    } else {
+    } else if account.provider == RemoteProviderKind::Gitlab {
         format!("{}/api/v4/namespaces?per_page=100", account.host)
+    } else {
+        format!("{GITEE_API}/user")
     };
     let value = send(
         authenticated(client()?.get(url), &account, &secret),
@@ -543,27 +666,33 @@ pub async fn namespaces(
             kind: "user".into(),
             host: account.host.clone(),
         }];
-        let orgs = send(
-            authenticated(
-                client()?.get(format!("{GITHUB_API}/user/orgs?per_page=100")),
-                &account,
-                &secret,
-            ),
-            "GitHub",
-            cancel,
-        )
-        .await?;
-        result.extend(orgs.as_array().into_iter().flatten().filter_map(|v| {
-            Some(RemoteNamespace {
-                id: v["id"].as_u64()?.to_string(),
-                name: v["login"].as_str()?.into(),
-                full_path: v["login"].as_str()?.into(),
-                kind: "organization".into(),
-                host: account.host.clone(),
-            })
-        }));
+        for page in 1..=20 {
+            let orgs = send(
+                authenticated(
+                    client()?.get(format!("{GITHUB_API}/user/orgs?per_page=100&page={page}")),
+                    &account,
+                    &secret,
+                ),
+                "GitHub",
+                cancel,
+            )
+            .await?;
+            let values = orgs.as_array().cloned().unwrap_or_default();
+            result.extend(values.iter().filter_map(|v| {
+                Some(RemoteNamespace {
+                    id: v["id"].as_u64()?.to_string(),
+                    name: v["login"].as_str()?.into(),
+                    full_path: v["login"].as_str()?.into(),
+                    kind: "organization".into(),
+                    host: account.host.clone(),
+                })
+            }));
+            if values.len() < 100 {
+                break;
+            }
+        }
         Ok(result)
-    } else {
+    } else if account.provider == RemoteProviderKind::Gitlab {
         Ok(value
             .as_array()
             .into_iter()
@@ -578,6 +707,55 @@ pub async fn namespaces(
                 })
             })
             .collect())
+    } else {
+        let mut result = vec![RemoteNamespace {
+            id: value["id"].as_u64().unwrap_or_default().to_string(),
+            name: value["login"]
+                .as_str()
+                .or_else(|| value["name"].as_str())
+                .unwrap_or("")
+                .into(),
+            full_path: value["path"]
+                .as_str()
+                .or_else(|| value["login"].as_str())
+                .or_else(|| value["name"].as_str())
+                .unwrap_or("")
+                .into(),
+            kind: "user".into(),
+            host: account.host.clone(),
+        }];
+        for page in 1..=20 {
+            let orgs = send(
+                authenticated(
+                    client()?.get(format!("{GITEE_API}/user/orgs?per_page=100&page={page}")),
+                    &account,
+                    &secret,
+                ),
+                "Gitee",
+                cancel,
+            )
+            .await;
+            let Ok(orgs) = orgs else {
+                break;
+            };
+            let values = orgs.as_array().cloned().unwrap_or_default();
+            result.extend(values.iter().filter_map(|item| {
+                Some(RemoteNamespace {
+                    id: item["id"].as_u64()?.to_string(),
+                    name: item["name"]
+                        .as_str()
+                        .or_else(|| item["login"].as_str())?
+                        .into(),
+                    full_path: item["login"].as_str()?.into(),
+                    kind: "organization".into(),
+                    host: account.host.clone(),
+                })
+            }));
+            if values.len() < 100 {
+                break;
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -624,6 +802,19 @@ pub async fn create_repository(
             format!("{}/api/v4/projects", account.host),
             json!({"name":name,"description":description,"visibility":match visibility { RemoteVisibility::Private=>"private", RemoteVisibility::Internal=>"internal", RemoteVisibility::Public=>"public" },"namespace_id":namespace_id.and_then(|v| v.parse::<u64>().ok())}),
         ),
+        RemoteProviderKind::Gitee => (
+            namespace_id
+                .filter(|value| !value.is_empty() && **value != account.login)
+                .map(|namespace| {
+                    format!(
+                        "{GITEE_API}/orgs/{}/repos",
+                        url::form_urlencoded::byte_serialize(namespace.as_bytes())
+                            .collect::<String>()
+                    )
+                })
+                .unwrap_or_else(|| format!("{GITEE_API}/user/repos")),
+            json!({"name":name,"description":description,"private":visibility == RemoteVisibility::Private,"has_issues":true,"has_wiki":true}),
+        ),
     };
     let value = send(
         authenticated(client()?.post(url).json(&body), &account, &secret),
@@ -664,11 +855,437 @@ pub fn credentials_for_url(
     Ok((
         if account.provider == RemoteProviderKind::Github {
             "x-access-token".into()
+        } else if account.provider == RemoteProviderKind::Gitee {
+            account.login.clone()
         } else {
             "oauth2".into()
         },
         token(&account)?,
     ))
+}
+
+pub fn credentials_for_url_if_unambiguous(
+    config_dir: &Path,
+    url_value: &str,
+) -> Result<Option<(String, String)>, DesktopError> {
+    let parsed = match url::Url::parse(url_value) {
+        Ok(value) if matches!(value.scheme(), "http" | "https") => value,
+        _ => return Ok(None),
+    };
+    let candidates = load(config_dir)
+        .accounts
+        .into_iter()
+        .filter(|account| {
+            let Ok(host) = url::Url::parse(&account.host) else {
+                return false;
+            };
+            let base_path = host.path().trim_end_matches('/');
+            parsed.host_str() == host.host_str()
+                && (base_path.is_empty() || parsed.path().starts_with(&format!("{base_path}/")))
+        })
+        .collect::<Vec<_>>();
+    if candidates.len() != 1 {
+        return Ok(None);
+    }
+    credentials_for_url(config_dir, &candidates[0].id, url_value).map(Some)
+}
+
+fn remote_hostname(remote: &str) -> Option<String> {
+    if remote.contains("://") {
+        return url::Url::parse(remote)
+            .ok()?
+            .host_str()
+            .map(str::to_lowercase);
+    }
+    let host_and_path = remote
+        .rsplit_once('@')
+        .map(|(_, value)| value)
+        .unwrap_or(remote);
+    let (host, _) = host_and_path.split_once(':')?;
+    (!host.is_empty() && !host.contains(['/', '\\'])).then(|| host.to_lowercase())
+}
+
+fn account_hostname(account: &RemoteProviderAccount) -> Option<String> {
+    url::Url::parse(&account.host)
+        .ok()?
+        .host_str()
+        .map(str::to_lowercase)
+}
+
+fn avatar_candidate(email: &str, author_name: &str, provider: RemoteProviderKind) -> String {
+    let normalized = email.trim().to_lowercase();
+    let local = normalized.split('@').next().unwrap_or("");
+    let noreply = match provider {
+        RemoteProviderKind::Github => normalized.ends_with("@users.noreply.github.com"),
+        RemoteProviderKind::Gitee => {
+            normalized.ends_with("@user.noreply.gitee.com")
+                || normalized.ends_with("@noreply.gitee.com")
+        }
+        RemoteProviderKind::Gitlab => {
+            normalized.ends_with("@users.noreply.gitlab.com")
+                || normalized.ends_with("@noreply.gitlab.com")
+        }
+    };
+    if noreply {
+        return match provider {
+            RemoteProviderKind::Github => local.split('+').next_back().unwrap_or(local).to_string(),
+            RemoteProviderKind::Gitee => local
+                .split('+')
+                .next_back()
+                .unwrap_or(local)
+                .split('_')
+                .next_back()
+                .unwrap_or(local)
+                .to_string(),
+            RemoteProviderKind::Gitlab => local
+                .split_once('-')
+                .map(|(_, name)| name)
+                .unwrap_or(local)
+                .to_string(),
+        };
+    }
+    if provider == RemoteProviderKind::Github {
+        return String::new();
+    }
+    let prefix = local.trim_end_matches(|c: char| c.is_ascii_digit());
+    if prefix.len() >= 2 {
+        prefix.into()
+    } else {
+        author_name.trim().into()
+    }
+}
+
+fn github_avatar_url(username: &str) -> Option<String> {
+    (!username.is_empty()).then(|| {
+        format!(
+            "https://avatars.githubusercontent.com/{}",
+            url::form_urlencoded::byte_serialize(username.as_bytes()).collect::<String>()
+        )
+    })
+}
+
+pub async fn resolve_author_avatar(
+    config_dir: &Path,
+    email: &str,
+    author_name: &str,
+    remote_urls: &[String],
+    cross_platform_fallback: bool,
+    cancel: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    if cancel.is_cancelled() {
+        return Err(DesktopError::new(
+            "REQUEST_CANCELLED",
+            "Operation cancelled",
+            true,
+        ));
+    }
+    let saved_accounts = load(config_dir).accounts;
+    let mut platforms = Vec::<(String, RemoteProviderKind)>::new();
+    for host in remote_urls
+        .iter()
+        .filter_map(|remote| remote_hostname(remote))
+    {
+        let known = saved_accounts
+            .iter()
+            .find(|account| account_hostname(account).as_deref() == Some(host.as_str()));
+        let kind = known.map(|account| account.provider).or_else(|| {
+            if host == "github.com" || host.ends_with(".github.com") {
+                Some(RemoteProviderKind::Github)
+            } else if host == "gitee.com" || host.ends_with(".gitee.com") {
+                Some(RemoteProviderKind::Gitee)
+            } else if host == "gitlab.com" || host.ends_with(".gitlab.com") {
+                Some(RemoteProviderKind::Gitlab)
+            } else {
+                None
+            }
+        });
+        if let Some(kind) = kind {
+            if !platforms.iter().any(|(existing, _)| *existing == host) {
+                platforms.push((host, kind));
+            }
+        }
+    }
+    if cross_platform_fallback {
+        for account in &saved_accounts {
+            if let Some(host) = account_hostname(account) {
+                if !platforms.iter().any(|(existing, _)| *existing == host) {
+                    platforms.push((host, account.provider));
+                }
+            }
+        }
+    }
+    for (host, kind) in platforms {
+        let result =
+            resolve_author_avatar_on_host(&saved_accounts, &host, kind, email, author_name, cancel)
+                .await;
+        if cancel.is_cancelled() {
+            return Err(DesktopError::new(
+                "REQUEST_CANCELLED",
+                "Operation cancelled",
+                true,
+            ));
+        }
+        match result {
+            Ok(Some(avatar)) => return Ok(Some(avatar)),
+            Err(error) if error.code == "REQUEST_CANCELLED" => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+async fn resolve_author_avatar_on_host(
+    saved_accounts: &[RemoteProviderAccount],
+    host: &str,
+    provider_kind: RemoteProviderKind,
+    email: &str,
+    author_name: &str,
+    cancel: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    let account = saved_accounts.iter().find(|item| {
+        item.provider == provider_kind && account_hostname(item).as_deref() == Some(host)
+    });
+    let Some(account) = account else {
+        if provider_kind == RemoteProviderKind::Github
+            && email
+                .trim()
+                .to_lowercase()
+                .ends_with("@users.noreply.github.com")
+        {
+            let candidate = avatar_candidate(email, author_name, provider_kind);
+            return Ok(github_avatar_url(&candidate));
+        }
+        return Ok(None);
+    };
+    let secret = token(account)?;
+    let candidate = avatar_candidate(email, author_name, provider_kind);
+    let normalized_email = email.trim().to_lowercase();
+    let current_match = account.login.eq_ignore_ascii_case(&candidate)
+        || account
+            .display_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case(author_name));
+    let value = match provider_kind {
+        RemoteProviderKind::Github => {
+            let current = send(
+                authenticated(
+                    client()?.get(format!("{GITHUB_API}/user")),
+                    account,
+                    &secret,
+                ),
+                "GitHub avatar",
+                cancel,
+            )
+            .await
+            .ok();
+            let current_email_match = current
+                .as_ref()
+                .and_then(|user| user["email"].as_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case(&normalized_email));
+            if current_match || current_email_match {
+                current
+            } else if normalized_email.ends_with("@users.noreply.github.com") {
+                return Ok(github_avatar_url(&candidate));
+            } else if normalized_email.contains('@') {
+                let search = send(
+                    authenticated(
+                        client()?
+                            .get(format!("{GITHUB_API}/search/users"))
+                            .query(&[("q", format!("{normalized_email} in:email"))]),
+                        account,
+                        &secret,
+                    ),
+                    "GitHub avatar",
+                    cancel,
+                )
+                .await
+                .ok();
+                search.and_then(|result| {
+                    result["items"]
+                        .as_array()
+                        .and_then(|items| items.first())
+                        .cloned()
+                })
+            } else {
+                None
+            }
+        }
+        RemoteProviderKind::Gitee => {
+            let current = send(
+                authenticated(client()?.get(format!("{GITEE_API}/user")), account, &secret),
+                "Gitee avatar",
+                cancel,
+            )
+            .await
+            .ok();
+            let current_email_match = current
+                .as_ref()
+                .and_then(|user| user["email"].as_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case(&normalized_email));
+            if current_match || current_email_match {
+                current
+            } else if !candidate.is_empty() {
+                let encoded =
+                    url::form_urlencoded::byte_serialize(candidate.as_bytes()).collect::<String>();
+                send(
+                    authenticated(
+                        client()?.get(format!("{GITEE_API}/users/{encoded}")),
+                        account,
+                        &secret,
+                    ),
+                    "Gitee avatar",
+                    cancel,
+                )
+                .await
+                .ok()
+            } else {
+                None
+            }
+        }
+        RemoteProviderKind::Gitlab => {
+            let current = send(
+                authenticated(
+                    client()?.get(format!("{}/api/v4/user", account.host)),
+                    account,
+                    &secret,
+                ),
+                "GitLab avatar",
+                cancel,
+            )
+            .await
+            .ok();
+            let current_email_match = current
+                .as_ref()
+                .and_then(|user| user["email"].as_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case(&normalized_email));
+            if current_match || current_email_match {
+                current
+            } else {
+                let search = send(
+                    authenticated(
+                        client()?
+                            .get(format!("{}/api/v4/users", account.host))
+                            .query(&[("search", normalized_email.as_str())]),
+                        account,
+                        &secret,
+                    ),
+                    "GitLab avatar",
+                    cancel,
+                )
+                .await
+                .ok();
+                let matched = search.and_then(|result| {
+                    result
+                        .as_array()
+                        .and_then(|items| {
+                            items.iter().find(|item| {
+                                item["email"].as_str().is_some_and(|value| {
+                                    value.eq_ignore_ascii_case(&normalized_email)
+                                })
+                            })
+                        })
+                        .cloned()
+                });
+                if matched.is_some() {
+                    matched
+                } else if !candidate.is_empty() {
+                    send(
+                        authenticated(
+                            client()?
+                                .get(format!("{}/api/v4/users", account.host))
+                                .query(&[("username", candidate.as_str())]),
+                            account,
+                            &secret,
+                        ),
+                        "GitLab avatar",
+                        cancel,
+                    )
+                    .await
+                    .ok()
+                    .and_then(|result| result.as_array().and_then(|items| items.first()).cloned())
+                } else {
+                    None
+                }
+            }
+        }
+    };
+    let avatar = value
+        .and_then(|item| item["avatar_url"].as_str().map(String::from))
+        .filter(|url| !url.contains("no_portrait"))
+        .and_then(|avatar| {
+            let base = url::Url::parse(&account.host).ok()?;
+            let parsed = base.join(&avatar).ok()?;
+            matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
+        });
+    if provider_kind == RemoteProviderKind::Gitlab {
+        if let Some(ref avatar_url) = avatar {
+            if let Some(data_url) =
+                fetch_private_gitlab_avatar(account, &secret, avatar_url, cancel).await
+            {
+                return Ok(Some(data_url));
+            }
+        }
+    }
+    Ok(avatar)
+}
+
+async fn fetch_private_gitlab_avatar(
+    account: &RemoteProviderAccount,
+    secret: &str,
+    avatar_url: &str,
+    cancel: &CancellationToken,
+) -> Option<String> {
+    let account_url = url::Url::parse(&account.host).ok()?;
+    let avatar = url::Url::parse(avatar_url).ok()?;
+    if avatar.origin() != account_url.origin() {
+        return None;
+    }
+    let download = async {
+        let mut response = client()
+            .ok()?
+            .get(avatar_url)
+            .header("PRIVATE-TOKEN", secret)
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success()
+            || response
+                .content_length()
+                .is_some_and(|length| length > 1_048_576)
+        {
+            return None;
+        }
+        let mime = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)?
+            .to_str()
+            .ok()?
+            .split(';')
+            .next()?
+            .trim()
+            .to_string();
+        if !matches!(
+            mime.as_str(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        ) {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.ok()? {
+            if bytes.len().saturating_add(chunk.len()) > 1_048_576 {
+                return None;
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Some(format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ))
+    };
+    tokio::select! {
+        _ = cancel.cancelled() => None,
+        result = tokio::time::timeout(Duration::from_secs(6), download) => result.ok().flatten(),
+    }
 }
 
 #[cfg(test)]

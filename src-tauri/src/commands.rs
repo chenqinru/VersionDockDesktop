@@ -6,11 +6,11 @@ use tauri_plugin_opener::OpenerExt;
 use crate::{
     changelist, identity,
     models::{
-        BootstrapData, BridgeCommand, CapabilityStatus, CloneRepositoryResult, ConflictFile,
-        DesktopCapabilities, DesktopError, InitializeRepositoryResult, NotificationPermissionState,
-        OperationEvent, OperationStatus, RefreshScope, RepositoryEvent, RepositoryEventSource,
-        RequestEnvelope, ResponseEnvelope, RuntimeCapabilities, VcsKind, WindowTabImport,
-        WindowTabTransferCompleted,
+        BootstrapData, BridgeCommand, CapabilityStatus, CheckoutRepositoryResult,
+        CloneRepositoryResult, ConflictFile, DesktopCapabilities, DesktopError,
+        InitializeRepositoryResult, NotificationPermissionState, OperationEvent, OperationStatus,
+        RefreshScope, RepositoryEvent, RepositoryEventSource, RequestEnvelope, ResponseEnvelope,
+        RuntimeCapabilities, VcsKind, WindowTabImport, WindowTabTransferCompleted,
     },
     provider, shelf,
     state::{self, AppState, OperationReporter},
@@ -560,6 +560,7 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
             ("initializing", "Initializing Git repository")
         }
         BridgeCommand::CloneRepository { .. } => ("cloning", "Cloning Git repository"),
+        BridgeCommand::CheckoutSvnRepository { .. } => ("checkout", "Checking out SVN repository"),
         BridgeCommand::RepositoryStatus { .. } => ("status", "Reading repository status"),
         BridgeCommand::FileDiff { .. }
         | BridgeCommand::StashFileDiff { .. }
@@ -578,10 +579,12 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         BridgeCommand::Sync { .. } => ("sync", "Synchronizing repository"),
         BridgeCommand::ProviderAccounts
         | BridgeCommand::ProviderRepositories { .. }
-        | BridgeCommand::ProviderNamespaces { .. } => ("provider", "Loading remote provider data"),
+        | BridgeCommand::ProviderNamespaces { .. }
+        | BridgeCommand::ResolveAuthorAvatar { .. } => ("provider", "Loading remote provider data"),
         BridgeCommand::ProviderGithubBegin { .. }
         | BridgeCommand::ProviderGithubComplete { .. }
         | BridgeCommand::ProviderGitlabSave { .. }
+        | BridgeCommand::ProviderGiteeSave { .. }
         | BridgeCommand::ProviderRemove { .. } => {
             ("providerAuth", "Updating remote provider account")
         }
@@ -1076,6 +1079,17 @@ async fn dispatch(
                 },
             );
             availability.insert(
+                "giteeProvider".into(),
+                if secure_credentials.status.available {
+                    CapabilityStatus::available()
+                } else {
+                    CapabilityStatus::unavailable(
+                        "SECURE_STORAGE_UNAVAILABLE",
+                        "System secure storage is unavailable",
+                    )
+                },
+            );
+            availability.insert(
                 "svnAccount".into(),
                 tool_capability(tools.svn, "SVN", tools.svn_version.as_deref()),
             );
@@ -1382,10 +1396,10 @@ async fn dispatch(
             let parent = state::canonical_directory(&parent_path)?;
             let target = state::safe_relative(&parent, &target_name, true)?;
             let lock_key = format!("path:{}", target.to_string_lossy());
-            let credentials = provider_account_id
-                .as_deref()
-                .map(|id| provider::credentials_for_url(&state.config_dir, id, &url))
-                .transpose()?;
+            let credentials = match provider_account_id.as_deref() {
+                Some(id) => Some(provider::credentials_for_url(&state.config_dir, id, &url)?),
+                None => provider::credentials_for_url_if_unambiguous(&state.config_dir, &url)?,
+            };
             let recurse = state.app.read().await.settings.clone_recursive_submodules;
             let path = with_write(state, &lock_key, token, async {
                 vcs::clone_repository(
@@ -1403,6 +1417,42 @@ async fn dispatch(
                 path: path.to_string_lossy().into_owned(),
             })
         }
+        BridgeCommand::CheckoutSvnRepository {
+            url,
+            parent_path,
+            target_name,
+            username,
+            password,
+        } => {
+            let parent = state::canonical_directory(&parent_path)?;
+            let target = state::safe_relative(&parent, &target_name, true)?;
+            let lock_key = format!("path:{}", target.to_string_lossy());
+            let credentials = match (username, password) {
+                (Some(username), Some(password)) => Some((username, password)),
+                (None, None) => None,
+                _ => {
+                    return Err(DesktopError::new(
+                        "SVN_CREDENTIALS_INCOMPLETE",
+                        "Both SVN username and password are required",
+                        false,
+                    ))
+                }
+            };
+            let path = with_write(state, &lock_key, token, async {
+                vcs::checkout_svn_repository(
+                    &url,
+                    &parent,
+                    &target_name,
+                    credentials.as_ref(),
+                    token,
+                )
+                .await
+            })
+            .await?;
+            json(CheckoutRepositoryResult {
+                path: path.to_string_lossy().into_owned(),
+            })
+        }
         BridgeCommand::ProviderAccounts => json(provider::accounts(&state.config_dir)),
         BridgeCommand::ProviderGithubBegin { account_id } => {
             json(provider::github_begin(account_id, token).await?)
@@ -1417,6 +1467,10 @@ async fn dispatch(
         } => {
             json(provider::gitlab_save(&state.config_dir, account_id, &host, &secret, token).await?)
         }
+        BridgeCommand::ProviderGiteeSave {
+            account_id,
+            token: secret,
+        } => json(provider::gitee_save(&state.config_dir, account_id, &secret, token).await?),
         BridgeCommand::ProviderRemove { account_id } => {
             json(provider::remove(&state.config_dir, &account_id)?)
         }
@@ -1431,6 +1485,41 @@ async fn dispatch(
         ),
         BridgeCommand::ProviderNamespaces { account_id } => {
             json(provider::namespaces(&state.config_dir, &account_id, token).await?)
+        }
+        BridgeCommand::ResolveAuthorAvatar {
+            workspace_id,
+            repo_id,
+            email,
+            author_name,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let remotes = if repo.kind == VcsKind::Git {
+                vcs::remotes(&repo, token)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|item| item.fetch_url)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let cross_platform_fallback = state
+                .app
+                .read()
+                .await
+                .settings
+                .avatar_cross_platform_fallback;
+            json(
+                provider::resolve_author_avatar(
+                    &state.config_dir,
+                    &email,
+                    &author_name,
+                    &remotes,
+                    cross_platform_fallback,
+                    token,
+                )
+                .await?,
+            )
         }
         BridgeCommand::PublishRepository {
             workspace_id,
@@ -1930,10 +2019,33 @@ async fn dispatch(
             workspace_id,
             repo_id,
             paths,
+            allow_truncated,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
-                vcs::stage(&repo, &paths, token).await
+                if repo.kind == VcsKind::Svn {
+                    let status = workspace::svn_status(repo.clone(), token).await?;
+                    let truncated = status
+                        .files
+                        .iter()
+                        .filter(|file| file.is_truncated && paths.contains(&file.path))
+                        .count();
+                    if truncated > 0 && !allow_truncated {
+                        return Err(DesktopError::new(
+                            "SVN_TRUNCATED_DIRECTORY_CONFIRMATION_REQUIRED",
+                            "Adding a truncated SVN directory recursively requires confirmation",
+                            true,
+                        ));
+                    }
+                    if allow_truncated && (truncated != 1 || paths.len() != 1) {
+                        return Err(DesktopError::new(
+                            "SVN_TRUNCATED_DIRECTORY_SINGLE_TARGET_REQUIRED",
+                            "Add one truncated SVN directory at a time",
+                            false,
+                        ));
+                    }
+                }
+                vcs::stage(&repo, &paths, allow_truncated, token).await
             })
             .await?;
             json(true)
@@ -1957,6 +2069,20 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
+                if repo.kind == VcsKind::Svn {
+                    let status = workspace::svn_status(repo.clone(), token).await?;
+                    if status
+                        .files
+                        .iter()
+                        .any(|file| file.is_truncated && paths.contains(&file.path))
+                    {
+                        return Err(DesktopError::new(
+                            "SVN_TRUNCATED_DIRECTORY_DISCARD_FORBIDDEN",
+                            "A truncated SVN directory cannot be discarded safely",
+                            false,
+                        ));
+                    }
+                }
                 vcs::discard(&repo, &paths, token).await
             })
             .await?;
@@ -2291,7 +2417,7 @@ async fn dispatch(
                                     Some(total),
                                 );
                                 let settings = state.app.read().await.settings.clone();
-                                vcs::sync(
+                                Box::pin(vcs::sync(
                                     &repo,
                                     crate::models::SyncAction::Push,
                                     None,
@@ -2299,7 +2425,7 @@ async fn dispatch(
                                     false,
                                     &settings,
                                     token,
-                                )
+                                ))
                                 .await
                             })
                             .await
@@ -2409,7 +2535,7 @@ async fn dispatch(
                     None,
                 );
                 let settings = state.app.read().await.settings.clone();
-                vcs::sync(
+                Box::pin(vcs::sync(
                     &repo,
                     action,
                     remote,
@@ -2417,7 +2543,7 @@ async fn dispatch(
                     force.unwrap_or(false),
                     &settings,
                     token,
-                )
+                ))
                 .await
             })
             .await?;

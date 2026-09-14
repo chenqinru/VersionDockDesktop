@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use chrono::Utc;
@@ -373,6 +374,7 @@ fn walk(
             .ok()
             .map(|path| path.to_string_lossy().replace('\\', "/"));
         if SKIP.contains(&name.as_str())
+            || name.contains(".vd-staging-")
             || ignored_folders
                 .iter()
                 .any(|ignored| ignored == &name || relative.as_ref() == Some(ignored))
@@ -493,6 +495,8 @@ pub async fn git_status(
             conflicted,
             conflict_type: conflicted.then(|| "text".into()),
             submodule,
+            is_truncated: false,
+            truncation_reason: None,
         });
     }
     let revision = cli::run(
@@ -528,7 +532,7 @@ pub async fn svn_status(
     let root = Path::new(&meta.root_path);
     let output = cli::run(
         "svn",
-        &["status".into(), "--xml".into(), "--no-ignore".into()],
+        &["status".into(), "--xml".into()],
         root,
         None,
         cli::DEFAULT_TIMEOUT,
@@ -545,6 +549,14 @@ pub async fn svn_status(
     {
         let Some(path) = entry.attribute("path") else {
             continue;
+        };
+        let relative_path = if Path::new(path).is_absolute() {
+            match Path::new(path).strip_prefix(root) {
+                Ok(value) => value.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            }
+        } else {
+            path.replace('\\', "/")
         };
         let Some(status) = entry.children().find(|node| node.has_tag_name("wc-status")) else {
             continue;
@@ -566,15 +578,55 @@ pub async fn svn_status(
             continue;
         }
         files.push(FileChange {
-            path: path.replace('\\', "/"),
-            status: item.into(),
+            path: relative_path,
+            status: svn_status_label(item).into(),
             staged: false,
             unstaged: true,
             conflicted,
             conflict_type,
             submodule: false,
+            is_truncated: false,
+            truncation_reason: None,
         });
     }
+    let has_unversioned_directory = files.iter().any(|file| {
+        file.status == "untracked"
+            && std::fs::symlink_metadata(root.join(&file.path))
+                .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+    });
+    let ignores = if has_unversioned_directory {
+        svn_ignore_rules(root, token).await
+    } else {
+        SvnIgnoreRules {
+            client: Vec::new(),
+            inherited: Vec::new(),
+        }
+    };
+    let mut expanded = Vec::with_capacity(files.len());
+    for file in files {
+        let candidate = root.join(&file.path);
+        let real_directory = std::fs::symlink_metadata(&candidate)
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
+        if file.status == "untracked" && real_directory {
+            let (children, truncated, reason) =
+                collect_svn_untracked(&candidate, root, &ignores, 500, 8);
+            let has_children = !children.is_empty();
+            if truncated {
+                expanded.push(FileChange {
+                    is_truncated: true,
+                    truncation_reason: reason,
+                    ..file.clone()
+                });
+            }
+            expanded.extend(children);
+            if !truncated && !has_children {
+                expanded.push(file);
+            }
+        } else {
+            expanded.push(file);
+        }
+    }
+    let files = expanded;
     let info = cli::run(
         "svn",
         &["info".into(), "--show-item".into(), "relative-url".into()],
@@ -619,6 +671,263 @@ pub async fn svn_status(
         capabilities: repository_capabilities(VcsKind::Svn, true),
         tool_available: true,
     })
+}
+
+fn svn_status_label(item: &str) -> &'static str {
+    match item {
+        "unversioned" => "untracked",
+        "added" => "added",
+        "deleted" | "missing" => "deleted",
+        "conflicted" | "obstructed" => "conflicted",
+        _ => "modified",
+    }
+}
+
+fn collect_svn_untracked(
+    directory: &Path,
+    root: &Path,
+    ignores: &SvnIgnoreRules,
+    max_entries: usize,
+    max_depth: usize,
+) -> (Vec<FileChange>, bool, Option<String>) {
+    let mut files = Vec::new();
+    let mut visited = 0;
+    let mut truncated = false;
+    let mut reason = None;
+    fn walk(
+        directory: &Path,
+        root: &Path,
+        ignores: &SvnIgnoreRules,
+        depth: usize,
+        max_depth: usize,
+        max_entries: usize,
+        visited: &mut usize,
+        files: &mut Vec<FileChange>,
+        reason: &mut Option<String>,
+    ) {
+        if depth > max_depth {
+            *reason = Some("depth-limit".into());
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if files.len() >= max_entries || *visited >= max_entries {
+                *reason = Some("entry-limit".into());
+                break;
+            }
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if matches!(name.as_str(), ".git" | ".hg") || ignores.matches(&path, root, &name) {
+                continue;
+            }
+            *visited += 1;
+            let Ok(kind) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if kind.is_dir() && !kind.file_type().is_symlink() {
+                walk(
+                    &path,
+                    root,
+                    ignores,
+                    depth + 1,
+                    max_depth,
+                    max_entries,
+                    visited,
+                    files,
+                    reason,
+                );
+            } else if let Ok(relative) = path.strip_prefix(root) {
+                files.push(FileChange {
+                    path: relative.to_string_lossy().replace('\\', "/"),
+                    status: "untracked".into(),
+                    staged: false,
+                    unstaged: true,
+                    conflicted: false,
+                    conflict_type: None,
+                    submodule: false,
+                    is_truncated: false,
+                    truncation_reason: None,
+                });
+            }
+        }
+    }
+    walk(
+        directory,
+        root,
+        ignores,
+        1,
+        max_depth,
+        max_entries,
+        &mut visited,
+        &mut files,
+        &mut reason,
+    );
+    truncated |= reason.is_some();
+    (files, truncated, reason)
+}
+
+pub(crate) struct SvnIgnoreRules {
+    client: Vec<glob::Pattern>,
+    inherited: Vec<(PathBuf, Vec<glob::Pattern>)>,
+}
+
+impl SvnIgnoreRules {
+    pub(crate) fn matches(&self, path: &Path, root: &Path, lower_name: &str) -> bool {
+        if lower_name == ".svn" {
+            return true;
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if self.client.iter().any(|pattern| pattern.matches(name)) {
+            return true;
+        }
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        self.inherited.iter().any(|(scope, patterns)| {
+            relative.starts_with(scope) && patterns.iter().any(|pattern| pattern.matches(name))
+        })
+    }
+}
+
+fn svn_client_ignore_patterns() -> Vec<glob::Pattern> {
+    let mut config_paths = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        config_paths.push(PathBuf::from(home).join(".subversion/config"));
+    }
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        config_paths.push(PathBuf::from(appdata).join("Subversion/config"));
+    }
+    for path in config_paths {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let mut values = Vec::new();
+        let mut found = false;
+        let mut continuation = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with('#')
+                || trimmed.starts_with(';')
+                || trimmed.starts_with('[')
+            {
+                continuation = false;
+                continue;
+            }
+            if continuation && line.starts_with([' ', '\t']) {
+                values.extend(trimmed.split_whitespace().map(str::to_string));
+                continue;
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                if key.trim().eq_ignore_ascii_case("global-ignores") {
+                    found = true;
+                    continuation = true;
+                    values.extend(value.split_whitespace().map(str::to_string));
+                    continue;
+                }
+            }
+            continuation = false;
+        }
+        if found {
+            return compile_svn_patterns(values);
+        }
+    }
+    compile_svn_patterns([
+        "*.o",
+        "*.lo",
+        "*.la",
+        "*.al",
+        ".libs",
+        "*.so",
+        "*.so.[0-9]*",
+        "*.a",
+        "*.pyc",
+        "*.pyo",
+        "__pycache__",
+        "*.rej",
+        "*~",
+        "#*#",
+        ".#*",
+        ".*.swp",
+        ".DS_Store",
+        "[Tt]humbs.db",
+    ])
+}
+
+fn compile_svn_patterns<I, S>(values: I) -> Vec<glob::Pattern>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    values
+        .into_iter()
+        .filter_map(|value| glob::Pattern::new(value.as_ref()).ok())
+        .collect()
+}
+
+pub(crate) async fn svn_ignore_rules(root: &Path, token: &CancellationToken) -> SvnIgnoreRules {
+    let client = svn_client_ignore_patterns();
+    let output = cli::run(
+        "svn",
+        &[
+            "propget".into(),
+            "svn:global-ignores".into(),
+            "--show-inherited-props".into(),
+            "--xml".into(),
+            "-R".into(),
+            "--".into(),
+            ".".into(),
+        ],
+        root,
+        None,
+        Duration::from_secs(5),
+        token,
+    )
+    .await;
+    let inherited = output
+        .ok()
+        .and_then(|value| {
+            let xml = value.stdout_text();
+            let document = roxmltree::Document::parse(&xml).ok()?;
+            let mut rules = Vec::new();
+            for target in document
+                .descendants()
+                .filter(|node| node.has_tag_name("target"))
+            {
+                let raw_scope = target.attribute("path").unwrap_or("");
+                let scope = if raw_scope.contains("://") {
+                    PathBuf::new()
+                } else if Path::new(raw_scope).is_absolute() {
+                    Path::new(raw_scope)
+                        .strip_prefix(root)
+                        .unwrap_or(Path::new(""))
+                        .to_path_buf()
+                } else {
+                    PathBuf::from(raw_scope)
+                };
+                for property in target.descendants().filter(|node| {
+                    (node.has_tag_name("property") || node.has_tag_name("inherited_property"))
+                        && node.attribute("name") == Some("svn:global-ignores")
+                }) {
+                    let property_scope = if property.has_tag_name("inherited_property") {
+                        PathBuf::new()
+                    } else {
+                        scope.clone()
+                    };
+                    let patterns =
+                        compile_svn_patterns(property.text().unwrap_or("").split_whitespace());
+                    if !patterns.is_empty() {
+                        rules.push((property_scope, patterns));
+                    }
+                }
+            }
+            Some(rules)
+        })
+        .unwrap_or_default();
+    SvnIgnoreRules { client, inherited }
 }
 
 fn empty_status(meta: RepositoryMeta, tool_available: bool) -> RepositoryStatus {
@@ -1164,6 +1473,8 @@ mod tests {
             conflicted: false,
             conflict_type: None,
             submodule: false,
+            is_truncated: false,
+            truncation_reason: None,
         };
         let mut repositories = vec![
             status(
@@ -1291,6 +1602,8 @@ mod tests {
             conflicted: true,
             conflict_type: Some("bothModified".into()),
             submodule: false,
+            is_truncated: false,
+            truncation_reason: None,
         });
         apply_runtime_capabilities(&mut git, &tools, &secure_store);
         assert_eq!(

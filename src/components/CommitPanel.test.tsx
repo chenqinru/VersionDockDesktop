@@ -309,7 +309,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByText('origin')).toBeInTheDocument();
     expect(screen.getByText('main')).toBeInTheDocument();
     expect(screen.getByText('squash')).toBeInTheDocument();
-    expect(screen.getByText('Up to date')).toBeInTheDocument();
+    expect(screen.getByText('Checking...')).toBeInTheDocument();
     expect(screen.getByTitle('Pull Subtree')).toBeInTheDocument();
     expect(screen.getByTitle('More')).toBeInTheDocument();
   });

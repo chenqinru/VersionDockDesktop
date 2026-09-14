@@ -328,9 +328,9 @@ function RepoSection({
   const projectColor = readableAccentColor(meta.color || '#20b2aa');
 
   return (
-    <div style={css.repoSection}>
+    <div className="subtree-repo-section" style={css.repoSection}>
       {multiRepo && (
-        <div style={css.repoHeader(projectColor)}>
+        <div className="repository-group-header" style={{ ...css.repoHeader(projectColor), '--repo-color': projectColor } as React.CSSProperties}>
           <span style={css.dot(projectColor)} />
           <span style={css.repoName}>{meta.name}</span>
           {summary && <span style={css.repoStatus}>{summary}</span>}

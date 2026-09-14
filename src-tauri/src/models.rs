@@ -56,7 +56,7 @@ pub enum OperationDomain {
     System,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum OperationStatus {
     Queued,
@@ -160,6 +160,13 @@ pub enum BridgeCommand {
         target_name: String,
         provider_account_id: Option<String>,
     },
+    CheckoutSvnRepository {
+        url: String,
+        parent_path: String,
+        target_name: String,
+        username: Option<String>,
+        password: Option<String>,
+    },
     ProviderAccounts,
     ProviderGithubBegin {
         account_id: Option<String>,
@@ -170,6 +177,10 @@ pub enum BridgeCommand {
     ProviderGitlabSave {
         account_id: Option<String>,
         host: String,
+        token: String,
+    },
+    ProviderGiteeSave {
+        account_id: Option<String>,
         token: String,
     },
     ProviderRemove {
@@ -183,6 +194,12 @@ pub enum BridgeCommand {
     },
     ProviderNamespaces {
         account_id: String,
+    },
+    ResolveAuthorAvatar {
+        workspace_id: String,
+        repo_id: String,
+        email: String,
+        author_name: String,
     },
     PublishRepository {
         workspace_id: String,
@@ -261,6 +278,9 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         paths: Vec<String>,
+        #[serde(default)]
+        #[specta(optional)]
+        allow_truncated: bool,
     },
     Unstage {
         workspace_id: String,
@@ -655,11 +675,18 @@ pub struct CloneRepositoryResult {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutRepositoryResult {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum RemoteProviderKind {
     Github,
     Gitlab,
+    Gitee,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1482,6 +1509,9 @@ pub struct DesktopSettings {
     #[specta(optional)]
     pub gravatar_enabled: bool,
     #[serde(default)]
+    #[specta(optional)]
+    pub avatar_cross_platform_fallback: bool,
+    #[serde(default)]
     pub file_icon_theme: FileIconThemePreference,
 
     // ── Commit & Safety Guard ──────────────────────────────────────────────
@@ -1581,6 +1611,7 @@ impl Default for DesktopSettings {
             skipped_update_version: None,
             online_avatars_enabled: false,
             gravatar_enabled: false,
+            avatar_cross_platform_fallback: false,
             repository_scan_depth: 4,
             ignored_folders: vec![
                 ".git".into(),
@@ -2098,6 +2129,12 @@ pub struct FileChange {
     #[serde(default)]
     #[specta(optional)]
     pub submodule: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_truncated: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub truncation_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2252,10 +2289,15 @@ pub struct UnpushedCommit {
     #[specta(optional)]
     pub full_message: Option<String>,
     pub author: String,
+    #[serde(default)]
+    #[specta(optional)]
+    pub author_email: Option<String>,
     pub date: String,
     pub files_changed: u32,
     pub additions: u32,
     pub deletions: u32,
+    #[serde(default)]
+    pub parents: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2271,6 +2313,9 @@ pub struct IncomingCommit {
     #[specta(optional)]
     pub full_message: Option<String>,
     pub author: String,
+    #[serde(default)]
+    #[specta(optional)]
+    pub author_email: Option<String>,
     pub date: String,
     pub files_changed: u32,
     pub additions: u32,

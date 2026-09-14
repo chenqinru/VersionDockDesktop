@@ -103,6 +103,12 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	parent_path: string,
 	target_name: string,
 	provider_account_id: string | null,
+} } | { type: "checkoutSvnRepository"; payload: {
+	url: string,
+	parent_path: string,
+	target_name: string,
+	username: string | null,
+	password: string | null,
 } } | { type: "providerAccounts" } | { type: "providerGithubBegin"; payload: {
 	account_id: string | null,
 } } | { type: "providerGithubComplete"; payload: {
@@ -110,6 +116,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 } } | { type: "providerGitlabSave"; payload: {
 	account_id: string | null,
 	host: string,
+	token: string,
+} } | { type: "providerGiteeSave"; payload: {
+	account_id: string | null,
 	token: string,
 } } | { type: "providerRemove"; payload: {
 	account_id: string,
@@ -120,6 +129,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	per_page: number,
 } } | { type: "providerNamespaces"; payload: {
 	account_id: string,
+} } | { type: "resolveAuthorAvatar"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	email: string,
+	author_name: string,
 } } | { type: "publishRepository"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -185,6 +199,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	paths: string[],
+	allow_truncated?: boolean,
 } } | { type: "unstage"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -482,6 +497,10 @@ export type ChangelistOperation = { type: "create"; name: string } | { type: "re
 
 export type ChangesDisplayMode = "simplified" | "changelists";
 
+export type CheckoutRepositoryResult = {
+	path: string,
+};
+
 export type CleanWorkingTreeMethod = "shelve" | "stash";
 
 export type CloneRepositoryResult = {
@@ -626,6 +645,7 @@ export type DesktopSettings = {
 	skippedUpdateVersion?: string | null,
 	onlineAvatarsEnabled?: boolean,
 	gravatarEnabled?: boolean,
+	avatarCrossPlatformFallback?: boolean,
 	fileIconTheme?: FileIconThemePreference,
 	noVerify?: boolean,
 	autoCommitResolvedMerge?: boolean,
@@ -683,6 +703,8 @@ export type FileChange = {
 	conflicted: boolean,
 	conflictType?: string | null,
 	submodule?: boolean,
+	isTruncated?: boolean,
+	truncationReason?: string | null,
 };
 
 export type FileHistoryEntry = {
@@ -775,6 +797,7 @@ export type IncomingCommit = {
 	body?: string | null,
 	fullMessage?: string | null,
 	author: string,
+	authorEmail?: string | null,
 	date: string,
 	filesChanged: number,
 	additions: number,
@@ -945,7 +968,7 @@ export type RemoteProviderAccount = {
 	secureStorageRef: string,
 };
 
-export type RemoteProviderKind = "github" | "gitlab";
+export type RemoteProviderKind = "github" | "gitlab" | "gitee";
 
 export type RemoteRepository = {
 	id: string,
@@ -1250,10 +1273,12 @@ export type UnpushedCommit = {
 	body?: string | null,
 	fullMessage?: string | null,
 	author: string,
+	authorEmail?: string | null,
 	date: string,
 	filesChanged: number,
 	additions: number,
 	deletions: number,
+	parents?: string[],
 };
 
 export type UnpushedOperation = { type: "revert"; hashes: string[] } | { type: "undoHead" } | { type: "drop"; hashes: string[] } | { type: "squash"; hashes: string[]; message: string } | { type: "editMessage"; hash: string; message: string };

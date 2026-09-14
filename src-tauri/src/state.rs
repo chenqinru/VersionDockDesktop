@@ -446,6 +446,7 @@ impl AppState {
                                 || s == "target"
                                 || s == "dist"
                                 || s == ".vite"
+                                || s.contains(".vd-staging-")
                                 || ignored.iter().any(|item| item == &s)
                         })
                     });

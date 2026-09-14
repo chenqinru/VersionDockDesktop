@@ -24,7 +24,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const repos = useMemo(() => allRepos.filter((repo) => !repo.meta.isWorktree), [allRepos]);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const tagsByRepo = useAppStore((state) => state.tagsByRepo);
-  const loading = useAppStore((state) => state.historyLoading || state.branchesLoading);
+  const loading = useAppStore((state) => state.branchesLoading);
   const tagOperation = useAppStore((state) => state.tagOperation);
   const persistedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
   const sidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);

@@ -662,7 +662,7 @@ function ExtendedCommitSummary({
       <div className="extended-detail-block">
         <h3>{t('Author')}</h3>
         <div className="extended-author">
-          <AuthorAvatar name={commit.author} email={commit.email} size={24} />
+          <AuthorAvatar name={commit.author} email={commit.email} repoId={commit.repoId} size={24} />
           <span><strong>{commit.author}</strong><small>{commit.email}</small></span>
         </div>
       </div>
@@ -687,7 +687,7 @@ function ExtendedCommitSummary({
 function AuthorMeta({ commit }: { commit: CommitNode }) {
   return (
     <div className="detail-author-meta">
-      <AuthorAvatar name={commit.author} email={commit.email} size={36} />
+      <AuthorAvatar name={commit.author} email={commit.email} repoId={commit.repoId} size={36} />
       <span className="detail-author-line">
         <strong>{commit.author}</strong>
         <i>·</i>

@@ -4,6 +4,7 @@ import type { RepositoryStatus, UnpushedCommit, BranchInfo, CommitDetail, Commit
 import { useI18n } from '../i18n';
 import { capabilityAvailable, capabilityReason, isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
+import { AuthorAvatar } from './AuthorAvatar';
 import { BranchRefBadge } from './BranchRefBadge';
 import { FileIcon } from './FileIcon';
 import { branchColor, readableAccentColor } from './branchColor';
@@ -411,7 +412,7 @@ function PushFileTreeNode({ node, depth, collapsed, onToggle, onOpenFile }: {
   );
 }
 
-export function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, description, query }: {
+export function PushFileList({ files, loading, viewMode, onViewModeChange, onOpenFile, description, query, showToolbar = true }: {
   files: PushCommitFile[];
   loading: boolean;
   viewMode: PushFileViewMode;
@@ -419,6 +420,7 @@ export function PushFileList({ files, loading, viewMode, onViewModeChange, onOpe
   onOpenFile: (file: PushCommitFile) => void;
   description?: string;
   query?: string;
+  showToolbar?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const visibleFiles = useMemo(() => {
@@ -437,7 +439,7 @@ export function PushFileList({ files, loading, viewMode, onViewModeChange, onOpe
   return (
     <div style={styles.fileListRoot}>
       {description && <div style={styles.fileListDescription}>{description}</div>}
-      <div style={styles.filesHeader}>
+      {showToolbar && <div style={styles.filesHeader}>
         <span style={styles.filesTitle}>{loading ? '' : formatFileCount(visibleFiles.length, t)}</span>
         <div style={styles.filesHeaderActions}>
           <div style={styles.expandBtns}>
@@ -486,7 +488,7 @@ export function PushFileList({ files, loading, viewMode, onViewModeChange, onOpe
             </button>
           </div>
         </div>
-      </div>
+      </div>}
       {loading ? (
         <div style={styles.loadingRow}>{t('Loading files...')}</div>
       ) : visibleFiles.length === 0 ? (
@@ -609,7 +611,7 @@ function CommitRow({
           {commit.message}
         </span>
         <span style={styles.commitMeta}>
-          {commit.author} · {formatDate(commit.date, t)}
+          <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.authorEmail ?? ''} repoId={repoId} size={18} />{commit.author} · {formatDate(commit.date, t)}
           {commit.filesChanged != null && (
             <span style={styles.commitStats}>
               &nbsp;·&nbsp;{formatFileCount(commit.filesChanged, t)}
@@ -662,6 +664,7 @@ function CommitRow({
             viewMode={fileViewMode}
             onViewModeChange={onFileViewModeChange}
             onOpenFile={onOpenFile}
+            showToolbar={false}
           />
         </div>
       )}

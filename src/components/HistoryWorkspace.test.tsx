@@ -145,7 +145,7 @@ describe('HistoryWorkspace capabilities', () => {
 
   it('shows non-blocking loading feedback and formats merged local/remote refs', () => {
     useAppStore.setState({
-      bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', historyLoading: true,
+      bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', historyLoading: true, branchesLoading: true,
       history: [{ repoId: 'repo', hash: 'abc', shortHash: 'abc', parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: refs', refs: ['main', 'origin/main'] }],
       remotes: { repo: [{ name: 'origin', fetchUrl: 'https://example.test/repo.git', pushUrl: 'https://example.test/repo.git' }] },
     });

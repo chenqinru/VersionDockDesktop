@@ -4,7 +4,8 @@ import type {
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference, FileIconThemePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   IncomingCommit, UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
-  DesktopCapabilities, HistoryQuery, InitializeRepositoryResult, CloneRepositoryResult, OperationDomain, OperationEvent,
+  CheckoutRepositoryResult, DesktopCapabilities, HistoryQuery, InitializeRepositoryResult,
+  CloneRepositoryResult, OperationDomain, OperationEvent,
   RecentCommitMessage, RefreshScope, RepositoryCapabilities, RepositoryUpdateResult, RuntimeCapabilities,
   SyncResult, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
   BranchRecoveryResult, RepositoryCommitSelection, RestoreConflictsResult,
@@ -19,6 +20,7 @@ import { createTranslator, resolveLanguage } from '../i18n';
 export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
 export type DiffRange = { fromRevision: string; toRevision: string };
+export type RepositoryCheckoutOutcome = { succeeded: boolean; authenticationRequired: boolean };
 export type WorkingChangeTarget = { repoId: string; path: string; status: string; staged: boolean; section: 'staged' | 'unstaged' | 'untracked' };
 export type CommitChangesModel =
   | { kind: 'commits'; commits: CommitNode[]; files: DetailFileTarget[] }
@@ -312,6 +314,7 @@ export interface AppStore {
   openWorkspace: (paths: string[], focus?: boolean, options?: OpenWorkspaceOptions) => Promise<boolean>;
   initializeRepository: (targetPath: string) => Promise<void>;
   cloneRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, providerAccountId?: string) => Promise<boolean>;
+  checkoutSvnRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, username?: string, password?: string) => Promise<RepositoryCheckoutOutcome>;
   switchTab: (workspaceId: string) => Promise<void>;
   closeTab: (workspaceId: string) => Promise<void>;
   closeOtherTabs: (workspaceId: string) => Promise<void>;
@@ -334,7 +337,7 @@ export interface AppStore {
   dismissMergeMessageSuggestion: () => void;
   setAmendRepoIds: (values: string[]) => void;
   setCommitSelection: (repoId: string, paths: string[], selected: boolean) => void;
-  stage: (repoId: string, paths: string[]) => Promise<void>;
+  stage: (repoId: string, paths: string[], allowTruncated?: boolean) => Promise<void>;
   unstage: (repoId: string, paths: string[]) => Promise<void>;
   discard: (repoId: string, paths: string[]) => Promise<void>;
   deletePaths: (repoId: string, paths: string[]) => Promise<void>;
@@ -364,9 +367,9 @@ export interface AppStore {
   branchRecovery: (repoId: string, operation: BranchRecoveryOperation) => Promise<BranchRecoveryResult | undefined>;
   tagOperation: (operation: object, repoId?: string) => Promise<void>;
   loadStashes: (repoId?: string) => Promise<void>;
-  stashOperation: (repoId: string, operation: StashOperation) => Promise<void>;
+  stashOperation: (repoId: string, operation: StashOperation) => Promise<boolean>;
   loadShelves: (repoId?: string) => Promise<void>;
-  shelfOperation: (repoId: string, operation: ShelfOperation) => Promise<void>;
+  shelfOperation: (repoId: string, operation: ShelfOperation) => Promise<boolean>;
   loadChangelists: (repoId?: string) => Promise<void>;
   changelistOperation: (repoId: string, operation: ChangelistOperation) => Promise<void>;
   loadWorktrees: (repoId?: string) => Promise<void>;
@@ -458,7 +461,7 @@ const emptyState: AppStateSnapshot = {
     promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, autoFetchOnFocus: true, resetViewLocationsOnStartup: false,
     notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 4,
     ignoredFolders: ['.git', '.svn', '.hg', 'node_modules', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', 'target'],
-    maximumGraphCommits: 1000, projectColors: {}, externalEditor: null, onlineAvatarsEnabled: false, gravatarEnabled: false,
+    maximumGraphCommits: 1000, projectColors: {}, externalEditor: null, onlineAvatarsEnabled: false, gravatarEnabled: false, avatarCrossPlatformFallback: false,
   },
   layout: { panelSizes: { commit: 360, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
   lastWorkspaceId: null, openWorkspaceIds: [], activeWorkspaceId: null, recentWorkspaces: [], commitSelections: {},
@@ -642,7 +645,7 @@ function selectionRecord(values: RepositoryCommitSelection[] | undefined): Recor
 function pruneCommitSelections(repositories: RepositoryStatus[], selections: Record<string, string[]>): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const repo of repositories) {
-    const available = new Set(repo.files.map((file) => file.path));
+    const available = new Set(repo.files.filter((file) => !file.isTruncated).map((file) => file.path));
     const paths = [...new Set(selections[repo.meta.id] ?? [])].filter((path) => available.has(path));
     if (paths.length) result[repo.meta.id] = paths;
   }
@@ -1166,16 +1169,16 @@ export const useAppStore = create<AppStore>((set, get) => {
           });
         }
         if (scopes.has('refs') || scopes.has('history')) {
-          const [branches, tags] = await Promise.all([
-            bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false }),
-            bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false }),
+          const [branchesResult, tagsResult] = await Promise.allSettled([
+            bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
+            bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
           ]);
           if (get().snapshot?.workspace.id !== workspaceId) return;
           set((state) => ({
-            branchesByRepo: { ...state.branchesByRepo, [repoId]: branches },
-            tagsByRepo: { ...state.tagsByRepo, [repoId]: tags },
-            branches: state.selectedRepoId === repoId ? branches : state.branches,
-            tags: state.selectedRepoId === repoId ? tags : state.tags,
+            branchesByRepo: branchesResult.status === 'fulfilled' ? { ...state.branchesByRepo, [repoId]: branchesResult.value } : state.branchesByRepo,
+            tagsByRepo: tagsResult.status === 'fulfilled' ? { ...state.tagsByRepo, [repoId]: tagsResult.value } : state.tagsByRepo,
+            branches: state.selectedRepoId === repoId && branchesResult.status === 'fulfilled' ? branchesResult.value : state.branches,
+            tags: state.selectedRepoId === repoId && tagsResult.status === 'fulfilled' ? tagsResult.value : state.tags,
           }));
           if (!get().historyLoading) await refreshHistoryRepository(workspaceId, repoId);
         }
@@ -1443,6 +1446,38 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
         return true;
       }, 'workspace', { target: `${parentPath}/${targetName}` })) ?? false,
+
+    checkoutSvnRepository: async (url, parentPath, targetName, openInNewWindow = false, username, password) => {
+      let authenticationRequired = false;
+      const succeeded = (await withBusy(async () => {
+        let result: CheckoutRepositoryResult;
+        try {
+          result = await bridge().request<CheckoutRepositoryResult>({
+            type: 'checkoutSvnRepository',
+            payload: {
+              url,
+              parent_path: parentPath,
+              target_name: targetName,
+              username: username?.trim() || null,
+              password: password || null,
+            },
+          }, { timeoutMs: 600_000 });
+        } catch (error) {
+          if (error instanceof BridgeError && error.code === 'SVN_AUTH_FAILED') {
+            authenticationRequired = true;
+            return false;
+          }
+          throw error;
+        }
+        if (openInNewWindow) {
+          if (!await bridge().focusWorkspaceAcrossWindows([result.path])) await bridge().openInNewWindow([result.path]);
+        } else {
+          await get().openWorkspace([result.path]);
+        }
+        return true;
+      }, 'workspace', { target: `${parentPath}/${targetName}` })) ?? false;
+      return { succeeded, authenticationRequired };
+    },
 
     switchTab: async (workspaceId: string) => {
       if (get().activeTabId === workspaceId && get().snapshot) return;
@@ -1832,30 +1867,31 @@ export const useAppStore = create<AppStore>((set, get) => {
       await withBusy(async () => {
         set({ branchesLoading: true });
         const requests: Promise<unknown>[] = [get().loadHistory(true)];
+        const refRequests: Promise<unknown>[] = [];
         if (get().bootstrap?.capabilities.changelist && repo.capabilities?.changelist !== false) requests.push(get().loadChangelists());
         if (repo.meta.kind === 'git' && get().bootstrap?.capabilities.subtree && repo.capabilities?.subtree !== false) requests.push(get().loadSubtrees(repoId));
         const currentWorkspace = workspaceId();
         for (const item of get().snapshot?.repositories ?? []) {
-          requests.push(bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }).then((branches) => {
+          refRequests.push(bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }, { showProgress: false, timeoutMs: 12_000 }).then((branches) => {
             if (get().snapshot?.workspace.id !== currentWorkspace) return;
             set((state) => ({
               branchesByRepo: { ...state.branchesByRepo, [item.meta.id]: branches },
               branches: item.meta.id === get().selectedRepoId ? branches : state.branches,
             }));
-          }));
-          requests.push(bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }).then((tags) => {
+          }).catch(() => undefined));
+          refRequests.push(bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }, { showProgress: false, timeoutMs: 12_000 }).then((tags) => {
             if (get().snapshot?.workspace.id !== currentWorkspace) return;
             set((state) => ({
               tagsByRepo: { ...state.tagsByRepo, [item.meta.id]: tags },
               tags: item.meta.id === get().selectedRepoId ? tags : state.tags,
             }));
-          }));
+          }).catch(() => undefined));
         }
-        try {
-          await Promise.all(requests);
-        } finally {
-          set({ branchesLoading: false });
-        }
+        const otherResults = Promise.allSettled(requests);
+        try { await Promise.all(refRequests); }
+        finally { if (get().snapshot?.workspace.id === currentWorkspace) set({ branchesLoading: false }); }
+        const failures = (await otherResults).filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failures.length) throw failures[0].reason;
         const firstCommit = get().history[0];
         if (firstCommit && !get().selectedCommits.length) await get().selectCommit(firstCommit);
       }, `repository:${repoId}`);
@@ -1926,8 +1962,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (wid) persistCommitSelections(wid, commitSelections);
     },
 
-    stage: async (repoId, paths) => withBusy(async () => {
-      await bridge().request({ type: 'stage', payload: { workspace_id: workspaceId(), repo_id: repoId, paths } });
+    stage: async (repoId, paths, allowTruncated = false) => withBusy(async () => {
+      await bridge().request({ type: 'stage', payload: { workspace_id: workspaceId(), repo_id: repoId, paths, allow_truncated: allowTruncated } });
     }, `repository:${repoId}`),
 
     unstage: async (repoId, paths) => withBusy(async () => {
@@ -2438,10 +2474,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ stashes: values.reduce((next, value) => ({ ...next, [value.repoId]: value.stashes }), state.stashes) }));
     },
-    stashOperation: async (repoId, operation) => withBusy(async () => {
+    stashOperation: async (repoId, operation) => (await withBusy(async () => {
       await bridge().request({ type: 'stashOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
       await get().loadStashes(repoId);
-    }, `stash:${repoId}`),
+      return true;
+    }, `stash:${repoId}`)) ?? false,
     loadShelves: async (repoId) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
@@ -2460,10 +2497,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (get().snapshot?.workspace.id !== wid) return;
       set((state) => ({ shelves: values.reduce((next, value) => ({ ...next, [value.repoId]: value.shelves }), state.shelves) }));
     },
-    shelfOperation: async (repoId, operation) => withBusy(async () => {
+    shelfOperation: async (repoId, operation) => (await withBusy(async () => {
       await bridge().request({ type: 'shelfOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
       await get().loadShelves(repoId);
-    }, `shelf:${repoId}`),
+      return true;
+    }, `shelf:${repoId}`)) ?? false,
     loadChangelists: async (repoId) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;

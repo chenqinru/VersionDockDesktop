@@ -639,9 +639,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {activeCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="accounts-view-bar-icon" title={t('Accounts and privacy')}>
-                  <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub and GitLab accounts')}</button></SettingsCard>
+                  <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub, GitLab, and Gitee accounts')}</button></SettingsCard>
                   <SettingsCard title={t('Author avatars')}>
-                    <SettingToggle label={t('Online author avatars')} description={t('Resolve GitHub noreply addresses to GitHub avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false } : {}) })} />
+                    <SettingToggle label={t('Online author avatars')} description={t('Resolve remote provider addresses to author avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false, avatarCrossPlatformFallback: false } : {}) })} />
+                    <SettingToggle label={t('Search other connected platforms')} description={t('Try other connected platforms when this repository has no matching author avatar.')} checked={(settings?.onlineAvatarsEnabled ?? false) && (settings?.avatarCrossPlatformFallback ?? false)} onChange={(value) => void updateSettings({ avatarCrossPlatformFallback: value })} />
                     <SettingToggle label={t('Use Gravatar for other emails')} description={t('Send only a SHA-256 email hash to Gravatar.')} checked={(settings?.onlineAvatarsEnabled ?? false) && (settings?.gravatarEnabled ?? false)} onChange={(value) => void updateSettings({ gravatarEnabled: value })} />
                   </SettingsCard>
                 </SettingsSection>}

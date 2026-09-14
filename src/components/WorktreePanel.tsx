@@ -9,7 +9,7 @@ import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import { branchColor, headColor, readableAccentColor } from './branchColor';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, WorktreeEntry as BoundWorktreeEntry } from '../bindings/generated';
-import { FileIcon } from './FileIcon';
+import { WorkingDiffPanel } from './BranchWorkingDiffPanel';
 
 export interface NormalizedWorktreeEntry {
   path: string;
@@ -48,24 +48,6 @@ export interface WorktreePanelProps {
   onOpenInOS?: (repoId: string, worktreePath: string) => void;
   onAddToWorkspace?: (worktreePath: string) => void;
   onRequestCreate?: (repoId: string) => void;
-}
-
-function WorktreeDiffView() {
-  const value = useAppStore((state) => state.worktreeDiff);
-  const close = useAppStore((state) => state.closeWorktreeDiff);
-  const openDiff = useAppStore((state) => state.openWorktreeFileDiff);
-  const openBranchDiff = useAppStore((state) => state.openBranchWorkingFileDiff);
-  const [context, setContext] = useState<{ x: number; y: number; path: string }>();
-  const { t } = useI18n();
-  if (!value) return null;
-  const show = (path: string) => value.source === 'repository'
-    ? void openBranchDiff(value.repoId, value.baseRef, path)
-    : void openDiff(value.repoId, value.path, value.baseRef, path);
-  return <section className="worktree-diff-panel">
-    <header><button onClick={close}><Codicon name="arrow-left" />{t('Back to Worktrees')}</button><strong>{value.baseRef} ↔ {value.currentRef}</strong><span>{value.files.length} {t('files')}</span></header>
-    <div>{value.files.length === 0 ? <div className="empty-state"><Codicon name="diff" />{t('No worktree differences')}</div> : value.files.map((file) => <button key={`${file.status}:${file.path}`} onClick={() => show(file.path)} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, path: file.path }); }}><FileIcon name={file.path.split('/').pop() ?? file.path} /><span>{file.path}</span>{file.added !== null && <b className="added">+{file.added}</b>}{file.removed !== null && <b className="removed">-{file.removed}</b>}<em>{file.status}</em></button>)}</div>
-    {context && <ContextMenu x={context.x} y={context.y} items={[{ id: 'diff', label: t('Show Diff'), icon: 'diff' }]} onSelect={() => { show(context.path); setContext(undefined); }} onClose={() => setContext(undefined)} />}
-  </section>;
 }
 
 function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry): NormalizedWorktreeEntry {
@@ -453,7 +435,7 @@ export function WorktreePanel({
 
   const allEmpty = resolvedRepos.every((r) => r.worktrees.length === 0);
 
-  if (worktreeDiff) return <WorktreeDiffView />;
+  if (worktreeDiff) return <WorkingDiffPanel source="worktree" />;
   return (
     <div style={css.root}>
       <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />

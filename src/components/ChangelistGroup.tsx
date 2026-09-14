@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
@@ -6,21 +6,13 @@ import { BranchRefBadge } from './BranchRefBadge';
 import { useI18n } from '../i18n';
 import { buildFileTree, type FileTreeNode } from './fileTree';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
+import { SelectionCheckbox } from './SelectionCheckbox';
 
 export type ExpansionCommand = { sequence: number; expanded: boolean };
 
 export function StatusMark({ file }: { file: FileChange }) {
   const value = file.conflicted ? 'C' : file.status === 'untracked' ? 'U' : file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : file.status === 'renamed' ? 'R' : 'M';
   return <span className={`status-mark status-${file.status}`}>{value}</span>;
-}
-
-export function SelectionCheckbox({ label, checked, indeterminate = false, disabled = false, onChange }: { label: string; checked: boolean; indeterminate?: boolean; disabled?: boolean; onChange: () => void }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
-  return <span className={`selection-checkbox ${checked || indeterminate ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}>
-    <input ref={ref} aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={onChange} onClick={(event) => event.stopPropagation()} />
-    {(checked || indeterminate) && <Codicon name={indeterminate ? 'remove' : 'check'} />}
-  </span>;
 }
 
 export function TreeNode({
@@ -51,8 +43,9 @@ export function TreeNode({
   const currentPad = basePad + depth * 20;
 
   if (!node.file) {
-    const selectedCount = node.files.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
-    const allSelected = node.files.length > 0 && selectedCount === node.files.length;
+    const selectable = node.files.filter((file) => !file.isTruncated);
+    const selectedCount = selectable.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
+    const allSelected = selectable.length > 0 && selectedCount === selectable.length;
     return (
       <div className="tree-directory">
         <div
@@ -64,7 +57,8 @@ export function TreeNode({
             label={node.path}
             checked={allSelected}
             indeterminate={selectedCount > 0 && !allSelected}
-            onChange={() => setFiles(repo.meta.id, node.files.map((file) => file.path), !allSelected)}
+            disabled={!selectable.length}
+            onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)}
           />
           <button title={node.path} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}>
             <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
@@ -104,6 +98,7 @@ export function TreeNode({
       <SelectionCheckbox
         label={node.file.path}
         checked={selected.has(key)}
+        disabled={node.file.isTruncated}
         onChange={() => setFiles(repo.meta.id, [node.file!.path], !selected.has(key))}
       />
       <button title={node.file.path} onClick={() => onFile(node.file!)}>
@@ -164,7 +159,7 @@ export function ChangelistGroup({
 }: ChangelistGroupProps) {
   const { t } = useI18n();
   const allFilesWithRepo = useMemo(
-    () => repoGroups.flatMap((g) => g.files.map((f) => ({ repoId: g.repo.meta.id, path: f.path }))),
+    () => repoGroups.flatMap((g) => g.files.filter((f) => !f.isTruncated).map((f) => ({ repoId: g.repo.meta.id, path: f.path }))),
     [repoGroups],
   );
   const totalFiles = allFilesWithRepo.length;
@@ -180,8 +175,9 @@ export function ChangelistGroup({
   const toggleAll = () => {
     const nextVal = !allSelected;
     for (const group of repoGroups) {
-      if (group.files.length > 0) {
-        setFiles(group.repo.meta.id, group.files.map((f) => f.path), nextVal);
+      const selectable = group.files.filter((file) => !file.isTruncated);
+      if (selectable.length > 0) {
+        setFiles(group.repo.meta.id, selectable.map((f) => f.path), nextVal);
       }
     }
   };
@@ -335,6 +331,7 @@ function SingleRepoFileList({
             <SelectionCheckbox
               label={file.path}
               checked={selected.has(key)}
+              disabled={file.isTruncated}
               onChange={() => setFiles(repo.meta.id, [file.path], !selected.has(key))}
             />
             <button title={file.path} onClick={() => onFile(repo.meta.id, file)}>
@@ -388,8 +385,9 @@ function RepoSubGroup({
   const expanded = localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded;
 
   const totalFiles = files.length;
-  const selectedCount = files.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
-  const allSelected = totalFiles > 0 && selectedCount === totalFiles;
+  const selectableFiles = files.filter((file) => !file.isTruncated);
+  const selectedCount = selectableFiles.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
+  const allSelected = selectableFiles.length > 0 && selectedCount === selectableFiles.length;
   const branch = branchColor(repo.branch || repo.revision);
   const [hovered, setHovered] = useState(false);
 
@@ -398,10 +396,9 @@ function RepoSubGroup({
       <div
         className="repo-heading"
         style={{
-          background: `color-mix(in srgb, ${repo.meta.color} 14%, var(--versiondock-surface))`,
+          '--repo-color': repo.meta.color,
           paddingLeft: 18,
-          height: 26,
-        }}
+        } as React.CSSProperties}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onContextMenu={(e) => {
@@ -414,8 +411,8 @@ function RepoSubGroup({
           label={repo.meta.name}
           checked={allSelected}
           indeterminate={selectedCount > 0 && !allSelected}
-          disabled={totalFiles === 0}
-          onChange={() => setFiles(repo.meta.id, files.map((f) => f.path), !allSelected)}
+          disabled={selectableFiles.length === 0}
+          onChange={() => setFiles(repo.meta.id, selectableFiles.map((f) => f.path), !allSelected)}
         />
         <button
           title={repo.meta.name}

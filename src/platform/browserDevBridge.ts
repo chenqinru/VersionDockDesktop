@@ -2,7 +2,7 @@ import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
   MergeCommitSummary,
   DiffDocument, GraphCommitNode, HistoryPage, RemoteInfo, RepositoryStatus, ShelfEntry, StashEntry, SubtreeEntry,
-  RuntimeCapabilities, TagInfo, WorkspaceSnapshot, WorktreeEntry, SubmoduleEntry,
+  IncomingCommit, RuntimeCapabilities, TagInfo, UnpushedCommit, WorkspaceSnapshot, WorktreeEntry, SubmoduleEntry,
   WindowTabTransfer, LogEntry, LogLevel, LogChannel,
 } from '../bindings/generated';
 import type { BridgeEvent, NewWindowPlacement, RequestOptions, VersionDockBridge } from './bridge';
@@ -471,7 +471,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'bootstrap': return {
         state: this.state, tools: { git: true, svn: true, svnadmin: true },
         applicationSessionId: 'browser-demo-session',
-        capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: true, compare: true, remoteManagement: true },
+        capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: true, submodule: true, compare: true, remoteManagement: true },
         runtime: unavailableRuntime,
       } satisfies BootstrapData;
       case 'runtimeCapabilities': return unavailableRuntime;
@@ -481,6 +481,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'workspaceOpen': case 'workspaceRefresh': this.generation += 1; return this.snapshot();
       case 'initializeRepository': this.generation += 1; return { snapshot: this.snapshot(), repositoryId: this.repositories[0]?.meta.id ?? 'admin' };
       case 'cloneRepository': return { path: `${command.payload.parent_path}/${command.payload.target_name}` };
+      case 'checkoutSvnRepository': return { path: `${command.payload.parent_path}/${command.payload.target_name}` };
       case 'saveCommitSelections': return command.payload.selections;
       case 'branchRecovery': return { status: 'completed', target: command.payload.operation.target, stashReference: command.payload.operation.type === 'forceCheckout' ? null : 'stash@{0}', changesRestored: command.payload.operation.type === 'carryChanges', error: null, recoveryHint: null };
       case 'restoreConflicts': return { restoredPaths: [], failures: [] };
@@ -535,6 +536,50 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'worktreeFileDiff': return this.diff(command.payload.relative_path);
       case 'subtrees': return this.subtreeValues[command.payload.repo_id] ?? [];
       case 'submodules': return [] satisfies SubmoduleEntry[];
+      case 'unpushedCommits': {
+        const values = command.payload.repo_id === 'admin' ? (activeHistories.admin ?? []).slice(0, 1) : [];
+        return values.map((commit, index) => ({
+          hash: commit.hash,
+          shortHash: commit.shortHash,
+          message: commit.message,
+          body: index === 0 ? 'Updates the configuration workflow and keeps the browser preview representative.' : null,
+          fullMessage: commit.message,
+          author: commit.author,
+          date: commit.committerDate,
+          filesChanged: 3,
+          additions: 24,
+          deletions: 6,
+          parents: commit.parents,
+        })) satisfies UnpushedCommit[];
+      }
+      case 'incomingCommits': {
+        const count = this.repositories.find((repo) => repo.meta.id === command.payload.repo_id)?.behind ?? 0;
+        const values = (activeHistories[command.payload.repo_id] ?? activeHistories.api ?? []).slice(0, count);
+        return values.map((commit, index) => ({
+          hash: commit.hash,
+          shortHash: commit.shortHash,
+          message: commit.message,
+          body: index === 0 ? 'Remote changes ready to be reviewed before updating the local branch.' : null,
+          fullMessage: commit.message,
+          author: commit.author,
+          date: commit.committerDate,
+          filesChanged: Math.max(1, 3 - index),
+          additions: 18 + index * 7,
+          deletions: 4 + index * 2,
+          parents: commit.parents,
+          potentialConflictPaths: [],
+        })) satisfies IncomingCommit[];
+      }
+      case 'unpushedChanges': return {
+        fromRevision: command.payload.oldest_revision ?? 'origin/main',
+        toRevision: this.repositories.find((repo) => repo.meta.id === command.payload.repo_id)?.revision ?? 'HEAD',
+        files: activeDetailFiles[command.payload.repo_id] ?? [],
+      };
+      case 'incomingChanges': return {
+        fromRevision: this.repositories.find((repo) => repo.meta.id === command.payload.repo_id)?.revision ?? 'HEAD',
+        toRevision: `origin/${this.repositories.find((repo) => repo.meta.id === command.payload.repo_id)?.branch ?? 'main'}`,
+        files: activeDetailFiles[command.payload.repo_id] ?? [],
+      };
       case 'remotes': return [{ name: 'origin', fetchUrl: 'https://example.test/versiondock/demo.git', pushUrl: 'https://example.test/versiondock/demo.git' }] satisfies RemoteInfo[];
       case 'subtreeOperation': this.applySubtree(command.payload.repo_id, command.payload.operation); return true;
       case 'unpushedOperation': return true;

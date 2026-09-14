@@ -76,7 +76,7 @@ describe('SubtreePanel', () => {
     expect(screen.getAllByText('admin')).toHaveLength(2); // name & prefix
     expect(screen.getAllByText('api')).toHaveLength(2); // name & prefix
     expect(screen.getAllByText('squash')).toHaveLength(2);
-    expect(screen.getAllByText('Up to date')).toHaveLength(2);
+    expect(screen.getAllByText('Checking...')).toHaveLength(2);
     expect(screen.getByText('ssh://git@git.gsdzone.net:32022/tongji/admin.git')).toBeInTheDocument();
     expect(screen.getByText('ssh://git@git.gsdzone.net:32022/tongji/api.git')).toBeInTheDocument();
     expect(screen.getAllByText('chenqinru')).toHaveLength(2);

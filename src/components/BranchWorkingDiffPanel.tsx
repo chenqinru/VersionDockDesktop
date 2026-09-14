@@ -148,12 +148,13 @@ function BranchWorkingTreeNode({ node, depth, collapsed, selectedPath, toggle, s
   </div>;
 }
 
-export function BranchWorkingDiffPanel() {
-  const value = useAppStore((state) => state.worktreeDiff?.source === 'repository' ? state.worktreeDiff : undefined);
+export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree' }) {
+  const value = useAppStore((state) => state.worktreeDiff?.source === source ? state.worktreeDiff : undefined);
   const repositories = useAppStore((state) => state.snapshot?.repositories ?? []);
   const closeWorktreeDiff = useAppStore((state) => state.closeWorktreeDiff);
   const setActiveTab = useAppStore((state) => state.setActiveTab);
   const openDiff = useAppStore((state) => state.openBranchWorkingFileDiff);
+  const openWorktreeDiff = useAppStore((state) => state.openWorktreeFileDiff);
   const systemOpen = useAppStore((state) => state.systemOpen);
   const { t } = useI18n();
   const [viewMode, setViewMode] = useState<'tree' | 'list'>('tree');
@@ -168,11 +169,12 @@ export function BranchWorkingDiffPanel() {
   const repoColor = repo?.meta.color ?? 'var(--versiondock-accent)';
   const select = (file: CommitFile) => {
     setSelectedPath(file.path);
-    void openDiff(value.repoId, value.baseRef, file.path);
+    if (source === 'repository') void openDiff(value.repoId, value.baseRef, file.path);
+    else void openWorktreeDiff(value.repoId, value.path, value.baseRef, file.path);
   };
   const close = () => {
     closeWorktreeDiff();
-    setActiveTab('changes');
+    if (source === 'repository') setActiveTab('changes');
   };
 
   return <aside className="branch-working-diff-panel">
@@ -181,17 +183,19 @@ export function BranchWorkingDiffPanel() {
         <div><i style={{ background: repoColor }} /><strong>{repoName}</strong><span>{t('{0} vs Working Tree', value.baseRef)}</span></div>
         <small>{t('{0} compared with {1}', value.baseRef, value.currentRef)}</small>
       </div>
-      <button type="button" title={t('Back to Changes')} aria-label={t('Back to Changes')} onClick={close}><Codicon name="arrow-left" /></button>
+      <button type="button" title={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} aria-label={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} onClick={close}><Codicon name="arrow-left" /></button>
     </header>
     <div className="branch-working-toolbar">
       <span>{files.length === 1 ? t('{0} file', files.length) : t('{0} files', files.length)}</span>
       <i />
-      {viewMode === 'tree' && <>
+      {viewMode === 'tree' && <div className="branch-working-expand-actions">
         <button type="button" title={t('Expand all')} onClick={() => setCollapsed(new Set())}><Codicon name="expand-all" /></button>
         <button type="button" title={t('Collapse all')} onClick={() => setCollapsed(new Set(collectDirectories(tree)))}><Codicon name="collapse-all" /></button>
-      </>}
-      <button type="button" className={viewMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => setViewMode('tree')}><Codicon name="list-tree" /></button>
-      <button type="button" className={viewMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setViewMode('list')}><Codicon name="list-flat" /></button>
+      </div>}
+      <div className="branch-working-view-toggle">
+        <button type="button" className={viewMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => setViewMode('tree')}><Codicon name="list-tree" /></button>
+        <button type="button" className={viewMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setViewMode('list')}><Codicon name="list-flat" /></button>
+      </div>
     </div>
     <div className="branch-working-files">
       {files.length === 0 ? <div className="empty-state">{t('No file differences between {0} and the working tree', value.baseRef)}</div> : viewMode === 'tree'
@@ -201,13 +205,17 @@ export function BranchWorkingDiffPanel() {
     {context && <ContextMenu
       x={context.x}
       y={context.y}
-      items={[{ id: 'diff', label: t('Show Diff'), icon: 'diff' }, { id: 'open', label: t('Open file'), icon: 'go-to-file' }]}
+      items={[{ id: 'diff', label: t('Show Diff'), icon: 'diff' }, ...(source === 'repository' ? [{ id: 'open', label: t('Open file'), icon: 'go-to-file' }] : [])]}
       onSelect={(id) => {
         if (id === 'diff') select(context.file);
-        if (id === 'open') void systemOpen(value.repoId, context.file.path, false);
+        if (id === 'open' && source === 'repository') void systemOpen(value.repoId, context.file.path, false);
         setContext(undefined);
       }}
       onClose={() => setContext(undefined)}
     />}
   </aside>;
+}
+
+export function BranchWorkingDiffPanel() {
+  return <WorkingDiffPanel source="repository" />;
 }

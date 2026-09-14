@@ -48,9 +48,12 @@ static SUBTREE_SPLIT_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> =
 static SUBTREE_STATUS_CACHE: OnceLock<Mutex<HashMap<String, (Instant, SubtreePushStatus)>>> =
     OnceLock::new();
 type SvnBranchCacheEntry = (Instant, bool, Vec<String>);
+type SvnTagCacheEntry = (Instant, Vec<TagInfo>);
+type SvnIncomingCacheEntry = (Instant, u64, u32);
 static SVN_BRANCH_CACHE: OnceLock<Mutex<HashMap<String, SvnBranchCacheEntry>>> = OnceLock::new();
-static SVN_TAG_CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<TagInfo>)>>> = OnceLock::new();
-static SVN_INCOMING_CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64, u32)>>> = OnceLock::new();
+static SVN_TAG_CACHE: OnceLock<Mutex<HashMap<String, SvnTagCacheEntry>>> = OnceLock::new();
+static SVN_INCOMING_CACHE: OnceLock<Mutex<HashMap<String, SvnIncomingCacheEntry>>> =
+    OnceLock::new();
 static STASH_FILES_CACHE: OnceLock<Mutex<HashMap<String, Vec<ShelfFileEntry>>>> = OnceLock::new();
 
 fn svn_merges() -> &'static Mutex<HashMap<String, PendingSvnMerge>> {
@@ -339,6 +342,142 @@ pub async fn existing_repository(target: &Path, token: &CancellationToken) -> Op
     .then_some(VcsKind::Svn)
 }
 
+fn validate_checkout_target_name(target_name: &str) -> Result<(), DesktopError> {
+    let windows_stem = target_name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    let windows_reserved = matches!(windows_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (windows_stem.len() == 4
+            && matches!(&windows_stem[..3], "COM" | "LPT")
+            && matches!(windows_stem.as_bytes()[3], b'1'..=b'9'));
+    if target_name.is_empty()
+        || target_name.trim() != target_name
+        || target_name.contains('\0')
+        || target_name.chars().any(char::is_control)
+        || target_name.chars().any(|character| {
+            matches!(
+                character,
+                '<' | '>' | ':' | '"' | '|' | '?' | '*' | '/' | '\\'
+            )
+        })
+        || option_like(target_name)
+        || Path::new(target_name).components().count() != 1
+        || matches!(target_name, "." | "..")
+        || target_name.ends_with('.')
+        || target_name.ends_with(' ')
+        || windows_reserved
+    {
+        return Err(DesktopError::new(
+            "INVALID_TARGET_NAME",
+            "Invalid checkout target name",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn meaningful_directory_entries(
+    path: &Path,
+    staging_name: Option<&str>,
+) -> Result<Vec<String>, DesktopError> {
+    let mut entries = Vec::new();
+    for entry in path.read_dir().map_err(|error| {
+        DesktopError::new("CHECKOUT_TARGET_UNAVAILABLE", error.to_string(), true)
+    })? {
+        let entry = entry.map_err(|error| {
+            DesktopError::new("CHECKOUT_TARGET_UNAVAILABLE", error.to_string(), true)
+        })?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if matches!(name.as_str(), ".DS_Store" | "Thumbs.db") || staging_name == Some(name.as_str())
+        {
+            continue;
+        }
+        entries.push(name);
+    }
+    Ok(entries)
+}
+
+fn staging_directory(parent: &Path, target: &Path, target_name: &str, existed: bool) -> PathBuf {
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    if existed {
+        target.join(format!(".vd-staging-{suffix}"))
+    } else {
+        parent.join(format!(".{target_name}.vd-staging-{suffix}"))
+    }
+}
+
+fn cleanup_checkout_staging(path: &Path) {
+    if path.is_dir() {
+        let _ = std::fs::remove_dir_all(path);
+    }
+}
+
+fn finalize_checkout(
+    target: &Path,
+    staging: &Path,
+    target_existed: bool,
+) -> Result<(), DesktopError> {
+    if !target_existed {
+        if target.exists() {
+            return Err(DesktopError::new(
+                "CHECKOUT_TARGET_CREATED_DURING_OPERATION",
+                format!(
+                    "The target was created during the operation; checkout files remain at {}",
+                    staging.display()
+                ),
+                true,
+            ));
+        }
+        std::fs::rename(staging, target).map_err(|error| {
+            DesktopError::new("CHECKOUT_FINALIZE_FAILED", error.to_string(), true)
+        })?;
+        return Ok(());
+    }
+
+    let staging_name = staging.file_name().and_then(|value| value.to_str());
+    if !meaningful_directory_entries(target, staging_name)?.is_empty() {
+        return Err(DesktopError::new(
+            "CHECKOUT_TARGET_CHANGED_DURING_OPERATION",
+            format!(
+                "The target is no longer empty; checkout files remain at {}",
+                staging.display()
+            ),
+            true,
+        ));
+    }
+    for system_file in [".DS_Store", "Thumbs.db"] {
+        let path = target.join(system_file);
+        if path.is_file() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+    let mut moved = Vec::new();
+    for entry in staging
+        .read_dir()
+        .map_err(|error| DesktopError::new("CHECKOUT_FINALIZE_FAILED", error.to_string(), true))?
+    {
+        let entry = entry.map_err(|error| {
+            DesktopError::new("CHECKOUT_FINALIZE_FAILED", error.to_string(), true)
+        })?;
+        let name = entry.file_name();
+        if let Err(error) = std::fs::rename(entry.path(), target.join(&name)) {
+            for moved_name in moved.iter().rev() {
+                let _ = std::fs::rename(target.join(moved_name), staging.join(moved_name));
+            }
+            return Err(DesktopError::new(
+                "CHECKOUT_FINALIZE_FAILED",
+                format!("{error}; staging files remain at {}", staging.display()),
+                true,
+            ));
+        }
+        moved.push(name);
+    }
+    std::fs::remove_dir(staging)
+        .map_err(|error| DesktopError::new("CHECKOUT_FINALIZE_FAILED", error.to_string(), true))
+}
+
 pub async fn clone_repository(
     url: &str,
     parent: &Path,
@@ -355,7 +494,9 @@ pub async fn clone_repository(
             false,
         ));
     }
-    let supported = url.starts_with("https://")
+    let supported = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("git://")
         || url.starts_with("ssh://")
         || url.starts_with("file://")
         || (!url.contains("://")
@@ -371,24 +512,10 @@ pub async fn clone_repository(
             false,
         ));
     }
-    if target_name.is_empty()
-        || target_name.contains('\0')
-        || option_like(target_name)
-        || Path::new(target_name).components().count() != 1
-        || matches!(target_name, "." | "..")
-    {
-        return Err(DesktopError::new(
-            "INVALID_TARGET_NAME",
-            "Invalid clone target name",
-            false,
-        ));
-    }
+    validate_checkout_target_name(target_name)?;
     let target = safe_relative(parent, target_name, true)?;
     if target.exists()
-        && (!target.is_dir()
-            || target
-                .read_dir()
-                .map_or(true, |mut entries| entries.next().is_some()))
+        && (!target.is_dir() || !meaningful_directory_entries(&target, None)?.is_empty())
     {
         return Err(DesktopError::new(
             "CLONE_TARGET_NOT_EMPTY",
@@ -397,6 +524,7 @@ pub async fn clone_repository(
         ));
     }
     let existed = target.exists();
+    let staging = staging_directory(parent, &target, target_name, existed);
     let askpass = credentials.map(|_| create_askpass()).transpose()?;
     let mut environment = Vec::new();
     if let (Some((username, password)), Some(path)) = (credentials, askpass.as_ref()) {
@@ -411,7 +539,11 @@ pub async fn clone_repository(
     if recurse_submodules {
         clone_args.push("--recurse-submodules".into());
     }
-    clone_args.extend(["--".into(), url.into(), target_name.into()]);
+    clone_args.extend([
+        "--".into(),
+        url.into(),
+        staging.to_string_lossy().into_owned(),
+    ]);
     let result = cli::run_with_env(
         "git",
         &clone_args,
@@ -426,18 +558,119 @@ pub async fn clone_repository(
         let _ = std::fs::remove_file(path);
     }
     if let Err(error) = result {
-        if !existed
-            && target.is_dir()
-            && target
-                .read_dir()
-                .is_ok_and(|mut entries| entries.next().is_none())
-        {
-            let _ = std::fs::remove_dir(&target);
-        }
+        cleanup_checkout_staging(&staging);
         return Err(error);
     }
+    finalize_checkout(&target, &staging, existed)?;
     std::fs::canonicalize(&target)
         .map_err(|error| DesktopError::new("CLONE_TARGET_UNAVAILABLE", error.to_string(), true))
+}
+
+pub async fn checkout_svn_repository(
+    url: &str,
+    parent: &Path,
+    target_name: &str,
+    credentials: Option<&(String, String)>,
+    token: &CancellationToken,
+) -> Result<PathBuf, DesktopError> {
+    let url = url.trim();
+    let supported = ["http://", "https://", "svn://", "svn+ssh://", "file://"]
+        .iter()
+        .any(|scheme| url.to_ascii_lowercase().starts_with(scheme));
+    if url.is_empty() || url.contains('\0') || option_like(url) || !supported {
+        return Err(DesktopError::new(
+            "INVALID_SVN_CHECKOUT_URL",
+            "SVN checkout URL must use HTTP, HTTPS, SVN, SVN+SSH, or file://",
+            false,
+        ));
+    }
+    validate_checkout_target_name(target_name)?;
+    if credentials.is_some_and(|(username, _)| username.trim().is_empty()) {
+        return Err(DesktopError::new(
+            "INVALID_SVN_USERNAME",
+            "SVN username is invalid",
+            false,
+        ));
+    }
+    let target = safe_relative(parent, target_name, true)?;
+    if target.exists()
+        && (!target.is_dir() || !meaningful_directory_entries(&target, None)?.is_empty())
+    {
+        return Err(DesktopError::new(
+            "SVN_CHECKOUT_TARGET_NOT_EMPTY",
+            "SVN checkout target already exists and is not empty",
+            true,
+        ));
+    }
+    let existed = target.exists();
+    let staging = staging_directory(parent, &target, target_name, existed);
+    std::fs::create_dir_all(&staging)
+        .map_err(|error| DesktopError::new("CHECKOUT_STAGING_FAILED", error.to_string(), true))?;
+
+    let password_stdin_supported = if credentials.is_some() {
+        cli::run(
+            "svn",
+            &["--version".into(), "--quiet".into()],
+            &staging,
+            None,
+            Duration::from_secs(15),
+            token,
+        )
+        .await
+        .ok()
+        .map(|output| output.stdout_text())
+        .and_then(|version| {
+            let mut parts = version
+                .trim()
+                .split('.')
+                .filter_map(|part| part.parse::<u32>().ok());
+            Some((parts.next()?, parts.next()?))
+        })
+        .is_some_and(|(major, minor)| major > 1 || (major == 1 && minor >= 10))
+    } else {
+        false
+    };
+    if credentials.is_some() && !password_stdin_supported {
+        cleanup_checkout_staging(&staging);
+        return Err(DesktopError::new(
+            "SVN_PASSWORD_STDIN_UNAVAILABLE",
+            "This SVN client cannot receive passwords through stdin",
+            false,
+        )
+        .hint("Use the system SVN credential cache or upgrade SVN to 1.10 or later"));
+    }
+    let mut args = vec!["checkout".into(), "--force".into(), url.into(), ".".into()];
+    let stdin = if let Some((username, password)) = credentials {
+        args.extend(["--username".into(), username.trim().into()]);
+        args.push("--password-from-stdin".into());
+        args.extend([
+            "--config-option".into(),
+            "servers:global:store-passwords=yes".into(),
+            "--config-option".into(),
+            "servers:global:store-auth-creds=yes".into(),
+        ]);
+        password_stdin_supported.then(|| format!("{password}\n"))
+    } else {
+        None
+    };
+    args.push("--non-interactive".into());
+    if let Err(error) = cli::run(
+        "svn",
+        &args,
+        &staging,
+        stdin.as_deref().map(str::as_bytes),
+        cli::NETWORK_TIMEOUT,
+        token,
+    )
+    .await
+    {
+        cleanup_checkout_staging(&staging);
+        return Err(error);
+    }
+    finalize_checkout(&target, &staging, existed)?;
+    std::fs::canonicalize(&target).map_err(|error| {
+        DesktopError::new("SVN_CHECKOUT_TARGET_UNAVAILABLE", error.to_string(), true)
+    })
 }
 
 pub async fn publish_preflight(
@@ -599,13 +832,31 @@ pub async fn recent_commit_messages(
                 .collect())
         }
         VcsKind::Svn => {
-            let raw = svn(
-                vec!["log".into(), "--xml".into(), "--limit".into(), "100".into()],
+            let primary = svn_with_timeout(
+                vec![
+                    "log".into(),
+                    "--xml".into(),
+                    "-r".into(),
+                    "HEAD:1".into(),
+                    "--limit".into(),
+                    "100".into(),
+                ],
                 repo,
                 token,
+                Duration::from_secs(10),
             )
-            .await?
-            .stdout_text();
+            .await;
+            let raw = match primary {
+                Ok(output) if !output.stdout_text().trim().is_empty() => output.stdout_text(),
+                _ => svn_with_timeout(
+                    vec!["log".into(), "--xml".into(), "--limit".into(), "100".into()],
+                    repo,
+                    token,
+                    Duration::from_secs(10),
+                )
+                .await?
+                .stdout_text(),
+            };
             let document = roxmltree::Document::parse(&raw)
                 .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
             Ok(document
@@ -635,28 +886,11 @@ pub async fn last_commit_message(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Option<String>, DesktopError> {
-    if repo.kind == VcsKind::Git {
-        return Ok(recent_commit_messages(repo, token)
-            .await?
-            .into_iter()
-            .next()
-            .map(|item| item.message));
-    }
-    let revision = current_revision(repo, token).await?;
-    let raw = svn(
-        vec!["log".into(), "--xml".into(), "-r".into(), revision],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text();
-    let document = roxmltree::Document::parse(&raw)
-        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
-    Ok(document
-        .descendants()
-        .find(|node| node.has_tag_name("msg"))
-        .and_then(|node| node.text())
-        .and_then(normalize_commit_message))
+    Ok(recent_commit_messages(repo, token)
+        .await?
+        .into_iter()
+        .next()
+        .map(|item| item.message))
 }
 
 pub async fn diff(
@@ -858,6 +1092,7 @@ fn untracked_diff(
 pub async fn stage(
     repo: &RepositoryMeta,
     paths: &[String],
+    allow_truncated: bool,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     if paths.is_empty() {
@@ -915,19 +1150,97 @@ pub async fn stage(
             git(args, repo, token).await?;
         }
         VcsKind::Svn => {
-            let mut args = vec![
-                "add".into(),
-                "--parents".into(),
-                "--force".into(),
-                "--".into(),
-            ];
-            args.extend(
-                paths
-                    .iter()
-                    .map(|path| relative_path(root, path, true))
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
+            let _ = allow_truncated;
+            let safe_paths = paths
+                .iter()
+                .map(|path| relative_path(root, path, true))
+                .collect::<Result<Vec<_>, _>>()?;
+            let ignores = crate::workspace::svn_ignore_rules(root, token).await;
+            let scan_root = root.to_path_buf();
+            let scan_paths = safe_paths.clone();
+            let scan_token = token.clone();
+            tokio::task::spawn_blocking(move || {
+                for path in &scan_paths {
+                    if scan_token.is_cancelled() {
+                        return Err(DesktopError::new(
+                            "REQUEST_CANCELLED",
+                            "Operation cancelled",
+                            true,
+                        ));
+                    }
+                    if path.split('/').any(|part| {
+                        matches!(part.to_ascii_lowercase().as_str(), ".git" | ".hg" | ".svn")
+                    }) {
+                        return Err(DesktopError::new(
+                            "SVN_NESTED_VCS_METADATA",
+                            format!("Cannot add nested repository metadata at {path}"),
+                            false,
+                        ));
+                    }
+                    ensure_no_nested_vcs_metadata(
+                        &scan_root,
+                        &scan_root.join(path),
+                        &ignores,
+                        &scan_token,
+                    )?;
+                }
+                Ok::<(), DesktopError>(())
+            })
+            .await
+            .map_err(|error| DesktopError::new("SVN_ADD_SCAN_FAILED", error.to_string(), true))??;
+            let mut args = vec!["add".into(), "--parents".into(), "--".into()];
+            args.extend(safe_paths);
             svn(args, repo, token).await?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_no_nested_vcs_metadata(
+    root: &Path,
+    target: &Path,
+    ignores: &crate::workspace::SvnIgnoreRules,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    let mut pending = vec![target.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        if token.is_cancelled() {
+            return Err(DesktopError::new(
+                "REQUEST_CANCELLED",
+                "Operation cancelled",
+                true,
+            ));
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if matches!(name.to_ascii_lowercase().as_str(), ".git" | ".hg" | ".svn") {
+            return Err(DesktopError::new(
+                "SVN_NESTED_VCS_METADATA",
+                format!(
+                    "Cannot add nested repository metadata at {}",
+                    path.display()
+                ),
+                false,
+            ));
+        }
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|error| DesktopError::new("SVN_ADD_SCAN_FAILED", error.to_string(), true))?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        let entries = std::fs::read_dir(&path)
+            .map_err(|error| DesktopError::new("SVN_ADD_SCAN_FAILED", error.to_string(), true))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                DesktopError::new("SVN_ADD_SCAN_FAILED", error.to_string(), true)
+            })?;
+            let child = entry.path();
+            let lower_name = entry.file_name().to_string_lossy().to_lowercase();
+            if !ignores.matches(&child, root, &lower_name) {
+                pending.push(child);
+            }
         }
     }
     Ok(())
@@ -1318,7 +1631,7 @@ pub async fn commit_with_identity(
     match repo.kind {
         VcsKind::Git => {
             if !paths.is_empty() {
-                stage(repo, paths, token).await?;
+                stage(repo, paths, false, token).await?;
             }
             let mut args = vec!["commit".into(), "--file=-".into()];
             if amend {
@@ -1371,18 +1684,15 @@ pub async fn commit_with_identity(
                 ));
             }
             let root = Path::new(&repo.root_path);
-            prepare_svn_commit(repo, paths, token).await?;
-            let mut args = vec!["commit".into(), "--file".into(), "-".into()];
-            if paths.is_empty() {
-                args.push(".".into());
-            } else {
-                args.extend(
-                    paths
-                        .iter()
-                        .map(|path| relative_path(root, path, true))
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
-            }
+            let commit_targets = prepare_svn_commit(repo, paths, token).await?;
+            let mut args = vec![
+                "commit".into(),
+                "--file".into(),
+                "-".into(),
+                "--depth".into(),
+                "empty".into(),
+            ];
+            args.extend(commit_targets);
             let mut safe = vec!["--non-interactive".into()];
             safe.extend(args);
             let output = cli::run(
@@ -1934,11 +2244,16 @@ async fn prepare_svn_commit(
     repo: &RepositoryMeta,
     paths: &[String],
     token: &CancellationToken,
-) -> Result<(), DesktopError> {
+) -> Result<Vec<String>, DesktopError> {
     if paths.is_empty() {
-        return Ok(());
+        return Err(DesktopError::new(
+            "SVN_COMMIT_NO_PATHS",
+            "No SVN files selected to commit",
+            false,
+        ));
     }
     let root = Path::new(&repo.root_path);
+    let visible = crate::workspace::svn_status(repo.clone(), token).await?;
     let status = svn(vec!["status".into(), "--xml".into()], repo, token)
         .await?
         .stdout_text();
@@ -1948,6 +2263,22 @@ async fn prepare_svn_commit(
         .iter()
         .map(|path| relative_path(root, path, true))
         .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if let Some(path) = visible
+        .files
+        .iter()
+        .find(|file| file.is_truncated && selected.contains(&file.path))
+    {
+        return Err(DesktopError::new(
+            "SVN_TRUNCATED_DIRECTORY_COMMIT_FORBIDDEN",
+            format!(
+                "Add the entire truncated directory {} before committing it",
+                path.path
+            ),
+            false,
+        ));
+    }
+    let mut unversioned_roots = Vec::new();
+    let mut missing = Vec::new();
     for entry in document
         .descendants()
         .filter(|node| node.has_tag_name("entry"))
@@ -1955,32 +2286,105 @@ async fn prepare_svn_commit(
         let Some(path) = entry.attribute("path") else {
             continue;
         };
-        let normalized = path.replace('\\', "/");
-        if !selected.contains(&normalized) {
+        let Some(normalized) = svn_status_relative_path(root, path) else {
             continue;
-        }
+        };
         let item = entry
             .children()
             .find(|node| node.has_tag_name("wc-status"))
             .and_then(|node| node.attribute("item"))
             .unwrap_or("normal");
         if item == "unversioned" {
-            svn(
-                vec!["add".into(), "--parents".into(), "--".into(), normalized],
-                repo,
-                token,
-            )
-            .await?;
-        } else if item == "missing" {
-            svn(
-                vec!["delete".into(), "--force".into(), "--".into(), normalized],
-                repo,
-                token,
-            )
-            .await?;
+            unversioned_roots.push(normalized);
+        } else if item == "missing" && selected.contains(&normalized) {
+            missing.push(normalized);
         }
     }
-    Ok(())
+    let to_add =
+        selected
+            .iter()
+            .filter(|path| {
+                unversioned_roots
+                    .iter()
+                    .any(|root| *path == root || path.starts_with(&format!("{root}/")))
+            })
+            .map(|path| {
+                if visible.files.iter().any(|file| {
+                    file.path == *path && file.status == "untracked" && !file.is_truncated
+                }) {
+                    Ok(path.clone())
+                } else {
+                    Err(DesktopError::new(
+                        "SVN_UNTRACKED_PATH_NOT_VISIBLE",
+                        format!("Untracked path {path} is not in the current SVN status"),
+                        false,
+                    ))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+    if !to_add.is_empty() {
+        stage(repo, &to_add, false, token).await?;
+    }
+    if !missing.is_empty() {
+        let mut args = vec!["delete".into(), "--force".into(), "--".into()];
+        args.extend(missing);
+        svn(args, repo, token).await?;
+    }
+    let newly_added_directories = to_add
+        .iter()
+        .filter(|path| root.join(path).is_dir())
+        .collect::<Vec<_>>();
+    let mut targets = selected;
+    if !to_add.is_empty() {
+        let after_add = svn(vec!["status".into(), "--xml".into()], repo, token)
+            .await?
+            .stdout_text();
+        let document = roxmltree::Document::parse(&after_add)
+            .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+        let added = document
+            .descendants()
+            .filter(|node| node.has_tag_name("entry"))
+            .filter(|node| {
+                node.children().any(|child| {
+                    child.has_tag_name("wc-status") && child.attribute("item") == Some("added")
+                })
+            })
+            .filter_map(|node| node.attribute("path"))
+            .filter_map(|path| svn_status_relative_path(root, path))
+            .collect::<std::collections::HashSet<_>>();
+        for directory in newly_added_directories {
+            let prefix = format!("{directory}/");
+            targets.extend(
+                added
+                    .iter()
+                    .filter(|path| path.starts_with(&prefix))
+                    .cloned(),
+            );
+        }
+        let selected_targets = targets.iter().cloned().collect::<Vec<_>>();
+        for target in selected_targets {
+            let parts = target.split('/').collect::<Vec<_>>();
+            for count in 1..parts.len() {
+                let ancestor = parts[..count].join("/");
+                if added.contains(&ancestor) {
+                    targets.insert(ancestor);
+                }
+            }
+        }
+    }
+    let mut targets = targets.into_iter().collect::<Vec<_>>();
+    targets.sort();
+    Ok(targets)
+}
+
+fn svn_status_relative_path(root: &Path, value: &str) -> Option<String> {
+    let path = Path::new(value);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(root).ok()?.to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
 fn explicit_remote_branch(
@@ -2848,7 +3252,7 @@ pub async fn unpushed_commits(
     };
     range.push("--max-count=100".into());
     range.push(format!(
-        "--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%B{FIELD}%an{FIELD}%aI{META_END}"
+        "--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%B{FIELD}%an{FIELD}%aI{FIELD}%P{FIELD}%ae{META_END}"
     ));
     range.push("--numstat".into());
     let raw = git(
@@ -2864,7 +3268,7 @@ pub async fn unpushed_commits(
         .filter_map(|record| {
             let (metadata, stats) = record.split_once(META_END)?;
             let fields = metadata.split(FIELD).collect::<Vec<_>>();
-            if fields.len() < 6 || fields[0].is_empty() {
+            if fields.len() < 8 || fields[0].is_empty() {
                 return None;
             }
             let (files_changed, additions, deletions, _) = parse_numstat(stats);
@@ -2875,10 +3279,12 @@ pub async fn unpushed_commits(
                 body: commit_message_body(fields[3], fields[2]),
                 full_message: Some(fields[3].trim().to_string()),
                 author: fields[4].into(),
+                author_email: Some(fields[7].into()).filter(|value: &String| !value.is_empty()),
                 date: fields[5].into(),
                 files_changed,
                 additions,
                 deletions,
+                parents: fields[6].split_whitespace().map(str::to_string).collect(),
             })
         })
         .collect())
@@ -3051,7 +3457,7 @@ pub async fn incoming_commits(
             "log".into(),
             "HEAD..@{upstream}".into(),
             "--max-count=100".into(),
-            format!("--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%B{FIELD}%an{FIELD}%aI{FIELD}%P{META_END}"),
+            format!("--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%B{FIELD}%an{FIELD}%aI{FIELD}%P{FIELD}%ae{META_END}"),
             "--numstat".into(),
         ],
         repo,
@@ -3069,7 +3475,7 @@ pub async fn incoming_commits(
         .filter_map(|record| {
             let (metadata, stats) = record.split_once(META_END)?;
             let fields = metadata.split(FIELD).collect::<Vec<_>>();
-            if fields.len() < 7 || fields[0].is_empty() {
+            if fields.len() < 8 || fields[0].is_empty() {
                 return None;
             }
             let (files_changed, additions, deletions, changed_paths) = parse_numstat(stats);
@@ -3080,6 +3486,7 @@ pub async fn incoming_commits(
                 body: commit_message_body(fields[3], fields[2]),
                 full_message: Some(fields[3].trim().to_string()),
                 author: fields[4].into(),
+                author_email: Some(fields[7].into()).filter(|value: &String| !value.is_empty()),
                 date: fields[5].into(),
                 files_changed,
                 additions,
@@ -4410,7 +4817,7 @@ pub async fn commit_detail(
                 })?;
             let is_merge = commit.parents.len() >= 2;
             let (files, merge_parent_changes) = if is_merge {
-                let (combined_status, parent_changes) = tokio::try_join!(
+                let (combined_status, combined_stats, parent_changes) = tokio::try_join!(
                     async {
                         Ok::<String, DesktopError>(
                             git(
@@ -4419,6 +4826,7 @@ pub async fn commit_detail(
                                     "--no-commit-id".into(),
                                     "-r".into(),
                                     "--cc".into(),
+                                    "-z".into(),
                                     "-M".into(),
                                     "--name-status".into(),
                                     revision.into(),
@@ -4430,9 +4838,32 @@ pub async fn commit_detail(
                             .stdout_text(),
                         )
                     },
+                    async {
+                        Ok::<String, DesktopError>(
+                            git(
+                                vec![
+                                    "diff-tree".into(),
+                                    "--no-commit-id".into(),
+                                    "-r".into(),
+                                    "--cc".into(),
+                                    "-z".into(),
+                                    "-M".into(),
+                                    "--numstat".into(),
+                                    revision.into(),
+                                ],
+                                repo,
+                                token,
+                            )
+                            .await?
+                            .stdout_text(),
+                        )
+                    },
                     async { merge_parent_changes(repo, revision, &commit.parents, token).await },
                 )?;
-                (parse_combined_diff_files(&combined_status), parent_changes)
+                (
+                    parse_combined_diff_files(&combined_status, &parse_numstat_z(&combined_stats)),
+                    parent_changes,
+                )
             } else {
                 let stats_args = if let Some(parent) = commit.parents.first() {
                     vec![
@@ -4583,22 +5014,20 @@ fn normalize_combined_diff_status(code: &str) -> String {
     "M".into()
 }
 
-fn parse_combined_diff_files(statuses: &str) -> Vec<CommitFile> {
-    statuses
-        .lines()
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split('\t').filter(|s| !s.is_empty()).collect();
-            if fields.len() < 2 {
-                return None;
+fn parse_combined_diff_files(
+    statuses: &str,
+    stats: &HashMap<String, (Option<u32>, Option<u32>)>,
+) -> Vec<CommitFile> {
+    parse_git_name_status_z(statuses)
+        .into_iter()
+        .map(|(raw_status, path)| {
+            let (added, removed) = stats.get(&path).copied().unwrap_or((None, None));
+            CommitFile {
+                path,
+                status: normalize_combined_diff_status(&raw_status),
+                added,
+                removed,
             }
-            let raw_status = fields[0];
-            let path = fields[fields.len() - 1];
-            Some(CommitFile {
-                path: path.into(),
-                status: normalize_combined_diff_status(raw_status),
-                added: None,
-                removed: None,
-            })
         })
         .collect()
 }
@@ -8649,7 +9078,7 @@ pub async fn conflict_save(
         .map_err(|error| DesktopError::new("FILE_WRITE_FAILED", error.to_string(), true))?;
     match repo.kind {
         VcsKind::Git => {
-            stage(repo, &[safe], token).await?;
+            stage(repo, &[safe], false, token).await?;
             if auto_commit_resolved_merge {
                 complete_git_merge_if_resolved(repo, token).await?;
             }
@@ -8712,7 +9141,7 @@ pub async fn conflict_accept(
                 }
                 ConflictChoice::Working => {}
             }
-            stage(repo, &[safe], token).await?;
+            stage(repo, &[safe], false, token).await?;
             if auto_commit_resolved_merge {
                 complete_git_merge_if_resolved(repo, token).await?;
             }
