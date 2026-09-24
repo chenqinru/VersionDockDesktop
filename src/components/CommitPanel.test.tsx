@@ -440,4 +440,57 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.queryByText('Update Submodule')).not.toBeInTheDocument();
     expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
   });
+
+  it('supports select all / invert selection and manage remote accounts from the panel toolbar', async () => {
+    const changedRepo = {
+      ...gitRepo,
+      files: [
+        { path: 'src/file1.ts', status: 'modified' as const, staged: false, unstaged: true, conflicted: false },
+        { path: 'src/file2.ts', status: 'modified' as const, staged: false, unstaged: true, conflicted: false },
+      ],
+    };
+    useAppStore.setState({
+      bridge,
+      bootstrap: bootstrap(false),
+      snapshot: { ...gitSnapshot, repositories: [changedRepo] },
+      selectedRepoId: 'repo',
+      commitSelections: {},
+    });
+    const { container } = render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
+
+    // 1. 验证顶栏中的全选按钮
+    const selectAllBtn = container.querySelector('.panel-toolbar button[title="Select All"]');
+    expect(selectAllBtn).toBeInTheDocument();
+    expect(selectAllBtn?.querySelector('.custom-icon')).toBeInTheDocument();
+
+    // 点击全选
+    fireEvent.click(selectAllBtn!);
+    expect(useAppStore.getState().commitSelections['repo']).toEqual(['src/file1.ts', 'src/file2.ts']);
+
+    // 全选后变为反选
+    const invertBtn = container.querySelector('.panel-toolbar button[title="Invert Selection"]');
+    expect(invertBtn).toBeInTheDocument();
+    expect(invertBtn?.querySelector('.custom-icon')).toBeInTheDocument();
+
+    // 点击反选
+    fireEvent.click(invertBtn!);
+    expect(useAppStore.getState().commitSelections['repo'] ?? []).toEqual([]);
+
+    // 2. 验证顶栏管理远端账号按钮
+    const remoteAccountsBtn = container.querySelector('.panel-toolbar button[title="Manage Remote Accounts"]');
+    expect(remoteAccountsBtn).toBeInTheDocument();
+    expect(remoteAccountsBtn?.querySelector('.codicon-account')).toBeInTheDocument();
+
+    // 点击打开远端平台面板
+    fireEvent.click(remoteAccountsBtn!);
+    expect(screen.getByRole('dialog', { name: 'Remote Providers' })).toBeInTheDocument();
+
+    // 3. 验证更多菜单中不再包含全选和反选
+    const moreBtn = container.querySelector('.panel-toolbar button[title="More"]');
+    expect(moreBtn).toBeInTheDocument();
+    fireEvent.click(moreBtn!);
+    expect(screen.queryByText('Select All', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Invert Selection', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
+  });
 });
+

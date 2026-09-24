@@ -153,7 +153,11 @@ export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
   const [collapsedRepoIds, setCollapsedRepoIds] = useState<Set<string>>(new Set());
   const total = useMemo(() => repos.reduce((sum, repo) => sum + (entries[repo.meta.id]?.length ?? 0), 0), [entries, repos]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (repos.length > 0 && repos.some((repo) => !entries[repo.meta.id])) {
+      void load();
+    }
+  }, [entries, load, repos]);
 
   const add = async (repo: RepositoryStatus) => {
     const url = await promptDialog({ title: t('Add Submodule'), message: repo.meta.name, inputLabel: t('Repository URL') });

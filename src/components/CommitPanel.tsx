@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
 import { capabilityAvailable, capabilityReason, isOperationActive, isOperationActiveForRepositories, useAppStore } from '../store/appStore';
@@ -21,6 +21,8 @@ import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { ConflictBanner } from './ConflictBanner';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 import { BranchRefBadge } from './BranchRefBadge';
+import { ProviderPanel } from './ProviderPanel';
+import { InvertSelectionIcon, SelectAllIcon } from './CustomIcons';
 import { performCommitSafetyCheck } from '../history/safetyCheck';
 import { useSpeedSearch } from '../hooks/useSpeedSearch';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
@@ -196,6 +198,38 @@ export function CommitPanel() {
   const pushEnabled = snapshot?.repositories.some((repo) => repo.meta.kind === 'git') ?? false;
   const tab = pushEnabled && (storedTab === 'sync' || storedTab === 'push') ? 'sync' : submoduleEnabled && storedTab === 'submodule' ? 'submodule' : stashEnabled && storedTab === 'stash' ? 'stash' : shelfEnabled && storedTab === 'shelf' ? 'shelf' : worktreeEnabled && storedTab === 'worktree' ? 'worktree' : subtreeEnabled && storedTab === 'subtree' ? 'subtree' : 'changes';
   const setTab = useAppStore((state) => state.setActiveTab);
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set<string>([tab]));
+  const lastTabSyncAtRef = useRef<Partial<Record<string, number>>>({});
+
+  if (!visitedTabs.has(tab)) {
+    setVisitedTabs((prev) => new Set(prev).add(tab));
+  }
+
+  const switchTab = useCallback((targetTab: string) => {
+    setTab(targetTab as any);
+    setVisitedTabs((prev) => {
+      if (prev.has(targetTab)) return prev;
+      const next = new Set(prev);
+      next.add(targetTab);
+      return next;
+    });
+
+    const now = Date.now();
+    const last = lastTabSyncAtRef.current[targetTab] ?? 0;
+    if (now - last < 5000) {
+      return;
+    }
+    lastTabSyncAtRef.current[targetTab] = now;
+
+    if (targetTab === 'sync') {
+      void Promise.all([
+        useAppStore.getState().loadUnpushedCommits(),
+        useAppStore.getState().loadIncomingCommits(),
+      ]);
+    } else if (targetTab === 'submodule') {
+      void useAppStore.getState().loadSubmodules();
+    }
+  }, [setTab]);
   const speedSearch = useSpeedSearch(tab, tab === 'changes');
   const changelistCapability = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'changelist') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'changelist', true)) ?? true));
   const changelistEnabled = changelistCapability && changesDisplayMode === 'changelists';
@@ -233,8 +267,9 @@ export function CommitPanel() {
   const [syncExpansion, setSyncExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
   const [syncFileViewMode, setSyncFileViewMode] = useState<'tree' | 'list'>('tree');
   const [syncSelectionCommand, setSyncSelectionCommand] = useState<{ sequence: number; action: 'selectAll' | 'invert' }>({ sequence: 0, action: 'selectAll' });
-  const [syncAllSelected, setSyncAllSelected] = useState(false);
   const [syncHasSelectable, setSyncHasSelectable] = useState(false);
+  const [syncAllSelected, setSyncAllSelected] = useState(false);
+  const [providersOpen, setProvidersOpen] = useState(false);
   const [expandedByTab, setExpandedByTab] = useState<Record<'changes' | 'shelf' | 'stash' | 'sync', boolean | null>>({ changes: true, shelf: false, stash: false, sync: true });
   const [textareaHeight, setTextareaHeight] = useState(54);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -301,6 +336,7 @@ export function CommitPanel() {
   }, 0), [branchesByRepo, gitRepos, unpushedCommits]);
   const totalToSync = useMemo(() => totalToPush + gitRepos.reduce((sum, repo) => sum + Math.max(repo.behind, incomingCommits[repo.meta.id]?.length ?? 0), 0), [gitRepos, incomingCommits, totalToPush]);
   const refreshPanel = async () => {
+    lastTabSyncAtRef.current[tab] = Date.now();
     const store = useAppStore.getState();
     const requests: Promise<unknown>[] = [store.refresh()];
     if (tab === 'changes' && changelistEnabled) requests.push(store.loadChangelists());
@@ -425,7 +461,42 @@ export function CommitPanel() {
       : undefined;
   const settingsNoVerify = useAppStore((state) => state.bootstrap?.state.settings?.noVerify ?? false);
   const [noVerify, setNoVerify] = useState(settingsNoVerify);
-  const setFiles = (repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value);
+  const setFiles = useCallback((repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value), [setCommitSelection]);
+  const changesTotalFiles = repos.reduce((sum, repo) => sum + repo.files.length, 0);
+  const changesHasSelectable = changesTotalFiles > 0;
+  const changesIsAllSelected = changesHasSelectable && repos.every((repo) => repo.files.every((file) => selected.has(`${repo.meta.id}\0${file.path}`)));
+  const canSelectAll = tab === 'changes' || tab === 'sync';
+  const currentTabHasSelectable = tab === 'changes'
+    ? changesHasSelectable
+    : tab === 'sync'
+      ? syncHasSelectable
+      : false;
+  const currentTabIsAllSelected = tab === 'changes'
+    ? changesIsAllSelected
+    : tab === 'sync'
+      ? syncAllSelected
+      : false;
+  const handleSelectAll = useCallback(() => {
+    if (tab === 'changes') {
+      for (const repo of repos) {
+        setFiles(repo.meta.id, repo.files.map((file) => file.path), true);
+      }
+    } else if (tab === 'sync') {
+      setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'selectAll' }));
+    }
+  }, [repos, setFiles, tab]);
+  const handleInvertSelection = useCallback(() => {
+    if (tab === 'changes') {
+      for (const repo of repos) {
+        const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []);
+        const allPaths = repo.files.map((file) => file.path);
+        setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false);
+        setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true);
+      }
+    } else if (tab === 'sync') {
+      setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'invert' }));
+    }
+  }, [commitSelections, repos, setFiles, tab]);
   const doCommit = async (push: boolean) => {
     if (!message.trim() || !commitTargets.length || commitBusy || commitUnavailable || (push && pushUnavailable)) return;
     const submittedMessage = message;
@@ -1001,23 +1072,39 @@ export function CommitPanel() {
   const panelToolbar = <div className="panel-toolbar">
     <strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong>
     <span />
-    {tab === 'sync' && <button disabled={!syncHasSelectable} className={syncAllSelected ? 'selected' : ''} title={syncAllSelected ? t('Clear Selection') : t('Select All')} onClick={() => setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: syncAllSelected ? 'invert' : 'selectAll' }))}><Codicon name="check-all" /></button>}
+    {canSelectAll && (
+      <button
+        disabled={workspaceBusy || !currentTabHasSelectable}
+        title={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
+        aria-label={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
+        onClick={() => {
+          if (currentTabIsAllSelected) {
+            handleInvertSelection();
+          } else {
+            handleSelectAll();
+          }
+        }}
+      >
+        {currentTabIsAllSelected ? <InvertSelectionIcon /> : <SelectAllIcon />}
+      </button>
+    )}
     <button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void Promise.all(fetchTargets.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button>
     <button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></button>
+    <button
+      title={t('Manage Remote Accounts')}
+      aria-label={t('Manage Remote Accounts')}
+      onClick={() => {
+        setViewMenu(false);
+        setSettings(false);
+        setProvidersOpen(true);
+      }}
+    >
+      <Codicon name="account" />
+    </button>
     <button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></button>
     <div ref={viewMenuRef} className="view-options panel-view-options">
       <button title={t('More')} aria-label={t('More')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu('expand'); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></button>
       {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
-        {tab === 'changes' && <>
-          <button type="button" role="menuitem" onClick={() => { for (const repo of repos) setFiles(repo.meta.id, repo.files.map((file) => file.path), true); setViewMenu(false); }}><span className="view-menu-check"><Codicon name="check-all" /></span><span>{t('Select All')}</span></button>
-          <button type="button" role="menuitem" onClick={() => { for (const repo of repos) { const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []); const allPaths = repo.files.map((file) => file.path); setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false); setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true); } setViewMenu(false); }}><span className="view-menu-check"><Codicon name="list-selection" /></span><span>{t('Invert Selection')}</span></button>
-          <div className="view-menu-separator" />
-        </>}
-        {tab === 'sync' && <>
-          <button type="button" role="menuitem" disabled={!syncHasSelectable} onClick={() => { setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'selectAll' })); setViewMenu(false); }}><span className="view-menu-check"><Codicon name="check-all" /></span><span>{t('Select All')}</span></button>
-          <button type="button" role="menuitem" disabled={!syncHasSelectable} onClick={() => { setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'invert' })); setViewMenu(false); }}><span className="view-menu-check"><Codicon name="list-selection" /></span><span>{t('Invert Selection')}</span></button>
-          <div className="view-menu-separator" />
-        </>}
         <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('expand')} onFocus={() => setViewSubmenu('expand')}>
           <button type="button" role="menuitem" className={viewSubmenu === 'expand' ? 'active' : ''} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
           {viewSubmenu === 'expand' && <div className="view-options-submenu" role="menu">
@@ -1035,7 +1122,7 @@ export function CommitPanel() {
       </div>}
     </div>
   </div>;
-  const panelOverlays = <>{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
+  const panelOverlays = <>{providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
 
@@ -1043,8 +1130,9 @@ export function CommitPanel() {
     <aside className="commit-panel" onClick={() => setContext(undefined)}>
       {panelToolbar}
       {panelOverlays}
-      <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => setTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => setTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => setTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => setTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => setTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{submoduleEnabled && <button title={t('Submodules')} className={tab === 'submodule' ? 'active' : ''} onClick={() => { setTab('submodule'); void useAppStore.getState().loadSubmodules(); }}><Codicon name="repo-clone" />{tab === 'submodule' && <span>{t('Submodules')}</span>}{submoduleCount > 0 && <b>{submoduleCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Sync')} className={tab === 'sync' ? 'active' : ''} onClick={() => { setTab('sync'); void Promise.all([useAppStore.getState().loadUnpushedCommits(), useAppStore.getState().loadIncomingCommits()]); }}><Codicon name="sync" />{tab === 'sync' && <span>{t('Sync')}</span>}{totalToSync > 0 && <b>{totalToSync}</b>}</button>}</div>
-      {tab === 'sync' ? <SyncPanel repos={gitRepos} expansionCommand={syncExpansion} selectionCommand={syncSelectionCommand} fileViewMode={syncFileViewMode === 'list' ? 'flat' : 'tree'} onFileViewModeChange={(mode) => setSyncFileViewMode(mode === 'flat' ? 'list' : 'tree')} onExpansionChange={(expanded) => setExpandedByTab((current) => ({ ...current, sync: expanded }))} onSelectionChange={(allSelected, hasSelectable) => { setSyncAllSelected(allSelected); setSyncHasSelectable(hasSelectable); }} /> : tab === 'submodule' ? <SubmodulePanel repos={gitRepos} /> : tab === 'subtree' ? <SubtreePanel repos={gitRepos} /> : tab === 'worktree' ? <WorktreePanel repos={gitRepos} /> : tab === 'shelf' ? <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={shelfViewMode} expansion={shelfExpansion} onManualExpansionChange={() => markPanelExpansionMixed('shelf')} onOpenFileDiff={(repoId, shelfId, path) => void openShelfDiff(repoId, shelfId, path)} /> : tab === 'stash' ? <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={stashViewMode} expansion={stashExpansion} onManualExpansionChange={() => markPanelExpansionMixed('stash')} onOpenFileDiff={(repoId, reference, path) => void openStashDiff(repoId, reference, path)} /> : <>
+      <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => switchTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => switchTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => switchTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => switchTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => switchTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{submoduleEnabled && <button title={t('Submodules')} className={tab === 'submodule' ? 'active' : ''} onClick={() => switchTab('submodule')}><Codicon name="repo-clone" />{tab === 'submodule' && <span>{t('Submodules')}</span>}{submoduleCount > 0 && <b>{submoduleCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Sync')} className={tab === 'sync' ? 'active' : ''} onClick={() => switchTab('sync')}><Codicon name="sync" />{tab === 'sync' && <span>{t('Sync')}</span>}{totalToSync > 0 && <b>{totalToSync}</b>}</button>}</div>
+      {visitedTabs.has('changes') && (
+        <div className="commit-tab-content changes-tab-content" style={{ display: tab === 'changes' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
       {conflicts.length > 0 ? (
         <ConflictBanner
           summary={(() => {
@@ -1295,6 +1383,38 @@ export function CommitPanel() {
           <div ref={commitMenuRef} className="split-button commit-action"><button title={commitDisabledReason} disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable) || (defaultCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(defaultCommitAction === 'commitAndPush')}><Codicon name={defaultCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(defaultCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button><button disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>{commitMenu && <div className="split-menu right"><button disabled={commitBusy || Boolean(commitUnavailable)} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : undefined} onClick={() => { void doCommit(false); setCommitMenu(false); }}><Codicon name="check" />{t('Commit')}</button><button disabled={commitBusy || Boolean(commitUnavailable || pushUnavailable)} title={commitDisabledReason} onClick={() => { void doCommit(true); setCommitMenu(false); }}><Codicon name="cloud-upload" />{t('Commit & Push')}</button></div>}</div>
         </div>
       </div>
+      </div>
+      )}
+      {visitedTabs.has('shelf') && (
+        <div className="commit-tab-content shelf-tab-content" style={{ display: tab === 'shelf' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <ShelfPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={shelfViewMode} expansion={shelfExpansion} onManualExpansionChange={() => markPanelExpansionMixed('shelf')} onOpenFileDiff={(repoId, shelfId, path) => void openShelfDiff(repoId, shelfId, path)} />
+        </div>
+      )}
+      {visitedTabs.has('stash') && (
+        <div className="commit-tab-content stash-tab-content" style={{ display: tab === 'stash' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <StashPanel repos={gitRepos} selectedPaths={selectedByRepo} viewMode={stashViewMode} expansion={stashExpansion} onManualExpansionChange={() => markPanelExpansionMixed('stash')} onOpenFileDiff={(repoId, reference, path) => void openStashDiff(repoId, reference, path)} />
+        </div>
+      )}
+      {visitedTabs.has('worktree') && (
+        <div className="commit-tab-content worktree-tab-content" style={{ display: tab === 'worktree' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <WorktreePanel repos={gitRepos} />
+        </div>
+      )}
+      {visitedTabs.has('subtree') && (
+        <div className="commit-tab-content subtree-tab-content" style={{ display: tab === 'subtree' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <SubtreePanel repos={gitRepos} />
+        </div>
+      )}
+      {visitedTabs.has('submodule') && (
+        <div className="commit-tab-content submodule-tab-content" style={{ display: tab === 'submodule' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <SubmodulePanel repos={gitRepos} />
+        </div>
+      )}
+      {visitedTabs.has('sync') && (
+        <div className="commit-tab-content sync-tab-content" style={{ display: tab === 'sync' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <SyncPanel repos={gitRepos} expansionCommand={syncExpansion} selectionCommand={syncSelectionCommand} fileViewMode={syncFileViewMode === 'list' ? 'flat' : 'tree'} onFileViewModeChange={(mode) => setSyncFileViewMode(mode === 'flat' ? 'list' : 'tree')} onExpansionChange={(expanded) => setExpandedByTab((current) => ({ ...current, sync: expanded }))} onSelectionChange={(allSelected, hasSelectable) => { setSyncAllSelected(allSelected); setSyncHasSelectable(hasSelectable); }} />
+        </div>
+      )}
       {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context)} onSelect={(id) => void handleContextAction(id)} onClose={() => setContext(undefined)} />}
       {clHeaderContext && <ContextMenu x={clHeaderContext.x} y={clHeaderContext.y} items={clHeaderItems(clHeaderContext.changelistId)} onSelect={(id) => void handleClHeaderAction(id)} onClose={() => setClHeaderContext(undefined)} />}
       {historyOpen && <div className="commit-history-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false); }}><section ref={historyDialog} className="commit-history-modal" role="dialog" aria-modal="true" aria-label={t('Commit message history')}>
@@ -1306,7 +1426,6 @@ export function CommitPanel() {
           return <button key={`${item.repoId}:${item.revision}`} type="button" title={item.message} onClick={() => applyMessageFromHistory(item.message)}><strong>{subject}</strong>{body && <span>{body}</span>}</button>;
         }) : <div className="commit-history-empty"><Codicon name="history" /><span>{t('No commit message history')}</span></div>}</div>
       </section></div>}
-      </>}
     </aside>
   );
 }

@@ -406,7 +406,8 @@ export function WorktreePanel({
   const defaultOpenInOS = (repoId: string, worktreePath: string) => { void openWorktree(repoId, worktreePath, true); };
 
   const resolvedRepos: RepoWorktrees[] = (customRepos ?? repos.map((r) => {
-    const list = storeWorktrees[r.meta.id] ?? [];
+    const rawList = storeWorktrees[r.meta.id];
+    const list = Array.isArray(rawList) ? rawList : [];
     return {
       repoId: r.meta.id,
       repoName: r.meta.name,

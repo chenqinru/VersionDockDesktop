@@ -190,6 +190,12 @@
 - 复查最新 `378d8ea` 时确认 Desktop 原先只有一个聚合差异缓存槽，切换 Incoming/Outgoing 过滤会丢失另一方向的数据并重复请求。现按方向和提交哈希分开缓存，视图切换复用已加载结果。
 - Changes 中未受控文件的右键菜单在普通视图下也恢复 Add to Git/SVN 入口；SVN 截断目录仍需单独确认。SVN 的嵌套元数据检查移到阻塞任务池执行，避免扫描较大目录时占用 Tokio 工作线程。
 
+## 第五轮同步语义修正
+
+- Sync 单仓库和批量操作在 Pull 失败、被取消或不可用时不再继续 Push；Sync 与 History 的批量 Cherry-pick 在首个失败项后停止，保留原有错误通知。
+- Sync 聚合文件改为分别接收 Incoming/Outgoing 查询结果，一侧失败时仍缓存并显示另一侧成功的文件；失败信息只显示在对应方向，折叠后重新展开可重试。
+- Git `--numstat -z -M` 的 rename/copy 记录以目标路径关联增删统计，与 `--name-status -z` 的文件路径保持一致。本轮仅运行 TypeScript、ESLint、Rust 格式和 `cargo check`；真实远端与跨平台 Runtime 仍按上文验收边界处理。
+
 ## 二次复查修正
 
 第一次审计把若干“已有组件外壳”错误归类为“已有等价实现”。二次逐字段、逐命令核对后补齐了 Subtree 状态 Backend、Submodule 高级状态与子仓库操作、Incoming 完整正文/逐提交冲突/聚合操作，以及 Shelf、Stash、Worktree、Subtree 等页签的快速搜索。本文以上述二次复查后的结论为准。

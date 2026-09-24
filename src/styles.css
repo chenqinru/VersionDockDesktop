@@ -40,6 +40,7 @@
   --vscode-list-inactiveSelectionBackground: color-mix(in srgb, var(--versiondock-selected) 55%, transparent);
   --vscode-textLink-foreground: var(--versiondock-accent);
   --vscode-button-background: var(--versiondock-accent-bg);
+  --vscode-button-hoverBackground: color-mix(in srgb, #fff 10%, var(--versiondock-accent-bg));
   --vscode-button-foreground: #fff;
   --vscode-gitDecoration-addedResourceForeground: var(--versiondock-success);
   --vscode-gitDecoration-modifiedResourceForeground: #e2c08d;
@@ -2997,11 +2998,58 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
 
 /* VersionDock plugin visual alignment: dense, divider-led desktop workbench. */
-.panel-toolbar { min-width: 0; height: 30px; padding: 0 6px 0 10px; overflow: visible; display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--versiondock-border-soft); background: var(--versiondock-surface); }
-.panel-toolbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 16px; letter-spacing: 0; }
+.panel-toolbar { flex: 0 0 35px; min-width: 0; height: 35px; padding: 0 6px 0 10px; overflow: visible; display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--versiondock-border-soft); background: var(--versiondock-surface); }
+.panel-toolbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 35px; color: var(--versiondock-text); letter-spacing: 0; }
 .panel-toolbar > span { flex: 1; min-width: 0; }
-.panel-toolbar button { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; }
-.panel-toolbar button:hover, .panel-toolbar button.selected { color: var(--versiondock-text); background: var(--versiondock-hover); }
+.panel-toolbar button {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--versiondock-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+.panel-toolbar button:hover,
+.panel-toolbar button.selected {
+  color: var(--versiondock-text);
+  background: var(--versiondock-hover);
+}
+.panel-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.panel-toolbar button .codicon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.panel-toolbar button .custom-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+}
+.panel-view-options {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  height: 24px;
+}
 
 .view-options { position: relative; }
 .view-options-menu, .view-options-submenu { color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 5px; box-shadow: 0 5px 18px #0008; font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1)); }
@@ -3022,16 +3070,22 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .view-menu-check .codicon { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .panel-view-options .view-options-menu { left: 0; right: auto; }
 
-.commit-tabs { flex: 0 0 29px; height: 29px; display: flex; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border-soft); }
+.commit-tabs { flex: 0 0 29px; height: 29px; display: flex; align-items: center; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border-soft); box-sizing: border-box; }
 .commit-tabs::-webkit-scrollbar { display: none; }
-.commit-tabs button { min-width: 0; flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-start; gap: 0; padding: 5px 10px; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 17px; border-bottom: 2px solid transparent; transition: color .1s, border-color .1s; }
+.commit-tabs button { min-width: 0; flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-start; gap: 0; padding: 5px 10px; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 17px; border: none; border-bottom: 2px solid transparent; background: transparent; outline: none; cursor: pointer; box-sizing: border-box; transition: color .1s, border-color .1s; }
 .commit-tabs button.active { padding: 5px 12px; color: var(--versiondock-text); font-weight: 600; border-bottom: 2px solid var(--versiondock-accent); }
-.commit-tabs button:hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
+.commit-tabs button:not(.active):hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
+.commit-tabs button.active:hover { background: transparent; }
 .commit-tabs button > .codicon { margin-right: 0; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); transition: margin .15s; }
 .commit-tabs button.active > .codicon { margin-right: 5px; }
-.commit-tabs button > span { min-width: 0; overflow: hidden; display: inline-block; }
+.commit-tabs button > span { animation: gs-tab-label-in 0.18s ease-out both; min-width: 0; overflow: hidden; display: inline-block; white-space: nowrap; }
 .commit-tabs b { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 5px; border-radius: 8px; line-height: 16px; text-align: center; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); color: var(--versiondock-badge-foreground, #ffffff); flex-shrink: 0; opacity: .65; transition: opacity .15s; }
 .commit-tabs button.active b { opacity: 1; }
+
+@keyframes gs-tab-label-in {
+  from { opacity: 0; transform: translateX(-6px); max-width: 0; }
+  to   { opacity: 1; transform: translateX(0);    max-width: 80px; }
+}
 
 .commit-panel { background: var(--versiondock-surface); }
 .changes-actions { flex: 0 0 29px; height: 29px; padding: 2px 6px; background: var(--versiondock-surface); }
@@ -4505,11 +4559,6 @@ button.danger:not(:disabled):hover,
   border-bottom: 1px solid var(--versiondock-border) !important;
   border-radius: 0 !important;
   background: color-mix(in srgb, var(--repo-color, #888) 15%, transparent) !important;
-}
-
-.repo-heading:not(.changelist-heading):hover,
-.repository-group-header:hover {
-  background: color-mix(in srgb, var(--repo-color, #888) 22%, transparent) !important;
 }
 
 .repository-group-header [data-action-btn] {
@@ -6349,8 +6398,9 @@ button.notification-item-action-btn:focus-visible {
   padding-top: 10px;
   border-top: 1px solid var(--versiondock-border-soft);
 }
+.commit-tab-content { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
 .sync-panel,
-.submodule-panel { position: relative; display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--versiondock-text); background: var(--versiondock-surface); }
+.submodule-panel { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; color: var(--versiondock-text); background: var(--versiondock-surface); }
 .sync-panel { --versiondock-info: var(--vscode-charts-blue, #64b5f6); }
 .speed-search-indicator { position: absolute; z-index: 30; top: 70px; right: 10px; display: flex; align-items: center; gap: 6px; max-width: min(280px, calc(100% - 20px)); min-height: 26px; padding: 2px 5px 2px 8px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-accent); border-radius: 5px; box-shadow: 0 4px 14px rgba(0, 0, 0, .28); }
 .speed-search-indicator > span:nth-child(2) { min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -6382,6 +6432,11 @@ button.notification-item-action-btn:focus-visible {
 .sync-header-action.visible { opacity: 1; pointer-events: auto; }
 .sync-header-action:hover,
 .repository-group-header > button:not(.repository-group-main):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+.repository-group-main:not(:disabled):hover,
+.sync-repo-toggle:not(:disabled):hover,
+.sync-branch-trigger:not(:disabled):hover {
+  background: transparent !important;
+}
 .sync-direction-pill { min-width: 0; height: 18px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; margin-left: 2px; padding: 1px 6px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 14px; border-radius: 8px; background: transparent; }
 .sync-direction-pill.outgoing { color: var(--versiondock-success); border: 1px solid color-mix(in srgb, var(--versiondock-success) 45%, transparent); }
 .sync-direction-pill.incoming { color: var(--versiondock-info); border: 1px solid color-mix(in srgb, var(--versiondock-info) 55%, transparent); }
@@ -6435,17 +6490,62 @@ button.notification-item-action-btn:focus-visible {
 .sync-selected-pill > span { min-width: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sync-selected-pill > small { display: inline-flex; align-items: center; gap: 1px; padding: 0 3px; border-radius: 7px; font-size: 9px; background: color-mix(in srgb, currentColor 16%, transparent); }
 .sync-selected-pill > small.incoming { color: var(--versiondock-info); }
-.sync-primary-split { width: 100%; display: flex; overflow: hidden; border-radius: 4px; }
+.sync-primary-split { width: 100%; display: flex; overflow: hidden; border-radius: 4px; border: 1px solid var(--vscode-button-border, transparent); }
 .sync-primary-action,
-.sync-primary-more { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--versiondock-button-foreground, #fff); background: var(--versiondock-accent-bg); border: 0; }
+.sync-primary-more {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--vscode-button-foreground, #fff) !important;
+  background: var(--vscode-button-background, var(--versiondock-accent-bg));
+  border: 0;
+  cursor: pointer;
+  transition: background-color 80ms ease, transform 60ms ease, filter 60ms ease;
+}
 .sync-primary-action { flex: 1; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; }
 .sync-primary-more { width: 28px; flex: 0 0 28px; border-left: 1px solid color-mix(in srgb, white 24%, transparent); }
+
 .sync-primary-action.pull,
-.sync-primary-more.pull { background: color-mix(in srgb, var(--versiondock-info, #1f6feb) 85%, #0d419d 15%); }
+.sync-primary-more.pull {
+  background: color-mix(in srgb, var(--versiondock-info, #1f6feb) 85%, #0d419d 15%);
+  color: #fff !important;
+}
 .sync-primary-action.push,
-.sync-primary-more.push { background: color-mix(in srgb, var(--versiondock-success, #238636) 75%, #196c2e 25%); }
-.sync-primary-action:hover,
-.sync-primary-more:hover { filter: brightness(1.12); }
+.sync-primary-more.push {
+  background: color-mix(in srgb, var(--versiondock-success, #238636) 75%, #196c2e 25%);
+  color: #fff !important;
+}
+
+.sync-primary-action:not(:disabled):hover,
+.sync-primary-more:not(:disabled):hover {
+  background: var(--vscode-button-hoverBackground, color-mix(in srgb, #fff 10%, var(--versiondock-accent-bg))) !important;
+  color: var(--vscode-button-foreground, #fff) !important;
+  opacity: 1 !important;
+}
+
+.sync-primary-action.pull:not(:disabled):hover,
+.sync-primary-more.pull:not(:disabled):hover {
+  background: color-mix(in srgb, var(--versiondock-info, #1f6feb) 85%, #0d419d 15%) !important;
+  filter: brightness(1.08);
+  color: #fff !important;
+  opacity: 1 !important;
+}
+
+.sync-primary-action.push:not(:disabled):hover,
+.sync-primary-more.push:not(:disabled):hover {
+  background: color-mix(in srgb, var(--versiondock-success, #238636) 75%, #196c2e 25%) !important;
+  filter: brightness(1.08);
+  color: #fff !important;
+  opacity: 1 !important;
+}
+
+.sync-primary-action:not(:disabled):active,
+.sync-primary-more:not(:disabled):active {
+  filter: brightness(0.9) !important;
+  transform: translateY(1px) scale(0.995);
+}
 .repository-group-main > .repository-count { flex: 0 0 auto; min-width: 18px; height: 16px; padding: 0 5px; color: var(--versiondock-badge-foreground, #fff); background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; }
 .submodule-row { min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--versiondock-border-soft); }
 .submodule-row:hover { background: var(--versiondock-hover); }

@@ -387,7 +387,7 @@ export interface AppStore {
   loadUnpushedCommits: (repoId?: string) => Promise<void>;
   loadIncomingCommits: (repoId?: string) => Promise<void>;
   unpushedOperation: (repoId: string, operation: UnpushedOperation) => Promise<boolean>;
-  historyOperation: (repoId: string, operation: HistoryOperation) => Promise<void>;
+  historyOperation: (repoId: string, operation: HistoryOperation) => Promise<boolean>;
   createPatch: (repoId: string, revisions: string[]) => Promise<PatchDocument>;
   svnOperation: (repoId: string, operation: SvnOperation) => Promise<void>;
   openBranchComparison: (repoId: string, target: string) => void;
@@ -2679,10 +2679,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (operation.type === 'editMessage') get().addNotification({ type: 'success', title: 'History operation completed', message: 'VersionDock: Commit message updated.', workspaceId: get().snapshot?.workspace.id });
       return true;
     }, `history:${repoId}`)) ?? false,
-    historyOperation: async (repoId, operation) => withBusy(async () => {
-      if (operation.type === 'reset' && !ensureRepositoryCapability(repoId, 'historyRewrite')) return;
+    historyOperation: async (repoId, operation) => (await withBusy(async () => {
+      if (operation.type === 'reset' && !ensureRepositoryCapability(repoId, 'historyRewrite')) return false;
       await bridge().request({ type: 'historyOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
-    }, `history:${repoId}`),
+      return true;
+    }, `history:${repoId}`)) ?? false,
     createPatch: async (repoId, revisions) => bridge().request<PatchDocument>({ type: 'createPatch', payload: { workspace_id: workspaceId(), repo_id: repoId, revisions } }),
     svnOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'svnOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });

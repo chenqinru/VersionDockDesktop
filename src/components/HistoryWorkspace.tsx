@@ -338,7 +338,11 @@ function CommitList({
     if (id === 'checkout') await historyOperation(commit.repoId, { type: 'checkout', revision: commit.hash });
     if (id === 'svn-update') await historyOperation(commit.repoId, { type: 'svnUpdateTo', revision: commit.hash });
     if (id === 'cherry-pick' && commit.parents.length <= 1) await historyOperation(commit.repoId, { type: 'cherryPick', revision: commit.hash });
-    if (id === 'cherry-pick-multi' && oldestFirst.every((item) => item.parents.length <= 1)) for (const item of oldestFirst) await historyOperation(commit.repoId, { type: 'cherryPick', revision: item.hash });
+    if (id === 'cherry-pick-multi' && oldestFirst.every((item) => item.parents.length <= 1)) {
+      for (const item of oldestFirst) {
+        if (!await historyOperation(commit.repoId, { type: 'cherryPick', revision: item.hash })) break;
+      }
+    }
     if (id === 'revert' && await confirmDialog({ title: t('Revert commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('A new inverse commit will be created.')}`, danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: [commit.hash] });
     if (id === 'revert-multi' && await confirmDialog({ title: t('Revert Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: newestFirst.map((item) => item.hash) });
     if (id === 'reset') {

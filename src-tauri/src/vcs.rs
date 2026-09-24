@@ -3350,10 +3350,10 @@ fn parse_numstat_z(raw: &str) -> HashMap<String, (Option<u32>, Option<u32>)> {
             continue;
         }
         let path = if parts[2].is_empty() {
-            index += 1;
-            let next = fields.get(index).copied().unwrap_or_default();
-            index += 1;
-            next
+            // Renames and copies include both paths; name-status uses the destination.
+            let destination = fields.get(index + 1).copied().unwrap_or_default();
+            index += 2;
+            destination
         } else {
             parts[2]
         };
