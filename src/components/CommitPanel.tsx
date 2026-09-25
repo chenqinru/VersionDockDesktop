@@ -21,14 +21,103 @@ import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { ConflictBanner } from './ConflictBanner';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 import { BranchRefBadge } from './BranchRefBadge';
+import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { ProviderPanel } from './ProviderPanel';
 import { InvertSelectionIcon, SelectAllIcon } from './CustomIcons';
 import { performCommitSafetyCheck } from '../history/safetyCheck';
 import { useSpeedSearch } from '../hooks/useSpeedSearch';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { SubmoduleDiffModal } from './SubmoduleDiffModal';
+import { VscodeChangesView } from './VscodeChangesView';
+import { useBridge } from '../platform/context';
 import { SelectionCheckbox } from './SelectionCheckbox';
 import { hasMixedRepositoryKinds, repositoryLabel } from './repoLabel';
+
+const COMMIT_TEXTAREA_HEIGHT_KEY = 'versiondock:commit-message-textarea-height';
+
+function loadPersistedTextareaHeight(): number | null {
+  try {
+    const raw = localStorage.getItem(COMMIT_TEXTAREA_HEIGHT_KEY);
+    if (raw === null) return null;
+    const stored = Number(raw);
+    if (!Number.isFinite(stored)) return null;
+    return Math.max(52, Math.min(Math.floor(window.innerHeight * 0.55), stored));
+  } catch {
+    return null;
+  }
+}
+
+function persistTextareaHeight(height: number): void {
+  try {
+    localStorage.setItem(COMMIT_TEXTAREA_HEIGHT_KEY, String(Math.round(height)));
+  } catch {
+    // ignore
+  }
+}
+
+function PillAmendButton({
+  active,
+  color,
+  displayName,
+  onClick,
+}: {
+  active: boolean;
+  color: string;
+  displayName: string;
+  onClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const { t } = useI18n();
+  const title = active
+    ? t('Amend active for {0} (click to cancel)', displayName)
+    : t('Amend last commit for {0}', displayName);
+
+  return (
+    <button
+      type="button"
+      data-action-btn=""
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '2px',
+        padding: '0 4px',
+        marginLeft: '4px',
+        height: '16px',
+        lineHeight: '16px',
+        borderRadius: '8px',
+        fontSize: '10px',
+        boxSizing: 'border-box',
+        cursor: 'pointer',
+        userSelect: 'none',
+        transition: 'all 0.12s ease',
+        border: active
+          ? `1px solid ${color}`
+          : hovered
+            ? `1px solid ${color}80`
+            : `1px solid transparent`,
+        background: active
+          ? `${color}38`
+          : hovered
+            ? 'rgba(255, 255, 255, 0.16)'
+            : 'rgba(255, 255, 255, 0.08)',
+        color: active ? color : 'inherit',
+        opacity: active ? 1 : hovered ? 0.9 : 0.65,
+        fontWeight: active ? 600 : 400,
+      }}
+      title={title}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <Codicon name="history" style={{ fontSize: '10px', lineHeight: 1 }} />
+      <span>{t('Amend')}</span>
+    </button>
+  );
+}
 
 const emptyRepositories: RepositoryStatus[] = [];
 function StatusMark({ file }: { file: FileChange }) {
@@ -37,7 +126,7 @@ function StatusMark({ file }: { file: FileChange }) {
 }
 
 type ExpansionCommand = { sequence: number; expanded: boolean };
-type ChangeContext = { x: number; y: number; kind: 'file' | 'folder' | 'repo'; repo: RepositoryStatus; files: FileChange[]; path?: string; changelistId?: string };
+type ChangeContext = { x: number; y: number; kind: 'file' | 'folder' | 'repo'; repo: RepositoryStatus; files: FileChange[]; path?: string; changelistId?: string; stagedSection?: boolean };
 
 type FlatChangeItem = { node: FileTreeNode; depth: number; key: string };
 
@@ -108,6 +197,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
   const selectableFiles = repo.files.filter((file) => !file.isTruncated);
   const selectedCount = selectableFiles.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
   const allSelected = selectableFiles.length > 0 && selectedCount === selectableFiles.length;
+  const [branchMenuAnchor, setBranchMenuAnchor] = useState<DOMRect | undefined>(undefined);
   const branch = branchColor(repo.branch || repo.revision);
   return (
     <section className="repo-change-group">
@@ -119,7 +209,38 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
         onContextMenu={onRepoContext}
       >
         <SelectionCheckbox label={repoLabel} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectableFiles.length} onChange={() => setFiles(repo.meta.id, selectableFiles.map((file) => file.path), !allSelected)} />
-        <button title={repoLabel} onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repoLabel}</strong><BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" style={{ marginLeft: 4 }} /></button>
+        <button title={repoLabel} onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><i style={{ background: repo.meta.color }} /><strong>{repoLabel}</strong></button>
+        <button
+          type="button"
+          className="repo-branch-trigger"
+          title={t('Switch branch')}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(branchMenuAnchor)}
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            setBranchMenuAnchor((cur) => (cur ? undefined : rect));
+          }}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            margin: '0 0 0 4px',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+        >
+          <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
+        </button>
+        {branchMenuAnchor && (
+          <BranchMenuPopover
+            anchorRect={branchMenuAnchor}
+            initialRepoId={repo.meta.id}
+            repoOnly
+            onClose={() => setBranchMenuAnchor(undefined)}
+          />
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
           {repo.files.length > 0 && (
             <button
@@ -271,7 +392,13 @@ export function CommitPanel() {
   const [syncAllSelected, setSyncAllSelected] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
   const [expandedByTab, setExpandedByTab] = useState<Record<'changes' | 'shelf' | 'stash' | 'sync', boolean | null>>({ changes: true, shelf: false, stash: false, sync: true });
-  const [textareaHeight, setTextareaHeight] = useState(54);
+  const [manualTextareaHeight, setManualTextareaHeight] = useState<number | null>(loadPersistedTextareaHeight);
+  const manualTextareaHeightRef = useRef<number | null>(manualTextareaHeight);
+  useEffect(() => {
+    manualTextareaHeightRef.current = manualTextareaHeight;
+  }, [manualTextareaHeight]);
+  const bridge = useBridge();
+  const [submoduleDiffTarget, setSubmoduleDiffTarget] = useState<{ repo: RepositoryStatus; file: FileChange } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyDialog = useDialogFocusTrap(historyOpen, () => setHistoryOpen(false));
   const [historyMessages, setHistoryMessages] = useState<RecentCommitMessage[]>([]);
@@ -279,6 +406,39 @@ export function CommitPanel() {
   const messageRequestRef = useRef<AbortController | null>(null);
   const amendMessageRequestRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const updateManualTextareaHeight = useCallback((height: number) => {
+    const nextHeight = Math.max(52, Math.min(Math.floor(window.innerHeight * 0.55), height));
+    manualTextareaHeightRef.current = nextHeight;
+    persistTextareaHeight(nextHeight);
+    setManualTextareaHeight(nextHeight);
+  }, []);
+
+  const resizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const manualHeight = manualTextareaHeightRef.current;
+    if (manualHeight !== null) {
+      el.style.height = `${manualHeight}px`;
+      el.style.overflow = 'auto';
+      return;
+    }
+    el.style.height = 'auto';
+    const maxHeight = Math.max(52, Math.floor(window.innerHeight * 0.5));
+    if (el.scrollHeight > maxHeight) {
+      el.style.height = `${maxHeight}px`;
+      el.style.overflow = 'auto';
+    } else {
+      const nextHeight = Math.max(52, el.scrollHeight);
+      el.style.height = `${nextHeight}px`;
+      el.style.overflow = 'hidden';
+    }
+  }, []);
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [message, resizeTextarea, manualTextareaHeight]);
+
   const historyIndexRef = useRef(-1);
   const historyDraftRef = useRef(message);
   const messageRef = useRef(message);
@@ -351,51 +511,106 @@ export function CommitPanel() {
   const activeOperationRepo = repos.find((repo) => repo.meta.kind === 'git' && repo.operation);
   const restoreConflicts = useAppStore((state) => state.restoreConflicts);
   const restorableConflictRepoIds = repos.filter((repo) => repo.meta.kind === 'git' && !repo.operation && (repo.conflicts > 0 || repo.files.some((file) => file.conflicted))).map((repo) => repo.meta.id);
+  const canRepoAmend = useCallback((repo: RepositoryStatus) => {
+    if (repo.meta.kind !== 'git') return false;
+    const unpushed = unpushedCommits[repo.meta.id];
+    if (unpushed) return unpushed.length > 0;
+    const branch = branchesByRepo[repo.meta.id]?.find((b) => b.current);
+    return (branch?.ahead ?? repo.ahead) > 0;
+  }, [branchesByRepo, unpushedCommits]);
+
+  const [vscodeDeselectedRepos, setVscodeDeselectedRepos] = useState<Set<string>>(new Set());
+
   const selectedByRepo = useMemo(() => {
     const map = new Map<string, string[]>();
-    for (const key of selected) { const [repoId, path] = key.split('\0'); map.set(repoId, [...(map.get(repoId) ?? []), path]); }
+    for (const key of selected) {
+      const [repoId, path] = key.split('\0');
+      map.set(repoId, [...(map.get(repoId) ?? []), path]);
+    }
     return map;
   }, [selected]);
-  const commitTargets = repos.filter((repo) => (selectedByRepo.get(repo.meta.id)?.length ?? 0) > 0);
+
+  const effectiveSelectedByRepo = useMemo(() => {
+    if (changesDisplayMode === 'vscode') {
+      const map = new Map<string, string[]>();
+      for (const repo of repos) {
+        if (vscodeDeselectedRepos.has(repo.meta.id)) continue;
+        if (repo.meta.kind === 'svn') {
+          const paths = repo.files.map((f) => f.path);
+          if (paths.length > 0) {
+            map.set(repo.meta.id, paths);
+          }
+        } else {
+          const staged = repo.files.filter((f) => f.staged).map((f) => f.path);
+          if (staged.length > 0) {
+            map.set(repo.meta.id, staged);
+          }
+        }
+      }
+      return map;
+    }
+    return selectedByRepo;
+  }, [changesDisplayMode, repos, selectedByRepo, vscodeDeselectedRepos]);
+
+  const commitTargets = repos.filter((repo) => (effectiveSelectedByRepo.get(repo.meta.id)?.length ?? 0) > 0);
+  const vscodeTargetRepoIds = useMemo(() => new Set(commitTargets.map((r) => r.meta.id)), [commitTargets]);
   const showGitActions = commitTargets.length > 0
     ? commitTargets.some((repo) => repo.meta.kind === 'git')
     : gitRepos.length > 0;
-  const amendTarget = commitTargets.length === 1 && commitTargets[0].meta.kind === 'git' ? commitTargets[0] : undefined;
-  const amendBranch = amendTarget ? branchesByRepo[amendTarget.meta.id]?.find((branch) => branch.current) : undefined;
-  const showAmend = Boolean(amendTarget && (
-    (amendBranch?.ahead ?? amendTarget.ahead) > 0
-    || (!amendBranch?.upstream && (unpushedCommits[amendTarget.meta.id]?.length ?? 0) > 0)
-  ));
+
+  const singleAmendTarget = commitTargets.length === 1 && canRepoAmend(commitTargets[0])
+    ? commitTargets[0]
+    : (repos.length === 1 && canRepoAmend(repos[0]) ? repos[0] : undefined);
+  const showAmend = Boolean(singleAmendTarget);
+
   useEffect(() => {
-    const allowedRepoId = showAmend ? amendTarget?.meta.id : undefined;
-    const next = amendRepoIds.filter((repoId) => repoId === allowedRepoId);
-    if (next.length !== amendRepoIds.length) setAmendRepoIds(next);
-  }, [amendRepoIds, amendTarget, setAmendRepoIds, showAmend]);
+    const validTargetIds = new Set(
+      commitTargets
+        .filter((r) => canRepoAmend(r))
+        .map((r) => r.meta.id)
+    );
+    const next = amendRepoIds.filter((repoId) => validTargetIds.has(repoId));
+    if (next.length !== amendRepoIds.length) {
+      setAmendRepoIds(next);
+    }
+  }, [amendRepoIds, canRepoAmend, commitTargets, setAmendRepoIds]);
+
   const messageHistoryRepoKey = repos.map((repo) => repo.meta.id).sort().join('\0');
   const recentCommitMessages = useAppStore((state) => state.recentCommitMessages);
   const lastCommitMessage = useAppStore((state) => state.lastCommitMessage);
-  useEffect(() => {
-    messageRequestRef.current?.abort();
+
+  const fetchMessageHistory = useCallback(async (signal?: AbortSignal) => {
     if (!messageHistoryRepoKey) {
-      queueMicrotask(() => {
-        setHistoryMessages([]);
-        setHistoryLoading(false);
-      });
+      setHistoryMessages([]);
+      setHistoryLoading(false);
       return;
     }
+    setHistoryLoading(true);
+    try {
+      const values = await recentCommitMessages(messageHistoryRepoKey.split('\0'), signal);
+      if (!signal?.aborted) {
+        setHistoryMessages(values);
+      }
+    } catch {
+      // 忽略请求错误，保留已有数据
+    } finally {
+      if (!signal?.aborted) {
+        setHistoryLoading(false);
+      }
+    }
+  }, [messageHistoryRepoKey, recentCommitMessages]);
+
+  useEffect(() => {
+    messageRequestRef.current?.abort();
     const controller = new AbortController();
     messageRequestRef.current = controller;
     queueMicrotask(() => {
-      if (controller.signal.aborted || messageRequestRef.current !== controller) return;
-      setHistoryLoading(true);
-      setHistoryMessages([]);
+      if (!controller.signal.aborted) {
+        void fetchMessageHistory(controller.signal);
+      }
     });
-    void recentCommitMessages(messageHistoryRepoKey.split('\0'), controller.signal)
-      .then((values) => { if (!controller.signal.aborted && messageRequestRef.current === controller) setHistoryMessages(values); })
-      .catch(() => undefined)
-      .finally(() => { if (!controller.signal.aborted && messageRequestRef.current === controller) setHistoryLoading(false); });
     return () => controller.abort();
-  }, [messageHistoryRepoKey, recentCommitMessages, snapshot?.workspace.id]);
+  }, [fetchMessageHistory, snapshot?.workspace.id]);
   useEffect(() => { messageRef.current = message; }, [message]);
   useEffect(() => {
     historyIndexRef.current = -1;
@@ -462,9 +677,23 @@ export function CommitPanel() {
   const settingsNoVerify = useAppStore((state) => state.bootstrap?.state.settings?.noVerify ?? false);
   const [noVerify, setNoVerify] = useState(settingsNoVerify);
   const setFiles = useCallback((repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value), [setCommitSelection]);
+  const isVscode = changesDisplayMode === 'vscode';
   const changesTotalFiles = repos.reduce((sum, repo) => sum + repo.files.length, 0);
   const changesHasSelectable = changesTotalFiles > 0;
-  const changesIsAllSelected = changesHasSelectable && repos.every((repo) => repo.files.every((file) => selected.has(`${repo.meta.id}\0${file.path}`)));
+  const changesIsAllSelected = useMemo(() => {
+    if (!changesHasSelectable) return false;
+    if (isVscode) {
+      return repos.every((repo) => {
+        if (repo.meta.kind === 'svn') {
+          return repo.files.every((file) => selected.has(`${repo.meta.id}\0${file.path}`));
+        }
+        const hasUnstaged = repo.files.some((file) => file.unstaged || file.status === 'untracked');
+        const hasStaged = repo.files.some((file) => file.staged);
+        return !hasUnstaged && hasStaged;
+      });
+    }
+    return repos.every((repo) => repo.files.every((file) => selected.has(`${repo.meta.id}\0${file.path}`)));
+  }, [changesHasSelectable, isVscode, repos, selected]);
   const canSelectAll = tab === 'changes' || tab === 'sync';
   const currentTabHasSelectable = tab === 'changes'
     ? changesHasSelectable
@@ -478,25 +707,50 @@ export function CommitPanel() {
       : false;
   const handleSelectAll = useCallback(() => {
     if (tab === 'changes') {
-      for (const repo of repos) {
-        setFiles(repo.meta.id, repo.files.map((file) => file.path), true);
+      if (isVscode) {
+        for (const repo of repos) {
+          if (repo.meta.kind === 'git') {
+            const unstaged = repo.files.filter((f) => f.unstaged || f.status === 'untracked').map((f) => f.path);
+            if (unstaged.length > 0) void stage(repo.meta.id, unstaged);
+          } else {
+            setFiles(repo.meta.id, repo.files.map((file) => file.path), true);
+          }
+        }
+      } else {
+        for (const repo of repos) {
+          setFiles(repo.meta.id, repo.files.map((file) => file.path), true);
+        }
       }
     } else if (tab === 'sync') {
       setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'selectAll' }));
     }
-  }, [repos, setFiles, tab]);
+  }, [isVscode, repos, setFiles, stage, tab]);
   const handleInvertSelection = useCallback(() => {
     if (tab === 'changes') {
-      for (const repo of repos) {
-        const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []);
-        const allPaths = repo.files.map((file) => file.path);
-        setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false);
-        setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true);
+      if (isVscode) {
+        for (const repo of repos) {
+          if (repo.meta.kind === 'git') {
+            const staged = repo.files.filter((f) => f.staged).map((f) => f.path);
+            if (staged.length > 0) void unstage(repo.meta.id, staged);
+          } else {
+            const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []);
+            const allPaths = repo.files.map((file) => file.path);
+            setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false);
+            setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true);
+          }
+        }
+      } else {
+        for (const repo of repos) {
+          const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []);
+          const allPaths = repo.files.map((file) => file.path);
+          setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false);
+          setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true);
+        }
       }
     } else if (tab === 'sync') {
       setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'invert' }));
     }
-  }, [commitSelections, repos, setFiles, tab]);
+  }, [commitSelections, isVscode, repos, setFiles, tab, unstage]);
   const doCommit = async (push: boolean) => {
     if (!message.trim() || !commitTargets.length || commitBusy || commitUnavailable || (push && pushUnavailable)) return;
     const submittedMessage = message;
@@ -505,7 +759,7 @@ export function CommitPanel() {
     const wid = useAppStore.getState().snapshot?.workspace.id ?? '';
     const safetyResults = await Promise.all(
       commitTargets.map(async (repo) => {
-        const paths = selectedByRepo.get(repo.meta.id) ?? [];
+        const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
         if (paths.length === 0) return null;
         return performCommitSafetyCheck(wid, repo.meta.id, paths);
       })
@@ -568,8 +822,8 @@ export function CommitPanel() {
       if (!confirmed) return;
     }
 
-    await commitMany(commitTargets.map((repo) => {
-      const paths = selectedByRepo.get(repo.meta.id) ?? [];
+    const results = await commitMany(commitTargets.map((repo) => {
+      const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
       return {
         repoId: repo.meta.id,
         paths,
@@ -578,11 +832,26 @@ export function CommitPanel() {
         noVerify,
       };
     }), message, push);
-    const failedRepoIds = new Set(useAppStore.getState().batchCommitReport?.results.filter((result) => result.error).map((result) => result.repoId) ?? []);
+    if (!results) {
+      return;
+    }
+    const failedRepoIds = new Set(results.filter((result) => result.error || !result.committed).map((result) => result.repoId));
     if (failedRepoIds.size === 0) {
       if (useAppStore.getState().commitMessage.trim() === submittedMessage.trim()) setMessage('');
       setAmendRepoIds([]);
       useAppStore.getState().dismissBatchReport();
+      if (submittedMessage.trim()) {
+        const repoId = commitTargets[0]?.meta.id ?? '';
+        setHistoryMessages((prev) => [
+          {
+            repoId,
+            revision: 'HEAD',
+            committedAt: new Date().toISOString(),
+            message: submittedMessage.trim(),
+          },
+          ...prev.filter((item) => item.message.trim() !== submittedMessage.trim()),
+        ]);
+      }
     } else {
       setAmendRepoIds(amendRepoIds.filter((repoId) => failedRepoIds.has(repoId)));
     }
@@ -592,7 +861,7 @@ export function CommitPanel() {
     const submittedMessage = message;
     let succeeded = true;
     for (const repo of commitTargets.filter((item) => item.meta.kind === 'git')) {
-      const paths = selectedByRepo.get(repo.meta.id) ?? [];
+      const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
       const result = kind === 'stash'
         ? await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: message.trim() || t('WIP stash'), paths, include_untracked: true })
         : await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: message.trim() || t('WIP shelf'), paths });
@@ -619,16 +888,24 @@ export function CommitPanel() {
     else await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: t('Changes'), paths });
   };
   const contextItems = (value: ChangeContext): ContextMenuEntry[] => {
-    const { repo, files, kind } = value;
+    const { repo, files, kind, stagedSection } = value;
     const file = kind === 'file' ? files[0] : undefined;
     const allUntracked = files.length > 0 && files.every((item) => item.status === 'untracked');
     const containsTruncated = files.some((item) => item.isTruncated);
     const git = repo.meta.kind === 'git';
     const items: ContextMenuEntry[] = [];
     if (kind === 'file' && file?.submodule) {
-      if (file.staged && !file.unstaged) items.push({ id: 'unstage', label: t('Unstage'), icon: 'remove' });
+      if (stagedSection !== undefined ? stagedSection : (file.staged && !file.unstaged)) items.push({ id: 'unstage', label: t('Unstage'), icon: 'remove' });
       else items.push({ id: 'stage', label: t('Stage'), icon: 'add' });
-      items.push({ separator: true }, { id: 'refresh', label: t('Refresh'), icon: 'refresh' });
+      items.push(
+        { separator: true },
+        { id: 'submodule-update-parent', label: t('Update Submodule (Sync to Commit)'), icon: 'sync' },
+        { id: 'submodule-reveal-panel', label: t('Reveal in Submodules Panel'), icon: 'repo-clone' },
+        { id: 'submodule-diff', label: t('Show Pointer Diff'), icon: 'diff' },
+        { id: 'submodule-open-window', label: t('Open in New Window'), icon: 'link-external' },
+        { separator: true },
+        { id: 'refresh', label: t('Refresh'), icon: 'refresh' },
+      );
       return items;
     }
     if (file?.conflicted) items.push(
@@ -637,6 +914,36 @@ export function CommitPanel() {
       { id: 'accept-theirs', label: t('Accept Theirs'), icon: 'check-all' },
       { separator: true },
     );
+    if (stagedSection !== undefined && git) {
+      if (stagedSection) {
+        items.push({ id: 'unstage', label: t(kind === 'folder' ? 'Unstage Folder' : 'Unstage'), icon: 'remove' });
+      } else {
+        items.push({ id: 'stage', label: t(kind === 'folder' ? 'Stage Folder' : allUntracked ? 'Add to Git' : 'Stage'), icon: 'add' });
+        items.push({ id: 'rollback', label: t('Rollback'), icon: 'discard' });
+        items.push(
+          { id: 'shelf', label: t(kind === 'file' ? 'Shelve' : 'Shelve Changes'), icon: 'archive' },
+          { id: 'stash', label: t(kind === 'file' ? 'Stash' : 'Stash Changes'), icon: 'save' },
+        );
+      }
+      if (kind === 'file' && file) items.push(
+        { id: stagedSection ? 'diff-staged' : 'diff-unstaged', label: t('Show Diff'), icon: 'diff' },
+        { id: 'history', label: t('File history'), icon: 'history' },
+        { id: 'commit-history', label: t('Show in commit history'), icon: 'git-commit' },
+        { id: 'open', label: t('Open file'), icon: 'go-to-file' },
+        { id: 'reveal', label: t('Reveal in File Manager'), icon: 'folder-opened' },
+      );
+      if (!stagedSection && kind !== 'repo' && value.path) {
+        items.push(
+          { separator: true },
+          { id: 'ignore', label: t('Add to .gitignore'), icon: 'exclude' },
+        );
+      }
+      if (!stagedSection && files.length && !containsTruncated && kind !== 'repo') {
+        items.push({ separator: true }, { id: 'delete', label: t('Delete'), icon: 'trash', danger: true });
+      }
+      items.push({ separator: true }, { id: 'refresh', label: t('Refresh'), icon: 'refresh' });
+      return items;
+    }
     if (allUntracked) {
       items.push({ id: 'stage', label: t(git ? 'Add to Git' : containsTruncated && files.length === 1 ? 'Add directory recursively to SVN' : 'Add to SVN'), icon: 'add' });
       if (!git && kind === 'folder' && files.some((entry) => entry.isTruncated && entry.path === value.path)) {
@@ -904,6 +1211,35 @@ export function CommitPanel() {
         break;
       }
       case 'unstage': await unstage(repo.meta.id, paths); break;
+      case 'submodule-update-parent': {
+        if (file) {
+          await useAppStore.getState().submoduleOperation(repo.meta.id, {
+            type: 'update',
+            path: file.path,
+            init: false,
+            recursive: false,
+            remote: false,
+          });
+        }
+        break;
+      }
+      case 'submodule-reveal-panel': {
+        switchTab('submodule');
+        break;
+      }
+      case 'submodule-diff': {
+        if (file) {
+          setSubmoduleDiffTarget({ repo, file });
+        }
+        break;
+      }
+      case 'submodule-open-window': {
+        if (file) {
+          const absPath = `${repo.meta.rootPath}/${file.path}`.replace(/\\/g, '/');
+          void bridge?.openInNewWindow([absPath]);
+        }
+        break;
+      }
       case 'diff-unstaged': if (file) await openDiff(repo.meta.id, file.path, false); break;
       case 'diff-staged': if (file) await openDiff(repo.meta.id, file.path, true); break;
       case 'history': if (file) openFileHistory(repo.meta.id, file.path); break;
@@ -1004,10 +1340,17 @@ export function CommitPanel() {
   };
   const startTextareaResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    const el = textareaRef.current;
     const startY = event.clientY;
-    const startHeight = textareaHeight;
-    const move = (moveEvent: PointerEvent) => setTextareaHeight(Math.max(52, Math.min(window.innerHeight * 0.55, startHeight + startY - moveEvent.clientY)));
+    const startHeight = el?.getBoundingClientRect().height ?? manualTextareaHeightRef.current ?? 54;
+    let latestHeight = startHeight;
+    const move = (moveEvent: PointerEvent) => {
+      latestHeight = Math.max(52, Math.min(window.innerHeight * 0.55, startHeight + startY - moveEvent.clientY));
+      manualTextareaHeightRef.current = latestHeight;
+      setManualTextareaHeight(latestHeight);
+    };
     const finish = () => {
+      persistTextareaHeight(latestHeight);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', finish);
       window.removeEventListener('pointercancel', finish);
@@ -1130,7 +1473,7 @@ export function CommitPanel() {
     <aside className="commit-panel" onClick={() => setContext(undefined)}>
       {panelToolbar}
       {panelOverlays}
-      <div className="commit-tabs"><button title={t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => switchTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => switchTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => switchTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => switchTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => switchTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{submoduleEnabled && <button title={t('Submodules')} className={tab === 'submodule' ? 'active' : ''} onClick={() => switchTab('submodule')}><Codicon name="repo-clone" />{tab === 'submodule' && <span>{t('Submodules')}</span>}{submoduleCount > 0 && <b>{submoduleCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Sync')} className={tab === 'sync' ? 'active' : ''} onClick={() => switchTab('sync')}><Codicon name="sync" />{tab === 'sync' && <span>{t('Sync')}</span>}{totalToSync > 0 && <b>{totalToSync}</b>}</button>}</div>
+      <div className="commit-tabs"><button title={changesDisplayMode === 'changelists' || changesDisplayMode === 'vscode' ? t('Commit') : t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => switchTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{changesDisplayMode === 'changelists' || changesDisplayMode === 'vscode' ? t('Commit') : t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => switchTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => switchTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{submoduleEnabled && <button title={t('Submodules')} className={tab === 'submodule' ? 'active' : ''} onClick={() => switchTab('submodule')}><Codicon name="repo-clone" />{tab === 'submodule' && <span>{t('Submodules')}</span>}{submoduleCount > 0 && <b>{submoduleCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => switchTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => switchTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Sync')} className={tab === 'sync' ? 'active' : ''} onClick={() => switchTab('sync')}><Codicon name="sync" />{tab === 'sync' && <span>{t('Sync')}</span>}{totalToSync > 0 && <b>{totalToSync}</b>}</button>}</div>
       {visitedTabs.has('changes') && (
         <div className="commit-tab-content changes-tab-content" style={{ display: tab === 'changes' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
       {conflicts.length > 0 ? (
@@ -1292,12 +1635,95 @@ export function CommitPanel() {
             openWorkingChanges={(repoId) => openWorkingChanges(repoId)}
             onManageRepo={(repoId) => openIdentityPanel(repoId)}
           />
+        ) : changesDisplayMode === 'vscode' ? (
+          <VscodeChangesView
+            repos={visibleChangeRepos}
+            selected={selected}
+            setFiles={setFiles}
+            onFile={(repoId, file, staged) => {
+              if (file.submodule) {
+                const repo = repos.find((r) => r.meta.id === repoId);
+                if (repo) setSubmoduleDiffTarget({ repo, file });
+              } else {
+                void openDiff(repoId, file.path, staged);
+              }
+            }}
+            onContext={(event, file, repo, staged) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContext({ x: event.clientX, y: event.clientY, kind: 'file' as const, repo, files: [file], path: file.path, stagedSection: staged });
+            }}
+            onFolderContext={(event, folderPath, files, repo, staged) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContext({ x: event.clientX, y: event.clientY, kind: 'folder' as const, repo, files, path: folderPath, stagedSection: staged });
+            }}
+            onRepoContext={(event, repo, staged) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContext({ x: event.clientX, y: event.clientY, kind: 'repo' as const, repo, files: repo.files, stagedSection: staged });
+            }}
+            viewMode={viewMode as 'tree' | 'list'}
+            expansion={expansion}
+            openWorkingChanges={(repoId) => openWorkingChanges(repoId)}
+            onStage={async (repoId, paths) => {
+              setVscodeDeselectedRepos((prev) => {
+                if (!prev.has(repoId)) return prev;
+                const next = new Set(prev);
+                next.delete(repoId);
+                return next;
+              });
+              const repo = repos.find((r) => r.meta.id === repoId);
+              if (repo?.meta.kind === 'svn') {
+                const truncated = repo.files.filter((entry) => entry.isTruncated && paths.includes(entry.path));
+                if (truncated.length === 1 && paths.length === 1) {
+                  const confirmed = await confirmDialog({
+                    title: t('Add directory recursively to SVN'),
+                    message: t('The directory scan was truncated. SVN will add all eligible descendants recursively. Continue?'),
+                  });
+                  if (confirmed) {
+                    await stage(repoId, paths, true);
+                  }
+                  return;
+                }
+                const safePaths = paths.filter((p) => !repo.files.some((entry) => entry.path === p && entry.isTruncated));
+                if (safePaths.length) await stage(repoId, safePaths);
+                return;
+              }
+              await stage(repoId, paths);
+            }}
+            onUnstage={(repoId, paths) => void unstage(repoId, paths)}
+            onDiscard={(repoId, paths) => {
+              const repo = repos.find((r) => r.meta.id === repoId);
+              const files = repo?.files.filter((f) => paths.includes(f.path)) ?? [];
+              if (repo && files.length) void confirmDiscard(repo, files);
+            }}
+            speedSearchQuery={speedSearch.query}
+            selectedRepos={vscodeTargetRepoIds}
+            onToggleRepoSelection={(repoId) => {
+              setVscodeDeselectedRepos((prev) => {
+                const next = new Set(prev);
+                if (vscodeTargetRepoIds.has(repoId)) {
+                  next.add(repoId);
+                } else {
+                  next.delete(repoId);
+                }
+                return next;
+              });
+            }}
+          />
         ) : (
           visibleChangeRepos.map((repo) => {
             const fileProps = {
               selected,
               setFiles,
-              onFile: (file: FileChange) => void openDiff(repo.meta.id, file.path, file.staged && !file.unstaged),
+              onFile: (file: FileChange) => {
+                if (file.submodule) {
+                  setSubmoduleDiffTarget({ repo, file });
+                } else {
+                  void openDiff(repo.meta.id, file.path, file.staged && !file.unstaged);
+                }
+              },
               onContext: (event: React.MouseEvent, file: FileChange) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1326,20 +1752,104 @@ export function CommitPanel() {
         )}
       </div>
       <div className="commit-form">
-        <div className="commit-resize-grip" role="separator" tabIndex={0} aria-label={t('Resize commit message')} aria-orientation="horizontal" aria-valuemin={52} aria-valuemax={Math.round(window.innerHeight * 0.55)} aria-valuenow={Math.round(textareaHeight)} onPointerDown={startTextareaResize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTextareaHeight((value) => Math.max(52, Math.min(window.innerHeight * 0.55, value + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>
-        {repos.length > 1 && <div className="commit-targets">{commitTargets.length === 0 ? <span>{t('No files selected')}</span> : commitTargets.map((repo) => <em key={repo.meta.id} style={{ color: repo.meta.color, background: `${repo.meta.color}28`, borderColor: `${repo.meta.color}60` }}><button title={t('Remove {0}', repo.meta.name)} onClick={() => setFiles(repo.meta.id, repo.files.map((file) => file.path), false)}><Codicon name="close" /></button>{repo.meta.name}<b>{selectedByRepo.get(repo.meta.id)?.length}</b></em>)}</div>}
+        <div
+          className="commit-resize-grip"
+          role="separator"
+          tabIndex={0}
+          aria-label={t('Resize commit message')}
+          aria-orientation="horizontal"
+          aria-valuemin={52}
+          aria-valuemax={Math.round(window.innerHeight * 0.55)}
+          aria-valuenow={Math.round(manualTextareaHeight ?? 54)}
+          onPointerDown={startTextareaResize}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+              event.preventDefault();
+              const cur = manualTextareaHeight ?? textareaRef.current?.getBoundingClientRect().height ?? 54;
+              const next = Math.max(52, Math.min(window.innerHeight * 0.55, cur + (event.key === 'ArrowUp' ? 10 : -10)));
+              updateManualTextareaHeight(next);
+            }
+          }}
+        >
+          <i />
+        </div>
+        {repos.length > 1 && (
+          <div className="commit-targets">
+            {commitTargets.length === 0 ? (
+              <span>{t('No files selected')}</span>
+            ) : (
+              commitTargets.map((repo) => {
+                const count = effectiveSelectedByRepo.get(repo.meta.id)?.length ?? 0;
+                const isAmended = amendRepos.has(repo.meta.id);
+                const repoCanAmend = canRepoAmend(repo);
+                return (
+                  <em
+                    key={repo.meta.id}
+                    style={{
+                      color: repo.meta.color,
+                      background: `${repo.meta.color}28`,
+                      borderColor: `${repo.meta.color}60`,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <button
+                      title={t('Remove {0}', repo.meta.name)}
+                      onClick={() => {
+                        if (changesDisplayMode === 'vscode') {
+                          setVscodeDeselectedRepos((prev) => {
+                            const next = new Set(prev);
+                            next.add(repo.meta.id);
+                            return next;
+                          });
+                        } else {
+                          setFiles(repo.meta.id, repo.files.map((file) => file.path), false);
+                        }
+                      }}
+                    >
+                      <Codicon name="close" />
+                    </button>
+                    {repo.meta.name}
+                    <b>{count}</b>
+                    {repoCanAmend && (
+                      <PillAmendButton
+                        active={isAmended}
+                        color={repo.meta.color}
+                        displayName={repo.meta.name}
+                        onClick={() => void toggleAmend(repo.meta.id)}
+                      />
+                    )}
+                  </em>
+                );
+              })
+            )}
+          </div>
+        )}
         <div className="commit-options">
-          {showAmend && amendTarget && <label title={t('Amend last commit')}><input type="checkbox" checked={amendRepos.has(amendTarget.meta.id)} onChange={() => void toggleAmend(amendTarget.meta.id)} />{t('Amend last commit')}</label>}
+          {showAmend && singleAmendTarget && <label title={t('Amend last commit')}><input type="checkbox" checked={amendRepos.has(singleAmendTarget.meta.id)} onChange={() => void toggleAmend(singleAmendTarget.meta.id)} />{t('Amend last commit')}</label>}
           {commitTargets.some((r) => r.meta.kind === 'git') && (
             <label title={t('Bypass Git pre-commit hooks')}>
               <input type="checkbox" checked={noVerify} onChange={(e) => setNoVerify(e.target.checked)} />
               {t('Bypass hooks (--no-verify)')}
             </label>
           )}
-          <div className="commit-option-actions"><button type="button" disabled={!repos.length || workspaceBusy || historyLoading} aria-label={t('Commit message history')} title={t('View commit message history')} onClick={() => setHistoryOpen(true)}><Codicon name="history" /></button></div>
+          <div className="commit-option-actions">
+            <button
+              type="button"
+              disabled={!repos.length || workspaceBusy || historyLoading}
+              aria-label={t('Commit message history')}
+              title={t('View commit message history')}
+              onClick={() => {
+                void fetchMessageHistory();
+                setHistoryOpen(true);
+              }}
+            >
+              <Codicon name="history" />
+            </button>
+          </div>
         </div>
         {mergeMessageSuggestion && <div className="merge-message-suggestion" role="status"><span>{t('Merge message suggestion')}: {mergeMessageSuggestion}</span><button type="button" onClick={applyMergeMessageSuggestion}>{t('Use Merge Message')}</button><button type="button" onClick={dismissMergeMessageSuggestion}>{t('Ignore')}</button></div>}
-        <textarea ref={textareaRef} style={{ height: textareaHeight }} value={message} onChange={(event) => { historyIndexRef.current = -1; historyDraftRef.current = event.target.value; appliedHistoryMessageRef.current = null; setMessage(event.target.value); }} onPointerDown={() => { if (historyIndexRef.current < 0) return; historyIndexRef.current = -1; historyDraftRef.current = message; }} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => {
+        <textarea ref={textareaRef} style={manualTextareaHeight !== null ? { height: manualTextareaHeight } : undefined} value={message} onChange={(event) => { historyIndexRef.current = -1; historyDraftRef.current = event.target.value; appliedHistoryMessageRef.current = null; setMessage(event.target.value); }} onPointerDown={() => { if (historyIndexRef.current < 0) return; historyIndexRef.current = -1; historyDraftRef.current = message; }} placeholder={`${t('Commit message')} (Cmd+Enter ${t('Commit')})`} onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { void doCommit(defaultCommitAction === 'commitAndPush'); return; }
           if ((event.key !== 'ArrowUp' && event.key !== 'ArrowDown') || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.nativeEvent.isComposing) return;
           const historyActive = historyIndexRef.current >= 0;
@@ -1417,6 +1927,17 @@ export function CommitPanel() {
       )}
       {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context)} onSelect={(id) => void handleContextAction(id)} onClose={() => setContext(undefined)} />}
       {clHeaderContext && <ContextMenu x={clHeaderContext.x} y={clHeaderContext.y} items={clHeaderItems(clHeaderContext.changelistId)} onSelect={(id) => void handleClHeaderAction(id)} onClose={() => setClHeaderContext(undefined)} />}
+      {submoduleDiffTarget && (
+        <SubmoduleDiffModal
+          repo={submoduleDiffTarget.repo}
+          file={submoduleDiffTarget.file}
+          onClose={() => setSubmoduleDiffTarget(null)}
+          onRevealPanel={() => {
+            setSubmoduleDiffTarget(null);
+            switchTab('submodule');
+          }}
+        />
+      )}
       {historyOpen && <div className="commit-history-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false); }}><section ref={historyDialog} className="commit-history-modal" role="dialog" aria-modal="true" aria-label={t('Commit message history')}>
         <header className="commit-history-header"><Codicon name="history" /><strong>{t('Commit message history')}</strong><button type="button" aria-label={t('Cancel')} title={t('Cancel')} onClick={() => setHistoryOpen(false)}><Codicon name="close" /></button></header>
         <div className="commit-history-subtitle">{t('Select a previous commit message to use.')}</div>

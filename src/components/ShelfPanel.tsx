@@ -381,6 +381,7 @@ function ShelfRow({
   expansion,
   onManualExpansionChange,
   onUnshelve,
+  onUnshelveAndDrop,
   onUnshelveFile,
   onOpenFileDiff,
   onDrop,
@@ -391,6 +392,7 @@ function ShelfRow({
   expansion: ExpansionCommand;
   onManualExpansionChange: () => void;
   onUnshelve: (repoId: string, shelveId: string) => void;
+  onUnshelveAndDrop: (repoId: string, shelveId: string) => void;
   onUnshelveFile: (repoId: string, shelveId: string, filePath: string) => void;
   onOpenFileDiff?: (repoId: string, shelfId: string, filePath: string) => void;
   onDrop: (repoId: string, shelveId: string) => void;
@@ -467,13 +469,24 @@ function ShelfRow({
             <button
               type="button"
               style={rowStyle.btn}
-              title={t('Unshelve (apply and keep)')}
+              title={t('Apply and delete')}
+              onClick={(e) => {
+                e.stopPropagation();
+                onUnshelveAndDrop(repoId, entry.id);
+              }}
+            >
+              <Codicon name="desktop-download" />
+            </button>
+            <button
+              type="button"
+              style={rowStyle.btn}
+              title={t('Apply and keep')}
               onClick={(e) => {
                 e.stopPropagation();
                 onUnshelve(repoId, entry.id);
               }}
             >
-              <Codicon name="desktop-download" />
+              <Codicon name="arrow-down" />
             </button>
             <button
               type="button"
@@ -540,12 +553,14 @@ function ShelfRow({
           x={ctxMenu.x}
           y={ctxMenu.y}
           items={[
-            { id: 'unshelve', label: t('Unshelve'), icon: 'desktop-download' },
+            { id: 'pop', label: t('Apply and delete'), icon: 'desktop-download' },
+            { id: 'unshelve', label: t('Apply and keep'), icon: 'arrow-down' },
             { separator: true },
             { id: 'drop', label: t('Delete'), icon: 'trash', danger: true },
           ]}
           onSelect={(id) => {
-            if (id === 'unshelve') onUnshelve(repoId, entry.id);
+            if (id === 'pop') onUnshelveAndDrop(repoId, entry.id);
+            else if (id === 'unshelve') onUnshelve(repoId, entry.id);
             else if (id === 'drop') onDrop(repoId, entry.id);
             setCtxMenu(null);
           }}
@@ -656,8 +671,17 @@ export function ShelfPanel({
     }
   }, [loadShelves, repos]);
 
+  const loadErrors = useAppStore((state) => state.loadErrors);
+
   const handleUnshelve = async (repoId: string, shelveId: string) => {
     await shelfOperation(repoId, { type: 'apply', shelf_id: shelveId });
+  };
+
+  const handleUnshelveAndDrop = async (repoId: string, shelveId: string) => {
+    const success = await shelfOperation(repoId, { type: 'apply', shelf_id: shelveId });
+    if (success) {
+      await shelfOperation(repoId, { type: 'drop', shelf_id: shelveId });
+    }
   };
 
   const handleUnshelveFile = async (
@@ -689,6 +713,7 @@ export function ShelfPanel({
           const repoShelves = (shelves[repo.meta.id] ?? []).filter((entry) => !needle || `${repo.meta.name} ${entry.name} ${entry.branch ?? ''} ${entry.files.map((file) => file.path).join(' ')}`.toLocaleLowerCase().includes(needle));
           const projectColor = repo.meta.color || '#4aaa9a';
           const worktreeBranch = repo.meta.isWorktree ? repo.branch : undefined;
+          const error = loadErrors[`shelves:${repo.meta.id}`];
           return (
             <section key={repo.meta.id} style={css.repoSection}>
               {repos.length >= 1 && (
@@ -701,7 +726,14 @@ export function ShelfPanel({
                 </div>
               )}
 
-              {repoShelves.length === 0 ? (
+              {error && (
+                <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }}>
+                  <Codicon name="error" style={{ marginRight: '6px' }} />
+                  {error}
+                </div>
+              )}
+
+              {repoShelves.length === 0 && !error ? (
                 <div style={css.empty}>
                   <Codicon name="archive" style={{ marginRight: '6px' }} />
                   {t('No shelved changes')}
@@ -716,6 +748,7 @@ export function ShelfPanel({
                     expansion={expansion}
                     onManualExpansionChange={onManualExpansionChange}
                     onUnshelve={handleUnshelve}
+                    onUnshelveAndDrop={handleUnshelveAndDrop}
                     onUnshelveFile={handleUnshelveFile}
                     onOpenFileDiff={onOpenFileDiff}
                     onDrop={handleDrop}

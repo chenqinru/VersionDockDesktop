@@ -495,7 +495,7 @@ export type ChangelistEntry = {
 
 export type ChangelistOperation = { type: "create"; name: string } | { type: "rename"; changelist_id: string; name: string } | { type: "delete"; changelist_id: string } | { type: "assign"; changelist_id: string | null; paths: string[] } | { type: "setActive"; changelist_id: string };
 
-export type ChangesDisplayMode = "simplified" | "changelists";
+export type ChangesDisplayMode = "simplified" | "changelists" | "vscode";
 
 export type CheckoutRepositoryResult = {
 	path: string,

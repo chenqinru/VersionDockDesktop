@@ -8,11 +8,40 @@ import { BranchRefBadge } from './BranchRefBadge';
 import { Codicon } from './Codicon';
 import { AuthorAvatar } from './AuthorAvatar';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
-import { confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
 import { PushFileList, type PushFileViewMode } from './PushPanel';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import { SelectionCheckbox } from './SelectionCheckbox';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
+
+async function resolvePullStrategy(
+  t: (key: string, ...args: Array<string | number>) => string,
+  explicitStrategy?: 'merge' | 'rebase' | 'ff-only',
+): Promise<'merge' | 'rebase' | 'ff-only' | undefined> {
+  if (explicitStrategy) return explicitStrategy;
+  const configured = useAppStore.getState().bootstrap?.state.settings?.updateProjectMethod ?? 'rebase';
+  if (configured === 'prompt') {
+    const choice = await choiceDialog({
+      title: t('Update Project — Strategy'),
+      message: t('Choose how to integrate incoming changes'),
+      choices: [
+        {
+          id: 'rebase',
+          label: t('Rebase the current branch on top of incoming changes'),
+          icon: 'repo-forked',
+        },
+        {
+          id: 'merge',
+          label: t('Merge incoming changes into the current branch'),
+          icon: 'git-merge',
+        },
+      ],
+    });
+    if (!choice) return undefined;
+    return choice as 'rebase' | 'merge';
+  }
+  return configured === 'rebase' ? 'rebase' : 'merge';
+}
 
 type DirectionFilter = 'all' | 'outgoing' | 'incoming' | 'none';
 type TimelineCommit =
@@ -32,7 +61,7 @@ function relativeDate(value: string, t: (key: string, ...args: Array<string | nu
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: days > 365 ? 'numeric' : undefined });
 }
 
-function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSelected, onClearSelection, onFileViewModeChange }: {
+function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSelected, onClearSelection, onFileViewModeChange, defaultExpanded = false }: {
   repo: RepositoryStatus;
   item: TimelineCommit;
   selected: boolean;
@@ -41,6 +70,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   onSelected: (key: string, additive: boolean) => void;
   onClearSelection: () => void;
   onFileViewModeChange: (mode: PushFileViewMode) => void;
+  defaultExpanded?: boolean;
 }) {
   const bridge = useAppStore((state) => state.bridge);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
@@ -52,10 +82,30 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   const backToHistory = useAppStore((state) => state.backToHistory);
   const setHistoryFilter = useAppStore((state) => state.setHistoryFilter);
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<CommitDetail>();
   const [context, setContext] = useState<{ x: number; y: number }>();
+
+  useEffect(() => {
+    if (!defaultExpanded || !bridge || !workspaceId) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setLoading(true);
+      void bridge.request<CommitDetail>({
+        type: 'commitDetail',
+        payload: { workspace_id: workspaceId, repo_id: repo.meta.id, revision: item.commit.hash },
+      }).then((result) => {
+        if (!cancelled) setDetail(result);
+      }).catch(() => undefined).finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultExpanded, bridge, workspaceId, repo.meta.id, item.commit.hash]);
 
   const commit = item.commit;
   const fullMessage = commit.fullMessage || (commit.body ? `${commit.message}\n\n${commit.body}` : commit.message);
@@ -201,6 +251,8 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
   const historyOperation = useAppStore((state) => state.historyOperation);
   const operations = useAppStore((state) => state.operations);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
+  const loadErrors = useAppStore((state) => state.loadErrors);
+  const loadOutgoing = useAppStore((state) => state.loadUnpushedCommits);
   const { t } = useI18n();
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(new Set());
   const [hovered, setHovered] = useState(false);
@@ -227,6 +279,8 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
   const incomingKey = `${workspaceId ?? ''}\0${repo.meta.id}\0incoming\0${incomingHashes}`;
   const currentChanges = { outgoing: changesCache[outgoingKey], incoming: changesCache[incomingKey] };
   const currentError = changesError?.key === changesKey ? changesError : undefined;
+  const outgoingError = loadErrors[`unpushed:${repo.meta.id}`];
+  const incomingError = loadErrors[`incoming:${repo.meta.id}`];
   const missingOutgoing = Boolean(outgoingHashes && !currentChanges.outgoing);
   const missingIncoming = Boolean(incomingHashes && !currentChanges.incoming);
   useEffect(() => {
@@ -295,9 +349,11 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
       if (!await historyOperation(repo.meta.id, { type: 'cherryPick', revision: commit.hash })) break;
     }
   };
-  const pullRepo = async () => {
-    const configured = useAppStore.getState().bootstrap?.state.settings?.updateProjectMethod;
-    return sync(repo.meta.id, configured === 'rebase' ? 'pullRebase' : 'pull');
+  const pullRepo = async (strategy?: 'merge' | 'rebase' | 'ff-only') => {
+    const effective = await resolvePullStrategy(t, strategy);
+    if (!effective) return false;
+    const action = effective === 'rebase' ? 'pullRebase' : effective === 'ff-only' ? 'pullFfOnly' : 'pull';
+    return sync(repo.meta.id, action);
   };
   const syncRepo = async () => {
     if (incomingCount > 0 && !await pullRepo()) return;
@@ -347,6 +403,22 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
       </div>
     </header>
     {expanded && <div className="sync-repo-body" onClick={(event) => { if (!(event.target as HTMLElement).closest('[data-sync-commit-row]')) setSelectedCommits(new Set()); }}>
+      {(outgoingError || incomingError) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: 'var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1))', color: 'var(--vscode-errorForeground, #f48771)', fontSize: 12 }}>
+          <Codicon name="error" />
+          <span style={{ flex: 1 }}>{outgoingError || incomingError}</span>
+          <button
+            type="button"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', textDecoration: 'underline' }}
+            onClick={() => {
+              if (outgoingError) void loadOutgoing(repo.meta.id);
+              if (incomingError) void loadIncoming(repo.meta.id);
+            }}
+          >
+            {t('Retry')}
+          </button>
+        </div>
+      )}
       {!incomingActive && !outgoingActive ? <div className="sync-empty">{t('No commit type selected')}</div> : displayMode === 'changes' ? <>
         {incomingActive && incoming.length > 0 && <div className="sync-aggregate-section">
           {filter === 'all' && <div className="sync-aggregate-title incoming"><Codicon name="arrow-down" />{currentChanges.incoming ? t('Incoming Changes ({0})', currentChanges.incoming.files.length) : t('Incoming Changes')}</div>}
@@ -376,8 +448,8 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
             showToolbar={false}
           />}
         </div>}
-      </> : visibleTimeline.length ? visibleTimeline.map((item) => <SyncCommitRow key={`${item.kind}:${item.commit.hash}`} repo={repo} item={item} selected={selectedCommits.has(`${item.kind}:${item.commit.hash}`)} selectedItems={selectedItems} fileViewMode={fileViewMode} onSelected={selectCommit} onClearSelection={() => setSelectedCommits(new Set())} onFileViewModeChange={onFileViewModeChange} />)
-        : <div className="sync-empty">{query ? t('No commits found') : outgoingCount + incomingCount === 0 ? <><Codicon name="check" />{t('Up to date')}</> : t('Fetch to load incoming commit details.')}</div>}
+      </> : visibleTimeline.length ? visibleTimeline.map((item) => <SyncCommitRow key={`${item.kind}:${item.commit.hash}`} repo={repo} item={item} defaultExpanded={item.kind === 'outgoing' && item.isHead} selected={selectedCommits.has(`${item.kind}:${item.commit.hash}`)} selectedItems={selectedItems} fileViewMode={fileViewMode} onSelected={selectCommit} onClearSelection={() => setSelectedCommits(new Set())} onFileViewModeChange={onFileViewModeChange} />)
+        : <div className="sync-empty">{query ? t('No commits found') : (outgoingError || incomingError) ? <span style={{ color: 'var(--vscode-errorForeground, #f48771)' }}>{t('Failed to load commits')}</span> : outgoingCount + incomingCount === 0 ? <><Codicon name="check" />{t('Up to date')}</> : t('Fetch to load incoming commit details.')}</div>}
     </div>}
     {headerMenu && <ContextMenu x={headerMenu.x} y={headerMenu.y} items={headerItems.map((entry) => 'separator' in entry ? entry : { ...entry, disabled: entry.id === 'fetch' ? busy || !capabilityAvailable(repo.capabilities, 'syncFetch', true) : entry.disabled })} onSelect={runHeaderAction} onClose={() => setHeaderMenu(undefined)} />}
     {branchMenuAnchor && <BranchMenuPopover anchorRect={branchMenuAnchor} initialRepoId={repo.meta.id} repoOnly onClose={() => setBranchMenuAnchor(undefined)} />}
@@ -454,12 +526,16 @@ export function SyncPanel({ repos, expansionCommand, selectionCommand, fileViewM
     await Promise.all([loadIncoming(), loadOutgoing()]);
   };
   const syncSelected = async (strategy?: 'merge' | 'rebase' | 'ff-only') => {
-    const configured = useAppStore.getState().bootstrap?.state.settings?.updateProjectMethod;
+    let effectiveStrategy = strategy;
+    if (pullableRepos.length > 0) {
+      effectiveStrategy = await resolvePullStrategy(t, strategy);
+      if (!effectiveStrategy) return;
+    }
     for (const repo of selectedRepos) {
       const canPull = pullableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
       const canPush = pushableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
       if (canPull) {
-        const action = strategy === 'rebase' || (!strategy && configured === 'rebase') ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull';
+        const action = effectiveStrategy === 'rebase' ? 'pullRebase' : effectiveStrategy === 'ff-only' ? 'pullFfOnly' : 'pull';
         if (!await sync(repo.meta.id, action)) continue;
       }
       if (canPush) await sync(repo.meta.id, 'push');

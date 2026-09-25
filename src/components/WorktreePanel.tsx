@@ -50,7 +50,7 @@ export interface WorktreePanelProps {
   onRequestCreate?: (repoId: string) => void;
 }
 
-function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry): NormalizedWorktreeEntry {
+function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry, workspacePaths: string[] = []): NormalizedWorktreeEntry {
   const isMain = 'isMain' in entry ? Boolean((entry as NormalizedWorktreeEntry).isMain) : Boolean((entry as BoundWorktreeEntry).main);
   const isDetached = 'isDetached' in entry ? Boolean((entry as NormalizedWorktreeEntry).isDetached) : Boolean((entry as BoundWorktreeEntry).detached);
   const isBare = 'isBare' in entry ? Boolean((entry as NormalizedWorktreeEntry).isBare) : Boolean((entry as BoundWorktreeEntry).bare);
@@ -59,7 +59,13 @@ function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry): No
   const branchShort = ('branchShort' in entry && (entry as NormalizedWorktreeEntry).branchShort)
     ? (entry as NormalizedWorktreeEntry).branchShort
     : (entry.branch || '').replace(/^refs\/heads\//, '');
-  const isInWorkspace = 'isInWorkspace' in entry ? Boolean((entry as NormalizedWorktreeEntry).isInWorkspace) : true;
+  const isInWorkspace = 'isInWorkspace' in entry && typeof (entry as NormalizedWorktreeEntry).isInWorkspace === 'boolean'
+    ? Boolean((entry as NormalizedWorktreeEntry).isInWorkspace)
+    : workspacePaths.some((wp) => {
+        const normalizedWp = wp.replace(/[\\/]+$/, '').toLocaleLowerCase();
+        const normalizedPath = entry.path.replace(/[\\/]+$/, '').toLocaleLowerCase();
+        return normalizedPath === normalizedWp || normalizedPath.startsWith(`${normalizedWp}/`);
+      });
 
   return {
     path: entry.path,
@@ -78,8 +84,10 @@ function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry): No
 
 function ctxItems(entry: NormalizedWorktreeEntry, t: (key: string, ...args: Array<string | number>) => string): ContextMenuEntry[] {
   const items: ContextMenuEntry[] = [
+    ...(entry.isInWorkspace ? [{ id: 'explorer', label: t('Reveal in Explorer'), icon: 'folder-opened' } as ContextMenuEntry] : []),
     { id: 'open', label: t('Open in New Window'), icon: 'link-external' },
-    { id: 'os', label: t('Open in File Manager'), icon: 'folder-opened' },
+    { id: 'os', label: t('Open in File Manager'), icon: 'folder' },
+    ...(!entry.isInWorkspace ? [{ id: 'add-to-workspace', label: t('Add Folder to Workspace'), icon: 'add' } as ContextMenuEntry] : []),
   ];
   if (!entry.isMain) {
     items.push(
@@ -105,6 +113,7 @@ function WorktreeRow({
   onUnlock,
   onOpenInExplorer,
   onOpenInOS,
+  onAddToWorkspace,
   onCompare,
 }: {
   entry: NormalizedWorktreeEntry;
@@ -114,6 +123,7 @@ function WorktreeRow({
   onUnlock?: WorktreePanelProps['onUnlock'];
   onOpenInExplorer?: WorktreePanelProps['onOpenInExplorer'];
   onOpenInOS?: WorktreePanelProps['onOpenInOS'];
+  onAddToWorkspace?: WorktreePanelProps['onAddToWorkspace'];
   onCompare?: (repoId: string, entry: NormalizedWorktreeEntry) => void;
 }) {
   const { t } = useI18n();
@@ -158,6 +168,16 @@ function WorktreeRow({
         </div>
         {hovered && !entry.isMain && (
           <div style={row.actions}>
+            {!entry.isInWorkspace && onAddToWorkspace && (
+              <button
+                data-action-btn=""
+                style={row.btn}
+                title={t('Add Folder to Workspace')}
+                onClick={(e) => { e.stopPropagation(); onAddToWorkspace(entry.path); }}
+              >
+                <Codicon name="add" />
+              </button>
+            )}
             {onOpenInExplorer && (
               <button
                 data-action-btn=""
@@ -212,7 +232,8 @@ function WorktreeRow({
           items={ctxItems(entry, t)}
           onSelect={(id) => {
             setCtxMenu(null);
-            if (id === 'open') onOpenInExplorer?.(repoId, entry.path);
+            if (id === 'add-to-workspace') onAddToWorkspace?.(entry.path);
+            if (id === 'explorer' || id === 'open') onOpenInExplorer?.(repoId, entry.path);
             if (id === 'os') onOpenInOS?.(repoId, entry.path);
             if (id === 'diff') onCompare?.(repoId, entry);
             if (id === 'lock') onLock?.(repoId, entry.path);
@@ -238,8 +259,10 @@ function RepoSection({
   onPrune,
   onOpenInExplorer,
   onOpenInOS,
+  onAddToWorkspace,
   onRequestCreate,
   onCompare,
+  error,
 }: {
   repo: RepoWorktrees;
   multiRepo: boolean;
@@ -249,8 +272,10 @@ function RepoSection({
   onPrune?: WorktreePanelProps['onPrune'];
   onOpenInExplorer?: WorktreePanelProps['onOpenInExplorer'];
   onOpenInOS?: WorktreePanelProps['onOpenInOS'];
+  onAddToWorkspace?: WorktreePanelProps['onAddToWorkspace'];
   onRequestCreate?: WorktreePanelProps['onRequestCreate'];
   onCompare?: (repoId: string, entry: NormalizedWorktreeEntry) => void;
+  error?: string | null;
 }) {
   const { t } = useI18n();
   const hasPrunable = repo.worktrees.some((w) => w.isPrunable);
@@ -286,7 +311,13 @@ function RepoSection({
           </div>
         </div>
       )}
-      {repo.worktrees.length === 0 ? (
+      {error && (
+        <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }}>
+          <Codicon name="error" style={{ marginRight: '6px' }} />
+          {error}
+        </div>
+      )}
+      {repo.worktrees.length === 0 && !error ? (
         <div style={css.empty}>{t('No worktrees')}</div>
       ) : (
         repo.worktrees.map((w) => (
@@ -299,6 +330,7 @@ function RepoSection({
             onUnlock={onUnlock}
             onOpenInExplorer={onOpenInExplorer}
             onOpenInOS={onOpenInOS}
+            onAddToWorkspace={onAddToWorkspace}
             onCompare={onCompare}
           />
         ))
@@ -337,6 +369,7 @@ export function WorktreePanel({
   onPrune,
   onOpenInExplorer,
   onOpenInOS,
+  onAddToWorkspace,
   onRequestCreate,
 }: WorktreePanelProps) {
   const { t } = useI18n();
@@ -402,8 +435,17 @@ export function WorktreePanel({
     void loadWorktreeDiff(repoId, entry.path, 'HEAD');
   };
 
+  const openWorkspace = useAppStore((state) => state.openWorkspace);
+  const workspacePaths = useAppStore((state) => state.snapshot?.workspace.paths ?? []);
+  const loadErrors = useAppStore((state) => state.loadErrors);
+
   const defaultOpen = (repoId: string, worktreePath: string) => { void openWorktree(repoId, worktreePath, false); };
   const defaultOpenInOS = (repoId: string, worktreePath: string) => { void openWorktree(repoId, worktreePath, true); };
+  const defaultAddToWorkspace = async (worktreePath: string) => {
+    if (!workspacePaths.includes(worktreePath)) {
+      await openWorkspace([...workspacePaths, worktreePath]);
+    }
+  };
 
   const resolvedRepos: RepoWorktrees[] = (customRepos ?? repos.map((r) => {
     const rawList = storeWorktrees[r.meta.id];
@@ -413,7 +455,7 @@ export function WorktreePanel({
       repoName: r.meta.name,
       repoColor: r.meta.color,
       isLinkedWorktree: Boolean(r.meta.isWorktree),
-      worktrees: list.map(normalizeEntry),
+      worktrees: list.map((entry) => normalizeEntry(entry, workspacePaths)),
     };
   })).flatMap((repo) => {
     const needle = speedSearch.query.trim().toLocaleLowerCase();
@@ -454,8 +496,10 @@ export function WorktreePanel({
             onPrune={onPrune ?? defaultPrune}
             onOpenInExplorer={onOpenInExplorer ?? defaultOpen}
             onOpenInOS={onOpenInOS ?? defaultOpenInOS}
+            onAddToWorkspace={onAddToWorkspace ?? defaultAddToWorkspace}
             onRequestCreate={onRequestCreate ?? defaultCreate}
             onCompare={defaultCompare}
+            error={loadErrors[`worktrees:${repo.repoId}`]}
           />
         ))
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   CatFileFilterMode,
+  ChangesDisplayMode,
   CleanWorkingTreeMethod,
   DefaultCommitAction,
   DefaultSaveAction,
@@ -262,8 +263,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         options={[
                           ['simplified', t('Simplified')],
                           ['changelists', t('Changelists')],
+                          ['vscode', t('VS Code style (Staged / Changes)')],
                         ]}
-                        onChange={(value) => void updateSettings({ changesDisplayMode: value as 'simplified' | 'changelists' })}
+                        onChange={(value) => void updateSettings({ changesDisplayMode: value as ChangesDisplayMode })}
                       />
                       <SettingSelect
                         label={t('Default commit action')}
@@ -1800,8 +1802,9 @@ function SearchResults({
         options={[
           ['simplified', t('Simplified')],
           ['changelists', t('Changelists')],
+          ['vscode', t('VS Code style (Staged / Changes)')],
         ]}
-        onChange={(val) => void updateSettings({ changesDisplayMode: val as 'simplified' | 'changelists' })}
+        onChange={(val) => void updateSettings({ changesDisplayMode: val as ChangesDisplayMode })}
       />,
     );
   }

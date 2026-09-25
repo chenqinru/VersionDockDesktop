@@ -31,16 +31,22 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
   const [context, setContext] = useState<{ x: number; y: number }>();
 
   const remove = async () => {
+    const risks: string[] = [];
+    if (entry.dirty) risks.push(t('uncommitted local changes'));
+    if ((entry.unpushedCount ?? 0) > 0) risks.push(t('{0} unpushed commits', entry.unpushedCount));
+    const riskWarning = risks.length > 0 ? ' ' + t('WARNING: Submodule has {0}. Removing will permanently delete these modifications!', risks.join(' & ')) : '';
+
     if (!await confirmDialog({
       title: t('Remove Submodule'),
-      message: t('Remove submodule "{0}" from the repository and stage the .gitmodules change?', entry.path),
+      message: t('VersionDock [{0}]: Remove submodule "{1}"? This will deinitialize, unregister from .gitmodules, and delete its files.{2}', repo.meta.name, entry.path, riskWarning),
       confirmLabel: t('Remove'),
       danger: true,
     })) return;
     try {
-      await operate(repo.meta.id, { type: 'remove', path: entry.path, force: false });
+      await operate(repo.meta.id, { type: 'remove', path: entry.path, force: false }, { rethrow: true });
     } catch (error) {
-      if (!String(error).includes('SUBMODULE_DIRTY')) throw error;
+      const errorCode = (error as { code?: string })?.code;
+      if (errorCode !== 'SUBMODULE_DIRTY' && !String(error).includes('SUBMODULE_DIRTY')) throw error;
       if (await confirmDialog({ title: t('Force Remove Submodule'), message: t('The submodule has local changes. Force removal can discard them.'), confirmLabel: t('Force Remove'), danger: true })) {
         await operate(repo.meta.id, { type: 'remove', path: entry.path, force: true });
       }
@@ -144,6 +150,7 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
 
 export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
   const entries = useAppStore((state) => state.submodules);
+  const loadErrors = useAppStore((state) => state.loadErrors);
   const load = useAppStore((state) => state.loadSubmodules);
   const operate = useAppStore((state) => state.submoduleOperation);
   const operations = useAppStore((state) => state.operations);
@@ -182,6 +189,7 @@ export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
         const color = readableAccentColor(repo.meta.color);
         const uninitialized = allItems.filter((entry) => !entry.initialized).length;
         const outOfSync = allItems.filter((entry) => entry.syncStatus === 'outOfSync').length;
+        const error = loadErrors[`submodules:${repo.meta.id}`];
         return <section className="submodule-repo" key={repo.meta.id}>
           <header className="repository-group-header" style={{ '--repo-color': color } as React.CSSProperties}>
             <button className="repository-group-main" title={repo.meta.name} onClick={() => setCollapsedRepoIds((current) => { const next = new Set(current); if (next.has(repo.meta.id)) next.delete(repo.meta.id); else next.add(repo.meta.id); return next; })}>
@@ -196,7 +204,8 @@ export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
             <button data-action-btn="" disabled={busy} title={t('Add Submodule')} onClick={() => void add(repo)}><Codicon name="add" /></button>
           </header>
           {!collapsed && <div className="submodule-repo-body">
-            {items.length ? items.map((entry) => <SubmoduleRow key={entry.path} repo={repo} entry={entry} busy={busy} />) : <div className="sync-empty">{needle && total > 0 ? t('No commits found') : t('No submodules')}</div>}
+            {error && <div className="sync-empty" style={{ color: 'var(--vscode-errorForeground, #f48771)', justifyContent: 'flex-start', padding: '6px 12px' }}><Codicon name="error" /> {error}</div>}
+            {items.length ? items.map((entry) => <SubmoduleRow key={entry.path} repo={repo} entry={entry} busy={busy} />) : !error && <div className="sync-empty">{needle && total > 0 ? t('No commits found') : t('No submodules')}</div>}
           </div>}
         </section>;
       })}

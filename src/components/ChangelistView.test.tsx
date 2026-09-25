@@ -158,4 +158,67 @@ describe('ChangelistView and ChangelistGroup hierarchy and interactions', () => 
 
     expect(onHeaderContextMenu).toHaveBeenCalledWith(expect.anything(), 'custom-1');
   });
+
+  it('renders error banner and handles retry when changelist loading fails', async () => {
+    const mockLoadChangelists = vi.fn();
+    const { useAppStore } = await import('../store/appStore');
+    useAppStore.setState({
+      loadErrors: { 'changelists:repo-1': 'Connection timed out' },
+      loadChangelists: mockLoadChangelists,
+    });
+
+    render(
+      <ChangelistView
+        repos={[repo1]}
+        changelists={{}}
+        selected={new Set()}
+        setFiles={vi.fn()}
+        onFile={vi.fn()}
+        onContext={vi.fn()}
+        onFolderContext={vi.fn()}
+        onRepoContext={vi.fn()}
+        onHeaderContextMenu={vi.fn()}
+        onEmptyContextMenu={vi.fn()}
+        viewMode="list"
+        expansion={{ sequence: 0, expanded: true }}
+        openWorkingChanges={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Connection timed out/)).toBeInTheDocument();
+    const retryBtn = screen.getByRole('button', { name: 'Retry' });
+    fireEvent.click(retryBtn);
+
+    expect(mockLoadChangelists).toHaveBeenCalledWith('repo-1');
+  });
+
+  it('does not place tracked files into Default Changelist when changelists fail to load initially without cache', async () => {
+    const { useAppStore } = await import('../store/appStore');
+    useAppStore.setState({
+      loadErrors: { 'changelists:repo-1': 'Failed to fetch' },
+    });
+
+    render(
+      <ChangelistView
+        repos={[repo1]}
+        changelists={{}}
+        selected={new Set()}
+        setFiles={vi.fn()}
+        onFile={vi.fn()}
+        onContext={vi.fn()}
+        onFolderContext={vi.fn()}
+        onRepoContext={vi.fn()}
+        onHeaderContextMenu={vi.fn()}
+        onEmptyContextMenu={vi.fn()}
+        viewMode="list"
+        expansion={{ sequence: 0, expanded: true }}
+        openWorkingChanges={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Default Changelist')).toBeInTheDocument();
+    expect(screen.queryByTitle('src/App.tsx')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('src/custom.ts')).not.toBeInTheDocument();
+    expect(screen.getByTitle('new-untracked.txt')).toBeInTheDocument();
+  });
 });

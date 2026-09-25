@@ -3,6 +3,7 @@ import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { branchColor } from './branchColor';
 import { BranchRefBadge } from './BranchRefBadge';
+import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { useI18n } from '../i18n';
 import { buildFileTree, type FileTreeNode } from './fileTree';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
@@ -390,6 +391,7 @@ function RepoSubGroup({
   const allSelected = selectableFiles.length > 0 && selectedCount === selectableFiles.length;
   const branch = branchColor(repo.branch || repo.revision);
   const [hovered, setHovered] = useState(false);
+  const [branchMenuAnchor, setBranchMenuAnchor] = useState<DOMRect | undefined>(undefined);
 
   return (
     <div className="repo-sub-group" style={{ margin: 0 }}>
@@ -421,8 +423,38 @@ function RepoSubGroup({
           <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
           <i style={{ background: repo.meta.color }} />
           <strong>{repo.meta.name}</strong>
-          <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" style={{ marginLeft: 4 }} />
         </button>
+        <button
+          type="button"
+          className="repo-branch-trigger"
+          title={t('Switch branch')}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(branchMenuAnchor)}
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            setBranchMenuAnchor((cur) => (cur ? undefined : rect));
+          }}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            margin: '0 0 0 4px',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+        >
+          <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
+        </button>
+        {branchMenuAnchor && (
+          <BranchMenuPopover
+            anchorRect={branchMenuAnchor}
+            initialRepoId={repo.meta.id}
+            repoOnly
+            onClose={() => setBranchMenuAnchor(undefined)}
+          />
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
           {files.length > 0 && (
             <button

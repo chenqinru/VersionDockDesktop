@@ -1738,6 +1738,7 @@ pub enum ChangesDisplayMode {
     #[default]
     Simplified,
     Changelists,
+    Vscode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]

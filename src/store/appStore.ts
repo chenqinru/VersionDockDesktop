@@ -235,6 +235,7 @@ export interface WorkspaceSessionState {
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
   lastSyncedAt?: number;
+  loadErrors: Record<string, string | null>;
 }
 
 export interface AppStore {
@@ -309,6 +310,7 @@ export interface AppStore {
   comparison?: BranchCompareResult;
   remotes: Record<string, RemoteInfo[]>;
   batchCommitReport?: BatchCommitReport;
+  loadErrors: Record<string, string | null>;
   initialize: (bridge: VersionDockBridge) => Promise<void>;
   dispose: () => void;
   openWorkspace: (paths: string[], focus?: boolean, options?: OpenWorkspaceOptions) => Promise<boolean>;
@@ -330,7 +332,7 @@ export interface AppStore {
   openShelfDiff: (repoId: string, shelfId: string, path: string) => Promise<void>;
   openCommitDetail: () => void;
   openCommitChanges: () => void;
-  openWorkingChanges: (repoId: string) => void;
+  openWorkingChanges: (repoId: string, section?: 'staged' | 'unstaged') => void;
   loadChangesDiff: (target: DetailFileTarget | WorkingChangeTarget) => Promise<void>;
   setCommitMessage: (value: string) => void;
   applyMergeMessageSuggestion: () => void;
@@ -343,7 +345,7 @@ export interface AppStore {
   deletePaths: (repoId: string, paths: string[]) => Promise<void>;
   addIgnore: (repoId: string, path: string) => Promise<void>;
   commit: (repoId: string, message: string, amend: boolean, paths: string[], push: boolean, noVerify?: boolean) => Promise<void>;
-  commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean; noVerify?: boolean }>, message: string, push: boolean) => Promise<void>;
+  commitMany: (targets: Array<{ repoId: string; paths: string[]; unstagePaths: string[]; amend: boolean; noVerify?: boolean }>, message: string, push: boolean) => Promise<RepositoryOperationResult[] | undefined>;
   retryBatchResult: (repoId: string) => Promise<void>;
   dismissBatchReport: () => void;
   sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'pullFfOnly' | 'push' | 'pushTags' | 'update', notify?: boolean, options?: SyncOptions & { force?: boolean }) => Promise<RepositoryUpdateResult | undefined>;
@@ -383,7 +385,7 @@ export interface AppStore {
   loadSubtrees: (repoId?: string) => Promise<void>;
   subtreeOperation: (repoId: string, operation: SubtreeOperation) => Promise<void>;
   loadSubmodules: (repoId?: string) => Promise<void>;
-  submoduleOperation: (repoId: string, operation: SubmoduleOperation) => Promise<void>;
+  submoduleOperation: (repoId: string, operation: SubmoduleOperation, options?: { rethrow?: boolean }) => Promise<void>;
   loadUnpushedCommits: (repoId?: string) => Promise<void>;
   loadIncomingCommits: (repoId?: string) => Promise<void>;
   unpushedOperation: (repoId: string, operation: UnpushedOperation) => Promise<boolean>;
@@ -754,6 +756,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     operation: () => Promise<T>,
     domain = 'workspace',
     target?: { repositoryId?: string | null; target?: string | null },
+    options?: { rethrow?: boolean },
   ): Promise<T | undefined> => {
     const operationId = `client-${Date.now()}-${++localOperationSequence}`;
     const context = { ...operationContext(domain, get()), ...target, visibility: 'background' as const };
@@ -795,6 +798,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           workspaceId: get().snapshot?.workspace.id,
         });
       }
+      if (options?.rethrow) throw error;
       return undefined;
     } finally {
       set((state) => {
@@ -945,6 +949,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       comparisonTarget: state.comparisonTarget,
       comparison: state.comparison,
       remotes: state.remotes,
+      loadErrors: state.loadErrors,
       lastSyncedAt: Date.now(),
     };
   };
@@ -1010,7 +1015,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {} }
+      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, loadErrors: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     const sessionId = get().bootstrap?.applicationSessionId ?? 'browser-session';
@@ -1231,7 +1236,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined,
+    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, loadErrors: {},
     logPanelOpen: false,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
     logEntries: [],
@@ -1645,6 +1650,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             comparisonTarget: undefined,
             comparison: undefined,
             remotes: {},
+            loadErrors: {},
           });
           await persistTabs(nextTabs, null);
         }
@@ -1726,6 +1732,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         comparisonTarget: undefined,
         comparison: undefined,
         remotes: {},
+        loadErrors: {},
       });
       await persistTabs([], null);
     },
@@ -1927,16 +1934,19 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ changes: { kind: 'commits', commits: state.selectedCommits, files }, changesDiff: undefined, mode: 'changes' });
     },
 
-    openWorkingChanges: (repoId) => {
+    openWorkingChanges: (repoId, section) => {
       const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
       if (!repo) return;
-      const files: WorkingChangeTarget[] = repo.files.flatMap((file) => {
+      const allFiles: WorkingChangeTarget[] = repo.files.flatMap((file) => {
         const targets: WorkingChangeTarget[] = [];
         if (file.staged) targets.push({ repoId, path: file.path, status: file.status, staged: true, section: 'staged' });
         if (file.status === 'untracked') targets.push({ repoId, path: file.path, status: file.status, staged: false, section: 'untracked' });
         else if (file.unstaged) targets.push({ repoId, path: file.path, status: file.status, staged: false, section: 'unstaged' });
         return targets;
       });
+      const files = section
+        ? (section === 'staged' ? allFiles.filter((f) => f.staged) : allFiles.filter((f) => !f.staged))
+        : allFiles;
       set({ changes: { kind: 'workingTree', repoId, files }, changesDiff: undefined, mode: 'changes' });
     },
 
@@ -2014,6 +2024,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ batchCommitReport: { message, push, targets, results } });
       clearCommittedSelections(results.filter((result) => result.committed).map((result) => result.repoId));
       notifyBatchFailures(results);
+      return results;
     }, 'commit', {
       repositoryId: targets.length === 1 ? targets[0].repoId : null,
       target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(targets.map((target) => target.repoId))}`,
@@ -2461,18 +2472,41 @@ export const useAppStore = create<AppStore>((set, get) => {
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       if (repoId) {
-        const values = await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
-        if (get().snapshot?.workspace.id !== wid) return;
-        set((state) => ({ stashes: { ...state.stashes, [repoId]: values } }));
+        try {
+          const values = await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repoId } });
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            stashes: { ...state.stashes, [repoId]: values },
+            loadErrors: { ...state.loadErrors, [`stashes:${repoId}`]: null },
+          }));
+        } catch (error) {
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            loadErrors: { ...state.loadErrors, [`stashes:${repoId}`]: errorText(error) },
+          }));
+        }
         return;
       }
       const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        stashes: await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        stashes: await b.request<StashEntry[]>({ type: 'stashes', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ stashes: values.reduce((next, value) => ({ ...next, [value.repoId]: value.stashes }), state.stashes) }));
+      set((state) => {
+        const nextStashes = { ...state.stashes };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextStashes[rId] = res.value.stashes;
+            nextErrors[`stashes:${rId}`] = null;
+          } else {
+            nextErrors[`stashes:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { stashes: nextStashes, loadErrors: nextErrors };
+      });
     },
     stashOperation: async (repoId, operation) => (await withBusy(async () => {
       await bridge().request({ type: 'stashOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
@@ -2484,18 +2518,41 @@ export const useAppStore = create<AppStore>((set, get) => {
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       if (repoId) {
-        const values = await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
-        if (get().snapshot?.workspace.id !== wid) return;
-        set((state) => ({ shelves: { ...state.shelves, [repoId]: values } }));
+        try {
+          const values = await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repoId } });
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            shelves: { ...state.shelves, [repoId]: values },
+            loadErrors: { ...state.loadErrors, [`shelves:${repoId}`]: null },
+          }));
+        } catch (error) {
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            loadErrors: { ...state.loadErrors, [`shelves:${repoId}`]: errorText(error) },
+          }));
+        }
         return;
       }
       const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        shelves: await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        shelves: await b.request<ShelfEntry[]>({ type: 'shelves', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ shelves: values.reduce((next, value) => ({ ...next, [value.repoId]: value.shelves }), state.shelves) }));
+      set((state) => {
+        const nextShelves = { ...state.shelves };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextShelves[rId] = res.value.shelves;
+            nextErrors[`shelves:${rId}`] = null;
+          } else {
+            nextErrors[`shelves:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { shelves: nextShelves, loadErrors: nextErrors };
+      });
     },
     shelfOperation: async (repoId, operation) => (await withBusy(async () => {
       await bridge().request({ type: 'shelfOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
@@ -2506,15 +2563,42 @@ export const useAppStore = create<AppStore>((set, get) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
-      const repositories = repoId
-        ? (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.id === repoId)
-        : (get().snapshot?.repositories ?? []).filter((repo) => capabilityAvailable(repo.capabilities, 'changelist', true));
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      if (repoId) {
+        try {
+          const values = await b.request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: wid, repo_id: repoId } });
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            changelists: { ...state.changelists, [repoId]: values },
+            loadErrors: { ...state.loadErrors, [`changelists:${repoId}`]: null },
+          }));
+        } catch (error) {
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            loadErrors: { ...state.loadErrors, [`changelists:${repoId}`]: errorText(error) },
+          }));
+        }
+        return;
+      }
+      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => capabilityAvailable(repo.capabilities, 'changelist', true));
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        changelists: await b.request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        changelists: await b.request<ChangelistEntry[]>({ type: 'changelists', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ changelists: values.reduce((next, value) => ({ ...next, [value.repoId]: value.changelists }), state.changelists) }));
+      set((state) => {
+        const nextChangelists = { ...state.changelists };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextChangelists[rId] = res.value.changelists;
+            nextErrors[`changelists:${rId}`] = null;
+          } else {
+            nextErrors[`changelists:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { changelists: nextChangelists, loadErrors: nextErrors };
+      });
     },
     changelistOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'changelistOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
@@ -2525,18 +2609,41 @@ export const useAppStore = create<AppStore>((set, get) => {
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       if (repoId) {
-        const values = await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
-        if (get().snapshot?.workspace.id !== wid) return;
-        set((state) => ({ worktrees: { ...state.worktrees, [repoId]: values } }));
+        try {
+          const values = await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repoId } });
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            worktrees: { ...state.worktrees, [repoId]: values },
+            loadErrors: { ...state.loadErrors, [`worktrees:${repoId}`]: null },
+          }));
+        } catch (error) {
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            loadErrors: { ...state.loadErrors, [`worktrees:${repoId}`]: errorText(error) },
+          }));
+        }
         return;
       }
       const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        worktrees: await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        worktrees: await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ worktrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.worktrees }), state.worktrees) }));
+      set((state) => {
+        const nextWorktrees = { ...state.worktrees };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextWorktrees[rId] = res.value.worktrees;
+            nextErrors[`worktrees:${rId}`] = null;
+          } else {
+            nextErrors[`worktrees:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { worktrees: nextWorktrees, loadErrors: nextErrors };
+      });
     },
     worktreeOperation: async (repoId, operation) => withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'worktreeWrite')) return;
@@ -2588,18 +2695,41 @@ export const useAppStore = create<AppStore>((set, get) => {
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       if (repoId) {
-        const values = await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
-        if (get().snapshot?.workspace.id !== wid) return;
-        set((state) => ({ subtrees: { ...state.subtrees, [repoId]: values } }));
+        try {
+          const values = await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repoId } });
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            subtrees: { ...state.subtrees, [repoId]: values },
+            loadErrors: { ...state.loadErrors, [`subtrees:${repoId}`]: null },
+          }));
+        } catch (error) {
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            loadErrors: { ...state.loadErrors, [`subtrees:${repoId}`]: errorText(error) },
+          }));
+        }
         return;
       }
       const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        subtrees: await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        subtrees: await b.request<SubtreeEntry[]>({ type: 'subtrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ subtrees: values.reduce((next, value) => ({ ...next, [value.repoId]: value.subtrees }), state.subtrees) }));
+      set((state) => {
+        const nextSubtrees = { ...state.subtrees };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextSubtrees[rId] = res.value.subtrees;
+            nextErrors[`subtrees:${rId}`] = null;
+          } else {
+            nextErrors[`subtrees:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { subtrees: nextSubtrees, loadErrors: nextErrors };
+      });
     },
     subtreeOperation: async (repoId, operation) => withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'subtreeWrite')) return;
@@ -2623,53 +2753,112 @@ export const useAppStore = create<AppStore>((set, get) => {
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git' && !repo.meta.isSubmodule && (!repoId || repo.meta.id === repoId));
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        submodules: await b.request<SubmoduleEntry[]>({ type: 'submodules', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        submodules: await b.request<SubmoduleEntry[]>({ type: 'submodules', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ submodules: values.reduce((next, value) => ({ ...next, [value.repoId]: value.submodules }), state.submodules) }));
+      set((state) => {
+        const nextSubmodules = { ...state.submodules };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextSubmodules[rId] = res.value.submodules;
+            nextErrors[`submodules:${rId}`] = null;
+          } else {
+            nextErrors[`submodules:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { submodules: nextSubmodules, loadErrors: nextErrors };
+      });
     },
-    submoduleOperation: async (repoId, operation) => withBusy(async () => {
+    submoduleOperation: async (repoId, operation, options) => withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'submoduleWrite')) return;
       await bridge().request({ type: 'submoduleOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
       await get().loadSubmodules(repoId);
-    }, `submodule:${repoId}`),
+    }, `submodule:${repoId}`, undefined, options).then(() => undefined),
     loadUnpushedCommits: async (repoId) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       if (repoId) {
-        const values = await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
-        if (get().snapshot?.workspace.id !== wid) return;
-        set((state) => ({ unpushedCommits: { ...state.unpushedCommits, [repoId]: values } }));
+        try {
+          const values = await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repoId } });
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            unpushedCommits: { ...state.unpushedCommits, [repoId]: values },
+            loadErrors: { ...state.loadErrors, [`unpushed:${repoId}`]: null },
+          }));
+        } catch (error) {
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            loadErrors: { ...state.loadErrors, [`unpushed:${repoId}`]: errorText(error) },
+          }));
+        }
         return;
       }
       const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        commits: await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        commits: await b.request<UnpushedCommit[]>({ type: 'unpushedCommits', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ unpushedCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.unpushedCommits) }));
+      set((state) => {
+        const nextCommits = { ...state.unpushedCommits };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextCommits[rId] = res.value.commits;
+            nextErrors[`unpushed:${rId}`] = null;
+          } else {
+            nextErrors[`unpushed:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { unpushedCommits: nextCommits, loadErrors: nextErrors };
+      });
     },
     loadIncomingCommits: async (repoId) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
       if (!b || !wid) return;
       if (repoId) {
-        const values = await b.request<IncomingCommit[]>({ type: 'incomingCommits', payload: { workspace_id: wid, repo_id: repoId } }).catch(() => []);
-        if (get().snapshot?.workspace.id !== wid) return;
-        set((state) => ({ incomingCommits: { ...state.incomingCommits, [repoId]: values } }));
+        try {
+          const values = await b.request<IncomingCommit[]>({ type: 'incomingCommits', payload: { workspace_id: wid, repo_id: repoId } });
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            incomingCommits: { ...state.incomingCommits, [repoId]: values },
+            loadErrors: { ...state.loadErrors, [`incoming:${repoId}`]: null },
+          }));
+        } catch (error) {
+          if (get().snapshot?.workspace.id !== wid) return;
+          set((state) => ({
+            loadErrors: { ...state.loadErrors, [`incoming:${repoId}`]: errorText(error) },
+          }));
+        }
         return;
       }
       const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
-      const values = await Promise.all(repositories.map(async (repo) => ({
+      const results = await Promise.allSettled(repositories.map(async (repo) => ({
         repoId: repo.meta.id,
-        commits: await b.request<IncomingCommit[]>({ type: 'incomingCommits', payload: { workspace_id: wid, repo_id: repo.meta.id } }).catch(() => []),
+        commits: await b.request<IncomingCommit[]>({ type: 'incomingCommits', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
       })));
       if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => ({ incomingCommits: values.reduce((next, value) => ({ ...next, [value.repoId]: value.commits }), state.incomingCommits) }));
+      set((state) => {
+        const nextCommits = { ...state.incomingCommits };
+        const nextErrors = { ...state.loadErrors };
+        results.forEach((res, index) => {
+          const rId = repositories[index].meta.id;
+          if (res.status === 'fulfilled') {
+            nextCommits[rId] = res.value.commits;
+            nextErrors[`incoming:${rId}`] = null;
+          } else {
+            nextErrors[`incoming:${rId}`] = errorText(res.reason);
+          }
+        });
+        return { incomingCommits: nextCommits, loadErrors: nextErrors };
+      });
     },
     unpushedOperation: async (repoId, operation) => (await withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return false;

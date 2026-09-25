@@ -1,7 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ChangelistGroup, type ChangelistRepoGroup, type ExpansionCommand } from './ChangelistGroup';
 import { branchColor } from './branchColor';
 import { BranchRefBadge } from './BranchRefBadge';
+import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
+import { Codicon } from './Codicon';
+import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { FileChange, RepositoryStatus, ChangelistEntry } from '../bindings/generated';
 
@@ -39,9 +42,23 @@ export function ChangelistView({
   onManageRepo,
 }: ChangelistViewProps) {
   const { t } = useI18n();
+  const loadErrors = useAppStore((state) => state.loadErrors);
+  const loadChangelists = useAppStore((state) => state.loadChangelists);
+  const [branchMenuAnchor, setBranchMenuAnchor] = useState<DOMRect | undefined>(undefined);
   const singleRepo = repos.length === 1;
   const multiRepo = repos.length > 1;
   const singleRepoStatus = singleRepo ? repos[0] : null;
+
+  const changelistErrors = useMemo(() => {
+    const list: Array<{ repoId: string; repoName: string; error: string }> = [];
+    for (const repo of repos) {
+      const err = loadErrors[`changelists:${repo.meta.id}`];
+      if (err) {
+        list.push({ repoId: repo.meta.id, repoName: repo.meta.name, error: err });
+      }
+    }
+    return list;
+  }, [loadErrors, repos]);
 
   // 1. Collect all custom changelists across all repositories
   const customLists = useMemo(() => {
@@ -73,15 +90,19 @@ export function ChangelistView({
       }
     }
     for (const repo of repos) {
-      if (repo.files.some((f) => f.status === 'untracked')) {
+      if (repo.files.some((f) => f.status === 'untracked') || (loadErrors[`changelists:${repo.meta.id}`] && changelists[repo.meta.id] === undefined)) {
         reposInOtherChangelists.add(repo.meta.id);
       }
     }
 
     return repos
       .map((repo) => {
-        const entries = changelists[repo.meta.id] ?? [];
-        const assigned = new Set(entries.flatMap((e) => e.files));
+        const hasError = Boolean(loadErrors[`changelists:${repo.meta.id}`]);
+        const entries = changelists[repo.meta.id];
+        if (hasError && entries === undefined) {
+          return { repo, files: [] };
+        }
+        const assigned = new Set((entries ?? []).flatMap((e) => e.files));
         const files = repo.files.filter((f) => !assigned.has(f.path) && f.status !== 'untracked');
         return { repo, files };
       })
@@ -90,7 +111,7 @@ export function ChangelistView({
         if (g.files.length > 0) return true;
         return !reposInOtherChangelists.has(g.repo.meta.id);
       });
-  }, [repos, changelists, customLists, singleRepo]);
+  }, [repos, changelists, customLists, singleRepo, loadErrors]);
 
   // 3. Compute file groups for each custom Changelist
   const customGroups = useMemo(() => {
@@ -173,8 +194,56 @@ export function ChangelistView({
             >
               {singleRepoStatus.meta.name}
             </strong>
-            <BranchRefBadge label={singleRepoStatus.branch || singleRepoStatus.revision} kind={singleRepoStatus.meta.kind === 'svn' ? 'revision' : singleRepoStatus.meta.isWorktree ? 'worktree' : 'branch'} color={singleRepoStatus.meta.kind === 'svn' ? undefined : branch} className="branch-chip" style={{ marginLeft: 4 }} />
+            <button
+              type="button"
+              className="repo-branch-trigger"
+              title={t('Switch branch')}
+              aria-haspopup="menu"
+              aria-expanded={Boolean(branchMenuAnchor)}
+              onClick={(e) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                setBranchMenuAnchor((cur) => (cur ? undefined : rect));
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                margin: '0 0 0 4px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              <BranchRefBadge label={singleRepoStatus.branch || singleRepoStatus.revision} kind={singleRepoStatus.meta.kind === 'svn' ? 'revision' : singleRepoStatus.meta.isWorktree ? 'worktree' : 'branch'} color={singleRepoStatus.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
+            </button>
+            {branchMenuAnchor && (
+              <BranchMenuPopover
+                anchorRect={branchMenuAnchor}
+                initialRepoId={singleRepoStatus.meta.id}
+                repoOnly
+                onClose={() => setBranchMenuAnchor(undefined)}
+              />
+            )}
           </div>
+        </div>
+      )}
+
+      {changelistErrors.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 12px', background: 'var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1))', color: 'var(--vscode-errorForeground, #f48771)', fontSize: 12 }}>
+          {changelistErrors.map((item) => (
+            <div key={item.repoId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Codicon name="error" />
+              <span style={{ flex: 1 }}>{item.repoName}: {item.error}</span>
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', textDecoration: 'underline' }}
+                onClick={() => void loadChangelists(item.repoId)}
+              >
+                {t('Retry')}
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

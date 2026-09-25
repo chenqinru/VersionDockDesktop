@@ -8,6 +8,8 @@ import type { BootstrapData, RepositoryStatus, WorkspaceSnapshot } from '../bind
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 
+import * as dialogService from './dialogService';
+
 const bootstrap = (stash: boolean, shelf = false, subtree = false, worktree = false): BootstrapData => ({
   applicationSessionId: 'test-session',
   state: { theme: 'system', language: 'system', uiFontSize: 'standard', lastWorkspaceId: null, recentWorkspaces: [], panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'changes', fileViewMode: 'tree', externalEditor: null },
@@ -20,8 +22,10 @@ const gitRepo: RepositoryStatus = { meta: { id: 'repo', name: 'Repository', root
 const gitSnapshot: WorkspaceSnapshot = { workspace: { id: 'workspace', name: 'Workspace', paths: ['/tmp/repo'], lastOpenedAt: '', available: true }, generation: 1, tools: { git: true, svn: true, svnadmin: true }, repositories: [gitRepo] };
 const originalRefresh = useAppStore.getState().refresh;
 const originalLoadStashes = useAppStore.getState().loadStashes;
+const originalUnstage = useAppStore.getState().unstage;
+const originalStage = useAppStore.getState().stage;
 
-afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, loadStashes: originalLoadStashes }); });
+afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
 describe('CommitPanel capabilities and file view', () => {
   it('compacts single-child directory chains while preserving file paths', () => {
@@ -331,7 +335,7 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: bootstrap(true, true, true, true), snapshot: gitSnapshot });
     const { container } = renderPanel();
     const tabs = Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('title'));
-    expect(tabs).toEqual(['Changes', 'Shelf', 'Stash', 'Worktrees', 'Subtree', 'Submodules', 'Sync']);
+    expect(tabs).toEqual(['Changes', 'Shelf', 'Stash', 'Submodules', 'Worktrees', 'Subtree', 'Sync']);
   });
 
   it('shows a branch-to-working-tree diff across the whole commit panel instead of the Worktrees tab', async () => {
@@ -492,5 +496,370 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.queryByText('Select All', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
     expect(screen.queryByText('Invert Selection', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
   });
-});
 
+  it('calculates commit targets for pure SVN workspace in VS Code mode', async () => {
+    const svnRepo: RepositoryStatus = {
+      meta: { id: 'svn-repo', name: 'SVN Repo', rootPath: '/tmp/svn', color: '#ce9178', kind: 'svn', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false },
+      branch: 'trunk',
+      revision: '10',
+      ahead: 0,
+      behind: 0,
+      files: [
+        { path: 'doc.txt', status: 'modified', staged: false, unstaged: true, conflicted: false },
+      ],
+      conflicts: 0,
+      operation: null,
+    };
+    const otherRepo: RepositoryStatus = {
+      ...svnRepo,
+      meta: { ...svnRepo.meta, id: 'other-repo', name: 'Other Repo' },
+      files: [
+        { path: 'other.txt', status: 'modified', staged: false, unstaged: true, conflicted: false },
+      ],
+    };
+    const baseBootstrap = bootstrap(false);
+    useAppStore.setState({
+      bridge,
+      bootstrap: {
+        ...baseBootstrap,
+        state: {
+          ...baseBootstrap.state,
+          settings: {
+            theme: 'system',
+            language: 'system',
+            uiFontSize: 'standard',
+            changesDisplayMode: 'vscode',
+            defaultCommitAction: 'commit',
+            defaultSaveAction: 'stash',
+            promptBeforeAddingUntracked: true,
+            suppressDivergedWarning: false,
+            autoRefreshInterval: 0,
+            fetchOnStartup: false,
+            resetViewLocationsOnStartup: false,
+            notifyIncomingCommits: false,
+            notifyUnpushedCommits: false,
+            repositoryScanDepth: 4,
+            ignoredFolders: [],
+            maximumGraphCommits: 1000,
+            projectColors: {},
+            externalEditor: null,
+          },
+        },
+      },
+      snapshot: { ...gitSnapshot, repositories: [svnRepo, otherRepo] },
+      selectedRepoId: 'svn-repo',
+    });
+
+    const { container } = renderPanel();
+    // 纯 SVN 模式下不应该渲染暂存区
+    expect(screen.queryByText('Staged Changes')).not.toBeInTheDocument();
+    // Changes 区分组应存在并列出文件
+    expect(screen.getByText('Changes')).toBeInTheDocument();
+    expect(screen.getByText('doc.txt')).toBeInTheDocument();
+    // 提交目标 Pill 应显示 SVN Repo
+    expect(container.querySelector('.commit-targets em')).toHaveTextContent('SVN Repo');
+  });
+
+  it('retains draft message and does not record history when batchCommit fails', async () => {
+    const failingBridge = new MockBridge(async (request) => {
+      if (request.type === 'batchCommit') {
+        throw new Error('IPC failed');
+      }
+      return [];
+    });
+    const changedRepo = { ...gitRepo, files: [{ path: 'src/App.tsx', status: 'modified', staged: true, unstaged: false, conflicted: false }] };
+    useAppStore.setState({
+      bridge: failingBridge,
+      bootstrap: bootstrap(false),
+      snapshot: { ...gitSnapshot, repositories: [changedRepo] },
+      selectedRepoId: 'repo',
+      commitMessage: 'WIP draft commit message',
+      commitSelections: { repo: ['src/App.tsx'] },
+    });
+
+    render(<BridgeContext.Provider value={failingBridge}><CommitPanel /></BridgeContext.Provider>);
+    const commitBtn = screen.getByRole('button', { name: 'Commit' });
+    fireEvent.click(commitBtn);
+
+    await waitFor(() => {
+      // 提交失败时，提交草稿必须被保留，不能被清空
+      expect(useAppStore.getState().commitMessage).toBe('WIP draft commit message');
+    });
+  });
+
+  it('removes SVN repository from commit targets when clicking close on its target tag in vscode mode', () => {
+    const svnRepo: RepositoryStatus = {
+      meta: {
+        id: 'svn-repo',
+        name: 'SVN Repo',
+        rootPath: '/tmp/svn',
+        color: '#3794ff',
+        kind: 'svn',
+        parentRepoId: null,
+        depth: 0,
+        isSubmodule: false,
+        isWorktree: false,
+      },
+      branch: '',
+      revision: 'r10',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'doc.txt', status: 'modified', staged: false, unstaged: true, conflicted: false }],
+      conflicts: 0,
+      operation: null,
+    };
+
+    const otherRepo: RepositoryStatus = {
+      meta: {
+        id: 'other-repo',
+        name: 'Other Repo',
+        rootPath: '/tmp/other',
+        color: '#4ec9b0',
+        kind: 'git',
+        parentRepoId: null,
+        depth: 0,
+        isSubmodule: false,
+        isWorktree: false,
+      },
+      branch: 'main',
+      revision: 'def',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'other.txt', status: 'modified', staged: true, unstaged: false, conflicted: false }],
+      conflicts: 0,
+      operation: null,
+    };
+
+    useAppStore.setState({
+      bootstrap: {
+        ...bootstrap(false),
+        state: {
+          ...bootstrap(false).state,
+          settings: {
+            theme: 'system',
+            language: 'system',
+            uiFontSize: 'standard',
+            changesDisplayMode: 'vscode',
+            defaultCommitAction: 'commit',
+            defaultSaveAction: 'stash',
+            promptBeforeAddingUntracked: true,
+            suppressDivergedWarning: false,
+            autoRefreshInterval: 0,
+            fetchOnStartup: false,
+            resetViewLocationsOnStartup: false,
+            notifyIncomingCommits: false,
+            notifyUnpushedCommits: false,
+            repositoryScanDepth: 4,
+            ignoredFolders: [],
+            maximumGraphCommits: 1000,
+            projectColors: {},
+            externalEditor: null,
+          },
+        },
+      },
+      snapshot: { ...gitSnapshot, repositories: [svnRepo, otherRepo] },
+      selectedRepoId: 'svn-repo',
+    });
+
+    renderPanel();
+    const removeBtn = screen.getByTitle('Remove SVN Repo');
+    expect(removeBtn).toBeInTheDocument();
+    fireEvent.click(removeBtn);
+    expect(screen.queryByTitle('Remove SVN Repo')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Remove Other Repo')).toBeInTheDocument();
+  });
+
+  it('removes Git repository from commit targets without calling unstage when clicking close in vscode mode', () => {
+    const unstageMock = vi.fn();
+    useAppStore.setState({ unstage: unstageMock });
+
+    const gitRepo1: RepositoryStatus = {
+      meta: {
+        id: 'git-repo-1',
+        name: 'Repo 1',
+        rootPath: '/tmp/repo1',
+        color: '#4ec9b0',
+        kind: 'git',
+        parentRepoId: null,
+        depth: 0,
+        isSubmodule: false,
+        isWorktree: false,
+      },
+      branch: 'main',
+      revision: '111',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'file1.ts', status: 'modified', staged: true, unstaged: false, conflicted: false }],
+      conflicts: 0,
+      operation: null,
+    };
+
+    const gitRepo2: RepositoryStatus = {
+      meta: {
+        id: 'git-repo-2',
+        name: 'Repo 2',
+        rootPath: '/tmp/repo2',
+        color: '#3794ff',
+        kind: 'git',
+        parentRepoId: null,
+        depth: 0,
+        isSubmodule: false,
+        isWorktree: false,
+      },
+      branch: 'main',
+      revision: '222',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'file2.ts', status: 'modified', staged: true, unstaged: false, conflicted: false }],
+      conflicts: 0,
+      operation: null,
+    };
+
+    useAppStore.setState({
+      bootstrap: {
+        ...bootstrap(false),
+        state: {
+          ...bootstrap(false).state,
+          settings: {
+            theme: 'system',
+            language: 'system',
+            uiFontSize: 'standard',
+            changesDisplayMode: 'vscode',
+            defaultCommitAction: 'commit',
+            defaultSaveAction: 'stash',
+            promptBeforeAddingUntracked: true,
+            suppressDivergedWarning: false,
+            autoRefreshInterval: 0,
+            fetchOnStartup: false,
+            resetViewLocationsOnStartup: false,
+            notifyIncomingCommits: false,
+            notifyUnpushedCommits: false,
+            repositoryScanDepth: 4,
+            ignoredFolders: [],
+            maximumGraphCommits: 1000,
+            projectColors: {},
+            externalEditor: null,
+          },
+        },
+      },
+      snapshot: { ...gitSnapshot, repositories: [gitRepo1, gitRepo2] },
+      selectedRepoId: 'git-repo-1',
+    });
+
+    renderPanel();
+    const removeBtn = screen.getByTitle('Remove Repo 2');
+    expect(removeBtn).toBeInTheDocument();
+    fireEvent.click(removeBtn);
+
+    // Repo 2 target is removed, Repo 1 remains
+    expect(screen.queryByTitle('Remove Repo 2')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Remove Repo 1')).toBeInTheDocument();
+    // unstage must NOT be called
+    expect(unstageMock).not.toHaveBeenCalled();
+
+    // Repo 2 checkbox in staged section should now be unchecked
+    const checkboxes = screen.getAllByTitle('Include this repository in the commit') as HTMLInputElement[];
+    const repo2Checkbox = checkboxes[1];
+    expect(repo2Checkbox.checked).toBe(false);
+
+    // Click checkbox to re-include Repo 2 into commit targets (operation closed-loop)
+    fireEvent.click(repo2Checkbox);
+    expect(screen.getByTitle('Remove Repo 2')).toBeInTheDocument();
+  });
+
+  it('prompts confirmDialog before staging single truncated SVN directory and only stages if confirmed', async () => {
+    const stageMock = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ stage: stageMock });
+    const confirmSpy = vi.spyOn(dialogService, 'confirmDialog');
+
+    const svnRepoTruncated: RepositoryStatus = {
+      meta: {
+        id: 'svn-trunc-repo',
+        name: 'SVN Trunc Repo',
+        rootPath: '/tmp/svn-trunc',
+        color: '#3794ff',
+        kind: 'svn',
+        parentRepoId: null,
+        depth: 0,
+        isSubmodule: false,
+        isWorktree: false,
+      },
+      branch: '',
+      revision: 'r99',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'deep-folder', status: 'untracked', staged: false, unstaged: true, conflicted: false, isTruncated: true }],
+      conflicts: 0,
+      operation: null,
+    };
+
+    useAppStore.setState({
+      bootstrap: {
+        ...bootstrap(false),
+        state: {
+          ...bootstrap(false).state,
+          settings: {
+            theme: 'system',
+            language: 'system',
+            uiFontSize: 'standard',
+            changesDisplayMode: 'vscode',
+            defaultCommitAction: 'commit',
+            defaultSaveAction: 'stash',
+            promptBeforeAddingUntracked: true,
+            suppressDivergedWarning: false,
+            autoRefreshInterval: 0,
+            fetchOnStartup: false,
+            resetViewLocationsOnStartup: false,
+            notifyIncomingCommits: false,
+            notifyUnpushedCommits: false,
+            repositoryScanDepth: 4,
+            ignoredFolders: [],
+            maximumGraphCommits: 1000,
+            projectColors: {},
+            externalEditor: null,
+          },
+        },
+      },
+      snapshot: { ...gitSnapshot, repositories: [svnRepoTruncated] },
+      selectedRepoId: 'svn-trunc-repo',
+    });
+
+    renderPanel();
+
+    // 1. User cancels confirmDialog
+    confirmSpy.mockResolvedValueOnce(false);
+    const fileRow = screen.getByText('deep-folder').closest('.file-item')!;
+    fireEvent.mouseEnter(fileRow);
+    const addBtn = screen.getByTitle('Add directory recursively to SVN');
+    fireEvent.click(addBtn);
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled();
+    });
+    expect(stageMock).not.toHaveBeenCalled();
+
+    // 2. User accepts confirmDialog
+    confirmSpy.mockClear();
+    confirmSpy.mockResolvedValueOnce(true);
+    fireEvent.click(addBtn);
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(stageMock).toHaveBeenCalledWith('svn-trunc-repo', ['deep-folder'], true);
+    });
+  });
+
+  it('resizes commit textarea with arrow keys on grip and persists height to localStorage', () => {
+    localStorage.clear();
+    useAppStore.setState({ bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo' });
+    renderPanel();
+
+    const grip = screen.getByLabelText('Resize commit message');
+    expect(grip).toBeInTheDocument();
+
+    fireEvent.keyDown(grip, { key: 'ArrowUp' });
+    const persisted = localStorage.getItem('versiondock:commit-message-textarea-height');
+    expect(persisted).toBeTruthy();
+    expect(Number(persisted)).toBeGreaterThanOrEqual(52);
+  });
+});

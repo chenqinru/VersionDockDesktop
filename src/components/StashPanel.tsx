@@ -558,6 +558,7 @@ export function StashPanel({
   onOpenFileDiff?: (repoId: string, reference: string, filePath: string) => void;
 }) {
   const stashes = useAppStore((state) => state.stashes);
+  const loadErrors = useAppStore((state) => state.loadErrors);
   const loadStashes = useAppStore((state) => state.loadStashes);
   const stashOperation = useAppStore((state) => state.stashOperation);
   const { t } = useI18n();
@@ -594,6 +595,7 @@ export function StashPanel({
           const list = ((stashes[repo.meta.id] ?? []) as StashItem[]).filter((entry) => !needle || `${repo.meta.name} ${entry.message} ${entry.fullMessage} ${entry.branch} ${entry.files.map((file) => file.path).join(' ')}`.toLocaleLowerCase().includes(needle));
           const projectColor = repo.meta.color || '#4ec9b0';
           const worktreeBranch = repo.meta.isWorktree ? repo.branch : undefined;
+          const error = loadErrors[`stashes:${repo.meta.id}`];
 
           return (
             <section key={repo.meta.id} style={css.repoSection} className="stash-repo">
@@ -605,7 +607,14 @@ export function StashPanel({
               </div>
 
               {/* Stash items or empty */}
-              {list.length === 0 ? (
+              {error && (
+                <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }} className="stash-empty">
+                  <Codicon name="error" style={{ marginRight: '6px' }} />
+                  {error}
+                </div>
+              )}
+
+              {list.length === 0 && !error ? (
                 <div style={css.empty} className="stash-empty">
                   {t('No stashes')}
                 </div>
