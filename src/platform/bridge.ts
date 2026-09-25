@@ -38,6 +38,7 @@ export interface VersionDockBridge {
   selectWorkspaceFolders(title: string): Promise<string[]>;
   selectDirectory(title: string): Promise<string | null>;
   selectExecutable(title: string): Promise<string | null>;
+  saveFileDialog(options: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>;
   notify(title: string, body: string): Promise<boolean>;
   openInNewWindow(paths?: string[], placement?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string>;
   transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting?: boolean): Promise<boolean>;
@@ -153,7 +154,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
     case 'history': case 'historyTopology': case 'commitDetail': case 'commitMergeCommits':
     case 'commitMergeParentFiles': case 'unpushedCommits': case 'unpushedOperation':
-    case 'historyOperation': case 'createPatch': case 'branchCompare': return 'history';
+    case 'historyOperation': case 'createPatch': case 'savePatch': case 'branchCompare': return 'history';
     case 'branches': case 'branchOperation': case 'branchRecovery': return 'branch';
     case 'tags': case 'tagOperation': return 'tag';
     case 'commit': case 'batchCommit': case 'recentCommitMessages': case 'lastCommitMessage': return 'commit';
@@ -418,6 +419,15 @@ export class TauriBridge implements VersionDockBridge {
     });
     return typeof value === 'string' ? value : null;
   }
+  async saveFileDialog(options: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null> {
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const value = await save(options);
+      return typeof value === 'string' ? value : null;
+    } catch {
+      return null;
+    }
+  }
   async notify(title: string, body: string): Promise<boolean> {
     try {
       const notifications = await import('@tauri-apps/plugin-notification');
@@ -607,6 +617,7 @@ export class MockBridge implements VersionDockBridge {
   async selectWorkspaceFolders(): Promise<string[]> { return []; }
   async selectDirectory(): Promise<string | null> { return null; }
   async selectExecutable(): Promise<string | null> { return Promise.resolve('/usr/local/bin/mock-editor'); }
+  async saveFileDialog(): Promise<string | null> { return null; }
   async notify(): Promise<boolean> { return false; }
   async openInNewWindow(): Promise<string> {
     return Promise.resolve('mock-window-new');

@@ -19,12 +19,14 @@ export type ContextMenuEntry = ContextMenuItem | ContextMenuSeparator;
 interface Props {
   x: number;
   y: number;
+  header?: string;
+  variant?: 'gitLog';
   items: ContextMenuEntry[];
-  onSelect: (id: string) => void;
+  onSelect: (id: string, anchorRect: DOMRect) => void;
   onClose: () => void;
 }
 
-export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
+export function ContextMenu({ x, y, header, variant, items, onSelect, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -45,7 +47,7 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
     const posX = x + w > vw - margin ? Math.max(margin, vw - w - margin) : Math.max(margin, x);
     const posY = y + h > vh - margin ? Math.max(margin, vh - h - margin) : Math.max(margin, y);
     setPos({ x: posX, y: posY });
-  }, [x, y]);
+  }, [x, y, header]);
 
   useEffect(() => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
@@ -101,9 +103,10 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
     <div
       ref={ref}
       role="menu"
-      style={{ ...styles.menu, ...style }}
+      style={{ ...styles.menu, ...(variant === 'gitLog' ? styles.gitLogMenu : {}), ...style }}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {header && <><div style={styles.header}>{header}</div><div style={styles.separator} /></>}
       {items.map((item, i) => {
         if ('separator' in item && item.separator) {
           return <div key={i} style={styles.separator} />;
@@ -116,8 +119,8 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
             role="menuitem"
             disabled={it.disabled}
             title={it.disabled ? it.disabledReason : undefined}
-            style={styles.item(!!it.danger, !!it.disabled)}
-            onClick={() => { if (!it.disabled) { onSelect(it.id); onClose(); } }}
+            style={{ ...styles.item(!!it.danger, !!it.disabled), ...(variant === 'gitLog' ? styles.gitLogItem(!!it.disabled) : {}) }}
+            onClick={(event) => { if (!it.disabled) { onSelect(it.id, event.currentTarget.getBoundingClientRect()); onClose(); } }}
             onMouseEnter={(e) => { if (!it.disabled) e.currentTarget.style.background = 'var(--vscode-list-hoverBackground, var(--versiondock-hover))'; }}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
@@ -132,6 +135,12 @@ export function ContextMenu({ x, y, items, onSelect, onClose }: Props) {
 }
 
 const styles = {
+  header: {
+    padding: '4px 12px',
+    color: 'var(--vscode-menu-foreground, var(--versiondock-text))',
+    fontSize: '11px',
+    whiteSpace: 'nowrap',
+  } as React.CSSProperties,
   menu: {
     background: 'var(--vscode-menu-background, var(--versiondock-surface-alt, var(--versiondock-surface)))',
     border: '1px solid var(--vscode-menu-border, var(--versiondock-border))',
@@ -143,6 +152,16 @@ const styles = {
     color: 'var(--vscode-menu-foreground, var(--versiondock-text))',
     userSelect: 'none' as const,
   },
+  gitLogMenu: {
+    minWidth: '220px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+  } as React.CSSProperties,
+  gitLogItem: (disabled: boolean): React.CSSProperties => ({
+    padding: '4px 12px',
+    opacity: disabled ? 0.35 : 1,
+    cursor: disabled ? 'default' : 'pointer',
+    whiteSpace: 'nowrap',
+  }),
   item: (danger: boolean, disabled: boolean): React.CSSProperties => ({
     display: 'flex',
     alignItems: 'center',

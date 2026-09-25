@@ -1,4 +1,7 @@
 {
+  "Failed to load {0}: {1}": "Failed to load {0}: {1}",
+  "Failed to load logs for {0} repo(s) ({1}…): {2}": "Failed to load logs for {0} repo(s) ({1}…): {2}",
+  "Retry": "Retry",
   "VersionDock: Fetching all remotes": "VersionDock: Fetching all remotes",
   "Merge: {0}": "Merge: {0}",
   "VersionDock: No conflict markers found in {0}": "VersionDock: No conflict markers found in {0}",
@@ -329,6 +332,8 @@
   "Open a local file to show file history.": "Open a local file to show file history.",
   "Open a local file to show selection history.": "Open a local file to show selection history.",
   "Select one or more lines to show selection history.": "Select one or more lines to show selection history.",
+  "Show Selection History": "Show Selection History",
+  "Uncommitted additions have no history": "Uncommitted additions have no history",
   "Select repositories to show again": "Select repositories to show again",
   "Hidden Repositories": "Hidden Repositories",
   "The selected file is not inside a Git repository.": "The selected file is not inside a Git repository.",

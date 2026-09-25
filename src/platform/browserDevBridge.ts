@@ -338,6 +338,7 @@ export class BrowserDevBridge implements VersionDockBridge {
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
   async selectDirectory(): Promise<string | null> { return workspace.paths[0] ?? null; }
   async selectExecutable(): Promise<string | null> { return '/usr/local/bin/zed'; }
+  async saveFileDialog(): Promise<string | null> { return null; }
   async notify(): Promise<boolean> { return false; }
   async openInNewWindow(paths?: string[], _position?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string> {
     if (typeof window !== 'undefined') {
@@ -519,7 +520,7 @@ export class BrowserDevBridge implements VersionDockBridge {
         const filtered = scoped.filter((commit) => (!query.text || `${commit.hash} ${commit.message} ${commit.author}`.toLowerCase().includes(query.text.toLowerCase())) && (!query.author || commit.author.toLowerCase().includes(query.author.toLowerCase())) && (!query.fromDate || commit.committerDate.slice(0, 10) >= query.fromDate) && (!query.toDate || commit.committerDate.slice(0, 10) <= query.toDate));
         return { commits: filtered.slice(command.payload.skip, command.payload.skip + command.payload.limit), hasMore: false } satisfies HistoryPage;
       }
-      case 'historyTopology': return (activeHistories[command.payload.repo_id] ?? []).map(({ repoId, hash, parents, committerDate, refs }) => ({ repoId, hash, parents, committerDate, refs })) satisfies GraphCommitNode[];
+      case 'historyTopology': return (activeHistories[command.payload.repo_id] ?? []).slice(0, command.payload.limit ?? undefined).map(({ repoId, hash, parents, committerDate, refs }) => ({ repoId, hash, parents, committerDate, refs })) satisfies GraphCommitNode[];
       case 'branches': return this.branchValues[command.payload.repo_id] ?? [];
       case 'tags': return this.tagValues[command.payload.repo_id] ?? [];
       case 'commitDetail': return this.commitDetail(command.payload.repo_id, command.payload.revision);
@@ -590,6 +591,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'subtreeOperation': this.applySubtree(command.payload.repo_id, command.payload.operation); return true;
       case 'unpushedOperation': return true;
       case 'createPatch': return { fileName: `versiondock-${command.payload.revisions.length}.patch`, content: 'From browser demo\n' };
+      case 'savePatch': return command.payload.path;
       case 'stage': this.updateFiles(command.payload.repo_id, command.payload.paths, true); return true;
       case 'unstage': this.updateFiles(command.payload.repo_id, command.payload.paths, false); return true;
       case 'deletePaths': this.repositories = this.repositories.map((repo) => repo.meta.id === command.payload.repo_id ? { ...repo, files: repo.files.filter((file) => !command.payload.paths.includes(file.path)) } : repo); return true;

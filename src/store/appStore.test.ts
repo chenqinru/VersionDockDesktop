@@ -930,4 +930,42 @@ describe('appStore async lifecycle', () => {
     expect(currentDialog()).toBeUndefined();
     expect(operations.find((command) => command.type === 'branchRecovery')).toMatchObject({ payload: { operation: { type: 'forceCheckout', target: 'feature' } } });
   });
+
+  it('handles multi-repo partial history failure gracefully with historyRepoErrors', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('a', 'Alpha'), repository('b', 'Beta')];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'history') {
+        if ((command.payload as { repo_id: string }).repo_id === 'b') throw new Error('Git repository corrupted');
+        return { commits: [{ repoId: 'a', hash: 'a1', shortHash: 'a1', parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'a1', refs: [] }], hasMore: false };
+      }
+      if (command.type === 'historyTopology') return [];
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a' });
+    await useAppStore.getState().loadHistory(true);
+    expect(useAppStore.getState().history.map((c) => c.hash)).toEqual(['a1']);
+    expect(useAppStore.getState().historyRepoErrors).toEqual({ b: 'Git repository corrupted' });
+  });
+
+  it('supports openHistoryForLineRange and restores lineRange after clearing path', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('a', 'Alpha')];
+    const queries: Array<{ lineRange?: unknown }> = [];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'history') {
+        queries.push((command.payload as { query: { lineRange?: unknown } }).query);
+        return { commits: [], hasMore: false };
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'a' });
+    await useAppStore.getState().openHistoryForLineRange('a', 'src/main.rs', { start: 10, end: 25 });
+    expect(useAppStore.getState().historyQuery.lineRange).toEqual({ start: 10, end: 25 });
+    expect(queries[queries.length - 1].lineRange).toEqual({ start: 10, end: 25 });
+
+    await useAppStore.getState().clearHistoryPath();
+    expect(useAppStore.getState().historyQuery.lineRange).toBeNull();
+    expect(useAppStore.getState().historyQuery.path).toBeNull();
+  });
 });

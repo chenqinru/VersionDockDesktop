@@ -796,6 +796,11 @@ fn command_error_context(
             repo_id,
             ..
         }
+        | BridgeCommand::SavePatch {
+            workspace_id,
+            repo_id,
+            ..
+        }
         | BridgeCommand::GitIdentity {
             workspace_id,
             repo_id,
@@ -2601,11 +2606,12 @@ async fn dispatch(
             workspace_id,
             repo_id,
             svn_limit,
+            limit,
             revision,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::history_topology(&repo, svn_limit, revision, token).await?)
+            json(vcs::history_topology(&repo, limit, svn_limit, revision, token).await?)
         }
         BridgeCommand::CommitDetail {
             workspace_id,
@@ -2689,6 +2695,26 @@ async fn dispatch(
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
             json(vcs::create_patch(&repo, &revisions, token).await?)
+        }
+        BridgeCommand::SavePatch {
+            workspace_id,
+            repo_id,
+            revisions,
+            path,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            let patch = vcs::create_patch(&repo, &revisions, token).await?;
+            tokio::fs::write(&path, patch.content.as_bytes())
+                .await
+                .map_err(|e| {
+                    crate::models::DesktopError::new(
+                        "SAVE_PATCH_FAILED",
+                        format!("Failed to save patch to {}: {}", path, e),
+                        false,
+                    )
+                })?;
+            json(path)
         }
         BridgeCommand::HistoryOperation {
             workspace_id,

@@ -7,7 +7,6 @@ import type { RepositoryStatus } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog } from './dialogService';
 import { isBranchProtected } from '../history/branchProtection';
-import { branchRevisionRef } from '../history/refs';
 import { ProviderPanel } from './ProviderPanel';
 
 interface Props {

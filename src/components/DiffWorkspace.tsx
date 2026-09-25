@@ -33,6 +33,9 @@ export function DiffWorkspace() {
   if (!diff) return null;
   const fileName = diff.path.split('/').pop() ?? diff.path;
   const revisionLabel = file && !file.revision ? t(file.staged ? 'Index ↔ HEAD' : 'Working tree') : undefined;
+  const isWorking = file?.toRevision === 'WORKTREE' || file?.toRevision === 'WORKING' || (!file?.revision && !file?.toRevision);
+  const oldRevision = file?.fromRevision ?? (file?.revision ? `${file.revision}~1` : 'HEAD');
+  const newRevision = isWorking ? undefined : (file?.toRevision ?? file?.revision);
   return <section className="diff-workspace">
     <header className="diff-header">
       <button className="diff-back-button" onClick={back}><Codicon name="arrow-left" /><span>{t(comparisonTarget ? 'Back to compare' : 'Back to history')}</span></button>
@@ -72,7 +75,7 @@ export function DiffWorkspace() {
         setContext({ x: event.clientX, y: event.clientY, selection });
       }}
     >
-      {diff.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : !diff.content ? <DiffPlaceholder kind="empty" path={diff.path} /> : <UnifiedDiffView content={diff.content} path={diff.path} language={diff.language} />}
+      {diff.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : !diff.content ? <DiffPlaceholder kind="empty" path={diff.path} /> : <UnifiedDiffView repoId={file?.repoId ?? comparisonTarget?.repoId ?? repo?.meta.id} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} />}
     </div>
     {context && <ContextMenu
       x={context.x}

@@ -4,6 +4,7 @@ import { HistoryWorkspace } from './HistoryWorkspace';
 import { formatRefLabel } from '../history/refs';
 import { commitKey } from '../history/commitDetails';
 import { buildDetailTree, buildHistoryRefOptions, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches, sumBranchAheadBehind } from './HistoryWorkspace.helpers';
+import * as dialogService from './dialogService';
 import { BranchSidebar } from './BranchSidebar';
 import { useAppStore } from '../store/appStore';
 import type { BootstrapData, WorkspaceSnapshot } from '../bindings/generated';
@@ -74,6 +75,107 @@ describe('HistoryWorkspace capabilities', () => {
     fireEvent.contextMenu(screen.getByText('feat: cherry-pick directly').closest('.commit-row')!);
     fireEvent.click(screen.getByText('Cherry-Pick'));
     await waitFor(() => expect(historyOperation).toHaveBeenCalledWith('repo', { type: 'cherryPick', revision: commit.hash }));
+  });
+
+  it('copies revision number to clipboard and dispatches notification', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const commit = { repoId: 'repo', hash: 'abcdef1234567890', shortHash: 'abcdef1', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: copy hash', refs: [] };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit] });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feat: copy hash').closest('.commit-row')!);
+    fireEvent.click(screen.getByText('Copy Revision Number'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(commit.hash));
+    expect(useAppStore.getState().notifications.some((n) => n.title === 'Revision copied')).toBe(true);
+  });
+
+  it('checks out revision directly when no local branch points to it', async () => {
+    const historyOperation = vi.fn().mockResolvedValue(true);
+    const commit = { repoId: 'repo', hash: 'abcdef1234567', shortHash: 'abcdef1', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: checkout directly', refs: [] };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit], historyOperation });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feat: checkout directly').closest('.commit-row')!);
+    fireEvent.click(screen.getByText('Checkout Revision'));
+    await waitFor(() => expect(historyOperation).toHaveBeenCalledWith('repo', { type: 'checkout', revision: commit.hash }));
+  });
+
+  it('requests undo with expectedHash matching the selected HEAD commit', async () => {
+    const confirmSpy = vi.spyOn(dialogService, 'confirmDialog').mockResolvedValue(true);
+    const unpushedOperation = vi.fn().mockResolvedValue(true);
+    const commit = {
+      repoId: 'repo',
+      hash: 'abcdef1234567890abcdef1234567890abcdef12',
+      shortHash: 'abcdef1',
+      parents: [],
+      author: 'Ada',
+      email: 'ada@example.test',
+      authorDate: '2026-01-01T00:00:00Z',
+      committerDate: '2026-01-01T00:00:00Z',
+      message: 'feat: undo me',
+      refs: ['HEAD -> main'],
+      unpushed: true,
+    };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit], unpushedOperation });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feat: undo me').closest('.commit-row')!);
+    fireEvent.click(screen.getByText('Undo Commit'));
+    await waitFor(() => expect(unpushedOperation).toHaveBeenCalledWith('repo', { type: 'undoHead', expectedHash: commit.hash }));
+    confirmSpy.mockRestore();
+  });
+
+  it('requests reset with expectedBranch and expectedHead matching the confirmed branch state', async () => {
+    const choiceSpy = vi.spyOn(dialogService, 'choiceDialog').mockResolvedValue('hard');
+    const confirmSpy = vi.spyOn(dialogService, 'confirmDialog').mockResolvedValue(true);
+    const historyOperation = vi.fn().mockResolvedValue(true);
+    const commit = {
+      repoId: 'repo',
+      hash: 'target1234567890abcdef',
+      shortHash: 'target1',
+      parents: [],
+      author: 'Ada',
+      email: 'ada@example.test',
+      authorDate: '2026-01-01T00:00:00Z',
+      committerDate: '2026-01-01T00:00:00Z',
+      message: 'feat: reset target',
+      refs: [],
+    };
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true),
+      snapshot,
+      selectedRepoId: 'repo',
+      history: [commit],
+      branchesByRepo: { repo: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }] },
+      historyOperation,
+    });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feat: reset target').closest('.commit-row')!);
+    fireEvent.click(screen.getByText('Reset Current Branch to Here...'));
+    await waitFor(() => expect(historyOperation).toHaveBeenCalledWith('repo', {
+      type: 'reset',
+      revision: commit.hash,
+      mode: 'hard',
+      expectedBranch: 'main',
+      expectedHead: 'abc1234',
+    }));
+    choiceSpy.mockRestore();
+    confirmSpy.mockRestore();
+  });
+
+  it('saves patch to selected file path via savePatch', async () => {
+    const savePatch = vi.fn().mockResolvedValue('/path/to/my.patch');
+    const saveFileDialog = vi.fn().mockResolvedValue('/path/to/my.patch');
+    const mockBridge = {
+      saveFileDialog,
+      platform: () => 'macos',
+      request: vi.fn(),
+    } as unknown as import('../platform/bridge').VersionDockBridge;
+    const commit = { repoId: 'repo', hash: 'abcdef1234567', shortHash: 'abcdef1', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: save patch', refs: [] };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit], bridge: mockBridge, savePatch });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('feat: save patch').closest('.commit-row')!);
+    fireEvent.click(screen.getByText('Create Patch...'));
+    await waitFor(() => expect(savePatch).toHaveBeenCalledWith('repo', [commit.hash], '/path/to/my.patch'));
+    expect(useAppStore.getState().notifications.some((n) => n.title === 'Patch created')).toBe(true);
   });
 
   it('uses the row action to open commit details rather than previewing the first file', async () => {

@@ -365,6 +365,8 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         svn_limit: u32,
+        #[serde(default)]
+        limit: Option<u32>,
         revision: Option<String>,
     },
     CommitDetail {
@@ -415,6 +417,12 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         revisions: Vec<String>,
+    },
+    SavePatch {
+        workspace_id: String,
+        repo_id: String,
+        revisions: Vec<String>,
+        path: String,
     },
     Branches {
         workspace_id: String,
@@ -777,6 +785,13 @@ pub struct RecentCommitMessage {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LineRange {
+    pub start: u32,
+    pub end: u32,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryQuery {
@@ -786,6 +801,8 @@ pub struct HistoryQuery {
     pub to_date: Option<String>,
     pub path: Option<String>,
     pub revision: Option<String>,
+    #[serde(default)]
+    pub line_range: Option<LineRange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2336,7 +2353,10 @@ pub enum UnpushedOperation {
     Revert {
         hashes: Vec<String>,
     },
-    UndoHead,
+    UndoHead {
+        #[serde(default, rename = "expectedHash")]
+        expected_hash: Option<String>,
+    },
     Drop {
         hashes: Vec<String>,
     },
@@ -2365,6 +2385,10 @@ pub enum HistoryOperation {
     Reset {
         revision: String,
         mode: String,
+        #[serde(default, rename = "expectedBranch")]
+        expected_branch: Option<String>,
+        #[serde(default, rename = "expectedHead")]
+        expected_head: Option<String>,
     },
     CheckoutFile {
         revision: String,

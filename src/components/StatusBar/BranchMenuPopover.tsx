@@ -13,9 +13,10 @@ interface BranchMenuPopoverProps {
   onClose: () => void;
   initialRepoId?: string;
   repoOnly?: boolean;
+  directBranch?: { repoId: string; branchName: string; isCurrent: boolean };
 }
 
-export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly = false }: BranchMenuPopoverProps) {
+export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly = false, directBranch }: BranchMenuPopoverProps) {
   const { t } = useI18n();
   const bridge = useBridge();
   const snapshot = useAppStore((state) => state.snapshot);
@@ -35,7 +36,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const refresh = useAppStore((state) => state.refresh);
 
   // 二级菜单状态
-  const [activeSubmenuRepoId, setActiveSubmenuRepoId] = useState<string | null>(initialRepoId ?? null);
+  const [activeSubmenuRepoId, setActiveSubmenuRepoId] = useState<string | null>(directBranch ? null : initialRepoId ?? null);
   const [activeCommonBranch, setActiveCommonBranch] = useState<{ name: string; isRemote: boolean } | null>(null);
   const [activeCommonTag, setActiveCommonTag] = useState<string | null>(null);
   const [submenuPos, setSubmenuPos] = useState<{ left: number; top: number; centerY: number; maxHeight: number } | null>(() => {
@@ -54,13 +55,18 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     branchName: string;
     isRemote: boolean;
     isCurrent: boolean;
-  } | null>(null);
+  } | null>(directBranch ? { ...directBranch, isRemote: false } : null);
   const [activeTagAction, setActiveTagAction] = useState<{
     repoId: string;
     tagName: string;
     isCurrent: boolean;
   } | null>(null);
-  const [actionMenuPos, setActionMenuPos] = useState<{ left: number; top: number; centerY: number; maxHeight: number } | null>(null);
+  const [actionMenuPos, setActionMenuPos] = useState<{ left: number; top: number; centerY: number; maxHeight: number } | null>(() => directBranch && anchorRect ? {
+    left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - 288)),
+    top: anchorRect.bottom + 4,
+    centerY: anchorRect.bottom + 4,
+    maxHeight: Math.max(160, window.innerHeight - 20),
+  } : null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
@@ -91,9 +97,9 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
       const h = actionMenuRef.current.offsetHeight;
       const minTop = 10;
       const maxBottom = window.innerHeight - 30;
-      let nextTop = actionMenuPos.centerY - h / 2;
+      let nextTop = directBranch && anchorRect ? anchorRect.bottom + 4 : actionMenuPos.centerY - h / 2;
       if (nextTop + h > maxBottom) {
-        nextTop = maxBottom - h;
+        nextTop = directBranch && anchorRect ? anchorRect.top - h - 4 : maxBottom - h;
       }
       if (nextTop < minTop) {
         nextTop = minTop;
@@ -102,7 +108,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
         setActionMenuPos((prev) => (prev ? { ...prev, top: nextTop } : null));
       }
     }
-  }, [actionMenuPos, activeBranchAction, activeTagAction]);
+  }, [actionMenuPos, activeBranchAction, activeTagAction, anchorRect, directBranch]);
 
   // 监听点击外部和 Escape 关闭
   useEffect(() => {
@@ -121,7 +127,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (repoOnly && !activeBranchAction && !activeTagAction) {
+        if (directBranch || (repoOnly && !activeBranchAction && !activeTagAction)) {
           onClose();
         } else if (activeBranchAction || activeTagAction) {
           setActiveBranchAction(null);
@@ -144,7 +150,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, repoOnly]);
+  }, [onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, repoOnly, directBranch]);
 
   const repositories = useMemo(() => snapshot?.repositories ?? [], [snapshot?.repositories]);
   const gitRepos = useMemo(() => repositories.filter((r) => r.meta.kind === 'git'), [repositories]);

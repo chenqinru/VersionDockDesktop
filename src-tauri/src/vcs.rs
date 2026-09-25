@@ -17,14 +17,14 @@ use crate::{
         CommitDetail, CommitFile, CommitNode, CommitPathOperationEntry, ConflictBlock,
         ConflictChoice, DesktopError, DiffDocument, EffectiveGitIdentity, FileHistoryEntry,
         FileHistoryPage, FileRevisionDocument, GraphCommitNode, HistoryOperation, HistoryPage,
-        HistoryQuery, IgnoreRules, IncomingCommit, MergeCommitSummary, MergeParentChange,
-        MergeVersions, PatchDocument, RecentCommitMessage, RemoteInfo, RemoteOperation,
-        RepositoryMeta, RepositoryUpdateResult, RestoreConflictFailure, RestoreConflictsResult,
-        RevisionChanges, ShelfFileEntry, StashEntry, StashOperation, SubmoduleConflictStages,
-        SubmoduleEntry, SubmoduleOperation, SubmoduleSyncStatus, SubtreeEntry, SubtreeOperation,
-        SubtreePushStatus, SubtreeState, SvnOperation, SyncAction, SyncResult, TagInfo,
-        TagOperation, UnpushedCommit, UnpushedOperation, UpdateDetail, UpdateKind, UpdateSummary,
-        VcsKind, WorktreeDiffResult, WorktreeEntry, WorktreeOperation,
+        HistoryQuery, IgnoreRules, IncomingCommit, LineRange, MergeCommitSummary,
+        MergeParentChange, MergeVersions, PatchDocument, RecentCommitMessage, RemoteInfo,
+        RemoteOperation, RepositoryMeta, RepositoryUpdateResult, RestoreConflictFailure,
+        RestoreConflictsResult, RevisionChanges, ShelfFileEntry, StashEntry, StashOperation,
+        SubmoduleConflictStages, SubmoduleEntry, SubmoduleOperation, SubmoduleSyncStatus,
+        SubtreeEntry, SubtreeOperation, SubtreePushStatus, SubtreeState, SvnOperation, SyncAction,
+        SyncResult, TagInfo, TagOperation, UnpushedCommit, UnpushedOperation, UpdateDetail,
+        UpdateKind, UpdateSummary, VcsKind, WorktreeDiffResult, WorktreeEntry, WorktreeOperation,
     },
     state::safe_relative,
 };
@@ -3247,12 +3247,13 @@ pub async fn history(
 
 pub async fn history_topology(
     repo: &RepositoryMeta,
+    limit: Option<u32>,
     svn_limit: u32,
     revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<Vec<GraphCommitNode>, DesktopError> {
     match repo.kind {
-        VcsKind::Git => git_history_topology(repo, revision, token).await,
+        VcsKind::Git => git_history_topology(repo, limit, revision, token).await,
         VcsKind::Svn => svn_history_topology(repo, svn_limit.clamp(1, 100), token).await,
     }
 }
@@ -3659,6 +3660,121 @@ async fn incoming_conflict_paths(repo: &RepositoryMeta, token: &CancellationToke
     paths
 }
 
+async fn ensure_unpushed_commits(
+    repo: &RepositoryMeta,
+    hashes: &[String],
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if hashes.is_empty() {
+        return Ok(());
+    }
+    for hash in hashes {
+        validate_revision(hash)?;
+    }
+
+    let remotes_output = git(vec!["remote".into()], repo, token).await?.stdout_text();
+    let remote_names: Vec<String> = remotes_output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect();
+
+    if !remote_names.is_empty() {
+        for remote_name in &remote_names {
+            validate_ref(remote_name)?;
+            git_network_quick(
+                vec![
+                    "fetch".into(),
+                    "--prune".into(),
+                    "--no-tags".into(),
+                    remote_name.clone(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .map_err(|err| {
+                DesktopError::new(
+                    "CANNOT_VERIFY_REMOTE_STATE",
+                    format!(
+                        "Cannot verify remote tracking state for '{remote_name}' before rewriting history. Operation aborted to protect published commits: {}",
+                        err.message
+                    ),
+                    false,
+                )
+            })?;
+        }
+    }
+
+    let has_upstream = git(
+        vec![
+            "rev-parse".into(),
+            "--abbrev-ref".into(),
+            "--symbolic-full-name".into(),
+            "@{upstream}".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .is_ok();
+
+    if has_upstream {
+        for hash in hashes {
+            let is_ancestor = git(
+                vec![
+                    "merge-base".into(),
+                    "--is-ancestor".into(),
+                    hash.clone(),
+                    "@{upstream}".into(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .is_ok();
+
+            if is_ancestor {
+                let short = if hash.len() > 7 { &hash[..7] } else { hash };
+                return Err(DesktopError::new(
+                    "COMMIT_ALREADY_PUSHED",
+                    format!("Commit {short} has already been pushed to the remote tracking branch"),
+                    false,
+                ));
+            }
+        }
+    }
+
+    if !remote_names.is_empty() {
+        for hash in hashes {
+            let containing_remotes = git(
+                vec![
+                    "branch".into(),
+                    "-r".into(),
+                    "--contains".into(),
+                    hash.clone(),
+                ],
+                repo,
+                token,
+            )
+            .await?
+            .stdout_text();
+
+            if containing_remotes.lines().any(|l| !l.trim().is_empty()) {
+                let short = if hash.len() > 7 { &hash[..7] } else { hash };
+                return Err(DesktopError::new(
+                    "COMMIT_ALREADY_PUSHED",
+                    format!("Commit {short} has already been pushed to a remote branch"),
+                    false,
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn unpushed_operation(
     repo: &RepositoryMeta,
     operation: UnpushedOperation,
@@ -3666,7 +3782,29 @@ pub async fn unpushed_operation(
 ) -> Result<(), DesktopError> {
     ensure_git(repo)?;
     match operation {
-        UnpushedOperation::UndoHead => {
+        UnpushedOperation::UndoHead { expected_hash } => {
+            let head = git(vec!["rev-parse".into(), "HEAD".into()], repo, token)
+                .await?
+                .stdout_text()
+                .trim()
+                .to_string();
+            if let Some(expected) = expected_hash
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                validate_revision(expected)?;
+                let matches =
+                    head == expected || head.starts_with(expected) || expected.starts_with(&head);
+                if !matches {
+                    return Err(DesktopError::new(
+                        "COMMIT_NOT_HEAD",
+                        "The current HEAD has changed and no longer matches the expected commit",
+                        false,
+                    ));
+                }
+            }
+            ensure_unpushed_commits(repo, &[head], token).await?;
             git(
                 vec!["reset".into(), "--soft".into(), "HEAD^".into()],
                 repo,
@@ -3682,13 +3820,15 @@ pub async fn unpushed_operation(
                 .stdout_text()
                 .trim()
                 .to_string();
-            if head != hash {
+            let matches = head == hash || head.starts_with(&hash) || hash.starts_with(&head);
+            if !matches {
                 return Err(DesktopError::new(
                     "COMMIT_NOT_HEAD",
                     "Only the HEAD commit message can be edited safely",
                     false,
                 ));
             }
+            ensure_unpushed_commits(repo, &[head], token).await?;
             let message = validate_message(&message)?;
             cli::run(
                 "git",
@@ -3710,6 +3850,7 @@ pub async fn unpushed_operation(
         UnpushedOperation::Drop { hashes } => {
             ensure_clean_worktree(repo, token).await?;
             let (oldest, newest) = validate_contiguous_commits(repo, &hashes, false, token).await?;
+            ensure_unpushed_commits(repo, &hashes, token).await?;
             git(
                 vec![
                     "rebase".into(),
@@ -3731,13 +3872,15 @@ pub async fn unpushed_operation(
                 .stdout_text()
                 .trim()
                 .to_string();
-            if newest != head {
+            let matches = newest == head || newest.starts_with(&head) || head.starts_with(&newest);
+            if !matches {
                 return Err(DesktopError::new(
                     "SQUASH_REQUIRES_HEAD",
                     "Squash selection must include HEAD",
                     false,
                 ));
             }
+            ensure_unpushed_commits(repo, &hashes, token).await?;
             git(
                 vec!["reset".into(), "--soft".into(), format!("{oldest}^")],
                 repo,
@@ -4015,7 +4158,12 @@ pub async fn history_operation(
                     args.extend(revisions);
                     git(args, repo, token).await?;
                 }
-                HistoryOperation::Reset { revision, mode } => {
+                HistoryOperation::Reset {
+                    revision,
+                    mode,
+                    expected_branch,
+                    expected_head,
+                } => {
                     validate_revision(&revision)?;
                     if !matches!(mode.as_str(), "soft" | "mixed" | "hard") {
                         return Err(DesktopError::new(
@@ -4024,8 +4172,61 @@ pub async fn history_operation(
                             false,
                         ));
                     }
-                    if mode != "hard" {
-                        ensure_clean_worktree(repo, token).await?;
+                    if let Some(expected) = expected_branch
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let current_branch = git(
+                            vec![
+                                "symbolic-ref".into(),
+                                "--short".into(),
+                                "-q".into(),
+                                "HEAD".into(),
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await
+                        .map(|output| output.stdout_text().trim().to_string())
+                        .ok();
+
+                        let branch_matches = match current_branch.as_deref() {
+                            Some(current) => current == expected,
+                            None => expected == "HEAD" || expected == "(detached)",
+                        };
+
+                        if !branch_matches {
+                            return Err(DesktopError::new(
+                                "BRANCH_CHANGED",
+                                format!(
+                                    "The current branch has changed (expected '{expected}'). Reset aborted.",
+                                ),
+                                false,
+                            ));
+                        }
+                    }
+                    if let Some(expected) = expected_head
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        validate_revision(expected)?;
+                        let head = git(vec!["rev-parse".into(), "HEAD".into()], repo, token)
+                            .await?
+                            .stdout_text()
+                            .trim()
+                            .to_string();
+                        let matches = head == expected
+                            || head.starts_with(expected)
+                            || expected.starts_with(&head);
+                        if !matches {
+                            return Err(DesktopError::new(
+                                "HEAD_CHANGED",
+                                "The current HEAD commit has changed since confirmation. Reset aborted.",
+                                false,
+                            ));
+                        }
                     }
                     git(
                         vec!["reset".into(), format!("--{mode}"), revision],
@@ -4313,10 +4514,36 @@ async fn git_history(
         validate_history_date(value)?;
         args.push(format!("--until={value}T23:59:59"));
     }
+    let trimmed_path = query
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let line_range_filter = if trimmed_path.is_some() {
+        query.line_range
+    } else {
+        None
+    };
+
+    if line_range_filter.is_some() {
+        args.push("--no-patch".into());
+    }
+
     // Prioritize the checked-out history when tips share a timestamp, matching
     // JetBrains and the VersionDock plugin. Unborn repositories have no HEAD.
-    if let Some(value) = query.revision.clone() {
-        args.push(value);
+    // Line-range queries dig through a single revision; specifying multiple tips
+    // or `--all` causes git log -L to fail with "More than one commit to dig from".
+    let query_revision = query
+        .revision
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && *v != "WORKTREE" && *v != "WORKING" && *v != "INDEX");
+    if let Some(value) = query_revision {
+        args.push(value.to_string());
+    } else if line_range_filter.is_some() {
+        if !head_hash.is_empty() {
+            args.push("HEAD".into());
+        }
     } else {
         if !head_hash.is_empty() {
             args.push("HEAD".into());
@@ -4325,19 +4552,33 @@ async fn git_history(
         args.push("--exclude=refs/versiondock/ai-composer/*".into());
         args.push("--all".into());
     }
-    if let Some(path) = query
-        .path
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        let path = literal_path(Path::new(&repo.root_path), path, false)?;
-        args.push("--follow".into());
-        args.push("--".into());
-        args.push(path);
+    if let Some(path) = trimmed_path {
+        if let Some(line_range) = line_range_filter {
+            let path = relative_path(Path::new(&repo.root_path), path, false)?;
+            args.push("-L".into());
+            args.push(format!("{},{}:{}", line_range.start, line_range.end, path));
+        } else {
+            let path = literal_path(Path::new(&repo.root_path), path, false)?;
+            args.push("--follow".into());
+            args.push("--".into());
+            args.push(path);
+        }
     }
     let (raw, refs_by_hash) = tokio::try_join!(
-        async { Ok::<_, DesktopError>(git(args, repo, token).await?.stdout_text()) },
+        async {
+            match git(args, repo, token).await {
+                Ok(output) => Ok(output.stdout_text()),
+                Err(err) if line_range_filter.is_some() => {
+                    let message = err.message.to_lowercase();
+                    if message.contains("has only") {
+                        Ok(String::new())
+                    } else {
+                        Err(err)
+                    }
+                }
+                Err(err) => Err(err),
+            }
+        },
         git_decorated_refs(repo, &head_hash, token),
     )?;
     let needle = query.text.unwrap_or_default().trim().to_lowercase();
@@ -4397,6 +4638,7 @@ async fn git_history(
 
 async fn git_history_topology(
     repo: &RepositoryMeta,
+    limit: Option<u32>,
     revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<Vec<GraphCommitNode>, DesktopError> {
@@ -4414,8 +4656,10 @@ async fn git_history_topology(
     .await
     .map(|output| output.stdout_text().trim().to_string())
     .unwrap_or_default();
+    let cap = limit.unwrap_or(2000).max(2000);
     let mut args = vec![
         "log".into(),
+        format!("-n{cap}"),
         "--date-order".into(),
         format!("--format={format}"),
         "--date=iso-strict".into(),
@@ -4615,6 +4859,58 @@ pub async fn branch_compare(
     })
 }
 
+async fn svn_selection_revisions(
+    repo: &RepositoryMeta,
+    path: &str,
+    line_range: LineRange,
+    revision: Option<&str>,
+    token: &CancellationToken,
+) -> Result<HashSet<String>, DesktopError> {
+    let rel = relative_path(Path::new(&repo.root_path), path, false)?;
+    let mut args = vec!["blame".into(), "--xml".into()];
+    let clean_rev = revision
+        .map(str::trim)
+        .filter(|r| !r.is_empty() && *r != "HEAD")
+        .and_then(|r| {
+            let clean = r.trim_start_matches('r');
+            if clean.bytes().all(|b| b.is_ascii_digit()) && !clean.is_empty() {
+                Some(clean)
+            } else {
+                None
+            }
+        });
+    if let Some(rev) = clean_rev {
+        args.extend(["-r".into(), rev.to_string()]);
+        args.extend(["--".into(), format!("{rel}@{rev}")]);
+    } else {
+        args.extend(["--".into(), format!("{rel}@")]);
+    }
+    let output = svn_with_timeout(args, repo, token, Duration::from_secs(15)).await?;
+    let raw = output.stdout_text();
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let mut revisions = HashSet::new();
+    for entry in document.descendants().filter(|n| n.has_tag_name("entry")) {
+        let line_num: u32 = match entry.attribute("line-number").and_then(|v| v.parse().ok()) {
+            Some(n) => n,
+            None => continue,
+        };
+        if line_num < line_range.start || line_num > line_range.end {
+            continue;
+        }
+        if let Some(commit_node) = entry.children().find(|c| c.has_tag_name("commit")) {
+            if let Some(rev) = commit_node
+                .attribute("revision")
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+            {
+                revisions.insert(rev.to_string());
+            }
+        }
+    }
+    Ok(revisions)
+}
+
 async fn svn_history(
     repo: &RepositoryMeta,
     skip: u32,
@@ -4642,9 +4938,57 @@ async fn svn_history(
     if let Some(value) = query.to_date.as_deref().filter(|value| !value.is_empty()) {
         validate_history_date(value)?;
     }
-    let target = svn_history_target(repo, query.revision.as_deref(), query.path.as_deref())?;
-    let mut args = vec!["log".into(), "--xml".into(), "-r".into(), "HEAD:0".into()];
-    let scan_limit = if backend_filter {
+
+    let trimmed_path = query
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let query_revision = query.revision.as_deref().map(str::trim).filter(|v| {
+        !v.is_empty() && *v != "HEAD" && *v != "WORKTREE" && *v != "WORKING" && *v != "INDEX"
+    });
+
+    let selection_revisions = match (trimmed_path, query.line_range) {
+        (Some(path), Some(line_range)) => {
+            let revisions =
+                svn_selection_revisions(repo, path, line_range, query_revision, token).await?;
+            if revisions.is_empty() {
+                return Ok(HistoryPage {
+                    commits: vec![],
+                    has_more: false,
+                });
+            }
+            Some(revisions)
+        }
+        _ => None,
+    };
+
+    let target = svn_history_target(repo, query_revision, query.path.as_deref())?;
+    let mut args = vec!["log".into(), "--xml".into()];
+
+    if let Some(ref sel) = selection_revisions {
+        let mut numeric: Vec<u64> = sel.iter().filter_map(|r| r.parse::<u64>().ok()).collect();
+        numeric.sort_unstable();
+        if let (Some(&min_rev), Some(&max_rev)) = (numeric.first(), numeric.last()) {
+            args.extend(["-r".into(), format!("{max_rev}:{min_rev}")]);
+        } else {
+            args.extend(["-r".into(), "HEAD:0".into()]);
+        }
+    } else if let Some(clean_rev) = query_revision.and_then(|r| {
+        let clean = r.trim_start_matches('r');
+        if clean.bytes().all(|b| b.is_ascii_digit()) && !clean.is_empty() {
+            Some(clean)
+        } else {
+            None
+        }
+    }) {
+        args.extend(["-r".into(), format!("{clean_rev}:0")]);
+    } else {
+        args.extend(["-r".into(), "HEAD:0".into()]);
+    }
+
+    let scan_limit = if backend_filter || selection_revisions.is_some() {
         requested.max(1_000)
     } else {
         requested
@@ -4665,6 +5009,11 @@ async fn svn_history(
         .filter(|node| node.has_tag_name("logentry"))
         .filter_map(|entry| {
             let revision = entry.attribute("revision")?;
+            if let Some(ref sel) = selection_revisions {
+                if !sel.contains(revision) {
+                    return None;
+                }
+            }
             let text = |name: &str| {
                 entry
                     .children()
@@ -4746,23 +5095,41 @@ fn svn_history_target(
     if revision.is_none() && path.is_none() {
         return Ok(None);
     }
+    let numeric_rev = revision.and_then(|r| {
+        let clean = r.trim_start_matches('r');
+        if !clean.is_empty() && clean.bytes().all(|byte| byte.is_ascii_digit()) {
+            Some(clean)
+        } else {
+            None
+        }
+    });
     let mut relative = String::new();
     if let Some(revision) = revision {
-        if revision.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Ok(Some(format!("{}@{revision}", repo.root_path)));
+        if numeric_rev.is_none() {
+            let target = svn_repository_target(revision)?;
+            relative.push_str(target.trim_start_matches("^/"));
         }
-        let target = svn_repository_target(revision)?;
-        relative.push_str(target.trim_start_matches("^/"));
     }
     if let Some(path) = path {
-        relative_path(Path::new(&repo.root_path), path, false)?;
+        let rel = relative_path(Path::new(&repo.root_path), path, false)?;
         if !relative.is_empty() {
             relative.push('/');
         }
-        relative.push_str(path.trim_matches('/'));
+        relative.push_str(rel.trim_matches('/'));
     }
-    Ok(Some(if revision.is_some() {
+    if relative.is_empty() {
+        if let Some(clean) = numeric_rev {
+            return Ok(Some(format!("{}@{clean}", repo.root_path)));
+        }
+        return Ok(None);
+    }
+    Ok(Some(if revision.is_some() && numeric_rev.is_none() {
         format!("^/{relative}@HEAD")
+    } else if let Some(clean) = numeric_rev {
+        format!(
+            "{}@{clean}",
+            Path::new(&repo.root_path).join(relative).to_string_lossy()
+        )
     } else {
         format!(
             "{}@HEAD",

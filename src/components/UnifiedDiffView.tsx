@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { bundledLanguages, codeToTokensBase, type BundledLanguage, type BundledTheme, type ThemeRegistrationRaw, type ThemedToken } from 'shiki';
 import { Codicon } from './Codicon';
+import { ContextMenu } from './ContextMenu';
 import { useI18n } from '../i18n';
+import { useAppStore, normalizeHistoryRevision } from '../store/appStore';
 import { resolveShikiTheme } from '../theme';
 
 type DiffSide = 'old' | 'new';
@@ -76,6 +78,114 @@ export function resolveDiffHighlightLanguage(language: string, path: string, lin
     return 'typescript';
   }
   return requested in bundledLanguages ? requested as BundledLanguage : null;
+}
+
+export interface DiffSelectionLineRange {
+  start: number;
+  end: number;
+  side?: 'old' | 'new';
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function extractDiffLineRange(container: HTMLElement, target?: Element | null): DiffSelectionLineRange | undefined {
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    const range = selection.getRangeAt(0);
+    if (
+      container.contains(range.commonAncestorContainer)
+      || container.contains(range.startContainer)
+      || container.contains(range.endContainer)
+    ) {
+      const lineElements = Array.from(container.querySelectorAll<HTMLElement>('.diff-inline-row, .diff-code-cell, [data-line-number]'));
+      let detectedSide: 'old' | 'new' | undefined;
+      for (const el of lineElements) {
+        if (selection.containsNode(el, true)) {
+          if (el.dataset.side === 'old' || el.closest('.unified-diff-pane.old') || el.classList.contains('deletion') || el.classList.contains('old')) {
+            detectedSide = 'old';
+            break;
+          } else if (el.dataset.side === 'new' || el.closest('.unified-diff-pane.new') || el.classList.contains('addition') || el.classList.contains('new')) {
+            detectedSide = 'new';
+          }
+        }
+      }
+      const side = detectedSide ?? 'new';
+
+      const lineNumbers: number[] = [];
+      const seen = new Set<HTMLElement>();
+      for (const el of lineElements) {
+        if (seen.has(el)) continue;
+        if (selection.containsNode(el, true)) {
+          seen.add(el);
+          let num: number | undefined;
+          if (side === 'old') {
+            const rawOld = el.dataset.oldLineNumber;
+            if (rawOld !== undefined) {
+              num = Number(rawOld);
+            } else if (el.dataset.side === 'old' || el.classList.contains('old') || el.classList.contains('deletion')) {
+              num = Number(el.dataset.lineNumber);
+            }
+          } else {
+            const rawNew = el.dataset.newLineNumber;
+            if (rawNew !== undefined) {
+              num = Number(rawNew);
+            } else if (el.dataset.side === 'new' || el.classList.contains('new') || el.classList.contains('addition')) {
+              num = Number(el.dataset.lineNumber);
+            }
+          }
+          if (num !== undefined && !Number.isNaN(num) && num > 0) {
+            lineNumbers.push(num);
+          }
+        }
+      }
+      if (lineNumbers.length > 0) {
+        return {
+          start: Math.min(...lineNumbers),
+          end: Math.max(...lineNumbers),
+          side,
+        };
+      }
+    }
+  }
+
+  if (target) {
+    const specificNumberEl = target.closest<HTMLElement>('.diff-line-number[data-line-number], [data-side][data-line-number]');
+    if (specificNumberEl && container.contains(specificNumberEl)) {
+      const num = Number(specificNumberEl.dataset.lineNumber);
+      if (!Number.isNaN(num) && num > 0) {
+        const side = specificNumberEl.dataset.side === 'old' || specificNumberEl.classList.contains('old') ? 'old' : 'new';
+        return { start: num, end: num, side };
+      }
+    }
+
+    const lineEl = target.closest<HTMLElement>('[data-line-number], .diff-inline-row, .diff-code-cell');
+    if (lineEl && container.contains(lineEl)) {
+      let side: 'old' | 'new' = 'new';
+      if (
+        target.closest('.diff-line-number.old')
+        || target.closest('.diff-code-cell.old')
+        || target.closest('.unified-diff-pane.old')
+        || lineEl.dataset.side === 'old'
+        || lineEl.classList.contains('deletion')
+      ) {
+        side = 'old';
+      }
+
+      let num: number | undefined;
+      if (side === 'old') {
+        const rawOld = lineEl.dataset.oldLineNumber;
+        num = rawOld !== undefined ? Number(rawOld) : Number(lineEl.dataset.lineNumber);
+      } else {
+        const rawNew = lineEl.dataset.newLineNumber;
+        num = rawNew !== undefined ? Number(rawNew) : Number(lineEl.dataset.lineNumber);
+      }
+
+      if (num !== undefined && !Number.isNaN(num) && num > 0) {
+        return { start: num, end: num, side };
+      }
+    }
+  }
+
+  return undefined;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -393,7 +503,7 @@ function changedContent(content: string, peer?: string, tokens?: ThemedToken[]):
 
 function DiffCodeCell({ cell, peer, side, tokens }: { cell: DiffCell; peer?: DiffCell; side: DiffSide; tokens?: ThemedToken[] }) {
   const marker = cell.kind === 'deletion' ? '−' : cell.kind === 'addition' ? '+' : ' ';
-  return <div className={`diff-code-cell ${side} ${cell.kind}`}>
+  return <div className={`diff-code-cell ${side} ${cell.kind}`} data-line-number={cell.lineNumber ?? undefined} data-side={side}>
     <span className="diff-marker">{marker}</span>
     <span className="diff-line-number">{cell.lineNumber ?? ''}</span>
     <code>{cell.kind === 'empty' ? ' ' : changedContent(cell.content, peer?.content, tokens)}</code>
@@ -458,15 +568,40 @@ function renderRow(
     </div>;
   }
   const marker = row.cell.kind === 'deletion' ? '−' : row.cell.kind === 'addition' ? '+' : ' ';
-  return <div className={`diff-inline-row ${row.cell.kind}`}>
-    <span className="diff-line-number old">{row.oldNumber ?? ''}</span>
-    <span className="diff-line-number new">{row.newNumber ?? ''}</span>
+  const lineNumber = row.newNumber ?? row.oldNumber;
+  return <div className={`diff-inline-row ${row.cell.kind}`} data-line-number={lineNumber ?? undefined} data-new-line-number={row.newNumber ?? undefined} data-old-line-number={row.oldNumber ?? undefined}>
+    <span className="diff-line-number old" data-side="old" data-line-number={row.oldNumber ?? undefined}>{row.oldNumber ?? ''}</span>
+    <span className="diff-line-number new" data-side="new" data-line-number={row.newNumber ?? undefined}>{row.newNumber ?? ''}</span>
     <span className="diff-marker">{marker}</span>
     <code>{changedContent(row.cell.content, row.peer?.content, highlighted?.get(row.cell))}</code>
   </div>;
 }
 
-export function UnifiedDiffView({ content, path = '', language = 'text', className = '', splitBreakpoint = 700 }: { content: string; path?: string; language?: string; className?: string; splitBreakpoint?: number }) {
+export interface UnifiedDiffViewProps {
+  content: string;
+  path?: string;
+  oldPath?: string;
+  language?: string;
+  className?: string;
+  splitBreakpoint?: number;
+  repoId?: string;
+  oldRevision?: string;
+  newRevision?: string;
+  onShowSelectionHistory?: (range: DiffSelectionLineRange, revision?: string, path?: string) => void;
+}
+
+export function UnifiedDiffView({
+  content,
+  path = '',
+  oldPath,
+  language = 'text',
+  className = '',
+  splitBreakpoint = 700,
+  repoId,
+  oldRevision,
+  newRevision,
+  onShowSelectionHistory,
+}: UnifiedDiffViewProps) {
   const { t } = useI18n();
   const [view, setView] = useState<'split' | 'inline'>('split');
   const [theme, setTheme] = useState<BundledTheme | ThemeRegistrationRaw>(() => resolveShikiTheme(document.documentElement.dataset.theme));
@@ -475,8 +610,75 @@ export function UnifiedDiffView({ content, path = '', language = 'text', classNa
   const parsed = useMemo(() => parseUnifiedDiff(content, path), [content, path]);
   const rows = useMemo(() => buildRenderRows(parsed, view, collapsed, expandedFolds), [parsed, view, collapsed, expandedFolds]);
   const [highlighted, setHighlighted] = useState<WeakMap<DiffCell, ThemedToken[]>>();
+  const containerRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activeChangeIndex, setActiveChangeIndex] = useState<number>(-1);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    lineRange?: DiffSelectionLineRange;
+    selectionText?: string;
+    isWorkingTreeAddition?: boolean;
+  }>();
+
+  const handleContextMenu = (event: React.MouseEvent) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const target = event.target as Element;
+    if (target.closest('.diff-toolbar') || target.closest('button')) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const selection = window.getSelection();
+    const selectionText = selection?.toString() || '';
+    const lineRange = extractDiffLineRange(container, target);
+    const isWorkingTree = !newRevision || newRevision === 'WORKTREE' || newRevision === 'WORKING';
+    let isWorkingTreeAddition = false;
+    if (isWorkingTree && lineRange?.side !== 'old') {
+      const cellEl = target.closest('.diff-code-cell, .diff-inline-row');
+      if (cellEl && (cellEl.classList.contains('addition') || Boolean(cellEl.querySelector('.diff-code-cell.addition')))) {
+        isWorkingTreeAddition = true;
+      } else if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+        const lineElements = Array.from(container.querySelectorAll<HTMLElement>('.diff-inline-row, .diff-code-cell'));
+        const selectedEls = lineElements.filter((el) => selection.containsNode(el, true));
+        if (selectedEls.length > 0 && selectedEls.every((el) => el.classList.contains('addition') || el.classList.contains('new'))) {
+          isWorkingTreeAddition = true;
+        }
+      }
+    }
+
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      lineRange,
+      selectionText,
+      isWorkingTreeAddition,
+    });
+  };
+
+  const handleSelectContextMenu = (id: string) => {
+    if (id === 'copy') {
+      const text = contextMenu?.selectionText || '';
+      if (text) {
+        void navigator.clipboard?.writeText(text).catch(() => undefined);
+      }
+    } else if (id === 'selection-history' && contextMenu?.lineRange && !contextMenu.isWorkingTreeAddition) {
+      const isOld = contextMenu.lineRange.side === 'old';
+      const rawRevision = isOld
+        ? (oldRevision ?? (newRevision ? `${newRevision}~1` : undefined))
+        : newRevision;
+      const selectedRevision = normalizeHistoryRevision(rawRevision);
+      const effectiveOldPath = oldPath || (parsed.oldLabel && parsed.oldLabel !== '/dev/null' ? parsed.oldLabel : path);
+      const selectedPath = (isOld && effectiveOldPath) ? effectiveOldPath : path;
+      if (onShowSelectionHistory) {
+        onShowSelectionHistory(contextMenu.lineRange, selectedRevision, selectedPath);
+      } else if (repoId && selectedPath) {
+        void useAppStore.getState().openHistoryForLineRange(repoId, selectedPath, contextMenu.lineRange, selectedRevision);
+      }
+    }
+    setContextMenu(undefined);
+  };
 
   const handleExpandFold = useCallback((foldId: string, action: 'all' | 'top' | 'bottom') => {
     setExpandedFolds((prev) => {
@@ -524,6 +726,24 @@ export function UnifiedDiffView({ content, path = '', language = 'text', classNa
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => rows[index]?.kind === 'fold' ? 28 : rows[index]?.kind === 'meta' ? 27 : 20,
     overscan: 24,
+    observeElementRect: (instance, cb) => {
+      const element = instance.scrollElement;
+      if (!element) return;
+      cb({
+        width: element.offsetWidth || 1000,
+        height: element.offsetHeight || 800,
+      });
+      if (typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(([entry]) => {
+        if (!entry) return;
+        cb({
+          width: Math.round(entry.contentRect.width),
+          height: Math.round(entry.contentRect.height),
+        });
+      });
+      observer.observe(element);
+      return () => observer.disconnect();
+    },
   });
 
   const goToChange = useCallback((index: number) => {
@@ -582,7 +802,7 @@ export function UnifiedDiffView({ content, path = '', language = 'text', classNa
   }, [content.length, language, parsed, path, theme]);
   useEffect(() => { virtualizer.measure(); }, [view, virtualizer]);
 
-  return <section className={`unified-diff ${view} ${className}`} aria-label={t('File differences')}>
+  return <section ref={containerRef} className={`unified-diff ${view} ${className}`} aria-label={t('File differences')} onContextMenu={handleContextMenu}>
     <div className="diff-toolbar">
       <div className="diff-toolbar-left">
         <button
@@ -729,5 +949,25 @@ export function UnifiedDiffView({ content, path = '', language = 'text', classNa
         )}
       </div>
     </div>
+    {contextMenu && (
+      <ContextMenu
+        x={contextMenu.x}
+        y={contextMenu.y}
+        items={[
+          { id: 'copy', label: t('Copy'), icon: 'copy' },
+          ...(contextMenu.lineRange && (onShowSelectionHistory || (repoId && (path || oldPath || (parsed.oldLabel && parsed.oldLabel !== '/dev/null'))))
+            ? [{
+                id: 'selection-history',
+                label: t('Show Selection History'),
+                icon: 'history',
+                disabled: contextMenu.isWorkingTreeAddition,
+                disabledReason: contextMenu.isWorkingTreeAddition ? t('Uncommitted additions have no history') : undefined,
+              } as const]
+            : []),
+        ]}
+        onSelect={handleSelectContextMenu}
+        onClose={() => setContextMenu(undefined)}
+      />
+    )}
   </section>;
 }

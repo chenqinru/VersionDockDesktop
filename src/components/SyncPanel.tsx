@@ -159,7 +159,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
       return;
     }
     if (!await confirmDialog({ title: action === 'drop' ? t('Drop {0} commits?', selectedHashes.length) : action === 'revert' ? t('Revert {0} commits', selectedHashes.length) : t('Undo Commit'), message: sameKindSelection.map((candidate) => `${candidate.commit.shortHash} ${candidate.commit.message}`).join('\n') || `${commit.shortHash} ${commit.message}`, danger: action !== 'revert' })) return;
-    if (action === 'undoHead') await unpushedOperation(repo.meta.id, { type: 'undoHead' });
+    if (action === 'undoHead') await unpushedOperation(repo.meta.id, { type: 'undoHead', expectedHash: commit.hash });
     else await unpushedOperation(repo.meta.id, { type: action, hashes: selectedHashes });
   };
 

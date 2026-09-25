@@ -267,6 +267,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	svn_limit: number,
+	limit?: number | null,
 	revision: string | null,
 } } | { type: "commitDetail"; payload: {
 	workspace_id: string,
@@ -307,6 +308,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	revisions: string[],
+} } | { type: "savePatch"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	revisions: string[],
+	path: string,
 } } | { type: "branches"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -771,7 +777,7 @@ export type GraphCommitNode = {
 	refs: string[],
 };
 
-export type HistoryOperation = { type: "checkout"; revision: string } | { type: "cherryPick"; revision: string } | { type: "revert"; revisions: string[] } | { type: "reset"; revision: string; mode: string } | { type: "checkoutFile"; revision: string; path: string } | { type: "revertFile"; revision: string; path: string } | { type: "applyPaths"; entries: CommitPathOperationEntry[] } | { type: "revertPaths"; entries: CommitPathOperationEntry[] } | { type: "svnUpdateTo"; revision: string };
+export type HistoryOperation = { type: "checkout"; revision: string } | { type: "cherryPick"; revision: string } | { type: "revert"; revisions: string[] } | { type: "reset"; revision: string; mode: string; expectedBranch?: string | null; expectedHead?: string | null } | { type: "checkoutFile"; revision: string; path: string } | { type: "revertFile"; revision: string; path: string } | { type: "applyPaths"; entries: CommitPathOperationEntry[] } | { type: "revertPaths"; entries: CommitPathOperationEntry[] } | { type: "svnUpdateTo"; revision: string };
 
 export type HistoryPage = {
 	commits: CommitNode[],
@@ -785,6 +791,7 @@ export type HistoryQuery = {
 	toDate: string | null,
 	path: string | null,
 	revision: string | null,
+	lineRange?: LineRange | null,
 };
 
 export type IgnoreRules = {
@@ -834,6 +841,11 @@ export type LayoutState = {
 	stashViewMode: string,
 	branchSidebarCollapsed: boolean,
 	branchSidebarCollapsedSections: string[],
+};
+
+export type LineRange = {
+	start: number,
+	end: number,
 };
 
 export type LogChannel = "git" | "svn" | "core" | "ui";
@@ -1285,7 +1297,7 @@ export type UnpushedCommit = {
 	parents?: string[],
 };
 
-export type UnpushedOperation = { type: "revert"; hashes: string[] } | { type: "undoHead" } | { type: "drop"; hashes: string[] } | { type: "squash"; hashes: string[]; message: string } | { type: "editMessage"; hash: string; message: string };
+export type UnpushedOperation = { type: "revert"; hashes: string[] } | { type: "undoHead"; expectedHash?: string | null } | { type: "drop"; hashes: string[] } | { type: "squash"; hashes: string[]; message: string } | { type: "editMessage"; hash: string; message: string };
 
 export type UpdateDetail = {
 	commits: CommitNode[],

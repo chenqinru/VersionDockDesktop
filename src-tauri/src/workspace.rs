@@ -1149,10 +1149,6 @@ pub fn apply_runtime_capabilities(
             || status.branch.contains("detached"));
     let conflicted = status.conflicts > 0;
     let operation_active = status.operation.is_some();
-    let dirty = status
-        .files
-        .iter()
-        .any(|file| file.staged || file.unstaged || file.conflicted);
     let has_head = !status.revision.trim().is_empty();
     let safe_sync = !detached && !conflicted && !operation_active;
     let safe_extension_write = !conflicted && !operation_active;
@@ -1196,7 +1192,7 @@ pub fn apply_runtime_capabilities(
     status.capabilities.availability.insert(
         "historyRewrite".into(),
         contextual_capability(
-            git && has_head && !detached && !conflicted && !dirty && !operation_active,
+            git && has_head && !detached && !conflicted && !operation_active,
             if !git {
                 "VCS_CAPABILITY_NOT_APPLICABLE"
             } else if detached {
@@ -1207,8 +1203,6 @@ pub fn apply_runtime_capabilities(
                 "REPOSITORY_CONFLICTED"
             } else if operation_active {
                 "REPOSITORY_OPERATION_IN_PROGRESS"
-            } else if dirty {
-                "WORKTREE_DIRTY"
             } else {
                 "CAPABILITY_UNAVAILABLE"
             },
@@ -1222,8 +1216,6 @@ pub fn apply_runtime_capabilities(
                 "Resolve conflicts before rewriting history"
             } else if operation_active {
                 "Finish or abort the current repository operation"
-            } else if dirty {
-                "Commit, stash, or discard working tree changes first"
             } else {
                 "History rewriting is unavailable"
             },

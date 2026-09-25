@@ -6,6 +6,7 @@ import { capabilityAvailable, capabilityReason, resolveNotificationText, useAppS
 import { useI18n } from '../i18n';
 import { useResizable } from '../hooks/useResizable';
 import { BranchSidebar } from './BranchSidebar';
+import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { BranchComparePanel } from './BranchComparePanel';
 import { CommitGraph } from './CommitGraph';
 import { CommitDetailPanel } from './CommitDetailPanel';
@@ -33,6 +34,12 @@ function formatDate(value: string): string {
   if (Number.isNaN(date.getTime())) return value;
   const pad = (item: number) => String(item).padStart(2, '0');
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatAuthorName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
 }
 
 function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { open: boolean; onToggle: () => void; onFetch: () => void; expanded: boolean; onToggleExpanded: () => void }) {
@@ -174,6 +181,8 @@ function CommitList({
   const { t } = useI18n();
   const parent = useRef<HTMLDivElement>(null);
   const repos = useAppStore((state) => state.snapshot?.repositories ?? []);
+  const branchesByRepo = useAppStore((state) => state.branchesByRepo);
+  const historyRepoErrors = useAppStore((state) => state.historyRepoErrors);
   const storeHasMore = useAppStore((state) => state.historyHasMore);
   const hasMore = hasMoreOverride ?? storeHasMore;
   const selected = useAppStore((state) => new Set(state.selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
@@ -188,6 +197,7 @@ function CommitList({
   const branchOperation = useAppStore((state) => state.branchOperation);
   const tagOperation = useAppStore((state) => state.tagOperation);
   const createPatch = useAppStore((state) => state.createPatch);
+  const savePatch = useAppStore((state) => state.savePatch);
   const commits = useMemo(() => {
     if (isFiltered) return assignLanes(history, true, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
     if (hasRevisionFilter) return assignLanes(history, false, repoKindById, remoteNamesByRepo, topologyCommits, repoSortKeyById);
@@ -220,6 +230,7 @@ function CommitList({
   const [hoveredKey, setHoveredKey] = useState<string>();
   const [containerWidth, setContainerWidth] = useState(0);
   const [context, setContext] = useState<{ x: number; y: number; commit: CommitNode }>();
+  const [branchOptions, setBranchOptions] = useState<{ anchorRect: DOMRect; repoId: string; branchName: string; isCurrent: boolean; svn: boolean }>();
   const [popover, setPopover] = useState<{ detail: CommitDetail; anchor: CommitPopoverAnchor }>();
   const hoveredKeyRef = useRef<string>();
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -274,29 +285,45 @@ function CommitList({
   const virtualItems = virtualizer.getVirtualItems();
   const scrollTop = virtualizer.scrollOffset ?? 0;
   const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: index * COMMIT_ROW_HEIGHT }));
+  const contextSelection = (commit: CommitNode): CommitNode[] => selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
+  const commitMenuRefs = (commit: CommitNode) => {
+    const svn = repoKindById[commit.repoId] === 'svn';
+    const groups = groupRefs(commit.refs, svn ? 'svn' : 'git', remoteNamesByRepo[commit.repoId] ?? []);
+    const local = groups.filter((group) => group.isLocal && !group.isTag && !group.isDetached);
+    const remote = groups.filter((group) => group.isRemote && !group.isRemoteHead && !group.isTag);
+    const primaryLocal = local.find((group) => group.isHead) ?? local[0];
+    const primaryRemote = remote[0];
+    const svnBranch = repos.find((repo) => repo.meta.id === commit.repoId)?.branch;
+    return {
+      hasTags: groups.some((group) => group.isTag),
+      checkoutTarget: svn ? (commit.refs.includes('HEAD') ? svnBranch : undefined) : primaryLocal?.label ?? (primaryRemote ? `${primaryRemote.remoteName}/${primaryRemote.label}` : undefined),
+      branchOptionsTarget: svn ? (commit.refs.includes('HEAD') ? svnBranch : undefined) : primaryLocal?.label,
+    };
+  };
   const contextItems = (commit: CommitNode): ContextMenuEntry[] => {
     const git = repoKindById[commit.repoId] !== 'svn';
     const repository = repoMap.get(commit.repoId);
     const rewriteAvailable = capabilityAvailable(repository?.capabilities, 'historyRewrite', true);
     const rewriteReason = capabilityReason(repository?.capabilities, 'historyRewrite');
-    const selection = selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
+    const selection = contextSelection(commit);
     if (selection.length > 1) {
       const allUnpushed = selection.every((item) => item.unpushed);
       const containsMerge = selection.some((item) => item.parents.length > 1);
       return [
         { id: 'patch-multi', label: t('Create Patch...'), icon: 'diff' },
-        ...(git ? [{ id: 'cherry-pick-multi', label: t('Cherry-Pick All'), icon: 'git-commit', disabled: containsMerge, disabledReason: containsMerge ? t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') : undefined } as ContextMenuEntry, { separator: true } as ContextMenuEntry, { id: 'revert-multi', label: t('Revert Commits'), icon: 'discard' } as ContextMenuEntry] : []),
+        ...(git ? [{ id: 'cherry-pick-multi', label: t('Cherry-Pick All'), icon: 'git-commit', disabled: containsMerge, disabledReason: containsMerge ? t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') : undefined } as ContextMenuEntry, { separator: true } as ContextMenuEntry, { id: 'reset-multi', label: t('Reset Current Branch to Here'), icon: 'history', disabled: true } as ContextMenuEntry, { id: 'revert-multi', label: t('Revert Commits'), icon: 'discard' } as ContextMenuEntry] : []),
         ...(allUnpushed ? [{ separator: true } as ContextMenuEntry, { id: 'drop-multi', label: t('Drop Commits'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'squash-multi', label: t('Squash {0} Commits...', selection.length), icon: 'fold-down', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
       ];
     }
-    const hasTags = commit.refs.some((ref) => ref.startsWith('refs/tags/') || ref.startsWith('tag: '));
+    const { hasTags, checkoutTarget, branchOptionsTarget } = commitMenuRefs(commit);
     const items: ContextMenuEntry[] = [
       { id: 'copy', label: t('Copy Revision Number'), icon: 'copy' },
       { separator: true },
       { id: 'branch', label: t('New Branch...'), icon: 'git-branch' },
       { id: hasTags ? 'manage-tags' : 'tag', label: t(hasTags ? 'Manage Tags...' : 'New Tag...'), icon: 'tag' },
       { separator: true },
-      { id: git ? 'checkout' : 'svn-update', label: t(git ? 'Checkout Revision' : 'Update to Revision'), icon: 'arrow-right' },
+      { id: 'checkout', label: t(checkoutTarget ? 'Checkout...' : git ? 'Checkout Revision' : 'Update to Revision'), icon: 'arrow-right' },
+      ...(branchOptionsTarget ? [{ id: 'branch-options', label: t('Branch options...'), icon: 'git-branch' } as ContextMenuEntry] : []),
       { separator: true },
       { id: 'patch', label: t('Create Patch...'), icon: 'diff' },
     ];
@@ -304,28 +331,86 @@ function CommitList({
     items.push(
       { id: 'cherry-pick', label: t('Cherry-Pick'), icon: 'git-commit', disabled: commit.parents.length > 1, disabledReason: commit.parents.length > 1 ? t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') : undefined },
       { separator: true },
-      { id: 'reset', label: t('Reset Current Branch to Here...'), icon: 'history', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason },
+      { id: 'reset', label: t('Reset Current Branch to Here...'), icon: 'history', disabled: !rewriteAvailable, disabledReason: rewriteReason },
       { id: 'revert', label: t('Revert Commit'), icon: 'discard' },
     );
+    const currentBranch = branchesByRepo[commit.repoId]?.find((b) => b.current);
+    const isHead = commit.refs.some((ref) => ref === 'HEAD' || ref.startsWith('HEAD -> '))
+      || Boolean(currentBranch?.detachedHash && (commit.hash === currentBranch.detachedHash || commit.shortHash === currentBranch.detachedHash))
+      || (Boolean(repository?.revision) && (commit.hash === repository?.revision || commit.shortHash === repository?.revision || commit.hash.startsWith(repository?.revision ?? '')));
     if (commit.unpushed) items.push(
       { separator: true },
-      ...(commits[0]?.hash === commit.hash ? [{ id: 'edit', label: t('Edit Commit Message…'), icon: 'edit', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
+      ...(isHead ? [{ id: 'edit', label: t('Edit Commit Message'), icon: 'edit', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
+      ...(isHead ? [{ separator: true } as ContextMenuEntry] : []),
       { id: 'drop', label: t('Drop Commit'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason },
     );
     return items;
   };
-  const runContext = async (id: string) => {
-    const commit = context?.commit;
+  const runContext = async (id: string, targetCommit?: CommitNode, anchorRect?: DOMRect) => {
+    const commit = targetCommit ?? context?.commit;
     if (!commit) return;
-    const selection = selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
+    const { checkoutTarget, branchOptionsTarget } = commitMenuRefs(commit);
+    if (id === 'branch-options' && branchOptionsTarget && anchorRect) {
+      const currentBranch = branchesByRepo[commit.repoId]?.find((branch) => branch.current)?.name ?? repoMap.get(commit.repoId)?.branch;
+      setBranchOptions({ anchorRect, repoId: commit.repoId, branchName: branchOptionsTarget, isCurrent: currentBranch === branchOptionsTarget, svn: repoKindById[commit.repoId] === 'svn' });
+      return;
+    }
+    const selection = contextSelection(commit);
     const index = new Map(commits.map((item, position) => [commitKey(item.repoId, item.hash), position]));
     const oldestFirst = [...selection].sort((left, right) => (index.get(commitKey(right.repoId, right.hash)) ?? 0) - (index.get(commitKey(left.repoId, left.hash)) ?? 0));
     const newestFirst = [...selection].sort((left, right) => (index.get(commitKey(left.repoId, left.hash)) ?? 0) - (index.get(commitKey(right.repoId, right.hash)) ?? 0));
-    if (id === 'copy') await navigator.clipboard?.writeText(commit.hash).catch(() => undefined);
+    const repoName = repoMap.get(commit.repoId)?.meta.name ?? commit.repoId;
+    if (id === 'copy') {
+      await navigator.clipboard?.writeText(commit.hash).catch(() => undefined);
+      useAppStore.getState().addNotification({
+        type: 'info',
+        title: t('Revision copied'),
+        message: { key: 'VersionDock [{0}]: revision {1} copied to clipboard.', args: [repoName, commit.shortHash || commit.hash.slice(0, 7)] },
+        workspaceId: useAppStore.getState().snapshot?.workspace.id,
+      });
+    }
     if (id === 'patch' || id === 'patch-multi') {
-      const patch = await createPatch(commit.repoId, selection.map((item) => item.hash));
-      const url = URL.createObjectURL(new Blob([patch.content], { type: 'text/x-patch;charset=utf-8' }));
-      const link = document.createElement('a'); link.href = url; link.download = patch.fileName; link.click(); URL.revokeObjectURL(url);
+      const hashes = selection.map((item) => item.hash);
+      const defaultName = selection.length === 1 ? `${selection[0].shortHash || selection[0].hash.slice(0, 7)}.patch` : `versiondock-${selection.length}-commits.patch`;
+      const b = useAppStore.getState().bridge;
+      let savePath: string | null = null;
+      try {
+        if (b) {
+          savePath = await b.saveFileDialog({
+            title: t('Save Patch'),
+            defaultPath: defaultName,
+            filters: [{ name: 'Patch files', extensions: ['patch', 'diff'] }, { name: 'All files', extensions: ['*'] }],
+          });
+        }
+      } catch {
+        savePath = null;
+      }
+      if (savePath) {
+        try {
+          await savePatch(commit.repoId, hashes, savePath);
+          useAppStore.getState().addNotification({
+            type: 'success',
+            title: t('Patch created'),
+            message: { key: 'VersionDock [{0}]: Patch saved to {1}', args: [repoName, savePath] },
+            workspaceId: useAppStore.getState().snapshot?.workspace.id,
+          });
+        } catch (error) {
+          useAppStore.getState().addNotification({
+            type: 'error',
+            title: t('Create patch failed'),
+            message: { raw: error instanceof Error ? error.message : String(error) },
+            workspaceId: useAppStore.getState().snapshot?.workspace.id,
+          });
+        }
+      } else if (savePath === null && b && (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+        // Cancelled by user in native save dialog
+      } else {
+        const patch = await createPatch(commit.repoId, hashes);
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+          const url = URL.createObjectURL(new Blob([patch.content], { type: 'text/x-patch;charset=utf-8' }));
+          const link = document.createElement('a'); link.href = url; link.download = patch.fileName; link.click(); URL.revokeObjectURL(url);
+        }
+      }
     }
     if (id === 'branch') { const name = await promptDialog({ title: t('New Branch'), message: commit.shortHash, inputLabel: t('Branch name') }); if (name) await branchOperation({ type: 'create', name, from: commit.hash }, commit.repoId); }
     if (id === 'tag') { const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') }); if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId); }
@@ -335,8 +420,33 @@ function CommitList({
       if (action === 'create') { const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') }); if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId); }
       if (action?.startsWith('delete:')) await tagOperation({ type: 'delete', name: action.slice('delete:'.length) }, commit.repoId);
     }
-    if (id === 'checkout') await historyOperation(commit.repoId, { type: 'checkout', revision: commit.hash });
-    if (id === 'svn-update') await historyOperation(commit.repoId, { type: 'svnUpdateTo', revision: commit.hash });
+    if (id === 'checkout') {
+      if (checkoutTarget) {
+        const svn = repoKindById[commit.repoId] === 'svn';
+        const choice = await choiceDialog({
+          title: t(svn ? 'SVN Switch / Update' : 'Checkout'),
+          message: commit.shortHash,
+          choices: [
+            {
+              id: 'branch',
+              label: t(svn ? "Switch to '{0}'" : "Checkout branch '{0}'", checkoutTarget),
+              icon: 'git-branch',
+            },
+            {
+              id: 'revision',
+              label: t(svn ? 'Update to Revision' : 'Checkout revision (detached HEAD)'),
+              icon: 'git-commit',
+            },
+          ],
+        });
+        if (!choice) return;
+        if (choice === 'branch') {
+          await branchOperation({ type: 'checkout', name: checkoutTarget }, commit.repoId);
+          return;
+        }
+      }
+      await historyOperation(commit.repoId, repoKindById[commit.repoId] === 'svn' ? { type: 'svnUpdateTo', revision: commit.hash } : { type: 'checkout', revision: commit.hash });
+    }
     if (id === 'cherry-pick' && commit.parents.length <= 1) await historyOperation(commit.repoId, { type: 'cherryPick', revision: commit.hash });
     if (id === 'cherry-pick-multi' && oldestFirst.every((item) => item.parents.length <= 1)) {
       for (const item of oldestFirst) {
@@ -347,18 +457,24 @@ function CommitList({
     if (id === 'revert-multi' && await confirmDialog({ title: t('Revert Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await historyOperation(commit.repoId, { type: 'revert', revisions: newestFirst.map((item) => item.hash) });
     if (id === 'reset') {
       const mode = await choiceDialog({ title: t('Reset Current Branch to Here...'), message: `${commit.shortHash} ${commit.message}`, danger: true, choices: [{ id: 'soft', label: t('Soft'), description: t('Keep staged and unstaged changes'), icon: 'arrow-down' }, { id: 'mixed', label: t('Mixed'), description: t('Keep unstaged changes, unstage staged changes'), icon: 'discard' }, { id: 'hard', label: t('Hard'), description: t('Discard all changes'), icon: 'warning', danger: true }] });
-      if (mode && await confirmDialog({ title: t('Reset {0}?', mode), message: `${commit.shortHash} ${commit.message}\n\n${t(mode === 'hard' ? 'All working tree and index changes will be discarded.' : 'Commits after this revision will be removed from the current branch.')}`, danger: true })) await historyOperation(commit.repoId, { type: 'reset', revision: commit.hash, mode });
+      const currentBranch = branchesByRepo[commit.repoId]?.find((b) => b.current);
+      const snapshotRepo = useAppStore.getState().snapshot?.repositories.find((r) => r.meta.id === commit.repoId);
+      const expectedBranch = currentBranch?.name || snapshotRepo?.branch || undefined;
+      const expectedHead = currentBranch?.detachedHash || snapshotRepo?.revision || undefined;
+      if (mode && await confirmDialog({ title: t('Reset {0}?', mode), message: `${commit.shortHash} ${commit.message}\n\n${t(mode === 'hard' ? 'All working tree and index changes will be discarded.' : 'Commits after this revision will be removed from the current branch.')}`, danger: true })) {
+        await historyOperation(commit.repoId, { type: 'reset', revision: commit.hash, mode, expectedBranch, expectedHead });
+      }
     }
     if (id === 'edit') {
       const detail = await useAppStore.getState().loadCommitDetail(commit);
-      const repoName = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
-      await editorDialog({ title: t('Edit Commit Message'), message: `${repoName} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, confirmLabel: t('Save'), submit: async (message) => {
+      const name = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
+      await editorDialog({ title: t('Edit Commit Message'), message: `${name} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, confirmLabel: t('Save'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message });
         if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed')); }
         return true;
       } });
     }
-    if (id === 'undo' && await confirmDialog({ title: t('Undo Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('Changes remain staged.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'undoHead' });
+    if (id === 'undo' && await confirmDialog({ title: t('Undo Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('Changes remain staged.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'undoHead', expectedHash: commit.hash });
     if (id === 'drop' && await confirmDialog({ title: t('Drop Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('This rewrites local history and may require force push.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: [commit.hash] });
     if (id === 'drop-multi' && await confirmDialog({ title: t('Drop Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: newestFirst.map((item) => item.hash) });
     if (id === 'squash-multi') {
@@ -398,17 +514,74 @@ function CommitList({
           {commit.incoming && <span className="commit-flow-indicator" title={t('Not pulled')}><Codicon name="arrow-down" className="commit-flow-icon incoming" /></span>}
           {commit.unpushed && <span className="commit-flow-indicator" title={t('Not pushed')}><Codicon name="arrow-up" className="commit-flow-icon unpushed" /></span>}
           <span className="commit-author">
-            <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.email} repoId={commit.repoId} size={18} /><span className="commit-author-name">{commit.author}</span>
+            <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.email} repoId={commit.repoId} size={18} /><span className="commit-author-name" title={commit.author}>{formatAuthorName(commit.author)}</span>
           </span>
-          <time>{formatDate(commit.committerDate)}</time>
+          <time title={commit.authorDate || commit.committerDate}>{formatDate(commit.authorDate || commit.committerDate)}</time>
         </div>;
       })}
     </div>
     {popover && <CommitPopover detail={popover.detail} anchor={popover.anchor} repoKind={repoKindById[popover.detail.commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[popover.detail.commit.repoId] ?? []} onClose={() => setPopover(undefined)} onEnter={() => { popoverActive.current = true; if (closeTimer.current) clearTimeout(closeTimer.current); }} onLeave={() => { popoverActive.current = false; setPopover(undefined); }} />}
-    {context && <ContextMenu x={context.x} y={context.y} items={contextItems(context.commit)} onSelect={(id) => void runContext(id)} onClose={() => setContext(undefined)} />}
+    {context && <ContextMenu x={context.x} y={context.y} variant="gitLog" header={contextSelection(context.commit).length > 1 ? t('{0} commits selected', contextSelection(context.commit).length) : undefined} items={contextItems(context.commit)} onSelect={(id, rect) => void runContext(id, context.commit, rect)} onClose={() => setContext(undefined)} />}
+    {branchOptions && createPortal(<BranchMenuPopover anchorRect={branchOptions.anchorRect} initialRepoId={branchOptions.repoId} repoOnly directBranch={branchOptions.svn ? undefined : { repoId: branchOptions.repoId, branchName: branchOptions.branchName, isCurrent: branchOptions.isCurrent }} onClose={() => setBranchOptions(undefined)} />, document.body, `${branchOptions.repoId}:${branchOptions.branchName}`)}
     {loading && <div className="history-loading" role="status" aria-live="polite"><Codicon name="loading codicon-modifier-spin" /><span>{t('Loading commits…')}</span></div>}
     {!loading && !commits.length && <div className="empty-state"><Codicon name="history" /><span>{t('No history')}</span></div>}
     {commits.length > 0 && allExpanded && <span className="sr-only">{t('Collapse project names')}</span>}
+    {historyRepoErrors && Object.keys(historyRepoErrors).length > 0 && !loading && (() => {
+      const errorEntries = Object.entries(historyRepoErrors);
+      const errorDetailTooltip = errorEntries
+        .map(([id, error]) => `${repoMap.get(id)?.meta.name || id}: ${error}`)
+        .join('\n');
+      const [firstRepoId, firstError] = errorEntries[0];
+      const firstRepoName = repoMap.get(firstRepoId)?.meta.name || firstRepoId;
+      const firstCleanError = firstError.replace(/^error:\s*/i, '').trim().split('\n')[0] || '';
+      const summaryText = errorEntries.length === 1
+        ? t('Failed to load {0}: {1}', firstRepoName, firstCleanError)
+        : t('Failed to load logs for {0} repo(s) ({1}…): {2}', String(errorEntries.length), firstRepoName, firstCleanError);
+
+      return (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 22,
+            maxWidth: '90%',
+            padding: '4px 10px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            border: '1px solid var(--vscode-inputValidation-errorBorder, #f14c4c)',
+            borderRadius: '4px',
+            background: 'var(--vscode-inputValidation-errorBackground, #5a1d1d)',
+            color: 'var(--vscode-inputValidation-errorForeground, #ffffff)',
+            fontSize: '11px',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.35)',
+          }}
+          title={errorDetailTooltip}
+        >
+          <Codicon name="error" style={{ color: 'var(--vscode-errorForeground, #f14c4c)', flexShrink: 0 }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {summaryText}
+          </span>
+          <button
+            style={{
+              padding: '2px 8px',
+              background: 'var(--vscode-button-background, #007acc)',
+              color: 'var(--vscode-button-foreground, #ffffff)',
+              border: 'none',
+              borderRadius: '2px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              flexShrink: 0,
+            }}
+            onClick={() => void loadHistory(true)}
+          >
+            {t('Retry')}
+          </button>
+        </div>
+      );
+    })()}
   </div>;
 }
 
@@ -475,7 +648,7 @@ export function HistoryWorkspace() {
     return map;
   }, [branchesByRepo, snapshotRepos]);
 
-  const hasTopologyBreakingFilter = !!(historyQuery.text || historyQuery.author || historyQuery.fromDate || historyQuery.toDate || historyQuery.path);
+  const hasTopologyBreakingFilter = !!(historyQuery.text || historyQuery.author || historyQuery.fromDate || historyQuery.toDate || historyQuery.path || historyQuery.lineRange);
   const hasBranchFilter = !!filters.ref;
   const topologyCommits = !hasTopologyBreakingFilter
     ? (historyTopology.length > 0 ? historyTopology : hasBranchFilter ? allHistory : undefined)
@@ -543,7 +716,7 @@ export function HistoryWorkspace() {
   const clearFilters = () => {
     setFilters(EMPTY_FILTERS);
     setHistoryScope({ repoIds: null, revisionsByRepo: {} });
-    setHistoryQuery({ text: null, author: null, fromDate: null, toDate: null, path: null, revision: null });
+    setHistoryQuery({ text: null, author: null, fromDate: null, toDate: null, path: null, revision: null, lineRange: null });
     queueMicrotask(() => void loadHistory(true).catch(() => undefined));
   };
   const fetchAndRefresh = async () => {
@@ -576,10 +749,17 @@ export function HistoryWorkspace() {
       <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor branch-filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!filters.ref} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <FilterPopover title={t('Branch / Tags')} values={refOptions} selected={filters.ref} onSelect={(ref) => { updateFilters({ ref }); setMenu(null); }} onClear={() => updateFilters({ ref: '' })} query={refQuery} onQuery={setRefQuery} />}</div>
       <div ref={menu === 'dates' ? activeFilter : undefined} className="filter-anchor date-filter-anchor"><ToggleFilter icon="calendar" label={filters.from || filters.to ? `${filters.from || '…'} → ${filters.to || '…'}` : t('From → To')} active={!!filters.from || !!filters.to} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} />{menu === 'dates' && <DatePopover from={filters.from} to={filters.to} onChange={(from, to) => updateFilters({ from, to })} onClear={() => updateFilters({ from: '', to: '' })} />}</div>
       {historyQuery.path && (
-        <div className="history-path-chip" title={historyQuery.path}>
+        <div
+          className="history-path-chip"
+          title={historyQuery.lineRange ? `${historyQuery.path} (${historyQuery.lineRange.start}-${historyQuery.lineRange.end})` : historyQuery.path}
+        >
           <Codicon name="history" />
           <span>{t('History:')}</span>
-          <strong>{historyQuery.path.split('/').pop() || historyQuery.path}</strong>
+          <strong>
+            {historyQuery.lineRange
+              ? t('{0}:lines {1}-{2}', historyQuery.path.split('/').pop() || historyQuery.path, historyQuery.lineRange.start, historyQuery.lineRange.end)
+              : (historyQuery.path.split('/').pop() || historyQuery.path)}
+          </strong>
           <button
             type="button"
             className="history-path-clear"

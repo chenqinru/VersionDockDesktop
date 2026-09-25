@@ -949,7 +949,7 @@ function RepoSection({
           onDropCommits={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Drop {0} commits?', hashes.length), hashes, () => operate({ type: 'drop', hashes })); }}
           onRevertCommits={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Revert {0} commits?', hashes.length), hashes, () => operate({ type: 'revert', hashes })); }}
           onEditMsg={() => { const commit = commits.find((item) => item.hash === ctxMenu.singleHash); if (commit) void promptDialog({ title: t('Edit Commit Message…'), message: commit.shortHash, inputLabel: t('Commit message'), initialValue: commit.message }).then((message) => { if (message) return operate({ type: 'editMessage', hash: commit.hash, message }); }); }}
-          onUndo={() => { void confirmRewrite(t('Undo HEAD commit?'), ctxMenu.selectedHashes, () => operate({ type: 'undoHead' })); }}
+          onUndo={() => { void confirmRewrite(t('Undo HEAD commit?'), ctxMenu.selectedHashes, () => operate({ type: 'undoHead', expectedHash: ctxMenu.selectedHashes[0] ?? ctxMenu.singleHash })); }}
           onRevertSingle={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Revert commit?'), hashes, () => operate({ type: 'revert', hashes })); }}
           onDropSingle={() => { const hashes = ctxMenu.selectedHashes; void confirmRewrite(t('Drop commit?'), hashes, () => operate({ type: 'drop', hashes })); }}
           onViewInLog={() => {
@@ -1060,7 +1060,7 @@ export function PushPanel({ repos, selectedRepoIds, onToggleRepo, query }: {
       danger: true,
     });
     if (!confirmed) return;
-    await useAppStore.getState().unpushedOperation(repoId, { type: 'undoHead' });
+    await useAppStore.getState().unpushedOperation(repoId, { type: 'undoHead', expectedHash: head.hash });
   };
 
   const requestCommitFiles = async (repoId: string, hash: string): Promise<PushCommitFile[]> => {

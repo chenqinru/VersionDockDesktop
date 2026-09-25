@@ -1200,9 +1200,15 @@ async fn real_git_unpushed_history_operations_are_effective_and_safe() {
         "one edited"
     );
 
-    vcs::unpushed_operation(&repository, UnpushedOperation::UndoHead, &token)
-        .await
-        .unwrap();
+    vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::UndoHead {
+            expected_hash: None,
+        },
+        &token,
+    )
+    .await
+    .unwrap();
     assert!(
         !directory.path().join("one.txt").exists() || {
             command_output(
@@ -1373,6 +1379,8 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
         HistoryOperation::Reset {
             revision: before_reset.clone(),
             mode: "mixed".into(),
+            expected_branch: None,
+            expected_head: None,
         },
         false,
         &token,
@@ -1410,6 +1418,8 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
         HistoryOperation::Reset {
             revision: second,
             mode: "unsafe".into(),
+            expected_branch: None,
+            expected_head: None,
         },
         false,
         &token,
@@ -1417,6 +1427,464 @@ async fn real_git_history_context_operations_modify_the_expected_targets() {
     .await
     .unwrap_err();
     assert_eq!(error.code, "INVALID_RESET_MODE");
+}
+
+#[tokio::test]
+async fn real_git_history_with_line_range_returns_expected_commits() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    let file_path = directory.path().join("file.txt");
+    std::fs::write(&file_path, "line 1\nline 2\nline 3\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "first commit"], directory.path());
+    let commit1 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    std::fs::write(&file_path, "line 1 modified\nline 2\nline 3\n").unwrap();
+    command(
+        "git",
+        &["commit", "-am", "second commit: modify line 1"],
+        directory.path(),
+    );
+    let commit2 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    std::fs::write(&file_path, "line 1 modified\nline 2\nline 3 modified\n").unwrap();
+    command(
+        "git",
+        &["commit", "-am", "third commit: modify line 3"],
+        directory.path(),
+    );
+    let commit3 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // Query line 1 history: should include commit2 and commit1, but NOT commit3
+    let page = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("file.txt".into()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 1 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes = page
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes.contains(&commit2.as_str()));
+    assert!(hashes.contains(&commit1.as_str()));
+    assert!(!hashes.contains(&commit3.as_str()));
+
+    // Query line 3 history: should include commit3 and commit1, but NOT commit2
+    let page3 = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("file.txt".into()),
+            line_range: Some(crate::models::LineRange { start: 3, end: 3 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes3 = page3
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes3.contains(&commit3.as_str()));
+    assert!(hashes3.contains(&commit1.as_str()));
+    assert!(!hashes3.contains(&commit2.as_str()));
+}
+
+#[tokio::test]
+async fn real_git_history_with_line_range_on_renamed_file_and_worktree_revision() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+
+    let old_file = directory.path().join("old_name.txt");
+    std::fs::write(&old_file, "line 1\nline 2\nline 3\n").unwrap();
+    command("git", &["add", "old_name.txt"], directory.path());
+    command(
+        "git",
+        &["commit", "-m", "first commit (c1)"],
+        directory.path(),
+    );
+    let commit1 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    std::fs::write(&old_file, "line 1 modified\nline 2\nline 3\n").unwrap();
+    command(
+        "git",
+        &["commit", "-am", "second commit: modify line 1 (c2)"],
+        directory.path(),
+    );
+    let commit2 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    command(
+        "git",
+        &["mv", "old_name.txt", "new_name.txt"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["commit", "-m", "third commit: rename to new_name.txt (c3)"],
+        directory.path(),
+    );
+    let commit3 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // 1. WORKTREE revision should be normalized to HEAD without throwing unknown revision error
+    let worktree_page = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("new_name.txt".into()),
+            revision: Some("WORKTREE".into()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 1 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(!worktree_page.commits.is_empty());
+    let worktree_hashes = worktree_page
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(worktree_hashes.contains(&commit2.as_str()));
+
+    // 2. Querying old revision (c2) with new_name.txt must fail because new_name.txt does not exist in c2
+    let fail_new_name = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("new_name.txt".into()),
+            revision: Some(commit2.clone()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 1 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await;
+    assert!(fail_new_name.is_err());
+
+    // 3. Querying old revision (c2) with historical old_name.txt succeeds and finds c2 and c1
+    let success_old_name = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("old_name.txt".into()),
+            revision: Some(commit2.clone()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 1 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let old_hashes = success_old_name
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(old_hashes.contains(&commit2.as_str()));
+    assert!(old_hashes.contains(&commit1.as_str()));
+    assert!(!old_hashes.contains(&commit3.as_str()));
+}
+
+#[tokio::test]
+async fn real_svn_history_with_line_range_returns_expected_commits() {
+    if !available("svn") || !available("svnadmin") {
+        eprintln!("SKIP: svn or svnadmin not available");
+        return;
+    }
+    let repository_dir = tempdir().unwrap();
+    let checkout_parent = tempdir().unwrap();
+    command(
+        "svnadmin",
+        &["create", repository_dir.path().to_str().unwrap()],
+        checkout_parent.path(),
+    );
+    let url = svn_file_url(repository_dir.path());
+    let checkout = checkout_parent.path().join("svn_wc");
+    command(
+        "svn",
+        &["checkout", &url, checkout.to_str().unwrap()],
+        checkout_parent.path(),
+    );
+
+    let file_path = checkout.join("file.txt");
+    std::fs::write(&file_path, "line 1\nline 2\nline 3\n").unwrap();
+    command("svn", &["add", "file.txt"], &checkout);
+    command("svn", &["commit", "-m", "first commit"], &checkout);
+
+    std::fs::write(&file_path, "line 1 modified\nline 2\nline 3\n").unwrap();
+    command(
+        "svn",
+        &["commit", "-m", "second commit: modify line 1"],
+        &checkout,
+    );
+
+    std::fs::write(&file_path, "line 1 modified\nline 2\nline 3 modified\n").unwrap();
+    command(
+        "svn",
+        &["commit", "-m", "third commit: modify line 3"],
+        &checkout,
+    );
+
+    let repository = repo(&checkout, VcsKind::Svn);
+    let token = CancellationToken::new();
+
+    // Query line 1 history: in WC, line 1 was last modified by r2
+    let page1 = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("file.txt".into()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 1 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes1 = page1
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes1.contains(&"2"));
+    assert!(!hashes1.contains(&"1"));
+    assert!(!hashes1.contains(&"3"));
+
+    // Query lines 1..=2 history: line 1 from r2, line 2 from r1 -> should include r2 and r1, but NOT r3
+    let page1_2 = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("file.txt".into()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 2 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes1_2 = page1_2
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes1_2.contains(&"2"));
+    assert!(hashes1_2.contains(&"1"));
+    assert!(!hashes1_2.contains(&"3"));
+
+    // Query line 3 history: in WC, line 3 was last modified by r3 -> should include r3, but NOT r1 or r2
+    let page3 = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("file.txt".into()),
+            line_range: Some(crate::models::LineRange { start: 3, end: 3 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes3 = page3
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes3.contains(&"3"));
+    assert!(!hashes3.contains(&"1"));
+    assert!(!hashes3.contains(&"2"));
+
+    // Query line 3 history at revision 2: at r2, line 3 was created by r1 (not yet modified by r3)
+    let page3_r2 = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("file.txt".into()),
+            revision: Some("2".into()),
+            line_range: Some(crate::models::LineRange { start: 3, end: 3 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes3_r2 = page3_r2
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes3_r2.contains(&"1"));
+    assert!(!hashes3_r2.contains(&"3"));
+    assert!(!hashes3_r2.contains(&"2"));
+}
+
+#[tokio::test]
+async fn real_svn_history_with_line_range_on_deleted_file_returns_commits_at_selected_revision() {
+    if !available("svn") || !available("svnadmin") {
+        eprintln!("SKIP: svn or svnadmin not available");
+        return;
+    }
+    let repository_dir = tempdir().unwrap();
+    let checkout_parent = tempdir().unwrap();
+    command(
+        "svnadmin",
+        &["create", repository_dir.path().to_str().unwrap()],
+        checkout_parent.path(),
+    );
+    let url = svn_file_url(repository_dir.path());
+    let checkout = checkout_parent.path().join("svn_wc_del");
+    command(
+        "svn",
+        &["checkout", &url, checkout.to_str().unwrap()],
+        checkout_parent.path(),
+    );
+
+    let file_path = checkout.join("del.txt");
+    std::fs::write(&file_path, "line 1\nline 2\nline 3\n").unwrap();
+    command("svn", &["add", "del.txt"], &checkout);
+    command("svn", &["commit", "-m", "first commit (r1)"], &checkout);
+
+    std::fs::write(&file_path, "line 1 modified\nline 2\nline 3\n").unwrap();
+    command(
+        "svn",
+        &["commit", "-m", "second commit: modify line 1 (r2)"],
+        &checkout,
+    );
+
+    command("svn", &["delete", "del.txt"], &checkout);
+    command(
+        "svn",
+        &["commit", "-m", "third commit: delete del.txt (r3)"],
+        &checkout,
+    );
+
+    let repository = repo(&checkout, VcsKind::Svn);
+    let token = CancellationToken::new();
+
+    // 1. Without revision on deleted file: svn blame must fail and error is preserved (not swallowed into empty)
+    let unpinned = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("del.txt".into()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 1 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await;
+    assert!(unpinned.is_err());
+
+    // 2. With selected revision "2": should locate file at peg revision 2 and return r2 for line 1
+    let pinned_r2_line1 = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("del.txt".into()),
+            revision: Some("2".into()),
+            line_range: Some(crate::models::LineRange { start: 1, end: 1 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes_r2_line1 = pinned_r2_line1
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes_r2_line1.contains(&"2"));
+    assert!(!hashes_r2_line1.contains(&"3"));
+
+    // 3. With selected revision "2": should return r1 for line 2
+    let pinned_r2_line2 = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("del.txt".into()),
+            revision: Some("2".into()),
+            line_range: Some(crate::models::LineRange { start: 2, end: 2 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let hashes_r2_line2 = pinned_r2_line2
+        .commits
+        .iter()
+        .map(|c| c.hash.as_str())
+        .collect::<Vec<_>>();
+    assert!(hashes_r2_line2.contains(&"1"));
+    assert!(!hashes_r2_line2.contains(&"2"));
+    assert!(!hashes_r2_line2.contains(&"3"));
 }
 
 #[tokio::test]
@@ -2275,7 +2743,7 @@ async fn real_git_core_workflow() {
         .await
         .unwrap();
     assert_eq!(history.commits.len(), 2);
-    let topology = vcs::history_topology(&repository, 1_000, None, &token)
+    let topology = vcs::history_topology(&repository, None, 1_000, None, &token)
         .await
         .unwrap();
     assert_eq!(topology.len(), 2);
@@ -2326,7 +2794,7 @@ async fn real_git_core_workflow() {
         .unwrap()
         .iter()
         .any(|branch| branch.current && branch.name == "feature/test"));
-    let feature_topology = vcs::history_topology(&repository, 1_000, None, &token)
+    let feature_topology = vcs::history_topology(&repository, None, 1_000, None, &token)
         .await
         .unwrap();
     assert!(feature_topology[0]
@@ -2936,7 +3404,7 @@ async fn real_svn_core_workflow() {
         "SVN history: {:#?}",
         history.commits
     );
-    let topology = vcs::history_topology(&repository, 1_000, None, &token)
+    let topology = vcs::history_topology(&repository, None, 1_000, None, &token)
         .await
         .unwrap();
     assert!(topology.len() >= 2);
@@ -3076,4 +3544,397 @@ async fn test_vscode_shelf_import_and_backward_compatibility() {
         .await
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn real_git_unpushed_operations_reject_already_pushed_commits_and_stale_undo_head() {
+    let remote_dir = tempfile::tempdir().unwrap();
+    command("git", &["init", "--bare"], remote_dir.path());
+
+    let work_dir = tempfile::tempdir().unwrap();
+    command(
+        "git",
+        &["clone", remote_dir.path().to_str().unwrap(), "."],
+        work_dir.path(),
+    );
+    command("git", &["checkout", "-b", "main"], work_dir.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        work_dir.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        work_dir.path(),
+    );
+    std::fs::write(work_dir.path().join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "."], work_dir.path());
+    command("git", &["commit", "-m", "base"], work_dir.path());
+    command("git", &["push", "-u", "origin", "main"], work_dir.path());
+
+    let repository = repo(work_dir.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // 1. Commit 1 locally (unpushed)
+    std::fs::write(work_dir.path().join("c1.txt"), "c1\n").unwrap();
+    command("git", &["add", "."], work_dir.path());
+    command("git", &["commit", "-m", "commit 1"], work_dir.path());
+    let c1 = command_output("git", &["rev-parse", "HEAD"], work_dir.path());
+
+    // 2. UndoHead with stale/wrong expected_hash must fail
+    let err_stale = vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::UndoHead {
+            expected_hash: Some("0000000000000000000000000000000000000000".into()),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_stale.code, "COMMIT_NOT_HEAD");
+
+    // 3. Push commit 1 to origin
+    command("git", &["push"], work_dir.path());
+
+    // 4. UndoHead on already-pushed commit must fail
+    let err_pushed_undo = vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::UndoHead {
+            expected_hash: Some(c1.clone()),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_pushed_undo.code, "COMMIT_ALREADY_PUSHED");
+
+    // 5. EditMessage on already-pushed commit must fail
+    let err_pushed_edit = vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::EditMessage {
+            hash: c1.clone(),
+            message: "edited c1".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_pushed_edit.code, "COMMIT_ALREADY_PUSHED");
+
+    // 6. Drop on already-pushed commit must fail
+    let err_pushed_drop = vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::Drop {
+            hashes: vec![c1.clone()],
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_pushed_drop.code, "COMMIT_ALREADY_PUSHED");
+
+    // 7. Make two new commits: c2, c3
+    std::fs::write(work_dir.path().join("c2.txt"), "c2\n").unwrap();
+    command("git", &["add", "."], work_dir.path());
+    command("git", &["commit", "-m", "commit 2"], work_dir.path());
+    let c2 = command_output("git", &["rev-parse", "HEAD"], work_dir.path());
+
+    std::fs::write(work_dir.path().join("c3.txt"), "c3\n").unwrap();
+    command("git", &["add", "."], work_dir.path());
+    command("git", &["commit", "-m", "commit 3"], work_dir.path());
+    let c3 = command_output("git", &["rev-parse", "HEAD"], work_dir.path());
+
+    // 8. Squash contiguous range that includes pushed c1 (c3, c2, c1) must fail
+    let err_pushed_squash = vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::Squash {
+            hashes: vec![c3.clone(), c2.clone(), c1.clone()],
+            message: "squashed all".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_pushed_squash.code, "COMMIT_ALREADY_PUSHED");
+
+    // 9. UndoHead on truly unpushed c3 with correct expected_hash must succeed
+    vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::UndoHead {
+            expected_hash: Some(c3.clone()),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let new_head = command_output("git", &["rev-parse", "HEAD"], work_dir.path());
+    assert_eq!(new_head, c2);
+}
+
+#[tokio::test]
+async fn real_git_history_reset_rejects_stale_branch_and_stale_head() {
+    let directory = tempfile::tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "base"], directory.path());
+
+    // Create feature branch
+    command("git", &["checkout", "-b", "feature"], directory.path());
+    std::fs::write(directory.path().join("f1.txt"), "f1\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "feature 1"], directory.path());
+    let f1 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    std::fs::write(directory.path().join("f2.txt"), "f2\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "feature 2"], directory.path());
+    let f2 = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // 1. Reset with wrong expected_branch must fail
+    let err_branch = vcs::history_operation(
+        &repository,
+        HistoryOperation::Reset {
+            revision: f1.clone(),
+            mode: "hard".into(),
+            expected_branch: Some("main".into()),
+            expected_head: Some(f2.clone()),
+        },
+        false,
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_branch.code, "BRANCH_CHANGED");
+
+    // 2. Reset with stale expected_head must fail
+    let err_head = vcs::history_operation(
+        &repository,
+        HistoryOperation::Reset {
+            revision: f1.clone(),
+            mode: "hard".into(),
+            expected_branch: Some("feature".into()),
+            expected_head: Some(f1.clone()), // Stale: actual HEAD is f2
+        },
+        false,
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_head.code, "HEAD_CHANGED");
+
+    // 3. Reset with matching branch and HEAD must succeed
+    vcs::history_operation(
+        &repository,
+        HistoryOperation::Reset {
+            revision: f1.clone(),
+            mode: "hard".into(),
+            expected_branch: Some("feature".into()),
+            expected_head: Some(f2.clone()),
+        },
+        false,
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let current_head = command_output("git", &["rev-parse", "HEAD"], directory.path());
+    assert_eq!(current_head, f1);
+    assert!(!directory.path().join("f2.txt").exists());
+}
+
+#[tokio::test]
+async fn real_git_history_with_line_range_on_lines_beyond_file_length_returns_empty() {
+    let directory = tempfile::tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(
+        directory.path().join("short.txt"),
+        "line 1\nline 2\nline 3\n",
+    )
+    .unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "short file"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // Query lines 50..60 on a 3-line file
+    let page = vcs::history(
+        &repository,
+        0,
+        10,
+        HistoryQuery {
+            path: Some("short.txt".into()),
+            line_range: Some(crate::models::LineRange { start: 50, end: 60 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    assert!(page.commits.is_empty());
+    assert!(!page.has_more);
+}
+
+#[tokio::test]
+async fn real_git_unpushed_operations_reject_concurrent_push_from_other_clone() {
+    let remote_dir = tempfile::tempdir().unwrap();
+    command("git", &["init", "--bare"], remote_dir.path());
+
+    // Clone 1 setup
+    let clone1_dir = tempfile::tempdir().unwrap();
+    command(
+        "git",
+        &["clone", remote_dir.path().to_str().unwrap(), "."],
+        clone1_dir.path(),
+    );
+    command("git", &["checkout", "-b", "main"], clone1_dir.path());
+    command(
+        "git",
+        &["config", "user.name", "Clone 1"],
+        clone1_dir.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "clone1@example.test"],
+        clone1_dir.path(),
+    );
+    std::fs::write(clone1_dir.path().join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "."], clone1_dir.path());
+    command("git", &["commit", "-m", "base"], clone1_dir.path());
+    command("git", &["push", "-u", "origin", "main"], clone1_dir.path());
+
+    let base_hash = command_output("git", &["rev-parse", "HEAD"], clone1_dir.path());
+
+    // Clone 2 setup
+    let clone2_dir = tempfile::tempdir().unwrap();
+    command(
+        "git",
+        &["clone", remote_dir.path().to_str().unwrap(), "."],
+        clone2_dir.path(),
+    );
+    command("git", &["checkout", "main"], clone2_dir.path());
+    command(
+        "git",
+        &["config", "user.name", "Clone 2"],
+        clone2_dir.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "clone2@example.test"],
+        clone2_dir.path(),
+    );
+
+    // Clone 1 creates commit A and pushes it to origin
+    std::fs::write(clone1_dir.path().join("a.txt"), "a\n").unwrap();
+    command("git", &["add", "."], clone1_dir.path());
+    command("git", &["commit", "-m", "commit A"], clone1_dir.path());
+    command("git", &["push", "origin", "main"], clone1_dir.path());
+    let commit_a = command_output("git", &["rev-parse", "HEAD"], clone1_dir.path());
+
+    // Clone 2 fetches the commit object and resets to commit A,
+    // but without updating origin/main tracking branch yet
+    command("git", &["fetch", "origin", &commit_a], clone2_dir.path());
+    command("git", &["reset", "--hard", &commit_a], clone2_dir.path());
+
+    // Verify clone 2 local tracking ref is still base before operation
+    let stale_upstream = command_output("git", &["rev-parse", "origin/main"], clone2_dir.path());
+    assert_eq!(stale_upstream, base_hash);
+
+    let repository2 = repo(clone2_dir.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // Clone 2 tries to undo commit A, which was pushed by Clone 1
+    let err = vcs::unpushed_operation(
+        &repository2,
+        UnpushedOperation::UndoHead {
+            expected_hash: Some(commit_a.clone()),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(err.code, "COMMIT_ALREADY_PUSHED");
+
+    // After unpushed_operation, clone 2's remote tracking ref should have been refreshed to commit A
+    let refreshed_upstream =
+        command_output("git", &["rev-parse", "origin/main"], clone2_dir.path());
+    assert_eq!(refreshed_upstream, commit_a);
+}
+
+#[tokio::test]
+async fn real_git_unpushed_operations_reject_when_remote_unreachable() {
+    let directory = tempfile::tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "base"], directory.path());
+
+    // Add an unreachable remote
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "origin",
+            "file:///non/existent/path/for/versiondock/test.git",
+        ],
+        directory.path(),
+    );
+
+    let head = command_output("git", &["rev-parse", "HEAD"], directory.path());
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    let err = vcs::unpushed_operation(
+        &repository,
+        UnpushedOperation::UndoHead {
+            expected_hash: Some(head),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(err.code, "CANNOT_VERIFY_REMOTE_STATE");
+    assert!(err
+        .message
+        .contains("Cannot verify remote tracking state for 'origin'"));
 }

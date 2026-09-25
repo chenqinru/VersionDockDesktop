@@ -118,7 +118,7 @@ export function FileHistoryPanel() {
           {loading && <div className="detail-loading"><Codicon name="loading codicon-modifier-spin" />{t('Loading files...')}</div>}
           {error && <div className="error-row">{error}</div>}
           {document && <>
-            {binary ? <DiffPlaceholder kind="binary" path={document.path} /> : truncated ? <DiffPlaceholder kind="truncated" path={document.path} lineCount={diff?.lineCount} /> : diff?.content ? <UnifiedDiffView className="file-history-diff" content={diff.content} path={diff.path} language={diff.language} splitBreakpoint={900} /> : <SourceCodeView content={document.content} path={document.path} />}
+            {binary ? <DiffPlaceholder kind="binary" path={document.path} /> : truncated ? <DiffPlaceholder kind="truncated" path={document.path} lineCount={diff?.lineCount} /> : diff?.content ? <UnifiedDiffView className="file-history-diff" repoId={target.repoId} oldPath={selected?.previousPath ?? undefined} oldRevision={selected?.previousRevision ?? undefined} newRevision={selected?.revision} onShowSelectionHistory={(range, revision, targetPath) => { close(); const effectivePath = targetPath ?? (range.side === 'old' ? (selected?.previousPath ?? target.path) : target.path); void useAppStore.getState().openHistoryForLineRange(target.repoId, effectivePath, range, revision); }} content={diff.content} path={diff.path} language={diff.language} splitBreakpoint={900} /> : <SourceCodeView content={document.content} path={document.path} />}
           </>}
         </main>
       </div>

@@ -39,6 +39,16 @@ export function CommitChangesWorkspace() {
     [changes, selectedKey],
   );
   const repoNames = useMemo(() => Object.fromEntries(repositories.map((repo) => [repo.meta.id, repo.meta.name])), [repositories]);
+  const oldRevision = selected
+    ? isWorking(selected)
+      ? 'HEAD'
+      : selected.fromRevision ?? (selected.commitHash ? `${selected.commitHash}~1` : undefined)
+    : undefined;
+  const newRevision = selected
+    ? isWorking(selected)
+      ? undefined
+      : selected.toRevision ?? selected.commitHash
+    : undefined;
   const commitFiles = (commitHash: string, files: DetailFileTarget[]) => files.filter((target) => (target.commitHashes ?? [target.commitHash]).includes(commitHash));
   const openContext = (event: React.MouseEvent, target: ChangeTarget) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY, target }); };
   const contextItems: ContextMenuEntry[] = [
@@ -114,7 +124,7 @@ export function CommitChangesWorkspace() {
         {changes.kind === 'commits' && changes.files.some((target) => !repoNames[target.repoId]) && <section><h3><Codicon name="repo" />{t('Repository')}</h3>{changes.files.filter((target) => !repoNames[target.repoId]).map((target) => <button key={targetKey(target)} className="changes-file-row" onContextMenu={(event) => openContext(event, target)} onClick={() => { setSelectedKey(targetKey(target)); void loadDiff(target); }}><FileIcon name={target.path} /><span className="changes-file-name">{target.path}</span></button>)}</section>}
       </aside>
       <div className="changes-preview">
-        {diff?.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff?.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : selected && diff?.content ? <UnifiedDiffView content={diff.content} path={diff.path} language={diff.language} /> : selected && diff ? <DiffPlaceholder kind="empty" path={diff.path} /> : <DiffPlaceholder kind="select" />}
+        {diff?.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff?.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : selected && diff?.content ? <UnifiedDiffView repoId={selected.repoId} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} /> : selected && diff ? <DiffPlaceholder kind="empty" path={diff.path} /> : <DiffPlaceholder kind="select" />}
       </div>
     </div>
     {context && <ContextMenu x={context.x} y={context.y} items={contextItems} onSelect={runContext} onClose={() => setContext(undefined)} />}

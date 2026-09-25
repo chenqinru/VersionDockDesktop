@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
-import { highlightDiffLines, highlightParsedDiffSide, parseUnifiedDiff, resolveDiffHighlightLanguage } from './UnifiedDiffView';
+import { extractDiffLineRange, highlightDiffLines, highlightParsedDiffSide, parseUnifiedDiff, resolveDiffHighlightLanguage, UnifiedDiffView } from './UnifiedDiffView';
 
 describe('parseUnifiedDiff', () => {
+  afterEach(() => {
+    cleanup();
+  });
   it('keeps VS Code-style diagonal shading on aligned empty split cells with seamless repetition', () => {
     const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
     expect(styles).toMatch(/\.diff-code-cell\.empty code\s*\{[^}]*repeating-linear-gradient\(-45deg,[^}]*background-size:\s*10px\s*10px/s);
@@ -132,5 +136,242 @@ describe('parseUnifiedDiff', () => {
     expect(styles).toMatch(/\.diff-fold-line\s*\{[^}]*position:\s*absolute/s);
     expect(styles).toMatch(/\.diff-fold-badge\s*\{[^}]*border-radius:\s*12px/s);
     expect(styles).toMatch(/\.diff-fold-action-btn\s*\{[^}]*border-radius:\s*3px/s);
+  });
+
+  it('extracts line range from clicked line target or selection', () => {
+    const container = document.createElement('div');
+    const line1 = document.createElement('div');
+    line1.setAttribute('data-line-number', '12');
+    const code = document.createElement('code');
+    code.textContent = 'const foo = 1;';
+    line1.appendChild(code);
+    container.appendChild(line1);
+
+    expect(extractDiffLineRange(container, code)).toEqual({ start: 12, end: 12, side: 'new' });
+    expect(extractDiffLineRange(container, null)).toBeUndefined();
+  });
+
+  it('triggers onShowSelectionHistory with side and revision when right-clicking a line and clicking menu item', () => {
+    const onShowSelectionHistory = vi.fn();
+    const diffContent = [
+      '--- a/file.ts',
+      '+++ b/file.ts',
+      '@@ -10,3 +10,3 @@',
+      ' const a = 1;',
+      '-const b = 2;',
+      '+const b = 3;',
+      ' const c = 4;',
+    ].join('\n');
+
+    const { container } = render(
+      <UnifiedDiffView
+        content={diffContent}
+        path="file.ts"
+        repoId="repo-1"
+        oldRevision="rev-old"
+        newRevision="rev-new"
+        onShowSelectionHistory={onShowSelectionHistory}
+      />
+    );
+
+    const cell = container.querySelector('[data-line-number="11"][data-side="old"]');
+    expect(cell).toBeTruthy();
+
+    fireEvent.contextMenu(cell!, { clientX: 100, clientY: 100 });
+    const menuItem = screen.getByRole('menuitem', { name: /Show Selection History|显示选区历史/ });
+    expect(menuItem).toBeTruthy();
+
+    fireEvent.click(menuItem);
+    expect(onShowSelectionHistory).toHaveBeenCalledWith({ start: 11, end: 11, side: 'old' }, 'rev-old', 'file.ts');
+  });
+
+  it('correctly extracts old vs new line numbers in inline diff rows where line numbers differ', () => {
+    const container = document.createElement('div');
+    const row = document.createElement('div');
+    row.className = 'diff-inline-row context';
+    row.setAttribute('data-line-number', '25');
+    row.setAttribute('data-new-line-number', '25');
+    row.setAttribute('data-old-line-number', '18');
+
+    const oldSpan = document.createElement('span');
+    oldSpan.className = 'diff-line-number old';
+    oldSpan.setAttribute('data-side', 'old');
+    oldSpan.setAttribute('data-line-number', '18');
+    oldSpan.textContent = '18';
+
+    const newSpan = document.createElement('span');
+    newSpan.className = 'diff-line-number new';
+    newSpan.setAttribute('data-side', 'new');
+    newSpan.setAttribute('data-line-number', '25');
+    newSpan.textContent = '25';
+
+    const code = document.createElement('code');
+    code.textContent = 'same content';
+
+    row.appendChild(oldSpan);
+    row.appendChild(newSpan);
+    row.appendChild(code);
+    container.appendChild(row);
+
+    // Clicking old line number span must return old side and line 18
+    expect(extractDiffLineRange(container, oldSpan)).toEqual({ start: 18, end: 18, side: 'old' });
+
+    // Clicking new line number span must return new side and line 25
+    expect(extractDiffLineRange(container, newSpan)).toEqual({ start: 25, end: 25, side: 'new' });
+  });
+
+  it('triggers onShowSelectionHistory with accurate old line number when right-clicking old number in inline view', () => {
+    const onShowSelectionHistory = vi.fn();
+    const diffContent = [
+      '--- a/file.ts',
+      '+++ b/file.ts',
+      '@@ -10,3 +20,3 @@',
+      ' const a = 1;',
+      '-const b = 2;',
+      '+const b = 3;',
+      ' const c = 4;',
+    ].join('\n');
+
+    const { container } = render(
+      <UnifiedDiffView
+        content={diffContent}
+        path="file.ts"
+        repoId="repo-1"
+        oldRevision="rev-old"
+        newRevision="rev-new"
+        onShowSelectionHistory={onShowSelectionHistory}
+      />
+    );
+
+    // Switch to inline (unified) view
+    const inlineBtn = container.querySelector<HTMLButtonElement>('.diff-toolbar-left button');
+    expect(inlineBtn).toBeTruthy();
+    fireEvent.click(inlineBtn!);
+
+    // Right-click old line number 10 (which corresponds to new line 20)
+    const oldLineSpan = container.querySelector('.diff-line-number.old[data-line-number="10"]');
+    expect(oldLineSpan).toBeTruthy();
+
+    fireEvent.contextMenu(oldLineSpan!, { clientX: 100, clientY: 100 });
+    const menuItem = screen.getByRole('menuitem', { name: /Show Selection History|显示选区历史/ });
+    expect(menuItem).toBeTruthy();
+
+    fireEvent.click(menuItem);
+    expect(onShowSelectionHistory).toHaveBeenCalledWith({ start: 10, end: 10, side: 'old' }, 'rev-old', 'file.ts');
+  });
+
+  it('normalizes WORKTREE and WORKING pseudo-revisions to undefined when triggering new side selection history', () => {
+    const onShowSelectionHistory = vi.fn();
+    const diffContent = [
+      '--- a/file.ts',
+      '+++ b/file.ts',
+      '@@ -1,2 +1,2 @@',
+      ' context',
+      '+new line',
+    ].join('\n');
+
+    const { container } = render(
+      <UnifiedDiffView
+        content={diffContent}
+        path="file.ts"
+        repoId="repo-1"
+        oldRevision="HEAD"
+        newRevision="WORKTREE"
+        onShowSelectionHistory={onShowSelectionHistory}
+      />
+    );
+
+    const contextCell = container.querySelector('[data-line-number="1"][data-side="new"]');
+    expect(contextCell).toBeTruthy();
+
+    fireEvent.contextMenu(contextCell!, { clientX: 100, clientY: 100 });
+    const menuItem = screen.getByRole('menuitem', { name: /Show Selection History|显示选区历史/ });
+    expect(menuItem).toBeTruthy();
+    expect(menuItem).not.toBeDisabled();
+
+    fireEvent.click(menuItem);
+    expect(onShowSelectionHistory).toHaveBeenCalledWith({ start: 1, end: 1, side: 'new' }, undefined, 'file.ts');
+  });
+
+  it('disables selection history on uncommitted addition lines in working tree diff', () => {
+    const onShowSelectionHistory = vi.fn();
+    const diffContent = [
+      '--- a/file.ts',
+      '+++ b/file.ts',
+      '@@ -1,1 +1,2 @@',
+      ' context',
+      '+new line',
+    ].join('\n');
+
+    const { container } = render(
+      <UnifiedDiffView
+        content={diffContent}
+        path="file.ts"
+        repoId="repo-1"
+        oldRevision="HEAD"
+        newRevision="WORKTREE"
+        onShowSelectionHistory={onShowSelectionHistory}
+      />
+    );
+
+    const additionCell = container.querySelector('[data-line-number="2"][data-side="new"]');
+    expect(additionCell).toBeTruthy();
+
+    fireEvent.contextMenu(additionCell!, { clientX: 100, clientY: 100 });
+    const menuItem = screen.getByRole('menuitem', { name: /Show Selection History|显示选区历史/ });
+    expect(menuItem).toBeTruthy();
+    expect(menuItem).toBeDisabled();
+
+    fireEvent.click(menuItem);
+    expect(onShowSelectionHistory).not.toHaveBeenCalled();
+  });
+
+  it('passes previousPath/oldLabel for old side selection history on renamed files', () => {
+    const onShowSelectionHistory = vi.fn();
+    const diffContent = [
+      'diff --git a/old_name.ts b/new_name.ts',
+      'similarity index 90%',
+      'rename from old_name.ts',
+      'rename to new_name.ts',
+      '--- a/old_name.ts',
+      '+++ b/new_name.ts',
+      '@@ -1,1 +1,1 @@',
+      '-old content',
+      '+new content',
+    ].join('\n');
+
+    const { container } = render(
+      <UnifiedDiffView
+        content={diffContent}
+        path="new_name.ts"
+        oldPath="old_name.ts"
+        repoId="repo-1"
+        oldRevision="rev-old"
+        newRevision="rev-new"
+        onShowSelectionHistory={onShowSelectionHistory}
+      />
+    );
+
+    // Right-click old side: should use old_name.ts
+    const oldCell = container.querySelector('[data-line-number="1"][data-side="old"]');
+    expect(oldCell).toBeTruthy();
+
+    fireEvent.contextMenu(oldCell!, { clientX: 100, clientY: 100 });
+    const menuItemOld = screen.getByRole('menuitem', { name: /Show Selection History|显示选区历史/ });
+    expect(menuItemOld).toBeTruthy();
+    fireEvent.click(menuItemOld);
+
+    expect(onShowSelectionHistory).toHaveBeenCalledWith({ start: 1, end: 1, side: 'old' }, 'rev-old', 'old_name.ts');
+
+    // Right-click new side: should use new_name.ts
+    const newCell = container.querySelector('[data-line-number="1"][data-side="new"]');
+    expect(newCell).toBeTruthy();
+
+    fireEvent.contextMenu(newCell!, { clientX: 100, clientY: 100 });
+    const menuItemNew = screen.getByRole('menuitem', { name: /Show Selection History|显示选区历史/ });
+    expect(menuItemNew).toBeTruthy();
+    fireEvent.click(menuItemNew);
+
+    expect(onShowSelectionHistory).toHaveBeenCalledWith({ start: 1, end: 1, side: 'new' }, 'rev-new', 'new_name.ts');
   });
 });

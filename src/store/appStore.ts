@@ -4,7 +4,7 @@ import type {
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference, FileIconThemePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   IncomingCommit, UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
-  CheckoutRepositoryResult, DesktopCapabilities, HistoryQuery, InitializeRepositoryResult,
+  CheckoutRepositoryResult, DesktopCapabilities, HistoryQuery, InitializeRepositoryResult, LineRange,
   CloneRepositoryResult, OperationDomain, OperationEvent,
   RecentCommitMessage, RefreshScope, RepositoryCapabilities, RepositoryUpdateResult, RuntimeCapabilities,
   SyncResult, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
@@ -45,6 +45,15 @@ export function workspacePathsEqual(left: string[], right: string[]): boolean {
   const sortedLeft = [...left].sort();
   const sortedRight = [...right].sort();
   return sortedLeft.every((path, index) => path === sortedRight[index]);
+}
+
+export function normalizeHistoryRevision(rev?: string | null): string | undefined {
+  if (!rev) return undefined;
+  const trimmed = rev.trim();
+  if (!trimmed || trimmed === 'WORKTREE' || trimmed === 'WORKING' || trimmed === 'INDEX') {
+    return undefined;
+  }
+  return trimmed;
 }
 
 export type NotificationText = string | { key: string; args?: Array<string | number> } | { raw: string };
@@ -99,7 +108,7 @@ const batchFailedStageLabels: Record<string, string> = {
 };
 
 const HISTORY_PAGE_SIZE = 100;
-const EMPTY_HISTORY_QUERY: HistoryQuery = { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null };
+const EMPTY_HISTORY_QUERY: HistoryQuery = { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null, lineRange: null };
 
 interface LogCandidate<T extends GraphCommitNode> {
   commit: T;
@@ -233,7 +242,9 @@ export interface WorkspaceSessionState {
   historyTopology: GraphCommitNode[];
   historyTopologyByRepo: Record<string, GraphCommitNode[]>;
   historyHasMoreByRepo: Record<string, boolean>;
+  historyRepoErrors?: Record<string, string>;
   historyLoading: boolean;
+  historyTopologyLoading?: boolean;
   branchesLoading: boolean;
   historyScope: HistoryScope;
   historyFilter: string;
@@ -308,7 +319,9 @@ export interface AppStore {
   historyTopology: GraphCommitNode[];
   historyTopologyByRepo: Record<string, GraphCommitNode[]>;
   historyHasMoreByRepo: Record<string, boolean>;
+  historyRepoErrors?: Record<string, string>;
   historyLoading: boolean;
+  historyTopologyLoading?: boolean;
   branchesLoading: boolean;
   historyScope: HistoryScope;
   historyFilter: string;
@@ -394,6 +407,7 @@ export interface AppStore {
   setHistoryFilter: (value: string) => void;
   setHistoryQuery: (query: HistoryQuery) => void;
   openHistoryForPath: (repoId: string, path: string) => Promise<void>;
+  openHistoryForLineRange: (repoId: string, path: string, lineRange: LineRange, revision?: string | null) => Promise<void>;
   clearHistoryPath: () => Promise<void>;
   setHistoryScope: (scope: HistoryScope) => void;
   selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
@@ -427,6 +441,7 @@ export interface AppStore {
   unpushedOperation: (repoId: string, operation: UnpushedOperation) => Promise<boolean>;
   historyOperation: (repoId: string, operation: HistoryOperation) => Promise<boolean>;
   createPatch: (repoId: string, revisions: string[]) => Promise<PatchDocument>;
+  savePatch: (repoId: string, revisions: string[], path: string) => Promise<string>;
   svnOperation: (repoId: string, operation: SvnOperation) => Promise<void>;
   openBranchComparison: (repoId: string, target: string) => void;
   closeBranchComparison: () => void;
@@ -518,7 +533,15 @@ const repositoryEventGenerations = new Map<string, number>();
 let commitSelectionGeneration = 0;
 let changesDiffGeneration = 0;
 let diffRequestGeneration = 0;
-let historyRequestGeneration = 0;
+let historyPageGeneration = 0;
+let historyTopologyGeneration = 0;
+
+function abortHistoryRequests() {
+  historyPageGeneration += 1;
+  historyTopologyGeneration += 1;
+  requestControllers.get('history:page')?.abort();
+  requestControllers.get('history:topology')?.abort();
+}
 let historyPathPreviousScope: HistoryScope | undefined;
 let historyPathPreviousQuery: HistoryQuery | undefined;
 let comparisonRequestGeneration = 0;
@@ -1131,7 +1154,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
   const refreshHistoryRepository = async (workspaceId: string, repoId: string) => {
     const current = get();
-    const requestGeneration = historyRequestGeneration;
+    const pageGen = historyPageGeneration;
     if (current.historyScope.repoIds && !current.historyScope.repoIds.includes(repoId)) return;
     const repo = current.snapshot?.repositories.find((item) => item.meta.id === repoId);
     if (!repo) return;
@@ -1155,7 +1178,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         payload: { workspace_id: workspaceId, repo_id: repoId, svn_limit: 1000, revision: current.historyScope.revisionsByRepo[repoId] ?? null },
       }, { showProgress: false }).catch(() => []),
     ]);
-    if (get().snapshot?.workspace.id !== workspaceId || historyRequestGeneration !== requestGeneration) return;
+    if (get().snapshot?.workspace.id !== workspaceId || historyPageGeneration !== pageGen) return;
     set((state) => {
       const historyByRepo = { ...state.historyByRepo, [repoId]: page.commits };
       const historyHasMoreByRepo = { ...state.historyHasMoreByRepo, [repoId]: page.hasMore };
@@ -1293,7 +1316,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, loadErrors: {},
+    ready: false, notifications: [], toastNotificationIds: [], identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, loadErrors: {},
     logPanelOpen: false,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
     logEntries: [],
@@ -1551,7 +1574,8 @@ export const useAppStore = create<AppStore>((set, get) => {
 
       cancelRequests();
       workspaceRequestGeneration += 1;
-      historyRequestGeneration += 1;
+      historyPageGeneration += 1;
+      historyTopologyGeneration += 1;
       changesDiffGeneration += 1;
       diffRequestGeneration += 1;
       commitSelectionGeneration += 1;
@@ -1912,8 +1936,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         commitSelectionGeneration += 1;
         changesDiffGeneration += 1;
         diffRequestGeneration += 1;
-        historyRequestGeneration += 1;
-        for (const key of ['branch-comparison', 'diff', 'history', 'changes-diff', 'branch-working-diff']) {
+        abortHistoryRequests();
+        for (const key of ['branch-comparison', 'diff', 'changes-diff', 'branch-working-diff']) {
           requestControllers.get(key)?.abort();
         }
       }
@@ -2265,7 +2289,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       const repoIds = scope.repoIds ? new Set(scope.repoIds) : null;
       const repos = repoIds ? allRepos.filter((repo) => repoIds.has(repo.meta.id)) : allRepos;
       if (!repos.length) {
-        if (reset) set({ history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMore: false, historyHasMoreByRepo: {}, historyLoading: false });
+        if (reset) {
+          abortHistoryRequests();
+          set({ history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMore: false, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyLoading: false, historyTopologyLoading: false });
+        }
         return;
       }
       if (!reset && get().historyLoading) return;
@@ -2274,29 +2301,57 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({ historyHasMore: false });
         return;
       }
-      const requestGeneration = reset ? ++historyRequestGeneration : historyRequestGeneration;
+      const pageGeneration = ++historyPageGeneration;
       const requestWorkspace = workspaceId();
-      const controller = beginRequest('history');
+      const pageController = beginRequest('history:page');
       const visibleLimit = Math.min((reset ? 0 : get().history.length) + HISTORY_PAGE_SIZE, historyMaxCommits);
       if (!silent) set({ historyLoading: true });
+      if (reset) {
+        set({ historyTopologyByRepo: {}, historyTopology: [] });
+      }
       try {
-        // VersionDock fetches the prefix needed from every repository, merges
-        // those logs, and only then applies the workspace-wide page boundary.
-        const pagesPromise = Promise.all(repos.map(async (repo) => {
-          const page = await bridge().request<HistoryPage>({ type: 'history', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, skip: 0, limit: visibleLimit, query: { ...get().historyQuery, text: get().historyFilter || get().historyQuery.text, revision: scope.revisionsByRepo[repo.meta.id] ?? null } } }, { signal: controller.signal, showProgress: !silent });
+        // VersionDock fetches the prefix needed from every repository using allSettled,
+        // so that a single repository failure does not crash the entire workspace log.
+        const pageSettled = await Promise.allSettled(repos.map(async (repo) => {
+          const page = await bridge().request<HistoryPage>({
+            type: 'history',
+            payload: {
+              workspace_id: requestWorkspace,
+              repo_id: repo.meta.id,
+              skip: 0,
+              limit: visibleLimit,
+              query: { ...get().historyQuery, text: get().historyFilter || get().historyQuery.text, revision: scope.revisionsByRepo[repo.meta.id] ?? null },
+            },
+          }, { signal: pageController.signal, showProgress: !silent });
           return { repoId: repo.meta.id, page };
         }));
-        const breaking = get().historyQuery.text || get().historyQuery.author || get().historyQuery.fromDate || get().historyQuery.toDate || get().historyQuery.path;
-        const topologyPromise = reset && !breaking
-          ? Promise.all(repos.map(async (repo) => ({
-            repoId: repo.meta.id,
-            commits: await bridge().request<GraphCommitNode[]>({ type: 'historyTopology', payload: { workspace_id: requestWorkspace, repo_id: repo.meta.id, svn_limit: 1000, revision: scope.revisionsByRepo[repo.meta.id] ?? null } }, { signal: controller.signal, showProgress: !silent }).catch((error) => isAbortError(error) ? Promise.reject(error) : []),
-          })))
-          : Promise.resolve(undefined);
-        const [pages, topology] = await Promise.all([pagesPromise, topologyPromise]);
-        if (requestGeneration !== historyRequestGeneration || get().snapshot?.workspace.id !== requestWorkspace) return;
-        const nextByRepo: Record<string, CommitNode[]> = {};
-        const nextHasMore: Record<string, boolean> = {};
+
+        if (pageGeneration !== historyPageGeneration || get().snapshot?.workspace.id !== requestWorkspace) return;
+
+        const repoErrors: Record<string, string> = reset ? {} : { ...(get().historyRepoErrors ?? {}) };
+        const pages: Array<{ repoId: string; page: HistoryPage }> = [];
+        for (let i = 0; i < pageSettled.length; i++) {
+          const res = pageSettled[i];
+          const repo = repos[i];
+          if (res.status === 'fulfilled') {
+            pages.push(res.value);
+            delete repoErrors[repo.meta.id];
+          } else {
+            if (isAbortError(res.reason)) return;
+            const errorMsg = res.reason instanceof Error ? res.reason.message : String(res.reason);
+            repoErrors[repo.meta.id] = errorMsg;
+          }
+        }
+
+        if (pages.length === 0 && repos.length > 0) {
+          const firstErr = Object.values(repoErrors)[0];
+          publishError('History loading failed', new Error(firstErr || 'Failed to load history'));
+          set({ historyRepoErrors: repoErrors, historyLoading: false });
+          return;
+        }
+
+        const nextByRepo: Record<string, CommitNode[]> = reset ? {} : { ...get().historyByRepo };
+        const nextHasMore: Record<string, boolean> = reset ? {} : { ...get().historyHasMoreByRepo };
         for (const { repoId, page } of pages) {
           nextByRepo[repoId] = page.commits;
           nextHasMore[repoId] = page.hasMore;
@@ -2305,11 +2360,61 @@ export const useAppStore = create<AppStore>((set, get) => {
         const history = mergedHistory.slice(0, visibleLimit);
         const historyHasMore = visibleLimit < historyMaxCommits
           && (mergedHistory.length > visibleLimit || Object.values(nextHasMore).some(Boolean));
-        if (topology) {
-          const historyTopologyByRepo = Object.fromEntries(topology.map((item) => [item.repoId, item.commits]));
-          set({ historyByRepo: nextByRepo, historyHasMoreByRepo: nextHasMore, history, historyHasMore, historyTopologyByRepo, historyTopology: interleaveLogs(historyTopologyByRepo) });
-        } else {
-          set({ historyByRepo: nextByRepo, historyHasMoreByRepo: nextHasMore, history, historyHasMore });
+
+        // 提交列表就绪后立即展示，先行渲染出首屏列表，并立即清除 historyLoading 状态允许分页滚动！
+        set({
+          historyByRepo: nextByRepo,
+          historyHasMoreByRepo: nextHasMore,
+          history,
+          historyHasMore,
+          historyRepoErrors: repoErrors,
+          historyLoading: false,
+        });
+
+        // 异步后台加载图谱拓扑并限制最大抓取量，拓扑返回后平滑更新泳道排线
+        // 使用独立的 topologyGeneration 与 'history:topology' 控制器，绝不与后续滚动分页冲突
+        const breaking = get().historyQuery.text || get().historyQuery.author || get().historyQuery.fromDate || get().historyQuery.toDate || get().historyQuery.path || get().historyQuery.lineRange;
+        if (reset && !breaking) {
+          const topologyGeneration = ++historyTopologyGeneration;
+          const topologyController = beginRequest('history:topology');
+          set({ historyTopologyLoading: true });
+          const topologyLimit = Math.max(historyMaxCommits, 2000);
+          try {
+            const topologyResults = await Promise.allSettled(repos.map(async (repo) => ({
+              repoId: repo.meta.id,
+              commits: await bridge().request<GraphCommitNode[]>({
+                type: 'historyTopology',
+                payload: {
+                  workspace_id: requestWorkspace,
+                  repo_id: repo.meta.id,
+                  limit: topologyLimit,
+                  svn_limit: 1000,
+                  revision: scope.revisionsByRepo[repo.meta.id] ?? null,
+                },
+              }, { signal: topologyController.signal, showProgress: false }).catch((error) => isAbortError(error) ? Promise.reject(error) : []),
+            })));
+
+            if (topologyGeneration === historyTopologyGeneration && get().snapshot?.workspace.id === requestWorkspace) {
+              const historyTopologyByRepo: Record<string, GraphCommitNode[]> = {};
+              for (const res of topologyResults) {
+                if (res.status === 'fulfilled') {
+                  historyTopologyByRepo[res.value.repoId] = res.value.commits;
+                }
+              }
+              set({
+                historyTopologyByRepo,
+                historyTopology: interleaveLogs(historyTopologyByRepo),
+              });
+            }
+          } catch (error) {
+            if (!isAbortError(error)) {
+              // Topology 加载失败仅降级为按列表排线，不影响列表渲染
+            }
+          } finally {
+            if (topologyGeneration === historyTopologyGeneration) {
+              set({ historyTopologyLoading: false });
+            }
+          }
         }
       } catch (error) {
         if (!isAbortError(error)) {
@@ -2317,34 +2422,56 @@ export const useAppStore = create<AppStore>((set, get) => {
           throw error;
         }
       } finally {
-        if (!silent && requestGeneration === historyRequestGeneration) set({ historyLoading: false });
+        if (!silent && pageGeneration === historyPageGeneration) set({ historyLoading: false });
       }
     },
 
     setHistoryFilter: (value) => set((state) => ({ historyFilter: value, historyQuery: { ...state.historyQuery, text: value || null } })),
     setHistoryQuery: (historyQuery) => {
-      ++historyRequestGeneration;
-      requestControllers.get('history')?.abort();
+      abortHistoryRequests();
       set({ historyQuery, historyFilter: historyQuery.text ?? '', history: [], historyByRepo: {}, historyHasMore: false, historyTopology: [], historyTopologyByRepo: {} });
     },
     openHistoryForPath: async (repoId, path) => {
-      ++historyRequestGeneration;
-      requestControllers.get('history')?.abort();
+      abortHistoryRequests();
       if (!get().historyQuery.path) {
         historyPathPreviousScope = get().historyScope;
         historyPathPreviousQuery = get().historyQuery;
       }
-      set((state) => ({ historyScope: { repoIds: [repoId], revisionsByRepo: state.historyScope.revisionsByRepo[repoId] ? { [repoId]: state.historyScope.revisionsByRepo[repoId] } : {} }, historyQuery: { ...state.historyQuery, path }, selectedRepoId: repoId, mode: 'history' }));
+      set((state) => ({
+        historyScope: { repoIds: [repoId], revisionsByRepo: state.historyScope.revisionsByRepo[repoId] ? { [repoId]: state.historyScope.revisionsByRepo[repoId] } : {} },
+        historyQuery: { ...state.historyQuery, path, lineRange: null },
+        selectedRepoId: repoId,
+        mode: 'history',
+      }));
+      await get().loadHistory(true);
+    },
+    openHistoryForLineRange: async (repoId, path, lineRange, revision) => {
+      abortHistoryRequests();
+      if (!get().historyQuery.path) {
+        historyPathPreviousScope = get().historyScope;
+        historyPathPreviousQuery = get().historyQuery;
+      }
+      const targetRevision = normalizeHistoryRevision(revision);
+      set((state) => {
+        const nextRevisions = targetRevision
+          ? { [repoId]: targetRevision }
+          : {};
+        return {
+          historyScope: { repoIds: [repoId], revisionsByRepo: nextRevisions },
+          historyQuery: { ...state.historyQuery, path, lineRange, revision: targetRevision ?? null },
+          selectedRepoId: repoId,
+          mode: 'history',
+        };
+      });
       await get().loadHistory(true);
     },
     clearHistoryPath: async () => {
-      ++historyRequestGeneration;
-      requestControllers.get('history')?.abort();
+      abortHistoryRequests();
       const restored = historyPathPreviousScope ?? get().historyScope;
       const restoredQuery = historyPathPreviousQuery ?? get().historyQuery;
       historyPathPreviousScope = undefined;
       historyPathPreviousQuery = undefined;
-      set({ historyScope: restored, historyQuery: { ...restoredQuery, path: null }, historyFilter: restoredQuery.text ?? '' });
+      set({ historyScope: restored, historyQuery: { ...restoredQuery, path: null, lineRange: null }, historyFilter: restoredQuery.text ?? '' });
       await get().loadHistory(true);
     },
     setHistoryScope: (historyScope) => set({ historyScope }),
@@ -2495,6 +2622,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           };
           const message = messages[branch.type];
           if (message) get().addNotification({ type: 'success', title: 'Branch operation completed', message, workspaceId: get().snapshot?.workspace.id });
+          await get().refresh();
+          await get().selectRepo(repoId, true);
         }
         return result;
       } catch (error) {
@@ -2540,6 +2669,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
         const tag = operation as { type: string; name: string; remote?: string };
         const messages: Record<string, NotificationText | undefined> = {
+          create: tag.name ? { key: 'VersionDock [{0}]: tag "{1}" created.', args: [repoName, tag.name] } : undefined,
           push: tag.remote ? { key: 'VersionDock [{0}]: tag "{1}" pushed to "{2}".', args: [repoName, tag.name, tag.remote] } : undefined,
           checkout: { key: 'VersionDock [{0}]: checked out tag "{1}" (detached HEAD).', args: [repoName, tag.name] },
           merge: { key: 'VersionDock [{0}]: merged tag "{1}".', args: [repoName, tag.name] },
@@ -2547,6 +2677,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         };
         const message = messages[tag.type];
         if (message) get().addNotification({ type: 'success', title: 'Tag operation completed', message, workspaceId: get().snapshot?.workspace.id });
+        await get().refresh();
         await get().selectRepo(repoId, true);
         return true;
       }, `repository:${repoId}`);
@@ -2950,16 +3081,58 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return false;
       await bridge().request({ type: 'unpushedOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
       await get().loadUnpushedCommits(repoId);
-      if (operation.type === 'squash') get().addNotification({ type: 'success', title: 'History operation completed', message: 'VersionDock: Squash completed.', workspaceId: get().snapshot?.workspace.id });
-      if (operation.type === 'editMessage') get().addNotification({ type: 'success', title: 'History operation completed', message: 'VersionDock: Commit message updated.', workspaceId: get().snapshot?.workspace.id });
+      const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
+      let message: NotificationText | undefined;
+      if (operation.type === 'undoHead') {
+        message = { key: 'VersionDock [{0}]: undid last commit. Changes remain staged.', args: [repoName] };
+      } else if (operation.type === 'drop') {
+        const count = operation.hashes.length;
+        message = count === 1
+          ? { key: 'VersionDock [{0}]: dropped commit {1}.', args: [repoName, operation.hashes[0].slice(0, 7)] }
+          : { key: 'VersionDock [{0}]: dropped {1} commits.', args: [repoName, count] };
+      } else if (operation.type === 'squash') {
+        message = { key: 'VersionDock [{0}]: squash completed.', args: [repoName] };
+      } else if (operation.type === 'editMessage') {
+        message = { key: 'VersionDock [{0}]: commit message updated.', args: [repoName] };
+      }
+      if (message) {
+        get().addNotification({ type: 'success', title: 'History operation completed', message, workspaceId: get().snapshot?.workspace.id });
+      }
+      await get().refresh();
+      await get().loadHistory(true);
       return true;
     }, `history:${repoId}`)) ?? false,
     historyOperation: async (repoId, operation) => (await withBusy(async () => {
       if (operation.type === 'reset' && !ensureRepositoryCapability(repoId, 'historyRewrite')) return false;
       await bridge().request({ type: 'historyOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
+      const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
+      let message: NotificationText | undefined;
+      if (operation.type === 'checkout') {
+        const short = operation.revision.slice(0, 7);
+        message = { key: 'VersionDock [{0}]: checked out revision {1}.', args: [repoName, short] };
+      } else if (operation.type === 'svnUpdateTo') {
+        message = { key: 'VersionDock [{0}]: updated to revision {1}.', args: [repoName, operation.revision] };
+      } else if (operation.type === 'cherryPick') {
+        const short = operation.revision.slice(0, 7);
+        message = { key: 'VersionDock [{0}]: cherry-picked commit {1}.', args: [repoName, short] };
+      } else if (operation.type === 'revert') {
+        const count = operation.revisions.length;
+        message = count === 1
+          ? { key: 'VersionDock [{0}]: reverted commit {1}.', args: [repoName, operation.revisions[0].slice(0, 7)] }
+          : { key: 'VersionDock [{0}]: reverted {1} commits.', args: [repoName, count] };
+      } else if (operation.type === 'reset') {
+        const short = operation.revision.slice(0, 7);
+        message = { key: 'VersionDock [{0}]: reset current branch to {1} ({2}).', args: [repoName, short, operation.mode] };
+      }
+      if (message) {
+        get().addNotification({ type: 'success', title: 'History operation completed', message, workspaceId: get().snapshot?.workspace.id });
+      }
+      await get().refresh();
+      await get().loadHistory(true);
       return true;
     }, `history:${repoId}`)) ?? false,
     createPatch: async (repoId, revisions) => bridge().request<PatchDocument>({ type: 'createPatch', payload: { workspace_id: workspaceId(), repo_id: repoId, revisions } }),
+    savePatch: async (repoId, revisions, path) => bridge().request<string>({ type: 'savePatch', payload: { workspace_id: workspaceId(), repo_id: repoId, revisions, path } }),
     svnOperation: async (repoId, operation) => withBusy(async () => {
       await bridge().request({ type: 'svnOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
       const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;

@@ -1,4 +1,7 @@
 {
+  "Failed to load {0}: {1}": "加载 {0} 失败：{1}",
+  "Failed to load logs for {0} repo(s) ({1}…): {2}": "加载 {0} 个仓库的日志失败（{1}…）：{2}",
+  "Retry": "重试",
   "VersionDock: Fetching all remotes": "VersionDock：正在抓取所有远程",
   "Merge: {0}": "合并：{0}",
   "VersionDock: No conflict markers found in {0}": "VersionDock：在 {0} 中未找到冲突标记",
@@ -329,6 +332,8 @@
   "Open a local file to show file history.": "打开本地文件后再显示文件历史。",
   "Open a local file to show selection history.": "打开本地文件后再显示选区历史。",
   "Select one or more lines to show selection history.": "选择一行或多行后再显示选区历史。",
+  "Show Selection History": "显示选区历史",
+  "Uncommitted additions have no history": "未提交的新增内容没有历史记录",
   "Select repositories to show again": "选择要重新显示的仓库",
   "Hidden Repositories": "已隐藏仓库",
   "The selected file is not inside a Git repository.": "所选文件不在 Git 仓库中。",
