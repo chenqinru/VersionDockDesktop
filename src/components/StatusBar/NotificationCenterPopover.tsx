@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Codicon } from '../Codicon';
 import { resolveNotificationText, useAppStore, type AppNotification } from '../../store/appStore';
 import { useI18n } from '../../i18n';
@@ -23,14 +23,32 @@ function formatRelativeTime(timestamp: number, t: (key: string, ...args: Array<s
 export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: NotificationCenterPopoverProps) {
   const { t } = useI18n();
   const notifications = useAppStore((state) => state.notifications);
+  const tabs = useAppStore((state) => state.tabs);
+  const activeTabId = useAppStore((state) => state.activeTabId);
   const markNotificationAsRead = useAppStore((state) => state.markNotificationAsRead);
   const markAllNotificationsAsRead = useAppStore((state) => state.markAllNotificationsAsRead);
   const removeNotification = useAppStore((state) => state.removeNotification);
   const clearNotifications = useAppStore((state) => state.clearNotifications);
   const performNotificationAction = useAppStore((state) => state.performNotificationAction);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const [scope, setScope] = useState<'current' | 'all'>('current');
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const snapshotWorkspaceId = useAppStore((state) => state.snapshot?.workspace.id);
+  const currentWorkspaceId = activeTabId ?? snapshotWorkspaceId ?? null;
+
+  const hasMultipleTabs = tabs.length > 1;
+  const currentWorkspaceNotifications = notifications.filter(
+    (n) => !n.workspaceId || !currentWorkspaceId || n.workspaceId === currentWorkspaceId
+  );
+  const currentUnreadCount = currentWorkspaceNotifications.filter((n) => !n.read).length;
+  const totalUnreadCount = notifications.filter((n) => !n.read).length;
+
+  const displayNotifications = (hasMultipleTabs && scope === 'current')
+    ? currentWorkspaceNotifications
+    : notifications;
+  const displayUnreadCount = (hasMultipleTabs && scope === 'current')
+    ? currentUnreadCount
+    : totalUnreadCount;
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -92,25 +110,25 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
         <div className="notification-header-title">
           <Codicon name="bell" />
           <span>{t('Notifications')}</span>
-          {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+          {displayUnreadCount > 0 && <span className="notification-badge">{displayUnreadCount}</span>}
         </div>
         <div className="notification-header-actions">
-          {unreadCount > 0 && (
+          {displayUnreadCount > 0 && (
             <button
               type="button"
               className="notification-action-btn"
-              title={t('Mark all as read')}
-              onClick={() => markAllNotificationsAsRead()}
+              title={scope === 'current' && hasMultipleTabs ? t('Mark current as read') : t('Mark all as read')}
+              onClick={() => markAllNotificationsAsRead(scope === 'current' && hasMultipleTabs ? (activeTabId ?? undefined) : undefined)}
             >
               <Codicon name="check-all" />
             </button>
           )}
-          {notifications.length > 0 && (
+          {displayNotifications.length > 0 && (
             <button
               type="button"
               className="notification-action-btn"
-              title={t('Clear all')}
-              onClick={() => clearNotifications()}
+              title={scope === 'current' && hasMultipleTabs ? t('Clear current') : t('Clear all')}
+              onClick={() => clearNotifications(scope === 'current' && hasMultipleTabs ? (activeTabId ?? undefined) : undefined)}
             >
               <Codicon name="clear-all" />
             </button>
@@ -118,60 +136,91 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
         </div>
       </div>
 
+      {hasMultipleTabs && (
+        <div className="notification-scope-nav" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={scope === 'current'}
+            className={`notification-scope-tab ${scope === 'current' ? 'active' : ''}`}
+            onClick={() => setScope('current')}
+          >
+            <span>{t('Current Project')}</span>
+            {currentUnreadCount > 0 && <span className="notification-scope-badge">{currentUnreadCount}</span>}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={scope === 'all'}
+            className={`notification-scope-tab ${scope === 'all' ? 'active' : ''}`}
+            onClick={() => setScope('all')}
+          >
+            <span>{t('All Projects')}</span>
+            {totalUnreadCount > 0 && <span className="notification-scope-badge">{totalUnreadCount}</span>}
+          </button>
+        </div>
+      )}
+
       <div className="statusbar-popover-content notification-list">
-        {notifications.length === 0 ? (
+        {displayNotifications.length === 0 ? (
           <div className="notification-empty">
             <Codicon name="bell-dot" />
             <span>{t('No notifications')}</span>
           </div>
         ) : (
-          notifications.map((item) => (
-            <article
-              key={item.id}
-              className={`notification-item ${item.type} ${item.read ? 'read' : 'unread'}`}
-              onClick={() => markNotificationAsRead(item.id)}
-            >
-              <div className={`notification-severity-icon ${item.type}`}>
-                <Codicon name={getNotificationIcon(item.type)} />
-              </div>
-              <div className="notification-item-body">
-                <div className="notification-item-row">
-                  <strong className="notification-item-title">{resolveNotificationText(item.title, t)}</strong>
-                  <span className="notification-item-time">
-                    {formatRelativeTime(item.timestamp, t)}
-                  </span>
-                </div>
-                <p className="notification-item-msg">{resolveNotificationText(item.message, t)}</p>
-                {item.details && <pre className="notification-item-details">{item.details}</pre>}
-                {item.actions.length > 0 && <div className="notification-item-actions">
-                  {item.actions.map((action, actionIndex) => (
-                    <button
-                      type="button"
-                      className="notification-item-action-btn"
-                      key={`${action.type}-${actionIndex}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleAction(item, actionIndex);
-                      }}
-                    >
-                      <span>{resolveNotificationText(action.label, t)}</span>
-                    </button>
-                  ))}
-                </div>}
-              </div>
-              <button
-                type="button"
-                className="notification-item-dismiss"
-                title={t('Dismiss')}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeNotification(item.id);
-                }}
+          displayNotifications.map((item) => {
+            const workspaceName = tabs.find((t) => t.id === item.workspaceId)?.name;
+            return (
+              <article
+                key={item.id}
+                className={`notification-item ${item.type} ${item.read ? 'read' : 'unread'}`}
+                onClick={() => markNotificationAsRead(item.id)}
               >
-                <Codicon name="close" />
-              </button>
-            </article>
-          ))
+                <div className={`notification-severity-icon ${item.type}`}>
+                  <Codicon name={getNotificationIcon(item.type)} />
+                </div>
+                <div className="notification-item-body">
+                  <div className="notification-item-row">
+                    <strong className="notification-item-title">{resolveNotificationText(item.title, t)}</strong>
+                    {workspaceName && (scope === 'all' || !activeTabId) && (
+                      <span className="notification-workspace-tag" title={workspaceName}>{workspaceName}</span>
+                    )}
+                    <span className="notification-item-time">
+                      {formatRelativeTime(item.timestamp, t)}
+                    </span>
+                  </div>
+                  <p className="notification-item-msg">{resolveNotificationText(item.message, t)}</p>
+                  {item.details && <pre className="notification-item-details">{item.details}</pre>}
+                  {item.actions.length > 0 && <div className="notification-item-actions">
+                    {item.actions.map((action, actionIndex) => (
+                      <button
+                        type="button"
+                        className="notification-item-action-btn"
+                        key={`${action.type}-${actionIndex}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleAction(item, actionIndex);
+                        }}
+                      >
+                        <span>{resolveNotificationText(action.label, t)}</span>
+                      </button>
+                    ))}
+                  </div>}
+                </div>
+                <button
+                  type="button"
+                  className="notification-item-dismiss"
+                  title={t('Dismiss')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeNotification(item.id);
+                  }}
+                >
+                  <Codicon name="close" />
+                </button>
+              </article>
+            );
+          })
         )}
       </div>
     </div>

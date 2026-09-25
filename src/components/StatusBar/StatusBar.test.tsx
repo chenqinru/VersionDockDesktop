@@ -277,6 +277,73 @@ describe('StatusBar', () => {
     expect(screen.getByText('No notifications')).toBeInTheDocument();
   });
 
+  it('isolates notification badge and provides scope switching in multi-project mode', async () => {
+    const { container } = renderStatusBar();
+
+    useAppStore.setState({
+      tabs: [
+        { id: 'ws1', name: 'Project One', paths: ['/ws1'], available: true, lastOpenedAt: '' },
+        { id: 'ws2', name: 'Project Two', paths: ['/ws2'], available: true, lastOpenedAt: '' },
+      ],
+      activeTabId: 'ws1',
+      notifications: [],
+    });
+
+    // 添加一条属于 Project Two 的通知
+    act(() => {
+      useAppStore.getState().addNotification({
+        type: 'info',
+        title: 'Project 2 Notice',
+        message: 'Something in ws2',
+        workspaceId: 'ws2',
+      });
+    });
+
+    const bellBtn = screen.getByRole('button', { name: /Notifications/i });
+
+    // 因为当前激活的是 ws1，状态栏角标不应显示
+    expect(container.querySelector('.notification-status-badge')).toBeNull();
+    expect(bellBtn).toHaveAttribute('title', 'Notifications · 1 in other projects');
+
+    // 添加一条属于当前项目 ws1 的通知
+    act(() => {
+      useAppStore.getState().addNotification({
+        type: 'warning',
+        title: 'Project 1 Alert',
+        message: 'Something in ws1',
+        workspaceId: 'ws1',
+      });
+    });
+
+    // 当前项目角标为 1，且 tooltip 提示其他项目也有未读
+    await waitFor(() => {
+      const badge = container.querySelector('.notification-status-badge');
+      expect(badge).not.toBeNull();
+      expect(badge?.textContent).toBe('1');
+      expect(bellBtn).toHaveAttribute('title', 'Notifications (1) · 1 in other projects');
+    });
+
+    // 打开通知中心
+    fireEvent.click(bellBtn);
+
+    // 应该渲染作用域导航选项卡
+    expect(screen.getByRole('tab', { name: /Current Project/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /All Projects/i })).toBeInTheDocument();
+
+    // 默认在 Current Project 下，只展示 ws1 的通知
+    expect(screen.getByText('Project 1 Alert')).toBeInTheDocument();
+    expect(screen.queryByText('Project 2 Notice')).not.toBeInTheDocument();
+
+    // 切换到 All Projects
+    const allTab = screen.getByRole('tab', { name: /All Projects/i });
+    fireEvent.click(allTab);
+
+    // 两个通知均可见，且展示归属项目标签
+    expect(screen.getByText('Project 1 Alert')).toBeInTheDocument();
+    expect(screen.getByText('Project 2 Notice')).toBeInTheDocument();
+    expect(screen.getByText('Project Two')).toBeInTheDocument();
+  });
+
   it('shows active operation progress in the status bar and supports cancellation', async () => {
     const { bridge, container } = renderStatusBar();
     const cancelOperation = vi.fn(async () => true);

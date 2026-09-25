@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useI18n } from '../../i18n';
-import { useAppStore } from '../../store/appStore';
+import { isLogEntryInWorkspace, useAppStore } from '../../store/appStore';
 import { useResizable } from '../../hooks/useResizable';
 import type { LogChannel, LogLevel } from '../../bindings/generated';
 
@@ -125,6 +125,9 @@ export function OutputPanel() {
   const logEntries = useAppStore((state) => state.logEntries);
   const activeChannel = useAppStore((state) => state.activeLogChannel);
   const activeLevel = useAppStore((state) => state.activeLogLevel);
+  const activeProject = useAppStore((state) => state.activeLogProject);
+  const tabs = useAppStore((state) => state.tabs);
+  const activeTabId = useAppStore((state) => state.activeTabId);
   const searchQuery = useAppStore((state) => state.logSearchQuery);
   const autoScroll = useAppStore((state) => state.logAutoScroll);
 
@@ -132,6 +135,7 @@ export function OutputPanel() {
   const setLogPanelHeight = useAppStore((state) => state.setLogPanelHeight);
   const setLogChannel = useAppStore((state) => state.setLogChannel);
   const setLogLevel = useAppStore((state) => state.setLogLevel);
+  const setLogProject = useAppStore((state) => state.setLogProject);
   const setSearchQuery = useAppStore((state) => state.setLogSearchQuery);
   const setAutoScroll = useAppStore((state) => state.setLogAutoScroll);
   const clearLogs = useAppStore((state) => state.clearLogs);
@@ -150,8 +154,42 @@ export function OutputPanel() {
     'y',
   );
 
+  const projectOptions = useMemo(() => {
+    const list: Array<{ id: string; label: string }> = [
+      { id: 'current', label: 'Current Project' },
+      { id: 'all', label: 'All Projects' },
+    ];
+    if (tabs.length > 1) {
+      tabs.forEach((tab) => {
+        list.push({ id: tab.id, label: tab.name });
+      });
+    }
+    return list;
+  }, [tabs]);
+
+  const snapshot = useAppStore((state) => state.snapshot);
+  const currentTab = tabs.find((t) => t.id === activeTabId);
+  const currentPaths = useMemo(() => {
+    if (currentTab) return currentTab.paths;
+    if (snapshot) return snapshot.workspace.paths;
+    return [];
+  }, [currentTab, snapshot]);
+  const selectedTab = activeProject !== 'current' && activeProject !== 'all'
+    ? tabs.find((t) => t.id === activeProject)
+    : null;
+  const selectedPaths = useMemo(() => selectedTab ? selectedTab.paths : [], [selectedTab]);
+
   const filteredEntries = useMemo(() => {
     return logEntries.filter((entry) => {
+      if (activeProject === 'current') {
+        if (currentPaths.length > 0 && !isLogEntryInWorkspace(entry, currentPaths)) {
+          return false;
+        }
+      } else if (activeProject !== 'all') {
+        if (selectedPaths.length > 0 && !isLogEntryInWorkspace(entry, selectedPaths)) {
+          return false;
+        }
+      }
       if (activeChannel !== 'all' && entry.channel !== activeChannel) {
         return false;
       }
@@ -171,7 +209,7 @@ export function OutputPanel() {
       }
       return true;
     });
-  }, [logEntries, activeChannel, activeLevel, searchQuery]);
+  }, [logEntries, activeProject, currentPaths, selectedPaths, activeChannel, activeLevel, searchQuery]);
 
   useEffect(() => {
     if (!logPanelOpen || !autoScroll || !scrollContainerRef.current) return;
@@ -269,6 +307,14 @@ export function OutputPanel() {
         </div>
 
         <div className="output-panel-controls">
+          <OutputDropdown
+            ariaLabel={t('Filter by project')}
+            value={activeProject}
+            options={projectOptions}
+            onChange={(val) => setLogProject(val)}
+            className="output-dropdown-project"
+          />
+
           <OutputDropdown
             ariaLabel={t('Filter by channel')}
             value={activeChannel}
@@ -393,6 +439,10 @@ export function OutputPanel() {
                   <span className="output-log-time">{formatTime(entry.timestamp)}</span>
                   <span className={`output-log-level ${entry.level}`}>{entry.level.toUpperCase()}</span>
                   <span className="output-log-channel">[{entry.channel.toUpperCase()}]</span>
+                  {activeProject === 'all' && entry.cwd && (() => {
+                    const matchedTab = tabs.find((tab) => isLogEntryInWorkspace(entry, tab.paths));
+                    return matchedTab ? <span className="output-log-project">[{matchedTab.name}]</span> : null;
+                  })()}
                   <span className="output-log-msg">{entry.message}</span>
                   {entry.durationMs !== null && entry.durationMs !== undefined && (
                     <span className="output-log-duration">{entry.durationMs}ms</span>

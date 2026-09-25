@@ -146,15 +146,18 @@ async fn run_once(
     #[cfg(windows)]
     command.creation_flags(0x08000000);
 
+    let cwd_str = Some(cwd.to_string_lossy().into_owned());
+
     let mut child = command.spawn().map_err(|error| {
         let duration_ms = start_time.elapsed().as_millis() as u32;
-        crate::logger::log_entry(
+        crate::logger::log_entry_with_cwd(
             crate::logger::LogLevel::Error,
             channel,
             &formatted_cmd,
             Some(format!("Unable to start {program}: {error}")),
             Some(duration_ms),
             None,
+            cwd_str.clone(),
         );
         DesktopError::new(
             "TOOL_START_FAILED",
@@ -186,13 +189,14 @@ async fn run_once(
             stdout_task.abort();
             stderr_task.abort();
             let duration_ms = start_time.elapsed().as_millis() as u32;
-            crate::logger::log_entry(
+            crate::logger::log_entry_with_cwd(
                 crate::logger::LogLevel::Warn,
                 channel,
                 &formatted_cmd,
                 Some("Operation cancelled".to_string()),
                 Some(duration_ms),
                 None,
+                cwd_str.clone(),
             );
             return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true));
         }
@@ -204,13 +208,14 @@ async fn run_once(
                     stdout_task.abort();
                     stderr_task.abort();
                     let duration_ms = start_time.elapsed().as_millis() as u32;
-                    crate::logger::log_entry(
+                    crate::logger::log_entry_with_cwd(
                         crate::logger::LogLevel::Error,
                         channel,
                         &formatted_cmd,
                         Some(format!("{program} timed out")),
                         Some(duration_ms),
                         None,
+                        cwd_str.clone(),
                     );
                     return Err(DesktopError::new("COMMAND_TIMEOUT", format!("{program} timed out"), true));
                 },
@@ -245,13 +250,14 @@ async fn run_once(
     if !status.success() {
         let stderr = redact(&String::from_utf8_lossy(&result.stderr));
         let (code, hint) = classify_failure(program, &stderr);
-        crate::logger::log_entry(
+        crate::logger::log_entry_with_cwd(
             crate::logger::LogLevel::Error,
             channel,
             &formatted_cmd,
             Some(stderr.clone()),
             Some(duration_ms),
             result.exit_code,
+            cwd_str.clone(),
         );
         return Err(DesktopError {
             code: code.into(),
@@ -276,13 +282,14 @@ async fn run_once(
     } else {
         crate::logger::LogLevel::Info
     };
-    crate::logger::log_entry(
+    crate::logger::log_entry_with_cwd(
         level,
         channel,
         &formatted_cmd,
         None,
         Some(duration_ms),
         result.exit_code,
+        cwd_str,
     );
     Ok(result)
 }

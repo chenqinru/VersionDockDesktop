@@ -5044,6 +5044,56 @@ button.danger:not(:disabled):hover,
   max-height: 400px;
 }
 
+.notification-scope-nav {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  gap: 4px;
+  background: var(--versiondock-surface);
+  border-bottom: 1px solid var(--versiondock-border-soft);
+  user-select: none;
+}
+
+.notification-scope-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 3px;
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--versiondock-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.notification-scope-tab:hover {
+  color: var(--versiondock-text);
+  background: var(--versiondock-hover);
+}
+
+.notification-scope-tab.active {
+  color: var(--versiondock-text);
+  background: var(--versiondock-surface-alt);
+  border-color: var(--versiondock-border);
+  font-weight: 600;
+}
+
+.notification-scope-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+  line-height: 14px;
+  border-radius: 8px;
+  background: var(--versiondock-accent);
+  color: #ffffff;
+}
+
 .notification-empty {
   display: flex;
   flex-direction: column;
@@ -5110,6 +5160,19 @@ button.danger:not(:disabled):hover,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.notification-workspace-tag {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 0 4px;
+  line-height: 14px;
+  border-radius: 3px;
+  background: var(--versiondock-hover);
+  color: var(--versiondock-accent);
+  border: 1px solid color-mix(in srgb, var(--versiondock-accent) 25%, var(--versiondock-border-soft));
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .notification-item-time {
@@ -6134,6 +6197,10 @@ button.notification-item-action-btn:focus-visible {
   display: inline-flex;
 }
 
+.output-dropdown-project {
+  width: 140px;
+}
+
 .output-dropdown-channel {
   width: 130px;
 }
@@ -6427,6 +6494,13 @@ button.notification-item-action-btn:focus-visible {
   flex-shrink: 0;
   font-weight: 600;
   color: var(--versiondock-text);
+  user-select: none;
+}
+
+.output-log-project {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--versiondock-accent);
   user-select: none;
 }
 

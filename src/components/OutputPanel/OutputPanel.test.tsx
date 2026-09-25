@@ -18,6 +18,7 @@ const sampleLogs: LogEntry[] = [
     details: null,
     durationMs: 25,
     exitCode: 0,
+    cwd: null,
   },
   {
     id: 'log-2',
@@ -28,6 +29,7 @@ const sampleLogs: LogEntry[] = [
     details: 'Some server warning',
     durationMs: 120,
     exitCode: 0,
+    cwd: null,
   },
   {
     id: 'log-3',
@@ -38,6 +40,7 @@ const sampleLogs: LogEntry[] = [
     details: 'fatal: connection timed out',
     durationMs: 3000,
     exitCode: 128,
+    cwd: null,
   },
 ];
 
@@ -145,4 +148,124 @@ describe('OutputPanel & LogStatusBarItem', () => {
     });
     expect(useAppStore.getState().logPanelOpen).toBe(false);
   });
+
+  it('filters logs by project scope', () => {
+    useAppStore.setState({
+      tabs: [
+        { id: 'tab-a', name: 'Project A', paths: ['/project-a'], lastOpenedAt: '', available: true },
+        { id: 'tab-b', name: 'Project B', paths: ['/project-b'], lastOpenedAt: '', available: true },
+      ],
+      activeTabId: 'tab-a',
+      activeLogProject: 'current',
+      logEntries: [
+        {
+          id: 'log-a',
+          timestamp: '2026-08-31T12:00:00.000Z',
+          level: 'info',
+          channel: 'git',
+          message: 'git pull in Project A',
+          details: null,
+          durationMs: 25,
+          exitCode: 0,
+          cwd: '/project-a',
+        },
+        {
+          id: 'log-b',
+          timestamp: '2026-08-31T12:00:01.000Z',
+          level: 'info',
+          channel: 'git',
+          message: 'git pull in Project B',
+          details: null,
+          durationMs: 30,
+          exitCode: 0,
+          cwd: '/project-b',
+        },
+        {
+          id: 'log-global',
+          timestamp: '2026-08-31T12:00:02.000Z',
+          level: 'info',
+          channel: 'core',
+          message: 'Global system log',
+          details: null,
+          durationMs: 10,
+          exitCode: 0,
+          cwd: null,
+        },
+      ],
+    });
+
+    renderWithProviders(<OutputPanel />, bridge);
+
+    // 默认 'current' (Project A): 应该能看到 A 的日志和全局日志，看不到 B 的日志
+    expect(screen.getByText('git pull in Project A')).toBeInTheDocument();
+    expect(screen.getByText('Global system log')).toBeInTheDocument();
+    expect(screen.queryByText('git pull in Project B')).not.toBeInTheDocument();
+
+    // 切换到 All Projects
+    const projectTrigger = screen.getByLabelText(/Filter by project/i);
+    act(() => {
+      fireEvent.click(projectTrigger);
+    });
+    const allOption = screen.getByText('All Projects');
+    act(() => {
+      fireEvent.click(allOption);
+    });
+
+    // 此时全部可见，并且展示归属项目标签
+    expect(screen.getByText('git pull in Project A')).toBeInTheDocument();
+    expect(screen.getByText('git pull in Project B')).toBeInTheDocument();
+    expect(screen.getByText('Global system log')).toBeInTheDocument();
+    expect(screen.getByText('[Project A]')).toBeInTheDocument();
+    expect(screen.getByText('[Project B]')).toBeInTheDocument();
+  });
+
+  it('isolates unread errors by active project workspace', () => {
+    useAppStore.setState({
+      tabs: [
+        { id: 'tab-a', name: 'Project A', paths: ['/project-a'], lastOpenedAt: '', available: true },
+        { id: 'tab-b', name: 'Project B', paths: ['/project-b'], lastOpenedAt: '', available: true },
+      ],
+      activeTabId: 'tab-a',
+      logPanelOpen: false,
+      unreadErrorCount: 0,
+      logEntries: [],
+    });
+
+    // 在 Project B 中产生一个错误
+    act(() => {
+      useAppStore.getState().addLogEntry({
+        id: 'err-b',
+        timestamp: '2026-08-31T12:00:10.000Z',
+        level: 'error',
+        channel: 'git',
+        message: 'Project B git checkout error',
+        details: 'conflict in B',
+        durationMs: 100,
+        exitCode: 1,
+        cwd: '/project-b',
+      });
+    });
+
+    // 因为当前激活的是 tab-a，当前未读错误不应增加
+    expect(useAppStore.getState().unreadErrorCount).toBe(0);
+
+    // 在 Project A 中产生一个错误
+    act(() => {
+      useAppStore.getState().addLogEntry({
+        id: 'err-a',
+        timestamp: '2026-08-31T12:00:11.000Z',
+        level: 'error',
+        channel: 'git',
+        message: 'Project A git push error',
+        details: 'rejected',
+        durationMs: 200,
+        exitCode: 1,
+        cwd: '/project-a',
+      });
+    });
+
+    // Project A 未读错误应该增加为 1
+    expect(useAppStore.getState().unreadErrorCount).toBe(1);
+  });
 });
+

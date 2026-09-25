@@ -397,6 +397,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       details: null,
       durationMs: 12,
       exitCode: 0,
+      cwd: null,
     },
     {
       id: 'demo-log-2',
@@ -407,6 +408,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       details: null,
       durationMs: 34,
       exitCode: 0,
+      cwd: '/browser-demo',
     },
     {
       id: 'demo-log-3',
@@ -417,6 +419,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       details: null,
       durationMs: 88,
       exitCode: 0,
+      cwd: '/browser-demo',
     },
   ];
   private logHandlers = new Set<(entry: LogEntry) => void>();
@@ -451,6 +454,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       details: details ?? null,
       durationMs: null,
       exitCode: null,
+      cwd: null,
     };
     this.logs.push(entry);
     this.logHandlers.forEach((h) => h(entry));

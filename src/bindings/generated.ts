@@ -847,6 +847,7 @@ export type LogEntry = {
 	details: string | null,
 	durationMs: number | null,
 	exitCode: number | null,
+	cwd: string | null,
 };
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";

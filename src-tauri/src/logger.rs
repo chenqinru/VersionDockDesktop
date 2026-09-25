@@ -67,6 +67,7 @@ pub struct LogEntry {
     pub details: Option<String>,
     pub duration_ms: Option<u32>,
     pub exit_code: Option<i32>,
+    pub cwd: Option<String>,
 }
 
 pub struct LogManager {
@@ -95,6 +96,18 @@ pub fn log_entry(
     duration_ms: Option<u32>,
     exit_code: Option<i32>,
 ) {
+    log_entry_with_cwd(level, channel, message, details, duration_ms, exit_code, None);
+}
+
+pub fn log_entry_with_cwd(
+    level: LogLevel,
+    channel: LogChannel,
+    message: impl Into<String>,
+    details: Option<String>,
+    duration_ms: Option<u32>,
+    exit_code: Option<i32>,
+    cwd: Option<String>,
+) {
     if let Some(logger) = get_logger() {
         let entry = LogEntry {
             id: uuid::Uuid::new_v4().to_string(),
@@ -105,6 +118,7 @@ pub fn log_entry(
             details: details.map(|d| crate::cli::redact(&d)),
             duration_ms,
             exit_code,
+            cwd,
         };
         logger.push(entry);
     }
@@ -281,6 +295,7 @@ mod tests {
                 details: None,
                 duration_ms: None,
                 exit_code: Some(0),
+                cwd: None,
             });
         }
 
@@ -307,6 +322,7 @@ mod tests {
             details: None,
             duration_ms: None,
             exit_code: None,
+            cwd: None,
         });
 
         manager.push(LogEntry {
@@ -318,6 +334,7 @@ mod tests {
             details: None,
             duration_ms: None,
             exit_code: Some(1),
+            cwd: None,
         });
 
         let git_logs = manager.get_entries(Some(LogChannel::Git), None, None);

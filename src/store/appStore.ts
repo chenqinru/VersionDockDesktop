@@ -181,6 +181,42 @@ export function interleaveHistory(historyByRepo: Record<string, CommitNode[]>): 
   return interleaveLogs(historyByRepo);
 }
 
+function normalizeDirPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+export function isPathInDir(childPath: string, parentDir: string): boolean {
+  const c = normalizeDirPath(childPath);
+  const p = normalizeDirPath(parentDir);
+  return c === p || c.startsWith(`${p}/`);
+}
+
+export function isLogEntryInWorkspace(entry: LogEntry, workspacePaths: string[]): boolean {
+  if (!entry.cwd) {
+    return true;
+  }
+  return workspacePaths.some((wp) => isPathInDir(entry.cwd!, wp));
+}
+
+export function calculateWorkspaceUnreadErrors(
+  entries: LogEntry[],
+  workspaceId: string | null,
+  tabs: WorkspaceSnapshot['workspace'][],
+  lastReadTimestamps: Record<string, number>,
+  fallbackPaths?: string[],
+): number {
+  const lastRead = (workspaceId ? lastReadTimestamps[workspaceId] : undefined) ?? 0;
+  const currentTab = tabs.find((t) => t.id === workspaceId);
+  const paths = currentTab ? currentTab.paths : (fallbackPaths ?? []);
+  return entries.filter((entry) => {
+    if (entry.level !== 'error') return false;
+    const ts = new Date(entry.timestamp).getTime();
+    if (ts <= lastRead) return false;
+    if (paths.length === 0) return true;
+    return isLogEntryInWorkspace(entry, paths);
+  }).length;
+}
+
 export interface WorkspaceSessionState {
   snapshot: WorkspaceSnapshot;
   allRepositories: RepositoryStatus[];
@@ -426,9 +462,9 @@ export interface AppStore {
   dismissToast: () => void;
   performNotificationAction: (notificationId: string, actionIndex: number) => Promise<void>;
   markNotificationAsRead: (id: string) => void;
-  markAllNotificationsAsRead: () => void;
+  markAllNotificationsAsRead: (workspaceId?: string) => void;
   removeNotification: (id: string) => void;
-  clearNotifications: () => void;
+  clearNotifications: (workspaceId?: string) => void;
   openIdentityPanel: (repoId?: string) => void;
   closeIdentityPanel: () => void;
   openRemoteManager: (repoId?: string) => void;
@@ -438,9 +474,12 @@ export interface AppStore {
   logEntries: LogEntry[];
   activeLogChannel: LogChannel | 'all';
   activeLogLevel: LogLevel | 'all';
+  activeLogProject: string;
+  setLogProject: (project: string) => void;
   logSearchQuery: string;
   logAutoScroll: boolean;
   unreadErrorCount: number;
+  lastReadLogTimestamps: Record<string, number>;
   toggleLogPanel: () => void;
   setLogPanelOpen: (open: boolean) => void;
   setLogPanelHeight: (height: number) => void;
@@ -1245,6 +1284,9 @@ export const useAppStore = create<AppStore>((set, get) => {
     logSearchQuery: '',
     logAutoScroll: true,
     unreadErrorCount: 0,
+    lastReadLogTimestamps: {},
+    activeLogProject: 'current',
+    setLogProject: (project) => set({ activeLogProject: project }),
 
     operations: {},
 
@@ -1509,9 +1551,16 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
 
       const cachedSession = get().sessions[workspaceId];
+      const nextUnreadErrors = calculateWorkspaceUnreadErrors(
+        get().logEntries,
+        workspaceId,
+        get().tabs,
+        get().lastReadLogTimestamps,
+      );
       if (cachedSession) {
         set({
           activeTabId: workspaceId,
+          unreadErrorCount: nextUnreadErrors,
           snapshot: cachedSession.snapshot,
           allRepositories: cachedSession.allRepositories,
           selectedRepoId: cachedSession.selectedRepoId,
@@ -1572,7 +1621,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           const requestGeneration = ++workspaceRequestGeneration;
           const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths: targetTab.paths } }, { signal: controller.signal });
           if (requestGeneration !== workspaceRequestGeneration) return;
-          set({ activeTabId: workspaceId });
+          set({ activeTabId: workspaceId, unreadErrorCount: nextUnreadErrors });
           await persistTabs(get().tabs, workspaceId);
           await applySnapshot(snapshot, true);
         }, 'workspace');
@@ -3066,11 +3115,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       const defaultActions: AppNotificationAction[] = notification.type === 'error'
         ? [{ type: 'openLogPanel', label: 'View Log' }]
         : [];
+      const currentWorkspaceId = get().snapshot?.workspace.id ?? get().activeTabId ?? undefined;
       const item: AppNotification = {
         id,
         timestamp: Date.now(),
         read: false,
         actions: notification.actions && notification.actions.length > 0 ? notification.actions : defaultActions,
+        workspaceId: notification.workspaceId ?? currentWorkspaceId,
         ...notification,
       };
       set((state) => ({
@@ -3121,9 +3172,14 @@ export const useAppStore = create<AppStore>((set, get) => {
         notifications: state.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
       }));
     },
-    markAllNotificationsAsRead: () => {
+    markAllNotificationsAsRead: (workspaceId?: string) => {
       set((state) => ({
-        notifications: state.notifications.map((n) => ({ ...n, read: true })),
+        notifications: state.notifications.map((n) => {
+          if (!workspaceId || n.workspaceId === workspaceId || !n.workspaceId) {
+            return { ...n, read: true };
+          }
+          return n;
+        }),
       }));
     },
     removeNotification: (id) => {
@@ -3132,7 +3188,19 @@ export const useAppStore = create<AppStore>((set, get) => {
         toastNotificationIds: (state.toastNotificationIds ?? []).filter((item) => item !== id),
       }));
     },
-    clearNotifications: () => set({ notifications: [], toastNotificationIds: [] }),
+    clearNotifications: (workspaceId?: string) => {
+      set((state) => {
+        if (!workspaceId) {
+          return { notifications: [], toastNotificationIds: [] };
+        }
+        const filtered = state.notifications.filter((n) => n.workspaceId && n.workspaceId !== workspaceId);
+        const keptIds = new Set(filtered.map((n) => n.id));
+        return {
+          notifications: filtered,
+          toastNotificationIds: (state.toastNotificationIds ?? []).filter((id) => keptIds.has(id)),
+        };
+      });
+    },
     openIdentityPanel: (repoId) => {
       const targetRepoId = repoId ?? get().selectedRepoId ?? get().snapshot?.repositories[0]?.meta.id ?? null;
       set({ identityPanelRepoId: targetRepoId });
@@ -3145,9 +3213,27 @@ export const useAppStore = create<AppStore>((set, get) => {
     closeRemoteManager: () => set({ remoteManagerRepoId: null }),
     toggleLogPanel: () => {
       const next = !get().logPanelOpen;
-      set({ logPanelOpen: next, unreadErrorCount: next ? 0 : get().unreadErrorCount });
+      const activeTabId = get().activeTabId;
+      const nextTimestamps = next && activeTabId
+        ? { ...get().lastReadLogTimestamps, [activeTabId]: Date.now() }
+        : get().lastReadLogTimestamps;
+      set({
+        logPanelOpen: next,
+        unreadErrorCount: next ? 0 : get().unreadErrorCount,
+        lastReadLogTimestamps: nextTimestamps,
+      });
     },
-    setLogPanelOpen: (open) => set({ logPanelOpen: open, unreadErrorCount: open ? 0 : get().unreadErrorCount }),
+    setLogPanelOpen: (open) => {
+      const activeTabId = get().activeTabId;
+      const nextTimestamps = open && activeTabId
+        ? { ...get().lastReadLogTimestamps, [activeTabId]: Date.now() }
+        : get().lastReadLogTimestamps;
+      set({
+        logPanelOpen: open,
+        unreadErrorCount: open ? 0 : get().unreadErrorCount,
+        lastReadLogTimestamps: nextTimestamps,
+      });
+    },
     setLogPanelHeight: (height) => {
       const clamped = Math.max(120, Math.min(height, 600));
       set({ logPanelHeight: clamped });
@@ -3159,14 +3245,23 @@ export const useAppStore = create<AppStore>((set, get) => {
     setLogAutoScroll: (autoScroll) => set({ logAutoScroll: autoScroll }),
     clearLogs: async () => {
       await bridge().clearLogs();
-      set({ logEntries: [] });
+      set({ logEntries: [], unreadErrorCount: 0 });
     },
     addLogEntry: (entry) => set((state) => {
       const nextEntries = [...state.logEntries, entry];
       if (nextEntries.length > 3000) nextEntries.shift();
-      const unreadErrorCount = entry.level === 'error' && !state.logPanelOpen
-        ? state.unreadErrorCount + 1
-        : state.unreadErrorCount;
+      let unreadErrorCount = state.unreadErrorCount;
+      if (entry.level === 'error') {
+        if (state.logPanelOpen) {
+          unreadErrorCount = 0;
+        } else {
+          const currentTab = state.tabs.find((t) => t.id === state.activeTabId);
+          const paths = currentTab ? currentTab.paths : (state.snapshot?.workspace.paths ?? []);
+          if (paths.length === 0 || isLogEntryInWorkspace(entry, paths)) {
+            unreadErrorCount += 1;
+          }
+        }
+      }
       return { logEntries: nextEntries, unreadErrorCount };
     }),
     loadLogs: async () => {
@@ -3183,7 +3278,13 @@ export const useAppStore = create<AppStore>((set, get) => {
     exportLogs: async (targetPath) => {
       return await bridge().exportLogs(targetPath);
     },
-    resetUnreadErrors: () => set({ unreadErrorCount: 0 }),
+    resetUnreadErrors: () => {
+      const activeTabId = get().activeTabId;
+      const nextTimestamps = activeTabId
+        ? { ...get().lastReadLogTimestamps, [activeTabId]: Date.now() }
+        : get().lastReadLogTimestamps;
+      set({ unreadErrorCount: 0, lastReadLogTimestamps: nextTimestamps });
+    },
   };
 });
 
