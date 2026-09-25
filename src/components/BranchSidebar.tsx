@@ -2,11 +2,13 @@ import { useDeferredValue, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
-import { buildSidebarModel, sumBranchAheadBehind, type SidebarBranch, type SidebarTag } from './HistoryWorkspace.helpers';
+import { buildSidebarModel, sumBranchAheadBehind, type BranchInstance, type SidebarBranch, type SidebarTag } from './HistoryWorkspace.helpers';
 import type { RepositoryStatus } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
-import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog } from './dialogService';
 import { isBranchProtected } from '../history/branchProtection';
+import { branchRevisionRef } from '../history/refs';
+import { ProviderPanel } from './ProviderPanel';
 
 interface Props {
   repoFilter: Set<string>;
@@ -32,6 +34,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const [filter, setFilter] = useState('');
   const deferredFilter = useDeferredValue(filter);
   const [activeItem, setActiveItem] = useState<string | null>(null);
+  const [publishRepoId, setPublishRepoId] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
     const initial = new Set(persistedSections);
     const tagCount = Object.values(tagsByRepo).reduce((count, tags) => count + tags.length, 0);
@@ -45,8 +48,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const loadBranchWorkingDiff = useAppStore((state) => state.loadBranchWorkingDiff);
   const { t } = useI18n();
 
-  const visibleRepos = repoFilter.size ? repos.filter((repo) => repoFilter.has(repo.meta.id)) : repos;
-  const model = useMemo(() => buildSidebarModel(visibleRepos, branchesByRepo, tagsByRepo, deferredFilter), [branchesByRepo, deferredFilter, tagsByRepo, visibleRepos]);
+  const model = useMemo(() => buildSidebarModel(repos, branchesByRepo, tagsByRepo, deferredFilter), [branchesByRepo, deferredFilter, tagsByRepo, repos]);
   const showVcsBadges = repos.some((repo) => repo.meta.kind === 'git') && repos.some((repo) => repo.meta.kind === 'svn');
   const repoColors = useMemo(() => Object.fromEntries(repos.map((repo) => [repo.meta.id, repo.meta.color])), [repos]);
   const toggleSection = (key: SectionKey) => {
@@ -56,35 +58,84 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
     setBranchSidebarState(sidebarCollapsed, [...next]);
   };
 
+  const pickTargetInstance = async (targetBranch: SidebarBranch, actionTitle: string): Promise<BranchInstance | null> => {
+    if (targetBranch.instances.length <= 1) return targetBranch.instances[0] ?? null;
+    const choice = await choiceDialog({
+      title: actionTitle,
+      message: t('Choose a repository for "{0}"', targetBranch.name),
+      choices: targetBranch.instances.map((item) => ({
+        id: item.repoId,
+        label: item.repo.meta.name,
+        description: item.branch.current ? t('Current HEAD') : item.branch.remote ? t('Remote branch') : undefined,
+        icon: 'repo',
+      })),
+    });
+    if (!choice) return null;
+    return targetBranch.instances.find((item) => item.repoId === choice) ?? null;
+  };
+
+  const pickRemote = async (repoId: string, title: string): Promise<string | null> => {
+    await useAppStore.getState().loadRemotes(repoId);
+    const repoRemotes = useAppStore.getState().remotes[repoId] ?? [];
+    const names = repoRemotes.map((r) => r.name);
+    if (names.length === 0) return null;
+    if (names.length === 1) return names[0];
+    return await choiceDialog({
+      title,
+      message: t('Select a remote repository:'),
+      choices: names.map((name) => ({ id: name, label: name, icon: 'cloud-upload' })),
+    });
+  };
+
+  const pickTargetTagInstance = async (targetTag: SidebarTag, title: string) => {
+    const gitInstances = targetTag.instances.filter((item) => item.repo.meta.kind === 'git');
+    if (gitInstances.length === 0) return null;
+    if (gitInstances.length === 1) return gitInstances[0];
+    const choice = await choiceDialog({
+      title,
+      message: `${targetTag.name}\n${t('{0} repositories', gitInstances.length)}`,
+      choices: gitInstances.map((item) => ({
+        id: item.repo.meta.id,
+        label: item.repo.meta.name,
+        description: item.repo.meta.rootPath,
+        icon: 'repo',
+      })),
+    });
+    if (!choice) return null;
+    return gitInstances.find((item) => item.repo.meta.id === choice) ?? null;
+  };
+
   return <aside className="branch-sidebar">
-    <div className="branch-sidebar-header">
-      <div className="branch-search">
-        <Codicon name="filter" />
-        <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
-        {filter && <button aria-label={t('Clear')} onClick={() => setFilter('')}><Codicon name="close" /></button>}
+    <div className="branch-sidebar-sticky-header">
+      <div className="branch-sidebar-header">
+        <div className="branch-search">
+          <Codicon name="filter" />
+          <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
+          {filter && <button aria-label={t('Clear')} onClick={() => setFilter('')}><Codicon name="close" /></button>}
+        </div>
+        <button className="branch-sidebar-collapse" title={t('Collapse sidebar')} aria-label={t('Collapse sidebar')} onClick={onCollapse}>
+          <Codicon name="layout-sidebar-left" />
+        </button>
       </div>
-      <button className="branch-sidebar-collapse" title={t('Collapse sidebar')} aria-label={t('Collapse sidebar')} onClick={onCollapse}>
-        <Codicon name="layout-sidebar-left" />
-      </button>
+
+      {loading && <div className="branch-loading" role="status" aria-live="polite">
+        <Codicon name="loading codicon-modifier-spin" />
+        <span>{t('Loading branches…')}</span>
+      </div>}
+
+      {repos.length > 1 && <div className="branch-repo-list">
+        {repos.map((repo) => <RepositoryRow
+          key={repo.meta.id}
+          repo={repo}
+          repoColors={repoColors}
+          showVcsBadges={showVcsBadges}
+          selected={repoFilter.has(repo.meta.id)}
+          active={activeItem === `repo:${repo.meta.id}`}
+          onClick={() => setActiveItem(`repo:${repo.meta.id}`)}
+          onDoubleClick={() => onRepoFilter(repo.meta.id)}
+        />)}
+      </div>}
     </div>
-
-    {loading && <div className="branch-loading" role="status" aria-live="polite">
-      <Codicon name="loading codicon-modifier-spin" />
-      <span>{t('Loading branches…')}</span>
-    </div>}
-
-    {repos.length > 1 && <div className="branch-repo-list">
-      {repos.map((repo) => <RepositoryRow
-        key={repo.meta.id}
-        repo={repo}
-        repoColors={repoColors}
-        showVcsBadges={showVcsBadges}
-        selected={repoFilter.has(repo.meta.id)}
-        active={activeItem === `repo:${repo.meta.id}`}
-        onClick={() => setActiveItem(`repo:${repo.meta.id}`)}
-        onDoubleClick={() => onRepoFilter(repo.meta.id)}
-      />)}
-    </div>}
 
     <SidebarSection
       icon="git-branch"
@@ -145,13 +196,11 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         repoColors={repoColors}
         multiRepo={repos.length > 1}
         showVcsBadges={showVcsBadges}
+        selected={refFilter.has(tag.ref)}
         active={activeItem === `tag:${tag.key}`}
         detached={tag.instances.some(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name))}
         onClick={() => setActiveItem(`tag:${tag.key}`)}
-        onDoubleClick={() => {
-          const instance = tag.instances.find(({ repo }) => repo.meta.kind === 'git');
-          if (instance) void tagOperation({ type: 'checkout', name: tag.name }, instance.repo.meta.id);
-        }}
+        onDoubleClick={() => onRefFilter(tag.ref)}
         onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, kind: 'tag', tag }); }}
       />)}
     </SidebarSection>}
@@ -159,13 +208,13 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
       if (context.kind === 'tag') {
         const tag = context.tag!;
         const svn = tag.vcsKind === 'svn';
-        const detached = tag.instances.some(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name));
+        const allDetached = tag.instances.every(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name));
         return [
           { id: 'tag-checkout', label: t(svn ? 'Switch to "{0}"' : 'Checkout "{0}"', tag.name), icon: 'arrow-right' },
           { separator: true },
           { id: 'tag-merge', label: t(svn ? 'Merge tag into working copy' : 'Merge into current'), icon: 'git-merge' },
           ...(!svn ? [{ id: 'tag-push', label: t('Push to remote...'), icon: 'cloud-upload' } as ContextMenuEntry] : []),
-          ...(!detached ? [{ separator: true } as ContextMenuEntry, { id: 'tag-delete', label: t(svn ? 'Delete SVN tag' : 'Delete tag'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
+          ...(!allDetached ? [{ separator: true } as ContextMenuEntry, { id: 'tag-delete', label: t(svn ? 'Delete SVN tag' : 'Delete tag'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
         ];
       }
       const branch = context.branch!;
@@ -190,21 +239,81 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
     })()} onSelect={(id) => { void (async () => {
       if (context.kind === 'branch' && context.branch) {
         const branch = context.branch;
-        const instance = branch.instances.find((item) => item.branch.current) ?? branch.instances[0];
-        if (!instance) return;
-        const target = branch.vcsKind === 'svn' ? branch.ref : instance.branch.name;
+        const defaultInstance = branch.instances.find((item) => item.branch.current) ?? branch.instances[0];
+        if (!defaultInstance) return;
         if (id === 'checkout') for (const item of branch.instances) await branchOperation({ type: 'checkout', name: branch.vcsKind === 'svn' ? branch.ref : item.branch.name }, item.repoId);
-        if (id === 'compare-current') onCompare(instance.repoId, instance.branch.name);
-        if (id === 'diff-working') await loadBranchWorkingDiff(instance.repoId, instance.branch.remote ? `refs/remotes/${instance.branch.name}` : `refs/heads/${instance.branch.name}`);
-        if (id === 'merge') await branchOperation({ type: 'merge', name: target }, instance.repoId);
-        if (id === 'rebase') await branchOperation({ type: 'rebase', name: target }, instance.repoId);
-        if (id === 'pull') await sync(
-          instance.repoId,
-          branch.vcsKind === 'svn' ? 'update' : 'pull',
-          true,
-          { branch: branch.vcsKind === 'svn' ? branch.ref : instance.branch.name },
-        );
-        if (id === 'push') await sync(instance.repoId, 'push');
+        const getBranchRef = (inst: BranchInstance) => {
+          if (branch.vcsKind === 'svn') return branch.ref;
+          return inst.branch.remote ? `refs/remotes/${inst.branch.name}` : inst.branch.name;
+        };
+        if (id === 'compare-current') {
+          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t('Compare with Current')) : defaultInstance;
+          if (inst) onCompare(inst.repoId, getBranchRef(inst));
+        }
+        if (id === 'diff-working') {
+          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t('Compare with Working Directory')) : defaultInstance;
+          if (inst) void loadBranchWorkingDiff(inst.repoId, inst.branch.remote ? `refs/remotes/${inst.branch.name}` : `refs/heads/${inst.branch.name}`);
+        }
+        if (id === 'merge') {
+          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t(branch.vcsKind === 'svn' ? 'Merge into working copy' : 'Merge into current')) : defaultInstance;
+          if (inst) await branchOperation({ type: 'merge', name: getBranchRef(inst) }, inst.repoId);
+        }
+        if (id === 'rebase') {
+          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t("Rebase onto '{0}'", branch.name)) : defaultInstance;
+          if (inst) await branchOperation({ type: 'rebase', name: getBranchRef(inst) }, inst.repoId);
+        }
+        if (id === 'pull') {
+          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t(branch.vcsKind === 'svn' ? 'Update' : 'Pull')) : defaultInstance;
+          if (!inst) return;
+          if (branch.vcsKind === 'svn') {
+            await sync(inst.repoId, 'update', true, { branch: branch.ref });
+          } else {
+            let action: 'pull' | 'pullRebase' = 'pull';
+            if (inst.branch.current) {
+              const currentSettings = useAppStore.getState().bootstrap?.state.settings;
+              const updateMethod = currentSettings?.updateProjectMethod ?? 'rebase';
+              if (updateMethod === 'prompt') {
+                const selected = await choiceDialog({
+                  title: t('Update Project — Strategy'),
+                  message: t('Choose how incoming Git changes are integrated.'),
+                  choices: [
+                    { id: 'rebase', label: t('Rebase the current branch on top of incoming changes'), icon: 'repo-forked' },
+                    { id: 'merge', label: t('Merge incoming changes into the current branch'), icon: 'git-merge' },
+                  ],
+                });
+                if (!selected) {
+                  setContext(undefined);
+                  return;
+                }
+                action = selected === 'rebase' ? 'pullRebase' : 'pull';
+              } else {
+                action = updateMethod === 'rebase' ? 'pullRebase' : 'pull';
+              }
+            }
+            await sync(inst.repoId, action, true, { branch: inst.branch.name });
+          }
+        }
+        if (id === 'push') {
+          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t('Push Branch')) : defaultInstance;
+          if (!inst) return;
+          await useAppStore.getState().loadRemotes(inst.repoId);
+          const repoRemotes = useAppStore.getState().remotes[inst.repoId] ?? [];
+          if (repoRemotes.length === 0) {
+            const confirmed = await confirmDialog({
+              title: t('Publish Repository'),
+              message: t('VersionDock [{0}]: No remotes configured. Would you like to publish this repository?', inst.repo.meta.name),
+              confirmLabel: t('Publish...'),
+            });
+            if (confirmed) {
+              setPublishRepoId(inst.repoId);
+            }
+            setContext(undefined);
+            return;
+          }
+          const remote = await pickRemote(inst.repoId, t('Push — Select remote'));
+          if (repoRemotes.length > 1 && !remote) return;
+          await sync(inst.repoId, 'push', true, { remote: remote ?? undefined, branch: inst.branch.name });
+        }
         if (id === 'delete') {
           if (branch.vcsKind === 'git' && isBranchProtected(branch.name)) {
             await confirmDialog({
@@ -229,12 +338,124 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
       if (context.kind === 'tag' && context.tag) {
         const tag = context.tag;
         if (id === 'tag-checkout') for (const instance of tag.instances) await tagOperation({ type: 'checkout', name: tag.name }, instance.repo.meta.id);
-        if (id === 'tag-merge') { const instance = tag.instances[0]; if (instance) await tagOperation({ type: 'merge', name: tag.name }, instance.repo.meta.id); }
-        if (id === 'tag-delete' && await confirmDialog({ title: t('Delete tag?'), message: `${tag.name}\n${t('{0} repositories', tag.repoIds.length)}`, danger: true })) for (const instance of tag.instances) await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
-        if (id === 'tag-push') { const remote = await promptDialog({ title: t('Push Tag'), message: tag.name, inputLabel: t('Remote'), initialValue: 'origin' }); if (remote) for (const instance of tag.instances.filter((item) => item.repo.meta.kind === 'git')) await tagOperation({ type: 'push', name: tag.name, remote }, instance.repo.meta.id); }
+        if (id === 'tag-merge') {
+          for (const instance of tag.instances) {
+            await tagOperation({ type: 'merge', name: tag.name }, instance.repo.meta.id);
+          }
+        }
+        if (id === 'tag-delete') {
+          const checkedOutRepos = tag.instances.filter(({ repo }) =>
+            (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name)
+          );
+          const eligibleInstances = tag.instances.filter(({ repo }) =>
+            !(branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name)
+          );
+          if (eligibleInstances.length === 0) {
+            const singleName = tag.instances.length === 1 ? tag.instances[0].repo.meta.name : undefined;
+            await confirmDialog({
+              title: t('Cannot delete tag'),
+              message: singleName
+                ? t('VersionDock [{0}]: Cannot delete tag "{1}" — HEAD is detached on it.', singleName, tag.name)
+                : t('VersionDock: Cannot delete tag "{0}" — HEAD is detached on it in all target repositories.', tag.name),
+              confirmLabel: t('OK'),
+            });
+            setContext(undefined);
+            return;
+          }
+
+          if (tag.vcsKind === 'svn') {
+            const confirmed = await confirmDialog({
+              title: t('Delete tag?'),
+              message: `${tag.name}\n${t('{0} repositories', eligibleInstances.length)}`,
+              danger: true,
+            });
+            if (confirmed) {
+              for (const instance of eligibleInstances) {
+                await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
+              }
+            }
+          } else {
+            const skippedMsg = checkedOutRepos.length > 0
+              ? ` (${t('skipped in: {0} — HEAD detached on this tag', checkedOutRepos.map((i) => i.repo.meta.name).join(', '))})`
+              : '';
+            const choice = await choiceDialog({
+              title: t('Delete tag?'),
+              message: `${tag.name}${skippedMsg}\n${t('{0} repositories', eligibleInstances.length)}`,
+              danger: true,
+              choices: [
+                { id: 'local', label: t('Delete Local'), icon: 'trash', danger: true },
+                { id: 'remote', label: t('Delete on Remote'), icon: 'cloud', danger: true },
+                { id: 'both', label: t('Delete Local and Remote'), icon: 'warning', danger: true },
+              ],
+            });
+            if (!choice) {
+              setContext(undefined);
+              return;
+            }
+
+            if (choice === 'local') {
+              for (const instance of eligibleInstances) {
+                await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
+              }
+            } else if (choice === 'remote') {
+              for (const instance of eligibleInstances) {
+                const remote = await pickRemote(instance.repo.meta.id, t('Delete "{0}" from remote', tag.name));
+                if (remote) {
+                  await tagOperation({ type: 'delete', name: tag.name, remote }, instance.repo.meta.id);
+                }
+              }
+            } else if (choice === 'both') {
+              for (const instance of eligibleInstances) {
+                const deletedLocal = await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
+                if (!deletedLocal) continue;
+                const remote = await pickRemote(instance.repo.meta.id, t('Delete "{0}" from remote', tag.name));
+                if (remote) {
+                  await tagOperation({ type: 'delete', name: tag.name, remote }, instance.repo.meta.id);
+                }
+              }
+            }
+          }
+        }
+        if (id === 'tag-push') {
+          const inst = await pickTargetTagInstance(tag, t('Push Tag'));
+          if (!inst) return;
+          const targetRepoId = inst.repo.meta.id;
+          await useAppStore.getState().loadRemotes(targetRepoId);
+          const currentRemotes = useAppStore.getState().remotes[targetRepoId] ?? [];
+          if (currentRemotes.length === 0) {
+            useAppStore.getState().addNotification({
+              type: 'warning',
+              title: t('Push Tag'),
+              message: { key: 'VersionDock [{0}]: No remotes configured.', args: [inst.repo.meta.name] },
+              workspaceId: useAppStore.getState().snapshot?.workspace.id,
+            });
+            return;
+          }
+          const remote = currentRemotes.length === 1
+            ? currentRemotes[0].name
+            : await choiceDialog({
+                title: t('Push tag "{0}" — Select remote', tag.name),
+                message: t('Select a remote repository:'),
+                choices: currentRemotes.map((r) => ({ id: r.name, label: r.name, icon: 'cloud-upload' })),
+              });
+          if (remote) {
+            await tagOperation({ type: 'push', name: tag.name, remote }, targetRepoId);
+          }
+        }
       }
       setContext(undefined);
     })(); }} onClose={() => setContext(undefined)} />}
+    {publishRepoId && (
+      <ProviderPanel
+        mode="publish"
+        repoId={publishRepoId}
+        close={() => {
+          setPublishRepoId(null);
+          void useAppStore.getState().loadRemotes(publishRepoId);
+          void useAppStore.getState().refresh(true);
+        }}
+      />
+    )}
   </aside>;
 }
 
@@ -247,11 +468,13 @@ function RepositoryRow({ repo, showVcsBadges, selected, active, onClick, onDoubl
   onClick: () => void;
   onDoubleClick: () => void;
 }) {
+  const { t } = useI18n();
   return <div
     className={`branch-repo-row ${selected ? 'selected' : ''} ${active ? 'active' : ''}`}
     role="button"
     tabIndex={0}
     aria-pressed={selected}
+    title={t('Double-click to filter commits by repository: {0}', repo.meta.name)}
     onClick={onClick}
     onDoubleClick={onDoubleClick}
     onKeyDown={(event) => {
@@ -262,6 +485,7 @@ function RepositoryRow({ repo, showVcsBadges, selected, active, onClick, onDoubl
   >
     <i style={{ background: repo.meta.color }} />
     <span>{repo.meta.name}</span>
+    {repo.meta.isSubmodule && <em className="branch-submodule-badge" title={t('Submodule')}>{t('SUB')}</em>}
     {showVcsBadges && <VcsBadge kind={repo.meta.kind} />}
   </div>;
 }
@@ -298,6 +522,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
   onDoubleClick: () => void;
   onContextMenu: (event: React.MouseEvent) => void;
 }) {
+  const { t } = useI18n();
   const headCount = branch.instances.filter((instance) => instance.branch.current).length;
   const { ahead, behind } = sumBranchAheadBehind(branch);
   const isPrimary = ['main', 'master', 'trunk', 'develop', 'dev', 'release'].includes(branch.name.toLowerCase());
@@ -306,6 +531,7 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
     role="button"
     tabIndex={0}
     aria-pressed={active}
+    title={`${branch.name}\n${branch.vcsKind === 'svn' ? t('Double-click to filter by this branch · Right-click for SVN actions') : t('Double-click to filter by this branch · Right-click for Git actions')}`}
     onClick={onClick}
     onDoubleClick={onDoubleClick}
     onContextMenu={onContextMenu}
@@ -315,38 +541,51 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
       onDoubleClick();
     }}
   >
-    <Codicon name={isPrimary ? 'star-full' : branch.remote ? 'cloud' : 'git-branch'} />
+    <Codicon
+      name={isPrimary ? 'star-full' : branch.remote ? 'cloud' : 'git-branch'}
+      title={branch.current ? (multiRepo ? t('Current HEAD in {0} of {1} repositories', headCount, branch.repoIds.length) : t('Current HEAD')) : isPrimary ? t('Primary branch') : undefined}
+    />
     <span className="branch-ref-name">{branch.name}</span>
     {showVcsBadges && <VcsBadge kind={branch.vcsKind} />}
-    {branch.current && <em className="branch-head-badge">{multiRepo && headCount > 0 && headCount < branch.repoIds.length ? `HEAD ${headCount}/${branch.repoIds.length}` : 'HEAD'}</em>}
+    {branch.current && (
+      <em
+        className="branch-head-badge"
+        title={multiRepo ? t('Current HEAD in {0} of {1} repositories', headCount, branch.repoIds.length) : t('current branch')}
+      >
+        {multiRepo && headCount > 0 && headCount < branch.repoIds.length ? `HEAD ${headCount}/${branch.repoIds.length}` : 'HEAD'}
+      </em>
+    )}
     {(ahead > 0 || behind > 0) && <span className="branch-ahead-behind">{ahead > 0 && <b className="ahead">↑{ahead}</b>}{behind > 0 && <b className="behind">↓{behind}</b>}</span>}
     {multiRepo && <span className="branch-repo-dots">{branch.repoIds.map((repoId) => <i key={repoId} style={{ background: repoColors[repoId] ?? 'var(--versiondock-muted)' }} />)}</span>}
   </div>;
 }
 
-function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, detached, onClick, onDoubleClick, onContextMenu }: {
+function TagRow({ tag, repoColors, multiRepo, showVcsBadges, selected, active, detached, onClick, onDoubleClick, onContextMenu }: {
   tag: SidebarTag;
   repoColors: Record<string, string>;
   multiRepo: boolean;
   showVcsBadges: boolean;
+  selected: boolean;
   active: boolean;
   detached: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
   onContextMenu: (event: React.MouseEvent) => void;
 }) {
+  const { t } = useI18n();
   return <div
-    className={`branch-ref-row tag-row ${active ? 'active' : ''} ${detached ? 'head' : ''}`}
+    className={`branch-ref-row tag-row ${selected ? 'filtered' : ''} ${active ? 'active' : ''} ${detached ? 'head' : ''}`}
     role="button"
     tabIndex={0}
     aria-pressed={active}
+    title={`${t('Tag: {0}', tag.name)}${detached ? ` (${t('current')})` : ''}\n${t('Right-click for actions')}`}
     onClick={onClick}
     onDoubleClick={onDoubleClick}
     onContextMenu={onContextMenu}
     onKeyDown={(event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
-      onClick();
+      onDoubleClick();
     }}
   >
     <Codicon name="tag" />

@@ -3439,7 +3439,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .date-popover input[type="date"] { height: 25px; padding: 0 5px; color-scheme: dark; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); }
 
 .branch-sidebar { height: 100%; overflow: auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); user-select: none; background: var(--versiondock-surface); }
-.branch-sidebar-header { position: sticky; top: 0; z-index: 4; height: 35px; display: flex; align-items: stretch; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); }
+.branch-sidebar-sticky-header { position: sticky; top: 0; z-index: 4; background: var(--versiondock-surface); }
+.branch-sidebar-header { height: 35px; display: flex; align-items: stretch; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); }
 .branch-loading { height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--vscode-progressBar-background, var(--versiondock-accent)); background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .history-loading { position: sticky; z-index: 5; top: 0; height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--vscode-progressBar-background, var(--versiondock-accent)); background: color-mix(in srgb, var(--versiondock-surface) 92%, transparent); border-bottom: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .branch-search { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; padding: 0 8px; background: var(--versiondock-input); color: var(--versiondock-muted); }
@@ -3469,8 +3470,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .branch-ref-row.head > .codicon, .branch-ref-row.tag-row.head > .codicon { color: var(--versiondock-accent); }
 .branch-ref-row.tag-row > .codicon { color: var(--versiondock-warning, #d7ba7d); }
 .branch-ref-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.branch-head-badge, .branch-vcs-badge { flex: 0 0 auto; height: 14px; padding: 0 4px; border-radius: 2px; font-style: normal; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 14px; }
+.branch-head-badge, .branch-vcs-badge, .branch-submodule-badge { flex: 0 0 auto; height: 14px; padding: 0 4px; border-radius: 2px; font-style: normal; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 14px; }
 .branch-head-badge { background: var(--versiondock-accent-bg); color: #fff; letter-spacing: .02em; }
+.branch-submodule-badge { background: color-mix(in srgb, var(--versiondock-text) 14%, transparent); color: var(--versiondock-text); letter-spacing: .02em; margin-left: auto; }
 .branch-vcs-badge { color: var(--vscode-button-foreground); }
 .branch-vcs-badge.git { background: var(--versiondock-warning); }
 .branch-vcs-badge.svn { background: var(--versiondock-accent-bg); }

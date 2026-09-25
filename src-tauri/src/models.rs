@@ -907,6 +907,7 @@ pub enum TagOperation {
     },
     Delete {
         name: String,
+        remote: Option<String>,
     },
     Checkout {
         name: String,

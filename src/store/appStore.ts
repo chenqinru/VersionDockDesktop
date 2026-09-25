@@ -403,7 +403,7 @@ export interface AppStore {
   clearCommitSelection: () => void;
   branchOperation: (operation: object, repoId?: string) => Promise<BranchOperationResult | undefined>;
   branchRecovery: (repoId: string, operation: BranchRecoveryOperation) => Promise<BranchRecoveryResult | undefined>;
-  tagOperation: (operation: object, repoId?: string) => Promise<void>;
+  tagOperation: (operation: object, repoId?: string) => Promise<boolean>;
   loadStashes: (repoId?: string) => Promise<void>;
   stashOperation: (repoId: string, operation: StashOperation) => Promise<boolean>;
   loadShelves: (repoId?: string) => Promise<void>;
@@ -1218,6 +1218,24 @@ export const useAppStore = create<AppStore>((set, get) => {
             bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
           ]);
           if (get().snapshot?.workspace.id !== workspaceId) return;
+          const repoItem = get().snapshot?.repositories.find((r) => r.meta.id === repoId);
+          const repoName = repoItem?.meta.name ?? repoId;
+          if (branchesResult.status === 'rejected' && !isAbortError(branchesResult.reason)) {
+            get().addNotification({
+              type: 'warning',
+              title: 'Branch error',
+              message: { key: 'Failed to load branches for {0}: {1}', args: [repoName, errorText(branchesResult.reason)] },
+              workspaceId,
+            });
+          }
+          if (tagsResult.status === 'rejected' && !isAbortError(tagsResult.reason)) {
+            get().addNotification({
+              type: 'warning',
+              title: 'Tag error',
+              message: { key: 'Failed to load tags for {0}: {1}', args: [repoName, errorText(tagsResult.reason)] },
+              workspaceId,
+            });
+          }
           set((state) => ({
             branchesByRepo: branchesResult.status === 'fulfilled' ? { ...state.branchesByRepo, [repoId]: branchesResult.value } : state.branchesByRepo,
             tagsByRepo: tagsResult.status === 'fulfilled' ? { ...state.tagsByRepo, [repoId]: tagsResult.value } : state.tagsByRepo,
@@ -1934,14 +1952,30 @@ export const useAppStore = create<AppStore>((set, get) => {
               branchesByRepo: { ...state.branchesByRepo, [item.meta.id]: branches },
               branches: item.meta.id === get().selectedRepoId ? branches : state.branches,
             }));
-          }).catch(() => undefined));
+          }).catch((error) => {
+            if (get().snapshot?.workspace.id !== currentWorkspace) return;
+            get().addNotification({
+              type: 'warning',
+              title: 'Branch error',
+              message: { key: 'Failed to load branches for {0}: {1}', args: [item.meta.name, errorText(error)] },
+              workspaceId: currentWorkspace,
+            });
+          }));
           refRequests.push(bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }, { showProgress: false, timeoutMs: 12_000 }).then((tags) => {
             if (get().snapshot?.workspace.id !== currentWorkspace) return;
             set((state) => ({
               tagsByRepo: { ...state.tagsByRepo, [item.meta.id]: tags },
               tags: item.meta.id === get().selectedRepoId ? tags : state.tags,
             }));
-          }).catch(() => undefined));
+          }).catch((error) => {
+            if (get().snapshot?.workspace.id !== currentWorkspace) return;
+            get().addNotification({
+              type: 'warning',
+              title: 'Tag error',
+              message: { key: 'Failed to load tags for {0}: {1}', args: [item.meta.name, errorText(error)] },
+              workspaceId: currentWorkspace,
+            });
+          }));
         }
         const otherResults = Promise.allSettled(requests);
         try { await Promise.all(refRequests); }
@@ -2499,8 +2533,9 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     tagOperation: async (operation, requestedRepoId) => {
-      const repoId = requestedRepoId ?? get().selectedRepoId; if (!repoId) return;
-      await withBusy(async () => {
+      const repoId = requestedRepoId ?? get().selectedRepoId;
+      if (!repoId) return false;
+      const result = await withBusy(async () => {
         await bridge().request({ type: 'tagOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation: operation as never } });
         const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
         const tag = operation as { type: string; name: string; remote?: string };
@@ -2513,7 +2548,9 @@ export const useAppStore = create<AppStore>((set, get) => {
         const message = messages[tag.type];
         if (message) get().addNotification({ type: 'success', title: 'Tag operation completed', message, workspaceId: get().snapshot?.workspace.id });
         await get().selectRepo(repoId, true);
+        return true;
       }, `repository:${repoId}`);
+      return result === true;
     },
 
     loadStashes: async (repoId) => {

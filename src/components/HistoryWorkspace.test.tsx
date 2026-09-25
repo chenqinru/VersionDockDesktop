@@ -180,9 +180,37 @@ describe('HistoryWorkspace data helpers', () => {
         { name: 'origin/main', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
       ],
     }, { repo: [{ name: 'v1.0.0' }] });
-    expect(options.find((option) => option.id === 'feature/ui')?.revisionsByRepo.repo).toBe('refs/heads/feature/ui');
-    expect(options.find((option) => option.id === 'origin/main')?.revisionsByRepo.repo).toBe('refs/remotes/origin/main');
-    expect(options.find((option) => option.id === 'v1.0.0')?.revisionsByRepo.repo).toBe('refs/tags/v1.0.0');
+    expect(options.find((option) => option.id === 'refs/heads/feature/ui')?.revisionsByRepo.repo).toBe('refs/heads/feature/ui');
+    expect(options.find((option) => option.id === 'refs/remotes/origin/main')?.revisionsByRepo.repo).toBe('refs/remotes/origin/main');
+    expect(options.find((option) => option.id === 'refs/tags/v1.0.0')?.revisionsByRepo.repo).toBe('refs/tags/v1.0.0');
+    expect(options.find((option) => option.id === 'refs/heads/feature/ui')?.label).toBe('feature/ui');
+  });
+
+  it('keeps both branch and tag when they share the same name without overwriting', () => {
+    const options = buildHistoryRefOptions(snapshot.repositories, {
+      repo: [{ name: 'v1.0.0', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+    }, { repo: [{ name: 'v1.0.0' }] });
+    expect(options).toHaveLength(2);
+    expect(options.map((option) => option.id)).toEqual(['refs/heads/v1.0.0', 'refs/tags/v1.0.0']);
+  });
+
+  it('excludes detached HEAD pseudo-branch from history ref options and sidebar branches', () => {
+    const branchesWithHead = {
+      repo: [
+        { name: 'HEAD', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0, detachedTag: 'v1.0.0' },
+        { name: 'main', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        { name: 'origin/HEAD', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 },
+      ],
+    };
+    const options = buildHistoryRefOptions(snapshot.repositories, branchesWithHead, { repo: [{ name: 'v1.0.0' }] });
+    expect(options.some((opt) => opt.label === 'HEAD')).toBe(false);
+    expect(options.some((opt) => opt.id === 'refs/heads/HEAD')).toBe(false);
+
+    const model = buildSidebarModel(snapshot.repositories, branchesWithHead, { repo: [{ name: 'v1.0.0', hash: 'a', date: '' }] });
+    expect(model.local.map((b) => b.name)).toEqual(['main']);
+    expect(model.remotes).toHaveLength(0);
+    const merged = mergeBranches(snapshot.repositories, branchesWithHead, false);
+    expect(merged.map((b) => b.name)).toEqual(['main']);
   });
 
   it('groups remote namespaces and preserves mixed repository identity', () => {
@@ -309,6 +337,61 @@ describe('HistoryWorkspace data helpers', () => {
     expect(screen.queryByRole('radio', { name: 'feature/ui' })).not.toBeInTheDocument();
   }, 15000);
 
+  it('resets mismatched repo filter when double clicking branch from another repo in sidebar', async () => {
+    const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
+    useAppStore.setState({
+      bootstrap: bootstrap(false, false),
+      snapshot: { ...snapshot, repositories: [snapshot.repositories[0], secondRepo] },
+      selectedRepoId: 'repo',
+      branchesByRepo: {
+        repo: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+        'repo-2': [{ name: 'feature/ui', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+      },
+      tagsByRepo: { repo: [], 'repo-2': [] },
+    });
+    render(<HistoryWorkspace />);
+
+    const repoRow = screen.getByText('Repo').closest('.branch-repo-row')!;
+    fireEvent.doubleClick(repoRow);
+    expect(useAppStore.getState().historyScope.repoIds).toEqual(['repo']);
+
+    const branchRow = screen.getByText('feature/ui').closest('.branch-ref-row')!;
+    fireEvent.doubleClick(branchRow);
+
+    await waitFor(() => {
+      expect(useAppStore.getState().historyScope.repoIds).toEqual(['repo-2']);
+      expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ 'repo-2': 'refs/heads/feature/ui' });
+    });
+  });
+
+  it('preserves shared branch filter selection when scoped to a single repository', async () => {
+    const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
+    useAppStore.setState({
+      bootstrap: bootstrap(false, false),
+      snapshot: { ...snapshot, repositories: [snapshot.repositories[0], secondRepo] },
+      selectedRepoId: 'repo',
+      branchesByRepo: {
+        repo: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+        'repo-2': [{ name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+      },
+      tagsByRepo: { repo: [], 'repo-2': [] },
+    });
+    render(<HistoryWorkspace />);
+
+    const repoRow = screen.getByText('Repo').closest('.branch-repo-row')!;
+    fireEvent.doubleClick(repoRow);
+    expect(useAppStore.getState().historyScope.repoIds).toEqual(['repo']);
+
+    const mainBranchRow = screen.getByText('main').closest('.branch-ref-row')!;
+    fireEvent.doubleClick(mainBranchRow);
+
+    await waitFor(() => {
+      expect(useAppStore.getState().historyScope.repoIds).toEqual(['repo']);
+      expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ repo: 'refs/heads/main' });
+      expect(mainBranchRow.classList.contains('filtered')).toBe(true);
+    });
+  });
+
   it('merges branch instances and only exposes shared, current, or mainline branches by default', () => {
     const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
     const branches = {
@@ -361,5 +444,111 @@ describe('HistoryWorkspace data helpers', () => {
     expect(src.name).toBe('src/deep/components');
     expect(src.fileCount).toBe(2);
     expect(tree.find((node) => node.name === 'README.md')?.fileCount).toBe(1);
+  });
+
+  it('connects branch double-click in HistoryWorkspace to filter history by canonical revision ref and highlight sidebar row', async () => {
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true),
+      snapshot,
+      selectedRepoId: 'repo',
+      branchesByRepo: {
+        repo: [
+          { name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+          { name: 'feature/ui', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
+        ],
+      },
+      tagsByRepo: { repo: [] },
+    });
+
+    render(<HistoryWorkspace />);
+    const branchRow = screen.getByText('feature/ui').closest('.branch-ref-row')!;
+    expect(branchRow).not.toHaveClass('filtered');
+
+    fireEvent.doubleClick(branchRow);
+
+    await waitFor(() => {
+      expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ repo: 'refs/heads/feature/ui' });
+    });
+    expect(branchRow).toHaveClass('filtered');
+  });
+
+  it('keeps all repositories and their branches in sidebar when repository filter is active', () => {
+    const secondRepo = {
+      ...snapshot.repositories[0],
+      meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' },
+    };
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true),
+      snapshot: { ...snapshot, repositories: [snapshot.repositories[0], secondRepo] },
+      selectedRepoId: 'repo',
+      branchesByRepo: {
+        repo: [{ name: 'main', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+        'repo-2': [{ name: 'feature/second', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 }],
+      },
+      tagsByRepo: { repo: [], 'repo-2': [] },
+    });
+
+    render(<HistoryWorkspace />);
+
+    // Both repos are rendered in repo list
+    expect(screen.getByText('Repo')).toBeInTheDocument();
+    expect(screen.getByText('Repo 2')).toBeInTheDocument();
+
+    // Double-click Repo 1 to filter by Repo 1
+    fireEvent.doubleClick(screen.getByText('Repo'));
+
+    // Even though Repo 1 is filtered, Repo 2's branch remains in the sidebar!
+    expect(screen.getByText('feature/second')).toBeInTheDocument();
+    expect(screen.getByText('main')).toBeInTheDocument();
+  });
+
+  it('renders SUB badge on submodule repositories with informative title', () => {
+    const submoduleRepo = {
+      ...snapshot.repositories[0],
+      meta: { ...snapshot.repositories[0].meta, id: 'sub-repo', name: 'SubRepo', isSubmodule: true },
+    };
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true),
+      snapshot: { ...snapshot, repositories: [snapshot.repositories[0], submoduleRepo] },
+      selectedRepoId: 'repo',
+      branchesByRepo: { repo: [], 'sub-repo': [] },
+      tagsByRepo: { repo: [], 'sub-repo': [] },
+    });
+
+    render(<HistoryWorkspace />);
+    const subBadge = screen.getByText('SUB');
+    expect(subBadge).toBeInTheDocument();
+    expect(subBadge).toHaveClass('branch-submodule-badge');
+    expect(subBadge).toHaveAttribute('title', 'Submodule');
+  });
+
+  it('merges multi-repo tags across all associated repository instances', async () => {
+    const tagOperation = vi.fn().mockResolvedValue(undefined);
+    const secondRepo = {
+      ...snapshot.repositories[0],
+      meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' },
+    };
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true),
+      snapshot: { ...snapshot, repositories: [snapshot.repositories[0], secondRepo] },
+      selectedRepoId: 'repo',
+      branchesByRepo: { repo: [], 'repo-2': [] },
+      tagsByRepo: {
+        repo: [{ name: 'v2.0', hash: 'abc', date: '' }],
+        'repo-2': [{ name: 'v2.0', hash: 'def', date: '' }],
+      },
+      tagOperation,
+    });
+
+    render(<BranchSidebar repoFilter={new Set()} refFilter={new Set()} onRepoFilter={vi.fn()} onRefFilter={vi.fn()} onCompare={vi.fn()} onCollapse={vi.fn()} />);
+
+    const tagRow = screen.getByText('v2.0').closest('.branch-ref-row')!;
+    fireEvent.contextMenu(tagRow);
+    fireEvent.click(screen.getByText('Merge into current'));
+
+    await waitFor(() => {
+      expect(tagOperation).toHaveBeenCalledWith({ type: 'merge', name: 'v2.0' }, 'repo');
+      expect(tagOperation).toHaveBeenCalledWith({ type: 'merge', name: 'v2.0' }, 'repo-2');
+    });
   });
 });

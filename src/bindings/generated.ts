@@ -1256,7 +1256,7 @@ export type TagInfo = {
 	date: string,
 };
 
-export type TagOperation = { type: "create"; name: string; revision: string | null } | { type: "delete"; name: string } | { type: "checkout"; name: string } | { type: "merge"; name: string } | { type: "push"; name: string; remote: string };
+export type TagOperation = { type: "create"; name: string; revision: string | null } | { type: "delete"; name: string; remote: string | null } | { type: "checkout"; name: string } | { type: "merge"; name: string } | { type: "push"; name: string; remote: string };
 
 export type ThemePreference = "system" | "dark2026" | "light2026" | "githubDarkDimmed" | "oneDarkPro" | "dracula" | "nord" | "light" | "dark";
 

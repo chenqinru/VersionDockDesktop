@@ -647,7 +647,7 @@ async fn read_capped<R: AsyncRead + Unpin>(
     mut reader: R,
 ) -> Result<(Vec<u8>, bool), std::io::Error> {
     let mut output = Vec::with_capacity(64 * 1024);
-    let mut buffer = [0_u8; 16 * 1024];
+    let mut buffer = vec![0_u8; 16 * 1024];
     let mut exceeded = false;
     loop {
         let read = reader.read(&mut buffer).await?;

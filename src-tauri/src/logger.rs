@@ -96,7 +96,15 @@ pub fn log_entry(
     duration_ms: Option<u32>,
     exit_code: Option<i32>,
 ) {
-    log_entry_with_cwd(level, channel, message, details, duration_ms, exit_code, None);
+    log_entry_with_cwd(
+        level,
+        channel,
+        message,
+        details,
+        duration_ms,
+        exit_code,
+        None,
+    );
 }
 
 pub fn log_entry_with_cwd(

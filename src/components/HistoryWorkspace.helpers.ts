@@ -1,7 +1,7 @@
 import type { BranchInfo, CommitFile, RepositoryStatus } from '../bindings/generated';
 import { branchRevisionRef, tagRevisionRef } from '../history/refs';
 
-type BranchInstance = { repoId: string; repo: RepositoryStatus; branch: BranchInfo };
+export type BranchInstance = { repoId: string; repo: RepositoryStatus; branch: BranchInfo };
 export type MergedBranch = { name: string; instances: BranchInstance[]; current: boolean; remote: boolean };
 
 const MAINLINE_BRANCH = /^(main|master|prod|develop|dev|release)(?:[/-].*)?$/i;
@@ -30,6 +30,7 @@ export type SidebarBranch = {
 export type SidebarTag = {
   key: string;
   name: string;
+  ref: string;
   instances: Array<{ repo: RepositoryStatus; tag: { name: string; hash: string; date: string } }>;
   repoIds: string[];
   vcsKind: 'git' | 'svn';
@@ -62,11 +63,11 @@ export function buildHistoryRefOptions(
   tagsByRepo: Readonly<Record<string, ReadonlyArray<{ name: string }>>>,
 ): HistoryRefOption[] {
   const values = new Map<string, HistoryRefOption>();
-  const add = (id: string, icon: string, repoId: string, revision: string) => {
+  const add = (id: string, label: string, icon: string, repoId: string, revision: string) => {
     const current = values.get(id);
     values.set(id, {
       id,
-      label: id,
+      label,
       icon,
       repoIds: current ? [...new Set([...current.repoIds, repoId])] : [repoId],
       revisionsByRepo: { ...current?.revisionsByRepo, [repoId]: revision },
@@ -74,10 +75,14 @@ export function buildHistoryRefOptions(
   };
   for (const repo of repos) {
     for (const branch of branchesByRepo[repo.meta.id] ?? []) {
-      add(branch.name, branch.remote ? 'cloud' : 'git-branch', repo.meta.id, branchRevisionRef({ name: branch.name, isRemote: branch.remote }, repo.meta.kind));
+      if (!branch.remote && branch.name === 'HEAD') continue;
+      if (branch.remote && branchBaseName(branch) === 'HEAD') continue;
+      const revision = branchRevisionRef({ name: branch.name, isRemote: branch.remote }, repo.meta.kind);
+      add(revision, branch.name, branch.remote ? 'cloud' : 'git-branch', repo.meta.id, revision);
     }
     for (const tag of tagsByRepo[repo.meta.id] ?? []) {
-      add(tag.name, 'tag', repo.meta.id, tagRevisionRef(tag.name, repo.meta.kind));
+      const revision = tagRevisionRef(tag.name, repo.meta.kind);
+      add(revision, tag.name, 'tag', repo.meta.id, revision);
     }
   }
   return [...values.values()].sort((left, right) => left.label.localeCompare(right.label));
@@ -105,7 +110,9 @@ function mergeSidebarBranches(
   for (const repo of repos) {
     for (const branch of branchesByRepo[repo.meta.id] ?? []) {
       if (branch.remote !== remote) continue;
+      if (!remote && branch.name === 'HEAD') continue;
       const name = branchBaseName(branch);
+      if (remote && name === 'HEAD') continue;
       const remoteName = remote ? remoteNameFor(branch) : undefined;
       const ref = branchRevisionRef({ name: branch.name, isRemote: branch.remote }, repo.meta.kind);
       const searchable = `${branch.name} ${name} ${remoteName ?? ''}`.toLowerCase();
@@ -159,6 +166,7 @@ function mergeSidebarTags(
         values.set(key, {
           key,
           name: tag.name,
+          ref: tagRevisionRef(tag.name, repo.meta.kind),
           instances: [{ repo, tag }],
           repoIds: [repo.meta.id],
           vcsKind: repo.meta.kind,
@@ -194,6 +202,8 @@ export function mergeBranches(repos: RepositoryStatus[], branchesByRepo: Record<
   const seenInstances = new Set<string>();
   for (const repo of repos) for (const branch of branchesByRepo[repo.meta.id] ?? []) {
     if (branch.remote !== remote) continue;
+    if (!remote && branch.name === 'HEAD') continue;
+    if (remote && branchBaseName(branch) === 'HEAD') continue;
     // Keep the remote namespace: within one repository, `origin/main` and
     // `upstream/main` are different refs and must never be merged together.
     const name = branch.name;

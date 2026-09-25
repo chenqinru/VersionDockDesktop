@@ -2614,7 +2614,7 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::commit_detail(&repo, &revision, token).await?)
+            json(Box::pin(vcs::commit_detail(&repo, &revision, token)).await?)
         }
         BridgeCommand::CommitMergeCommits {
             workspace_id,
@@ -2624,7 +2624,7 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::merge_commits(&repo, &revision, &parents, token).await?)
+            json(Box::pin(vcs::merge_commits(&repo, &revision, &parents, token)).await?)
         }
         BridgeCommand::CommitMergeParentFiles {
             workspace_id,

@@ -2477,7 +2477,15 @@ pub async fn sync(
     }
     if repo.kind == VcsKind::Git && matches!(action, SyncAction::Push) {
         return Ok(SyncResult {
-            output: git_push(repo, remote, force, settings.use_safe_force_push, token).await?,
+            output: git_push(
+                repo,
+                remote,
+                branch,
+                force,
+                settings.use_safe_force_push,
+                token,
+            )
+            .await?,
             update: None,
         });
     }
@@ -3088,6 +3096,7 @@ async fn update_summary(
 async fn git_push(
     repo: &RepositoryMeta,
     requested_remote: Option<String>,
+    requested_branch: Option<String>,
     force: bool,
     use_safe_force_push: bool,
     token: &CancellationToken,
@@ -3100,40 +3109,66 @@ async fn git_push(
             extra_args.push("--force".into());
         }
     }
-    if let Some(remote) = requested_remote {
-        validate_ref(&remote)?;
-        let mut args = vec!["push".into()];
-        args.extend(extra_args);
-        args.push(remote);
-        return Ok(git(args, repo, token).await?.stdout_text());
-    }
-    if git(
+    let target_branch = if let Some(branch_name) = requested_branch {
+        let clean = branch_name.trim_start_matches("refs/heads/").to_string();
+        if !clean.is_empty() {
+            validate_ref(&clean)?;
+            Some(clean)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let branch = if let Some(b) = target_branch {
+        b
+    } else {
+        let head_branch = git(
+            vec!["symbolic-ref".into(), "--short".into(), "HEAD".into()],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text()
+        .trim()
+        .to_string();
+        validate_ref(&head_branch)?;
+        head_branch
+    };
+
+    let has_upstream = git(
         vec![
             "rev-parse".into(),
             "--abbrev-ref".into(),
             "--symbolic-full-name".into(),
-            "@{upstream}".into(),
+            format!("{branch}@{{upstream}}"),
         ],
         repo,
         token,
     )
     .await
-    .is_ok()
-    {
+    .is_ok();
+
+    if let Some(remote) = requested_remote {
+        validate_ref(&remote)?;
+        let mut args = vec!["push".into()];
+        args.extend(extra_args);
+        if !has_upstream {
+            args.extend(["--set-upstream".into(), remote, branch]);
+        } else {
+            args.push(remote);
+            args.push(branch);
+        }
+        return Ok(git(args, repo, token).await?.stdout_text());
+    }
+
+    if has_upstream {
         let mut args = vec!["push".into()];
         args.extend(extra_args);
         return Ok(git(args, repo, token).await?.stdout_text());
     }
-    let branch = git(
-        vec!["symbolic-ref".into(), "--short".into(), "HEAD".into()],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text()
-    .trim()
-    .to_string();
-    validate_ref(&branch)?;
+
     let remotes = git(vec!["remote".into()], repo, token)
         .await?
         .stdout_text()
@@ -4817,7 +4852,7 @@ pub async fn commit_detail(
                 })?;
             let is_merge = commit.parents.len() >= 2;
             let (files, merge_parent_changes) = if is_merge {
-                let (combined_status, combined_stats, parent_changes) = tokio::try_join!(
+                let (combined_status, combined_stats) = tokio::try_join!(
                     async {
                         Ok::<String, DesktopError>(
                             git(
@@ -4858,8 +4893,9 @@ pub async fn commit_detail(
                             .stdout_text(),
                         )
                     },
-                    async { merge_parent_changes(repo, revision, &commit.parents, token).await },
                 )?;
+                let parent_changes =
+                    Box::pin(merge_parent_changes(repo, revision, &commit.parents, token)).await?;
                 (
                     parse_combined_diff_files(&combined_status, &parse_numstat_z(&combined_stats)),
                     parent_changes,
@@ -5048,41 +5084,32 @@ pub async fn merge_parent_changes(
 
     let mut changes = Vec::new();
     for (index, parent) in parents.iter().enumerate() {
-        let (metadata, changed_paths) = tokio::try_join!(
-            async {
-                Ok::<String, DesktopError>(
-                    git(
-                        vec![
-                            "show".into(),
-                            "-s".into(),
-                            "--format=%h%x00%an%x00%aI%x00%s".into(),
-                            parent.clone(),
-                        ],
-                        repo,
-                        token,
-                    )
-                    .await?
-                    .stdout_text(),
-                )
-            },
-            async {
-                Ok::<String, DesktopError>(
-                    git(
-                        vec![
-                            "diff".into(),
-                            "--name-only".into(),
-                            "-M".into(),
-                            parent.clone(),
-                            revision.into(),
-                        ],
-                        repo,
-                        token,
-                    )
-                    .await?
-                    .stdout_text(),
-                )
-            }
-        )?;
+        let metadata = git(
+            vec![
+                "show".into(),
+                "-s".into(),
+                "--format=%h%x00%an%x00%aI%x00%s".into(),
+                parent.clone(),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text();
+
+        let changed_paths = git(
+            vec![
+                "diff".into(),
+                "--name-only".into(),
+                "-M".into(),
+                parent.clone(),
+                revision.into(),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text();
 
         let meta_parts: Vec<&str> = metadata.trim_end().split('\0').collect();
         let short_hash = meta_parts
@@ -5330,7 +5357,7 @@ pub async fn branches(
             names
         })
         .unwrap_or_default();
-    Ok(raw
+    let mut items: Vec<BranchInfo> = raw
         .split(RECORD)
         .filter_map(|record| {
             let fields = record.trim().split(FIELD).collect::<Vec<_>>();
@@ -5349,7 +5376,86 @@ pub async fn branches(
                 detached_hash: None,
             })
         })
-        .collect())
+        .collect();
+
+    let has_current = items.iter().any(|b| b.current);
+    if !has_current {
+        let detached_tag = if let Ok(tag_out) = git(
+            vec![
+                "describe".into(),
+                "--tags".into(),
+                "--exact-match".into(),
+                "HEAD".into(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        {
+            let tag = tag_out.stdout_text().trim().to_string();
+            if !tag.is_empty() {
+                Some(tag)
+            } else {
+                None
+            }
+        } else if let Ok(tag_out) = git(
+            vec![
+                "tag".into(),
+                "--points-at".into(),
+                "HEAD".into(),
+                "--sort=-creatordate".into(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        {
+            let tag = tag_out
+                .stdout_text()
+                .lines()
+                .next()
+                .map(|line| line.trim().to_string())
+                .unwrap_or_default();
+            if !tag.is_empty() {
+                Some(tag)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let detached_hash = if detached_tag.is_none() {
+            if let Ok(hash_out) = git(vec!["rev-parse".into(), "HEAD".into()], repo, token).await {
+                let full = hash_out.stdout_text().trim().to_string();
+                if full.len() >= 8 {
+                    Some(full[..8].to_string())
+                } else if !full.is_empty() {
+                    Some(full)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        items.push(BranchInfo {
+            name: "HEAD".into(),
+            current: true,
+            remote: false,
+            remote_name: None,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            detached_tag,
+            detached_hash,
+        });
+    }
+
+    Ok(items)
 }
 
 fn remote_name_for_ref(ref_name: &str, remote_names: &[String]) -> Option<String> {
@@ -5548,21 +5654,70 @@ pub async fn branch_operation(
         }
         BranchOperation::Checkout { name } => {
             validate_ref(&name)?;
-            let remote_ref = git(
+            let is_local_ref = git(
                 vec![
                     "show-ref".into(),
                     "--verify".into(),
-                    format!("refs/remotes/{name}"),
+                    format!("refs/heads/{name}"),
                 ],
                 repo,
                 token,
             )
             .await
             .is_ok();
-            if remote_ref {
-                vec!["switch".into(), "--track".into(), name]
-            } else {
+            if is_local_ref {
                 vec!["switch".into(), name]
+            } else {
+                let is_remote_ref = git(
+                    vec![
+                        "show-ref".into(),
+                        "--verify".into(),
+                        format!("refs/remotes/{name}"),
+                    ],
+                    repo,
+                    token,
+                )
+                .await
+                .is_ok();
+                if is_remote_ref {
+                    let remotes = git(vec!["remote".into()], repo, token)
+                        .await
+                        .map(|out| {
+                            let mut list = out
+                                .stdout_text()
+                                .lines()
+                                .map(str::trim)
+                                .filter(|l| !l.is_empty())
+                                .map(String::from)
+                                .collect::<Vec<_>>();
+                            list.sort_by_key(|r| std::cmp::Reverse(r.len()));
+                            list
+                        })
+                        .unwrap_or_default();
+                    let local_name = remotes
+                        .iter()
+                        .find_map(|r| name.strip_prefix(&format!("{r}/")))
+                        .or_else(|| name.split_once('/').map(|(_, rest)| rest))
+                        .unwrap_or(&name);
+                    let local_exists = git(
+                        vec![
+                            "show-ref".into(),
+                            "--verify".into(),
+                            format!("refs/heads/{local_name}"),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await
+                    .is_ok();
+                    if local_exists {
+                        vec!["switch".into(), local_name.to_string()]
+                    } else {
+                        vec!["switch".into(), "--track".into(), name]
+                    }
+                } else {
+                    vec!["switch".into(), name]
+                }
             }
         }
         BranchOperation::Merge { name } => {
@@ -6185,7 +6340,7 @@ pub async fn tag_operation(
                     svn_repository_target(&format!("tags/{name}"))?,
                 ]
             }
-            TagOperation::Delete { name } => {
+            TagOperation::Delete { name, .. } => {
                 let target = svn_repository_target(&format!("tags/{name}"))?;
                 vec![
                     "delete".into(),
@@ -6242,9 +6397,19 @@ pub async fn tag_operation(
             }
             args
         }
-        TagOperation::Delete { name } => {
+        TagOperation::Delete { name, remote } => {
             validate_ref(&name)?;
-            vec!["tag".into(), "-d".into(), name]
+            if let Some(remote_name) = remote {
+                validate_ref(&remote_name)?;
+                vec![
+                    "push".into(),
+                    remote_name,
+                    "--delete".into(),
+                    format!("refs/tags/{name}"),
+                ]
+            } else {
+                vec!["tag".into(), "-d".into(), name]
+            }
         }
         TagOperation::Checkout { name } => {
             validate_ref(&name)?;
