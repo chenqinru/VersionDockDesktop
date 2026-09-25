@@ -171,7 +171,7 @@ export function ChangelistView({
             onRepoContext(e, singleRepoStatus);
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+          <div className="repo-heading-main" style={{ gap: 6 }}>
             <span
               style={{
                 width: 8,
@@ -194,6 +194,11 @@ export function ChangelistView({
             >
               {singleRepoStatus.meta.name}
             </strong>
+            {singleRepoStatus.meta.isSubmodule && (
+              <span className="submodule-badge" title={t('Submodule')}>
+                {t('SUB')}
+              </span>
+            )}
             <button
               type="button"
               className="repo-branch-trigger"
@@ -205,27 +210,18 @@ export function ChangelistView({
                 const rect = e.currentTarget.getBoundingClientRect();
                 setBranchMenuAnchor((cur) => (cur ? undefined : rect));
               }}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                margin: '0 0 0 4px',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-              }}
             >
               <BranchRefBadge label={singleRepoStatus.branch || singleRepoStatus.revision} kind={singleRepoStatus.meta.kind === 'svn' ? 'revision' : singleRepoStatus.meta.isWorktree ? 'worktree' : 'branch'} color={singleRepoStatus.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
             </button>
-            {branchMenuAnchor && (
-              <BranchMenuPopover
-                anchorRect={branchMenuAnchor}
-                initialRepoId={singleRepoStatus.meta.id}
-                repoOnly
-                onClose={() => setBranchMenuAnchor(undefined)}
-              />
-            )}
           </div>
+          {branchMenuAnchor && (
+            <BranchMenuPopover
+              anchorRect={branchMenuAnchor}
+              initialRepoId={singleRepoStatus.meta.id}
+              repoOnly
+              onClose={() => setBranchMenuAnchor(undefined)}
+            />
+          )}
         </div>
       )}
 

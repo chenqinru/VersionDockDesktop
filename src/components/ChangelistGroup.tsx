@@ -8,6 +8,8 @@ import { useI18n } from '../i18n';
 import { buildFileTree, type FileTreeNode } from './fileTree';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
 import { SelectionCheckbox } from './SelectionCheckbox';
+import { useAppStore } from '../store/appStore';
+import { hasMixedRepositoryKinds } from './repoLabel';
 
 export type ExpansionCommand = { sequence: number; expanded: boolean };
 
@@ -392,6 +394,7 @@ function RepoSubGroup({
   const branch = branchColor(repo.branch || repo.revision);
   const [hovered, setHovered] = useState(false);
   const [branchMenuAnchor, setBranchMenuAnchor] = useState<DOMRect | undefined>(undefined);
+  const mixedKinds = useAppStore((state) => hasMixedRepositoryKinds(state.snapshot?.repositories ?? []));
 
   return (
     <div className="repo-sub-group" style={{ margin: 0 }}>
@@ -416,37 +419,45 @@ function RepoSubGroup({
           disabled={selectableFiles.length === 0}
           onChange={() => setFiles(repo.meta.id, selectableFiles.map((f) => f.path), !allSelected)}
         />
-        <button
-          title={repo.meta.name}
-          onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
-        >
-          <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
-          <i style={{ background: repo.meta.color }} />
-          <strong>{repo.meta.name}</strong>
-        </button>
-        <button
-          type="button"
-          className="repo-branch-trigger"
-          title={t('Switch branch')}
-          aria-haspopup="menu"
-          aria-expanded={Boolean(branchMenuAnchor)}
-          onClick={(e) => {
-            e.stopPropagation();
-            const rect = e.currentTarget.getBoundingClientRect();
-            setBranchMenuAnchor((cur) => (cur ? undefined : rect));
-          }}
-          style={{
-            background: 'none',
-            border: 'none',
-            padding: 0,
-            margin: '0 0 0 4px',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-          }}
-        >
-          <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
-        </button>
+        <div className="repo-heading-main">
+          <button
+            type="button"
+            className="repo-heading-toggle"
+            title={repo.meta.name}
+            onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
+          >
+            <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
+            <i style={{ background: repo.meta.color }} />
+            <strong>{repo.meta.name}</strong>
+          </button>
+          {repo.meta.isSubmodule && (
+            <span className="submodule-badge" title={t('Submodule')}>
+              {t('SUB')}
+            </span>
+          )}
+          {mixedKinds && (
+            <span
+              className={`vcs-badge ${repo.meta.kind === 'svn' ? 'svn' : 'git'}`}
+              title={repo.meta.kind === 'svn' ? t('SVN working copy') : 'Git'}
+            >
+              {repo.meta.kind === 'svn' ? 'SVN' : 'GIT'}
+            </span>
+          )}
+          <button
+            type="button"
+            className="repo-branch-trigger"
+            title={t('Switch branch')}
+            aria-haspopup="menu"
+            aria-expanded={Boolean(branchMenuAnchor)}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              setBranchMenuAnchor((cur) => (cur ? undefined : rect));
+            }}
+          >
+            <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
+          </button>
+        </div>
         {branchMenuAnchor && (
           <BranchMenuPopover
             anchorRect={branchMenuAnchor}
@@ -455,7 +466,7 @@ function RepoSubGroup({
             onClose={() => setBranchMenuAnchor(undefined)}
           />
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
+        <div className="repo-actions">
           {files.length > 0 && (
             <button
               className="repo-open-changes"

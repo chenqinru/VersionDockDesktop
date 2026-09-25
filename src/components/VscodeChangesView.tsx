@@ -10,18 +10,6 @@ import type { FileChange, RepositoryStatus } from '../bindings/generated';
 import { StatusMark, type ExpansionCommand } from './ChangelistGroup';
 import { hasMixedRepositoryKinds } from './repoLabel';
 
-const vcsBadgeStyle = (kind: 'git' | 'svn'): React.CSSProperties => ({
-  fontSize: '9px',
-  fontWeight: 'bold',
-  letterSpacing: 0,
-  color: 'var(--versiondock-badge-foreground, #ffffff)',
-  background: kind === 'svn'
-    ? 'var(--vscode-charts-purple, #8957e5)'
-    : 'var(--vscode-charts-orange, #f05033)',
-  borderRadius: '3px',
-  padding: '1px 4px',
-  flexShrink: 0,
-});
 
 interface VscodeChangesViewProps {
   repos: RepositoryStatus[];
@@ -347,63 +335,44 @@ function SingleRepoHeader({
       } as React.CSSProperties}
       onContextMenu={(e) => onRepoContext(e, repo, false)}
     >
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+      <div className="repo-heading-main" style={{ gap: 6 }}>
         <i style={{ background: repo.meta.color, width: 8, height: 8, borderRadius: '50%', flexShrink: 0 }} />
         <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
           {repo.meta.name}
         </strong>
         {repo.meta.isSubmodule && (
-          <span
-            style={{
-              fontSize: 10,
-              padding: '1px 4px',
-              borderRadius: 3,
-              background: 'var(--vscode-badge-background, rgba(255, 255, 255, 0.1))',
-              color: 'var(--vscode-badge-foreground, inherit)',
-            }}
-            title={t('Submodule')}
-          >
+          <span className="submodule-badge" title={t('Submodule')}>
             {t('SUB')}
           </span>
         )}
         {showVcsBadge && (
           <span
-            style={vcsBadgeStyle(repo.meta.kind === 'svn' ? 'svn' : 'git')}
+            className={`vcs-badge ${repo.meta.kind === 'svn' ? 'svn' : 'git'}`}
             title={repo.meta.kind === 'svn' ? t('SVN working copy') : 'Git'}
           >
             {repo.meta.kind === 'svn' ? 'SVN' : 'GIT'}
           </span>
         )}
+        <button
+          type="button"
+          className="repo-branch-trigger"
+          title={t('Switch branch')}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(branchMenuAnchor)}
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            setBranchMenuAnchor((cur) => (cur ? undefined : rect));
+          }}
+        >
+          <BranchRefBadge
+            label={repo.branch || repo.revision}
+            kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'}
+            color={repo.meta.kind === 'svn' ? undefined : branchClr}
+            className="branch-chip"
+          />
+        </button>
       </div>
-      <button
-        type="button"
-        className="repo-branch-trigger"
-        title={t('Switch branch')}
-        aria-haspopup="menu"
-        aria-expanded={Boolean(branchMenuAnchor)}
-        onClick={(e) => {
-          e.stopPropagation();
-          const rect = e.currentTarget.getBoundingClientRect();
-          setBranchMenuAnchor((cur) => (cur ? undefined : rect));
-        }}
-        style={{
-          background: 'none',
-          border: 'none',
-          padding: 0,
-          margin: '0 0 0 4px',
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          flexShrink: 0,
-        }}
-      >
-        <BranchRefBadge
-          label={repo.branch || repo.revision}
-          kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'}
-          color={repo.meta.kind === 'svn' ? undefined : branchClr}
-          className="branch-chip"
-        />
-      </button>
       {branchMenuAnchor && (
         <BranchMenuPopover
           anchorRect={branchMenuAnchor}
@@ -542,66 +511,50 @@ function VscodeRepoSection({
             }}
           />
         )}
-        <button
-          title={repo.meta.name}
-          onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
-        >
-          <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
-          <i style={{ background: repo.meta.color }} />
-          <strong>{repo.meta.name}</strong>
-        </button>
-        {repo.meta.isSubmodule && (
-          <span
-            style={{
-              fontSize: 10,
-              padding: '1px 4px',
-              borderRadius: 3,
-              background: 'var(--vscode-badge-background, rgba(255, 255, 255, 0.1))',
-              color: 'var(--vscode-badge-foreground, inherit)',
-              marginLeft: 4,
-              flexShrink: 0,
+        <div className="repo-heading-main">
+          <button
+            type="button"
+            className="repo-heading-toggle"
+            title={repo.meta.name}
+            onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
+          >
+            <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
+            <i style={{ background: repo.meta.color }} />
+            <strong>{repo.meta.name}</strong>
+          </button>
+          {repo.meta.isSubmodule && (
+            <span className="submodule-badge" title={t('Submodule')}>
+              {t('SUB')}
+            </span>
+          )}
+          {showVcsBadge && (
+            <span
+              className={`vcs-badge ${repo.meta.kind === 'svn' ? 'svn' : 'git'}`}
+              title={repo.meta.kind === 'svn' ? t('SVN working copy') : 'Git'}
+            >
+              {repo.meta.kind === 'svn' ? 'SVN' : 'GIT'}
+            </span>
+          )}
+          <button
+            type="button"
+            className="repo-branch-trigger"
+            title={t('Switch branch')}
+            aria-haspopup="menu"
+            aria-expanded={Boolean(branchMenuAnchor)}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              setBranchMenuAnchor((cur) => (cur ? undefined : rect));
             }}
-            title={t('Submodule')}
           >
-            {t('SUB')}
-          </span>
-        )}
-        {showVcsBadge && (
-          <span
-            style={{ ...vcsBadgeStyle(repo.meta.kind === 'svn' ? 'svn' : 'git'), marginLeft: 4 }}
-            title={repo.meta.kind === 'svn' ? t('SVN working copy') : 'Git'}
-          >
-            {repo.meta.kind === 'svn' ? 'SVN' : 'GIT'}
-          </span>
-        )}
-        <button
-          type="button"
-          className="repo-branch-trigger"
-          title={t('Switch branch')}
-          aria-haspopup="menu"
-          aria-expanded={Boolean(branchMenuAnchor)}
-          onClick={(e) => {
-            e.stopPropagation();
-            const rect = e.currentTarget.getBoundingClientRect();
-            setBranchMenuAnchor((cur) => (cur ? undefined : rect));
-          }}
-          style={{
-            background: 'none',
-            border: 'none',
-            padding: 0,
-            margin: '0 0 0 4px',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-          }}
-        >
-          <BranchRefBadge
-            label={repo.branch || repo.revision}
-            kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'}
-            color={repo.meta.kind === 'svn' ? undefined : branchClr}
-            className="branch-chip"
-          />
-        </button>
+            <BranchRefBadge
+              label={repo.branch || repo.revision}
+              kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'}
+              color={repo.meta.kind === 'svn' ? undefined : branchClr}
+              className="branch-chip"
+            />
+          </button>
+        </div>
         {branchMenuAnchor && (
           <BranchMenuPopover
             anchorRect={branchMenuAnchor}

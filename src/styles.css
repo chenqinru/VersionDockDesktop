@@ -3196,14 +3196,31 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .repo-change-group:last-child { border-bottom: 0; }
 .repo-heading { width: 100%; min-width: 0; height: 26px; padding: 0 8px; display: flex; align-items: center; gap: 0; overflow: hidden; white-space: nowrap; background: color-mix(in srgb, var(--versiondock-surface-alt) 72%, transparent); }
 .repo-heading > .selection-checkbox { flex: 0 0 auto; margin: 0 2px 0 0; }
-.repo-heading > button { min-width: 0; flex: 1; height: 100%; padding: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-align: left; }
+.repo-heading > button:not(.repo-branch-trigger):not(.repo-heading-toggle) { min-width: 0; flex: 1; height: 100%; padding: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-align: left; }
 .repo-heading > button:not(:disabled):hover { background: transparent; }
 .repo-heading > button > .codicon { flex: 0 0 auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
-.repo-heading i { width: 8px; height: 8px; flex: 0 0 8px; }
+.repo-heading-main { min-width: 0; flex: 1; height: 100%; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; }
+.repo-heading-toggle { min-width: 20px; flex: 0 1 auto; height: 100%; padding: 0; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-align: left; background: transparent; border: 0; color: inherit; cursor: pointer; }
+.repo-heading-toggle:not(:disabled):hover { background: transparent; }
+.repo-heading-toggle > .codicon { flex: 0 0 auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.repo-heading-toggle > i,
+.repo-heading i { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
+.repo-heading-toggle > strong,
 .repo-heading strong { min-width: 20px; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); letter-spacing: .05em; }
+.repo-heading-main .submodule-badge,
+.repo-heading .submodule-badge { font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--versiondock-badge-foreground, #fff); background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); border-radius: 3px; padding: 1px 4px; flex-shrink: 0; line-height: 12px; }
+.repo-heading-main .vcs-badge,
+.repo-heading .vcs-badge { font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: 0; color: var(--versiondock-badge-foreground, #fff); border-radius: 3px; padding: 1px 4px; flex-shrink: 0; line-height: 12px; }
+.repo-heading-main .vcs-badge.svn,
+.repo-heading .vcs-badge.svn { background: var(--vscode-charts-purple, #8957e5); }
+.repo-heading-main .vcs-badge.git,
+.repo-heading .vcs-badge.git { background: var(--vscode-charts-orange, #f05033); }
+.repo-heading .repo-branch-trigger { min-width: 0; max-width: 160px; flex: 0 1 auto; height: 100%; display: inline-flex; align-items: center; margin-left: 4px; padding: 0; background: transparent; border: 0; color: inherit; cursor: pointer; overflow: hidden; }
+.repo-heading .repo-branch-trigger:hover { background: transparent; }
 .repo-heading .branch-chip { min-width: 0; max-width: 160px; height: 19px; flex: 0 1 auto; align-items: center; padding: 0 5px; border: 1px solid; border-radius: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; overflow: hidden; white-space: nowrap; }
 .repo-heading .branch-chip > .codicon { flex: 0 0 auto; }
 .repo-heading .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-heading .repo-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .repo-heading > b { min-width: 18px; height: 16px; flex: 0 0 auto; padding: 0 5px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 16px; text-align: center; }
 .file-row, .directory-row { height: 22px; min-height: 22px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 22px; user-select: none; -webkit-user-select: none; }
 .file-row { min-width: 0; display: flex; align-items: center; gap: 3px; padding-right: 8px; overflow: hidden; white-space: nowrap; }
