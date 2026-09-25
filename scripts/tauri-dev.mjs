@@ -6,23 +6,22 @@ const platformConfig = `src-tauri/tauri.${platform}.conf.json`;
 const npmCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const args = ['tauri', 'dev'];
 const rawAppArgs = process.argv.slice(2);
-const watchSources = rawAppArgs.includes('--watch');
-const appArgs = rawAppArgs.filter((argument) => argument !== '--watch');
+const stableSession = rawAppArgs.includes('--stable');
+// Accept the former --watch switch as a no-op for existing launch commands.
+const appArgs = rawAppArgs.filter((argument) => argument !== '--stable' && argument !== '--watch');
 
 if (existsSync(platformConfig)) args.push('--config', platformConfig);
 args.push('--config', 'src-tauri/tauri.dev.conf.json');
-// VersionDock is commonly used to operate on its own checkout while developing.
-// Stash/checkout/reset then changes the source files backing the running app.
-// Keep the default self-hosted session stable; opt into traditional hot reload
-// with `npm run tauri:dev -- --watch` when source watching is desired.
-if (!watchSources) args.push('--no-watch');
+// When VersionDock operates on its own checkout, stash/checkout/reset can change
+// the running app's source files. Opt into a stable session for that workflow.
+if (stableSession) args.push('--no-watch');
 if (appArgs.length > 0) args.push('--', '--', ...appArgs);
 
 const child = spawn(npmCommand, args, {
   stdio: 'inherit',
   env: {
     ...process.env,
-    VERSIONDOCK_STABLE_DEV: watchSources ? '0' : '1',
+    VERSIONDOCK_STABLE_DEV: stableSession ? '1' : '0',
   },
 });
 child.on('error', (error) => { console.error(error); process.exitCode = 1; });

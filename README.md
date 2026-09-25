@@ -65,6 +65,8 @@ npm install
 npm run tauri:dev
 ```
 
+开发模式默认监听前端和 Rust 源码：前端修改通过 Vite 热更新，Rust 修改由 Tauri 重新编译并重启应用。如果正在用 VersionDock 操作自身仓库，且需要避免 checkout 等操作触发重载，可用 `npm run tauri:dev -- --stable` 暂时关闭监听。
+
 前端 UI 服务可单独启动（仅用于 UI 样式调试，真实仓库操作需通过 Tauri 运行）：
 ```bash
 npm run dev

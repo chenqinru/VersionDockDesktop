@@ -61,6 +61,8 @@ npm install
 npm run tauri:dev
 ```
 
+Development mode watches frontend and Rust sources by default. Vite hot reloads frontend changes; Tauri rebuilds and restarts the app after Rust changes. When using VersionDock on its own checkout, run `npm run tauri:dev -- --stable` to avoid reloads during operations such as checkout.
+
 ---
 
 ## 🧪 Testing & Quality Gates
