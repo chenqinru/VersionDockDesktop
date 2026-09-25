@@ -257,4 +257,31 @@ describe('CommitDetailPanel merge commits', () => {
       { fromRevision: 'parent22222222', toRevision: 'merge1234567890' },
     );
   });
+
+  it('shows expand button and allows toggling for long subjects (>25 chars) even without body', () => {
+    const longSubject = 'chore(quick-applications): 注释掉大模型 API 续期配置以简化代码结构';
+    const longDetail: CommitDetail = {
+      ...mergeDetail,
+      commit: { ...mergeCommit, message: longSubject },
+      fullMessage: longSubject,
+    };
+    useAppStore.setState({
+      snapshot,
+      selectedCommit: longDetail,
+      selectedCommits: [longDetail.commit],
+      selectedCommitDetails: { 'repo-1:merge1234567890': longDetail },
+    });
+
+    render(<CommitDetailPanel onCollapse={vi.fn()} />);
+
+    const expandBtn = screen.getByRole('button', { name: /Click to expand/ });
+    expect(expandBtn).toBeInTheDocument();
+
+    const titleEl = screen.getByText(longSubject);
+    expect(titleEl).not.toHaveClass('expanded');
+
+    fireEvent.click(expandBtn);
+    expect(titleEl).toHaveClass('expanded');
+    expect(screen.getByRole('button', { name: /Click to collapse/ })).toBeInTheDocument();
+  });
 });

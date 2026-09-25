@@ -572,21 +572,40 @@ function CommitMessage({
   const { t } = useI18n();
   const { subject, body } = splitCommitMessage(detail);
   const hasBody = body.length > 0;
+  const canExpand = hasBody || subject.length > 25;
+  const fullMessageTooltip = detail.fullMessage.trim() || detail.commit.message || subject;
+
+  const handleTitleClick = () => {
+    if (!canExpand) return;
+    if ((window.getSelection()?.toString() || '').length === 0) {
+      toggle();
+    }
+  };
 
   return (
-    <div className="detail-message-card">
-      <div className="detail-message-title">
-        <strong className={expanded ? 'expanded' : ''} title={subject}>
+    <div className="detail-message-card" title={fullMessageTooltip}>
+      <div
+        className="detail-message-title"
+        style={{ cursor: canExpand ? 'pointer' : 'default' }}
+        onClick={handleTitleClick}
+      >
+        <strong className={expanded ? 'expanded' : ''} title={fullMessageTooltip}>
           {subject}
         </strong>
-        {hasBody && (
+        {canExpand ? (
           <button
             type="button"
             title={expanded ? t('Click to collapse') : t('Click to expand')}
-            onClick={toggle}
+            aria-expanded={expanded}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggle();
+            }}
           >
             <Codicon name={expanded ? 'chevron-up' : 'chevron-down'} />
           </button>
+        ) : (
+          <span className="detail-message-expand-placeholder" aria-hidden="true" />
         )}
       </div>
       {expanded && hasBody && <pre>{body}</pre>}
@@ -687,13 +706,13 @@ function ExtendedCommitSummary({
 function AuthorMeta({ commit }: { commit: CommitNode }) {
   return (
     <div className="detail-author-meta">
-      <AuthorAvatar name={commit.author} email={commit.email} repoId={commit.repoId} size={36} />
+      <AuthorAvatar name={commit.author} email={commit.email} repoId={commit.repoId} size={20} />
       <span className="detail-author-line">
         <strong>{commit.author}</strong>
         <i>·</i>
         <time>{formatDate(commit.authorDate || commit.committerDate)}</time>
         <i>·</i>
-        <code><Codicon name="git-commit" />{commit.shortHash}</code>
+        <code title={commit.hash}><Codicon name="git-commit" />{commit.shortHash}</code>
       </span>
     </div>
   );

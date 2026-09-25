@@ -36,7 +36,7 @@ const settingsCategories = [
   { id: 'settings-section-refresh-title', sectionId: 'settings-section-refresh', icon: 'sync', label: 'Refresh and startup' },
   { id: 'settings-section-repository-title', sectionId: 'settings-section-repository', icon: 'repo', label: 'Repository and history' },
   { id: 'settings-section-external-editor-title', sectionId: 'settings-section-external-editor', icon: 'terminal', label: 'External editor' },
-  { id: 'settings-section-accounts-title', sectionId: 'settings-section-accounts', icon: 'accounts-view-bar-icon', label: 'Accounts and privacy' },
+  { id: 'settings-section-accounts-title', sectionId: 'settings-section-accounts', icon: 'account', label: 'Accounts and privacy' },
   { id: 'settings-section-about-title', sectionId: 'settings-section-about', icon: 'info', label: 'About and updates' },
 ] as const;
 
@@ -640,7 +640,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </SettingsSection>
                 )}
 
-                {activeCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="accounts-view-bar-icon" title={t('Accounts and privacy')}>
+                {activeCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="account" title={t('Accounts and privacy')}>
                   <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub, GitLab, and Gitee accounts')}</button></SettingsCard>
                   <SettingsCard title={t('Author avatars')}>
                     <SettingToggle label={t('Online author avatars')} description={t('Resolve remote provider addresses to author avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false, avatarCrossPlatformFallback: false } : {}) })} />

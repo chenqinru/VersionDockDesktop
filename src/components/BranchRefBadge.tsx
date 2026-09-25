@@ -53,6 +53,7 @@ export function BranchRefBadge({
       fontWeight: kind === 'head' ? 700 : compact ? 500 : 600,
       lineHeight: compact ? '16px' : undefined,
       whiteSpace: 'nowrap',
+      ['--ref-color' as any]: resolvedColor,
       ...style,
     }}
   >

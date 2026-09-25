@@ -22,7 +22,7 @@
   --versiondock-danger: #F28772;
   --versiondock-warning: #CCA700;
   --versiondock-input: #191A1B;
-  --versiondock-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --versiondock-code: Menlo, Monaco, "Courier New", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --vscode-editor-background: var(--versiondock-bg);
   --vscode-editor-foreground: var(--versiondock-text);
   --vscode-foreground: var(--versiondock-text);
@@ -59,6 +59,7 @@
   --vscode-menu-border: var(--versiondock-border);
   --vscode-menu-foreground: var(--versiondock-text);
   --vscode-menu-separatorBackground: var(--versiondock-border-soft);
+  --vscode-textCodeBlock-background: var(--versiondock-input);
 }
 
 :root[data-theme="githubDarkDimmed"] {
@@ -173,6 +174,7 @@
   --versiondock-danger: #ad0707;
   --versiondock-warning: #B69500;
   --versiondock-input: #FFFFFF;
+  --vscode-textCodeBlock-background: rgba(0, 0, 0, 0.035);
 }
 
 :root[data-theme="light"] {
@@ -192,12 +194,13 @@
   --versiondock-danger: #c72e0f;
   --versiondock-warning: #895503;
   --versiondock-input: #ffffff;
+  --vscode-textCodeBlock-background: rgba(0, 0, 0, 0.035);
 }
 
 :root[data-theme="light"] .detail-message-card,
 :root[data-theme="light2026"] .detail-message-card {
-  background: var(--versiondock-surface);
-  border: 0;
+  background: var(--vscode-textCodeBlock-background);
+  border: 1px solid var(--vscode-panel-border, var(--versiondock-border));
 }
 
 :root[data-theme="light"] .detail-message-title strong,
@@ -3564,16 +3567,16 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-repo-row { min-height: 22px; display: flex; align-items: center; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; letter-spacing: .045em; text-transform: uppercase; }
 .detail-repo-row span { display: flex; align-items: center; gap: 6px; }
 .detail-repo-row i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
-.detail-message-card { margin: 5px 0 8px; padding: 7px 8px; background: var(--versiondock-input); border: 0; border-radius: 4px; }
-.detail-message-title { min-width: 0; display: flex; align-items: flex-start; gap: 6px; }
-.detail-message-title strong { min-width: 0; flex: 1; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 1.45; font-weight: 600; }
-.detail-message-title button { width: 20px; height: 20px; flex: 0 0 20px; color: var(--versiondock-muted); }
+.detail-message-card { margin: 2px 0 3px; padding: 10px 12px; border: 1px solid var(--vscode-panel-border, var(--versiondock-border)); border-radius: 4px; background: var(--vscode-textCodeBlock-background, var(--vscode-input-background)); }
+.detail-message-title { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.detail-message-title strong { min-width: 0; flex: 1; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 1.45; font-weight: 400; }
+.detail-message-title button { width: 18px; height: 18px; flex: 0 0 18px; color: var(--versiondock-muted); }
 .detail-message-title button:hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
-.detail-message-card pre { margin: 7px 0 0; padding-top: 7px; border-top: 1px solid var(--versiondock-border-soft); white-space: pre-wrap; color: var(--versiondock-muted); font: calc(11px * var(--versiondock-ui-font-scale, 1))/1.5 var(--versiondock-code); }
+.detail-message-card pre { margin-top: 8px; padding-top: 0; border-top: 0; white-space: pre-wrap; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); word-break: break-word; user-select: text; }
 .detail-author-meta { min-width: 0; display: flex; align-items: center; gap: 6px; margin-top: 3px; margin-bottom: 5px; }
 .detail-author-meta .avatar { width: 20px; height: 20px; flex: 0 0 20px; overflow: hidden; font-size: calc(8px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1; }
 .detail-author-line { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.detail-author-line strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.detail-author-line strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; color: var(--versiondock-muted); }
 .detail-author-line i { color: var(--versiondock-muted); font-style: normal; }
 .detail-author-line time { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--versiondock-muted); }
 .detail-author-line code { min-width: 0; display: inline-flex; align-items: center; gap: 3px; overflow: hidden; text-overflow: ellipsis; color: var(--versiondock-muted); font: calc(10px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }
@@ -3581,9 +3584,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-refs { margin: 0; }
 .detail-refs em { height: 18px; padding: 0 5px; display: inline-flex; align-items: center; gap: 3px; border-radius: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); line-height: 16px; }
 .detail-refs em .codicon { font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
-.detail-refs em.head { color: var(--versiondock-warning); border-color: color-mix(in srgb, var(--versiondock-warning) 65%, transparent); background: color-mix(in srgb, var(--versiondock-warning) 12%, transparent); }
-.detail-refs em.remote { color: var(--versiondock-accent); border-color: color-mix(in srgb, var(--versiondock-accent) 50%, transparent); background: color-mix(in srgb, var(--versiondock-accent) 10%, transparent); }
-.detail-refs em.tag { color: var(--versiondock-warning); border-color: color-mix(in srgb, var(--versiondock-warning) 50%, transparent); background: color-mix(in srgb, var(--versiondock-warning) 10%, transparent); }
+.detail-refs em.head { color: var(--ref-color, var(--versiondock-warning)); border-color: color-mix(in srgb, var(--ref-color, var(--versiondock-warning)) 65%, transparent); background: color-mix(in srgb, var(--ref-color, var(--versiondock-warning)) 12%, transparent); }
+.detail-refs em.remote { color: var(--ref-color, var(--versiondock-accent)); border-color: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 50%, transparent); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 10%, transparent); }
+.detail-refs em.tag { color: var(--ref-color, var(--versiondock-warning)); border-color: color-mix(in srgb, var(--ref-color, var(--versiondock-warning)) 50%, transparent); background: color-mix(in srgb, var(--ref-color, var(--versiondock-warning)) 10%, transparent); }
 .detail-aggregate-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .aggregate-item { padding: 8px 0 12px; border-top: 0; }
 .aggregate-item + .aggregate-item { border-top: 1px solid var(--versiondock-border-soft); }
@@ -3647,17 +3650,19 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .detail-root-label > .codicon { width: 14px; flex: 0 0 14px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .detail-tree-dir > button, .detail-file-row { min-height: 22px; height: 22px; padding-top: 2px; padding-bottom: 2px; }
 .detail-summary .detail-toolbar { flex: 0 0 22px; height: 22px; margin: 0 0 2px; padding: 0; border-bottom: 0; }
-.detail-summary .detail-toolbar-label { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); gap: 4px; }
+.detail-summary .detail-toolbar-label { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; gap: 4px; }
 .detail-single { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.detail-message-card { margin: 2px 0 3px; padding: 10px 12px; border: 0; }
-.detail-message-title { display: flex; align-items: center; gap: 8px; }
+.detail-message-card { margin: 2px 0 3px; padding: 10px 12px; border: 1px solid var(--vscode-panel-border, var(--versiondock-border)); border-radius: 4px; background: var(--vscode-textCodeBlock-background, var(--vscode-input-background)); }
+.detail-message-title { display: flex; align-items: center; gap: 8px; user-select: text; }
 .detail-message-title strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-text); font: 400 calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); }
-.detail-message-title strong.expanded { white-space: normal; word-break: break-word; }
-.detail-message-title button { width: 18px; height: 18px; padding: 0; flex: 0 0 18px; }
-.detail-message-card pre { margin-top: 8px; padding-top: 0; border-top: 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); }
-.detail-refs { margin: 0; }
-.detail-refs em { height: 16px; padding: 0 6px; line-height: 16px; }
-.detail-refs em:not(.overflow) { color: var(--ref-color, var(--versiondock-accent)); border-color: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 55%, transparent); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 20%, transparent); }
+.detail-message-title strong.expanded { white-space: pre-wrap; word-break: break-word; overflow: visible; }
+.detail-message-title button { width: 18px; height: 18px; padding: 0; flex: 0 0 18px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.detail-message-title button .codicon { font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.detail-message-title button:hover { background: var(--versiondock-hover); }
+.detail-message-expand-placeholder { width: 18px; height: 18px; flex: 0 0 18px; }
+.detail-message-card pre { margin-top: 8px; padding-top: 0; border-top: 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); white-space: pre-wrap; word-break: break-word; user-select: text; }
+.detail-refs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.detail-refs em { height: 16px; padding: 0 6px; line-height: 16px; border-radius: 3px; }
 .detail-ref-overflow { height: 18px; padding: 0 5px; color: var(--versiondock-muted); border: 1px solid var(--versiondock-border); border-radius: 3px; background: transparent; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .detail-ref-overflow:hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
 .detail-ref-overflow.expanded { width: 100%; margin-top: 2px; justify-content: center; }
@@ -5752,9 +5757,12 @@ button.notification-item-action-btn:focus-visible {
 /* Settings 面板关于操作按钮 */
 .settings-about-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
+  max-width: 100%;
 }
 
 .settings-action-btn {
@@ -5763,7 +5771,7 @@ button.notification-item-action-btn:focus-visible {
   justify-content: center;
   gap: 6px;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 10px;
   box-sizing: border-box;
   border-radius: 4px;
   background: var(--versiondock-surface-alt);
@@ -5772,6 +5780,8 @@ button.notification-item-action-btn:focus-visible {
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
   font-weight: 500;
   line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
   user-select: none;
