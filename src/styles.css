@@ -512,6 +512,101 @@ body.is-tab-drop-target * {
   color: var(--versiondock-accent);
 }
 
+.titlebar-tab-icon.project-icon {
+  margin-right: 1px;
+}
+
+/* ==========================================================================
+   JetBrains 风格项目英文字母图标 (ProjectIcon)
+   ========================================================================== */
+.project-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1;
+  text-align: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.project-icon-letters {
+  display: block;
+  line-height: 1;
+  transform: translateY(0.5px);
+}
+
+.project-icon.two-letters .project-icon-letters {
+  letter-spacing: -0.04em;
+}
+
+/* 尺寸规格：小 (Tab栏 / 拖拽预览 16px) */
+.project-icon--small {
+  width: 16px;
+  height: 16px;
+  border-radius: 3.5px;
+  font-size: calc(9.5px * var(--versiondock-ui-font-scale, 1));
+}
+.project-icon--small.two-letters {
+  font-size: calc(8.5px * var(--versiondock-ui-font-scale, 1));
+}
+
+/* 尺寸规格：中 (下拉菜单 26px) */
+.project-icon--medium {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
+}
+.project-icon--medium.two-letters {
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+}
+
+/* 尺寸规格：大 (欢迎界面近期项目 32px) */
+.project-icon--large {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  font-size: calc(15px * var(--versiondock-ui-font-scale, 1));
+}
+.project-icon--large.two-letters {
+  font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
+}
+
+/* 不可用状态样式 */
+.project-icon.is-unavailable {
+  opacity: 0.55;
+  filter: grayscale(40%);
+}
+
+.project-icon-unavailable-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--versiondock-danger, #f44336);
+  border: 1px solid #ffffff;
+}
+
+.project-icon--large .project-icon-unavailable-badge {
+  width: 8px;
+  height: 8px;
+  right: 2px;
+  bottom: 2px;
+}
+
 .titlebar-tab-title {
   flex: 1;
   min-width: 0;
@@ -774,15 +869,18 @@ body.is-tab-drop-target * {
   width: 26px;
   height: 26px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--versiondock-accent) 12%, transparent);
-  color: var(--versiondock-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.workspace-menu-item.unavailable .workspace-menu-item-icon {
+.workspace-menu-item-icon:not(.project-icon) {
+  background: color-mix(in srgb, var(--versiondock-accent) 12%, transparent);
+  color: var(--versiondock-accent);
+}
+
+.workspace-menu-item.unavailable .workspace-menu-item-icon:not(.project-icon) {
   background: color-mix(in srgb, var(--versiondock-danger) 15%, transparent);
   color: var(--versiondock-danger);
 }
@@ -2863,15 +2961,18 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   width: 32px;
   height: 32px;
   border-radius: 7px;
-  background: color-mix(in srgb, var(--versiondock-accent) 12%, transparent);
-  color: var(--versiondock-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.recent-card.unavailable .recent-card-icon {
+.recent-card-icon:not(.project-icon) {
+  background: color-mix(in srgb, var(--versiondock-accent) 12%, transparent);
+  color: var(--versiondock-accent);
+}
+
+.recent-card.unavailable .recent-card-icon:not(.project-icon) {
   background: color-mix(in srgb, var(--versiondock-danger) 15%, transparent);
   color: var(--versiondock-danger);
 }

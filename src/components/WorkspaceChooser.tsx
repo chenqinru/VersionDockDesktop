@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Codicon } from './Codicon';
+import { ProjectIcon } from './ProjectIcon';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
@@ -11,9 +12,9 @@ export function WorkspaceChooser() {
   const removeRecent = useAppStore((state) => state.removeRecent);
   const openAbout = useAppStore((state) => state.openAbout);
   const initializeRepository = useAppStore((state) => state.initializeRepository);
-  const initializeAvailable = useAppStore((state) => state.bootstrap?.capabilities.availability?.initializeRepository?.available ?? state.bootstrap?.tools.git ?? false);
-  const cloneAvailable = useAppStore((state) => state.bootstrap?.capabilities.availability?.cloneRepository?.available ?? state.bootstrap?.tools.git ?? false);
-  const svnAvailable = useAppStore((state) => state.bootstrap?.tools.svn ?? false);
+  const initializeAvailable = useAppStore((state) => state.bootstrap?.capabilities?.availability?.initializeRepository?.available ?? state.bootstrap?.tools?.git ?? false);
+  const cloneAvailable = useAppStore((state) => state.bootstrap?.capabilities?.availability?.cloneRepository?.available ?? state.bootstrap?.tools?.git ?? false);
+  const svnAvailable = useAppStore((state) => state.bootstrap?.tools?.svn ?? false);
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const { t } = useI18n();
   const bridge = useBridge();
@@ -197,9 +198,13 @@ export function WorkspaceChooser() {
                       disabled={!workspace.available || busy}
                       onClick={(event) => handleRecentClick(event, workspace.paths)}
                     >
-                      <div className="recent-card-icon">
-                        <Codicon name={workspace.available ? 'folder' : 'warning'} />
-                      </div>
+                      <ProjectIcon
+                        name={workspace.name}
+                        seed={workspace.paths[0] || workspace.id || workspace.name}
+                        size="large"
+                        available={workspace.available}
+                        className="recent-card-icon"
+                      />
                       <div className="recent-card-info">
                         <span className="recent-card-name" title={workspace.name}>{workspace.name}</span>
                         <span className="recent-card-path" title={workspace.paths.join(' · ')}>

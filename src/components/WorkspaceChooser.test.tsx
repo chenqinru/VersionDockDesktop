@@ -36,4 +36,38 @@ describe('WorkspaceChooser V5 setup actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clone' }));
     await waitFor(() => expect(cloneRepository).toHaveBeenCalledWith('https://example.test/acme/demo.git', '/tmp/repos', 'demo', false, undefined));
   });
+
+  it('renders JetBrains-style project initials in recent workspaces list', () => {
+    const bridge = new MockBridge(() => true);
+    useAppStore.setState({
+      bootstrap: {
+        state: {
+          recentWorkspaces: [
+            {
+              id: 'recent-1',
+              name: 'yudao-cloud',
+              paths: ['/Users/chenqinru/Project/yudao-cloud'],
+              lastOpenedAt: '',
+              available: true,
+            },
+            {
+              id: 'recent-2',
+              name: 'api',
+              paths: ['/Users/chenqinru/Project/monthly-report/api'],
+              lastOpenedAt: '',
+              available: true,
+            },
+          ],
+        },
+      } as any,
+    });
+
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
+
+    const icons = screen.getAllByTestId('project-icon');
+    expect(icons).toHaveLength(2);
+    expect(icons[0]).toHaveTextContent('YC');
+    expect(icons[1]).toHaveTextContent('A');
+  });
 });
+

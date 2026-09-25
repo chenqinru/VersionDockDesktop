@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
+import { ProjectIcon } from './ProjectIcon';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { isOperationActive, useAppStore } from '../store/appStore';
@@ -674,7 +675,13 @@ export function TitleBar() {
                       }}
                       title={tab.paths.join(' · ')}
                     >
-                      <Codicon name={tab.available ? 'folder-opened' : 'warning'} className="titlebar-tab-icon" />
+                      <ProjectIcon
+                        name={tab.name}
+                        seed={tab.paths[0] || tab.id || tab.name}
+                        size="small"
+                        available={tab.available}
+                        className="titlebar-tab-icon"
+                      />
                       <span className="titlebar-tab-title">{tab.name}</span>
                       <button
                         type="button"
@@ -758,7 +765,13 @@ export function TitleBar() {
           }}
           aria-hidden="true"
         >
-          <Codicon name="folder-opened" className="titlebar-tab-icon" />
+          <ProjectIcon
+            name={tabDragPreview.tabName}
+            seed={tabDragPreview.tabName}
+            size="small"
+            available={true}
+            className="titlebar-tab-icon"
+          />
           <span className="titlebar-tab-title">{tabDragPreview.tabName}</span>
           <span className="titlebar-tab-ghost-close"><Codicon name="close" /></span>
         </div>
@@ -845,9 +858,13 @@ export function TitleBar() {
                           }
                         }}
                       >
-                        <div className="workspace-menu-item-icon">
-                          <Codicon name={workspace.available ? 'folder' : 'warning'} />
-                        </div>
+                        <ProjectIcon
+                          name={workspace.name}
+                          seed={workspace.paths[0] || workspace.id || workspace.name}
+                          size="medium"
+                          available={workspace.available}
+                          className="workspace-menu-item-icon"
+                        />
                         <div className="workspace-menu-item-info">
                           <div className="workspace-menu-item-row">
                             <span className="workspace-menu-item-name">{workspace.name}</span>

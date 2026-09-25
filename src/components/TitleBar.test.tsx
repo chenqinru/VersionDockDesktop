@@ -411,4 +411,50 @@ describe('TitleBar tab dragging', () => {
     header?.dispatchEvent(doubleClickEvent);
     expect(doubleClickEvent.defaultPrevented).toBe(true);
   });
+
+  it('renders JetBrains-style project initials icon in tabs and recent workspaces menu', () => {
+    const customWorkspace = {
+      id: 'k8s-nic-id',
+      name: 'k8s-nic',
+      paths: ['/tmp/k8s-nic'],
+      lastOpenedAt: '',
+      available: true,
+    };
+    useAppStore.setState({
+      bridge,
+      tabs: [customWorkspace],
+      activeTabId: customWorkspace.id,
+      bootstrap: {
+        state: {
+          recentWorkspaces: [
+            {
+              id: 'recent-1',
+              name: 'Jrebel-master',
+              paths: ['/tmp/Jrebel-master'],
+              lastOpenedAt: '',
+              available: true,
+            },
+          ],
+        },
+      } as any,
+    });
+
+    const { container } = render(
+      <BridgeContext.Provider value={bridge}>
+        <TitleBar />
+      </BridgeContext.Provider>,
+    );
+
+    const tabIcon = container.querySelector('.titlebar-tab .project-icon');
+    expect(tabIcon).toBeInTheDocument();
+    expect(tabIcon).toHaveTextContent('KN');
+
+    const addButton = screen.getByRole('button', { name: 'New Tab' });
+    fireEvent.click(addButton);
+
+    const menuIcon = container.querySelector('.workspace-menu-item .project-icon');
+    expect(menuIcon).toBeInTheDocument();
+    expect(menuIcon).toHaveTextContent('JM');
+  });
 });
+
