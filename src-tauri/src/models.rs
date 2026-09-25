@@ -174,6 +174,10 @@ pub enum BridgeCommand {
     ProviderGithubComplete {
         flow_id: String,
     },
+    ProviderGithubSave {
+        account_id: Option<String>,
+        token: String,
+    },
     ProviderGitlabSave {
         account_id: Option<String>,
         host: String,

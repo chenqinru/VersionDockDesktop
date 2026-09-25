@@ -113,6 +113,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	account_id: string | null,
 } } | { type: "providerGithubComplete"; payload: {
 	flow_id: string,
+} } | { type: "providerGithubSave"; payload: {
+	account_id: string | null,
+	token: string,
 } } | { type: "providerGitlabSave"; payload: {
 	account_id: string | null,
 	host: string,

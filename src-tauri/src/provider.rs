@@ -301,6 +301,40 @@ pub async fn github_complete(
     }
 }
 
+pub async fn github_save(
+    config_dir: &Path,
+    account_id: Option<String>,
+    secret: &str,
+    cancel: &CancellationToken,
+) -> Result<RemoteProviderAccount, DesktopError> {
+    if secret.trim().is_empty() {
+        return Err(DesktopError::new(
+            "PROVIDER_TOKEN_REQUIRED",
+            "GitHub token is required",
+            false,
+        ));
+    }
+    let user = send(
+        client()?
+            .get(format!("{GITHUB_API}/user"))
+            .bearer_auth(secret.trim())
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28"),
+        "GitHub",
+        cancel,
+    )
+    .await?;
+    persist_account(
+        config_dir,
+        account_id,
+        RemoteProviderKind::Github,
+        GITHUB_HOST.into(),
+        user["login"].as_str().unwrap_or("github").into(),
+        user["name"].as_str().map(String::from),
+        secret.trim(),
+    )
+}
+
 fn normalize_gitlab_host(value: &str) -> Result<String, DesktopError> {
     let raw = value.trim();
     let raw = if raw.contains("://") {

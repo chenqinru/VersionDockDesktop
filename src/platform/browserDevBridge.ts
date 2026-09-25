@@ -488,7 +488,9 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'providerAccounts': return [];
       case 'providerGithubBegin': return { flowId: 'demo-flow', userCode: 'DEMO-CODE', verificationUri: 'https://github.com/login/device', expiresAt: new Date(Date.now() + 900000).toISOString(), interval: 5 };
       case 'providerGithubComplete': throw new Error('GitHub OAuth is unavailable in browser demo');
-      case 'providerGitlabSave': return { id: 'gitlab-demo', provider: 'gitlab', host: command.payload.host, login: 'demo', displayName: 'Demo', secureStorageRef: 'browser-demo' };
+      case 'providerGithubSave': return { id: command.payload.account_id ?? 'github-demo', provider: 'github', host: 'https://github.com', login: 'github-demo-user', displayName: 'Demo GitHub User', secureStorageRef: 'browser-demo' };
+      case 'providerGitlabSave': return { id: command.payload.account_id ?? 'gitlab-demo', provider: 'gitlab', host: command.payload.host, login: 'demo', displayName: 'Demo', secureStorageRef: 'browser-demo' };
+      case 'providerGiteeSave': return { id: command.payload.account_id ?? 'gitee-demo', provider: 'gitee', host: 'https://gitee.com', login: 'gitee-demo-user', displayName: 'Demo Gitee User', secureStorageRef: 'browser-demo' };
       case 'providerRemove': return true;
       case 'providerRepositories': return { items: [], page: command.payload.page, hasMore: false };
       case 'providerNamespaces': return [];

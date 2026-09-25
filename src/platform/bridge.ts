@@ -167,7 +167,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'subtrees': case 'subtreeOperation': return 'subtree';
     case 'submodules': case 'submoduleOperation': return 'submodule';
     case 'remotes': case 'remoteOperation': return 'remote';
-    case 'providerAccounts': case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGitlabSave': case 'providerRemove': case 'providerRepositories': case 'providerNamespaces': case 'publishRepository': return 'remote';
+    case 'providerAccounts': case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGithubSave': case 'providerGitlabSave': case 'providerGiteeSave': case 'providerRemove': case 'providerRepositories': case 'providerNamespaces': case 'publishRepository': return 'remote';
     case 'gitIdentity': case 'gitProfileOperation': return 'identity';
     case 'svnAccount': case 'svnAccountOperation': case 'svnOperation': return 'svnAccount';
     case 'fileHistory': case 'fileRevisionContent': return 'fileHistory';
@@ -195,7 +195,7 @@ export const commandShowsProgressByDefault = (command: BridgeCommand): boolean =
     case 'stashOperation': case 'shelfOperation': case 'changelistOperation': case 'worktreeOperation':
     case 'subtreeOperation': case 'submoduleOperation': case 'unpushedOperation': case 'historyOperation':
     case 'svnOperation': case 'remoteOperation': case 'gitProfileOperation': case 'svnAccountOperation':
-    case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGitlabSave': case 'providerRemove': case 'publishRepository':
+    case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGithubSave': case 'providerGitlabSave': case 'providerGiteeSave': case 'providerRemove': case 'publishRepository':
       return true;
     default:
       return false;

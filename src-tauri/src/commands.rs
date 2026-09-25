@@ -583,6 +583,7 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         | BridgeCommand::ResolveAuthorAvatar { .. } => ("provider", "Loading remote provider data"),
         BridgeCommand::ProviderGithubBegin { .. }
         | BridgeCommand::ProviderGithubComplete { .. }
+        | BridgeCommand::ProviderGithubSave { .. }
         | BridgeCommand::ProviderGitlabSave { .. }
         | BridgeCommand::ProviderGiteeSave { .. }
         | BridgeCommand::ProviderRemove { .. } => {
@@ -1050,6 +1051,17 @@ async fn dispatch(
             }
             availability.insert(
                 "githubProvider".into(),
+                if secure_credentials.status.available {
+                    CapabilityStatus::available()
+                } else {
+                    CapabilityStatus::unavailable(
+                        "SECURE_STORAGE_UNAVAILABLE",
+                        "System secure storage is unavailable",
+                    )
+                },
+            );
+            availability.insert(
+                "githubDeviceFlow".into(),
                 if provider::github_available() && secure_credentials.status.available {
                     CapabilityStatus::available()
                 } else {
@@ -1460,6 +1472,10 @@ async fn dispatch(
         BridgeCommand::ProviderGithubComplete { flow_id } => {
             json(provider::github_complete(&state.config_dir, &flow_id, token).await?)
         }
+        BridgeCommand::ProviderGithubSave {
+            account_id,
+            token: secret,
+        } => json(provider::github_save(&state.config_dir, account_id, &secret, token).await?),
         BridgeCommand::ProviderGitlabSave {
             account_id,
             host,

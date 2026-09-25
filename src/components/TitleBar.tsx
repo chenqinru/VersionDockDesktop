@@ -30,6 +30,7 @@ interface ActiveTabDrag {
 
 interface TabDragPreview {
   tabName: string;
+  seed?: string;
   screenX: number;
   screenY: number;
   width: number;
@@ -515,6 +516,7 @@ export function TitleBar() {
       const usesNativeDetachPreview = '__TAURI_INTERNALS__' in window;
       if (detaching) setTabDragPreview(usesNativeDetachPreview ? null : {
         tabName: tab.name,
+        seed: tab.paths[0] || tab.name,
         screenX: point.screenX,
         screenY: point.screenY,
         width: tabWidth,
@@ -767,7 +769,7 @@ export function TitleBar() {
         >
           <ProjectIcon
             name={tabDragPreview.tabName}
-            seed={tabDragPreview.tabName}
+            seed={tabDragPreview.seed || tabDragPreview.tabName}
             size="small"
             available={true}
             className="titlebar-tab-icon"

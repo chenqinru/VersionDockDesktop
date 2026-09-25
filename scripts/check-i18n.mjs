@@ -5,7 +5,7 @@ const root = new URL('..', import.meta.url).pathname;
 const sourceRoots = [join(root, 'src', 'App.tsx'), join(root, 'src', 'components')];
 const technicalAllowlist = new Set([
   'VersionDock', 'VersionDock Desktop', 'Git & SVN', 'Git:', 'SVN:', 'HEAD',
-  'Promise',
+  'Promise', 'https://gitlab.com', 'glpat-...', 'my-repo',
 ]);
 
 function files(path) {

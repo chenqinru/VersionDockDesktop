@@ -1,5 +1,6 @@
 import type { ScreenPoint } from './tabDrag';
 import type { TabDragPayload } from '../platform/bridge';
+import { getProjectInitials, getProjectColor } from '../components/projectIconUtils';
 
 interface NativePreviewWindow {
   close(): Promise<void>;
@@ -32,7 +33,15 @@ export class TabDragPreviewWindow {
       if (token !== this.token) return;
       const label = `tab-drag-preview-${Date.now()}-${token}`;
       const width = Math.max(110, Math.min(drag.tabWidth, 220));
-      const query = new URLSearchParams({ name: drag.tabName, theme });
+      const seed = drag.paths[0] || drag.tabName;
+      const initials = getProjectInitials(drag.tabName);
+      const color = getProjectColor(seed);
+      const query = new URLSearchParams({
+        name: drag.tabName,
+        theme,
+        initials,
+        color,
+      });
       const preview = new WebviewWindow(label, {
         url: `tab-drag-preview.html?${query}`,
         x: point.screenX - width / 2,

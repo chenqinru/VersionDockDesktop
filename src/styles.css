@@ -6704,3 +6704,549 @@ button.notification-item-action-btn:focus-visible {
 @media (max-width: 720px) {
   .submodule-row-actions button.primary > span { display: none; }
 }
+
+/* ==========================================================================
+   Remote Provider Account Management (GitHub, GitLab, Gitee)
+   ========================================================================== */
+
+.modal-panel.provider-panel {
+  width: min(760px, calc(100vw - 48px));
+  height: min(540px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  background: var(--versiondock-surface-alt);
+  overflow: hidden;
+}
+
+/* 左侧账号与操作侧边栏 */
+.provider-accounts {
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--versiondock-bg) 65%, var(--versiondock-surface-alt));
+  border-right: 1px solid var(--versiondock-border-soft);
+  min-height: 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.provider-sidebar-header {
+  padding: 12px 10px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--versiondock-border-soft);
+}
+
+.provider-sidebar-title {
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.provider-account-count {
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+  font-weight: 600;
+}
+
+.provider-accounts-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-account-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.provider-account-card:hover {
+  background: var(--versiondock-hover);
+}
+
+.provider-account-card.selected {
+  background: color-mix(in srgb, var(--versiondock-accent) 15%, var(--versiondock-surface));
+  border-color: color-mix(in srgb, var(--versiondock-accent) 40%, transparent);
+}
+
+.provider-account-info {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+}
+
+.provider-platform-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border-soft);
+  color: var(--versiondock-text);
+  font-size: 14px;
+}
+
+.provider-platform-icon.github { color: #58a6ff; }
+.provider-platform-icon.gitlab { color: #fc6d26; }
+.provider-platform-icon.gitee { color: #c71d23; }
+
+.provider-account-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.provider-account-login {
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 550;
+  color: var(--versiondock-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.provider-account-host {
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.provider-add-section {
+  padding: 8px 10px;
+  border-top: 1px solid var(--versiondock-border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px dashed var(--versiondock-border);
+  background: transparent;
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 450;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.provider-add-btn:hover:not(:disabled) {
+  background: var(--versiondock-hover);
+  border-color: var(--versiondock-accent);
+  border-style: solid;
+}
+
+.provider-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.provider-sidebar-footer {
+  padding: 6px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--versiondock-border-soft);
+}
+
+.provider-cache-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--versiondock-muted);
+  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.provider-cache-btn:hover {
+  background: var(--versiondock-hover);
+  color: var(--versiondock-text);
+}
+
+/* 右侧内容主视窗 */
+.provider-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 空状态卡片 */
+.provider-empty-state {
+  margin: auto;
+  max-width: 380px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0;
+}
+
+.provider-empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--versiondock-accent) 15%, transparent);
+  color: var(--versiondock-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.provider-empty-title {
+  font-size: calc(14px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text);
+}
+
+.provider-empty-desc {
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+  line-height: 1.5;
+}
+
+/* 账号详情卡片 */
+.provider-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border-soft);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.provider-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.provider-avatar-box {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--versiondock-surface-alt);
+  border: 1px solid var(--versiondock-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--versiondock-muted);
+  font-size: 24px;
+}
+
+.provider-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.provider-detail-headings {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.provider-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-detail-name {
+  font-size: calc(15px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 650;
+  color: var(--versiondock-text);
+}
+
+.provider-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 550;
+  background: color-mix(in srgb, var(--versiondock-success, #388a34) 18%, transparent);
+  color: var(--versiondock-success, #4ec9b0);
+}
+
+.provider-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.provider-detail-login {
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+}
+
+.provider-detail-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--versiondock-border-soft);
+}
+
+.provider-detail-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+}
+
+.provider-detail-field-label {
+  color: var(--versiondock-muted);
+}
+
+.provider-detail-field-val {
+  color: var(--versiondock-text);
+  font-weight: 500;
+  font-family: var(--versiondock-code, monospace);
+}
+
+.provider-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--versiondock-border-soft);
+  flex-wrap: wrap;
+}
+
+.provider-detail-actions .danger {
+  color: var(--versiondock-danger, #f44336);
+  border-color: color-mix(in srgb, var(--versiondock-danger, #f44336) 40%, transparent);
+}
+
+.provider-detail-actions .danger:hover {
+  background: color-mix(in srgb, var(--versiondock-danger, #f44336) 15%, transparent);
+  border-color: var(--versiondock-danger, #f44336);
+}
+
+/* Device Flow 与 Token 表单卡片 */
+.provider-form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border-soft);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.provider-form-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--versiondock-text);
+}
+
+.provider-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-form-field label {
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  color: var(--versiondock-text);
+}
+
+.provider-form-field input,
+.provider-form-field select,
+.provider-form-field textarea {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  background: var(--versiondock-input);
+  border: 1px solid var(--versiondock-border);
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  box-sizing: border-box;
+}
+
+.provider-form-field textarea {
+  height: 60px;
+  padding: 6px 10px;
+  resize: vertical;
+}
+
+.provider-field-hint {
+  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-muted);
+  line-height: 1.4;
+}
+
+.provider-device-code-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--versiondock-surface-alt);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 6px;
+  gap: 12px;
+}
+
+.provider-device-code {
+  font-family: var(--versiondock-code, monospace);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--versiondock-accent);
+}
+
+.provider-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* 仓库浏览模式 */
+.provider-browse-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.provider-search-box {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.provider-search-box input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px 0 28px;
+  border-radius: 4px;
+  background: var(--versiondock-input);
+  border: 1px solid var(--versiondock-border);
+  color: var(--versiondock-text);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  box-sizing: border-box;
+}
+
+.provider-search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--versiondock-muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.provider-repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.provider-repo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--versiondock-surface);
+  border: 1px solid var(--versiondock-border-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  text-align: left;
+}
+
+.provider-repo-item:hover {
+  background: var(--versiondock-hover);
+  border-color: var(--versiondock-accent);
+}
+
+.provider-repo-name-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.provider-repo-name {
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 550;
+  color: var(--versiondock-text);
+}
+
+.provider-repo-branch {
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--versiondock-surface-alt);
+  color: var(--versiondock-muted);
+  border: 1px solid var(--versiondock-border-soft);
+}
