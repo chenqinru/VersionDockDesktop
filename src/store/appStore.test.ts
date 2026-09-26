@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, DiffDocument, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
 import { currentDialog, publishDialog } from '../components/dialogService';
-import { interleaveHistory, isOperationActive, isOperationActiveForRepositories, resolveNotificationText, useAppStore, workspacePathsEqual } from './appStore';
+import { commitKey } from '../history/commitDetails';
+import { interleaveHistory, isOperationActive, isOperationActiveForRepositories, resolveNotificationText, useAppStore, workspacePathsEqual, type WorkingChangeTarget } from './appStore';
 
 const bootstrap: BootstrapData = {
   applicationSessionId: 'test-session',
@@ -25,14 +26,15 @@ const repository = (id: string, name: string): RepositoryStatus => ({
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 };
 
 afterEach(() => {
   publishDialog(undefined);
   useAppStore.getState().dispose();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', operations: {}, notifications: [], toastNotificationIds: [], ready: false });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', diffReturnMode: undefined, operations: {}, notifications: [], toastNotificationIds: [], ready: false });
 });
 
 describe('appStore async lifecycle', () => {
@@ -212,6 +214,218 @@ describe('appStore async lifecycle', () => {
       comparison: { base: 'main', target: 'feature/ui' },
     });
   });
+
+  it('returns to commit-detail mode when backToHistory is invoked from commit detail diff', async () => {
+    const bridge = new MockBridge((command) => command.type === 'fileDiff'
+      ? { path: command.payload.relative_path, content: 'diff content', language: 'typescript', binary: false, truncated: false, lineCount: 1 }
+      : []);
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedRepoId: 'repo', mode: 'commit-detail' });
+
+    await useAppStore.getState().openDiff('repo', 'src/file.ts', false, 'abcdef');
+
+    expect(useAppStore.getState().mode).toBe('diff');
+    expect(useAppStore.getState().diffReturnMode).toBe('commit-detail');
+
+    useAppStore.getState().backToHistory();
+
+    expect(useAppStore.getState().mode).toBe('commit-detail');
+    expect(useAppStore.getState().diffReturnMode).toBeUndefined();
+  });
+
+  it('returns to merge mode and preserves merge data when backToHistory is invoked from diff', async () => {
+    const bridge = new MockBridge((command) => command.type === 'fileDiff'
+      ? { path: command.payload.relative_path, content: 'diff content', language: 'typescript', binary: false, truncated: false, lineCount: 1 }
+      : []);
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    const dummyMerge = {
+      path: 'conflict.txt',
+      base: 'base',
+      ours: 'ours',
+      theirs: 'theirs',
+      working: 'working',
+      markerContent: 'marker',
+      conflicts: [],
+      oursLabel: 'ours',
+      theirsLabel: 'theirs',
+      language: 'text',
+      fingerprint: 'fp-123',
+      binary: false,
+    };
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      snapshot: workspace,
+      selectedRepoId: 'repo',
+      mode: 'merge',
+      merge: dummyMerge,
+      mergeResult: 'working',
+    });
+
+    await useAppStore.getState().openDiff('repo', 'src/file.ts', false, 'abcdef');
+    expect(useAppStore.getState().mode).toBe('diff');
+    expect(useAppStore.getState().diffReturnMode).toBe('merge');
+    expect(useAppStore.getState().merge).toBe(dummyMerge);
+
+    useAppStore.getState().backToHistory();
+
+    expect(useAppStore.getState().mode).toBe('merge');
+    expect(useAppStore.getState().diffReturnMode).toBeUndefined();
+    expect(useAppStore.getState().merge).toBe(dummyMerge);
+    expect(useAppStore.getState().mergeResult).toBe('working');
+  });
+
+  it('preserves diffReturnMode across workspace tab switching', async () => {
+    const bridge = new MockBridge(() => []);
+    const tabA = snapshot('ws-a', 1).workspace;
+    const tabB = snapshot('ws-b', 1).workspace;
+    const sessionA = {
+      snapshot: snapshot('ws-a', 1),
+      allRepositories: [repository('repo-a', 'Repo A')],
+      selectedRepoId: 'repo-a',
+      mode: 'diff' as const,
+      diffReturnMode: 'commit-detail' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+    };
+    const sessionB = {
+      snapshot: snapshot('ws-b', 1),
+      allRepositories: [repository('repo-b', 'Repo B')],
+      selectedRepoId: 'repo-b',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-b',
+    };
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+      snapshot: sessionA.snapshot,
+      allRepositories: sessionA.allRepositories,
+      selectedRepoId: 'repo-a',
+      mode: 'diff',
+      diffReturnMode: 'commit-detail',
+      sessions: {
+        'ws-a': { ...sessionA, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+        'ws-b': { ...sessionB, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+      },
+    });
+
+    // 切换到 ws-b
+    await useAppStore.getState().switchTab('ws-b');
+    expect(useAppStore.getState().activeTabId).toBe('ws-b');
+    expect(useAppStore.getState().mode).toBe('history');
+
+    // 切回 ws-a
+    await useAppStore.getState().switchTab('ws-a');
+    expect(useAppStore.getState().activeTabId).toBe('ws-a');
+    expect(useAppStore.getState().mode).toBe('diff');
+    expect(useAppStore.getState().diffReturnMode).toBe('commit-detail');
+  });
+
+  it('resets path filter and reloads full history when opening update details', async () => {
+    const testCommit: CommitNode = {
+      repoId: 'repo',
+      hash: 'hash-update',
+      shortHash: 'hashup',
+      parents: [],
+      author: 'Tester',
+      email: 'tester@example.test',
+      authorDate: '2026-08-16T12:00:00Z',
+      committerDate: '2026-08-16T12:00:00Z',
+      message: 'update commit',
+      refs: [],
+    };
+    const testDetail: CommitDetail = {
+      commit: testCommit,
+      fullMessage: 'update commit',
+      branches: { local: [], remote: [], tags: [] },
+      files: [{ path: 'updated-file.ts', status: 'M', added: 1, removed: 0 }],
+    };
+    const fullCommit: CommitNode = {
+      repoId: 'repo',
+      hash: 'full-commit',
+      shortHash: 'full1',
+      parents: [],
+      author: 'Ada',
+      email: 'ada@example.test',
+      authorDate: '2026-01-01T00:00:00Z',
+      committerDate: '2026-01-01T00:00:00Z',
+      message: 'full history commit',
+      refs: [],
+    };
+    const pathCommit: CommitNode = {
+      repoId: 'repo',
+      hash: 'path-commit',
+      shortHash: 'path1',
+      parents: [],
+      author: 'Ada',
+      email: 'ada@example.test',
+      authorDate: '2026-01-01T00:00:00Z',
+      committerDate: '2026-01-01T00:00:00Z',
+      message: 'path filtered commit',
+      refs: [],
+    };
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') return testDetail;
+      if (command.type === 'history') {
+        const query = command.payload.query as { path?: string | null };
+        return { commits: query?.path ? [pathCommit] : [fullCommit], hasMore: false };
+      }
+      if (command.type === 'historyTopology') return [];
+      return [];
+    });
+
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      snapshot: workspace,
+      selectedRepoId: 'repo',
+    });
+
+    await useAppStore.getState().openHistoryForPath('repo', 'src/filter.ts');
+    expect(useAppStore.getState().historyQuery.path).toBe('src/filter.ts');
+    expect(useAppStore.getState().history).toEqual([pathCommit]);
+
+    await useAppStore.getState().openUpdateDetails({
+      repoId: 'repo',
+      beforeRevision: 'rev1',
+      afterRevision: 'rev2',
+      beforeStatus: '',
+      afterStatus: '',
+      summaryError: null,
+      summary: {
+        kind: 'updated',
+        commitCount: 1,
+        fileCount: 1,
+        containsMerge: false,
+        detail: {
+          commits: [testCommit],
+          files: [{ path: 'updated-file.ts', status: 'M', added: 1, removed: 0 }],
+        },
+      },
+    });
+
+    expect(useAppStore.getState().historyQuery.path).toBeNull();
+    expect(useAppStore.getState().mode).toBe('commit-detail');
+
+    await vi.waitFor(() => {
+      expect(useAppStore.getState().history).toEqual([fullCommit]);
+    });
+
+    useAppStore.getState().backToHistory();
+    expect(useAppStore.getState().mode).toBe('history');
+    expect(useAppStore.getState().historyQuery.path).toBeNull();
+    expect(useAppStore.getState().history).toEqual([fullCommit]);
+  });
+
+
 
   it('does not let an older workspace response replace the newest workspace', async () => {
     const first = deferred<WorkspaceSnapshot>();
@@ -967,5 +1181,938 @@ describe('appStore async lifecycle', () => {
     await useAppStore.getState().clearHistoryPath();
     expect(useAppStore.getState().historyQuery.lineRange).toBeNull();
     expect(useAppStore.getState().historyQuery.path).toBeNull();
+  });
+
+  it('merges extra commit refs into detail branches categorized by ref kind without polluting local branches', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+    const commit: CommitNode = {
+      repoId: 'repo',
+      hash: 'commit-with-refs',
+      shortHash: 'c1',
+      parents: [],
+      author: 'Ada',
+      email: 'ada@example.test',
+      authorDate: '2026-01-01T00:00:00Z',
+      committerDate: '2026-01-01T00:00:00Z',
+      message: 'test commit',
+      refs: ['HEAD -> feature/ui', 'origin/main', 'tag: v1.2.0', 'BASE'],
+    };
+    const detailFromBackend: CommitDetail = {
+      commit: { ...commit, refs: [] },
+      fullMessage: 'test commit',
+      branches: { local: ['feature/ui'], remote: [], tags: [] },
+      files: [{ path: 'README.md', status: 'M', added: 1, removed: 0 }],
+    };
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') return detailFromBackend;
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace });
+
+    const result = await useAppStore.getState().loadCommitDetail(commit);
+
+    expect(result.branches.isHead).toBe(true);
+    expect(result.branches.local).toEqual(['feature/ui']);
+    expect(result.branches.remote).toEqual(['origin/main']);
+    expect(result.branches.tags).toEqual(['v1.2.0']);
+    expect(result.commit.refs).toEqual(['HEAD -> feature/ui', 'origin/main', 'tag: v1.2.0', 'BASE']);
+  });
+
+  it('restores merge target and preserves resolutions/draft when returning from diff to merge view', async () => {
+    const workspace = snapshot('workspace', 1);
+    const repo = repository('repo', 'Repository');
+    workspace.repositories = [repo];
+
+    let savedPayload: unknown = null;
+    const mockVersions = {
+      base: 'base',
+      ours: 'ours',
+      theirs: 'theirs',
+      working: 'ours',
+      conflicts: [{ index: 0, base: { start: 1, end: 2 }, ours: { start: 1, end: 2 }, theirs: { start: 1, end: 2 } }],
+      fingerprint: 'fp-1',
+      markerContent: 'marker content',
+    };
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'conflictVersions') {
+        return mockVersions;
+      }
+      if (command.type === 'conflictSave') {
+        savedPayload = command.payload;
+        return undefined;
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      snapshot: workspace,
+      selectedRepoId: 'repo',
+    });
+
+    const conflict: ConflictFile = {
+      repoId: 'repo',
+      repoName: 'Repository',
+      repoColor: '#123456',
+      path: 'conflict.txt',
+      kind: 'git',
+      binary: false,
+    };
+
+    await useAppStore.getState().openMerge(conflict);
+    expect(useAppStore.getState().mode).toBe('merge');
+    expect(useAppStore.getState().mergeTarget).toEqual({ repoId: 'repo', path: 'conflict.txt' });
+    expect(useAppStore.getState().selectedFile).toEqual({ repoId: 'repo', path: 'conflict.txt', staged: false });
+    expect(useAppStore.getState().mergeResolutions).toEqual({ 0: 'unresolved' });
+
+    // 用户在合并编辑器中做出了解决选择并修改了内容
+    useAppStore.getState().setMergeResolutions({ 0: 'ours' });
+    useAppStore.getState().setMergeScope('left');
+    useAppStore.getState().setMergeResult('resolved content');
+
+    // 用户从侧边栏打开了一个外部文件的 diff
+    useAppStore.setState({
+      mode: 'diff',
+      diffReturnMode: 'merge',
+      selectedFile: { repoId: 'repo', path: 'unrelated.txt', staged: false },
+    });
+
+    expect(useAppStore.getState().mode).toBe('diff');
+    expect(useAppStore.getState().selectedFile).toEqual({ repoId: 'repo', path: 'unrelated.txt', staged: false });
+
+    // 用户点击返回
+    useAppStore.getState().backToHistory();
+
+    // 验证返回后的状态
+    expect(useAppStore.getState().mode).toBe('merge');
+    // selectedFile 精确恢复为 conflict.txt
+    expect(useAppStore.getState().selectedFile).toEqual({ repoId: 'repo', path: 'conflict.txt', staged: false });
+    expect(useAppStore.getState().mergeTarget).toEqual({ repoId: 'repo', path: 'conflict.txt' });
+    // 草稿和解决记录完整保留
+    expect(useAppStore.getState().mergeResult).toBe('resolved content');
+    expect(useAppStore.getState().mergeResolutions).toEqual({ 0: 'ours' });
+    expect(useAppStore.getState().mergeScope).toBe('left');
+
+    // 执行保存合并，验证保存的是 conflict.txt 而非 unrelated.txt
+    await useAppStore.getState().saveMerge();
+    expect(savedPayload).toEqual({
+      workspace_id: 'workspace',
+      repo_id: 'repo',
+      relative_path: 'conflict.txt',
+      content: 'resolved content',
+      expected_fingerprint: 'fp-1',
+    });
+  });
+
+  it('manages merge parent files loading state and captures failure error', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo', 'Repository')];
+
+    let shouldFail = true;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitMergeParentFiles') {
+        if (shouldFail) {
+          throw new Error('Connection refused');
+        }
+        return [{ path: 'src/file.ts', status: 'M', added: 1, removed: 0 }];
+      }
+      return [];
+    });
+
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace });
+
+    const cacheKey = 'repo\0rev-1\0parent-1';
+    await expect(useAppStore.getState().loadMergeParentFiles('repo', 'rev-1', 'parent-1')).rejects.toThrow('Connection refused');
+
+    expect(useAppStore.getState().mergeParentFilesLoading[cacheKey]).toBe(false);
+    expect(useAppStore.getState().mergeParentFilesError[cacheKey]).toBe('Connection refused');
+    expect(useAppStore.getState().mergeParentFiles[cacheKey]).toBeUndefined();
+
+    shouldFail = false;
+    const files = await useAppStore.getState().loadMergeParentFiles('repo', 'rev-1', 'parent-1');
+    expect(files).toHaveLength(1);
+    expect(useAppStore.getState().mergeParentFilesLoading[cacheKey]).toBe(false);
+    expect(useAppStore.getState().mergeParentFilesError[cacheKey]).toBe('');
+    expect(useAppStore.getState().mergeParentFiles[cacheKey]).toEqual(files);
+  });
+
+  it('isolates merge parent files request and avoids polluting active store when tab switched', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const tabB = snapshot('ws-b', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+    const repoB = repository('repo-b', 'Repo B');
+
+    const parentFiles = [{ path: 'src/file-a.ts', status: 'M' as const, added: 2, removed: 1 }];
+    const parentGate = deferred<typeof parentFiles>();
+    let observedSignal: AbortSignal | undefined;
+
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'commitMergeParentFiles') {
+        observedSignal = options?.signal;
+        return parentGate.promise;
+      }
+      return [];
+    });
+
+    const sessionA = {
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+    };
+    const sessionB = {
+      snapshot: { ...snapshot('ws-b', 1), repositories: [repoB] },
+      allRepositories: [repoB],
+      selectedRepoId: 'repo-b',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-b',
+    };
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+      snapshot: sessionA.snapshot,
+      allRepositories: sessionA.allRepositories,
+      selectedRepoId: 'repo-a',
+      mode: 'history',
+      sessions: {
+        'ws-a': { ...sessionA, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+        'ws-b': { ...sessionB, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+      },
+    });
+
+    const cacheKey = 'repo-a\0rev-1\0parent-1';
+    const pendingRequest = useAppStore.getState().loadMergeParentFiles('repo-a', 'rev-1', 'parent-1');
+
+    // 验证发出请求时绑定了 AbortSignal
+    expect(observedSignal).toBeDefined();
+    expect(observedSignal?.aborted).toBe(false);
+
+    // 切换到 ws-b 工作区
+    await useAppStore.getState().switchTab('ws-b');
+    expect(useAppStore.getState().activeTabId).toBe('ws-b');
+    // 切换标签触发 cancelRequests，原请求 signal 被 abort
+    expect(observedSignal?.aborted).toBe(true);
+
+    // 让原请求成功返回（模拟响应在切换后完成到达）
+    parentGate.resolve(parentFiles);
+    await pendingRequest;
+
+    // 验证当前激活的工作区 ws-b 的 store 没有被旧工作区 ws-a 的结果污染
+    expect(useAppStore.getState().mergeParentFiles[cacheKey]).toBeUndefined();
+
+    // 验证旧工作区 ws-a 的 session 记录了正确的结果
+    expect(useAppStore.getState().sessions['ws-a'].mergeParentFiles[cacheKey]).toEqual(parentFiles);
+
+    // 切回 ws-a，验证成功恢复该缓存
+    await useAppStore.getState().switchTab('ws-a');
+    expect(useAppStore.getState().activeTabId).toBe('ws-a');
+    expect(useAppStore.getState().mergeParentFiles[cacheKey]).toEqual(parentFiles);
+  });
+
+  it('isolates merge parent files failure and updates originating session when tab switched', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const tabB = snapshot('ws-b', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+    const repoB = repository('repo-b', 'Repo B');
+
+    const parentGate = deferred<never>();
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitMergeParentFiles') {
+        return parentGate.promise;
+      }
+      return [];
+    });
+
+    const sessionA = {
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+    };
+    const sessionB = {
+      snapshot: { ...snapshot('ws-b', 1), repositories: [repoB] },
+      allRepositories: [repoB],
+      selectedRepoId: 'repo-b',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-b',
+    };
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+      snapshot: sessionA.snapshot,
+      allRepositories: sessionA.allRepositories,
+      selectedRepoId: 'repo-a',
+      mode: 'history',
+      sessions: {
+        'ws-a': { ...sessionA, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+        'ws-b': { ...sessionB, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+      },
+    });
+
+    const cacheKey = 'repo-a\0rev-1\0parent-1';
+    const pendingRequest = useAppStore.getState().loadMergeParentFiles('repo-a', 'rev-1', 'parent-1');
+
+    // 切换到 ws-b 工作区
+    await useAppStore.getState().switchTab('ws-b');
+    expect(useAppStore.getState().activeTabId).toBe('ws-b');
+
+    // 让原请求失败抛出错误
+    parentGate.reject(new Error('Network timeout'));
+    await expect(pendingRequest).rejects.toThrow('Network timeout');
+
+    // 验证当前激活的工作区 ws-b 的 store 没有被旧工作区 ws-a 的错误状态污染
+    expect(useAppStore.getState().mergeParentFilesError[cacheKey]).toBeUndefined();
+
+    // 验证旧工作区 ws-a 的 session 记录了该错误状态
+    expect(useAppStore.getState().sessions['ws-a'].mergeParentFilesError[cacheKey]).toBe('Network timeout');
+
+    // 切回 ws-a，验证成功恢复该错误状态
+    await useAppStore.getState().switchTab('ws-a');
+    expect(useAppStore.getState().activeTabId).toBe('ws-a');
+    expect(useAppStore.getState().mergeParentFilesError[cacheKey]).toBe('Network timeout');
+  });
+
+  it('isolates commit detail loading and automatically recovers unfinished commit detail when switching back to workspace', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const tabB = snapshot('ws-b', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+    const repoB = repository('repo-b', 'Repo B');
+
+    const commitA: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-a-123456',
+      shortHash: 'commita',
+      parents: [],
+      author: 'Alice',
+      email: 'alice@example.com',
+      authorDate: '2026-08-16T10:00:00Z',
+      committerDate: '2026-08-16T10:00:00Z',
+      message: 'feat: something on repo A',
+      refs: ['HEAD -> main'],
+    };
+
+    const detailA: CommitDetail = {
+      commit: commitA,
+      fullMessage: 'feat: something on repo A',
+      branches: { local: ['main'], remote: [], tags: [] },
+      files: [{ path: 'file-a.ts', status: 'M', added: 1, removed: 0 }],
+    };
+
+    let detailGate = deferred<CommitDetail>();
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') {
+        return detailGate.promise;
+      }
+      return [];
+    });
+
+    const sessionA = {
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+    };
+    const sessionB = {
+      snapshot: { ...snapshot('ws-b', 1), repositories: [repoB] },
+      allRepositories: [repoB],
+      selectedRepoId: 'repo-b',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-b',
+    };
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+      snapshot: sessionA.snapshot,
+      allRepositories: sessionA.allRepositories,
+      selectedRepoId: 'repo-a',
+      selectedCommits: [commitA],
+      selectedPrimaryKey: commitKey(commitA.repoId, commitA.hash),
+      mode: 'history',
+      sessions: {
+        'ws-a': { ...sessionA, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [commitA], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [commitA], selectedPrimaryKey: commitKey(commitA.repoId, commitA.hash), selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+        'ws-b': { ...sessionB, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+      },
+    });
+
+    const keyA = commitKey(commitA.repoId, commitA.hash);
+    const pending = useAppStore.getState().loadCommitDetail(commitA);
+
+    // 切换到 ws-b
+    await useAppStore.getState().switchTab('ws-b');
+    expect(useAppStore.getState().activeTabId).toBe('ws-b');
+
+    // 响应在切换后完成
+    detailGate.resolve(detailA);
+    await pending;
+
+    // 验证 ws-b 没有被写入 commitA 详情
+    expect(useAppStore.getState().selectedCommitDetails[keyA]).toBeUndefined();
+    // 验证 ws-a 的 session 写入了该结果
+    expect(useAppStore.getState().sessions['ws-a'].selectedCommitDetails[keyA]).toEqual(detailA);
+
+    // 切回 ws-a，验证成功恢复
+    await useAppStore.getState().switchTab('ws-a');
+    expect(useAppStore.getState().activeTabId).toBe('ws-a');
+    expect(useAppStore.getState().selectedCommitDetails[keyA]).toEqual(detailA);
+    expect(useAppStore.getState().selectedCommit).toEqual(detailA);
+
+    // 测试未加载完就切走，切回时自动触发 reloadSelectedCommits 恢复
+    detailGate = deferred<CommitDetail>();
+    useAppStore.setState({
+      selectedCommitDetails: {},
+      selectedCommit: undefined,
+      sessions: {
+        ...useAppStore.getState().sessions,
+        'ws-a': {
+          ...useAppStore.getState().sessions['ws-a'],
+          selectedCommits: [commitA],
+          selectedCommitDetails: {},
+          selectedCommit: undefined,
+        },
+      },
+    });
+
+    // 切换到 ws-b
+    await useAppStore.getState().switchTab('ws-b');
+    expect(useAppStore.getState().activeTabId).toBe('ws-b');
+
+    // 切回 ws-a，由于缺少详情，自动触发 reloadSelectedCommits 并呈现 loading 状态
+    await useAppStore.getState().switchTab('ws-a');
+    expect(useAppStore.getState().selectedCommitLoading[keyA]).toBe(true);
+
+    // 完成 reload
+    detailGate.resolve(detailA);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(useAppStore.getState().selectedCommitDetails[keyA]).toEqual(detailA);
+    expect(useAppStore.getState().selectedCommit).toEqual(detailA);
+  });
+
+  it('records selectedCommitError on failure and supports reloadSelectedCommits retry', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+
+    const commitA: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-error-1234',
+      shortHash: 'error12',
+      parents: [],
+      author: 'Alice',
+      email: 'alice@example.com',
+      authorDate: '2026-08-16T10:00:00Z',
+      committerDate: '2026-08-16T10:00:00Z',
+      message: 'fix: error test',
+      refs: [],
+    };
+
+    const detailA: CommitDetail = {
+      commit: commitA,
+      fullMessage: 'fix: error test',
+      branches: { local: [], remote: [], tags: [] },
+      files: [],
+    };
+
+    let shouldFail = true;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') {
+        if (shouldFail) {
+          return Promise.reject(new Error('Backend error: commit not found'));
+        }
+        return Promise.resolve(detailA);
+      }
+      return [];
+    });
+
+    const key = commitKey(commitA.repoId, commitA.hash);
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA],
+      activeTabId: 'ws-a',
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      selectedCommits: [commitA],
+      selectedPrimaryKey: key,
+      selectedCommitDetails: {},
+      selectedCommitLoading: {},
+      selectedCommitError: {},
+      mode: 'history',
+    });
+
+    // 首次加载失败
+    await expect(useAppStore.getState().loadCommitDetail(commitA)).rejects.toThrow('Backend error: commit not found');
+    expect(useAppStore.getState().selectedCommitError[key]).toBe('Backend error: commit not found');
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBeUndefined();
+
+    // 允许后端恢复，并触发 reloadSelectedCommits
+    shouldFail = false;
+    await useAppStore.getState().reloadSelectedCommits();
+
+    expect(useAppStore.getState().selectedCommitError[key]).toBeUndefined();
+    expect(useAppStore.getState().selectedCommitDetails[key]).toEqual(detailA);
+    expect(useAppStore.getState().selectedCommit).toEqual(detailA);
+  });
+
+  it('does not block commit detail reload when persistTabs fails or is delayed', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const tabB = snapshot('ws-b', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+    const repoB = repository('repo-b', 'Repo B');
+
+    const commitA: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-sync-fail',
+      shortHash: 'syncfail',
+      parents: [],
+      author: 'Alice',
+      email: 'alice@example.com',
+      authorDate: '2026-08-16T10:00:00Z',
+      committerDate: '2026-08-16T10:00:00Z',
+      message: 'feat: sync test',
+      refs: [],
+    };
+
+    const detailA: CommitDetail = {
+      commit: commitA,
+      fullMessage: 'feat: sync test',
+      branches: { local: [], remote: [], tags: [] },
+      files: [],
+    };
+
+    const key = commitKey(commitA.repoId, commitA.hash);
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') {
+        return Promise.resolve(detailA);
+      }
+      return [];
+    });
+
+    // 模拟 syncWindowTabs 发生异常
+    bridge.syncWindowTabs = vi.fn().mockRejectedValue(new Error('IPC sync error'));
+
+    const sessionA = {
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-a',
+    };
+    const sessionB = {
+      snapshot: { ...snapshot('ws-b', 1), repositories: [repoB] },
+      allRepositories: [repoB],
+      selectedRepoId: 'repo-b',
+      mode: 'history' as const,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-b',
+    };
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-b',
+      snapshot: sessionB.snapshot,
+      allRepositories: sessionB.allRepositories,
+      selectedRepoId: 'repo-b',
+      mode: 'history',
+      sessions: {
+        'ws-a': { ...sessionA, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [commitA], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [commitA], selectedPrimaryKey: key, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+        'ws-b': { ...sessionB, selectedFile: undefined, diff: undefined, changesDiff: undefined, changes: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], mergeResult: '', mergeResolutions: {}, mergeScope: 'all', commitMessage: '', amendRepoIds: [], incomingCommits: {}, commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, comparison: undefined, remotes: {}, loadErrors: {} },
+      },
+    });
+
+    // 切回 ws-a，即使 syncWindowTabs 抛错，详情补载依然独立执行并成功更新
+    await useAppStore.getState().switchTab('ws-a');
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(useAppStore.getState().selectedCommitDetails[key]).toEqual(detailA);
+    expect(useAppStore.getState().selectedCommit).toEqual(detailA);
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBeUndefined();
+  });
+
+  it('checks target workspace and ignores stale reload when rapidly switching tabs', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const tabB = snapshot('ws-b', 1).workspace;
+    const repoB = repository('repo-b', 'Repo B');
+
+    const commitA: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-rapid-a',
+      shortHash: 'rapida',
+      parents: [],
+      author: 'Alice',
+      email: 'alice@example.com',
+      authorDate: '2026-08-16T10:00:00Z',
+      committerDate: '2026-08-16T10:00:00Z',
+      message: 'feat: rapid test A',
+      refs: [],
+    };
+
+    const detailA: CommitDetail = {
+      commit: commitA,
+      fullMessage: 'feat: rapid test A',
+      branches: { local: [], remote: [], tags: [] },
+      files: [],
+    };
+
+    let detailCalls = 0;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') {
+        detailCalls += 1;
+        return Promise.resolve(detailA);
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA, tabB],
+      activeTabId: 'ws-b',
+      snapshot: { ...snapshot('ws-b', 1), repositories: [repoB] },
+      allRepositories: [repoB],
+      selectedRepoId: 'repo-b',
+      selectedCommits: [],
+      selectedCommitDetails: {},
+      selectedCommitLoading: {},
+      selectedCommitError: {},
+      mode: 'history',
+    });
+
+    // 如果针对 ws-a 请求补载，但当前激活的是 ws-b，应当直接忽略，不执行补载
+    await useAppStore.getState().reloadSelectedCommits('ws-a');
+    expect(detailCalls).toBe(0);
+  });
+
+  it('preserves selectedCommitLoading when older request is aborted by subsequent request for the same commit', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+
+    const commitA: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-concurrent-1',
+      shortHash: 'concur1',
+      parents: [],
+      author: 'Alice',
+      email: 'alice@example.com',
+      authorDate: '2026-08-16T10:00:00Z',
+      committerDate: '2026-08-16T10:00:00Z',
+      message: 'feat: concurrent test',
+      refs: [],
+    };
+
+    const detailA: CommitDetail = {
+      commit: commitA,
+      fullMessage: 'feat: concurrent test',
+      branches: { local: [], remote: [], tags: [] },
+      files: [],
+    };
+
+    let requestCount = 0;
+    const request1Gate = deferred<CommitDetail>();
+    const request2Gate = deferred<CommitDetail>();
+
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'commitDetail') {
+        requestCount += 1;
+        if (requestCount === 1) {
+          return new Promise((resolve, reject) => {
+            options?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('Operation aborted', 'AbortError'));
+            });
+            request1Gate.promise.then(resolve, reject);
+          });
+        }
+        return request2Gate.promise;
+      }
+      return [];
+    });
+
+    const key = commitKey(commitA.repoId, commitA.hash);
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA],
+      activeTabId: 'ws-a',
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      selectedCommits: [commitA],
+      selectedPrimaryKey: key,
+      selectedCommitDetails: {},
+      selectedCommitLoading: {},
+      selectedCommitError: {},
+      mode: 'history',
+    });
+
+    // 1. 模拟悬停发起请求 1
+    const pending1 = useAppStore.getState().loadCommitDetail(commitA, true);
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBe(true);
+
+    // 2. 在请求 1 未完成时，模拟点击同一提交发起请求 2
+    const pending2 = useAppStore.getState().loadCommitDetail(commitA, true);
+
+    // 等待请求 1 被 abort 并进入 catch 块
+    await pending1.catch(() => undefined);
+
+    // 3. 核心验证：请求 1 绝不能清除请求 2 正在维持的 loading 状态，也不能写入错误
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBe(true);
+    expect(useAppStore.getState().selectedCommitError[key]).toBeFalsy();
+
+    // 4. 让请求 2 成功返回
+    request2Gate.resolve(detailA);
+    const result2 = await pending2;
+    expect(result2).toEqual(detailA);
+
+    // 请求 2 完成后，loading 被正常清除，detail 被正常写入
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBeUndefined();
+    expect(useAppStore.getState().selectedCommitDetails[key]).toEqual(detailA);
+  });
+
+  it('allows newest request to record error when older aborted request bails out safely', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+
+    const commitA: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-concurrent-2',
+      shortHash: 'concur2',
+      parents: [],
+      author: 'Alice',
+      email: 'alice@example.com',
+      authorDate: '2026-08-16T10:00:00Z',
+      committerDate: '2026-08-16T10:00:00Z',
+      message: 'feat: concurrent error test',
+      refs: [],
+    };
+
+    let requestCount = 0;
+    const request1Gate = deferred<CommitDetail>();
+    const request2Gate = deferred<CommitDetail>();
+
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'commitDetail') {
+        requestCount += 1;
+        if (requestCount === 1) {
+          return new Promise((resolve, reject) => {
+            options?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('Operation aborted', 'AbortError'));
+            });
+            request1Gate.promise.then(resolve, reject);
+          });
+        }
+        return request2Gate.promise;
+      }
+      return [];
+    });
+
+    const key = commitKey(commitA.repoId, commitA.hash);
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA],
+      activeTabId: 'ws-a',
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      selectedCommits: [commitA],
+      selectedPrimaryKey: key,
+      selectedCommitDetails: {},
+      selectedCommitLoading: {},
+      selectedCommitError: {},
+      mode: 'history',
+    });
+
+    const pending1 = useAppStore.getState().loadCommitDetail(commitA, true);
+    const pending2 = useAppStore.getState().loadCommitDetail(commitA, true);
+
+    await pending1.catch(() => undefined);
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBe(true);
+
+    // 让请求 2 发生真实后端错误
+    request2Gate.reject(new Error('Network timeout during click'));
+    await expect(pending2).rejects.toThrow('Network timeout during click');
+
+    // 新请求完成失败后，正常清除 loading 并记录该真实错误
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBeUndefined();
+    expect(useAppStore.getState().selectedCommitError[key]).toBe('Network timeout during click');
+  });
+
+  it('refuses to open incomplete changes when some selected commits are loading or failed', () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+    const commitA: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-agg-1',
+      shortHash: 'agg1',
+      parents: [],
+      author: 'Alice',
+      email: 'alice@example.com',
+      authorDate: '2026-08-16T10:00:00Z',
+      committerDate: '2026-08-16T10:00:00Z',
+      message: 'feat: first commit',
+      refs: [],
+    };
+    const commitB: CommitNode = {
+      repoId: 'repo-a',
+      hash: 'commit-agg-2',
+      shortHash: 'agg2',
+      parents: ['commit-agg-1'],
+      author: 'Bob',
+      email: 'bob@example.com',
+      authorDate: '2026-08-16T11:00:00Z',
+      committerDate: '2026-08-16T11:00:00Z',
+      message: 'feat: second commit',
+      refs: [],
+    };
+
+    const keyA = commitKey('repo-a', 'commit-agg-1');
+    const keyB = commitKey('repo-a', 'commit-agg-2');
+
+    const detailA: CommitDetail = {
+      commit: commitA,
+      fullMessage: 'feat: first commit',
+      branches: { local: [], remote: [], tags: [] },
+      files: [{ path: 'file-a.txt', status: 'added', added: 10, removed: 0 }],
+    };
+    const detailB: CommitDetail = {
+      commit: commitB,
+      fullMessage: 'feat: second commit',
+      branches: { local: [], remote: [], tags: [] },
+      files: [{ path: 'file-b.txt', status: 'added', added: 5, removed: 0 }],
+    };
+
+    useAppStore.setState({
+      tabs: [tabA],
+      activeTabId: 'ws-a',
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      selectedCommits: [commitA, commitB],
+      selectedCommitDetails: { [keyA]: detailA },
+      selectedCommitLoading: { [keyB]: true },
+      selectedCommitError: {},
+      mode: 'history',
+      changes: undefined,
+    });
+
+    // 1. commitB 仍在 loading 时，openCommitChanges 应当拒绝进入
+    useAppStore.getState().openCommitChanges();
+    expect(useAppStore.getState().mode).toBe('history');
+    expect(useAppStore.getState().changes).toBeUndefined();
+
+    // 2. commitB 加载失败时，openCommitChanges 也应当拒绝进入
+    useAppStore.setState({
+      selectedCommitLoading: {},
+      selectedCommitError: { [keyB]: 'Failed to load' },
+    });
+    useAppStore.getState().openCommitChanges();
+    expect(useAppStore.getState().mode).toBe('history');
+    expect(useAppStore.getState().changes).toBeUndefined();
+
+    // 3. 所有提交详情就绪后，成功进入 changes 模式并构建完整文件集合
+    useAppStore.setState({
+      selectedCommitDetails: { [keyA]: detailA, [keyB]: detailB },
+      selectedCommitLoading: {},
+      selectedCommitError: {},
+    });
+    useAppStore.getState().openCommitChanges();
+    expect(useAppStore.getState().mode).toBe('changes');
+    const changesModel = useAppStore.getState().changes;
+    expect(changesModel?.kind).toBe('commits');
+    if (changesModel?.kind === 'commits') {
+      expect(changesModel.commits).toHaveLength(2);
+      expect(changesModel.files).toHaveLength(2);
+    }
+  });
+
+  it('loadChangesDiff immediately clears previous diff and captures diff error on failure', async () => {
+    const tabA = snapshot('ws-a', 1).workspace;
+    const repoA = repository('repo-a', 'Repo A');
+
+    let shouldFail = false;
+    const diffGate = deferred<DiffDocument>();
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'fileDiff') {
+        if (shouldFail) {
+          return Promise.reject(new Error('Diff parse error'));
+        }
+        return diffGate.promise;
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      tabs: [tabA],
+      activeTabId: 'ws-a',
+      snapshot: { ...snapshot('ws-a', 1), repositories: [repoA] },
+      allRepositories: [repoA],
+      selectedRepoId: 'repo-a',
+      mode: 'changes',
+      changesDiff: { path: 'old.txt', content: 'old diff content', language: 'text', binary: false, truncated: false, lineCount: 1 },
+      changesDiffLoading: false,
+      changesDiffError: undefined,
+      changesDiffTarget: 'repo-a\0old.txt\0\0rev-1',
+    });
+
+    const newTarget: WorkingChangeTarget = {
+      repoId: 'repo-a',
+      path: 'new.txt',
+      section: 'staged',
+      status: 'modified',
+      staged: true,
+    };
+
+    // 1. 发起新文件请求
+    const pending = useAppStore.getState().loadChangesDiff(newTarget);
+
+    // 2. 核心验证：旧差异在发起时立即被清空，loading 被激活，target 被更新
+    expect(useAppStore.getState().changesDiff).toBeUndefined();
+    expect(useAppStore.getState().changesDiffLoading).toBe(true);
+    expect(useAppStore.getState().changesDiffTarget).toBe('repo-a\0staged\0new.txt');
+    expect(useAppStore.getState().changesDiffError).toBeUndefined();
+
+    // 3. 正常返回
+    diffGate.resolve({ path: 'new.txt', content: 'new diff content', language: 'text', binary: false, truncated: false, lineCount: 1 });
+    await pending;
+
+    expect(useAppStore.getState().changesDiffLoading).toBe(false);
+    expect(useAppStore.getState().changesDiff?.path).toBe('new.txt');
+    expect(useAppStore.getState().changesDiff?.content).toBe('new diff content');
+
+    // 4. 再次请求且发生失败
+    shouldFail = true;
+    await useAppStore.getState().loadChangesDiff(newTarget).catch(() => undefined);
+
+    // 失败后旧内容依然不残留，记录错误状态
+    expect(useAppStore.getState().changesDiff).toBeUndefined();
+    expect(useAppStore.getState().changesDiffLoading).toBe(false);
+    expect(useAppStore.getState().changesDiffError).toBe('Diff parse error');
   });
 });

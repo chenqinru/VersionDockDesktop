@@ -893,6 +893,64 @@ pub async fn last_commit_message(
         .map(|item| item.message))
 }
 
+async fn resolve_git_candidate_paths(
+    repo: &RepositoryMeta,
+    base: &str,
+    target: &str,
+    safe_path: &str,
+    token: &CancellationToken,
+) -> Vec<String> {
+    if let Ok(name_status) = git(
+        vec![
+            "diff".into(),
+            "--name-status".into(),
+            "-z".into(),
+            "-M".into(),
+            base.into(),
+            target.into(),
+            "--".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    {
+        let fields = name_status.stdout_text();
+        let parts = fields.split('\0').collect::<Vec<_>>();
+        let mut index = 0;
+        while index < parts.len() {
+            let code = parts[index];
+            index += 1;
+            if code.is_empty() {
+                continue;
+            }
+            if code.starts_with('R') || code.starts_with('C') {
+                let old_path = parts.get(index).copied().unwrap_or_default();
+                index += 1;
+                let new_path = parts.get(index).copied().unwrap_or_default();
+                index += 1;
+                if new_path == safe_path || old_path == safe_path {
+                    let mut candidates = Vec::new();
+                    if !old_path.is_empty() {
+                        candidates.push(old_path.to_string());
+                    }
+                    if !new_path.is_empty() && new_path != old_path {
+                        candidates.push(new_path.to_string());
+                    }
+                    return candidates;
+                }
+                continue;
+            }
+            let path = parts.get(index).copied().unwrap_or_default();
+            index += 1;
+            if path == safe_path {
+                return vec![safe_path.to_string()];
+            }
+        }
+    }
+    vec![safe_path.to_string()]
+}
+
 pub async fn diff(
     repo: &RepositoryMeta,
     path: &str,
@@ -953,40 +1011,83 @@ pub async fn diff(
                 })?;
                 validate_revision_or_ref(&from)?;
                 validate_revision_or_ref(&to)?;
-                git(
+                let candidates = resolve_git_candidate_paths(repo, &from, &to, &safe, token).await;
+                let mut args = vec![
+                    "diff".into(),
+                    "-M".into(),
+                    "-U999999".into(),
+                    "--no-ext-diff".into(),
+                    "--no-color".into(),
+                    "--binary".into(),
+                    from,
+                    to,
+                    "--".into(),
+                ];
+                for candidate in candidates {
+                    args.push(format!(":(literal){candidate}"));
+                }
+                git(args, repo, token).await?
+            } else if let Some(ref value) = revision {
+                validate_revision(value)?;
+                let parent = git(
                     vec![
+                        "rev-list".into(),
+                        "--parents".into(),
+                        "-n".into(),
+                        "1".into(),
+                        value.clone(),
+                    ],
+                    repo,
+                    token,
+                )
+                .await
+                .ok()
+                .and_then(|out| {
+                    let text = out.stdout_text();
+                    let parts = text.split_whitespace().collect::<Vec<_>>();
+                    if parts.len() >= 2 {
+                        Some(parts[1].to_string())
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(parent_hash) = parent {
+                    let candidates =
+                        resolve_git_candidate_paths(repo, &parent_hash, value, &safe, token).await;
+                    let mut args = vec![
                         "diff".into(),
+                        "-M".into(),
                         "-U999999".into(),
                         "--no-ext-diff".into(),
                         "--no-color".into(),
                         "--binary".into(),
-                        from,
-                        to,
+                        parent_hash,
+                        value.clone(),
                         "--".into(),
-                        format!(":(literal){safe}"),
-                    ],
-                    repo,
-                    token,
-                )
-                .await?
-            } else if let Some(value) = revision {
-                validate_revision(&value)?;
-                git(
-                    vec![
-                        "show".into(),
-                        "-U999999".into(),
-                        "--format=".into(),
-                        "--no-ext-diff".into(),
-                        "--no-color".into(),
-                        "--binary".into(),
-                        value,
-                        "--".into(),
-                        format!(":(literal){safe}"),
-                    ],
-                    repo,
-                    token,
-                )
-                .await?
+                    ];
+                    for candidate in candidates {
+                        args.push(format!(":(literal){candidate}"));
+                    }
+                    git(args, repo, token).await?
+                } else {
+                    git(
+                        vec![
+                            "show".into(),
+                            "-U999999".into(),
+                            "--format=".into(),
+                            "--no-ext-diff".into(),
+                            "--no-color".into(),
+                            "--binary".into(),
+                            value.clone(),
+                            "--".into(),
+                            format!(":(literal){safe}"),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?
+                }
             } else {
                 let mut args = vec![
                     "diff".into(),
@@ -1023,12 +1124,34 @@ pub async fn diff(
                 validate_svn_revision(&from)?;
                 validate_svn_revision(&to)?;
                 args.extend(["-r".into(), format!("{from}:{to}")]);
-            } else if let Some(value) = revision {
-                validate_svn_revision(&value)?;
-                args.extend(["-c".into(), value]);
+            } else if let Some(ref value) = revision {
+                validate_svn_revision(value)?;
+                args.extend(["-c".into(), value.clone()]);
             }
-            args.extend(["--".into(), safe]);
-            svn(args, repo, token).await?
+            args.extend(["--".into(), safe.clone()]);
+            match svn(args, repo, token).await {
+                Ok(out) => out,
+                Err(err) => {
+                    if let Some(rev) = revision.as_deref() {
+                        if let Ok(info) = svn_working_copy_info(repo, token).await {
+                            if !info.url.is_empty() {
+                                let target_url =
+                                    format!("{}/{}@HEAD", info.url.trim_end_matches('/'), safe);
+                                if let Ok(fallback_out) = svn(
+                                    vec!["diff".into(), "-c".into(), rev.into(), target_url],
+                                    repo,
+                                    token,
+                                )
+                                .await
+                                {
+                                    return make_diff(path, fallback_out.stdout);
+                                }
+                            }
+                        }
+                    }
+                    return Err(err);
+                }
+            }
         }
     };
     make_diff(path, output.stdout)
@@ -2903,6 +3026,126 @@ async fn status_fingerprint(
     Ok(hex::encode(Sha256::digest(raw)))
 }
 
+fn decode_svn_path(input: &str) -> String {
+    let mut bytes = Vec::new();
+    let mut chars = input.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            if let (Some(h1), Some(h2)) = (chars.next(), chars.next()) {
+                if let Ok(hex_byte) =
+                    u8::from_str_radix(&format!("{}{}", h1 as char, h2 as char), 16)
+                {
+                    bytes.push(hex_byte);
+                    continue;
+                }
+                bytes.push(b);
+                bytes.push(h1);
+                bytes.push(h2);
+            } else {
+                bytes.push(b);
+            }
+        } else {
+            bytes.push(b);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+pub struct SvnWorkingCopyInfo {
+    pub revision: String,
+    pub relative_path: String,
+    pub url: String,
+}
+
+pub async fn svn_working_copy_info(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<SvnWorkingCopyInfo, DesktopError> {
+    let raw = svn(vec!["info".into(), "--xml".into()], repo, token)
+        .await?
+        .stdout_text();
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let entry = document
+        .descendants()
+        .find(|node| node.has_tag_name("entry"));
+    let revision = entry
+        .and_then(|node| node.attribute("revision"))
+        .ok_or_else(|| {
+            DesktopError::new("SVN_REVISION_MISSING", "Unable to read SVN revision", true)
+        })?
+        .to_string();
+    let wc_url = document
+        .descendants()
+        .find(|n| n.has_tag_name("url"))
+        .and_then(|n| n.text())
+        .unwrap_or("")
+        .to_string();
+    let mut relative_path = document
+        .descendants()
+        .find(|n| n.has_tag_name("relative-url"))
+        .and_then(|n| n.text())
+        .map(|s| decode_svn_path(s.trim().trim_start_matches('^').trim_matches('/')))
+        .unwrap_or_default();
+    if relative_path.is_empty() {
+        let root_url = document
+            .descendants()
+            .find(|n| n.has_tag_name("root"))
+            .and_then(|n| n.text())
+            .unwrap_or("");
+        if !wc_url.is_empty() && !root_url.is_empty() && wc_url.starts_with(root_url) {
+            relative_path = decode_svn_path(wc_url[root_url.len()..].trim_matches('/'));
+        }
+    }
+    Ok(SvnWorkingCopyInfo {
+        revision,
+        relative_path,
+        url: wc_url,
+    })
+}
+
+fn map_svn_path_to_working_copy(
+    raw_path: &str,
+    wc_relative_path: &str,
+    wc_url: &str,
+) -> Option<String> {
+    let decoded = decode_svn_path(raw_path.trim());
+
+    if !wc_url.is_empty() {
+        if let Some(suffix) = decoded
+            .strip_prefix(wc_url)
+            .or_else(|| raw_path.strip_prefix(wc_url))
+        {
+            let rel = suffix.trim_start_matches('/');
+            if rel.is_empty() {
+                return None;
+            }
+            return Some(rel.to_string());
+        }
+    }
+
+    let repo_rel = decoded.trim_start_matches('/');
+    if wc_relative_path.is_empty() {
+        if repo_rel.is_empty() {
+            None
+        } else {
+            Some(repo_rel.to_string())
+        }
+    } else {
+        let prefix = format!("{wc_relative_path}/");
+        if repo_rel.starts_with(&prefix) {
+            let rel = &repo_rel[prefix.len()..];
+            if rel.is_empty() {
+                None
+            } else {
+                Some(rel.to_string())
+            }
+        } else {
+            None
+        }
+    }
+}
+
 async fn current_revision(
     repo: &RepositoryMeta,
     token: &CancellationToken,
@@ -2917,21 +3160,9 @@ async fn current_revision(
         .stdout_text()
         .trim()
         .into()),
-        VcsKind::Svn => {
-            let raw = svn(vec!["info".into(), "--xml".into()], repo, token)
-                .await?
-                .stdout_text();
-            let document = roxmltree::Document::parse(&raw)
-                .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
-            document
-                .descendants()
-                .find(|node| node.has_tag_name("entry"))
-                .and_then(|node| node.attribute("revision"))
-                .map(String::from)
-                .ok_or_else(|| {
-                    DesktopError::new("SVN_REVISION_MISSING", "Unable to read SVN revision", true)
-                })
-        }
+        VcsKind::Svn => svn_working_copy_info(repo, token)
+            .await
+            .map(|info| info.revision),
     }
 }
 
@@ -2982,6 +3213,8 @@ async fn update_summary(
                             vec![
                                 "diff".into(),
                                 "--numstat".into(),
+                                "-z".into(),
+                                "-M".into(),
                                 before.into(),
                                 after.into(),
                                 "--".into(),
@@ -2999,6 +3232,8 @@ async fn update_summary(
                             vec![
                                 "diff".into(),
                                 "--name-status".into(),
+                                "-z".into(),
+                                "-M".into(),
                                 before.into(),
                                 after.into(),
                                 "--".into(),
@@ -4835,6 +5070,8 @@ pub async fn branch_compare(
         vec![
             "diff".into(),
             "--numstat".into(),
+            "-z".into(),
+            "-M".into(),
             range.clone(),
             "--".into(),
         ],
@@ -4844,7 +5081,14 @@ pub async fn branch_compare(
     .await?
     .stdout_text();
     let statuses = git(
-        vec!["diff".into(), "--name-status".into(), range, "--".into()],
+        vec![
+            "diff".into(),
+            "--name-status".into(),
+            "-z".into(),
+            "-M".into(),
+            range,
+            "--".into(),
+        ],
         repo,
         token,
     )
@@ -5004,7 +5248,7 @@ async fn svn_history(
         .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
     let needle = query.text.unwrap_or_default().to_lowercase();
     let author_filter = query.author.unwrap_or_default().to_lowercase();
-    let all = document
+    let mut all = document
         .descendants()
         .filter(|node| node.has_tag_name("logentry"))
         .filter_map(|entry| {
@@ -5057,6 +5301,32 @@ async fn svn_history(
             })
         })
         .collect::<Vec<_>>();
+    let true_head_rev = if query_revision.is_none() && query.path.is_none() {
+        document
+            .descendants()
+            .find(|node| node.has_tag_name("logentry"))
+            .and_then(|node| node.attribute("revision"))
+            .map(|r| r.trim_start_matches('r').to_string())
+    } else {
+        None
+    };
+    let base_rev = current_revision(repo, token).await.ok();
+    let clean_base = base_rev.as_deref().map(|r| r.trim_start_matches('r'));
+    for commit in &mut all {
+        let clean_c = commit.hash.trim_start_matches('r');
+        let mut refs = Vec::new();
+        if let Some(ref head) = true_head_rev {
+            if clean_c == head {
+                refs.push("HEAD".to_string());
+            }
+        }
+        if let Some(base) = clean_base {
+            if clean_c == base {
+                refs.push("BASE".to_string());
+            }
+        }
+        commit.refs = refs;
+    }
     let mut commits = all.into_iter().skip(skip as usize).collect::<Vec<_>>();
     let has_more = commits.len() > limit as usize;
     commits.truncate(limit as usize);
@@ -5272,30 +5542,42 @@ pub async fn commit_detail(
                     vec![
                         "diff".into(),
                         "--numstat".into(),
+                        "-z".into(),
+                        "-M".into(),
                         parent.clone(),
                         revision.into(),
+                        "--".into(),
                     ]
                 } else {
                     vec![
                         "show".into(),
                         "--numstat".into(),
+                        "-z".into(),
+                        "-M".into(),
                         "--format=".into(),
                         revision.into(),
+                        "--".into(),
                     ]
                 };
                 let status_args = if let Some(parent) = commit.parents.first() {
                     vec![
                         "diff".into(),
                         "--name-status".into(),
+                        "-z".into(),
+                        "-M".into(),
                         parent.clone(),
                         revision.into(),
+                        "--".into(),
                     ]
                 } else {
                     vec![
                         "show".into(),
                         "--name-status".into(),
+                        "-z".into(),
+                        "-M".into(),
                         "--format=".into(),
                         revision.into(),
+                        "--".into(),
                     ]
                 };
                 let (stats, statuses) = tokio::try_join!(
@@ -5352,6 +5634,16 @@ pub async fn commit_detail(
             let message = full_message.lines().next().unwrap_or("").to_string();
             let author = text("author");
             let date = text("date");
+            let clean_rev = revision.trim_start_matches('r');
+            let mut refs = Vec::new();
+
+            let wc_info = svn_working_copy_info(repo, token).await.ok();
+            if let Some(ref info) = wc_info {
+                if clean_rev == info.revision.trim_start_matches('r') {
+                    refs.push("BASE".to_string());
+                }
+            }
+
             let commit = CommitNode {
                 repo_id: repo.id.clone(),
                 hash: revision.into(),
@@ -5366,27 +5658,86 @@ pub async fn commit_detail(
                 } else {
                     message
                 },
-                refs: vec![],
+                refs: refs.clone(),
                 incoming: false,
                 unpushed: false,
             };
-            let files = document
+
+            let wc_rel_path = wc_info
+                .as_ref()
+                .map(|i| i.relative_path.as_str())
+                .unwrap_or("");
+            let wc_url = wc_info.as_ref().map(|i| i.url.as_str()).unwrap_or("");
+
+            let mut files: Vec<CommitFile> = document
                 .descendants()
                 .filter(|node| node.has_tag_name("path"))
+                .filter(|node| node.attribute("kind") != Some("dir"))
                 .filter_map(|node| {
+                    let raw_path = node.text()?.trim();
+                    let mapped = map_svn_path_to_working_copy(raw_path, wc_rel_path, wc_url)?;
                     Some(CommitFile {
-                        path: node.text()?.trim_start_matches('/').into(),
+                        path: mapped,
                         status: node.attribute("action").unwrap_or("M").into(),
                         added: None,
                         removed: None,
                     })
                 })
                 .collect();
+
+            if files.is_empty() && !wc_url.is_empty() {
+                if let Ok(summary_out) = svn(
+                    vec![
+                        "diff".into(),
+                        "--summarize".into(),
+                        "--xml".into(),
+                        "-c".into(),
+                        clean_rev.into(),
+                        format!("{wc_url}@HEAD"),
+                    ],
+                    repo,
+                    token,
+                )
+                .await
+                {
+                    if let Ok(summary_doc) = roxmltree::Document::parse(&summary_out.stdout_text())
+                    {
+                        files = summary_doc
+                            .descendants()
+                            .filter(|node| node.has_tag_name("path"))
+                            .filter(|node| node.attribute("kind") != Some("dir"))
+                            .filter_map(|node| {
+                                let raw_path = node.text()?.trim();
+                                let mapped =
+                                    map_svn_path_to_working_copy(raw_path, wc_rel_path, wc_url)?;
+                                let item = node.attribute("item").unwrap_or("modified");
+                                let status = match item {
+                                    "added" => "A",
+                                    "deleted" => "D",
+                                    _ => "M",
+                                };
+                                Some(CommitFile {
+                                    path: mapped,
+                                    status: status.into(),
+                                    added: None,
+                                    removed: None,
+                                })
+                            })
+                            .collect();
+                    }
+                }
+            }
+
             Ok(CommitDetail {
                 commit,
                 full_message,
                 files,
-                branches: CommitBranches::default(),
+                branches: CommitBranches {
+                    local: refs.clone(),
+                    remote: Vec::new(),
+                    tags: Vec::new(),
+                    is_head: None,
+                },
                 merge_parent_changes: Vec::new(),
             })
         }
@@ -5526,14 +5877,20 @@ pub async fn merge_parent_files(
     let stats_args = vec![
         "diff".into(),
         "--numstat".into(),
+        "-z".into(),
+        "-M".into(),
         parent_hash.into(),
         revision.into(),
+        "--".into(),
     ];
     let status_args = vec![
         "diff".into(),
         "--name-status".into(),
+        "-z".into(),
+        "-M".into(),
         parent_hash.into(),
         revision.into(),
+        "--".into(),
     ];
     let (stats, statuses) = tokio::try_join!(
         async { Ok::<_, DesktopError>(git(stats_args, repo, token).await?.stdout_text()) },
@@ -5667,24 +6024,17 @@ fn lines(value: &str) -> Vec<String> {
 }
 
 fn merge_git_files(stats: &str, statuses: &str) -> Vec<CommitFile> {
-    let mut numbers = std::collections::HashMap::new();
-    for line in stats.lines() {
-        let fields = line.splitn(3, '\t').collect::<Vec<_>>();
-        if fields.len() == 3 {
-            numbers.insert(fields[2], (fields[0].parse().ok(), fields[1].parse().ok()));
-        }
-    }
-    statuses
-        .lines()
-        .filter_map(|line| {
-            let (status, path) = line.split_once('\t')?;
-            let (added, removed) = numbers.get(path).cloned().unwrap_or((None, None));
-            Some(CommitFile {
-                path: path.into(),
-                status: status.into(),
+    let numbers = parse_numstat_z(stats);
+    parse_git_name_status_z(statuses)
+        .into_iter()
+        .map(|(status, path)| {
+            let (added, removed) = numbers.get(&path).copied().unwrap_or((None, None));
+            CommitFile {
+                path,
+                status,
                 added,
                 removed,
-            })
+            }
         })
         .collect()
 }
@@ -9126,6 +9476,8 @@ pub async fn worktree_diff(
         vec![
             "diff".into(),
             "--numstat".into(),
+            "-z".into(),
+            "-M".into(),
             base_ref.into(),
             "--".into(),
         ],
@@ -9138,6 +9490,7 @@ pub async fn worktree_diff(
         vec![
             "diff".into(),
             "--name-status".into(),
+            "-z".into(),
             "-M".into(),
             base_ref.into(),
             "--".into(),
@@ -9246,6 +9599,8 @@ pub async fn branch_working_diff(
         vec![
             "diff".into(),
             "--numstat".into(),
+            "-z".into(),
+            "-M".into(),
             base_ref.into(),
             "--".into(),
         ],
@@ -9258,6 +9613,7 @@ pub async fn branch_working_diff(
         vec![
             "diff".into(),
             "--name-status".into(),
+            "-z".into(),
             "-M".into(),
             base_ref.into(),
             "--".into(),

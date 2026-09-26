@@ -2,19 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
-import { buildMergeContent, mergeCounts, type MergeResolution, type NonConflictScope } from './mergeEditorModel';
+import { buildMergeContent, mergeCounts, type MergeResolution } from './mergeEditorModel';
 
 export function MergeWorkspace() {
   const merge = useAppStore((state) => state.merge);
+  const mergeTarget = useAppStore((state) => state.mergeTarget ?? state.selectedFile);
   const result = useAppStore((state) => state.mergeResult);
   const setResult = useAppStore((state) => state.setMergeResult);
+  const resolutions = useAppStore((state) => state.mergeResolutions);
+  const setResolutions = useAppStore((state) => state.setMergeResolutions);
+  const scope = useAppStore((state) => state.mergeScope);
+  const setScope = useAppStore((state) => state.setMergeScope);
   const save = useAppStore((state) => state.saveMerge);
   const back = useAppStore((state) => state.backToHistory);
-  const busy = useAppStore((state) => isOperationActive(state.operations, { repositoryId: state.selectedFile?.repoId, domain: 'conflict' }));
+  const busy = useAppStore((state) => isOperationActive(state.operations, { repositoryId: mergeTarget?.repoId, domain: 'conflict' }));
   const accept = useAppStore((state) => state.acceptConflict);
   const [mergeKey, setMergeKey] = useState(merge?.fingerprint);
-  const [resolutions, setResolutions] = useState<Record<number, MergeResolution>>(() => Object.fromEntries((merge?.conflicts ?? []).map((conflict) => [conflict.index, 'unresolved'])));
-  const [scope, setScope] = useState<NonConflictScope>('all');
   const [current, setCurrent] = useState(0);
   const [syncScroll, setSyncScroll] = useState(true);
   const conflictRefs = useRef<Record<number, HTMLElement | null>>({});

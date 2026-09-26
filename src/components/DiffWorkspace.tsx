@@ -13,6 +13,7 @@ export function DiffWorkspace() {
   const diff = useAppStore((state) => state.diff);
   const back = useAppStore((state) => state.backToHistory);
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
+  const diffReturnMode = useAppStore((state) => state.diffReturnMode);
   const [context, setContext] = useState<{ x: number; y: number; selection?: string }>();
   const lastRangeRef = useRef<Range | null>(null);
   const { t } = useI18n();
@@ -36,9 +37,16 @@ export function DiffWorkspace() {
   const isWorking = file?.toRevision === 'WORKTREE' || file?.toRevision === 'WORKING' || (!file?.revision && !file?.toRevision);
   const oldRevision = file?.fromRevision ?? (file?.revision ? `${file.revision}~1` : 'HEAD');
   const newRevision = isWorking ? undefined : (file?.toRevision ?? file?.revision);
+  const backLabel = comparisonTarget
+    ? t('Back to compare')
+    : diffReturnMode === 'commit-detail'
+      ? t('Back to commit details')
+      : diffReturnMode === 'changes'
+        ? t('Back to changes')
+        : t('Back to history');
   return <section className="diff-workspace">
     <header className="diff-header">
-      <button className="diff-back-button" onClick={back}><Codicon name="arrow-left" /><span>{t(comparisonTarget ? 'Back to compare' : 'Back to history')}</span></button>
+      <button className="diff-back-button" onClick={back}><Codicon name="arrow-left" /><span>{backLabel}</span></button>
       <div className="diff-file-heading" title={diff.path}>
         <FileIcon name={fileName} />
         <span className="diff-file-path">{diff.path}</span>

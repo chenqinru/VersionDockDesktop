@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { useAppStore, type AppStore } from '../store/appStore';
@@ -10,8 +11,10 @@ import { confirmDialog } from './dialogService';
 import { AuthorAvatar } from './AuthorAvatar';
 import { branchColor, headColor, isPrimaryBranch, tagColor } from './branchColor';
 import { BranchRefBadge } from './BranchRefBadge';
+import { useSpeedSearch } from '../hooks/useSpeedSearch';
+import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 
-type DetailTreeNode = { name: string; path: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
+type DetailTreeNode = { name: string; path: string; key: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -23,6 +26,25 @@ function statusClass(status: string): string {
   return value === 'A' || value === 'C' ? 'added' : value === 'D' ? 'deleted' : value === 'R' ? 'renamed' : 'modified';
 }
 
+function HighlightText({ text, query }: { text: string; query?: string }) {
+  if (!query || !query.trim()) return <>{text}</>;
+  const trimmed = query.trim();
+  const lowerText = text.toLowerCase();
+  const lowerQuery = trimmed.toLowerCase();
+  const index = lowerText.indexOf(lowerQuery);
+  if (index === -1) return <>{text}</>;
+  const before = text.slice(0, index);
+  const match = text.slice(index, index + trimmed.length);
+  const after = text.slice(index + trimmed.length);
+  return (
+    <>
+      {before}
+      <mark className="search-match-highlight" style={{ background: 'var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.35))', color: 'inherit', borderRadius: 2 }}>{match}</mark>
+      {after}
+    </>
+  );
+}
+
 function refLabel(ref: string): string {
   return ref
     .replace('HEAD -> ', '')
@@ -32,12 +54,19 @@ function refLabel(ref: string): string {
     .replace('refs/tags/', '');
 }
 
-type DetailRef = { value: string; label: string; kind: 'branch' | 'remote' | 'tag' | 'head'; source: 'commit' | 'containing' };
+type DetailRef = {
+  value: string;
+  label: string;
+  kind: 'branch' | 'remote' | 'tag' | 'head' | 'revision';
+  source: 'commit' | 'containing';
+  isSvnRevision?: boolean;
+};
 
-function refsFor(detail: CommitDetail): DetailRef[] {
+function refsFor(detail: CommitDetail, repoKind?: 'git' | 'svn'): DetailRef[] {
   const local = new Set(detail.branches.local);
   const remote = new Set(detail.branches.remote.filter((branch) => !branch.endsWith('/HEAD')));
   const tags = new Set(detail.branches.tags);
+  const isSvn = repoKind === 'svn';
   const values: Array<{ value: string; source: DetailRef['source'] }> = [
     ...(detail.branches.isHead ? [{ value: 'HEAD', source: 'commit' as const }] : []),
     ...detail.commit.refs.map((value) => ({ value, source: 'commit' as const })),
@@ -47,6 +76,9 @@ function refsFor(detail: CommitDetail): DetailRef[] {
   ];
   const refs = values.flatMap(({ value, source }): DetailRef[] => {
     const label = refLabel(value);
+    if (isSvn && (value === 'HEAD' || value === 'BASE' || label === 'HEAD' || label === 'BASE')) {
+      return [{ value, label, kind: 'revision', source, isSvnRevision: true }];
+    }
     if (value.startsWith('refs/remotes/') && label.endsWith('/HEAD')) return [];
     if (!value.startsWith('refs/') && label.endsWith('/HEAD') && !local.has(label)) return [];
     if (value === 'HEAD' || value.startsWith('HEAD -> ')) return [{ value, label: 'HEAD', kind: 'head', source }];
@@ -56,15 +88,16 @@ function refsFor(detail: CommitDetail): DetailRef[] {
   });
   const unique = [...new Map(refs.map((ref) => [`${ref.kind}:${ref.label}`, ref])).values()];
   const rank = (ref: DetailRef): number => {
-    if (ref.kind === 'head') return 0;
-    if (ref.kind === 'tag' && ref.source === 'commit') return 1;
-    if (ref.kind === 'branch') return isPrimaryBranch(ref.label) ? 2 : 3;
+    if (ref.kind === 'revision') return 0;
+    if (ref.kind === 'head') return 1;
+    if (ref.kind === 'tag' && ref.source === 'commit') return 2;
+    if (ref.kind === 'branch') return isPrimaryBranch(ref.label) ? 3 : 4;
     if (ref.kind === 'remote') {
       const primary = ['main', 'master', 'trunk', 'develop', 'dev', 'release']
         .some((name) => ref.label.toLowerCase() === name || ref.label.toLowerCase().endsWith(`/${name}`));
-      return primary ? 4 : 5;
+      return primary ? 5 : 6;
     }
-    return 6;
+    return 7;
   };
   return unique.sort((left, right) => rank(left) - rank(right) || left.label.localeCompare(right.label));
 }
@@ -82,7 +115,7 @@ function sortTreeNodes(nodes: DetailTreeNode[]): DetailTreeNode[] {
     });
 }
 
-function buildTree(files: DetailFileTarget[]): DetailTreeNode[] {
+function buildTree(files: DetailFileTarget[], keyPrefix?: string): DetailTreeNode[] {
   const root: DetailTreeNode[] = [];
   for (const file of files) {
     const parts = file.path.split('/');
@@ -91,7 +124,8 @@ function buildTree(files: DetailFileTarget[]): DetailTreeNode[] {
       const path = parts.slice(0, index + 1).join('/');
       let node = nodes.find((item) => item.name === name);
       if (!node) {
-        node = { name, path, children: [], fileCount: 0 };
+        const key = keyPrefix ? `${keyPrefix}:${path}` : path;
+        node = { name, path, key, children: [], fileCount: 0 };
         nodes.push(node);
       }
       if (index === parts.length - 1) node.file = file;
@@ -109,7 +143,7 @@ function collapseTree(node: DetailTreeNode): DetailTreeNode {
   let current = { ...node, children: node.children.map(collapseTree) };
   while (!current.file && current.children.length === 1 && !current.children[0].file) {
     const child = current.children[0];
-    current = { ...child, name: `${current.name}/${child.name}`, path: child.path };
+    current = { ...child, name: `${current.name}/${child.name}`, path: child.path, key: child.key };
   }
   return current;
 }
@@ -158,14 +192,15 @@ function DetailFileContextMenu({ position, file, close, openDiff }: { position: 
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
   const repoKind = useAppStore((state) => state.snapshot?.repositories.find((repo) => repo.meta.id === file.repoId)?.meta.kind);
-  const directCommitFile = !file.fromRevision && !file.toRevision || (file.commitHashes?.length ?? 0) > 1;
+  const isMergeParent = Boolean(file.isMergeParentDiff || file.comparisonBaseHash);
+  const canRevertOrCherryPick = repoKind === 'git' && !isMergeParent;
   const items: ContextMenuEntry[] = [
     { id: 'diff', label: t('Show Diff'), icon: 'diff' },
     { id: 'history', label: t('File history'), icon: 'history' },
     { id: 'commit-history', label: t('Show in commit history'), icon: 'git-commit' },
     { id: 'open', label: t('Open file'), icon: 'go-to-file' },
     { id: 'reveal', label: t('Reveal in File Manager'), icon: 'folder-opened' },
-    ...(repoKind === 'git' && directCommitFile ? [
+    ...(canRevertOrCherryPick ? [
       { id: 'revert-file', label: t('Revert Selected Changes'), icon: 'discard', danger: true } as ContextMenuEntry,
       { id: 'checkout-file', label: t('Cherry-Pick Selected Changes'), icon: 'git-commit' } as ContextMenuEntry,
     ] : []),
@@ -194,7 +229,7 @@ function DetailDirectoryContextMenu({ position, files, close }: { position: { x:
   const eligible = files.length > 0
     && repoIds.size === 1
     && repoKind === 'git'
-    && files.every((file) => (!file.fromRevision && !file.toRevision) || (file.commitHashes?.length ?? 0) > 1);
+    && files.every((file) => !file.isMergeParentDiff && !file.comparisonBaseHash);
   if (!eligible || !repoId) return null;
   const uniquePaths = [...new Set(files.map((file) => file.path))];
   const visiblePaths = uniquePaths.slice(0, 8);
@@ -232,37 +267,53 @@ function DetailTreeNodeView({
   depth,
   openDiff,
   selectedFile,
-  allExpanded,
-  clearAllExpanded,
+  isDirOpen,
+  toggleDir,
   openingDiffPath,
   onOpeningDiff,
+  searchQuery,
+  activeMatchRepoId,
+  activeMatchPath,
+  activeMatchFromRevision,
+  onFileContextMenu,
+  onDirectoryContextMenu,
 }: {
   node: DetailTreeNode;
   depth: number;
   openDiff: AppStore['openDiff'];
   selectedFile?: AppStore['selectedFile'];
-  allExpanded: boolean | null;
-  clearAllExpanded: () => void;
+  isDirOpen: (key: string) => boolean;
+  toggleDir: (key: string) => void;
   openingDiffPath?: string | null;
   onOpeningDiff?: (path: string) => void;
+  searchQuery?: string;
+  activeMatchRepoId?: string;
+  activeMatchPath?: string;
+  activeMatchFromRevision?: string;
+  onFileContextMenu?: (event: React.MouseEvent, file: DetailFileTarget) => void;
+  onDirectoryContextMenu?: (event: React.MouseEvent, files: DetailFileTarget[]) => void;
 }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(true);
-  const [context, setContext] = useState<{ x: number; y: number }>();
   if (node.file) {
     const file = node.file;
     const isSelected = isFileSelected(file, selectedFile);
-    return (<>
+    const isActiveMatch = activeMatchRepoId === file.repoId
+      && activeMatchPath === file.path
+      && (activeMatchFromRevision ?? '') === (file.fromRevision ?? '');
+    return (
       <button
         type="button"
-        className={`detail-file-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''}`}
+        data-detail-repo-id={file.repoId}
+        data-detail-path={file.path}
+        data-detail-from-revision={file.fromRevision ?? ''}
+        className={`detail-file-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
         style={{ paddingLeft: 18 + depth * 14 }}
         title={`${file.path}\n${t('Click to open diff')}`}
         onClick={() => openTarget(file, openDiff, onOpeningDiff)}
-        onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY }); }}
+        onContextMenu={(event) => onFileContextMenu?.(event, file)}
       >
         <FileIcon name={node.name} />
-        <span className="detail-file-name">{node.name}</span>
+        <span className="detail-file-name"><HighlightText text={node.name} query={searchQuery} /></span>
         {openingDiffPath === file.path && (
           <Codicon name="loading~spin" style={{ fontSize: '12px', marginLeft: '6px' }} />
         )}
@@ -274,45 +325,44 @@ function DetailTreeNodeView({
         )}
         <em>{file.status.replace(/\d+$/, '').slice(0, 1).toUpperCase()}</em>
       </button>
-      {context && <DetailFileContextMenu position={context} file={file} openDiff={openDiff} close={() => setContext(undefined)} />}
-    </>);
+    );
   }
-  const isExpanded = allExpanded ?? expanded;
+  const isExpanded = isDirOpen(node.key);
   const files = descendantFiles(node);
   return (
-    <>
-      <div className="detail-tree-dir">
-        <button
-          type="button"
-          style={{ paddingLeft: depth * 14 }}
-          title={node.path}
-          onClick={() => {
-            if (allExpanded !== null) clearAllExpanded();
-            setExpanded((value) => !value);
-          }}
-          onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY }); }}
-        >
-          <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} />
-          <FileIcon name={node.name.split('/').pop() ?? node.name} folder open={isExpanded} />
-          <span className="detail-node-label">{node.name}</span>
-          <b className="detail-directory-count">{node.fileCount}</b>
-        </button>
-        {isExpanded && node.children.map((child) => (
-          <DetailTreeNodeView
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            openDiff={openDiff}
-            selectedFile={selectedFile}
-            allExpanded={allExpanded}
-            clearAllExpanded={clearAllExpanded}
-            openingDiffPath={openingDiffPath}
-            onOpeningDiff={onOpeningDiff}
-          />
-        ))}
-      </div>
-      {context && <DetailDirectoryContextMenu position={context} files={files} close={() => setContext(undefined)} />}
-    </>
+    <div className="detail-tree-dir">
+      <button
+        type="button"
+        style={{ paddingLeft: depth * 14 }}
+        title={node.path}
+        onClick={() => toggleDir(node.key)}
+        onContextMenu={(event) => onDirectoryContextMenu?.(event, files)}
+      >
+        <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} />
+        <FileIcon name={node.name.split('/').pop() ?? node.name} folder open={isExpanded} />
+        <span className="detail-node-label"><HighlightText text={node.name} query={searchQuery} /></span>
+        <b className="detail-directory-count">{node.fileCount}</b>
+      </button>
+      {isExpanded && node.children.map((child) => (
+        <DetailTreeNodeView
+          key={child.key}
+          node={child}
+          depth={depth + 1}
+          openDiff={openDiff}
+          selectedFile={selectedFile}
+          isDirOpen={isDirOpen}
+          toggleDir={toggleDir}
+          openingDiffPath={openingDiffPath}
+          onOpeningDiff={onOpeningDiff}
+          searchQuery={searchQuery}
+          activeMatchRepoId={activeMatchRepoId}
+          activeMatchPath={activeMatchPath}
+          activeMatchFromRevision={activeMatchFromRevision}
+          onFileContextMenu={onFileContextMenu}
+          onDirectoryContextMenu={onDirectoryContextMenu}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -324,6 +374,11 @@ function DetailFlatFileRow({
   openDiff,
   openingDiffPath,
   onOpeningDiff,
+  searchQuery,
+  activeMatchRepoId,
+  activeMatchPath,
+  activeMatchFromRevision,
+  onFileContextMenu,
 }: {
   file: DetailFileTarget;
   repoName?: string;
@@ -332,27 +387,37 @@ function DetailFlatFileRow({
   openDiff: AppStore['openDiff'];
   openingDiffPath?: string | null;
   onOpeningDiff?: (path: string) => void;
+  searchQuery?: string;
+  activeMatchRepoId?: string;
+  activeMatchPath?: string;
+  activeMatchFromRevision?: string;
+  onFileContextMenu?: (event: React.MouseEvent, file: DetailFileTarget) => void;
 }) {
   const { t } = useI18n();
-  const [context, setContext] = useState<{ x: number; y: number }>();
   const fileName = file.path.split('/').pop() ?? file.path;
   const dir = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
   const isSelected = isFileSelected(file, selectedFile);
-  return (<>
+  const isActiveMatch = activeMatchRepoId === file.repoId
+    && activeMatchPath === file.path
+    && (activeMatchFromRevision ?? '') === (file.fromRevision ?? '');
+  return (
     <button
       type="button"
+      data-detail-repo-id={file.repoId}
+      data-detail-path={file.path}
+      data-detail-from-revision={file.fromRevision ?? ''}
       key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
-      className={`detail-file-row detail-list-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''}`}
+      className={`detail-file-row detail-list-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
       title={`${file.path}\n${t('Click to open diff')}`}
       onClick={() => openTarget(file, openDiff, onOpeningDiff)}
-      onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY }); }}
+      onContextMenu={(event) => onFileContextMenu?.(event, file)}
     >
       <FileIcon name={fileName} />
-      <span className="detail-file-name">{fileName}</span>
+      <span className="detail-file-name"><HighlightText text={fileName} query={searchQuery} /></span>
       {openingDiffPath === file.path && (
         <Codicon name="loading~spin" style={{ fontSize: '12px', marginLeft: '6px' }} />
       )}
-      {dir && <span className="detail-dir-path">{dir}</span>}
+      {dir && <span className="detail-dir-path"><HighlightText text={dir} query={searchQuery} /></span>}
       {showRepo && repoName && <small className="detail-repo-pill">{repoName}</small>}
       {(file.added !== null || file.removed !== null) && (
         <span className="detail-line-stats">
@@ -362,8 +427,7 @@ function DetailFlatFileRow({
       )}
       <em>{file.status.replace(/\d+$/, '').slice(0, 1).toUpperCase()}</em>
     </button>
-    {context && <DetailFileContextMenu position={context} file={file} openDiff={openDiff} close={() => setContext(undefined)} />}
-  </>);
+  );
 }
 
 function DetailRepoGroup({
@@ -372,59 +436,95 @@ function DetailRepoGroup({
   repoColor,
   openDiff,
   selectedFile,
-  allExpanded,
-  clearAllExpanded,
+  isDirOpen,
+  toggleDir,
   openingDiffPath,
   onOpeningDiff,
+  searchQuery,
+  activeMatchRepoId,
+  activeMatchPath,
+  activeMatchFromRevision,
+  onFileContextMenu,
+  onDirectoryContextMenu,
 }: {
   files: DetailFileTarget[];
   repoName: string;
   repoColor?: string;
   openDiff: AppStore['openDiff'];
   selectedFile?: AppStore['selectedFile'];
-  allExpanded: boolean | null;
-  clearAllExpanded: () => void;
+  isDirOpen: (key: string) => boolean;
+  toggleDir: (key: string) => void;
   openingDiffPath?: string | null;
   onOpeningDiff?: (path: string) => void;
+  searchQuery?: string;
+  activeMatchRepoId?: string;
+  activeMatchPath?: string;
+  activeMatchFromRevision?: string;
+  onFileContextMenu?: (event: React.MouseEvent, file: DetailFileTarget) => void;
+  onDirectoryContextMenu?: (event: React.MouseEvent, files: DetailFileTarget[]) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
-  const [context, setContext] = useState<{ x: number; y: number }>();
-  const isExpanded = allExpanded ?? expanded;
+  const repoId = files[0]?.repoId ?? repoName;
+  const isExpanded = isDirOpen(`repo:${repoId}`);
   return (
-    <>
-      <div className="detail-repo-group">
-        <button
-          type="button"
-          className="detail-root-label"
-          title={repoName}
-          onClick={() => {
-            if (allExpanded !== null) clearAllExpanded();
-            setExpanded((value) => !value);
-          }}
-          onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setContext({ x: event.clientX, y: event.clientY }); }}
-        >
-          <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} />
-          <i style={{ background: repoColor ?? 'var(--versiondock-accent)' }} />
-          <strong>{repoName}</strong>
-          <b>{files.length}</b>
-        </button>
-        {isExpanded && buildTree(files).map((node) => (
-          <DetailTreeNodeView
-            key={node.path}
-            node={collapseTree(node)}
-            depth={1}
-            openDiff={openDiff}
-            selectedFile={selectedFile}
-            allExpanded={allExpanded}
-            clearAllExpanded={clearAllExpanded}
-            openingDiffPath={openingDiffPath}
-            onOpeningDiff={onOpeningDiff}
-          />
-        ))}
-      </div>
-      {context && <DetailDirectoryContextMenu position={context} files={files} close={() => setContext(undefined)} />}
-    </>
+    <div className="detail-repo-group">
+      <button
+        type="button"
+        className="detail-root-label"
+        title={repoName}
+        onClick={() => toggleDir(`repo:${repoId}`)}
+        onContextMenu={(event) => onDirectoryContextMenu?.(event, files)}
+      >
+        <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} />
+        <i style={{ background: repoColor ?? 'var(--versiondock-accent)' }} />
+        <strong><HighlightText text={repoName} query={searchQuery} /></strong>
+        <b>{files.length}</b>
+      </button>
+      {isExpanded && buildTree(files, `dir:${repoId}`).map((node) => (
+        <DetailTreeNodeView
+          key={node.key}
+          node={collapseTree(node)}
+          depth={1}
+          openDiff={openDiff}
+          selectedFile={selectedFile}
+          isDirOpen={isDirOpen}
+          toggleDir={toggleDir}
+          openingDiffPath={openingDiffPath}
+          onOpeningDiff={onOpeningDiff}
+          searchQuery={searchQuery}
+          activeMatchRepoId={activeMatchRepoId}
+          activeMatchPath={activeMatchPath}
+          activeMatchFromRevision={activeMatchFromRevision}
+          onFileContextMenu={onFileContextMenu}
+          onDirectoryContextMenu={onDirectoryContextMenu}
+        />
+      ))}
+    </div>
   );
+}
+
+type FlatItem =
+  | { kind: 'repo'; repoId: string; repoName: string; repoColor?: string; fileCount: number; files: DetailFileTarget[]; key: string }
+  | { kind: 'dir'; node: DetailTreeNode; depth: number; open: boolean; key: string }
+  | { kind: 'file'; file: DetailFileTarget; node: DetailTreeNode; depth: number; key: string };
+
+function flattenVisibleTreeNodes(
+  nodes: DetailTreeNode[],
+  isDirOpen: (key: string) => boolean,
+  depth = 1,
+): FlatItem[] {
+  const result: FlatItem[] = [];
+  for (const node of nodes) {
+    if (node.file) {
+      result.push({ kind: 'file', file: node.file, node, depth, key: `${node.file.repoId}:${node.path}` });
+    } else {
+      const open = isDirOpen(node.key);
+      result.push({ kind: 'dir', node, depth, open, key: node.key });
+      if (open && node.children.length > 0) {
+        result.push(...flattenVisibleTreeNodes(node.children, isDirOpen, depth + 1));
+      }
+    }
+  }
+  return result;
 }
 
 function MergeParentChangeGroup({
@@ -432,26 +532,42 @@ function MergeParentChangeGroup({
   commitHash,
   repoId,
   viewMode,
-  allExpanded,
-  clearAllExpanded,
   selectedFile,
   openDiff,
+  isDirOpen,
+  toggleDir,
+  searchQuery,
+  activeMatchRepoId,
+  activeMatchPath,
+  activeMatchFromRevision,
+  isExpanded,
+  onToggle,
+  onFileContextMenu,
+  onDirectoryContextMenu,
 }: {
   change: MergeParentChange;
   commitHash: string;
   repoId: string;
   viewMode: 'tree' | 'list';
-  allExpanded: boolean | null;
-  clearAllExpanded: () => void;
   selectedFile?: AppStore['selectedFile'];
   openDiff: AppStore['openDiff'];
+  isDirOpen: (key: string) => boolean;
+  toggleDir: (key: string) => void;
+  searchQuery?: string;
+  activeMatchRepoId?: string;
+  activeMatchPath?: string;
+  activeMatchFromRevision?: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onFileContextMenu?: (event: React.MouseEvent, file: DetailFileTarget) => void;
+  onDirectoryContextMenu?: (event: React.MouseEvent, files: DetailFileTarget[]) => void;
 }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
   const loadParentFiles = useAppStore((state) => state.loadMergeParentFiles);
   const cacheKey = `${repoId}\0${commitHash}\0${change.hash}`;
   const files = useAppStore((state) => state.mergeParentFiles[cacheKey]);
   const loading = useAppStore((state) => Boolean(state.mergeParentFilesLoading[cacheKey]));
+  const error = useAppStore((state) => state.mergeParentFilesError[cacheKey]);
 
   const parentTargets: DetailFileTarget[] = useMemo(() => {
     if (!files) return [];
@@ -464,27 +580,41 @@ function MergeParentChangeGroup({
       removed: file.removed,
       fromRevision: change.hash,
       toRevision: commitHash,
+      comparisonBaseHash: change.hash,
+      isMergeParentDiff: true,
     }));
   }, [files, repoId, commitHash, change.hash]);
 
   const toggle = () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && !files && !loading) {
-      void loadParentFiles(repoId, commitHash, change.hash);
+    onToggle();
+    if (!isExpanded && !files && !loading) {
+      void loadParentFiles(repoId, commitHash, change.hash).catch(() => {});
     }
   };
+
+  const retry = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!loading) {
+      void loadParentFiles(repoId, commitHash, change.hash).catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    if (isExpanded && !files && !loading && !error) {
+      void loadParentFiles(repoId, commitHash, change.hash).catch(() => {});
+    }
+  }, [isExpanded, files, loading, error, loadParentFiles, repoId, commitHash, change.hash]);
 
   return (
     <div className="merge-parent-group">
       <button
         type="button"
         className="merge-parent-row"
-        data-selected={expanded}
+        data-selected={isExpanded}
         title={`${change.hash}\n${change.message}`}
         onClick={toggle}
       >
-        <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} className="merge-chevron" />
+        <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} className="merge-chevron" />
         <Codicon name="git-commit" className="merge-commit-icon" />
         <span className="merge-parent-title">{t('Changes from {0}', change.shortHash)}</span>
         {change.message && <span className="merge-parent-message" title={change.message}>{change.message}</span>}
@@ -492,21 +622,35 @@ function MergeParentChangeGroup({
           {change.fileCount === 1 ? t('{0} file', change.fileCount) : t('{0} files', change.fileCount)}
         </span>
       </button>
-      {expanded && (
+      {isExpanded && (
         <div className="merge-parent-files">
           {loading && <div className="detail-loading">{t('Loading files...')}</div>}
-          {!loading && files && files.length === 0 && <div className="detail-loading">{t('No changed files')}</div>}
-          {!loading && files && files.length > 0 && (
+          {!loading && error && (
+            <div className="detail-loading detail-error">
+              <span>{t('Failed to load files')}</span>
+              <button type="button" className="detail-retry-button" onClick={retry}>
+                {t('Retry')}
+              </button>
+            </div>
+          )}
+          {!loading && !error && files && files.length === 0 && <div className="detail-loading">{t('No changed files')}</div>}
+          {!loading && !error && files && files.length > 0 && (
             viewMode === 'tree' ? (
-              buildTree(parentTargets).map((node) => (
+              buildTree(parentTargets, `merge-dir:${change.hash}`).map((node) => (
                 <DetailTreeNodeView
-                  key={node.path}
+                  key={node.key}
                   node={collapseTree(node)}
                   depth={0}
                   openDiff={openDiff}
                   selectedFile={selectedFile}
-                  allExpanded={allExpanded}
-                  clearAllExpanded={clearAllExpanded}
+                  isDirOpen={isDirOpen}
+                  toggleDir={toggleDir}
+                  searchQuery={searchQuery}
+                  activeMatchRepoId={activeMatchRepoId}
+                  activeMatchPath={activeMatchPath}
+                  activeMatchFromRevision={activeMatchFromRevision}
+                  onFileContextMenu={onFileContextMenu}
+                  onDirectoryContextMenu={onDirectoryContextMenu}
                 />
               ))
             ) : (
@@ -516,6 +660,11 @@ function MergeParentChangeGroup({
                   file={file}
                   selectedFile={selectedFile}
                   openDiff={openDiff}
+                  searchQuery={searchQuery}
+                  activeMatchRepoId={activeMatchRepoId}
+                  activeMatchPath={activeMatchPath}
+                  activeMatchFromRevision={activeMatchFromRevision}
+                  onFileContextMenu={onFileContextMenu}
                 />
               ))
             )
@@ -526,10 +675,10 @@ function MergeParentChangeGroup({
   );
 }
 
-function RefBadges({ detail, collapsible = false }: { detail: CommitDetail; collapsible?: boolean }) {
+function RefBadges({ detail, repoKind, collapsible = false }: { detail: CommitDetail; repoKind?: 'git' | 'svn'; collapsible?: boolean }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  const refs = refsFor(detail);
+  const refs = refsFor(detail, repoKind);
   const visible = collapsible && !expanded ? refs.slice(0, 5) : refs;
   const overflow = refs.slice(5);
   return (
@@ -538,12 +687,31 @@ function RefBadges({ detail, collapsible = false }: { detail: CommitDetail; coll
         const remoteBranch = ref.kind === 'remote' && ref.label.includes('/')
           ? ref.label.slice(ref.label.indexOf('/') + 1)
           : ref.label;
-        const color = ref.kind === 'head'
-          ? headColor()
-          : ref.kind === 'tag'
-            ? tagColor()
-            : branchColor(remoteBranch);
-        return <BranchRefBadge key={`${ref.kind}:${ref.value}`} label={ref.label} kind={ref.kind} color={color} variant="ref" icons={[ref.kind === 'head' ? 'arrow-right' : ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : 'git-branch']} className={ref.kind} />;
+        const color = ref.kind === 'revision'
+          ? tagColor()
+          : ref.kind === 'head'
+            ? headColor()
+            : ref.kind === 'tag'
+              ? tagColor()
+              : branchColor(remoteBranch);
+        const title = ref.isSvnRevision
+          ? (ref.label === 'HEAD' ? t('SVN repository HEAD revision') : t('SVN working copy BASE revision'))
+          : undefined;
+        const icons = ref.isSvnRevision
+          ? ['versions']
+          : [ref.kind === 'head' ? 'arrow-right' : ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : 'git-branch'];
+        return (
+          <BranchRefBadge
+            key={`${ref.kind}:${ref.value}`}
+            label={ref.label}
+            kind={ref.kind}
+            color={color}
+            variant="ref"
+            title={title}
+            icons={icons}
+            className={ref.kind}
+          />
+        );
       })}
       {collapsible && !expanded && overflow.length > 0 && <button type="button" className="detail-ref-overflow" title={t('Show {0} more', overflow.length)} onClick={() => setExpanded(true)}>{t('+{0} more', overflow.length)}</button>}
       {collapsible && expanded && refs.length > 5 && <button type="button" className="detail-ref-overflow expanded" onClick={() => setExpanded(false)}>{t('Show less')}</button>}
@@ -627,6 +795,9 @@ function ExtendedCommitSummary({
   repoMap: Map<string, RepositoryStatus>;
 }) {
   const { t } = useI18n();
+  const selectedCommitError = useAppStore((state) => state.selectedCommitError);
+  const selectedCommitLoading = useAppStore((state) => state.selectedCommitLoading);
+  const reloadSelectedCommits = useAppStore((state) => state.reloadSelectedCommits);
   const multiple = selectedCommits.length > 1;
 
   if (multiple) {
@@ -652,7 +823,33 @@ function ExtendedCommitSummary({
               const key = commitKey(commit.repoId, commit.hash);
               const current = selectedDetails[key];
               const repo = repoMap.get(commit.repoId);
-              if (!current) return <article className="extended-commit-item" key={key}><div className="detail-loading">{t('Loading...')}</div></article>;
+              const isItemLoading = Boolean(selectedCommitLoading[key]);
+              const itemError = selectedCommitError[key];
+
+              if (isItemLoading) {
+                return (
+                  <article className="extended-commit-item" key={key}>
+                    <div className="detail-loading">{t('Loading...')}</div>
+                  </article>
+                );
+              }
+
+              if (!current) {
+                return (
+                  <article className="extended-commit-item" key={key}>
+                    <div className="extended-commit-repo" style={{ color: repo?.meta.color }}>
+                      <Codicon name="repo" />{repo?.meta.name ?? commit.repoId}
+                    </div>
+                    <div className="detail-loading detail-error">
+                      <span>{itemError || t('Failed to load commit details')}</span>
+                      <button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
+                        {t('Retry')}
+                      </button>
+                    </div>
+                  </article>
+                );
+              }
+
               const message = splitCommitMessage(current);
               return (
                 <article className="extended-commit-item" key={key}>
@@ -662,7 +859,7 @@ function ExtendedCommitSummary({
                     {message.body && <pre>{message.body}</pre>}
                   </div>
                   <AuthorMeta commit={commit} />
-                  <RefBadges detail={current} />
+                  <RefBadges detail={current} repoKind={repo?.meta.kind} />
                 </article>
               );
             })}
@@ -694,7 +891,7 @@ function ExtendedCommitSummary({
           <dt>{t('Repository')}</dt><dd style={{ color: repo?.meta.color }}>{repo?.meta.name ?? commit.repoId}</dd>
         </dl>
       </div>
-      {refsFor(detail).length > 0 && <div className="extended-detail-block"><h3>{t('Branches & tags')}</h3><RefBadges detail={detail} /></div>}
+      {refsFor(detail, repo?.meta.kind).length > 0 && <div className="extended-detail-block"><h3>{t('Branches & tags')}</h3><RefBadges detail={detail} repoKind={repo?.meta.kind} /></div>}
       <div className="extended-detail-block">
         <h3>{t('Commit message')}</h3>
         <pre className="extended-full-message">{detail.fullMessage.trim() || commit.message}</pre>
@@ -722,6 +919,9 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   const detail = useAppStore((state) => state.selectedCommit);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
+  const selectedCommitError = useAppStore((state) => state.selectedCommitError);
+  const selectedCommitLoading = useAppStore((state) => state.selectedCommitLoading);
+  const reloadSelectedCommits = useAppStore((state) => state.reloadSelectedCommits);
   const selectedFile = useAppStore((state) => state.selectedFile);
   const loading = useAppStore((state) => state.selectedCommits.some((commit) =>
     state.selectedCommitLoading[commitKey(commit.repoId, commit.hash)] === true
@@ -733,12 +933,47 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   const openChanges = useAppStore((state) => state.openCommitChanges);
   const diff = useAppStore((state) => state.diff);
   const { t } = useI18n();
+  const canOpenChanges = selectedCommits.length > 0
+    && !loading
+    && selectedCommits.every((c) => {
+      const k = commitKey(c.repoId, c.hash);
+      return Boolean(selectedDetails[k]) && !selectedCommitError[k];
+    });
   const [openingDiffPath, setOpeningDiffPath] = useState<string | null>(null);
   const openingDiffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fileMode, setFileMode] = useState<'tree' | 'list'>('tree');
   const [allTreeExpanded, setAllTreeExpanded] = useState<boolean | null>(null);
+  const [collapsedDirs, setCollapsedDirs] = useState<Record<string, boolean>>({});
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
   const [infoHeight, setInfoHeight] = useState<number>();
+  const [fileContextMenu, setFileContextMenu] = useState<{ position: { x: number; y: number }; file: DetailFileTarget }>();
+  const [dirContextMenu, setDirContextMenu] = useState<{ position: { x: number; y: number }; files: DetailFileTarget[] }>();
+
+  const handleFileContextMenu = useCallback((event: React.MouseEvent, file: DetailFileTarget) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDirContextMenu(undefined);
+    setFileContextMenu({ position: { x: event.clientX, y: event.clientY }, file });
+  }, []);
+
+  const handleDirectoryContextMenu = useCallback((event: React.MouseEvent, files: DetailFileTarget[]) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setFileContextMenu(undefined);
+    setDirContextMenu({ position: { x: event.clientX, y: event.clientY }, files });
+  }, []);
+
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const matchedTargetsRef = useRef<DetailFileTarget[]>([]);
+
+  const handleNavigateMatch = useCallback((direction: -1 | 1) => {
+    const list = matchedTargetsRef.current;
+    if (list.length === 0) return;
+    setActiveMatchIndex((prev) => (prev + direction + list.length) % list.length);
+  }, []);
+
+  const speedSearch = useSpeedSearch('commit-detail', true, '.commit-detail', handleNavigateMatch);
+  const queryLower = speedSearch.query.trim().toLowerCase();
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setOpeningDiffPath(null));
@@ -754,13 +989,179 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
       setOpeningDiffPath((current) => (current === path ? null : current));
     }, 6000);
   }, []);
+
   const repoMap = useMemo(() => new Map(repositories.map((repo) => [repo.meta.id, repo])), [repositories]);
-  const targets = useMemo(() => buildCommitFileTargets(selectedCommits, selectedDetails, repositories), [selectedCommits, selectedDetails, repositories]);
+  const historyPath = useAppStore((state) => state.historyQuery.path);
+  const targets = useMemo(
+    () => buildCommitFileTargets(selectedCommits, selectedDetails, repositories, historyPath),
+    [selectedCommits, selectedDetails, repositories, historyPath],
+  );
+
+  const isMultiSelection = selectedCommits.length > 1;
+  const singleCommit = !isMultiSelection ? selectedCommits[0] : undefined;
+  const selectedPrimary = detail?.commit ?? singleCommit;
+  const singleKey = selectedPrimary ? commitKey(selectedPrimary.repoId, selectedPrimary.hash) : '';
+  const isMergeCommit = !isMultiSelection && Boolean(detail && detail.commit.parents.length >= 2);
+  const mergeParentChanges = useMemo(
+    () => ((isMergeCommit && detail?.mergeParentChanges) ? detail.mergeParentChanges : []),
+    [isMergeCommit, detail?.mergeParentChanges],
+  );
+
+  const [expandedParentHashes, setExpandedParentHashes] = useState<Set<string>>(new Set());
+  const toggleParentGroup = useCallback((parentHash: string) => {
+    setExpandedParentHashes((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentHash)) {
+        next.delete(parentHash);
+      } else {
+        next.add(parentHash);
+      }
+      return next;
+    });
+  }, []);
+
+  const mergeParentFiles = useAppStore((state) => state.mergeParentFiles);
+  const mergeParentFilesLoading = useAppStore((state) => state.mergeParentFilesLoading);
+  const mergeParentFilesError = useAppStore((state) => state.mergeParentFilesError);
+  const loadMergeParentFiles = useAppStore((state) => state.loadMergeParentFiles);
+  const inFlightParentRequestsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    inFlightParentRequestsRef.current.clear();
+  }, [singleKey]);
+
+  // 当开启搜索且当前选中合并提交时，自动预取尚未加载文件列表的 parent
+  useEffect(() => {
+    if (!speedSearch.isOpen || !isMergeCommit || !detail || mergeParentChanges.length === 0) return;
+    for (const parentChange of mergeParentChanges) {
+      const cacheKey = `${detail.commit.repoId}\0${detail.commit.hash}\0${parentChange.hash}`;
+      const hasFiles = Boolean(mergeParentFiles[cacheKey]);
+      const isLoading = Boolean(mergeParentFilesLoading[cacheKey]);
+      const hasError = Boolean(mergeParentFilesError[cacheKey]);
+      const isInFlight = inFlightParentRequestsRef.current.has(cacheKey);
+
+      if (!hasFiles && !isLoading && !hasError && !isInFlight) {
+        inFlightParentRequestsRef.current.add(cacheKey);
+        loadMergeParentFiles(detail.commit.repoId, detail.commit.hash, parentChange.hash)
+          .catch(() => {})
+          .finally(() => {
+            inFlightParentRequestsRef.current.delete(cacheKey);
+          });
+      }
+    }
+  }, [
+    speedSearch.isOpen,
+    isMergeCommit,
+    detail,
+    mergeParentChanges,
+    mergeParentFiles,
+    mergeParentFilesLoading,
+    mergeParentFilesError,
+    loadMergeParentFiles,
+  ]);
+  const cachedParentTargets = useMemo<DetailFileTarget[]>(() => {
+    if (!isMergeCommit || !detail) return [];
+    const results: DetailFileTarget[] = [];
+    for (const parentChange of mergeParentChanges) {
+      const cacheKey = `${detail.commit.repoId}\0${detail.commit.hash}\0${parentChange.hash}`;
+      const files = mergeParentFiles[cacheKey];
+      if (!files) continue;
+      for (const file of files) {
+        results.push({
+          repoId: detail.commit.repoId,
+          commitHash: detail.commit.hash,
+          path: file.path,
+          status: file.status,
+          added: file.added,
+          removed: file.removed,
+          fromRevision: parentChange.hash,
+          toRevision: detail.commit.hash,
+          comparisonBaseHash: parentChange.hash,
+          isMergeParentDiff: true,
+        });
+      }
+    }
+    return results;
+  }, [isMergeCommit, detail, mergeParentChanges, mergeParentFiles]);
+
+  const allSearchableTargets = useMemo(() => {
+    return [...targets, ...cachedParentTargets];
+  }, [targets, cachedParentTargets]);
+
+  const matchedTargets = useMemo(() => {
+    if (!queryLower) return [];
+    return allSearchableTargets.filter((target) => target.path.toLowerCase().includes(queryLower));
+  }, [allSearchableTargets, queryLower]);
+  matchedTargetsRef.current = matchedTargets;
+
+  const autoExpandedParentHashes = useMemo(() => {
+    if (!queryLower) return new Set<string>();
+    const set = new Set<string>();
+    for (const target of matchedTargets) {
+      if (target.isMergeParentDiff && target.fromRevision) {
+        set.add(target.fromRevision);
+      }
+    }
+    return set;
+  }, [queryLower, matchedTargets]);
+
+  useEffect(() => {
+    setActiveMatchIndex(0);
+  }, [queryLower]);
+
+  useEffect(() => {
+    if (activeMatchIndex >= matchedTargets.length && matchedTargets.length > 0) {
+      setActiveMatchIndex(0);
+    }
+  }, [matchedTargets.length, activeMatchIndex]);
+
+  const activeMatch = matchedTargets[activeMatchIndex];
   const targetsByRepo = useMemo(() => {
     const groups = new Map<string, DetailFileTarget[]>();
     for (const target of targets) groups.set(target.repoId, [...(groups.get(target.repoId) ?? []), target]);
     return groups;
   }, [targets]);
+
+  const autoExpandedKeys = useMemo(() => {
+    if (!queryLower) return new Set<string>();
+    const set = new Set<string>();
+    for (const file of allSearchableTargets) {
+      if (file.path.toLowerCase().includes(queryLower)) {
+        if (file.isMergeParentDiff && file.fromRevision) {
+          const parts = file.path.split('/');
+          for (let i = 1; i < parts.length; i++) {
+            set.add(`merge-dir:${file.fromRevision}:${parts.slice(0, i).join('/')}`);
+          }
+        } else {
+          set.add(`repo:${file.repoId}`);
+          const parts = file.path.split('/');
+          for (let i = 1; i < parts.length; i++) {
+            set.add(`dir:${file.repoId}:${parts.slice(0, i).join('/')}`);
+          }
+        }
+      }
+    }
+    return set;
+  }, [queryLower, allSearchableTargets]);
+
+  const isDirOpen = useCallback((key: string) => {
+    if (queryLower && autoExpandedKeys.has(key)) return true;
+    if (collapsedDirs[key] !== undefined) return !collapsedDirs[key];
+    return allTreeExpanded !== false;
+  }, [allTreeExpanded, autoExpandedKeys, collapsedDirs, queryLower]);
+
+  const toggleDir = useCallback((key: string) => {
+    setCollapsedDirs((prev) => {
+      const currentOpen = isDirOpen(key);
+      return { ...prev, [key]: currentOpen };
+    });
+  }, [isDirOpen]);
+
+  useEffect(() => {
+    setAllTreeExpanded(null);
+    setCollapsedDirs({});
+    setExpandedParentHashes(new Set());
+  }, [selectedCommits]);
 
   const resizeInfo = (event: React.PointerEvent) => {
     event.preventDefault();
@@ -773,7 +1174,82 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
     window.addEventListener('pointerup', up);
   };
 
-  if (!selectedCommits.length || (!detail && !loading)) {
+  const allMessagesExpanded = selectedCommits.length > 0 && selectedCommits.every((commit) => expandedMessages.has(commitKey(commit.repoId, commit.hash)));
+  const toggleAllMessages = () => setExpandedMessages(allMessagesExpanded ? new Set() : new Set(selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
+
+  const groupedTargets = useMemo(() => {
+    const ids = [...targetsByRepo.keys()];
+    return ids.length > 1
+      ? [...targetsByRepo.entries()]
+      : [[ids[0] ?? selectedPrimary?.repoId ?? '', targets]] as Array<[string, DetailFileTarget[]]>;
+  }, [targetsByRepo, selectedPrimary?.repoId, targets]);
+  const workspaceView = variant === 'workspace';
+
+  const flatItems = useMemo<FlatItem[]>(() => {
+    if (fileMode !== 'tree') return [];
+    const items: FlatItem[] = [];
+    for (const [repoId, files] of groupedTargets) {
+      const repoKey = `repo:${repoId}`;
+      const repoOpen = isDirOpen(repoKey);
+      const repoName = repoMap.get(repoId)?.meta.name ?? repoId;
+      const repoColor = repoMap.get(repoId)?.meta.color;
+      items.push({ kind: 'repo', repoId, repoName, repoColor, fileCount: files.length, files, key: repoKey });
+      if (repoOpen) {
+        const tree = buildTree(files, `dir:${repoId}`).map(collapseTree);
+        items.push(...flattenVisibleTreeNodes(tree, isDirOpen, 1));
+      }
+    }
+    return items;
+  }, [fileMode, groupedTargets, isDirOpen, repoMap]);
+
+  const itemCount = fileMode === 'tree' ? flatItems.length : targets.length;
+  const shouldVirtualize = itemCount > 40;
+  const fileListRef = useRef<HTMLDivElement | null>(null);
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? itemCount : 0,
+    getScrollElement: () => fileListRef.current,
+    estimateSize: () => 24,
+    overscan: 10,
+    enabled: shouldVirtualize,
+    initialRect: { width: 400, height: 800 },
+    observeElementRect: (instance, cb) => {
+      const el = instance.scrollElement;
+      if (!el) return;
+      const update = () => {
+        const width = el.offsetWidth || 400;
+        const height = el.offsetHeight || 800;
+        cb({ width, height });
+      };
+      update();
+      if (!window.ResizeObserver) return;
+      const observer = new ResizeObserver(update);
+      observer.observe(el);
+      return () => observer.disconnect();
+    },
+  });
+
+  useEffect(() => {
+    if (!activeMatch || !queryLower) return;
+
+    if (shouldVirtualize && !activeMatch.isMergeParentDiff) {
+      const targetIndex = fileMode === 'tree'
+        ? flatItems.findIndex((item) => item.kind === 'file' && item.file.repoId === activeMatch.repoId && item.file.path === activeMatch.path)
+        : targets.findIndex((file) => file.repoId === activeMatch.repoId && file.path === activeMatch.path);
+      if (targetIndex >= 0) {
+        virtualizer.scrollToIndex(targetIndex, { align: 'auto' });
+      }
+    }
+
+    const revisionVal = activeMatch.fromRevision ?? '';
+    const selector = `.commit-detail [data-detail-repo-id="${CSS.escape(activeMatch.repoId)}"][data-detail-path="${CSS.escape(activeMatch.path)}"][data-detail-from-revision="${CSS.escape(revisionVal)}"]`;
+    const element = document.querySelector(selector);
+    if (typeof element?.scrollIntoView === 'function') {
+      element.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeMatch, queryLower, shouldVirtualize, fileMode, flatItems, targets, virtualizer]);
+
+  if (!selectedCommits.length) {
     return (
       <aside className="commit-detail empty-detail">
         <Codicon name="git-commit" />
@@ -782,17 +1258,21 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
     );
   }
 
-  const repoIds = [...targetsByRepo.keys()];
-  const selectedPrimary = detail?.commit;
-  const singleKey = selectedPrimary ? commitKey(selectedPrimary.repoId, selectedPrimary.hash) : '';
-  const isMultiSelection = selectedCommits.length > 1;
-  const isMergeCommit = !isMultiSelection && Boolean(detail && detail.commit.parents.length >= 2);
-  const mergeParentChanges = (isMergeCommit && detail?.mergeParentChanges) ? detail.mergeParentChanges : [];
+  const hasAnyDetail = Boolean(detail) || selectedCommits.some((c) => Boolean(selectedDetails[commitKey(c.repoId, c.hash)]));
 
-  const allMessagesExpanded = selectedCommits.length > 0 && selectedCommits.every((commit) => expandedMessages.has(commitKey(commit.repoId, commit.hash)));
-  const toggleAllMessages = () => setExpandedMessages(allMessagesExpanded ? new Set() : new Set(selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
-  const groupedTargets = repoIds.length > 1 ? [...targetsByRepo.entries()] : [[repoIds[0] ?? selectedPrimary?.repoId ?? '', targets]] as Array<[string, DetailFileTarget[]]>;
-  const workspaceView = variant === 'workspace';
+  if (!hasAnyDetail && !loading) {
+    const errorMsg = (!isMultiSelection && singleKey ? selectedCommitError[singleKey] : '') || t('Failed to load commit details');
+    return (
+      <aside className="commit-detail empty-detail">
+        <Codicon name="error" />
+        <span>{errorMsg}</span>
+        <button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
+          <Codicon name="refresh" />
+          <span>{t('Retry')}</span>
+        </button>
+      </aside>
+    );
+  }
 
   return (
     <aside className={`commit-detail ${workspaceView ? 'commit-detail-expanded' : ''}`}>
@@ -803,15 +1283,22 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           {targets[0] && <button type="button" title={t('File history')} onClick={() => openFileHistory(targets[0].repoId, targets[0].path)}><Codicon name="history" /></button>}
           {fileMode === 'tree' && (
             <>
-              <button type="button" title={t('Expand all')} onClick={() => setAllTreeExpanded(true)}><Codicon name="expand-all" /></button>
-              <button type="button" title={t('Collapse all')} onClick={() => setAllTreeExpanded(false)}><Codicon name="collapse-all" /></button>
+              <button type="button" title={t('Expand all')} onClick={() => { setAllTreeExpanded(true); setCollapsedDirs({}); }}><Codicon name="expand-all" /></button>
+              <button type="button" title={t('Collapse all')} onClick={() => { setAllTreeExpanded(false); setCollapsedDirs({}); }}><Codicon name="collapse-all" /></button>
               <i className="detail-view-divider" />
             </>
           )}
-          <button type="button" className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); }}><Codicon name="list-tree" /></button>
-          <button type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); }}><Codicon name="list-flat" /></button>
+          <button type="button" className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-tree" /></button>
+          <button type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-flat" /></button>
         </div>
-        <div className="detail-files">
+        <SpeedSearchIndicator
+          query={speedSearch.query}
+          onClear={speedSearch.clear}
+          count={queryLower ? { current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length } : undefined}
+          onPrev={() => handleNavigateMatch(-1)}
+          onNext={() => handleNavigateMatch(1)}
+        />
+        <div className="detail-files" ref={fileListRef}>
           {loading && !targets.length && <div className="detail-loading">{t('Loading files...')}</div>}
           {!loading && isMergeCommit && targets.length === 0 && (
             <div className="no-merge-conflicts">{t('No merge conflicts')}</div>
@@ -820,49 +1307,167 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
             <div className="detail-loading">{t('No changed files')}</div>
           )}
           {!loading && targets.length > 0 && (
-            fileMode === 'tree' ? (
-              groupedTargets.map(([repoId, files]) => (
-                <DetailRepoGroup
-                  key={repoId}
-                  files={files}
-                  repoName={repoMap.get(repoId)?.meta.name ?? repoId}
-                  repoColor={repoMap.get(repoId)?.meta.color}
-                  openDiff={openDiff}
-                  selectedFile={selectedFile}
-                  allExpanded={allTreeExpanded}
-                  clearAllExpanded={() => setAllTreeExpanded(null)}
-                  openingDiffPath={openingDiffPath}
-                  onOpeningDiff={handleOpeningDiff}
-                />
-              ))
+            shouldVirtualize ? (
+              <div style={{ height: `${virtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
+                {virtualizer.getVirtualItems().map((virtualRow) => {
+                  const rowStyle: React.CSSProperties = {
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  };
+                  if (fileMode === 'tree') {
+                    const item = flatItems[virtualRow.index];
+                    if (!item) return null;
+                    if (item.kind === 'repo') {
+                      const repoOpen = isDirOpen(item.key);
+                      return (
+                        <div key={item.key} style={rowStyle} className="detail-repo-group">
+                          <button
+                            type="button"
+                            className="detail-root-label"
+                            title={item.repoName}
+                            onClick={() => toggleDir(item.key)}
+                            onContextMenu={(event) => handleDirectoryContextMenu(event, item.files)}
+                          >
+                            <Codicon name={repoOpen ? 'chevron-down' : 'chevron-right'} />
+                            <i style={{ background: item.repoColor ?? 'var(--versiondock-accent)' }} />
+                            <strong><HighlightText text={item.repoName} query={speedSearch.query} /></strong>
+                            <b>{item.fileCount}</b>
+                          </button>
+                        </div>
+                      );
+                    }
+                    if (item.kind === 'dir') {
+                      return (
+                        <div key={item.key} style={rowStyle} className="detail-tree-dir">
+                          <button
+                            type="button"
+                            style={{ paddingLeft: item.depth * 14 }}
+                            title={item.node.path}
+                            onClick={() => toggleDir(item.node.key)}
+                            onContextMenu={(event) => handleDirectoryContextMenu(event, descendantFiles(item.node))}
+                          >
+                            <Codicon name={item.open ? 'chevron-down' : 'chevron-right'} />
+                            <FileIcon name={item.node.name.split('/').pop() ?? item.node.name} folder open={item.open} />
+                            <span className="detail-node-label"><HighlightText text={item.node.name} query={speedSearch.query} /></span>
+                            <b className="detail-directory-count">{item.node.fileCount}</b>
+                          </button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={item.key} style={rowStyle}>
+                        <DetailTreeNodeView
+                          node={item.node}
+                          depth={item.depth}
+                          openDiff={openDiff}
+                          selectedFile={selectedFile}
+                          isDirOpen={isDirOpen}
+                          toggleDir={toggleDir}
+                          openingDiffPath={openingDiffPath}
+                          onOpeningDiff={handleOpeningDiff}
+                          searchQuery={speedSearch.query}
+                          activeMatchRepoId={activeMatch?.repoId}
+                          activeMatchPath={activeMatch?.path}
+                          activeMatchFromRevision={activeMatch?.fromRevision}
+                          onFileContextMenu={handleFileContextMenu}
+                          onDirectoryContextMenu={handleDirectoryContextMenu}
+                        />
+                      </div>
+                    );
+                  }
+                  const file = targets[virtualRow.index];
+                  if (!file) return null;
+                  return (
+                    <div key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`} style={rowStyle}>
+                      <DetailFlatFileRow
+                        file={file}
+                        repoName={repoMap.get(file.repoId)?.meta.name ?? file.repoId}
+                        showRepo={selectedCommits.length > 1}
+                        selectedFile={selectedFile}
+                        openDiff={openDiff}
+                        openingDiffPath={openingDiffPath}
+                        onOpeningDiff={handleOpeningDiff}
+                        searchQuery={speedSearch.query}
+                        activeMatchRepoId={activeMatch?.repoId}
+                        activeMatchPath={activeMatch?.path}
+                        activeMatchFromRevision={activeMatch?.fromRevision}
+                        onFileContextMenu={handleFileContextMenu}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
-              targets.map((file) => (
-                <DetailFlatFileRow
-                  key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
-                  file={file}
-                  repoName={repoMap.get(file.repoId)?.meta.name ?? file.repoId}
-                  showRepo={selectedCommits.length > 1}
-                  selectedFile={selectedFile}
-                  openDiff={openDiff}
-                  openingDiffPath={openingDiffPath}
-                  onOpeningDiff={handleOpeningDiff}
-                />
-              ))
+              fileMode === 'tree' ? (
+                groupedTargets.map(([repoId, files]) => (
+                  <DetailRepoGroup
+                    key={repoId}
+                    files={files}
+                    repoName={repoMap.get(repoId)?.meta.name ?? repoId}
+                    repoColor={repoMap.get(repoId)?.meta.color}
+                    openDiff={openDiff}
+                    selectedFile={selectedFile}
+                    isDirOpen={isDirOpen}
+                    toggleDir={toggleDir}
+                    openingDiffPath={openingDiffPath}
+                    onOpeningDiff={handleOpeningDiff}
+                    searchQuery={speedSearch.query}
+                    activeMatchRepoId={activeMatch?.repoId}
+                    activeMatchPath={activeMatch?.path}
+                    activeMatchFromRevision={activeMatch?.fromRevision}
+                    onFileContextMenu={handleFileContextMenu}
+                    onDirectoryContextMenu={handleDirectoryContextMenu}
+                  />
+                ))
+              ) : (
+                targets.map((file) => (
+                  <DetailFlatFileRow
+                    key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
+                    file={file}
+                    repoName={repoMap.get(file.repoId)?.meta.name ?? file.repoId}
+                    showRepo={selectedCommits.length > 1}
+                    selectedFile={selectedFile}
+                    openDiff={openDiff}
+                    openingDiffPath={openingDiffPath}
+                    onOpeningDiff={handleOpeningDiff}
+                    searchQuery={speedSearch.query}
+                    activeMatchRepoId={activeMatch?.repoId}
+                    activeMatchPath={activeMatch?.path}
+                    activeMatchFromRevision={activeMatch?.fromRevision}
+                    onFileContextMenu={handleFileContextMenu}
+                  />
+                ))
+              )
             )
           )}
-          {!loading && isMergeCommit && mergeParentChanges.map((parentChange) => (
-            <MergeParentChangeGroup
-              key={`${detail!.commit.repoId}:${detail!.commit.hash}:${parentChange.hash}`}
-              change={parentChange}
-              commitHash={detail!.commit.hash}
-              repoId={detail!.commit.repoId}
-              viewMode={fileMode}
-              allExpanded={allTreeExpanded}
-              clearAllExpanded={() => setAllTreeExpanded(null)}
-              selectedFile={selectedFile}
-              openDiff={openDiff}
-            />
-          ))}
+          {!loading && isMergeCommit && mergeParentChanges.map((parentChange) => {
+            const isGroupExpanded = (Boolean(queryLower) && autoExpandedParentHashes.has(parentChange.hash)) || expandedParentHashes.has(parentChange.hash);
+            return (
+              <MergeParentChangeGroup
+                key={`${detail!.commit.repoId}:${detail!.commit.hash}:${parentChange.hash}`}
+                change={parentChange}
+                commitHash={detail!.commit.hash}
+                repoId={detail!.commit.repoId}
+                viewMode={fileMode}
+                selectedFile={selectedFile}
+                openDiff={openDiff}
+                isDirOpen={isDirOpen}
+                toggleDir={toggleDir}
+                searchQuery={speedSearch.query}
+                activeMatchRepoId={activeMatch?.repoId}
+                activeMatchPath={activeMatch?.path}
+                activeMatchFromRevision={activeMatch?.fromRevision}
+                isExpanded={isGroupExpanded}
+                onToggle={() => toggleParentGroup(parentChange.hash)}
+                onFileContextMenu={handleFileContextMenu}
+                onDirectoryContextMenu={handleDirectoryContextMenu}
+              />
+            );
+          })}
         </div>
       </section>
       {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={150} aria-valuemax={Math.max(230, window.innerHeight - 120)} aria-valuenow={Math.round(infoHeight ?? Math.max(160, window.innerHeight * .28))} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setInfoHeight((value) => Math.max(150, Math.min(Math.max(230, window.innerHeight - 120), (value ?? Math.max(160, window.innerHeight * .28)) + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>}
@@ -874,7 +1479,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           </span>
           <div className="detail-actions">
             <button type="button" title={t('Open Commit Detail')} onClick={openCommitDetail}><Codicon name="open-preview" /></button>
-            <button type="button" title={t('Open Changes')} onClick={openChanges}><Codicon name="diff-multiple" /></button>
+            <button type="button" title={t('Open Changes')} disabled={!canOpenChanges} onClick={openChanges}><Codicon name="diff-multiple" /></button>
             <button type="button" title={allMessagesExpanded ? t('Collapse commit messages by default') : t('Expand commit messages by default')} onClick={toggleAllMessages}><Codicon name={allMessagesExpanded ? 'collapse-all' : 'expand-all'} /></button>
             <button type="button" title={t('Collapse commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></button>
           </div>
@@ -895,6 +1500,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
               const value = selectedDetails[commitKey(commit.repoId, commit.hash)];
               const key = commitKey(commit.repoId, commit.hash);
               const repo = repoMap.get(commit.repoId);
+              const isItemLoading = Boolean(selectedCommitLoading[key]);
+              const itemError = selectedCommitError[key];
               return (
                 <article className="aggregate-item" key={key}>
                   <div className="aggregate-repo"><Codicon name="repo" /><span style={{ color: repo?.meta.color }}>{repo?.meta.name ?? commit.repoId}</span></div>
@@ -911,10 +1518,17 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                         })}
                       />
                       <AuthorMeta commit={commit} />
-                      <RefBadges detail={value} />
+                      <RefBadges detail={value} repoKind={repo?.meta.kind} />
                     </>
+                  ) : isItemLoading ? (
+                    <div className="detail-loading">{t('Loading...')}</div>
                   ) : (
-                    <div className="detail-loading">{t('Loading files...')}</div>
+                    <div className="detail-loading detail-error">
+                      <span>{itemError || t('Failed to load commit details')}</span>
+                      <button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
+                        {t('Retry')}
+                      </button>
+                    </div>
                   )}
                 </article>
               );
@@ -933,10 +1547,25 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
               })}
             />
             <AuthorMeta commit={detail.commit} />
-            <RefBadges detail={detail} collapsible />
+            <RefBadges detail={detail} repoKind={repoMap.get(detail.commit.repoId)?.meta.kind} collapsible />
           </div>
         )}
       </section>}
+      {fileContextMenu && (
+        <DetailFileContextMenu
+          position={fileContextMenu.position}
+          file={fileContextMenu.file}
+          openDiff={openDiff}
+          close={() => setFileContextMenu(undefined)}
+        />
+      )}
+      {dirContextMenu && (
+        <DetailDirectoryContextMenu
+          position={dirContextMenu.position}
+          files={dirContextMenu.files}
+          close={() => setDirContextMenu(undefined)}
+        />
+      )}
     </aside>
   );
 }

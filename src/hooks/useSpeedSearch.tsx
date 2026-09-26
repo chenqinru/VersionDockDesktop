@@ -7,9 +7,19 @@ function isEditable(target: EventTarget | null): boolean {
     || (target instanceof HTMLElement && target.isContentEditable);
 }
 
-export function useSpeedSearch(scopeKey: string, enabled = true) {
+export function useSpeedSearch(
+  scopeKey: string,
+  enabled = true,
+  scopeSelector = '.commit-panel',
+  onNavigate?: (direction: -1 | 1) => void,
+) {
   const [query, setQuery] = useState('');
   const clearTimer = useRef<ReturnType<typeof setTimeout>>();
+  const onNavigateRef = useRef(onNavigate);
+
+  useEffect(() => {
+    onNavigateRef.current = onNavigate;
+  }, [onNavigate]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setQuery(''));
@@ -27,7 +37,7 @@ export function useSpeedSearch(scopeKey: string, enabled = true) {
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditable(event.target)) return;
-      const panel = document.querySelector('.commit-panel');
+      const panel = scopeSelector ? document.querySelector(scopeSelector) : null;
       const activeElement = document.activeElement;
       if (panel && !panel.matches(':hover') && !(activeElement instanceof Node && panel.contains(activeElement))) return;
       if (event.key === 'Escape') {
@@ -36,6 +46,18 @@ export function useSpeedSearch(scopeKey: string, enabled = true) {
       }
       if (event.key === 'Backspace') {
         setQuery((value) => value.slice(0, -1));
+        resetTimer();
+        event.preventDefault();
+        return;
+      }
+      if (query && (event.key === 'ArrowDown' || (event.key === 'Enter' && !event.shiftKey))) {
+        onNavigateRef.current?.(1);
+        resetTimer();
+        event.preventDefault();
+        return;
+      }
+      if (query && (event.key === 'ArrowUp' || (event.key === 'Enter' && event.shiftKey))) {
+        onNavigateRef.current?.(-1);
         resetTimer();
         event.preventDefault();
         return;
@@ -49,7 +71,7 @@ export function useSpeedSearch(scopeKey: string, enabled = true) {
       window.removeEventListener('keydown', onKeyDown);
       if (clearTimer.current) clearTimeout(clearTimer.current);
     };
-  }, [enabled, query]);
+  }, [enabled, query, scopeSelector]);
 
-  return { query, clear: () => setQuery('') };
+  return { query, clear: () => setQuery(''), isOpen: Boolean(query.trim()) };
 }

@@ -24,6 +24,9 @@ function statusClass(status: string): string {
 export function CommitChangesWorkspace() {
   const changes = useAppStore((state) => state.changes);
   const diff = useAppStore((state) => state.changesDiff);
+  const diffLoading = useAppStore((state) => state.changesDiffLoading);
+  const diffError = useAppStore((state) => state.changesDiffError);
+  const diffTarget = useAppStore((state) => state.changesDiffTarget);
   const loadDiff = useAppStore((state) => state.loadChangesDiff);
   const back = useAppStore((state) => state.backToHistory);
   const systemOpen = useAppStore((state) => state.systemOpen);
@@ -37,6 +40,13 @@ export function CommitChangesWorkspace() {
   const selected = useMemo(
     () => changes?.files.find((target) => targetKey(target) === selectedKey) ?? changes?.files[0],
     [changes, selectedKey],
+  );
+  const currentSelectedKey = selected ? targetKey(selected) : '';
+  const isDiffMatchingSelected = Boolean(
+    selected
+    && diff
+    && (!diffTarget || diffTarget === currentSelectedKey)
+    && diff.path === selected.path
   );
   const repoNames = useMemo(() => Object.fromEntries(repositories.map((repo) => [repo.meta.id, repo.meta.name])), [repositories]);
   const oldRevision = selected
@@ -60,10 +70,21 @@ export function CommitChangesWorkspace() {
     ...(externalEditor ? [{ id: 'external', label: t('Open in external editor'), icon: 'code' } as ContextMenuEntry] : []),
     { id: 'reveal', label: t('Reveal'), icon: 'folder-opened' },
   ];
+  const handleSelect = (target: ChangeTarget) => {
+    const key = targetKey(target);
+    if (key === selectedKey || (!selectedKey && target === changes?.files[0])) {
+      if (diffError || !isDiffMatchingSelected) {
+        void loadDiff(target);
+      }
+    } else {
+      setSelectedKey(key);
+    }
+  };
+
   const runContext = (id: string) => {
     const target = context?.target;
     if (!target) return;
-    if (id === 'diff') { setSelectedKey(targetKey(target)); void loadDiff(target); }
+    if (id === 'diff') handleSelect(target);
     if (id === 'history') openFileHistory(target.repoId, target.path);
     if (id === 'commit-history') void openHistoryForPath(target.repoId, target.path);
     if (id === 'open') void systemOpen(target.repoId, target.path, false);
@@ -73,17 +94,9 @@ export function CommitChangesWorkspace() {
   };
 
   useEffect(() => {
-    if (!changes?.files.length) {
-      return;
-    }
-    const first = changes.files[0];
-    void loadDiff(first);
-  }, [changes, loadDiff]);
-
-  useEffect(() => {
-    if (!selected || !changes?.files.length || targetKey(selected) === targetKey(changes.files[0])) return;
+    if (!selected) return;
     void loadDiff(selected);
-  }, [changes, loadDiff, selected]);
+  }, [loadDiff, selected]);
 
   if (!changes) return <div className="workspace-empty"><Codicon name="diff-multiple" />{t('Select a commit')}</div>;
   const title = changes.kind === 'workingTree' ? t('Working Tree Changes') : changes.commits.length === 1 ? changes.commits[0]?.message : `${changes.commits.length} ${t('commits')}`;
@@ -106,7 +119,7 @@ export function CommitChangesWorkspace() {
             {changes.commits.filter((commit) => commit.repoId === repo.meta.id).map((commit) => {
               const groupedFiles = commitFiles(commit.hash, files);
               if (!groupedFiles.length) return null;
-              return <div className="changes-commit-group" key={commit.hash}><h4><code>{commit.shortHash}</code><span>{commit.message}</span><b>{groupedFiles.length}</b></h4>{groupedFiles.map((target) => <button key={`${commit.hash}:${targetKey(target)}`} className={`changes-file-row ${selected && targetKey(target) === targetKey(selected) ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => { setSelectedKey(targetKey(target)); void loadDiff(target); }}>
+              return <div className="changes-commit-group" key={commit.hash}><h4><code>{commit.shortHash}</code><span>{commit.message}</span><b>{groupedFiles.length}</b></h4>{groupedFiles.map((target) => <button key={`${commit.hash}:${targetKey(target)}`} className={`changes-file-row ${selected && targetKey(target) === targetKey(selected) ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => handleSelect(target)}>
                 <FileIcon name={target.path.split('/').pop() ?? target.path} />
                 <span className="changes-file-name">{target.path}</span>
                 {target.added !== null && <em className="added">+{target.added}</em>}
@@ -119,12 +132,35 @@ export function CommitChangesWorkspace() {
         {changes.kind === 'workingTree' && (['staged', 'unstaged', 'untracked'] as const).map((section) => {
           const files = changes.files.filter((target) => target.section === section);
           if (!files.length) return null;
-          return <section key={section}><h3><Codicon name={section === 'staged' ? 'diff-added' : section === 'untracked' ? 'new-file' : 'diff'} />{t(section === 'staged' ? 'Staged Changes' : section === 'untracked' ? 'Untracked Files' : 'Unstaged Changes')}<b>{files.length}</b></h3>{files.map((target) => <button key={targetKey(target)} className={`changes-file-row ${selected && targetKey(target) === targetKey(selected) ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => { setSelectedKey(targetKey(target)); void loadDiff(target); }}><FileIcon name={target.path.split('/').pop() ?? target.path} /><span className="changes-file-name">{target.path}</span><em className={`change-status ${statusClass(target.status)}`}>{target.status.slice(0, 1).toUpperCase()}</em></button>)}</section>;
+          return <section key={section}><h3><Codicon name={section === 'staged' ? 'diff-added' : section === 'untracked' ? 'new-file' : 'diff'} />{t(section === 'staged' ? 'Staged Changes' : section === 'untracked' ? 'Untracked Files' : 'Unstaged Changes')}<b>{files.length}</b></h3>{files.map((target) => <button key={targetKey(target)} className={`changes-file-row ${selected && targetKey(target) === targetKey(selected) ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => handleSelect(target)}><FileIcon name={target.path.split('/').pop() ?? target.path} /><span className="changes-file-name">{target.path}</span><em className={`change-status ${statusClass(target.status)}`}>{target.status.slice(0, 1).toUpperCase()}</em></button>)}</section>;
         })}
-        {changes.kind === 'commits' && changes.files.some((target) => !repoNames[target.repoId]) && <section><h3><Codicon name="repo" />{t('Repository')}</h3>{changes.files.filter((target) => !repoNames[target.repoId]).map((target) => <button key={targetKey(target)} className="changes-file-row" onContextMenu={(event) => openContext(event, target)} onClick={() => { setSelectedKey(targetKey(target)); void loadDiff(target); }}><FileIcon name={target.path} /><span className="changes-file-name">{target.path}</span></button>)}</section>}
+        {changes.kind === 'commits' && changes.files.some((target) => !repoNames[target.repoId]) && <section><h3><Codicon name="repo" />{t('Repository')}</h3>{changes.files.filter((target) => !repoNames[target.repoId]).map((target) => <button key={targetKey(target)} className="changes-file-row" onContextMenu={(event) => openContext(event, target)} onClick={() => handleSelect(target)}><FileIcon name={target.path} /><span className="changes-file-name">{target.path}</span></button>)}</section>}
       </aside>
       <div className="changes-preview">
-        {diff?.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff?.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : selected && diff?.content ? <UnifiedDiffView repoId={selected.repoId} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} /> : selected && diff ? <DiffPlaceholder kind="empty" path={diff.path} /> : <DiffPlaceholder kind="select" />}
+        {diffLoading ? (
+          <DiffPlaceholder kind="loading" path={selected?.path} />
+        ) : diffError && (!diff || diffTarget === currentSelectedKey) ? (
+          <DiffPlaceholder
+            kind="error"
+            path={selected?.path}
+            error={diffError}
+            onRetry={() => selected && void loadDiff(selected)}
+          />
+        ) : isDiffMatchingSelected && diff ? (
+          diff.truncated ? (
+            <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} />
+          ) : diff.binary ? (
+             <DiffPlaceholder kind="binary" path={diff.path} />
+          ) : selected && diff.content ? (
+            <UnifiedDiffView repoId={selected.repoId} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} />
+          ) : (
+            <DiffPlaceholder kind="empty" path={diff.path} />
+          )
+        ) : selected ? (
+          <DiffPlaceholder kind="loading" path={selected.path} />
+        ) : (
+          <DiffPlaceholder kind="select" />
+        )}
       </div>
     </div>
     {context && <ContextMenu x={context.x} y={context.y} items={contextItems} onSelect={runContext} onClose={() => setContext(undefined)} />}

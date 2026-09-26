@@ -3338,6 +3338,171 @@ async fn real_git_commit_detail_merge_refs_and_range_diff() {
 }
 
 #[tokio::test]
+async fn real_git_commit_detail_rename_and_special_paths_diff() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("old name.txt"), "line 1\nline 2\n").unwrap();
+    std::fs::write(directory.path().join("中文 原始.txt"), "hello\n").unwrap();
+    command(
+        "git",
+        &["add", "old name.txt", "中文 原始.txt"],
+        directory.path(),
+    );
+    command("git", &["commit", "-m", "initial commit"], directory.path());
+    let initial_hash = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    command(
+        "git",
+        &["mv", "old name.txt", "new name.txt"],
+        directory.path(),
+    );
+    std::fs::write(
+        directory.path().join("new name.txt"),
+        "line 1\nline 2\nline 3\n",
+    )
+    .unwrap();
+
+    command(
+        "git",
+        &["mv", "中文 原始.txt", "中文 目标.txt"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("中文 目标.txt"), "hello\nworld\n").unwrap();
+
+    command(
+        "git",
+        &["add", "new name.txt", "中文 目标.txt"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["commit", "-m", "rename with modifications"],
+        directory.path(),
+    );
+    let rename_hash = command_output("git", &["rev-parse", "HEAD"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    let detail = vcs::commit_detail(&repository, &rename_hash, &token)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        detail.files.len(),
+        2,
+        "Expected exactly 2 changed files: {:?}",
+        detail.files
+    );
+
+    // 关键断言 1：绝不能出现将 old_path 与 new_path 用制表符拼接的错误文件名
+    for file in &detail.files {
+        assert!(
+            !file.path.contains('\t'),
+            "File path must not contain tab separator: {:?}",
+            file.path
+        );
+    }
+
+    // 关键断言 2：验证新路径以及 R 状态
+    let new_file = detail
+        .files
+        .iter()
+        .find(|f| f.path == "new name.txt")
+        .expect("new name.txt must be in commit detail files");
+    assert_eq!(new_file.status, "R");
+    assert_eq!(new_file.added, Some(1));
+    assert_eq!(new_file.removed, Some(0));
+
+    let zh_file = detail
+        .files
+        .iter()
+        .find(|f| f.path == "中文 目标.txt")
+        .expect("中文 目标.txt must be in commit detail files");
+    assert_eq!(zh_file.status, "R");
+    assert_eq!(zh_file.added, Some(1));
+    assert_eq!(zh_file.removed, Some(0));
+
+    // 关键断言 3：点击文件打开单提交 diff，必须能正确展示差异和重命名信息
+    let single_diff = vcs::diff(
+        &repository,
+        "new name.txt",
+        false,
+        Some(rename_hash.clone()),
+        None,
+        None,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(
+        single_diff.content.contains("rename from old name.txt"),
+        "Diff should indicate rename source: {}",
+        single_diff.content
+    );
+    assert!(
+        single_diff.content.contains("rename to new name.txt"),
+        "Diff should indicate rename destination: {}",
+        single_diff.content
+    );
+    assert!(
+        single_diff.content.contains("+line 3"),
+        "Diff should show added content: {}",
+        single_diff.content
+    );
+
+    // 关键断言 4：中文重命名文件单提交 diff 成功
+    let zh_diff = vcs::diff(
+        &repository,
+        "中文 目标.txt",
+        false,
+        Some(rename_hash.clone()),
+        None,
+        None,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(
+        zh_diff.content.contains("+world"),
+        "Diff should show added content for chinese file: {}",
+        zh_diff.content
+    );
+
+    // 关键断言 5：版本范围 diff 成功
+    let range_diff = vcs::diff(
+        &repository,
+        "new name.txt",
+        false,
+        None,
+        Some(initial_hash),
+        Some(rename_hash),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(
+        range_diff.content.contains("+line 3"),
+        "Range diff should show added content: {}",
+        range_diff.content
+    );
+}
+
+#[tokio::test]
 async fn real_svn_core_workflow() {
     if !available("svn") || !available("svnadmin") {
         eprintln!("SKIP: svn or svnadmin not available");
@@ -3404,6 +3569,54 @@ async fn real_svn_core_workflow() {
         "SVN history: {:#?}",
         history.commits
     );
+    assert!(
+        history.commits[0].refs.contains(&"HEAD".to_string()),
+        "Latest SVN commit should have HEAD ref: {:?}",
+        history.commits[0].refs
+    );
+
+    let filtered_history = vcs::history(
+        &repository,
+        0,
+        20,
+        HistoryQuery {
+            text: Some("initial".into()),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(filtered_history.commits.len(), 1);
+    assert_eq!(filtered_history.commits[0].message, "initial svn commit");
+    assert!(
+        !filtered_history.commits[0]
+            .refs
+            .contains(&"HEAD".to_string()),
+        "Filtered old SVN commit should not be labeled as HEAD: {:?}",
+        filtered_history.commits[0].refs
+    );
+
+    let path_history = vcs::history(
+        &repository,
+        0,
+        20,
+        HistoryQuery {
+            path: Some("中文 file.txt".into()),
+            text: Some("initial".into()),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(path_history.commits.len(), 1);
+    assert!(
+        !path_history.commits[0].refs.contains(&"HEAD".to_string()),
+        "Path-filtered old commit must not have HEAD ref: {:?}",
+        path_history.commits[0].refs
+    );
+
     let topology = vcs::history_topology(&repository, None, 1_000, None, &token)
         .await
         .unwrap();
@@ -3438,6 +3651,149 @@ async fn real_svn_core_workflow() {
     .await
     .unwrap();
     assert!(range.content.contains("+two"));
+}
+
+#[tokio::test]
+async fn real_svn_trunk_checkout_path_mapping_and_diff() {
+    if !available("svn") || !available("svnadmin") {
+        eprintln!("SKIP: svn or svnadmin not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let repository_path = directory.path().join("svn_repo");
+    let checkout = directory.path().join("trunk_checkout");
+    command(
+        "svnadmin",
+        &["create", repository_path.to_str().unwrap()],
+        directory.path(),
+    );
+    let url = svn_file_url(&repository_path);
+    command(
+        "svn",
+        &[
+            "mkdir",
+            "-m",
+            "init layout",
+            &format!("{url}/trunk"),
+            &format!("{url}/branches"),
+        ],
+        directory.path(),
+    );
+    command(
+        "svn",
+        &[
+            "checkout",
+            &format!("{url}/trunk"),
+            checkout.to_str().unwrap(),
+        ],
+        directory.path(),
+    );
+    std::fs::create_dir_all(checkout.join("sub")).unwrap();
+    std::fs::write(checkout.join("sub/example.txt"), "hello trunk\n").unwrap();
+    let repository = repo(&checkout, VcsKind::Svn);
+    let token = CancellationToken::new();
+
+    let status = workspace::svn_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    assert!(status
+        .files
+        .iter()
+        .any(|f| f.path == "sub/example.txt" && f.status == "untracked"));
+
+    vcs::commit(
+        &repository,
+        "add example in trunk",
+        false,
+        &["sub/example.txt".into()],
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let history = vcs::history(&repository, 0, 10, Default::default(), &token)
+        .await
+        .unwrap();
+    let first_rev = history
+        .commits
+        .iter()
+        .find(|c| c.message == "add example in trunk")
+        .map(|c| c.hash.clone())
+        .expect("first commit found");
+
+    let detail = vcs::commit_detail(&repository, &first_rev, &token)
+        .await
+        .unwrap();
+    assert_eq!(detail.commit.message, "add example in trunk");
+    // 关键断言：文件树不能显示 trunk/sub/example.txt，而必须映射为相对于工作副本的 sub/example.txt
+    assert_eq!(
+        detail.files.len(),
+        1,
+        "Directory paths must be filtered out and only file returned: {:?}",
+        detail.files
+    );
+    assert_eq!(
+        detail.files[0].path, "sub/example.txt",
+        "Path must be mapped to working copy root, not repository root"
+    );
+
+    // 修改并提交第二版
+    std::fs::write(checkout.join("sub/example.txt"), "hello trunk\nline 2\n").unwrap();
+    vcs::commit(
+        &repository,
+        "update example in trunk",
+        false,
+        &["sub/example.txt".into()],
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let history2 = vcs::history(&repository, 0, 10, Default::default(), &token)
+        .await
+        .unwrap();
+    let second_rev = history2
+        .commits
+        .iter()
+        .find(|c| c.message == "update example in trunk")
+        .map(|c| c.hash.clone())
+        .expect("second commit found");
+
+    // 单版本 diff 针对工作副本相对路径
+    let single_diff = vcs::diff(
+        &repository,
+        "sub/example.txt",
+        false,
+        Some(second_rev.clone()),
+        None,
+        None,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(
+        single_diff.content.contains("+line 2"),
+        "Single commit diff should contain added line: {}",
+        single_diff.content
+    );
+
+    // 范围 diff
+    let range_diff = vcs::diff(
+        &repository,
+        "sub/example.txt",
+        false,
+        None,
+        Some(first_rev),
+        Some(second_rev),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(
+        range_diff.content.contains("+line 2"),
+        "Range diff should contain added line: {}",
+        range_diff.content
+    );
 }
 
 #[tokio::test]

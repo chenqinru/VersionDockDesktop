@@ -26,7 +26,7 @@ describe('commit detail aggregation', () => {
     };
     const files = buildCommitFileTargets([newest, oldest], details, [repo]);
     expect(files).toHaveLength(1);
-    expect(files[0]).toMatchObject({ path: 'src/App.tsx', added: 5, removed: 5, fromRevision: 'c'.repeat(40), toRevision: 'a'.repeat(40), commitHash: 'b'.repeat(40) });
+    expect(files[0]).toMatchObject({ path: 'src/App.tsx', added: 5, removed: 5, fromRevision: 'c'.repeat(40), toRevision: 'a'.repeat(40), commitHash: 'a'.repeat(40), status: 'M' });
     expect(files[0].commitHashes).toEqual([newest.hash, oldest.hash]);
   });
 
@@ -39,5 +39,39 @@ describe('commit detail aggregation', () => {
     };
     const files = buildCommitFileTargets([newest, oldest], details, [svnRepo]);
     expect(files[0]).toMatchObject({ fromRevision: '0', toRevision: '2' });
+  });
+
+  it('filters commit files by history path accurately', () => {
+    const targetCommit = commit('1'.repeat(40), undefined);
+    const details: Record<string, CommitDetail> = {
+      [commitKey('repo', targetCommit.hash)]: {
+        commit: targetCommit,
+        fullMessage: targetCommit.message,
+        branches: { local: [], remote: [], tags: [] },
+        files: [
+          { path: 'src/components/CommitDetailPanel.tsx', status: 'M', added: 10, removed: 2 },
+          { path: 'src/store/appStore.ts', status: 'M', added: 5, removed: 1 },
+          { path: 'package.json', status: 'M', added: 1, removed: 0 },
+        ],
+      },
+    };
+
+    // 精确匹配
+    const filteredExact = buildCommitFileTargets([targetCommit], details, [repo], 'src/store/appStore.ts');
+    expect(filteredExact).toHaveLength(1);
+    expect(filteredExact[0].path).toBe('src/store/appStore.ts');
+
+    // 相对路径/子树匹配 (例如 `appStore.ts` 匹配 `src/store/appStore.ts`)
+    const filteredSuffix = buildCommitFileTargets([targetCommit], details, [repo], 'store/appStore.ts');
+    expect(filteredSuffix).toHaveLength(1);
+    expect(filteredSuffix[0].path).toBe('src/store/appStore.ts');
+
+    // 未匹配路径
+    const filteredNone = buildCommitFileTargets([targetCommit], details, [repo], 'src/not-exist.ts');
+    expect(filteredNone).toHaveLength(0);
+
+    // 未传入 historyPath 返回全部
+    const filteredAll = buildCommitFileTargets([targetCommit], details, [repo]);
+    expect(filteredAll).toHaveLength(3);
   });
 });

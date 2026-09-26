@@ -3596,6 +3596,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .aggregate-repo > .codicon { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .aggregate-item .detail-message-card { margin-top: 5px; }
 .detail-loading { padding: 12px 8px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
+.detail-loading.detail-error { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--versiondock-warning, #cca700); }
+.detail-retry-button { background: var(--versiondock-button-secondary-bg, rgba(255, 255, 255, 0.08)); color: var(--versiondock-text); border: 1px solid var(--versiondock-border); border-radius: 2px; padding: 1px 6px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); cursor: pointer; }
+.detail-retry-button:hover { background: var(--versiondock-hover); }
 .no-merge-conflicts { padding: 8px 10px 7px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; text-align: center; opacity: 0.72; }
 .merge-parent-group { margin-top: 4px; border-top: 1px solid var(--versiondock-border-soft); }
 .merge-parent-row { width: 100%; min-height: 24px; height: 24px; display: flex; align-items: center; gap: 5px; padding: 2px 8px; text-align: left; background: transparent; border: none; cursor: pointer; user-select: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
@@ -4431,6 +4434,8 @@ button.danger:not(:disabled):hover,
 .diff-placeholder-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; color: var(--versiondock-faint); border: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
 .diff-placeholder-icon > .codicon { font-size: calc(20px * var(--versiondock-ui-font-scale, 1)); }
 .diff-placeholder.truncated .diff-placeholder-icon { color: var(--versiondock-warning); }
+.diff-placeholder.loading .diff-placeholder-icon { color: var(--versiondock-accent); }
+.diff-placeholder.error .diff-placeholder-icon { color: var(--versiondock-error, #f14c4c); }
 .diff-placeholder > strong { max-width: min(520px, 100%); color: var(--versiondock-text); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; }
 .diff-placeholder > code { max-width: min(680px, 100%); overflow: hidden; color: var(--versiondock-muted); font: calc(10px * var(--versiondock-ui-font-scale, 1))/16px var(--versiondock-code); text-overflow: ellipsis; white-space: nowrap; }
 .diff-placeholder > small { color: var(--versiondock-faint); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
@@ -6610,6 +6615,8 @@ button.notification-item-action-btn:focus-visible {
 .speed-search-indicator > span:nth-child(2) { min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .speed-search-indicator button { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; color: inherit; background: transparent; border: 0; border-radius: 3px; }
 .speed-search-indicator button:hover { background: var(--versiondock-hover); }
+.speed-search-count { font-size: 11px; opacity: .85; padding: 0 4px; user-select: none; }
+.detail-file-row.is-active-match { outline: 1px solid var(--versiondock-focus, #007acc); background: var(--versiondock-selection, rgba(0, 122, 204, .25)) !important; }
 .speed-search-indicator { position: absolute; z-index: 30; top: 72px; right: 12px; display: flex; align-items: center; gap: 6px; max-width: min(320px, 60%); min-height: 25px; padding: 2px 5px 2px 8px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-focus, var(--versiondock-border)); border-radius: 4px; box-shadow: 0 3px 12px rgba(0, 0, 0, .25); }
 .speed-search-indicator > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .speed-search-indicator button { display: inline-flex; padding: 2px; color: inherit; border: 0; background: transparent; }

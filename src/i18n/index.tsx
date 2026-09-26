@@ -119,7 +119,7 @@ const desktopEn: Messages = {
   'Theme': 'Theme', 'Language': 'Language', 'UI font size': 'UI font size', 'Choose the application UI font size': 'Choose the application UI font size', 'Minimum': 'Minimum', 'Small': 'Small', 'Standard': 'Standard', 'Large': 'Large', 'Maximum': 'Maximum', 'System': 'System', 'Light': 'Light', 'Dark': 'Dark', '2026 Dark': '2026 Dark', '2026 Light': '2026 Light', 'GitHub Dark Dimmed': 'GitHub Dark Dimmed', 'One Dark Pro': 'One Dark Pro', 'Dracula': 'Dracula', 'Nord': 'Nord', 'Classic Dark': 'Classic Dark', 'Classic Light': 'Classic Light', 'System (Default 2026)': 'System (Default 2026)', 'English': 'English', 'Simplified Chinese': 'Simplified Chinese',
   'Git is not installed': 'Git is not installed', 'SVN is not installed': 'SVN is not installed', 'Loading workspace…': 'Loading workspace…',
   'Select a repository': 'Select a repository', 'Select a commit': 'Select a commit', 'Select a changed file to inspect its diff.': 'Select a changed file to inspect its diff.',
-  'Diff is too large to display': 'Diff is too large to display', 'Binary diff cannot be displayed': 'Binary diff cannot be displayed',
+  'Diff is too large to display': 'Diff is too large to display', 'Binary diff cannot be displayed': 'Binary diff cannot be displayed', 'Loading diff...': 'Loading diff...', 'Failed to load diff': 'Failed to load diff',
   'Apply ours': 'Apply ours', 'Apply theirs': 'Apply theirs', 'Result': 'Result', 'Ours': 'Ours', 'Theirs': 'Theirs', 'Base': 'Base',
   'Repository': 'Repository', 'Author': 'Author', 'Search commits': 'Search commits', 'Back to history': 'Back to history', 'Back to compare': 'Back to compare',
   'Previous change': 'Previous change', 'Next change': 'Next change', 'Split view': 'Side-by-side view', 'changes': 'changes',
@@ -136,7 +136,7 @@ const desktopEn: Messages = {
   'Retry the push after checking the remote and branch state': 'Retry the push after checking the remote and branch state', 'Review repository changes and retry only this repository': 'Review repository changes and retry only this repository', 'Configure a valid Git identity and retry this repository': 'Configure a valid Git identity and retry this repository', 'Reopen the workspace and verify that the repository is available': 'Reopen the workspace and verify that the repository is available',
   'Tree view': 'Tree view', 'List view': 'List view', 'Create tag': 'Create tag', 'Rename': 'Rename', 'Delete': 'Delete', 'Copy': 'Copy',
   'Open': 'Open', 'Reveal': 'Reveal', 'Reset': 'Reset', 'No history': 'No history', 'files': 'files', 'files changed': 'files changed', 'commits': 'commits', '{0} commit selected': '{0} commit selected', '{0} commits selected': '{0} commits selected', 'Remote': 'Remote', 'Local': 'Local', 'Aggregated commit selection': 'Aggregated commit selection', 'Selected time range': 'Selected time range', 'repositories involved': '{0} repositories involved', 'Merged commits': 'Merged commits', 'Loading...': 'Loading...', 'Loading files...': 'Loading files...', 'No commits found': 'No commits found', 'Open Commit Detail': 'Open Commit Detail', 'Open Changes': 'Open Changes', 'Close commit detail': 'Close commit detail', 'Show commit detail': 'Show commit detail', 'Expand': 'Expand', 'Collapse': 'Collapse', 'Resize commit detail': 'Resize commit detail', 'Expand commit messages by default': 'Expand commit messages by default', 'Collapse commit messages by default': 'Collapse commit messages by default',
-  'No merge conflicts': 'No merge conflicts', 'No changes relative to first parent': 'No changes relative to first parent', 'Changes from {0}': 'Changes from {0}', '{0} files': '{0} files', '{0} file': '{0} file', 'Click to expand': 'Click to expand', 'Click to collapse': 'Click to collapse', 'Click to open diff': 'Click to open diff',
+  'No merge conflicts': 'No merge conflicts', 'No changes relative to first parent': 'No changes relative to first parent', 'Changes from {0}': 'Changes from {0}', '{0} files': '{0} files', '{0} file': '{0} file', 'Click to expand': 'Click to expand', 'Click to collapse': 'Click to collapse', 'Click to open diff': 'Click to open diff', 'Failed to load files': 'Failed to load files', 'Failed to load commit details': 'Failed to load commit details', 'Retry': 'Retry',
   'Git and SVN are not installed': 'Git and SVN are not installed', 'Install at least one command-line tool to load repositories.': 'Install at least one command-line tool to load repositories.',
   'No repositories were found in this workspace.': 'No repositories were found in this workspace.', 'Initialize a local repository, or clone / checkout from Git or SVN.': 'Initialize a local repository, or clone / checkout from Git or SVN.', 'Force delete branch': 'Force delete branch',
   'Delete branch {0}?': 'Delete branch {0}?', 'Delete tag {0}?': 'Delete tag {0}?', 'Checkout branch {0}?': 'Checkout branch {0}?',
@@ -374,7 +374,7 @@ const desktopEn: Messages = {
   'Submodule changes are not published': 'Submodule changes are not published', 'Push the parent repository anyway? Other users may not be able to fetch the referenced submodule commits.': 'Push the parent repository anyway? Other users may not be able to fetch the referenced submodule commits.', 'Push Anyway': 'Push Anyway',
   'Merge commits require selecting a mainline parent and cannot be cherry-picked here.': 'Merge commits require selecting a mainline parent and cannot be cherry-picked here.',
   'Sync All': 'Sync All', 'Pull incoming changes, then push outgoing commits': 'Pull incoming changes, then push outgoing commits',
-  'Speed Search': 'Speed Search', 'Clear Speed Search': 'Clear Speed Search',
+  'Speed Search': 'Speed Search', 'Clear Speed Search': 'Clear Speed Search', 'Previous match': 'Previous match', 'Next match': 'Next match',
   '{0} potential conflicts': '{0} potential conflicts',
   'Fetch remote changes': 'Fetch remote changes', 'Fetch when window regains focus': 'Fetch when window regains focus', 'Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.': 'Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.',
   'Type-change conflict': 'Type-change conflict', 'Resolve in Merge Editor': 'Resolve in Merge Editor', 'Accept Ours Deletion': 'Accept Ours Deletion', 'Accept Theirs Deletion': 'Accept Theirs Deletion', 'Show Diff Summary': 'Show Diff Summary',
@@ -438,6 +438,9 @@ const desktopEn: Messages = {
   'VersionDock [{0}]: tag "{1}" deleted.': 'VersionDock [{0}]: tag "{1}" deleted.',
   'VersionDock [{0}]: branch "{1}" created.': 'VersionDock [{0}]: branch "{1}" created.',
   'VersionDock [{0}]: switched to "{1}"': 'VersionDock [{0}]: switched to "{1}"',
+  'SVN repository HEAD revision': 'SVN repository HEAD revision',
+  'SVN working copy BASE revision': 'SVN working copy BASE revision',
+  'Back to commit details': 'Back to commit details',
 };
 
 const desktopZh: Messages = {
@@ -561,7 +564,7 @@ const desktopZh: Messages = {
   'Theme': '主题', 'Language': '语言', 'UI font size': 'UI 字号', 'Choose the application UI font size': '选择应用界面字号', 'Minimum': '最小', 'Small': '小', 'Standard': '标准', 'Large': '大', 'Maximum': '最大', 'System': '跟随系统', 'Light': '浅色', 'Dark': '深色', '2026 Dark': '2026 深色', '2026 Light': '2026 浅色', 'GitHub Dark Dimmed': 'GitHub Dark Dimmed', 'One Dark Pro': 'One Dark Pro', 'Dracula': 'Dracula', 'Nord': 'Nord', 'Classic Dark': '经典深色', 'Classic Light': '经典浅色', 'System (Default 2026)': '跟随系统（默认 2026）', 'English': '英文', 'Simplified Chinese': '简体中文',
   'Git is not installed': '未安装 Git', 'SVN is not installed': '未安装 SVN', 'Loading workspace…': '正在加载工作区…',
   'Select a repository': '选择仓库', 'Select a commit': '选择提交', 'Select a changed file to inspect its diff.': '选择更改文件以查看差异。',
-  'Diff is too large to display': '差异内容过大，无法显示', 'Binary diff cannot be displayed': '无法显示二进制差异',
+  'Diff is too large to display': '差异内容过大，无法显示', 'Binary diff cannot be displayed': '无法显示二进制差异', 'Loading diff...': '正在加载差异...', 'Failed to load diff': '加载差异失败',
   'Apply ours': '采用当前', 'Apply theirs': '采用对方', 'Result': '结果', 'Ours': '当前', 'Theirs': '对方', 'Base': '基准',
   'Repository': '仓库', 'Author': '作者', 'Search commits': '搜索提交', 'Back to history': '返回历史', 'Back to compare': '返回比较',
   'Previous change': '上一个更改', 'Next change': '下一个更改', 'Split view': '分栏视图', 'changes': '处更改',
@@ -578,7 +581,7 @@ const desktopZh: Messages = {
   'Retry the push after checking the remote and branch state': '检查远程与分支状态后重试推送', 'Review repository changes and retry only this repository': '检查仓库更改后仅重试此仓库', 'Configure a valid Git identity and retry this repository': '配置有效的 Git 身份后重试此仓库', 'Reopen the workspace and verify that the repository is available': '重新打开工作区并确认仓库可用',
   'Tree view': '树视图', 'List view': '平铺视图', 'Create tag': '创建标签', 'Rename': '重命名', 'Delete': '删除', 'Copy': '复制',
   'Open': '打开', 'Reveal': '在文件管理器中显示', 'Reset': '重置', 'No history': '暂无历史', 'files': '个文件', 'files changed': '个文件有变更', 'commits': '个提交', '{0} commit selected': '已选择 {0} 个提交', '{0} commits selected': '已选择 {0} 个提交', 'Remote': '远程', 'Local': '本地', 'Aggregated commit selection': '聚合提交选择', 'Selected time range': '所选时间范围', 'repositories involved': '涉及 {0} 个仓库', 'Merged commits': '合并的提交', 'Loading...': '加载中...', 'Loading files...': '正在加载文件...', 'No commits found': '没有找到提交', 'Open Commit Detail': '打开提交详情', 'Open Changes': '打开更改', 'Close commit detail': '关闭提交详情', 'Show commit detail': '显示提交详情', 'Expand': '展开', 'Collapse': '收起', 'Resize commit detail': '调整提交详情高度', 'Expand commit messages by default': '默认展开提交信息', 'Collapse commit messages by default': '默认收起提交信息',
-  'No merge conflicts': '无合并冲突', 'No changes relative to first parent': '相对于第一个父提交没有变更', 'Changes from {0}': '来自 {0} 的变更', '{0} files': '{0} 个文件', '{0} file': '{0} 个文件', 'Click to expand': '点击展开', 'Click to collapse': '点击折叠', 'Click to open diff': '点击查看差异',
+  'No merge conflicts': '无合并冲突', 'No changes relative to first parent': '相对于第一个父提交没有变更', 'Changes from {0}': '来自 {0} 的变更', '{0} files': '{0} 个文件', '{0} file': '{0} 个文件', 'Click to expand': '点击展开', 'Click to collapse': '点击折叠', 'Click to open diff': '点击查看差异', 'Failed to load files': '加载文件失败', 'Failed to load commit details': '加载提交详情失败', 'Retry': '重试',
   'Git and SVN are not installed': '未安装 Git 和 SVN', 'Install at least one command-line tool to load repositories.': '请至少安装一个命令行工具以加载仓库。',
   'No repositories were found in this workspace.': '此工作区中未发现仓库。', 'Initialize a local repository, or clone / checkout from Git or SVN.': '可以初始化本地仓库，或从 Git / SVN 克隆、检出仓库。', 'Force delete branch': '强制删除分支',
   'Delete branch {0}?': '删除分支 {0}？', 'Delete tag {0}?': '删除标签 {0}？', 'Checkout branch {0}?': '切换到分支 {0}？',
@@ -816,7 +819,7 @@ const desktopZh: Messages = {
   'Submodule changes are not published': '子模块更改尚未发布', 'Push the parent repository anyway? Other users may not be able to fetch the referenced submodule commits.': '仍要推送父仓库吗？其他用户可能无法获取被引用的子模块提交。', 'Push Anyway': '仍然推送',
   'Merge commits require selecting a mainline parent and cannot be cherry-picked here.': '合并提交需要选择主线父提交，不能在此处直接挑选。',
   'Sync All': '全部同步', 'Pull incoming changes, then push outgoing commits': '先拉取传入更改，再推送本地提交',
-  'Speed Search': '快速搜索', 'Clear Speed Search': '清除快速搜索',
+  'Speed Search': '快速搜索', 'Clear Speed Search': '清除快速搜索', 'Previous match': '上一个匹配', 'Next match': '下一个匹配',
   '{0} potential conflicts': '{0} 个潜在冲突',
   'Fetch remote changes': '抓取远程更改', 'Fetch when window regains focus': '窗口重新获得焦点时抓取', 'Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.': '窗口重新获得焦点时在后台自动抓取远程更改，并使用三分钟冷却时间。',
   'Type-change conflict': '类型变更冲突', 'Resolve in Merge Editor': '在合并编辑器中解决', 'Accept Ours Deletion': '接受当前分支删除', 'Accept Theirs Deletion': '接受传入分支删除', 'Show Diff Summary': '显示差异摘要',
@@ -880,6 +883,9 @@ const desktopZh: Messages = {
   'VersionDock [{0}]: tag "{1}" deleted.': 'VersionDock [{0}]：标签“{1}”已删除。',
   'VersionDock [{0}]: branch "{1}" created.': 'VersionDock [{0}]：分支“{1}”已创建。',
   'VersionDock [{0}]: switched to "{1}"': 'VersionDock [{0}]：已切换至“{1}”',
+  'SVN repository HEAD revision': 'SVN 仓库 HEAD 修订版本',
+  'SVN working copy BASE revision': 'SVN 工作副本 BASE 修订版本',
+  'Back to commit details': '返回提交详情',
 };
 
 export interface I18nContextValue {
