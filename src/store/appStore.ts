@@ -487,6 +487,7 @@ export interface AppStore {
   openBranchComparison: (repoId: string, target: string) => void;
   closeBranchComparison: () => void;
   compareBranches: (repoId: string, base: string, target: string) => Promise<void>;
+  compareBranchCommits: (repoId: string, base: string, target: string, side: string, query: HistoryQuery, signal?: AbortSignal) => Promise<CommitNode[]>;
   clearComparison: () => void;
   loadRemotes: (repoId?: string) => Promise<void>;
   remoteOperation: (repoId: string, operation: RemoteOperation) => Promise<void>;
@@ -4101,6 +4102,22 @@ export const useAppStore = create<AppStore>((set, get) => {
       const comparison = await bridge().request<BranchCompareResult>({ type: 'branchCompare', payload: { workspace_id: requestWorkspace, repo_id: repoId, base, target } }, { signal: controller.signal });
       if (generation === comparisonRequestGeneration && get().snapshot?.workspace.id === requestWorkspace) set({ comparison });
     }, `history:${repoId}`),
+    compareBranchCommits: async (repoId, base, target, side, query, signal) => {
+      const requestWorkspace = workspaceId();
+      return bridge().request<CommitNode[]>({
+        type: 'branchCompareCommits',
+        payload: {
+          workspace_id: requestWorkspace,
+          repo_id: repoId,
+          base,
+          target,
+          side,
+          skip: 0,
+          limit: 500,
+          query,
+        },
+      }, { signal, showProgress: false });
+    },
     clearComparison: () => {
       comparisonRequestGeneration += 1;
       requestControllers.get('branch-comparison')?.abort();

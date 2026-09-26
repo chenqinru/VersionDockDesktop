@@ -415,6 +415,15 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	repo_id: string,
 	base: string,
 	target: string,
+} } | { type: "branchCompareCommits"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	base: string,
+	target: string,
+	side: string,
+	skip: number,
+	limit: number,
+	query: HistoryQuery,
 } } | { type: "remotes"; payload: {
 	workspace_id: string,
 	repo_id: string,

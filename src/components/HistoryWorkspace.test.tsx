@@ -49,7 +49,7 @@ describe('HistoryWorkspace capabilities', () => {
     fireEvent.click(screen.getByRole('button', { name: /Author/ }));
     expect(screen.getAllByText('Ada').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
-    expect(screen.getAllByText('Repo').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Repo/i).length).toBeGreaterThan(0);
   });
 
   it('provides commit, branch, tag, and repository context menus', () => {
@@ -275,7 +275,7 @@ describe('HistoryWorkspace capabilities', () => {
 });
 
 describe('HistoryWorkspace data helpers', () => {
-  it('maps local, remote, and tag filters to unambiguous full Git refs', () => {
+  it('maps local, remote, and tag filters to unambiguous full Git refs, excluding remote branches from dropdown', () => {
     const options = buildHistoryRefOptions(snapshot.repositories, {
       repo: [
         { name: 'feature/ui', current: true, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0 },
@@ -283,7 +283,7 @@ describe('HistoryWorkspace data helpers', () => {
       ],
     }, { repo: [{ name: 'v1.0.0' }] });
     expect(options.find((option) => option.id === 'refs/heads/feature/ui')?.revisionsByRepo.repo).toBe('refs/heads/feature/ui');
-    expect(options.find((option) => option.id === 'refs/remotes/origin/main')?.revisionsByRepo.repo).toBe('refs/remotes/origin/main');
+    expect(options.find((option) => option.id === 'refs/remotes/origin/main')).toBeUndefined();
     expect(options.find((option) => option.id === 'refs/tags/v1.0.0')?.revisionsByRepo.repo).toBe('refs/tags/v1.0.0');
     expect(options.find((option) => option.id === 'refs/heads/feature/ui')?.label).toBe('feature/ui');
   });
@@ -420,21 +420,21 @@ describe('HistoryWorkspace data helpers', () => {
     });
     render(<HistoryWorkspace />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Repository' }));
-    fireEvent.click(screen.getByRole('radio', { name: 'Repo 2GIT' }));
-    expect(screen.queryByRole('radio', { name: 'Repo 2GIT' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Repo 2' })[0]).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Branch / Tags' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Repository/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /^REPO 2/ }));
+    expect(screen.queryByRole('radio', { name: /^REPO 2/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^REPO 2/ })[0]).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Branch \/ Tag/ }));
     expect(screen.queryByRole('radio', { name: 'main' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'feature/ui' }));
     expect(screen.queryByRole('radio', { name: 'feature/ui' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'feature/ui' }));
     expect(screen.getByRole('radio', { name: 'feature/ui' })).toBeChecked();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Repo 2' })[0]);
-    fireEvent.click(screen.getByRole('radio', { name: 'RepoGIT' }));
-    expect(screen.queryByRole('radio', { name: 'RepoGIT' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Repo' })[0]).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Branch / Tags' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /^REPO 2/ })[0]);
+    fireEvent.click(screen.getByRole('radio', { name: /^REPO$/i }));
+    expect(screen.queryByRole('radio', { name: /^REPO$/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^REPO$/i })[0]).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Branch \/ Tag/ }));
     expect(screen.getByRole('radio', { name: 'main' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'feature/ui' })).not.toBeInTheDocument();
   }, 15000);

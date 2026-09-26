@@ -154,7 +154,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
     case 'history': case 'historyTopology': case 'commitDetail': case 'commitMergeCommits':
     case 'commitMergeParentFiles': case 'unpushedCommits': case 'unpushedOperation':
-    case 'historyOperation': case 'createPatch': case 'savePatch': case 'branchCompare': return 'history';
+    case 'historyOperation': case 'createPatch': case 'savePatch': case 'branchCompare': case 'branchCompareCommits': return 'history';
     case 'branches': case 'branchOperation': case 'branchRecovery': return 'branch';
     case 'tags': case 'tagOperation': return 'tag';
     case 'commit': case 'batchCommit': case 'recentCommitMessages': case 'lastCommitMessage': return 'commit';

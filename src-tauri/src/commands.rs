@@ -3214,6 +3214,32 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(vcs::branch_compare(&repo, &base, &target, token).await?)
         }
+        BridgeCommand::BranchCompareCommits {
+            workspace_id,
+            repo_id,
+            base,
+            target,
+            side,
+            skip,
+            limit,
+            query,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(
+                vcs::branch_compare_commits(
+                    &repo,
+                    &base,
+                    &target,
+                    &side,
+                    skip,
+                    limit,
+                    &query,
+                    token,
+                )
+                .await?,
+            )
+        }
         BridgeCommand::Remotes {
             workspace_id,
             repo_id,

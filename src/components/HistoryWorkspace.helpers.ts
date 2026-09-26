@@ -55,6 +55,7 @@ export type HistoryRefOption = {
   icon: string;
   repoIds: string[];
   revisionsByRepo: Record<string, string>;
+  group?: string;
 };
 
 export function buildHistoryRefOptions(
@@ -62,30 +63,41 @@ export function buildHistoryRefOptions(
   branchesByRepo: Readonly<Record<string, readonly BranchInfo[]>>,
   tagsByRepo: Readonly<Record<string, ReadonlyArray<{ name: string }>>>,
 ): HistoryRefOption[] {
-  const values = new Map<string, HistoryRefOption>();
-  const add = (id: string, label: string, icon: string, repoId: string, revision: string) => {
-    const current = values.get(id);
-    values.set(id, {
-      id,
-      label,
-      icon,
-      repoIds: current ? [...new Set([...current.repoIds, repoId])] : [repoId],
-      revisionsByRepo: { ...current?.revisionsByRepo, [repoId]: revision },
-    });
-  };
+  const branchValues = new Map<string, HistoryRefOption>();
+  const tagValues = new Map<string, HistoryRefOption>();
+
   for (const repo of repos) {
     for (const branch of branchesByRepo[repo.meta.id] ?? []) {
-      if (!branch.remote && branch.name === 'HEAD') continue;
-      if (branch.remote && branchBaseName(branch) === 'HEAD') continue;
-      const revision = branchRevisionRef({ name: branch.name, isRemote: branch.remote }, repo.meta.kind);
-      add(revision, branch.name, branch.remote ? 'cloud' : 'git-branch', repo.meta.id, revision);
+      if (branch.remote) continue;
+      if (branch.name === 'HEAD') continue;
+      const revision = branchRevisionRef({ name: branch.name, isRemote: false }, repo.meta.kind);
+      const current = branchValues.get(revision);
+      branchValues.set(revision, {
+        id: revision,
+        label: branch.name,
+        icon: 'git-branch',
+        group: 'Branches',
+        repoIds: current ? [...new Set([...current.repoIds, repo.meta.id])] : [repo.meta.id],
+        revisionsByRepo: { ...current?.revisionsByRepo, [repo.meta.id]: revision },
+      });
     }
     for (const tag of tagsByRepo[repo.meta.id] ?? []) {
       const revision = tagRevisionRef(tag.name, repo.meta.kind);
-      add(revision, tag.name, 'tag', repo.meta.id, revision);
+      const current = tagValues.get(revision);
+      tagValues.set(revision, {
+        id: revision,
+        label: tag.name,
+        icon: 'tag',
+        group: 'Tags',
+        repoIds: current ? [...new Set([...current.repoIds, repo.meta.id])] : [repo.meta.id],
+        revisionsByRepo: { ...current?.revisionsByRepo, [repo.meta.id]: revision },
+      });
     }
   }
-  return [...values.values()].sort((left, right) => left.label.localeCompare(right.label));
+
+  const sortedBranches = [...branchValues.values()].sort((left, right) => left.label.localeCompare(right.label));
+  const sortedTags = [...tagValues.values()].sort((left, right) => left.label.localeCompare(right.label));
+  return [...sortedBranches, ...sortedTags];
 }
 
 function remoteNameFor(branch: BranchInfo): string {

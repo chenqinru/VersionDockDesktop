@@ -51,7 +51,7 @@ function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { ope
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [onToggle, open]);
-  return <div ref={ref} className="history-more"><button className={`more-button ${open ? 'selected' : ''}`} title={t('More actions')} aria-label={t('More actions')} onClick={onToggle}><Codicon name="three-bars" /></button>{open && <div className="more-menu">
+  return <div ref={ref} className="history-more"><button type="button" className={`more-button ${open ? 'selected' : ''}`} title={t('More actions')} aria-label={t('More actions')} onClick={onToggle}><Codicon name="three-bars" style={{ fontSize: '14px' }} /></button>{open && <div className="more-menu">
     <button onClick={() => { onFetch(); onToggle(); }}><Codicon name="sync" />{t('Fetch and Refresh')}</button>
     <button onClick={() => { onToggleExpanded(); onToggle(); }}><Codicon name={expanded ? 'collapse-all' : 'expand-all'} />{t(expanded ? 'Collapse project names' : 'Expand project names')}</button>
   </div>}</div>;
@@ -657,10 +657,19 @@ export function HistoryWorkspace() {
   const authorOptions = useMemo(() => {
     const counts = new Map<string, { count: number; email: string; repoId: string }>();
     allHistory.forEach((commit) => { const current = counts.get(commit.author); counts.set(commit.author, { count: (current?.count ?? 0) + 1, email: current?.email || commit.email, repoId: current?.repoId || commit.repoId }); });
-    return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([author, value]) => ({ id: author, label: author, detail: String(value.count), avatarName: author, avatarEmail: value.email, avatarRepoId: value.repoId }));
+    return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([author, value]) => ({
+      id: author,
+      label: author,
+      sublabel: value.email,
+      count: value.count,
+      detail: String(value.count),
+      avatarName: author,
+      avatarEmail: value.email,
+      avatarRepoId: value.repoId,
+    }));
   }, [allHistory]);
   const mixedKinds = hasMixedRepositoryKinds(snapshotRepos);
-  const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repositoryLabel(repo, mixedKinds), color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
+  const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repositoryLabel(repo, mixedKinds).toUpperCase(), color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
   const allRefOptions = useMemo(
     () => buildHistoryRefOptions(snapshotRepos, branchesByRepo, tagsByRepo),
     [branchesByRepo, snapshotRepos, tagsByRepo],
@@ -670,9 +679,9 @@ export function HistoryWorkspace() {
     [allRefOptions, filters.repoId],
   );
   const selectedRepo = repoOptions.find((option) => option.id === filters.repoId);
-  const selectedRepoLabel = selectedRepo?.label ?? t('Repository');
-  const selectedRefLabel = allRefOptions.find((option) => option.id === filters.ref)?.label ?? t('Branch / Tags');
-  const filterActive = !!(filters.author || filters.repoId || filters.ref || filters.from || filters.to);
+  const selectedRepoLabel = selectedRepo?.label ?? t('Repository…');
+  const selectedRefLabel = allRefOptions.find((option) => option.id === filters.ref)?.label ?? t('Branch / Tag…');
+  const filterActive = !!(historySearch.trim() || historyQuery.path || filters.author || filters.repoId || filters.ref || filters.from || filters.to);
   const visibleHistory = allHistory;
   const updateFilters = (next: Partial<ViewFilters>) => {
     const updated = { ...filters, ...next };
@@ -714,10 +723,15 @@ export function HistoryWorkspace() {
     queueMicrotask(() => setFilters({ author: historyQuery.author ?? '', repoId, ref, from: historyQuery.fromDate ?? '', to: historyQuery.toDate ?? '' }));
   }, [allRefOptions, historyQuery.author, historyQuery.fromDate, historyQuery.toDate, historyScope]);
   const clearFilters = () => {
+    setHistorySearch('');
     setFilters(EMPTY_FILTERS);
     setHistoryScope({ repoIds: null, revisionsByRepo: {} });
     setHistoryQuery({ text: null, author: null, fromDate: null, toDate: null, path: null, revision: null, lineRange: null });
-    queueMicrotask(() => void loadHistory(true).catch(() => undefined));
+    if (historyQuery.path) {
+      void useAppStore.getState().clearHistoryPath();
+    } else {
+      queueMicrotask(() => void loadHistory(true).catch(() => undefined));
+    }
   };
   const fetchAndRefresh = async () => {
     await Promise.all(snapshotRepos.filter((repo) => repo.meta.kind === 'git').map((repo) => sync(repo.meta.id, 'fetch')));
@@ -740,13 +754,20 @@ export function HistoryWorkspace() {
     return () => { document.removeEventListener('pointerdown', handleOutside, true); document.removeEventListener('keydown', escape); };
   }, [menu]);
 
+  useEffect(() => {
+    if (!menu) {
+      setAuthorQuery('');
+      setRefQuery('');
+    }
+  }, [menu]);
+
   if (!selectedRepoId) return <div className="workspace-empty"><Codicon name="repo" />{t('Select a repository')}</div>;
   return <section className="history-workspace">
     {!compareTarget && <div className="history-filters" onClick={(event) => event.stopPropagation()}>
       <CommitSearch value={historySearch} onChange={setHistorySearch} onSubmit={() => void loadHistory(true).catch(() => undefined)} onClear={() => queueMicrotask(() => void loadHistory(true).catch(() => undefined))} />
-      <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" leading={authorOptions.find((option) => option.id === filters.author)?.avatarName ? <AuthorAvatar name={authorOptions.find((option) => option.id === filters.author)!.avatarName!} email={authorOptions.find((option) => option.id === filters.author)!.avatarEmail ?? ''} repoId={authorOptions.find((option) => option.id === filters.author)!.avatarRepoId} size={16} /> : undefined} label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover title={t('Author suggestions from current results')} values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} query={authorQuery} onQuery={setAuthorQuery} allowCustom />}</div>
-      <div ref={menu === 'repos' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon={selectedRepo ? undefined : 'repo'} leading={selectedRepo ? <span className="filter-repo-dot" style={{ background: selectedRepo.color }} /> : undefined} label={selectedRepoLabel} active={!!filters.repoId} open={menu === 'repos'} onClick={() => setMenu(menu === 'repos' ? null : 'repos')} />{menu === 'repos' && <FilterPopover title={t('Repository')} values={repoOptions} selected={filters.repoId} onSelect={(repoId) => { updateFilters({ repoId }); setMenu(null); }} onClear={() => updateFilters({ repoId: '' })} />}</div>
-      <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor branch-filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!filters.ref} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <FilterPopover title={t('Branch / Tags')} values={refOptions} selected={filters.ref} onSelect={(ref) => { updateFilters({ ref }); setMenu(null); }} onClear={() => updateFilters({ ref: '' })} query={refQuery} onQuery={setRefQuery} />}</div>
+      <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon="person" leading={authorOptions.find((option) => option.id === filters.author)?.avatarName ? <AuthorAvatar name={authorOptions.find((option) => option.id === filters.author)!.avatarName!} email={authorOptions.find((option) => option.id === filters.author)!.avatarEmail ?? ''} repoId={authorOptions.find((option) => option.id === filters.author)!.avatarRepoId} size={16} /> : undefined} label={filters.author ? filters.author : t('Author…')} active={!!filters.author} open={menu === 'authors'} onClick={() => setMenu(menu === 'authors' ? null : 'authors')} />{menu === 'authors' && <FilterPopover allLabel={t('All authors')} kind="author" values={authorOptions} selected={filters.author} onSelect={(author) => { updateFilters({ author }); setMenu(null); }} onClear={() => updateFilters({ author: '' })} />}</div>
+      <div ref={menu === 'repos' ? activeFilter : undefined} className="filter-anchor"><ToggleFilter icon={selectedRepo ? undefined : 'repo'} leading={selectedRepo ? <span className="filter-repo-dot" style={{ background: selectedRepo.color }} /> : undefined} label={selectedRepoLabel} active={!!filters.repoId} open={menu === 'repos'} onClick={() => setMenu(menu === 'repos' ? null : 'repos')} />{menu === 'repos' && <FilterPopover allLabel={t('All repositories')} kind="repo" values={repoOptions} selected={filters.repoId} onSelect={(repoId) => { updateFilters({ repoId }); setMenu(null); }} onClear={() => updateFilters({ repoId: '' })} />}</div>
+      <div ref={menu === 'refs' ? activeFilter : undefined} className="filter-anchor branch-filter-anchor"><ToggleFilter icon="git-branch" label={selectedRefLabel} active={!!filters.ref} open={menu === 'refs'} onClick={() => setMenu(menu === 'refs' ? null : 'refs')} />{menu === 'refs' && <FilterPopover allLabel={t('All branches & tags')} kind="ref" values={refOptions} selected={filters.ref} onSelect={(ref) => { updateFilters({ ref }); setMenu(null); }} onClear={() => updateFilters({ ref: '' })} />}</div>
       <div ref={menu === 'dates' ? activeFilter : undefined} className="filter-anchor date-filter-anchor"><ToggleFilter icon="calendar" label={filters.from || filters.to ? `${filters.from || '…'} → ${filters.to || '…'}` : t('From → To')} active={!!filters.from || !!filters.to} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} />{menu === 'dates' && <DatePopover from={filters.from} to={filters.to} onChange={(from, to) => updateFilters({ from, to })} onClear={() => updateFilters({ from: '', to: '' })} />}</div>
       {historyQuery.path && (
         <div
@@ -765,6 +786,7 @@ export function HistoryWorkspace() {
             className="history-path-clear"
             title={t('Clear history filter')}
             aria-label={t('Clear history filter')}
+            tabIndex={-1}
             onClick={(event) => {
               event.stopPropagation();
               void useAppStore.getState().clearHistoryPath();
@@ -774,7 +796,7 @@ export function HistoryWorkspace() {
           </button>
         </div>
       )}
-      {filterActive && <button className="history-clear-filters" title={t('Clear all filters')} onClick={clearFilters}><Codicon name="clear-all" /></button>}
+      {filterActive && <button type="button" className="history-clear-filters" title={t('Clear all filters')} aria-label={t('Clear all filters')} onClick={clearFilters}><Codicon name="clear-all" style={{ fontSize: '15px' }} /></button>}
       <MoreMenu open={moreOpen} onToggle={() => setMoreOpen((value) => !value)} onFetch={() => void fetchAndRefresh()} expanded={expandedRepoIds.size > 0 && expandedRepoIds.size === new Set(allHistory.map((commit) => commit.repoId)).size} onToggleExpanded={toggleRepoNames} />
     </div>}
     <div className="history-columns">

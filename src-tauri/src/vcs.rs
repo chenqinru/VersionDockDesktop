@@ -4808,6 +4808,76 @@ async fn git_history(
     .await
     .map(|output| output.stdout_text().trim().to_string())
     .unwrap_or_default();
+
+    let query_text = query.text.as_deref().map(str::trim).unwrap_or("");
+    let is_hash_like =
+        (7..=64).contains(&query_text.len()) && query_text.chars().all(|c| c.is_ascii_hexdigit());
+    let mut resolved_revision: Option<String> = None;
+    if is_hash_like {
+        let rev_parse_res = git(
+            vec![
+                "rev-parse".into(),
+                "--verify".into(),
+                "--quiet".into(),
+                format!("{}^{{commit}}", query_text.to_ascii_lowercase()),
+            ],
+            repo,
+            token,
+        )
+        .await;
+        match rev_parse_res {
+            Ok(output) => {
+                let resolved = output.stdout_text().trim().to_string();
+                if resolved.is_empty() {
+                    return Ok(HistoryPage {
+                        commits: Vec::new(),
+                        has_more: false,
+                    });
+                }
+                resolved_revision = Some(resolved);
+            }
+            Err(_) => {
+                return Ok(HistoryPage {
+                    commits: Vec::new(),
+                    has_more: false,
+                });
+            }
+        }
+    }
+    if resolved_revision.is_some() && skip > 0 {
+        return Ok(HistoryPage {
+            commits: Vec::new(),
+            has_more: false,
+        });
+    }
+
+    let query_revision = query
+        .revision
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && *v != "WORKTREE" && *v != "WORKING" && *v != "INDEX");
+
+    if let (Some(rev), Some(branch)) = (&resolved_revision, query_revision) {
+        let is_ancestor = git(
+            vec![
+                "merge-base".into(),
+                "--is-ancestor".into(),
+                rev.clone(),
+                branch.to_string(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        .is_ok();
+        if !is_ancestor {
+            return Ok(HistoryPage {
+                commits: Vec::new(),
+                has_more: false,
+            });
+        }
+    }
+
     let mut args = vec![
         "log".into(),
         "--date-order".into(),
@@ -4840,6 +4910,10 @@ async fn git_history(
         validate_history_date(value)?;
         args.push(format!("--until={value}T23:59:59"));
     }
+    if resolved_revision.is_none() && !query_text.is_empty() {
+        args.push(format!("--grep={query_text}"));
+        args.push("--regexp-ignore-case".into());
+    }
     let trimmed_path = query
         .path
         .as_deref()
@@ -4855,16 +4929,10 @@ async fn git_history(
         args.push("--no-patch".into());
     }
 
-    // Prioritize the checked-out history when tips share a timestamp, matching
-    // JetBrains and the VersionDock plugin. Unborn repositories have no HEAD.
-    // Line-range queries dig through a single revision; specifying multiple tips
-    // or `--all` causes git log -L to fail with "More than one commit to dig from".
-    let query_revision = query
-        .revision
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty() && *v != "WORKTREE" && *v != "WORKING" && *v != "INDEX");
-    if let Some(value) = query_revision {
+    if let Some(rev) = &resolved_revision {
+        args.push("-1".into());
+        args.push(rev.clone());
+    } else if let Some(value) = query_revision {
         args.push(value.to_string());
     } else if line_range_filter.is_some() {
         if !head_hash.is_empty() {
@@ -4878,16 +4946,18 @@ async fn git_history(
         args.push("--exclude=refs/versiondock/ai-composer/*".into());
         args.push("--all".into());
     }
-    if let Some(path) = trimmed_path {
-        if let Some(line_range) = line_range_filter {
-            let path = relative_path(Path::new(&repo.root_path), path, false)?;
-            args.push("-L".into());
-            args.push(format!("{},{}:{}", line_range.start, line_range.end, path));
-        } else {
-            let path = literal_path(Path::new(&repo.root_path), path, false)?;
-            args.push("--follow".into());
-            args.push("--".into());
-            args.push(path);
+    if resolved_revision.is_none() {
+        if let Some(path) = trimmed_path {
+            if let Some(line_range) = line_range_filter {
+                let path = relative_path(Path::new(&repo.root_path), path, false)?;
+                args.push("-L".into());
+                args.push(format!("{},{}:{}", line_range.start, line_range.end, path));
+            } else {
+                let path = literal_path(Path::new(&repo.root_path), path, false)?;
+                args.push("--follow".into());
+                args.push("--".into());
+                args.push(path);
+            }
         }
     }
     let (raw, refs_by_hash) = tokio::try_join!(
@@ -4907,7 +4977,7 @@ async fn git_history(
         },
         git_decorated_refs(repo, &head_hash, token),
     )?;
-    let needle = query.text.unwrap_or_default().trim().to_lowercase();
+    let needle = query_text.to_lowercase();
     let mut commits = raw
         .split(RECORD)
         .filter_map(|record| {
@@ -4915,13 +4985,12 @@ async fn git_history(
             if fields.len() < 10 || fields[0].is_empty() {
                 return None;
             }
-            let searchable = format!(
-                "{} {} {} {} {}",
-                fields[0], fields[1], fields[3], fields[7], fields[9]
-            )
-            .to_lowercase();
-            if !needle.is_empty() && !searchable.contains(&needle) {
-                return None;
+            if let Some(ref rev) = resolved_revision {
+                if !fields[0].eq_ignore_ascii_case(rev)
+                    && !fields[1].to_lowercase().starts_with(&needle)
+                {
+                    return None;
+                }
             }
             Some(CommitNode {
                 repo_id: repo.id.clone(),
@@ -5127,6 +5196,184 @@ async fn git_revision_hashes(
         .unwrap_or_default()
 }
 
+pub async fn branch_compare_commits(
+    repo: &RepositoryMeta,
+    base: &str,
+    target: &str,
+    side: &str,
+    skip: u32,
+    limit: u32,
+    query: &HistoryQuery,
+    token: &CancellationToken,
+) -> Result<Vec<CommitNode>, DesktopError> {
+    ensure_git(repo)?;
+    validate_revision_or_ref(base)?;
+    validate_revision_or_ref(target)?;
+
+    let is_base_only = side == "baseOnly" || side == "base";
+    let is_target_only = side == "targetOnly" || side == "target";
+    if !is_base_only && !is_target_only {
+        return Err(DesktopError::new(
+            "VALIDATION_FAILED",
+            "side must be either 'baseOnly' or 'targetOnly'",
+            false,
+        ));
+    }
+
+    let trimmed_text = query.text.as_deref().map(str::trim).unwrap_or("");
+    let is_hash_like = (7..=64).contains(&trimmed_text.len())
+        && trimmed_text.bytes().all(|b| b.is_ascii_hexdigit());
+
+    let mut resolved_revision: Option<String> = None;
+    if is_hash_like {
+        let rev_parse_res = git(
+            vec![
+                "rev-parse".into(),
+                "--verify".into(),
+                "--quiet".into(),
+                format!("{}^{{commit}}", trimmed_text.to_ascii_lowercase()),
+            ],
+            repo,
+            token,
+        )
+        .await;
+        if let Ok(output) = rev_parse_res {
+            let resolved = output.stdout_text().trim().to_string();
+            if !resolved.is_empty() {
+                resolved_revision = Some(resolved);
+            }
+        }
+        if resolved_revision.is_none() {
+            return Ok(Vec::new());
+        }
+    }
+
+    if let Some(ref rev) = resolved_revision {
+        if skip > 0 {
+            return Ok(Vec::new());
+        }
+        let (in_base, in_target) = tokio::join!(
+            git(
+                vec![
+                    "merge-base".into(),
+                    "--is-ancestor".into(),
+                    rev.clone(),
+                    base.to_string(),
+                ],
+                repo,
+                token,
+            ),
+            git(
+                vec![
+                    "merge-base".into(),
+                    "--is-ancestor".into(),
+                    rev.clone(),
+                    target.to_string(),
+                ],
+                repo,
+                token,
+            )
+        );
+
+        let matches_side = if is_base_only {
+            in_base.is_ok() && in_target.is_err()
+        } else {
+            in_target.is_ok() && in_base.is_err()
+        };
+
+        if !matches_side {
+            return Ok(Vec::new());
+        }
+    }
+
+    let range = if is_base_only {
+        format!("{target}..{base}")
+    } else {
+        format!("{base}..{target}")
+    };
+
+    let format = format!(
+        "%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}"
+    );
+
+    let max_count = if resolved_revision.is_some() {
+        1
+    } else if limit == 0 {
+        200
+    } else {
+        limit
+    };
+
+    let skip_count = if resolved_revision.is_some() {
+        0
+    } else {
+        skip
+    };
+
+    let mut args = vec![
+        "log".into(),
+        format!("--max-count={max_count}"),
+        format!("--skip={skip_count}"),
+        format!("--format={format}"),
+        "--date=iso-strict".into(),
+    ];
+
+    if let Some(ref rev) = resolved_revision {
+        args.push(rev.clone());
+    } else if !trimmed_text.is_empty() {
+        args.push(format!("--grep={trimmed_text}"));
+        args.push("--regexp-ignore-case".into());
+    }
+
+    if let Some(value) = query
+        .author
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        args.push(format!("--author={}", regex_literal(value)));
+        args.push("--regexp-ignore-case".into());
+    }
+
+    if let Some(value) = query
+        .from_date
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        validate_history_date(value)?;
+        args.push(format!("--since={value}T00:00:00"));
+    }
+
+    if let Some(value) = query
+        .to_date
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        validate_history_date(value)?;
+        args.push(format!("--until={value}T23:59:59"));
+    }
+
+    if resolved_revision.is_none() {
+        args.push(range);
+    }
+
+    if let Some(path) = query
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        args.push("--".into());
+        args.push(path.into());
+    }
+
+    let output = git(args, repo, token).await?;
+    let commits = parse_git_log(&repo.id, &output.stdout_text());
+    Ok(commits)
+}
+
 pub async fn branch_compare(
     repo: &RepositoryMeta,
     base: &str,
@@ -5136,25 +5383,10 @@ pub async fn branch_compare(
     ensure_git(repo)?;
     validate_revision_or_ref(base)?;
     validate_revision_or_ref(target)?;
-    let format = format!(
-        "%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}"
-    );
-    let compare_log = |range: String| {
-        git(
-            vec![
-                "log".into(),
-                "--max-count=200".into(),
-                format!("--format={format}"),
-                "--date=iso-strict".into(),
-                range,
-            ],
-            repo,
-            token,
-        )
-    };
-    let (base_output, target_output) = tokio::try_join!(
-        compare_log(format!("{target}..{base}")),
-        compare_log(format!("{base}..{target}"))
+    let default_query = HistoryQuery::default();
+    let (base_commits, target_commits) = tokio::try_join!(
+        branch_compare_commits(repo, base, target, "baseOnly", 0, 500, &default_query, token),
+        branch_compare_commits(repo, base, target, "targetOnly", 0, 500, &default_query, token)
     )?;
     let range = format!("{base}..{target}");
     let stats = git(
@@ -5188,8 +5420,8 @@ pub async fn branch_compare(
     Ok(BranchCompareResult {
         base: base.into(),
         target: target.into(),
-        base_commits: parse_git_log(&repo.id, &base_output.stdout_text()),
-        target_commits: parse_git_log(&repo.id, &target_output.stdout_text()),
+        base_commits,
+        target_commits,
         files: merge_git_files(&stats, &statuses),
     })
 }
@@ -5362,7 +5594,6 @@ async fn svn_history(
             let date = text("date");
             if !needle.is_empty()
                 && !full_message.to_lowercase().contains(&needle)
-                && !author.to_lowercase().contains(&needle)
                 && !revision.to_lowercase().contains(&needle)
             {
                 return None;

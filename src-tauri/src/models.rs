@@ -552,6 +552,16 @@ pub enum BridgeCommand {
         base: String,
         target: String,
     },
+    BranchCompareCommits {
+        workspace_id: String,
+        repo_id: String,
+        base: String,
+        target: String,
+        side: String,
+        skip: u32,
+        limit: u32,
+        query: HistoryQuery,
+    },
     Remotes {
         workspace_id: String,
         repo_id: String,

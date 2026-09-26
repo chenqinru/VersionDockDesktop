@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
 import { AuthorAvatar } from './AuthorAvatar';
@@ -6,12 +6,15 @@ import { AuthorAvatar } from './AuthorAvatar';
 export type HistoryFilterOption = {
   id: string;
   label: string;
+  sublabel?: string;
+  count?: number;
   color?: string;
   detail?: string;
   icon?: string;
   avatarName?: string;
   avatarEmail?: string;
   avatarRepoId?: string;
+  group?: string;
 };
 
 export function CommitSearch({ value, onChange, onSubmit, onClear }: {
@@ -78,8 +81,19 @@ export function ToggleFilter({ icon, leading, label, active, open, onClick }: {
   </button>;
 }
 
-export function FilterPopover({ title, values, selected, onSelect, onClear, query, onQuery, allowCustom }: {
-  title: string;
+export function FilterPopover({
+  values,
+  selected,
+  onSelect,
+  onClear,
+  allLabel: customAllLabel,
+  kind,
+  query: externalQuery,
+  onQuery: externalOnQuery,
+  allowCustom: externalAllowCustom,
+  searchable,
+}: {
+  title?: string;
   values: HistoryFilterOption[];
   selected: string;
   onSelect: (value: string) => void;
@@ -87,25 +101,127 @@ export function FilterPopover({ title, values, selected, onSelect, onClear, quer
   query?: string;
   onQuery?: (value: string) => void;
   allowCustom?: boolean;
+  allLabel?: string;
+  kind?: 'author' | 'repo' | 'ref';
+  searchable?: boolean;
 }) {
   const { t } = useI18n();
-  const displayed = query?.trim()
-    ? values.filter((value) => `${value.label} ${value.detail ?? ''}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-    : values;
-  const radioGroup = `filter-${title}`;
-  const allLabel = title === t('Author') ? t('All authors') : title === t('Repository') ? t('All repositories') : t('All branches & tags');
+  const [internalQuery, setInternalQuery] = useState('');
+  const query = externalQuery !== undefined ? externalQuery : internalQuery;
+  const setQuery = externalOnQuery ?? setInternalQuery;
+
+  const resolvedKind: 'author' | 'repo' | 'ref' = kind ?? (
+    values.some((v) => Boolean(v.avatarName))
+      ? 'author'
+      : values.some((v) => Boolean(v.color))
+        ? 'repo'
+        : 'ref'
+  );
+
+  const allowCustom = externalAllowCustom ?? (resolvedKind === 'author');
+  const isSearchable = searchable ?? (resolvedKind !== 'repo');
+
+  const allLabel = customAllLabel ?? (
+    resolvedKind === 'author'
+      ? t('All authors')
+      : resolvedKind === 'repo'
+        ? t('All repositories')
+        : t('All branches & tags')
+  );
+
+  const mergedValues: HistoryFilterOption[] = useMemo(() => {
+    if (!selected) return values;
+    if (values.some((v) => v.id === selected || v.label === selected)) return values;
+    return [{ id: selected, label: selected }, ...values];
+  }, [selected, values]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const displayed = normalizedQuery
+    ? mergedValues.filter((value) => {
+        const text = `${value.label} ${value.sublabel ?? ''} ${value.detail ?? ''}`.toLowerCase();
+        return text.includes(normalizedQuery);
+      })
+    : mergedValues;
+
+  const radioGroup = `filter-${resolvedKind}`;
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      if (displayed.length > 0) {
+        event.preventDefault();
+        onSelect(displayed[0].id);
+      } else if (allowCustom && query.trim()) {
+        event.preventDefault();
+        onSelect(query.trim());
+      }
+    }
+  };
+
+  const renderLeading = (option?: HistoryFilterOption) => {
+    if (resolvedKind === 'author') {
+      return <div className="filter-option-leading filter-leading-avatar" aria-hidden="true">
+        {option?.avatarName ? (
+          <AuthorAvatar name={option.avatarName} email={option.avatarEmail ?? ''} repoId={option.avatarRepoId} size={20} />
+        ) : option ? (
+          <Codicon name={option.icon || 'person'} />
+        ) : (
+          <Codicon name="organization" />
+        )}
+      </div>;
+    }
+    if (resolvedKind === 'repo') {
+      if (!option) return null;
+      return <span className="filter-option-dot" style={{ background: option.color }} aria-hidden="true" />;
+    }
+    if (resolvedKind === 'ref') {
+      if (!option) return null;
+      return <div className="filter-option-leading filter-leading-icon" aria-hidden="true">
+        <Codicon name={option?.icon || 'git-branch'} />
+      </div>;
+    }
+    return null;
+  };
+
   return <div className="filter-popover" data-selection-mode="single">
-    <header><strong>{title}</strong><button type="button" disabled={!selected} onClick={onClear}>{t('Clear')}</button></header>
-    {onQuery && <label className="popover-search"><Codicon name="search" /><input autoFocus value={query ?? ''} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => { if (allowCustom && event.key === 'Enter' && query?.trim()) onSelect(query.trim()); }} placeholder={allowCustom ? t('Type an author and press Enter…') : t('Filter…')} /></label>}
+    {isSearchable && (
+      <div className="popover-search">
+        <Codicon name="search" />
+        <input
+          autoFocus
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={allowCustom ? t('Type an author and press Enter…') : t('Filter…')}
+        />
+      </div>
+    )}
     <div className="filter-options">
-      <label><input name={radioGroup} aria-label={allLabel} type="radio" checked={!selected} onChange={onClear} /><span>{allLabel}</span>{!selected && <Codicon name="check" />}</label>
-      {displayed.map((value) => <label key={value.id} title={value.detail}>
-        <input name={radioGroup} aria-label={`${value.label}${value.detail ?? ''}`} type="radio" checked={selected === value.id} onChange={() => onSelect(value.id)} />
-        {value.color && <i style={{ background: value.color }} />}
-        {value.avatarName ? <AuthorAvatar name={value.avatarName} email={value.avatarEmail ?? ''} repoId={value.avatarRepoId} size={20} /> : value.icon && <Codicon name={value.icon} />}
-        <span><span className="filter-option-name">{value.label}</span>{value.detail && <small>{value.detail}</small>}</span>
-        {selected === value.id && <Codicon name="check" />}
-      </label>)}
+      <label className="filter-option-all">
+        <input name={radioGroup} aria-label={allLabel} type="radio" checked={!selected} onChange={onClear} />
+        {renderLeading()}
+        <span className="filter-option-content"><span className="filter-option-name">{allLabel}</span></span>
+        {!selected && resolvedKind !== 'ref' && <div className="filter-option-check"><Codicon name="check" /></div>}
+      </label>
+      {displayed.map((value, index) => {
+        const showGroup = Boolean(value.group && (index === 0 || displayed[index - 1].group !== value.group));
+        return (
+          <Fragment key={value.id}>
+            {showGroup && <div className="filter-group-label">{t(value.group!)}</div>}
+            <label title={value.sublabel ? `${value.label} <${value.sublabel}>` : value.detail}>
+              <input name={radioGroup} aria-label={`${value.label}${value.sublabel ? ` ${value.sublabel}` : ''}`} type="radio" checked={selected === value.id} onChange={() => onSelect(value.id)} />
+              {renderLeading(value)}
+              <span className="filter-option-content">
+                <span className="filter-option-name">{value.label}</span>
+                {value.sublabel && value.sublabel.trim() && <span className="filter-option-sublabel">{value.sublabel}</span>}
+              </span>
+              {value.count !== undefined && value.count > 0 && (
+                <span className="filter-option-count">{value.count}</span>
+              )}
+              {selected === value.id && <div className="filter-option-check"><Codicon name="check" /></div>}
+            </label>
+          </Fragment>
+        );
+      })}
       {!displayed.length && <div className="filter-empty">{t('No matches')}</div>}
     </div>
   </div>;

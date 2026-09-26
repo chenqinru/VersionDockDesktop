@@ -3423,16 +3423,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .history-filters .filter-button.active { color: var(--versiondock-text); border-color: color-mix(in srgb, var(--versiondock-accent) 55%, var(--versiondock-border)); }
 .history-filters .filter-button.active > i { width: 5px; height: 5px; margin-left: 1px; border-radius: 50%; background: var(--versiondock-accent); }
 .filter-popover { position: absolute; z-index: 110; top: 31px; left: 0; width: 250px; max-height: 360px; display: flex; flex-direction: column; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 8px 24px #0009; }
-.filter-popover > header { flex: 0 0 31px; padding: 0 6px 0 9px; display: flex; align-items: center; border-bottom: 1px solid var(--versiondock-border); }
-.filter-popover > header strong { min-width: 0; flex: 1; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.filter-popover > header button { height: 22px; padding: 0 5px; border: 0; color: var(--versiondock-accent); }
-.filter-options { min-height: 0; overflow: auto; padding: 3px; }
-.history-filters .filter-options label { width: 100%; height: 27px; padding: 0 6px; gap: 7px; border: 0; background: transparent; }
-.filter-options label:hover { background: var(--versiondock-hover); }
-.filter-options input { flex: 0 0 auto; width: 13px; height: 13px; accent-color: var(--versiondock-accent-bg); }
-.filter-options label > i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
-.filter-options label > span { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.filter-options small { margin-left: auto; color: var(--versiondock-muted); font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); }
 .date-popover { width: 270px; padding-bottom: 5px; }
 .history-filters .date-popover > label { width: auto; height: 32px; margin: 3px 7px 0; padding: 0; gap: 7px; border: 0; background: transparent; }
 .date-popover > label > span { width: 42px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }

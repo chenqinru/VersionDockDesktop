@@ -629,6 +629,93 @@ async fn real_git_branch_compare_and_remote_management() {
             .is_err()
     );
 
+    let default_query = HistoryQuery::default();
+    let target_commits = vcs::branch_compare_commits(
+        &repository,
+        "main",
+        "feature/compare",
+        "targetOnly",
+        0,
+        100,
+        &default_query,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(target_commits.len(), 1);
+    assert_eq!(target_commits[0].message, "feature change");
+
+    // Regex search via --grep
+    let regex_query = HistoryQuery {
+        text: Some("feat.*change".into()),
+        ..Default::default()
+    };
+    let regex_commits = vcs::branch_compare_commits(
+        &repository,
+        "main",
+        "feature/compare",
+        "targetOnly",
+        0,
+        100,
+        &regex_query,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(regex_commits.len(), 1);
+
+    let nomatch_query = HistoryQuery {
+        text: Some("nomatch.*".into()),
+        ..Default::default()
+    };
+    let nomatch_commits = vcs::branch_compare_commits(
+        &repository,
+        "main",
+        "feature/compare",
+        "targetOnly",
+        0,
+        100,
+        &nomatch_query,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(nomatch_commits.len(), 0);
+
+    // Hash lookup with ancestor checking
+    let feature_hash = &target_commits[0].hash;
+    let hash_query = HistoryQuery {
+        text: Some(feature_hash[..10].into()),
+        ..Default::default()
+    };
+    let hash_in_target = vcs::branch_compare_commits(
+        &repository,
+        "main",
+        "feature/compare",
+        "targetOnly",
+        0,
+        100,
+        &hash_query,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(hash_in_target.len(), 1);
+
+    let hash_in_base = vcs::branch_compare_commits(
+        &repository,
+        "main",
+        "feature/compare",
+        "baseOnly",
+        0,
+        100,
+        &hash_query,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(hash_in_base.len(), 0);
+
     vcs::remote_operation(
         &repository,
         RemoteOperation::Add {
