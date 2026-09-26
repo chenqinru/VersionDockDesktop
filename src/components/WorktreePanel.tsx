@@ -3,7 +3,7 @@ import { Codicon } from './Codicon';
 import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
-import { choiceDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
 import { useSpeedSearch } from '../hooks/useSpeedSearch';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import { branchColor, headColor, readableAccentColor } from './branchColor';
@@ -390,7 +390,18 @@ export function WorktreePanel({
     }
   }, [customRepos, loadWorktrees, repos]);
 
-  const defaultDelete = (repoId: string, worktreePath: string, force: boolean) => {
+  const defaultDelete = async (repoId: string, worktreePath: string, force: boolean) => {
+    const title = force ? t('Force Remove Worktree') : t('Remove Worktree');
+    const message = force
+      ? t('Are you sure you want to force remove worktree "{0}"? All uncommitted local changes and untracked files will be permanently lost.', worktreePath)
+      : t('Remove worktree "{0}" from repository?', worktreePath);
+    const confirmed = await confirmDialog({
+      title,
+      message,
+      confirmLabel: force ? t('Force Remove') : t('Remove'),
+      danger: true,
+    });
+    if (!confirmed) return;
     void worktreeOperation(repoId, { type: 'remove', path: worktreePath, force });
   };
 

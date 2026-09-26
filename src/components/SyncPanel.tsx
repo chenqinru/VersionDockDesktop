@@ -43,6 +43,12 @@ async function resolvePullStrategy(
   return configured === 'rebase' ? 'rebase' : 'merge';
 }
 
+function isWorkspaceOpen(store: ReturnType<typeof useAppStore.getState>, wid: string): boolean {
+  return store.tabs.some((tab) => tab.id === wid)
+    || Boolean(store.sessions[wid])
+    || store.snapshot?.workspace.id === wid;
+}
+
 type DirectionFilter = 'all' | 'outgoing' | 'incoming' | 'none';
 type TimelineCommit =
   | { kind: 'outgoing'; commit: UnpushedCommit; isHead: boolean }
@@ -335,8 +341,9 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
     return next;
   });
   const fetchRepo = async () => {
-    await sync(repo.meta.id, 'fetch', false);
-    await loadIncoming(repo.meta.id);
+    const wid = useAppStore.getState().snapshot?.workspace.id;
+    await sync(repo.meta.id, 'fetch', false, undefined, wid);
+    await loadIncoming(repo.meta.id, wid);
   };
   const toggleDisplayMode = () => {
     setDisplayMode((current) => current === 'changes' ? 'commits' : 'changes');
@@ -349,15 +356,23 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
       if (!await historyOperation(repo.meta.id, { type: 'cherryPick', revision: commit.hash })) break;
     }
   };
-  const pullRepo = async (strategy?: 'merge' | 'rebase' | 'ff-only') => {
+  const pullRepo = async (strategy?: 'merge' | 'rebase' | 'ff-only', targetWid?: string) => {
+    const wid = targetWid ?? useAppStore.getState().snapshot?.workspace.id;
+    if (!wid) return false;
     const effective = await resolvePullStrategy(t, strategy);
     if (!effective) return false;
+    const store = useAppStore.getState();
+    if (!isWorkspaceOpen(store, wid)) return false;
     const action = effective === 'rebase' ? 'pullRebase' : effective === 'ff-only' ? 'pullFfOnly' : 'pull';
-    return sync(repo.meta.id, action);
+    return sync(repo.meta.id, action, undefined, undefined, wid);
   };
   const syncRepo = async () => {
-    if (incomingCount > 0 && !await pullRepo()) return;
-    if (outgoingCount > 0) await sync(repo.meta.id, 'push');
+    const wid = useAppStore.getState().snapshot?.workspace.id;
+    if (!wid) return;
+    if (incomingCount > 0 && !await pullRepo(undefined, wid)) return;
+    const store = useAppStore.getState();
+    if (!isWorkspaceOpen(store, wid)) return;
+    if (outgoingCount > 0) await sync(repo.meta.id, 'push', undefined, undefined, wid);
   };
   const headerItems: ContextMenuEntry[] = [
     { id: 'fetch', label: t('Fetch'), icon: 'cloud-download' },
@@ -369,12 +384,13 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
     ...(outgoingCount > 0 ? [{ id: 'push', label: t('Push'), icon: 'cloud-upload', disabled: busy || !capabilityAvailable(repo.capabilities, 'syncPush', true) } as ContextMenuEntry] : []),
   ];
   const runHeaderAction = (id: string) => {
+    const wid = useAppStore.getState().snapshot?.workspace.id;
     if (id === 'fetch') void fetchRepo();
     else if (id === 'changes') void toggleDisplayMode();
     else if (id === 'cherryAll') void cherryPickAll();
     else if (id === 'sync') void syncRepo();
-    else if (id === 'pull') void pullRepo();
-    else if (id === 'push') void sync(repo.meta.id, 'push');
+    else if (id === 'pull') void pullRepo(undefined, wid);
+    else if (id === 'push') void sync(repo.meta.id, 'push', undefined, undefined, wid);
   };
 
   const canCheck = outgoingCount + incomingCount > 0 || Boolean(branch && !branch.upstream);
@@ -522,30 +538,36 @@ export function SyncPanel({ repos, expansionCommand, selectionCommand, fileViewM
       : t('Push');
   const countedPushLabel = pushableRepos.length > 1 ? `${pushLabel} (${pushableRepos.length})` : pushLabel;
   const fetchAll = async () => {
-    await Promise.allSettled(repos.map((repo) => sync(repo.meta.id, 'fetch', false)));
-    await Promise.all([loadIncoming(), loadOutgoing()]);
+    const wid = useAppStore.getState().snapshot?.workspace.id;
+    await Promise.allSettled(repos.map((repo) => sync(repo.meta.id, 'fetch', false, undefined, wid)));
+    await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
   const syncSelected = async (strategy?: 'merge' | 'rebase' | 'ff-only') => {
+    const wid = useAppStore.getState().snapshot?.workspace.id;
+    if (!wid) return;
     let effectiveStrategy = strategy;
     if (pullableRepos.length > 0) {
       effectiveStrategy = await resolvePullStrategy(t, strategy);
       if (!effectiveStrategy) return;
     }
+    const store = useAppStore.getState();
+    if (!isWorkspaceOpen(store, wid)) return;
     for (const repo of selectedRepos) {
       const canPull = pullableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
       const canPush = pushableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
       if (canPull) {
         const action = effectiveStrategy === 'rebase' ? 'pullRebase' : effectiveStrategy === 'ff-only' ? 'pullFfOnly' : 'pull';
-        if (!await sync(repo.meta.id, action)) continue;
+        if (!await sync(repo.meta.id, action, undefined, undefined, wid)) continue;
       }
-      if (canPush) await sync(repo.meta.id, 'push');
+      if (canPush) await sync(repo.meta.id, 'push', undefined, undefined, wid);
     }
-    await Promise.all([loadIncoming(), loadOutgoing()]);
+    await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
-  const pullSelected = async (strategy: 'merge' | 'rebase' | 'ff-only') => {
+  const pullSelected = async (strategy: 'merge' | 'rebase' | 'ff-only', targetWid?: string) => {
     const action = strategy === 'rebase' ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull';
-    await Promise.allSettled(pullableRepos.map((repo) => sync(repo.meta.id, action)));
-    await Promise.all([loadIncoming(), loadOutgoing()]);
+    const wid = targetWid ?? useAppStore.getState().snapshot?.workspace.id;
+    await Promise.allSettled(pullableRepos.map((repo) => sync(repo.meta.id, action, undefined, undefined, wid)));
+    await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
   const toggleChecked = (repoId: string) => setChecked((current) => {
     const next = new Set(current);
@@ -561,15 +583,23 @@ export function SyncPanel({ repos, expansionCommand, selectionCommand, fileViewM
     return { ...current, [repoId]: nextOut && nextInc ? 'all' : nextOut ? 'outgoing' : nextInc ? 'incoming' : 'none' };
   });
   const runFooterMenu = async (id: string) => {
+    const wid = useAppStore.getState().snapshot?.workspace.id;
+    if (!wid) return;
     if (id === 'fetch') await fetchAll();
     else if (id === 'tags') {
-      if (await confirmDialog({ title: t('Push Tags'), message: t('Push all local tags for selected Git repositories?') })) await Promise.allSettled(selectedRepos.map((repo) => sync(repo.meta.id, 'pushTags')));
+      if (await confirmDialog({ title: t('Push Tags'), message: t('Push all local tags for selected Git repositories?') })) {
+        const store = useAppStore.getState();
+        if (!isWorkspaceOpen(store, wid)) return;
+        await Promise.allSettled(selectedRepos.map((repo) => sync(repo.meta.id, 'pushTags', undefined, undefined, wid)));
+      }
     } else if (id === 'force') {
       if (await confirmDialog({ title: t('Safe Force Push...'), message: t('Force push selected repositories using force-with-lease?'), danger: true })) {
-        await Promise.allSettled(pushableRepos.map((repo) => sync(repo.meta.id, 'push', true, { force: true })));
+        const store = useAppStore.getState();
+        if (!isWorkspaceOpen(store, wid)) return;
+        await Promise.allSettled(pushableRepos.map((repo) => sync(repo.meta.id, 'push', true, { force: true }, wid)));
       }
     } else if (id === 'rebase' || id === 'merge' || id === 'ff') {
-      await pullSelected(id === 'rebase' ? 'rebase' : id === 'ff' ? 'ff-only' : 'merge');
+      await pullSelected(id === 'rebase' ? 'rebase' : id === 'ff' ? 'ff-only' : 'merge', wid);
     }
   };
   const footerItems: ContextMenuEntry[] = pullableRepos.length > 0 ? [

@@ -147,7 +147,7 @@ describe('WorktreePanel', () => {
     expect(screen.queryByText('Show Worktree Diff')).not.toBeInTheDocument();
   });
 
-  it('removes a worktree directly without an App-only confirmation dialog', async () => {
+  it('requires confirmation before removing a worktree and blocks removal if cancelled', async () => {
     const linked = { ...sampleWorktrees[0], path: '/tmp/managed-linked', branch: 'feature/worktree', main: false };
     const worktreeOperation = vi.fn().mockResolvedValue(undefined);
     const bridge = new MockBridge((command) => command.type === 'worktrees' ? [sampleWorktrees[0], linked] : true);
@@ -155,7 +155,39 @@ describe('WorktreePanel', () => {
     render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
     fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
     fireEvent.click(screen.getByText('Remove Worktree'));
+
+    await vi.waitFor(() => expect(currentDialog()?.kind).toBe('confirm'));
+    expect(currentDialog()?.danger).toBe(true);
+
+    // 1. 用户取消
+    currentDialog()?.resolve(false);
+    expect(worktreeOperation).not.toHaveBeenCalled();
+
+    // 2. 再次触发并确认
+    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    fireEvent.click(screen.getByText('Remove Worktree'));
+    await vi.waitFor(() => expect(currentDialog()?.kind).toBe('confirm'));
+    currentDialog()?.resolve(true);
+
     await vi.waitFor(() => expect(worktreeOperation).toHaveBeenCalledWith('repo-1', { type: 'remove', path: '/tmp/managed-linked', force: false }));
+  });
+
+  it('requires explicit danger confirmation before force removing a worktree', async () => {
+    const linked = { ...sampleWorktrees[0], path: '/tmp/managed-linked', branch: 'feature/worktree', main: false };
+    const worktreeOperation = vi.fn().mockResolvedValue(undefined);
+    const bridge = new MockBridge((command) => command.type === 'worktrees' ? [sampleWorktrees[0], linked] : true);
+    useAppStore.setState({ bridge, snapshot, worktrees: { 'repo-1': [sampleWorktrees[0], linked] }, worktreeOperation });
+    render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
+    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    fireEvent.click(screen.getByText('Force Remove'));
+
+    await vi.waitFor(() => expect(currentDialog()?.kind).toBe('confirm'));
+    expect(currentDialog()?.danger).toBe(true);
+    expect(currentDialog()?.confirmLabel).toBe('Force Remove');
+
+    // 用户确认
+    currentDialog()?.resolve(true);
+    await vi.waitFor(() => expect(worktreeOperation).toHaveBeenCalledWith('repo-1', { type: 'remove', path: '/tmp/managed-linked', force: true }));
   });
 
   it('selects an existing branch for a new worktree like VersionDock', async () => {

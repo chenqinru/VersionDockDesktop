@@ -1108,9 +1108,10 @@ export function PushPanel({ repos, selectedRepoIds, onToggleRepo, query }: {
     });
   }, [openDiff]);
 
-  const handlePush = async (targets: RepositoryStatus[], force = false) => {
+  const handlePush = async (targets: RepositoryStatus[], force = false, targetWid?: string) => {
     if (targets.length === 0 || targets.some((repo) => isRepoBusy(repo.meta.id))) return;
 
+    const wid = targetWid ?? useAppStore.getState().snapshot?.workspace.id;
     await Promise.all(targets.map((repo) => useAppStore.getState().loadSubmodules(repo.meta.id)));
     const unsafeSubmodules = targets.flatMap((repo) => (useAppStore.getState().submodules[repo.meta.id] ?? [])
       .filter((entry) => entry.dirty || entry.unpushedCount > 0)
@@ -1153,7 +1154,7 @@ export function PushPanel({ repos, selectedRepoIds, onToggleRepo, query }: {
       const branch = branchesByRepo[repo.meta.id]?.find((item) => item.current);
       const branchName = branch?.name || 'HEAD';
       try {
-        await sync(repo.meta.id, 'push', true, { force });
+        await sync(repo.meta.id, 'push', true, { force }, wid);
         pushSuccess = true;
       } catch (error: unknown) {
         const errStr = String(error);
@@ -1161,8 +1162,8 @@ export function PushPanel({ repos, selectedRepoIds, onToggleRepo, query }: {
         if (isRejected) {
           const onPushRejectedSetting = useAppStore.getState().bootstrap?.state.settings?.onPushRejected ?? 'prompt';
           if (onPushRejectedSetting === 'rebaseAndRetry') {
-            await sync(repo.meta.id, 'pullRebase');
-            await sync(repo.meta.id, 'push');
+            await sync(repo.meta.id, 'pullRebase', undefined, undefined, wid);
+            await sync(repo.meta.id, 'push', undefined, undefined, wid);
           } else if (onPushRejectedSetting === 'error') {
             throw error;
           } else {
@@ -1176,13 +1177,13 @@ export function PushPanel({ repos, selectedRepoIds, onToggleRepo, query }: {
               ],
             });
             if (choice === 'rebase') {
-              await sync(repo.meta.id, 'pullRebase');
-              await sync(repo.meta.id, 'push');
+              await sync(repo.meta.id, 'pullRebase', undefined, undefined, wid);
+              await sync(repo.meta.id, 'push', undefined, undefined, wid);
             } else if (choice === 'merge') {
-              await sync(repo.meta.id, 'pull');
-              await sync(repo.meta.id, 'push');
+              await sync(repo.meta.id, 'pull', undefined, undefined, wid);
+              await sync(repo.meta.id, 'push', undefined, undefined, wid);
             } else if (choice === 'force') {
-              await handlePush([repo], true);
+              await handlePush([repo], true, wid);
             }
           }
         } else {

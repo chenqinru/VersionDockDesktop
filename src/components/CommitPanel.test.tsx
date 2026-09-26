@@ -862,4 +862,81 @@ describe('CommitPanel capabilities and file view', () => {
     expect(persisted).toBeTruthy();
     expect(Number(persisted)).toBeGreaterThanOrEqual(52);
   });
+
+  it('orders commit targets deeper first so submodules are committed before parent repositories', async () => {
+    const parentRepo: RepositoryStatus = {
+      meta: {
+        id: 'parent',
+        name: 'Parent Repository',
+        rootPath: '/tmp/parent',
+        color: '#4ec9b0',
+        kind: 'git',
+        parentRepoId: null,
+        depth: 0,
+        isSubmodule: false,
+        isWorktree: false,
+      },
+      branch: 'main',
+      revision: 'abc',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'parent.txt', status: 'modified', staged: false, unstaged: true, conflicted: false }],
+      conflicts: 0,
+      operation: null,
+    };
+    const submoduleRepo: RepositoryStatus = {
+      meta: {
+        id: 'submodule',
+        name: 'Submodule Repository',
+        rootPath: '/tmp/parent/sub',
+        color: '#569cd6',
+        kind: 'git',
+        parentRepoId: 'parent',
+        depth: 1,
+        isSubmodule: true,
+        isWorktree: false,
+      },
+      branch: 'main',
+      revision: 'def',
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'sub.txt', status: 'modified', staged: false, unstaged: true, conflicted: false }],
+      conflicts: 0,
+      operation: null,
+    };
+
+    let receivedTargets: any[] = [];
+    const mockCommitMany = vi.fn().mockImplementation(async (targets: any[]) => {
+      receivedTargets = targets;
+      return targets.map((t) => ({ repoId: t.repoId, committed: true, error: null }));
+    });
+
+    useAppStore.setState({
+      bootstrap: bootstrap(false),
+      snapshot: {
+        ...gitSnapshot,
+        // 扫描顺序中父仓库排在子模块前面
+        repositories: [parentRepo, submoduleRepo],
+      },
+      selectedRepoId: 'parent',
+      commitMessage: 'feat: multi-repo commit',
+      commitMany: mockCommitMany,
+      commitSelections: {
+        parent: ['parent.txt'],
+        submodule: ['sub.txt'],
+      },
+    });
+
+    renderPanel();
+
+    const commitBtn = screen.getByRole('button', { name: /^Commit$/ });
+    fireEvent.click(commitBtn);
+
+    await waitFor(() => {
+      expect(mockCommitMany).toHaveBeenCalled();
+    });
+
+    // 验证子模块 (depth: 1) 排在父仓库 (depth: 0) 之前提交
+    expect(receivedTargets.map((t) => t.repoId)).toEqual(['submodule', 'parent']);
+  });
 });

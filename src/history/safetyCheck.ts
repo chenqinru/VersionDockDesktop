@@ -44,6 +44,7 @@ export interface CommitSafetyCheckResult {
   invalidFileNameFiles: InvalidFileNameInfo[];
   largeFiles: LargeFileInfo[];
   crlfFiles: string[];
+  checkError?: string;
 }
 
 export interface CommitSafetyOptions {
@@ -100,11 +101,16 @@ export async function performCommitSafetyCheck(
   workspaceId: string,
   repoId: string,
   paths: string[],
+  stagedOnly?: boolean,
 ): Promise<CommitSafetyCheckResult> {
+  const fallback = checkCommitSafety(paths);
   try {
     const bridge = useAppStore.getState?.()?.bridge;
     if (!bridge) {
-      return checkCommitSafety(paths);
+      return {
+        ...fallback,
+        checkError: 'Safety check bridge not available; deep inspection (large files & CRLF) skipped',
+      };
     }
     const res = await bridge.request<CommitSafetyCheckResult>({
       type: 'commitSafetyCheck',
@@ -112,10 +118,15 @@ export async function performCommitSafetyCheck(
         workspace_id: workspaceId,
         repo_id: repoId,
         paths,
+        staged_only: stagedOnly ?? false,
       },
     });
     return res;
-  } catch {
-    return checkCommitSafety(paths);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ...fallback,
+      checkError: message,
+    };
   }
 }

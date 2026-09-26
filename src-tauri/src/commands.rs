@@ -2162,6 +2162,7 @@ async fn dispatch(
             amend,
             paths,
             no_verify,
+            staged_only,
         } => {
             emit_operation_phase(
                 app,
@@ -2202,6 +2203,9 @@ async fn dispatch(
                     None,
                     None,
                 );
+                if staged_only {
+                    vcs::unstage_unexpected_cached(&repo, &paths, &[], token).await?;
+                }
                 vcs::commit_with_identity(
                     &repo,
                     &message,
@@ -2209,6 +2213,7 @@ async fn dispatch(
                     &paths,
                     identity.as_ref(),
                     no_verify,
+                    staged_only,
                     token,
                 )
                 .await
@@ -2220,6 +2225,7 @@ async fn dispatch(
             workspace_id,
             repo_id,
             paths,
+            staged_only,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let settings = state.app.read().await.settings.clone();
@@ -2306,33 +2312,39 @@ async fn dispatch(
 
                 // 3. File size & CRLF
                 let full_path = root.join(&rel_path);
-                if let Ok(metadata) = std::fs::symlink_metadata(&full_path) {
-                    if metadata.is_file() {
-                        let len = metadata.len();
-                        if settings.warn_on_large_files && len > max_size_bytes {
-                            let formatted = if len < 1024 * 1024 {
-                                format!("{:.1} KB", len as f64 / 1024.0)
-                            } else {
-                                format!("{:.1} MB", len as f64 / (1024.0 * 1024.0))
-                            };
-                            result.large_files.push(crate::models::LargeFileInfo {
-                                path: rel_path.clone(),
-                                size_bytes: len as f64,
-                                size_formatted: formatted,
-                            });
+                let (file_size, has_crlf) =
+                    if staged_only && repo.kind == crate::models::VcsKind::Git {
+                        match vcs::inspect_staged_file_for_safety(
+                            &repo,
+                            &rel_path,
+                            settings.warn_on_crlf,
+                            token,
+                        )
+                        .await
+                        {
+                            Ok(Some((size, crlf))) => (Some(size), crlf),
+                            _ => read_disk_file_safety(&full_path, settings.warn_on_crlf),
                         }
+                    } else {
+                        read_disk_file_safety(&full_path, settings.warn_on_crlf)
+                    };
 
-                        if settings.warn_on_crlf && len > 0 && len < 5 * 1024 * 1024 {
-                            if let Ok(mut f) = std::fs::File::open(&full_path) {
-                                use std::io::Read;
-                                let mut buffer = [0u8; 64 * 1024];
-                                if let Ok(read_bytes) = f.read(&mut buffer) {
-                                    if buffer[..read_bytes].windows(2).any(|w| w == b"\r\n") {
-                                        result.crlf_files.push(rel_path.clone());
-                                    }
-                                }
-                            }
-                        }
+                if let Some(len) = file_size {
+                    if settings.warn_on_large_files && len > max_size_bytes {
+                        let formatted = if len < 1024 * 1024 {
+                            format!("{:.1} KB", len as f64 / 1024.0)
+                        } else {
+                            format!("{:.1} MB", len as f64 / (1024.0 * 1024.0))
+                        };
+                        result.large_files.push(crate::models::LargeFileInfo {
+                            path: rel_path.clone(),
+                            size_bytes: len as f64,
+                            size_formatted: formatted,
+                        });
+                    }
+
+                    if settings.warn_on_crlf && has_crlf {
+                        result.crlf_files.push(rel_path.clone());
                     }
                 }
             }
@@ -2349,13 +2361,98 @@ async fn dispatch(
             targets,
             push,
         } => {
+            let cached = state.cached_repositories(&workspace_id).await;
+            let all_metas = if cached.is_empty() {
+                if let Ok(descriptor) = state.workspace(&workspace_id).await {
+                    let settings = state.app.read().await.settings.clone();
+                    workspace::scan(&descriptor, &settings).unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                cached
+            };
+
+            // 深度倒序排序（子模块 depth 较大排在前面，父仓库排在后面）
+            let mut targets = targets;
+            targets.sort_by(|a, b| {
+                let a_depth = all_metas
+                    .iter()
+                    .find(|m| m.id == a.repo_id)
+                    .map(|m| m.depth)
+                    .unwrap_or(0);
+                let b_depth = all_metas
+                    .iter()
+                    .find(|m| m.id == b.repo_id)
+                    .map(|m| m.depth)
+                    .unwrap_or(0);
+                b_depth.cmp(&a_depth)
+            });
+
             let mut results = Vec::new();
             let total = targets.len() as u32;
+            let mut failed_submodule_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut failed_push_submodule_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+
             for (index, target) in targets.into_iter().enumerate() {
                 let repo_id = target.repo_id.clone();
+                if let Some(failed_descendant) =
+                    find_failed_submodule_descendant(&repo_id, &failed_submodule_ids, &all_metas)
+                {
+                    let is_submodule = all_metas
+                        .iter()
+                        .find(|m| m.id == repo_id)
+                        .map(|m| m.is_submodule || m.depth > 0)
+                        .unwrap_or(false);
+                    if is_submodule {
+                        failed_submodule_ids.insert(repo_id.clone());
+                    }
+                    let child_name = if failed_descendant.name.is_empty() {
+                        failed_descendant.id.clone()
+                    } else {
+                        failed_descendant.name.clone()
+                    };
+                    let reason = if failed_push_submodule_ids.contains(&failed_descendant.id) {
+                        format!(
+                            "Skipped because child submodule \"{}\" failed to push.",
+                            child_name
+                        )
+                    } else {
+                        format!(
+                            "Skipped because child submodule \"{}\" failed to commit.",
+                            child_name
+                        )
+                    };
+                    results.push(crate::models::RepositoryOperationResult {
+                        repo_id,
+                        commit_attempted: false,
+                        committed: false,
+                        revision: None,
+                        push_attempted: false,
+                        pushed: false,
+                        failed_stage: Some("dependency".into()),
+                        recovery_hint: Some("Fix child submodule issues and retry".into()),
+                        error: Some(DesktopError::new(
+                            "SUBMODULE_DEPENDENCY_FAILED",
+                            reason,
+                            false,
+                        )),
+                    });
+                    continue;
+                }
                 let repo = match resolve_repo(state, &workspace_id, &repo_id).await {
                     Ok(repo) => repo,
                     Err(error) => {
+                        let is_submodule = all_metas
+                            .iter()
+                            .find(|m| m.id == repo_id)
+                            .map(|m| m.is_submodule || m.depth > 0)
+                            .unwrap_or(false);
+                        if is_submodule {
+                            failed_submodule_ids.insert(repo_id.clone());
+                        }
                         results.push(crate::models::RepositoryOperationResult {
                             repo_id,
                             commit_attempted: false,
@@ -2377,6 +2474,10 @@ async fn dispatch(
                     match identity::state(&state.config_dir, &repo, token).await {
                         Ok(identity) => Some(identity.effective),
                         Err(error) => {
+                            let is_submodule = repo.is_submodule || repo.depth > 0;
+                            if is_submodule {
+                                failed_submodule_ids.insert(repo_id.clone());
+                            }
                             results.push(crate::models::RepositoryOperationResult {
                                 repo_id,
                                 commit_attempted: false,
@@ -2408,9 +2509,13 @@ async fn dispatch(
                         Some(index as u32),
                         Some(total),
                     );
-                    if !target.unstage_paths.is_empty() {
-                        vcs::unstage(&repo, &target.unstage_paths, token).await?;
-                    }
+                    vcs::unstage_unexpected_cached(
+                        &repo,
+                        &target.paths,
+                        &target.unstage_paths,
+                        token,
+                    )
+                    .await?;
                     vcs::commit_with_identity(
                         &repo,
                         &target.message,
@@ -2418,6 +2523,7 @@ async fn dispatch(
                         &target.paths,
                         identity.as_ref(),
                         target.no_verify,
+                        target.staged_only,
                         token,
                     )
                     .await
@@ -2466,35 +2572,48 @@ async fn dispatch(
                                 recovery_hint: None,
                                 error: None,
                             }),
-                            Err(error) => results.push(crate::models::RepositoryOperationResult {
-                                repo_id,
-                                commit_attempted: true,
-                                committed: true,
-                                revision: Some(revision),
-                                push_attempted: true,
-                                pushed: false,
-                                failed_stage: Some("push".into()),
-                                recovery_hint: Some(
-                                    "Retry the push after checking the remote and branch state"
-                                        .into(),
-                                ),
-                                error: Some(error),
-                            }),
+                            Err(error) => {
+                                let is_submodule = repo.is_submodule || repo.depth > 0;
+                                if is_submodule {
+                                    failed_submodule_ids.insert(repo_id.clone());
+                                    failed_push_submodule_ids.insert(repo_id.clone());
+                                }
+                                results.push(crate::models::RepositoryOperationResult {
+                                    repo_id,
+                                    commit_attempted: true,
+                                    committed: true,
+                                    revision: Some(revision),
+                                    push_attempted: true,
+                                    pushed: false,
+                                    failed_stage: Some("push".into()),
+                                    recovery_hint: Some(
+                                        "Retry the push after checking the remote and branch state"
+                                            .into(),
+                                    ),
+                                    error: Some(error),
+                                });
+                            }
                         }
                     }
-                    Err(error) => results.push(crate::models::RepositoryOperationResult {
-                        repo_id,
-                        commit_attempted: true,
-                        committed: false,
-                        revision: None,
-                        push_attempted: false,
-                        pushed: false,
-                        failed_stage: Some("commit".into()),
-                        recovery_hint: Some(
-                            "Review repository changes and retry only this repository".into(),
-                        ),
-                        error: Some(error),
-                    }),
+                    Err(error) => {
+                        let is_submodule = repo.is_submodule || repo.depth > 0;
+                        if is_submodule {
+                            failed_submodule_ids.insert(repo_id.clone());
+                        }
+                        results.push(crate::models::RepositoryOperationResult {
+                            repo_id,
+                            commit_attempted: true,
+                            committed: false,
+                            revision: None,
+                            push_attempted: false,
+                            pushed: false,
+                            failed_stage: Some("commit".into()),
+                            recovery_hint: Some(
+                                "Review repository changes and retry only this repository".into(),
+                            ),
+                            error: Some(error),
+                        });
+                    }
                 }
             }
             emit_operation_phase(
@@ -3455,6 +3574,56 @@ fn external_editor_command(
     Ok((executable.to_string(), args))
 }
 
+fn read_disk_file_safety(path: &Path, check_crlf: bool) -> (Option<u64>, bool) {
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if metadata.is_file() {
+            let len = metadata.len();
+            let mut has_crlf = false;
+            if check_crlf && len > 0 && len < 5 * 1024 * 1024 {
+                if let Ok(mut f) = std::fs::File::open(path) {
+                    use std::io::Read;
+                    let mut buffer = [0u8; 64 * 1024];
+                    if let Ok(read_bytes) = f.read(&mut buffer) {
+                        if buffer[..read_bytes].windows(2).any(|w| w == b"\r\n") {
+                            has_crlf = true;
+                        }
+                    }
+                }
+            }
+            return (Some(len), has_crlf);
+        }
+    }
+    (None, false)
+}
+
+fn find_failed_submodule_descendant(
+    repo_id: &str,
+    failed_submodule_ids: &std::collections::HashSet<String>,
+    all_metas: &[crate::models::RepositoryMeta],
+) -> Option<crate::models::RepositoryMeta> {
+    if failed_submodule_ids.is_empty() {
+        return None;
+    }
+    for failed_id in failed_submodule_ids {
+        let mut curr = all_metas.iter().find(|m| m.id == *failed_id);
+        while let Some(c) = curr {
+            if let Some(parent_id) = &c.parent_repo_id {
+                if parent_id == repo_id {
+                    return all_metas
+                        .iter()
+                        .find(|m| m.id == *failed_id)
+                        .cloned()
+                        .or_else(|| Some((*c).clone()));
+                }
+                curr = all_metas.iter().find(|m| m.id == *parent_id);
+            } else {
+                break;
+            }
+        }
+    }
+    None
+}
+
 async fn resolve_repo(
     state: &AppState,
     workspace_id: &str,
@@ -3729,5 +3898,163 @@ mod tests {
         let error = waiting.await.unwrap().unwrap_err();
         drop(held);
         assert_eq!(error.code, "REQUEST_CANCELLED");
+    }
+
+    #[test]
+    fn find_failed_submodule_descendant_identifies_nested_submodule_failure() {
+        let parent = crate::models::RepositoryMeta {
+            id: "parent".into(),
+            name: "Parent Repo".into(),
+            root_path: "/tmp/parent".into(),
+            color: "#000".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let sub_a = crate::models::RepositoryMeta {
+            id: "sub_a".into(),
+            name: "Sub A".into(),
+            root_path: "/tmp/parent/sub_a".into(),
+            color: "#000".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: Some("parent".into()),
+            depth: 1,
+            is_submodule: true,
+            is_worktree: false,
+        };
+        let sub_b = crate::models::RepositoryMeta {
+            id: "sub_b".into(),
+            name: "Sub B".into(),
+            root_path: "/tmp/parent/sub_a/sub_b".into(),
+            color: "#000".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: Some("sub_a".into()),
+            depth: 2,
+            is_submodule: true,
+            is_worktree: false,
+        };
+        let sibling = crate::models::RepositoryMeta {
+            id: "sibling".into(),
+            name: "Sibling Repo".into(),
+            root_path: "/tmp/sibling".into(),
+            color: "#000".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let metas = vec![
+            parent.clone(),
+            sub_a.clone(),
+            sub_b.clone(),
+            sibling.clone(),
+        ];
+        let mut failed = std::collections::HashSet::new();
+
+        // 尚未失败时均返回 None
+        assert!(find_failed_submodule_descendant("parent", &failed, &metas).is_none());
+
+        // sub_b 失败
+        failed.insert("sub_b".into());
+
+        // parent 与 sub_a 都能检测到自身包含失败的子模块
+        let found_for_parent = find_failed_submodule_descendant("parent", &failed, &metas);
+        assert!(found_for_parent.is_some());
+        assert_eq!(found_for_parent.unwrap().id, "sub_b");
+
+        let found_for_sub_a = find_failed_submodule_descendant("sub_a", &failed, &metas);
+        assert!(found_for_sub_a.is_some());
+        assert_eq!(found_for_sub_a.unwrap().id, "sub_b");
+
+        // 无关的 sibling 仓库不应被影响
+        assert!(find_failed_submodule_descendant("sibling", &failed, &metas).is_none());
+    }
+
+    #[test]
+    fn batch_commit_targets_sort_submodules_before_parents() {
+        let parent = crate::models::RepositoryMeta {
+            id: "parent".into(),
+            name: "Parent Repo".into(),
+            root_path: "/tmp/parent".into(),
+            color: "#000".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let sub_a = crate::models::RepositoryMeta {
+            id: "sub_a".into(),
+            name: "Sub A".into(),
+            root_path: "/tmp/parent/sub_a".into(),
+            color: "#000".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: Some("parent".into()),
+            depth: 1,
+            is_submodule: true,
+            is_worktree: false,
+        };
+        let sub_b = crate::models::RepositoryMeta {
+            id: "sub_b".into(),
+            name: "Sub B".into(),
+            root_path: "/tmp/parent/sub_a/sub_b".into(),
+            color: "#000".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: Some("sub_a".into()),
+            depth: 2,
+            is_submodule: true,
+            is_worktree: false,
+        };
+        let all_metas = [parent, sub_a, sub_b];
+        let mut targets = [
+            crate::models::BatchCommitTarget {
+                repo_id: "parent".into(),
+                message: "parent msg".into(),
+                paths: vec!["file.txt".into()],
+                unstage_paths: vec![],
+                amend: false,
+                no_verify: false,
+                staged_only: false,
+            },
+            crate::models::BatchCommitTarget {
+                repo_id: "sub_a".into(),
+                message: "sub_a msg".into(),
+                paths: vec!["sub_a.txt".into()],
+                unstage_paths: vec![],
+                amend: false,
+                no_verify: false,
+                staged_only: false,
+            },
+            crate::models::BatchCommitTarget {
+                repo_id: "sub_b".into(),
+                message: "sub_b msg".into(),
+                paths: vec!["sub_b.txt".into()],
+                unstage_paths: vec![],
+                amend: false,
+                no_verify: false,
+                staged_only: false,
+            },
+        ];
+
+        targets.sort_by(|a, b| {
+            let a_depth = all_metas
+                .iter()
+                .find(|m| m.id == a.repo_id)
+                .map(|m| m.depth)
+                .unwrap_or(0);
+            let b_depth = all_metas
+                .iter()
+                .find(|m| m.id == b.repo_id)
+                .map(|m| m.depth)
+                .unwrap_or(0);
+            b_depth.cmp(&a_depth)
+        });
+
+        assert_eq!(targets[0].repo_id, "sub_b");
+        assert_eq!(targets[1].repo_id, "sub_a");
+        assert_eq!(targets[2].repo_id, "parent");
     }
 }

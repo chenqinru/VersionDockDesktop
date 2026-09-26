@@ -1572,6 +1572,147 @@ pub async fn unstage(
     Ok(())
 }
 
+pub async fn unstage_unexpected_cached(
+    repo: &RepositoryMeta,
+    expected_paths: &[String],
+    additional_unstage: &[String],
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if repo.kind != VcsKind::Git {
+        if !additional_unstage.is_empty() {
+            unstage(repo, additional_unstage, token).await?;
+        }
+        return Ok(());
+    }
+    let target_paths_set: std::collections::HashSet<&str> =
+        expected_paths.iter().map(|s| s.as_str()).collect();
+    let raw_cached = git(
+        vec![
+            "diff".into(),
+            "--name-status".into(),
+            "--cached".into(),
+            "-z".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout;
+    let mut all_unstage = additional_unstage.to_vec();
+    let parts: Vec<&[u8]> = raw_cached.split(|b| *b == 0).collect();
+    let mut i = 0;
+    while i < parts.len() {
+        if parts[i].is_empty() {
+            break;
+        }
+        let status = match std::str::from_utf8(parts[i]) {
+            Ok(s) => s,
+            Err(_) => {
+                i += 1;
+                continue;
+            }
+        };
+        i += 1;
+        if status.starts_with('R') || status.starts_with('C') {
+            if i + 1 >= parts.len() {
+                break;
+            }
+            let old_path = match std::str::from_utf8(parts[i]) {
+                Ok(s) => s,
+                Err(_) => {
+                    i += 2;
+                    continue;
+                }
+            };
+            let new_path = match std::str::from_utf8(parts[i + 1]) {
+                Ok(s) => s,
+                Err(_) => {
+                    i += 2;
+                    continue;
+                }
+            };
+            i += 2;
+            if !target_paths_set.contains(new_path) {
+                if !all_unstage.iter().any(|p| p == old_path) {
+                    all_unstage.push(old_path.to_string());
+                }
+                if !all_unstage.iter().any(|p| p == new_path) {
+                    all_unstage.push(new_path.to_string());
+                }
+            }
+        } else {
+            if i >= parts.len() {
+                break;
+            }
+            let path = match std::str::from_utf8(parts[i]) {
+                Ok(s) => s,
+                Err(_) => {
+                    i += 1;
+                    continue;
+                }
+            };
+            i += 1;
+            if !target_paths_set.contains(path) && !all_unstage.iter().any(|p| p == path) {
+                all_unstage.push(path.to_string());
+            }
+        }
+    }
+    if !all_unstage.is_empty() {
+        unstage(repo, &all_unstage, token).await?;
+    }
+    Ok(())
+}
+
+pub async fn inspect_staged_file_for_safety(
+    repo: &RepositoryMeta,
+    rel_path: &str,
+    check_crlf: bool,
+    token: &CancellationToken,
+) -> Result<Option<(u64, bool)>, DesktopError> {
+    if repo.kind != VcsKind::Git {
+        return Ok(None);
+    }
+    let path = match relative_path(Path::new(&repo.root_path), rel_path, true) {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    let spec = format!(":{path}");
+    let size_output = match git(
+        vec!["cat-file".into(), "-s".into(), spec.clone()],
+        repo,
+        token,
+    )
+    .await
+    {
+        Ok(out) => out,
+        Err(_) => return Ok(None),
+    };
+    let size_str = String::from_utf8_lossy(&size_output.stdout)
+        .trim()
+        .to_string();
+    let size = match size_str.parse::<u64>() {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+
+    let mut has_crlf = false;
+    if check_crlf && size > 0 && size < 5 * 1024 * 1024 {
+        if let Ok(content_output) =
+            git(vec!["cat-file".into(), "-p".into(), spec], repo, token).await
+        {
+            let limit = content_output.stdout.len().min(64 * 1024);
+            if content_output.stdout[..limit]
+                .windows(2)
+                .any(|w| w == b"\r\n")
+            {
+                has_crlf = true;
+            }
+        }
+    }
+
+    Ok(Some((size, has_crlf)))
+}
+
 pub async fn discard(
     repo: &RepositoryMeta,
     paths: &[String],
@@ -1608,41 +1749,9 @@ pub async fn discard(
                         }
                     }
                 } else {
-                    let exists_in_head = git(
-                        vec!["cat-file".into(), "-e".into(), format!("HEAD:{safe}")],
-                        repo,
-                        token,
-                    )
-                    .await
-                    .is_ok();
-
-                    if !exists_in_head {
-                        let target = root.join(&safe);
-                        if let Ok(metadata) = std::fs::symlink_metadata(&target) {
-                            if metadata.is_dir() {
-                                let _ = std::fs::remove_dir_all(&target);
-                            } else {
-                                let _ = std::fs::remove_file(&target);
-                            }
-                        }
-                        let _ = git(
-                            vec![
-                                "rm".into(),
-                                "-f".into(),
-                                "--cached".into(),
-                                "--ignore-unmatch".into(),
-                                "--".into(),
-                                pathspec,
-                            ],
-                            repo,
-                            token,
-                        )
-                        .await;
-                    } else if git(
+                    let res = git(
                         vec![
                             "restore".into(),
-                            "--source=HEAD".into(),
-                            "--staged".into(),
                             "--worktree".into(),
                             "--".into(),
                             pathspec.clone(),
@@ -1650,28 +1759,10 @@ pub async fn discard(
                         repo,
                         token,
                     )
-                    .await
-                    .is_err()
-                        && git(
-                            vec![
-                                "restore".into(),
-                                "--staged".into(),
-                                "--worktree".into(),
-                                "--".into(),
-                                pathspec.clone(),
-                            ],
-                            repo,
-                            token,
-                        )
-                        .await
-                        .is_err()
-                    {
-                        let _ = git(
-                            vec!["checkout".into(), "HEAD".into(), "--".into(), pathspec],
-                            repo,
-                            token,
-                        )
-                        .await;
+                    .await;
+                    if res.is_err() {
+                        let _ =
+                            git(vec!["checkout".into(), "--".into(), pathspec], repo, token).await;
                     }
                 }
             }
@@ -1714,13 +1805,12 @@ pub async fn discard(
                         let target = root.join(&safe);
                         if let Ok(metadata) = std::fs::symlink_metadata(&target) {
                             if metadata.is_dir() {
-                                std::fs::remove_dir_all(&target)
+                                let _ = std::fs::remove_dir(&target);
                             } else {
-                                std::fs::remove_file(&target)
+                                std::fs::remove_file(&target).map_err(|error| {
+                                    DesktopError::new("DISCARD_FAILED", error.to_string(), true)
+                                })?;
                             }
-                            .map_err(|error| {
-                                DesktopError::new("DISCARD_FAILED", error.to_string(), true)
-                            })?;
                         }
                     }
                 }
@@ -1738,7 +1828,7 @@ pub async fn commit(
     paths: &[String],
     token: &CancellationToken,
 ) -> Result<String, DesktopError> {
-    commit_with_identity(repo, message, amend, paths, None, false, token).await
+    commit_with_identity(repo, message, amend, paths, None, false, false, token).await
 }
 
 pub async fn commit_with_identity(
@@ -1748,12 +1838,13 @@ pub async fn commit_with_identity(
     paths: &[String],
     identity: Option<&EffectiveGitIdentity>,
     no_verify: bool,
+    staged_only: bool,
     token: &CancellationToken,
 ) -> Result<String, DesktopError> {
     let message = validate_message(message)?;
     match repo.kind {
         VcsKind::Git => {
-            if !paths.is_empty() {
+            if !staged_only && !paths.is_empty() {
                 stage(repo, paths, false, token).await?;
             }
             let mut args = vec!["commit".into(), "--file=-".into()];
@@ -7429,18 +7520,66 @@ pub async fn stash_operation(
             }
             git(args, repo, token).await?;
         }
-        StashOperation::Apply { reference } => {
+        StashOperation::Apply {
+            reference,
+            expected_hash,
+        } => {
             validate_stash_ref(&reference)?;
+            if let Some(expected) = expected_hash {
+                verify_stash_hash(repo, &reference, &expected, token).await?;
+            }
             git(vec!["stash".into(), "apply".into(), reference], repo, token).await?;
         }
-        StashOperation::Pop { reference } => {
+        StashOperation::Pop {
+            reference,
+            expected_hash,
+        } => {
             validate_stash_ref(&reference)?;
+            if let Some(expected) = expected_hash {
+                verify_stash_hash(repo, &reference, &expected, token).await?;
+            }
             git(vec!["stash".into(), "pop".into(), reference], repo, token).await?;
         }
-        StashOperation::Drop { reference } => {
+        StashOperation::Drop {
+            reference,
+            expected_hash,
+        } => {
             validate_stash_ref(&reference)?;
+            if let Some(expected) = expected_hash {
+                verify_stash_hash(repo, &reference, &expected, token).await?;
+            }
             git(vec!["stash".into(), "drop".into(), reference], repo, token).await?;
         }
+    }
+    Ok(())
+}
+
+async fn verify_stash_hash(
+    repo: &RepositoryMeta,
+    reference: &str,
+    expected_hash: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    let output = match git(vec!["rev-parse".into(), reference.to_string()], repo, token).await {
+        Ok(out) => out,
+        Err(_) => {
+            return Err(DesktopError::new(
+                "STASH_REFERENCE_MOVED",
+                "Stash entry not found or reference has moved",
+                false,
+            ));
+        }
+    };
+    let actual_hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let expected = expected_hash.trim();
+    if !actual_hash.eq_ignore_ascii_case(expected) && !actual_hash.starts_with(expected) {
+        return Err(DesktopError::new(
+            "STASH_REFERENCE_MOVED",
+            format!(
+                "Stash entry reference '{reference}' has moved concurrently (expected {expected}, found {actual_hash})"
+            ),
+            false,
+        ));
     }
     Ok(())
 }

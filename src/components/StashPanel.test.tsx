@@ -5,6 +5,7 @@ import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus } from '../bindings/generated';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
+import * as dialogService from './dialogService';
 
 const gitRepo1: RepositoryStatus = {
   meta: {
@@ -159,6 +160,40 @@ describe('StashPanel', () => {
     expect(requestedOperation).toEqual({
       type: 'pop',
       reference: 'stash@{0}',
+      expected_hash: 'hash001',
+    });
+  });
+
+  it('invokes drop with expected_hash after confirmation', async () => {
+    vi.spyOn(dialogService, 'confirmDialog').mockResolvedValue(true);
+    let requestedOperation: unknown = null;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'stashOperation') {
+        requestedOperation = command.payload.operation;
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge, snapshot, stashes: { 'repo-1': sampleStashes } });
+
+    render(
+      <BridgeContext.Provider value={bridge}>
+        <StashPanel repos={[gitRepo1, gitRepo2]} selectedPaths={new Map()} />
+      </BridgeContext.Provider>,
+    );
+
+    const titleEl = screen.getByText('fix login navigation layout');
+    const rowEl = titleEl.closest('div[title*="double-click"]')!;
+    fireEvent.mouseEnter(rowEl);
+
+    const dropBtn = screen.getByTitle('Drop stash');
+    fireEvent.click(dropBtn);
+
+    await vi.waitFor(() => {
+      expect(requestedOperation).toEqual({
+        type: 'drop',
+        reference: 'stash@{0}',
+        expected_hash: 'hash001',
+      });
     });
   });
 
@@ -199,5 +234,43 @@ describe('StashPanel', () => {
     expect(onOpenFileDiff).toHaveBeenCalledWith('repo-1', 'stash@{0}', 'src/components/LoginModal.tsx');
     fireEvent.contextMenu(row);
     expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
+  });
+
+  it('prevents duplicate pop trigger when pop is already in flight', async () => {
+    let operationCount = 0;
+    let resolveStashOp: (value: any) => void = () => undefined;
+    const pendingPromise = new Promise((resolve) => {
+      resolveStashOp = resolve;
+    });
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'stashOperation') {
+        operationCount++;
+        return pendingPromise;
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge, snapshot, stashes: { 'repo-1': sampleStashes } });
+
+    render(
+      <BridgeContext.Provider value={bridge}>
+        <StashPanel repos={[gitRepo1]} viewMode="list" expansion={{ sequence: 1, expanded: true }} />
+      </BridgeContext.Provider>,
+    );
+
+    const titleEl = screen.getByText('fix login navigation layout');
+    const headerEl = titleEl.closest('div[title*="double-click"]')!;
+
+    // 第一次双击
+    fireEvent.doubleClick(headerEl);
+    expect(operationCount).toBe(1);
+
+    // 紧接着发起第二次双击（此时第一次仍处于 pending 状态）
+    fireEvent.doubleClick(headerEl);
+    // 核心断言：由于已被锁定，绝不触发第二次请求！
+    expect(operationCount).toBe(1);
+
+    // 完成第一次请求
+    resolveStashOp([]);
   });
 });

@@ -146,12 +146,12 @@ export function CommitChangesWorkspace() {
             error={diffError}
             onRetry={() => selected && void loadDiff(selected)}
           />
-        ) : isDiffMatchingSelected && diff ? (
+        ) : isDiffMatchingSelected && diff && selected ? (
           diff.truncated ? (
             <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} />
           ) : diff.binary ? (
              <DiffPlaceholder kind="binary" path={diff.path} />
-          ) : selected && diff.content ? (
+          ) : diff.content ? (
             <UnifiedDiffView repoId={selected.repoId} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} />
           ) : (
             <DiffPlaceholder kind="empty" path={diff.path} />

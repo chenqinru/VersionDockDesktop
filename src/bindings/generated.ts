@@ -29,6 +29,7 @@ export type BatchCommitTarget = {
 	paths: string[],
 	unstagePaths?: string[],
 	noVerify?: boolean,
+	stagedOnly?: boolean,
 };
 
 export type BootstrapData = {
@@ -235,10 +236,12 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	amend: boolean,
 	paths: string[],
 	no_verify?: boolean,
+	staged_only?: boolean,
 } } | { type: "commitSafetyCheck"; payload: {
 	workspace_id: string,
 	repo_id: string,
 	paths: string[],
+	staged_only?: boolean,
 } } | { type: "batchCommit"; payload: {
 	workspace_id: string,
 	targets: BatchCommitTarget[],
@@ -1177,7 +1180,7 @@ export type StashEntry = {
 	files: ShelfFileEntry[],
 };
 
-export type StashOperation = { type: "create"; message: string; paths: string[]; include_untracked: boolean } | { type: "apply"; reference: string } | { type: "pop"; reference: string } | { type: "drop"; reference: string };
+export type StashOperation = { type: "create"; message: string; paths: string[]; include_untracked: boolean } | { type: "apply"; reference: string; expected_hash?: string | null } | { type: "pop"; reference: string; expected_hash?: string | null } | { type: "drop"; reference: string; expected_hash?: string | null };
 
 export type SubmoduleConflictStages = {
 	base: string | null,

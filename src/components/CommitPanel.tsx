@@ -677,11 +677,13 @@ export function CommitPanel() {
     } catch { /* store reports non-cancellation errors */ }
   };
   useEffect(() => () => amendMessageRequestRef.current?.abort(), [snapshot?.workspace.id]);
-  const commitBusy = workspaceBusy || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const commitBusy = workspaceBusy || isSubmitting || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
     workspaceId: snapshot?.workspace.id,
     domain: ['commit', 'sync'],
   });
-  const saveBusy = workspaceBusy || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
+  const saveBusy = workspaceBusy || isSaving || isOperationActiveForRepositories(operations, commitTargets.map((repo) => repo.meta.id), {
     workspaceId: snapshot?.workspace.id,
     domain: ['stash', 'shelf'],
   });
@@ -770,122 +772,199 @@ export function CommitPanel() {
     }
   }, [commitSelections, isVscode, repos, setFiles, tab, unstage]);
   const doCommit = async (push: boolean) => {
-    if (!message.trim() || !commitTargets.length || commitBusy || commitUnavailable || (push && pushUnavailable)) return;
-    const submittedMessage = message;
+    if (!message.trim() || !commitTargets.length || commitBusy || isSubmitting || commitUnavailable || (push && pushUnavailable)) return;
+    const targetWid = snapshot?.workspace.id ?? useAppStore.getState().snapshot?.workspace.id ?? '';
+    if (!targetWid) return;
 
-    // Safety check for sensitive files, large files, CRLF, invalid names, detached head, and rebase
-    const wid = useAppStore.getState().snapshot?.workspace.id ?? '';
-    const safetyResults = await Promise.all(
-      commitTargets.map(async (repo) => {
-        const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
-        if (paths.length === 0) return null;
-        return performCommitSafetyCheck(wid, repo.meta.id, paths);
-      })
-    );
+    setIsSubmitting(true);
+    try {
+      const submittedMessage = message;
 
-    const sensitiveFiles = Array.from(new Set(safetyResults.flatMap((r) => r?.sensitiveFiles ?? [])));
-    const largeFiles = safetyResults.flatMap((r) => r?.largeFiles ?? []);
-    const invalidFileNameFiles = safetyResults.flatMap((r) => r?.invalidFileNameFiles ?? []);
-    const crlfFiles = Array.from(new Set(safetyResults.flatMap((r) => r?.crlfFiles ?? [])));
-
-    const settings = useAppStore.getState().bootstrap?.state.settings;
-    const detachedHeadWarning = (settings?.warnOnDetachedHead ?? true)
-      ? commitTargets.filter((repo) => {
-          if (repo.meta.kind !== 'git') return false;
-          const branches = branchesByRepo[repo.meta.id];
-          if (!branches || branches.length === 0) return false;
-          const current = branches.find((b) => b.current);
-          return current?.name === 'HEAD' || Boolean(current?.detachedHash);
+      // Safety check for sensitive files, large files, CRLF, invalid names, detached head, and rebase
+      const safetyResults = await Promise.all(
+        commitTargets.map(async (repo) => {
+          const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
+          if (paths.length === 0) return null;
+          return performCommitSafetyCheck(targetWid, repo.meta.id, paths, isVscode && repo.meta.kind === 'git');
         })
-      : [];
+      );
 
-    const rebaseInProgressRepos = commitTargets.filter((repo) => repo.operation === 'rebase');
+      const sensitiveFiles = Array.from(new Set(safetyResults.flatMap((r) => r?.sensitiveFiles ?? [])));
+      const largeFiles = safetyResults.flatMap((r) => r?.largeFiles ?? []);
+      const invalidFileNameFiles = safetyResults.flatMap((r) => r?.invalidFileNameFiles ?? []);
+      const crlfFiles = Array.from(new Set(safetyResults.flatMap((r) => r?.crlfFiles ?? [])));
 
-    const hasIssues =
-      sensitiveFiles.length > 0 ||
-      largeFiles.length > 0 ||
-      invalidFileNameFiles.length > 0 ||
-      crlfFiles.length > 0 ||
-      detachedHeadWarning.length > 0 ||
-      rebaseInProgressRepos.length > 0;
+      const checkErrors = Array.from(new Set(safetyResults.map((r) => r?.checkError).filter(Boolean))) as string[];
 
-    if (hasIssues) {
-      const issues: string[] = [];
-      if (rebaseInProgressRepos.length > 0) {
-        issues.push(`${t('Rebase in progress')}: ${rebaseInProgressRepos.map((r) => r.meta.name).join(', ')}`);
+      const settings = useAppStore.getState().bootstrap?.state.settings;
+      const detachedHeadWarning = (settings?.warnOnDetachedHead ?? true)
+        ? commitTargets.filter((repo) => {
+            if (repo.meta.kind !== 'git') return false;
+            const branches = branchesByRepo[repo.meta.id];
+            if (!branches || branches.length === 0) return false;
+            const current = branches.find((b) => b.current);
+            return current?.name === 'HEAD' || Boolean(current?.detachedHash);
+          })
+        : [];
+
+      const rebaseInProgressRepos = commitTargets.filter((repo) => repo.operation === 'rebase');
+
+      const hasIssues =
+        sensitiveFiles.length > 0 ||
+        largeFiles.length > 0 ||
+        invalidFileNameFiles.length > 0 ||
+        crlfFiles.length > 0 ||
+        detachedHeadWarning.length > 0 ||
+        rebaseInProgressRepos.length > 0 ||
+        checkErrors.length > 0;
+
+      if (hasIssues) {
+        const issues: string[] = [];
+        if (checkErrors.length > 0) {
+          issues.push(`${t('Safety check service error (large file and CRLF checks skipped): {0}', checkErrors.join('; '))}`);
+        }
+        if (rebaseInProgressRepos.length > 0) {
+          issues.push(`${t('Rebase in progress')}: ${rebaseInProgressRepos.map((r) => r.meta.name).join(', ')}`);
+        }
+        if (detachedHeadWarning.length > 0) {
+          issues.push(`${t('Warn on detached HEAD')}: ${detachedHeadWarning.map((r) => r.meta.name).join(', ')}`);
+        }
+        if (sensitiveFiles.length > 0) {
+          issues.push(`${t('Sensitive files')}: ${sensitiveFiles.join(', ')}`);
+        }
+        if (largeFiles.length > 0) {
+          const list = largeFiles.map((f) => `${f.path} (${f.sizeFormatted})`).join(', ');
+          issues.push(`${t('Large files: {0}', list)}`);
+        }
+        if (invalidFileNameFiles.length > 0) {
+          issues.push(`${t('Incompatible / invalid file names: {0}', invalidFileNameFiles.map((f) => `${f.path} (${f.reason})`).join(', '))}`);
+        }
+        if (crlfFiles.length > 0) {
+          const list = crlfFiles.slice(0, 5).join(', ') + (crlfFiles.length > 5 ? ` (+${crlfFiles.length - 5})` : '');
+          issues.push(`${t('CRLF line separators: {0}', list)}`);
+        }
+        const confirmed = await confirmDialog({
+          title: t('Commit Safety Check'),
+          message: t('VersionDock Warning: The commit contains potential issues:\n{0}\nDo you want to commit anyway?', issues.join('\n')),
+          confirmLabel: t('Commit Anyway'),
+          danger: true,
+        });
+        if (!confirmed) return;
       }
-      if (detachedHeadWarning.length > 0) {
-        issues.push(`${t('Warn on detached HEAD')}: ${detachedHeadWarning.map((r) => r.meta.name).join(', ')}`);
-      }
-      if (sensitiveFiles.length > 0) {
-        issues.push(`${t('Sensitive files')}: ${sensitiveFiles.join(', ')}`);
-      }
-      if (largeFiles.length > 0) {
-        const list = largeFiles.map((f) => `${f.path} (${f.sizeFormatted})`).join(', ');
-        issues.push(`${t('Large files: {0}', list)}`);
-      }
-      if (invalidFileNameFiles.length > 0) {
-        issues.push(`${t('Incompatible / invalid file names: {0}', invalidFileNameFiles.map((f) => `${f.path} (${f.reason})`).join(', '))}`);
-      }
-      if (crlfFiles.length > 0) {
-        const list = crlfFiles.slice(0, 5).join(', ') + (crlfFiles.length > 5 ? ` (+${crlfFiles.length - 5})` : '');
-        issues.push(`${t('CRLF line separators: {0}', list)}`);
-      }
-      const confirmed = await confirmDialog({
-        title: t('Commit Safety Check'),
-        message: t('VersionDock Warning: The commit contains potential issues:\n{0}\nDo you want to commit anyway?', issues.join('\n')),
-        confirmLabel: t('Commit Anyway'),
-        danger: true,
+
+      const orderedCommitTargets = [...commitTargets].sort((a, b) => {
+        const aDepth = a.meta.depth ?? 0;
+        const bDepth = b.meta.depth ?? 0;
+        return bDepth - aDepth; // deeper (submodules) first
       });
-      if (!confirmed) return;
-    }
 
-    const results = await commitMany(commitTargets.map((repo) => {
-      const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
-      return {
-        repoId: repo.meta.id,
-        paths,
-        unstagePaths: repo.files.filter((file) => file.staged && !paths.includes(file.path)).map((file) => file.path),
-        amend: amendRepos.has(repo.meta.id),
-        noVerify,
-      };
-    }), message, push);
-    if (!results) {
-      return;
-    }
-    const failedRepoIds = new Set(results.filter((result) => result.error || !result.committed).map((result) => result.repoId));
-    if (failedRepoIds.size === 0) {
-      if (useAppStore.getState().commitMessage.trim() === submittedMessage.trim()) setMessage('');
-      setAmendRepoIds([]);
-      useAppStore.getState().dismissBatchReport();
-      if (submittedMessage.trim()) {
-        const repoId = commitTargets[0]?.meta.id ?? '';
-        setHistoryMessages((prev) => [
-          {
-            repoId,
-            revision: 'HEAD',
-            committedAt: new Date().toISOString(),
-            message: submittedMessage.trim(),
-          },
-          ...prev.filter((item) => item.message.trim() !== submittedMessage.trim()),
-        ]);
+      const results = await commitMany(orderedCommitTargets.map((repo) => {
+        const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
+        return {
+          repoId: repo.meta.id,
+          paths,
+          unstagePaths: repo.files.filter((file) => file.staged && !paths.includes(file.path)).map((file) => file.path),
+          amend: amendRepos.has(repo.meta.id),
+          noVerify,
+          stagedOnly: changesDisplayMode === 'vscode' && repo.meta.kind === 'git',
+        };
+      }), message, push, targetWid);
+      if (!results) {
+        return;
       }
-    } else {
-      setAmendRepoIds(amendRepoIds.filter((repoId) => failedRepoIds.has(repoId)));
+      const failedRepoIds = new Set(results.filter((result) => result.error || !result.committed).map((result) => result.repoId));
+      const isCurrentWorkspace = (useAppStore.getState().snapshot?.workspace.id ?? '') === targetWid;
+      if (isCurrentWorkspace) {
+        if (failedRepoIds.size === 0) {
+          if (useAppStore.getState().commitMessage.trim() === submittedMessage.trim()) setMessage('');
+          setAmendRepoIds([]);
+          useAppStore.getState().dismissBatchReport();
+          if (submittedMessage.trim()) {
+            const repoId = commitTargets[0]?.meta.id ?? '';
+            setHistoryMessages((prev) => [
+              {
+                repoId,
+                revision: 'HEAD',
+                committedAt: new Date().toISOString(),
+                message: submittedMessage.trim(),
+              },
+              ...prev.filter((item) => item.message.trim() !== submittedMessage.trim()),
+            ]);
+          }
+        } else {
+          setAmendRepoIds(amendRepoIds.filter((repoId) => failedRepoIds.has(repoId)));
+        }
+      } else {
+        useAppStore.setState((state) => {
+          const targetSession = state.sessions[targetWid];
+          if (!targetSession) return state;
+          const currentDraft = targetSession.commitMessage ?? '';
+          const shouldClearMessage = currentDraft.trim() === submittedMessage.trim();
+          const nextAmend = failedRepoIds.size === 0
+            ? []
+            : (targetSession.amendRepoIds ?? []).filter((repoId) => failedRepoIds.has(repoId));
+          return {
+            sessions: {
+              ...state.sessions,
+              [targetWid]: {
+                ...targetSession,
+                commitMessage: shouldClearMessage ? '' : targetSession.commitMessage,
+                amendRepoIds: nextAmend,
+                batchCommitReport: failedRepoIds.size === 0 ? undefined : targetSession.batchCommitReport,
+              },
+            },
+          };
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
   const doSave = async (kind: 'stash' | 'shelf') => {
-    if (saveBusy) return;
-    const submittedMessage = message;
-    let succeeded = true;
-    for (const repo of commitTargets.filter((item) => item.meta.kind === 'git')) {
-      const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
-      const result = kind === 'stash'
-        ? await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: message.trim() || t('WIP stash'), paths, include_untracked: true })
-        : await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: message.trim() || t('WIP shelf'), paths });
-      succeeded = result && succeeded;
+    if (saveBusy || isSaving) return;
+    const targetWid = snapshot?.workspace.id ?? useAppStore.getState().snapshot?.workspace.id ?? '';
+    if (!targetWid) return;
+
+    setIsSaving(true);
+    try {
+      const submittedMessage = message;
+      let succeeded = true;
+      for (const repo of commitTargets.filter((item) => item.meta.kind === 'git')) {
+        const paths = effectiveSelectedByRepo.get(repo.meta.id) ?? [];
+        const result = kind === 'stash'
+          ? await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: message.trim() || t('WIP stash'), paths, include_untracked: true }, targetWid)
+          : await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: message.trim() || t('WIP shelf'), paths }, targetWid);
+        succeeded = Boolean(result && succeeded);
+      }
+      if (succeeded) {
+        const isCurrentWorkspace = (useAppStore.getState().snapshot?.workspace.id ?? '') === targetWid;
+        if (isCurrentWorkspace) {
+          if (useAppStore.getState().commitMessage.trim() === submittedMessage.trim()) {
+            setMessage('');
+          }
+        } else {
+          useAppStore.setState((state) => {
+            const targetSession = state.sessions[targetWid];
+            if (!targetSession) return state;
+            const currentDraft = targetSession.commitMessage ?? '';
+            if (currentDraft.trim() === submittedMessage.trim()) {
+              return {
+                sessions: {
+                  ...state.sessions,
+                  [targetWid]: {
+                    ...targetSession,
+                    commitMessage: '',
+                  },
+                },
+              };
+            }
+            return state;
+          });
+        }
+      }
+    } finally {
+      setIsSaving(false);
     }
-    if (succeeded && useAppStore.getState().commitMessage.trim() === submittedMessage.trim()) setMessage('');
   };
   const confirmDiscard = async (repo: RepositoryStatus, files: FileChange[]) => {
     const safeFiles = files.filter((file) => !file.isTruncated);
@@ -901,9 +980,10 @@ export function CommitPanel() {
   };
   const savePaths = async (repo: RepositoryStatus, files: FileChange[], kind: 'stash' | 'shelf') => {
     if (repo.meta.kind !== 'git') return;
+    const targetWid = snapshot?.workspace.id ?? useAppStore.getState().snapshot?.workspace.id ?? '';
     const paths = files.map((file) => file.path);
-    if (kind === 'stash') await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: t('WIP stash'), paths, include_untracked: true });
-    else await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: t('Changes'), paths });
+    if (kind === 'stash') await useAppStore.getState().stashOperation(repo.meta.id, { type: 'create', message: t('WIP stash'), paths, include_untracked: true }, targetWid);
+    else await useAppStore.getState().shelfOperation(repo.meta.id, { type: 'create', name: t('Changes'), paths }, targetWid);
   };
   const contextItems = (value: ChangeContext): ContextMenuEntry[] => {
     const { repo, files, kind, stagedSection } = value;

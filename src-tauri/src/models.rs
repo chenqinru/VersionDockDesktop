@@ -325,11 +325,15 @@ pub enum BridgeCommand {
         paths: Vec<String>,
         #[serde(default)]
         no_verify: bool,
+        #[serde(default)]
+        staged_only: bool,
     },
     CommitSafetyCheck {
         workspace_id: String,
         repo_id: String,
         paths: Vec<String>,
+        #[serde(default)]
+        staged_only: bool,
     },
     BatchCommit {
         workspace_id: String,
@@ -658,6 +662,9 @@ pub struct BatchCommitTarget {
     #[serde(default)]
     #[specta(optional)]
     pub no_verify: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub staged_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -948,12 +955,18 @@ pub enum StashOperation {
     },
     Apply {
         reference: String,
+        #[serde(default)]
+        expected_hash: Option<String>,
     },
     Pop {
         reference: String,
+        #[serde(default)]
+        expected_hash: Option<String>,
     },
     Drop {
         reference: String,
+        #[serde(default)]
+        expected_hash: Option<String>,
     },
 }
 

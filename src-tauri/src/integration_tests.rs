@@ -737,6 +737,486 @@ async fn real_git_discard_restores_tracked_and_removes_untracked_files() {
 }
 
 #[tokio::test]
+async fn real_git_discard_preserves_staged_changes_for_partially_staged_and_added_files() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("tracked.txt"), "base\n").unwrap();
+    command("git", &["add", "tracked.txt"], directory.path());
+    command("git", &["commit", "-m", "initial"], directory.path());
+
+    // 1. 部分暂存 (MM): 暂存区为 base + staged, 工作区为 base + staged + worktree
+    std::fs::write(directory.path().join("tracked.txt"), "base\nstaged\n").unwrap();
+    command("git", &["add", "tracked.txt"], directory.path());
+    std::fs::write(
+        directory.path().join("tracked.txt"),
+        "base\nstaged\nworktree\n",
+    )
+    .unwrap();
+
+    // 2. 新增且暂存 (AM): 暂存区为 newly added, 工作区为 newly added + worktree
+    std::fs::write(directory.path().join("added.txt"), "new file in index\n").unwrap();
+    command("git", &["add", "added.txt"], directory.path());
+    std::fs::write(
+        directory.path().join("added.txt"),
+        "new file in index\nworktree edit\n",
+    )
+    .unwrap();
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    vcs::discard(
+        &repository,
+        &["tracked.txt".into(), "added.txt".into()],
+        &token,
+    )
+    .await
+    .unwrap();
+
+    // 验证: 工作区未暂存改动被回滚，但暂存区的改动完好保留！
+    assert_eq!(
+        read_text(directory.path().join("tracked.txt")),
+        "base\nstaged\n"
+    );
+    assert_eq!(
+        read_text(directory.path().join("added.txt")),
+        "new file in index\n"
+    );
+
+    // 验证 git status 依然保留暂存状态 (M  和 A )，未暂存部分已消除
+    let status = command_output("git", &["status", "--porcelain"], directory.path());
+    assert!(status.contains("M  tracked.txt"));
+    assert!(status.contains("A  added.txt"));
+}
+
+#[tokio::test]
+async fn real_svn_discard_added_directory_preserves_unversioned_files() {
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let repository_dir = tempdir().unwrap();
+    let checkout_parent = tempdir().unwrap();
+    command(
+        "svnadmin",
+        &["create", repository_dir.path().to_str().unwrap()],
+        checkout_parent.path(),
+    );
+    let checkout = checkout_parent.path().join("working");
+    command(
+        "svn",
+        &[
+            "checkout",
+            &svn_file_url(repository_dir.path()),
+            checkout.to_str().unwrap(),
+        ],
+        checkout_parent.path(),
+    );
+    let directory = checkout.join("new_dir");
+    std::fs::create_dir(&directory).unwrap();
+    // 将 new_dir 加入 SVN
+    command("svn", &["add", "new_dir"], &checkout);
+    // 在 new_dir 中创建未纳管的文件（不执行 svn add）
+    std::fs::write(directory.join("unversioned.txt"), "important data\n").unwrap();
+
+    let repository = repo(&checkout, VcsKind::Svn);
+    let token = CancellationToken::new();
+    // 回滚 new_dir
+    vcs::discard(&repository, &["new_dir".into()], &token)
+        .await
+        .unwrap();
+
+    // 验证未纳管文件没有被清掉
+    assert!(directory.join("unversioned.txt").exists());
+    assert_eq!(
+        read_text(directory.join("unversioned.txt")),
+        "important data\n"
+    );
+}
+
+#[tokio::test]
+async fn real_git_commit_staged_only_excludes_unstaged_working_tree_changes() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("file.txt"), "base\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "initial"], directory.path());
+
+    // 暂存部分行
+    std::fs::write(directory.path().join("file.txt"), "base\nstaged line\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    // 在工作区写入未暂存行（MM 状态）
+    std::fs::write(
+        directory.path().join("file.txt"),
+        "base\nstaged line\nunstaged line\n",
+    )
+    .unwrap();
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // staged_only: true 进行提交
+    let revision = vcs::commit_with_identity(
+        &repository,
+        "commit staged only",
+        false,
+        &["file.txt".into()],
+        None,
+        false,
+        true, // staged_only = true
+        &token,
+    )
+    .await
+    .unwrap();
+
+    // 验证提交中的内容严格只有暂存的内容，不包含 unstaged line
+    let committed_content = command_output(
+        "git",
+        &["show", &format!("{revision}:file.txt")],
+        directory.path(),
+    );
+    assert_eq!(committed_content, "base\nstaged line");
+
+    // 验证工作区依然保留未暂存的内容
+    assert_eq!(
+        read_text(directory.path().join("file.txt")),
+        "base\nstaged line\nunstaged line\n"
+    );
+    let raw_status = String::from_utf8_lossy(
+        &std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(directory.path())
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .to_string();
+    assert!(raw_status.starts_with(" M file.txt"));
+}
+
+#[tokio::test]
+async fn real_git_unstage_unexpected_cached_excludes_external_staged_files() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("file_a.txt"), "initial a\n").unwrap();
+    std::fs::write(directory.path().join("file_b.txt"), "initial b\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "initial commit"], directory.path());
+
+    // file_a 发生变更并暂存（预期提交）
+    std::fs::write(directory.path().join("file_a.txt"), "updated a\n").unwrap();
+    command("git", &["add", "file_a.txt"], directory.path());
+
+    // 模拟外部工具（或后台并发）暂存了 file_b（非本次提交预期文件）
+    std::fs::write(directory.path().join("file_b.txt"), "updated b\n").unwrap();
+    command("git", &["add", "file_b.txt"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // 执行 unstage_unexpected_cached，传入 expected = ["file_a.txt"]
+    vcs::unstage_unexpected_cached(&repository, &["file_a.txt".into()], &[], &token)
+        .await
+        .unwrap();
+
+    // 验证暂存区只剩 file_a.txt，file_b.txt 已被 unstage 到工作区
+    let status_raw = command_output("git", &["status", "--porcelain"], directory.path());
+    assert!(status_raw.contains("M  file_a.txt"));
+    assert!(status_raw.contains(" M file_b.txt"));
+
+    // 提交预期文件
+    let revision = vcs::commit_with_identity(
+        &repository,
+        "commit expected a only",
+        false,
+        &["file_a.txt".into()],
+        None,
+        false,
+        true,
+        &token,
+    )
+    .await
+    .unwrap();
+
+    // 验证提交中仅有 file_a.txt
+    let diff_tree = command_output(
+        "git",
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            &revision,
+        ],
+        directory.path(),
+    );
+    assert_eq!(diff_tree.trim(), "file_a.txt");
+    // 验证 file_b.txt 的修改依然完整保留在工作区
+    assert_eq!(
+        read_text(directory.path().join("file_b.txt")),
+        "updated b\n"
+    );
+}
+
+#[tokio::test]
+async fn real_git_unstage_unexpected_cached_excludes_unselected_rename_without_committing_deletion()
+{
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("old.txt"), "original old content\n").unwrap();
+    std::fs::write(directory.path().join("selected.txt"), "initial selected\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "initial commit"], directory.path());
+
+    // 暂存重命名 old.txt -> new.txt
+    command("git", &["mv", "old.txt", "new.txt"], directory.path());
+
+    // 修改并暂存 selected.txt
+    std::fs::write(directory.path().join("selected.txt"), "updated selected\n").unwrap();
+    command("git", &["add", "selected.txt"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // 仅选中提交 selected.txt，不提交重命名
+    vcs::unstage_unexpected_cached(&repository, &["selected.txt".into()], &[], &token)
+        .await
+        .unwrap();
+
+    // 提交预期文件 selected.txt
+    let revision = vcs::commit_with_identity(
+        &repository,
+        "commit selected only",
+        false,
+        &["selected.txt".into()],
+        None,
+        false,
+        true,
+        &token,
+    )
+    .await
+    .unwrap();
+
+    // 核心验证：提交生成的 revision 中仅包含 selected.txt，绝不包含 old.txt 的删除！
+    let diff_tree = command_output(
+        "git",
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            &revision,
+        ],
+        directory.path(),
+    );
+    assert_eq!(diff_tree.trim(), "selected.txt");
+
+    // 验证 HEAD 中依然完整保留 old.txt
+    let show_old = command_output("git", &["show", "HEAD:old.txt"], directory.path());
+    assert_eq!(show_old, "original old content");
+
+    // 验证 new.txt 依然保留在工作区
+    assert_eq!(
+        read_text(directory.path().join("new.txt")),
+        "original old content\n"
+    );
+}
+
+#[tokio::test]
+async fn real_git_inspect_staged_file_for_safety_uses_index_content() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "core.autocrlf", "false"],
+        directory.path(),
+    );
+
+    // 1. CRLF 验证：暂存区为 CRLF，工作区已被改回 LF
+    std::fs::write(directory.path().join("crlf.txt"), "line1\r\nline2\r\n").unwrap();
+    command("git", &["add", "crlf.txt"], directory.path());
+    std::fs::write(directory.path().join("crlf.txt"), "line1\nline2\n").unwrap();
+
+    // 2. 文件大小验证：暂存区为 10 字节，工作区被追加至 500 字节
+    std::fs::write(directory.path().join("size.txt"), "0123456789").unwrap();
+    command("git", &["add", "size.txt"], directory.path());
+    std::fs::write(directory.path().join("size.txt"), "0123456789".repeat(50)).unwrap();
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    // 验证 crlf.txt 检查结果来源于 index，能够成功发现 CRLF
+    let crlf_info = vcs::inspect_staged_file_for_safety(&repository, "crlf.txt", true, &token)
+        .await
+        .unwrap();
+    assert!(crlf_info.is_some());
+    let (_, has_crlf) = crlf_info.unwrap();
+    assert!(
+        has_crlf,
+        "Should detect CRLF in staged index despite disk file having LF"
+    );
+
+    // 验证 size.txt 检查出的大小严格为 10 字节，而不是工作区的 500 字节
+    let size_info = vcs::inspect_staged_file_for_safety(&repository, "size.txt", false, &token)
+        .await
+        .unwrap();
+    assert!(size_info.is_some());
+    let (staged_size, _) = size_info.unwrap();
+    assert_eq!(
+        staged_size, 10,
+        "Should inspect staged index size (10 bytes), not disk size (500 bytes)"
+    );
+}
+
+#[tokio::test]
+async fn real_git_stash_operation_aborts_if_reference_hash_moved() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "versiondock@example.test"],
+        directory.path(),
+    );
+
+    // 初始提交
+    std::fs::write(directory.path().join("base.txt"), "base\n").unwrap();
+    command("git", &["add", "base.txt"], directory.path());
+    command("git", &["commit", "-m", "initial commit"], directory.path());
+
+    // 创建第一份暂存 stash 1
+    std::fs::write(directory.path().join("file1.txt"), "file1\n").unwrap();
+    command("git", &["add", "file1.txt"], directory.path());
+    command("git", &["stash", "push", "-m", "stash 1"], directory.path());
+
+    // 创建第二份暂存 stash 2
+    std::fs::write(directory.path().join("file2.txt"), "file2\n").unwrap();
+    command("git", &["add", "file2.txt"], directory.path());
+    command("git", &["stash", "push", "-m", "stash 2"], directory.path());
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    let stashes = vcs::stashes(&repository, &token).await.unwrap();
+    assert_eq!(stashes.len(), 2);
+    let stash1_hash = stashes[1].hash.clone();
+    let stash2_hash = stashes[0].hash.clone();
+
+    // 尝试以 "stash@{0}" 为引用，但传入 stash 1 的 hash（模拟序号发生偏移错位）
+    let drop_err = vcs::stash_operation(
+        &repository,
+        StashOperation::Drop {
+            reference: "stash@{0}".into(),
+            expected_hash: Some(stash1_hash.clone()),
+        },
+        &token,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(drop_err.code, "STASH_REFERENCE_MOVED");
+
+    // 核心断言：由于校验不匹配被坚决阻断，两份暂存均完好无损保留！
+    let stashes_after_abort = vcs::stashes(&repository, &token).await.unwrap();
+    assert_eq!(stashes_after_abort.len(), 2);
+    assert_eq!(stashes_after_abort[0].hash, stash2_hash);
+    assert_eq!(stashes_after_abort[1].hash, stash1_hash);
+
+    // 传入匹配的 expected_hash，验证可正常执行删除
+    vcs::stash_operation(
+        &repository,
+        StashOperation::Drop {
+            reference: "stash@{0}".into(),
+            expected_hash: Some(stash2_hash),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+
+    let remaining_stashes = vcs::stashes(&repository, &token).await.unwrap();
+    assert_eq!(remaining_stashes.len(), 1);
+    assert_eq!(remaining_stashes[0].hash, stash1_hash);
+}
+
+#[tokio::test]
 async fn real_git_lists_only_unpushed_commits() {
     if !available("git") {
         eprintln!("SKIP: git not available");
@@ -2867,6 +3347,7 @@ async fn real_git_core_workflow() {
         &repository,
         StashOperation::Apply {
             reference: stashes[0].reference.clone(),
+            expected_hash: None,
         },
         &token,
     )
@@ -2879,6 +3360,7 @@ async fn real_git_core_workflow() {
         &repository,
         StashOperation::Drop {
             reference: stashes[0].reference.clone(),
+            expected_hash: None,
         },
         &token,
     )
@@ -2889,6 +3371,7 @@ async fn real_git_core_workflow() {
         &repository,
         StashOperation::Drop {
             reference: "--all".into(),
+            expected_hash: None,
         },
         &token,
     )

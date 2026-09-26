@@ -351,16 +351,18 @@ function StashRow({
   onPop,
   onDrop,
   onOpenFileDiff,
+  busy = false,
 }: {
   entry: StashItem;
   repoId: string;
   viewMode: 'tree' | 'list';
   expansion: ExpansionCommand;
   onManualExpansionChange: () => void;
-  onApply: (repoId: string, reference: string) => void;
-  onPop: (repoId: string, reference: string) => void;
-  onDrop: (repoId: string, reference: string) => void;
+  onApply: (repoId: string, reference: string, expectedHash?: string) => void;
+  onPop: (repoId: string, reference: string, expectedHash?: string) => void;
+  onDrop: (repoId: string, reference: string, expectedHash?: string) => void;
   onOpenFileDiff?: (repoId: string, reference: string, filePath: string) => void;
+  busy?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: false });
@@ -394,8 +396,11 @@ function StashRow({
           e.preventDefault();
           setCtxMenu({ x: e.clientX, y: e.clientY });
         }}
-        onDoubleClick={() => onPop(repoId, entry.reference)}
-        title={t('{0} — double-click to pop', entry.reference)}
+        onDoubleClick={() => {
+          if (busy) return;
+          onPop(repoId, entry.reference, entry.hash);
+        }}
+        title={busy ? t('Operation in progress...') : t('{0} — double-click to pop', entry.reference)}
       >
         <button
           type="button"
@@ -436,22 +441,26 @@ function StashRow({
           <div style={rowStyle.actions}>
             <button
               type="button"
-              style={rowStyle.btn}
+              style={{ ...rowStyle.btn, opacity: busy ? 0.4 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
+              disabled={busy}
               title={t('Pop (apply and drop)')}
               onClick={(e) => {
                 e.stopPropagation();
-                onPop(repoId, entry.reference);
+                if (busy) return;
+                onPop(repoId, entry.reference, entry.hash);
               }}
             >
               <Codicon name="desktop-download" />
             </button>
             <button
               type="button"
-              style={rowStyle.btn}
+              style={{ ...rowStyle.btn, opacity: busy ? 0.4 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
+              disabled={busy}
               title={t('Apply (keep stash)')}
               onClick={(e) => {
                 e.stopPropagation();
-                onApply(repoId, entry.reference);
+                if (busy) return;
+                onApply(repoId, entry.reference, entry.hash);
               }}
             >
               <Codicon name="arrow-down" />
@@ -461,11 +470,15 @@ function StashRow({
               style={{
                 ...rowStyle.btn,
                 color: 'var(--versiondock-danger, var(--vscode-errorForeground, #f48771))',
+                opacity: busy ? 0.4 : 1,
+                cursor: busy ? 'not-allowed' : 'pointer',
               }}
+              disabled={busy}
               title={t('Drop stash')}
               onClick={(e) => {
                 e.stopPropagation();
-                onDrop(repoId, entry.reference);
+                if (busy) return;
+                onDrop(repoId, entry.reference, entry.hash);
               }}
             >
               <Codicon name="trash" />
@@ -523,15 +536,16 @@ function StashRow({
           x={ctxMenu.x}
           y={ctxMenu.y}
           items={[
-            { id: 'pop', label: t('Pop (apply & drop)'), icon: 'desktop-download' },
-            { id: 'apply', label: t('Apply (keep stash)'), icon: 'arrow-down' },
+            { id: 'pop', label: t('Pop (apply & drop)'), icon: 'desktop-download', disabled: busy },
+            { id: 'apply', label: t('Apply (keep stash)'), icon: 'arrow-down', disabled: busy },
             { separator: true },
-            { id: 'drop', label: t('Delete'), icon: 'trash', danger: true },
+            { id: 'drop', label: t('Delete'), icon: 'trash', danger: true, disabled: busy },
           ]}
           onSelect={(id) => {
-            if (id === 'pop') onPop(repoId, entry.reference);
-            else if (id === 'apply') onApply(repoId, entry.reference);
-            else if (id === 'drop') onDrop(repoId, entry.reference);
+            if (busy) return;
+            if (id === 'pop') onPop(repoId, entry.reference, entry.hash);
+            else if (id === 'apply') onApply(repoId, entry.reference, entry.hash);
+            else if (id === 'drop') onDrop(repoId, entry.reference, entry.hash);
             setCtxMenu(null);
           }}
           onClose={() => setCtxMenu(null)}
@@ -563,6 +577,7 @@ export function StashPanel({
   const stashOperation = useAppStore((state) => state.stashOperation);
   const { t } = useI18n();
   const speedSearch = useSpeedSearch('stash');
+  const [operatingRepos, setOperatingRepos] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     for (const repo of repos) {
@@ -572,17 +587,47 @@ export function StashPanel({
     }
   }, [loadStashes, repos]);
 
-  const handleApply = (repoId: string, reference: string) => {
-    void stashOperation(repoId, { type: 'apply', reference });
+  const handleApply = async (repoId: string, reference: string, expectedHash?: string) => {
+    if (operatingRepos.has(repoId)) return;
+    setOperatingRepos((prev) => new Set(prev).add(repoId));
+    try {
+      await stashOperation(repoId, { type: 'apply', reference, expected_hash: expectedHash });
+    } finally {
+      setOperatingRepos((prev) => {
+        const next = new Set(prev);
+        next.delete(repoId);
+        return next;
+      });
+    }
   };
 
-  const handlePop = (repoId: string, reference: string) => {
-    void stashOperation(repoId, { type: 'pop', reference });
+  const handlePop = async (repoId: string, reference: string, expectedHash?: string) => {
+    if (operatingRepos.has(repoId)) return;
+    setOperatingRepos((prev) => new Set(prev).add(repoId));
+    try {
+      await stashOperation(repoId, { type: 'pop', reference, expected_hash: expectedHash });
+    } finally {
+      setOperatingRepos((prev) => {
+        const next = new Set(prev);
+        next.delete(repoId);
+        return next;
+      });
+    }
   };
 
-  const handleDrop = async (repoId: string, reference: string) => {
+  const handleDrop = async (repoId: string, reference: string, expectedHash?: string) => {
+    if (operatingRepos.has(repoId)) return;
     if (await confirmDialog({ title: t('Drop stash {0}?', reference), message: reference, danger: true })) {
-      void stashOperation(repoId, { type: 'drop', reference });
+      setOperatingRepos((prev) => new Set(prev).add(repoId));
+      try {
+        await stashOperation(repoId, { type: 'drop', reference, expected_hash: expectedHash });
+      } finally {
+        setOperatingRepos((prev) => {
+          const next = new Set(prev);
+          next.delete(repoId);
+          return next;
+        });
+      }
     }
   };
 
@@ -596,6 +641,7 @@ export function StashPanel({
           const projectColor = repo.meta.color || '#4ec9b0';
           const worktreeBranch = repo.meta.isWorktree ? repo.branch : undefined;
           const error = loadErrors[`stashes:${repo.meta.id}`];
+          const isRepoBusy = operatingRepos.has(repo.meta.id);
 
           return (
             <section key={repo.meta.id} style={css.repoSection} className="stash-repo">
@@ -631,6 +677,7 @@ export function StashPanel({
                     onPop={handlePop}
                     onDrop={handleDrop}
                     onOpenFileDiff={onOpenFileDiff}
+                    busy={isRepoBusy}
                   />
                 ))
               )}

@@ -146,12 +146,14 @@ describe('appStore async lifecycle', () => {
     useAppStore.setState({ bridge, snapshot: workspace });
 
     await useAppStore.getState().commitMany([
-      { repoId: 'repo-a', paths: ['a.ts'], unstagePaths: [], amend: false },
-      { repoId: 'repo-b', paths: ['b.ts'], unstagePaths: [], amend: false },
+      { repoId: 'repo-a', paths: ['a.ts'], unstagePaths: [], amend: false, stagedOnly: true },
+      { repoId: 'repo-b', paths: ['b.ts'], unstagePaths: [], amend: false, stagedOnly: false },
     ], 'batch targets', false);
 
     const batch = requests.find((request) => request.command.type === 'batchCommit');
     expect(batch?.options?.context).toMatchObject({ repositoryId: null, target: 'repositories:["repo-a","repo-b"]' });
+    expect((batch?.command as any)?.payload?.targets[0]?.stagedOnly).toBe(true);
+    expect((batch?.command as any)?.payload?.targets[1]?.stagedOnly).toBe(false);
   });
   it('compares multi-root workspace paths independent of selection order', () => {
     expect(workspacePathsEqual(['/repo/admin', '/repo/api'], ['/repo/api', '/repo/admin'])).toBe(true);
@@ -1263,7 +1265,7 @@ describe('appStore async lifecycle', () => {
 
     await useAppStore.getState().openMerge(conflict);
     expect(useAppStore.getState().mode).toBe('merge');
-    expect(useAppStore.getState().mergeTarget).toEqual({ repoId: 'repo', path: 'conflict.txt' });
+    expect(useAppStore.getState().mergeTarget).toEqual({ repoId: 'repo', path: 'conflict.txt', workspaceId: 'workspace' });
     expect(useAppStore.getState().selectedFile).toEqual({ repoId: 'repo', path: 'conflict.txt', staged: false });
     expect(useAppStore.getState().mergeResolutions).toEqual({ 0: 'unresolved' });
 
@@ -1289,7 +1291,7 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().mode).toBe('merge');
     // selectedFile 精确恢复为 conflict.txt
     expect(useAppStore.getState().selectedFile).toEqual({ repoId: 'repo', path: 'conflict.txt', staged: false });
-    expect(useAppStore.getState().mergeTarget).toEqual({ repoId: 'repo', path: 'conflict.txt' });
+    expect(useAppStore.getState().mergeTarget).toEqual({ repoId: 'repo', path: 'conflict.txt', workspaceId: 'workspace' });
     // 草稿和解决记录完整保留
     expect(useAppStore.getState().mergeResult).toBe('resolved content');
     expect(useAppStore.getState().mergeResolutions).toEqual({ 0: 'ours' });
@@ -1304,6 +1306,112 @@ describe('appStore async lifecycle', () => {
       content: 'resolved content',
       expected_fingerprint: 'fp-1',
     });
+  });
+
+  it('discards openMerge result if workspace changed during conflictVersions request', async () => {
+    const workspace1 = snapshot('workspace-1', 1);
+    const workspace2 = snapshot('workspace-2', 2);
+    const repo = repository('repo', 'Repository');
+    workspace1.repositories = [repo];
+    workspace2.repositories = [repo];
+
+    const mockVersions = {
+      base: 'base',
+      ours: 'ours',
+      theirs: 'theirs',
+      working: 'ours',
+      conflicts: [{ index: 0, base: { start: 1, end: 2 }, ours: { start: 1, end: 2 }, theirs: { start: 1, end: 2 } }],
+      fingerprint: 'fp-1',
+      markerContent: 'marker content',
+    };
+    const bridge = new MockBridge(async (command) => {
+      if (command.type === 'conflictVersions') {
+        // 模拟在异步等待期间工作区发生了切换
+        useAppStore.setState({ snapshot: workspace2 });
+        return mockVersions;
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      snapshot: workspace1,
+      selectedRepoId: 'repo',
+      mode: 'history',
+      merge: undefined,
+      mergeTarget: undefined,
+    });
+
+    const conflict: ConflictFile = {
+      repoId: 'repo',
+      repoName: 'Repository',
+      repoColor: '#123456',
+      path: 'conflict.txt',
+      kind: 'git',
+      binary: false,
+    };
+
+    await useAppStore.getState().openMerge(conflict);
+    expect(useAppStore.getState().mode).toBe('history');
+    expect(useAppStore.getState().merge).toBeUndefined();
+    expect(useAppStore.getState().mergeTarget).toBeUndefined();
+  });
+
+  it('blocks saveMerge if current workspace does not match merge target workspace', async () => {
+    const workspace2 = snapshot('workspace-2', 2);
+    let savedCalled = false;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'conflictSave') {
+        savedCalled = true;
+        return undefined;
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      snapshot: workspace2,
+      mode: 'merge',
+      mergeTarget: { repoId: 'repo', path: 'conflict.txt', workspaceId: 'workspace-1' },
+      mergeResult: 'resolved content',
+    });
+
+    await useAppStore.getState().saveMerge();
+    expect(savedCalled).toBe(false);
+  });
+
+  it('preserves existing conflicts and records error when loadConflicts fails', async () => {
+    const workspace = snapshot('workspace', 1);
+    const existingConflicts: ConflictFile[] = [{
+      repoId: 'repo',
+      repoName: 'Repository',
+      repoColor: '#123456',
+      path: 'existing.txt',
+      kind: 'git',
+      binary: false,
+    }];
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'conflicts') {
+        throw new Error('Network error');
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      snapshot: workspace,
+      conflicts: existingConflicts,
+      loadErrors: {},
+    });
+
+    await useAppStore.getState().loadConflicts(true);
+
+    expect(useAppStore.getState().conflicts).toEqual(existingConflicts);
+    expect(useAppStore.getState().loadErrors['conflicts:all']).toBe('Network error');
   });
 
   it('manages merge parent files loading state and captures failure error', async () => {
@@ -2114,5 +2222,776 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().changesDiff).toBeUndefined();
     expect(useAppStore.getState().changesDiffLoading).toBe(false);
     expect(useAppStore.getState().changesDiffError).toBe('Diff parse error');
+  });
+
+  it('retryBatchResult preserves stagedOnly flag and target workspace id', async () => {
+    const workspace1 = snapshot('workspace-1', 1);
+    workspace1.repositories = [repository('repo-a', 'Repo A')];
+
+    const requests: Array<{ type: string; payload: any }> = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command as any);
+      if (command.type === 'batchCommit') {
+        return [{
+          repoId: 'repo-a',
+          committed: true,
+          commitHash: 'commit-123',
+          pushed: false,
+          pushAttempted: false,
+          failedStage: null,
+          recoveryHint: null,
+          error: null,
+        }];
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: workspace1,
+      commitSelections: { 'repo-a': ['file.ts'] },
+      batchCommitReport: {
+        workspaceId: 'workspace-1',
+        message: 'fix: staged bug',
+        push: false,
+        targets: [{
+          repoId: 'repo-a',
+          paths: ['file.ts'],
+          unstagePaths: [],
+          amend: false,
+          stagedOnly: true,
+        }],
+        results: [{
+          repoId: 'repo-a',
+          commitAttempted: true,
+          committed: false,
+          revision: null,
+          pushed: false,
+          pushAttempted: false,
+          failedStage: 'commit',
+          recoveryHint: null,
+          error: { code: 'HOOK_FAILED', message: 'pre-commit hook failed', command: 'git commit', exitCode: 1, stderr: '', recoverable: false },
+        }],
+      },
+    });
+
+    await useAppStore.getState().retryBatchResult('repo-a');
+
+    const retryBatch = requests.find((r) => r.type === 'batchCommit');
+    expect(retryBatch).toBeDefined();
+    expect(retryBatch?.payload.workspace_id).toBe('workspace-1');
+    expect(retryBatch?.payload.targets[0]).toMatchObject({
+      repoId: 'repo-a',
+      message: 'fix: staged bug',
+      stagedOnly: true,
+    });
+    // 重试成功后清除勾选
+    expect(useAppStore.getState().commitSelections['repo-a']).toBeUndefined();
+    // 报告已清空
+    expect(useAppStore.getState().batchCommitReport).toBeUndefined();
+  });
+
+  it('isolates commit report and clears committed selections on origin workspace when workspace switches mid-commit', async () => {
+    const workspace1 = snapshot('workspace-1', 1);
+    const workspace2 = snapshot('workspace-2', 2);
+    workspace1.repositories = [repository('repo-1', 'Repo 1')];
+    workspace2.repositories = [repository('repo-2', 'Repo 2')];
+
+    const bridge = new MockBridge(async (command) => {
+      if (command.type === 'batchCommit') {
+        // 模拟提交在飞行过程中，用户切换到了 workspace-2
+        useAppStore.setState({
+          snapshot: workspace2,
+          commitSelections: { 'repo-2': ['other.ts'] },
+        });
+        return [{
+          repoId: 'repo-1',
+          committed: true,
+          commitHash: 'hash-1',
+          pushed: false,
+          pushAttempted: false,
+          failedStage: null,
+          recoveryHint: null,
+          error: null,
+        }];
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: workspace1,
+      commitSelections: { 'repo-1': ['staged.ts'] },
+      sessions: {
+        'workspace-1': {
+          snapshot: workspace1,
+          allRepositories: workspace1.repositories,
+          commitSelections: { 'repo-1': ['staged.ts'] },
+        } as any,
+      },
+    });
+
+    await useAppStore.getState().commitMany([
+      { repoId: 'repo-1', paths: ['staged.ts'], unstagePaths: [], amend: false, stagedOnly: true },
+    ], 'commit on ws1', false);
+
+    // 当前前台是 workspace-2，workspace-2 的 selections 不受影响，报告不显示在 workspace-2
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('workspace-2');
+    expect(useAppStore.getState().commitSelections).toEqual({ 'repo-2': ['other.ts'] });
+    expect(useAppStore.getState().batchCommitReport).toBeUndefined();
+
+    // workspace-1 的 session 中保存了 report，且 selections 被正确清除
+    const ws1Session = useAppStore.getState().sessions['workspace-1'];
+    expect(ws1Session?.commitSelections?.['repo-1']).toBeUndefined();
+    expect(ws1Session?.batchCommitReport).toMatchObject({
+      workspaceId: 'workspace-1',
+      message: 'commit on ws1',
+    });
+  });
+
+  it('retryBatchResult routes to original report when multiple failures occur for the same repository', async () => {
+    const workspace = snapshot('workspace-1', 1);
+    workspace.repositories = [repository('repo-a', 'Repo A')];
+
+    const requests: Array<{ type: string; payload: any }> = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command as any);
+      if (command.type === 'batchCommit') {
+        return [{
+          repoId: 'repo-a',
+          commitAttempted: true,
+          committed: false,
+          revision: null,
+          pushed: false,
+          pushAttempted: false,
+          failedStage: 'commit',
+          recoveryHint: null,
+          error: { code: 'FAIL', message: 'failed', command: 'git commit', exitCode: 1, stderr: '', recoverable: false },
+        }];
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: workspace,
+      notifications: [],
+      batchCommitReports: {},
+    });
+
+    // 1. 第一次提交失败
+    await useAppStore.getState().commitMany([
+      { repoId: 'repo-a', paths: ['a.txt'], unstagePaths: [], amend: false, stagedOnly: true },
+    ], 'commit message 1', false);
+
+    // 2. 第二次提交失败
+    await useAppStore.getState().commitMany([
+      { repoId: 'repo-a', paths: ['b.txt'], unstagePaths: [], amend: false, stagedOnly: true },
+    ], 'commit message 2', false);
+
+    const notifications = useAppStore.getState().notifications;
+    expect(notifications.length).toBe(2);
+
+    // notifications 是按时间倒序存放的，最新的在第 0 位，第一次通知在第 1 位
+    const firstNotification = notifications[1];
+    const firstAction = firstNotification.actions.find((a) => a.type === 'retryBatchResult');
+    expect(firstAction).toBeDefined();
+
+    // 清空抓取到的 requests
+    requests.length = 0;
+
+    // 3. 点击第一次通知的重试 action
+    await useAppStore.getState().performNotificationAction(firstNotification.id, 0);
+
+    // 4. 核心断言：重试使用的 message 必须是第一次的 'commit message 1'，paths 是 ['a.txt']，绝不被第二次覆盖！
+    const retryRequest = requests.find((r) => r.type === 'batchCommit');
+    expect(retryRequest).toBeDefined();
+    expect(retryRequest?.payload.targets[0].message).toBe('commit message 1');
+    expect(retryRequest?.payload.targets[0].paths).toEqual(['a.txt']);
+  });
+
+  it('commitMany respects explicit targetWorkspaceId independent of active tab', async () => {
+    const workspace1 = snapshot('workspace-1', 1);
+    const workspace2 = snapshot('workspace-2', 2);
+    workspace1.repositories = [repository('repo-1', 'Repo 1')];
+    workspace2.repositories = [repository('repo-2', 'Repo 2')];
+
+    const requests: Array<{ type: string; payload: any }> = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command as any);
+      return [];
+    });
+
+    // 当前活跃工作区是 workspace-2
+    useAppStore.setState({
+      bridge,
+      snapshot: workspace2,
+    });
+
+    // 显式指定 targetWorkspaceId = 'workspace-1' 发起提交
+    await useAppStore.getState().commitMany([
+      { repoId: 'repo-1', paths: ['staged.ts'], unstagePaths: [], amend: false, stagedOnly: true },
+    ], 'commit on ws1', false, 'workspace-1');
+
+    const commitRequest = requests.find((r) => r.type === 'batchCommit');
+    expect(commitRequest).toBeDefined();
+    expect(commitRequest?.payload.workspace_id).toBe('workspace-1');
+  });
+
+  it('retryBatchResult blocks execution and never falls back when specified reportId is absent', async () => {
+    const workspace = snapshot('workspace-1', 1);
+    workspace.repositories = [repository('repo-a', 'Repo A')];
+
+    const requests: Array<{ type: string; payload: any }> = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command as any);
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: workspace,
+      batchCommitReport: {
+        id: 'new-report-id',
+        workspaceId: 'workspace-1',
+        message: 'new message',
+        push: false,
+        results: [{
+          repoId: 'repo-a',
+          commitAttempted: true,
+          committed: false,
+          revision: null,
+          pushed: false,
+          pushAttempted: false,
+          failedStage: 'commit',
+          recoveryHint: null,
+          error: { code: 'FAIL', message: 'err', command: 'git commit', exitCode: 1, stderr: '', recoverable: false },
+        }],
+        targets: [{ repoId: 'repo-a', paths: ['new.txt'], unstagePaths: [], amend: false, stagedOnly: true }],
+      },
+      batchCommitReports: {
+        'new-report-id': {
+          id: 'new-report-id',
+          workspaceId: 'workspace-1',
+          message: 'new message',
+          push: false,
+          results: [{
+            repoId: 'repo-a',
+            commitAttempted: true,
+            committed: false,
+            revision: null,
+            pushed: false,
+            pushAttempted: false,
+            failedStage: 'commit',
+            recoveryHint: null,
+            error: { code: 'FAIL', message: 'err', command: 'git commit', exitCode: 1, stderr: '', recoverable: false },
+          }],
+          targets: [{ repoId: 'repo-a', paths: ['new.txt'], unstagePaths: [], amend: false, stagedOnly: true }],
+        },
+      },
+    });
+
+    // 调用已不存在的旧报告 ID 进行重试
+    await useAppStore.getState().retryBatchResult('repo-a', { reportId: 'obsolete-report-id' });
+
+    // 验证绝不发起任何 batchCommit 请求，严禁 fallback 到 new-report-id
+    const retryRequest = requests.find((r) => r.type === 'batchCommit');
+    expect(retryRequest).toBeUndefined();
+  });
+
+  it('closeTab removes session and prevents switchTab from restoring closed workspace into sessions cache', async () => {
+    const ws1 = snapshot('ws-1', 1);
+    const ws2 = snapshot('ws-2', 1);
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen') {
+        const payload = (command as any).payload;
+        if (payload?.paths?.[0]?.[0]?.includes('ws-1')) return ws1;
+        return ws2;
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      tabs: [ws1.workspace, ws2.workspace],
+      activeTabId: 'ws-1',
+      snapshot: ws1,
+      sessions: {
+        'ws-1': {
+          snapshot: ws1,
+          allRepositories: ws1.repositories,
+          selectedRepoId: ws1.repositories[0]?.meta.id,
+          selectedFile: undefined,
+          fileHistoryTarget: undefined,
+          historyFilter: '',
+          historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null },
+          diff: undefined,
+          changesDiff: undefined,
+          changes: undefined,
+          merge: undefined,
+          mergeTarget: undefined,
+          mergeResolutions: {},
+          mergeScope: 'all',
+          mergeResult: '',
+          commitMessage: '',
+          mergeMessageSuggestion: undefined,
+          amendRepoIds: [],
+          commitSelections: {},
+          comparisonTarget: undefined,
+          comparison: undefined,
+          mode: 'history',
+          diffReturnMode: undefined,
+          history: [],
+          historyHasMore: false,
+          historyByRepo: {},
+          historyTopology: [],
+          historyTopologyByRepo: {},
+          historyHasMoreByRepo: {},
+          historyLoading: false,
+          branchesLoading: false,
+          historyScope: { repoIds: null, revisionsByRepo: {} },
+          branches: [],
+          tags: [],
+          branchesByRepo: {},
+          tagsByRepo: {},
+          conflicts: [],
+          subtrees: {},
+          submodules: {},
+          worktrees: {},
+          stashes: {},
+          shelves: {},
+          changelists: {},
+          remotes: {},
+          unpushedCommits: {},
+          incomingCommits: {},
+          selectedCommits: [],
+          selectedPrimaryKey: undefined,
+          selectedCommit: undefined,
+          selectedCommitDetails: {},
+          selectedCommitLoading: {},
+          selectedCommitError: {},
+          mergeCommits: {},
+          mergeCommitsLoading: {},
+          mergeParentFiles: {},
+          mergeParentFilesLoading: {},
+          mergeParentFilesError: {},
+          loadErrors: {},
+        },
+        'ws-2': {
+          snapshot: ws2,
+          allRepositories: ws2.repositories,
+          selectedRepoId: ws2.repositories[0]?.meta.id,
+          selectedFile: undefined,
+          fileHistoryTarget: undefined,
+          historyFilter: '',
+          historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null },
+          diff: undefined,
+          changesDiff: undefined,
+          changes: undefined,
+          merge: undefined,
+          mergeTarget: undefined,
+          mergeResolutions: {},
+          mergeScope: 'all',
+          mergeResult: '',
+          commitMessage: '',
+          mergeMessageSuggestion: undefined,
+          amendRepoIds: [],
+          commitSelections: {},
+          comparisonTarget: undefined,
+          comparison: undefined,
+          mode: 'history',
+          diffReturnMode: undefined,
+          history: [],
+          historyHasMore: false,
+          historyByRepo: {},
+          historyTopology: [],
+          historyTopologyByRepo: {},
+          historyHasMoreByRepo: {},
+          historyLoading: false,
+          branchesLoading: false,
+          historyScope: { repoIds: null, revisionsByRepo: {} },
+          branches: [],
+          tags: [],
+          branchesByRepo: {},
+          tagsByRepo: {},
+          conflicts: [],
+          subtrees: {},
+          submodules: {},
+          worktrees: {},
+          stashes: {},
+          shelves: {},
+          changelists: {},
+          remotes: {},
+          unpushedCommits: {},
+          incomingCommits: {},
+          selectedCommits: [],
+          selectedPrimaryKey: undefined,
+          selectedCommit: undefined,
+          selectedCommitDetails: {},
+          selectedCommitLoading: {},
+          selectedCommitError: {},
+          mergeCommits: {},
+          mergeCommitsLoading: {},
+          mergeParentFiles: {},
+          mergeParentFilesLoading: {},
+          mergeParentFilesError: {},
+          loadErrors: {},
+        },
+      },
+    });
+
+    // 关闭当前活动的 ws-1 标签页
+    await useAppStore.getState().closeTab('ws-1');
+
+    // 验证激活标签切换为 ws-2
+    expect(useAppStore.getState().activeTabId).toBe('ws-2');
+    expect(useAppStore.getState().tabs.map((t) => t.id)).toEqual(['ws-2']);
+
+    // 关键断言：已关闭的 ws-1 绝不应该被 switchTab 写回 sessions 中！
+    expect(useAppStore.getState().sessions['ws-1']).toBeUndefined();
+    expect(useAppStore.getState().sessions['ws-2']).toBeDefined();
+  });
+
+  it('retryBatchResult blocks retrying parent repository when child submodule is not committed or pushed', async () => {
+    const parentRepo = repository('repo-parent', 'Parent Repo');
+    const childRepo: RepositoryStatus = {
+      ...repository('repo-child', 'Child Submodule'),
+      meta: {
+        ...repository('repo-child', 'Child Submodule').meta,
+        parentRepoId: 'repo-parent',
+        depth: 1,
+        isSubmodule: true,
+      },
+    };
+    const workspace = snapshot('ws-1', 1);
+    workspace.repositories = [parentRepo, childRepo];
+
+    const requests: Array<{ type: string; payload: any }> = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command as any);
+      if (command.type === 'batchCommit') {
+        const payload = (command as any).payload;
+        return payload.targets.map((t: any) => ({
+          repoId: t.repoId,
+          commitAttempted: true,
+          committed: true,
+          revision: 'rev-success',
+          pushed: Boolean(payload.push),
+          pushAttempted: Boolean(payload.push),
+          failedStage: null,
+          recoveryHint: null,
+          error: null,
+        }));
+      }
+      return [];
+    });
+
+    const reportId = 'batch-report-submodule';
+    useAppStore.setState({
+      bridge,
+      snapshot: workspace,
+      allRepositories: [parentRepo, childRepo],
+      batchCommitReports: {
+        [reportId]: {
+          id: reportId,
+          workspaceId: 'ws-1',
+          message: 'feat: update parent and submodule',
+          push: true,
+          targets: [
+            { repoId: 'repo-child', paths: ['child.txt'], unstagePaths: [], amend: false, stagedOnly: true },
+            { repoId: 'repo-parent', paths: ['parent.txt'], unstagePaths: [], amend: false, stagedOnly: true },
+          ],
+          results: [
+            {
+              repoId: 'repo-child',
+              commitAttempted: true,
+              committed: false,
+              revision: null,
+              pushed: false,
+              pushAttempted: false,
+              failedStage: 'commit',
+              recoveryHint: null,
+              error: { code: 'FAIL', message: 'Submodule pre-commit failed', command: 'git commit', exitCode: 1, stderr: '', recoverable: false },
+            },
+            {
+              repoId: 'repo-parent',
+              commitAttempted: false,
+              committed: false,
+              revision: null,
+              pushed: false,
+              pushAttempted: false,
+              failedStage: 'dependency',
+              recoveryHint: 'Fix child submodule issues and retry',
+              error: { code: 'SUBMODULE_DEPENDENCY_FAILED', message: 'Skipped because child submodule "Child Submodule" failed to commit.', command: 'batch_commit', exitCode: 1, stderr: '', recoverable: false },
+            },
+          ],
+        },
+      },
+    });
+
+    // 1. 尝试直接重试父仓库
+    await useAppStore.getState().retryBatchResult('repo-parent', { reportId });
+
+    // 关键安全断言：子模块尚未提交/推送，父仓库重试必须被坚决拦截！绝不能向 bridge 发出 batchCommit
+    expect(requests.filter((r) => r.type === 'batchCommit')).toHaveLength(0);
+    // 并且产生了一条警告通知
+    const notifications = useAppStore.getState().notifications;
+    expect(notifications.some((n) => n.title === 'Commit retry blocked')).toBe(true);
+
+    // 2. 现在先重试子模块
+    await useAppStore.getState().retryBatchResult('repo-child', { reportId });
+    expect(requests.filter((r) => r.type === 'batchCommit')).toHaveLength(1);
+    expect(requests[0].payload.targets[0].repoId).toBe('repo-child');
+
+    // 此时子模块已成功提交且已推送，report 中的子模块状态已更新为成功
+    requests.length = 0;
+
+    // 3. 再次重试父仓库
+    await useAppStore.getState().retryBatchResult('repo-parent', { reportId });
+
+    // 此时子模块依赖已满足，父仓库重试应顺利放行
+    expect(requests.filter((r) => r.type === 'batchCommit')).toHaveLength(1);
+    expect(requests[0].payload.targets[0].repoId).toBe('repo-parent');
+  });
+
+  it('persistCommitSelections maintains separate debounce timers per workspace and does not cancel adjacent workspace saves', async () => {
+    vi.useFakeTimers();
+    try {
+      const sentRequests: Array<{ type: string; payload: any }> = [];
+      const bridge = {
+        send: (command: any) => sentRequests.push(command),
+        request: vi.fn().mockResolvedValue([]),
+        subscribe: () => () => undefined,
+      };
+
+      useAppStore.setState({
+        bridge: bridge as any,
+        snapshot: snapshot('workspace-1', 1),
+        sessions: {
+          'workspace-1': { commitSelections: { 'repo-1': ['a.ts'] } } as any,
+          'workspace-2': { commitSelections: { 'repo-2': ['b.ts'] } } as any,
+        },
+      });
+
+      // 1. workspace-1 触发选中变更
+      useAppStore.getState().setCommitSelection('repo-1', ['a.ts'], true);
+
+      // 2. 在 120ms 防抖计时器触发前（50ms），切换至 workspace-2 并触发选中变更
+      vi.advanceTimersByTime(50);
+      useAppStore.setState({ snapshot: snapshot('workspace-2', 2) });
+      useAppStore.getState().setCommitSelection('repo-2', ['b.ts'], true);
+
+      // 3. 时间前进 150ms，使得两个工作区的防抖定时器均到达执行时间
+      vi.advanceTimersByTime(150);
+
+      // 4. 核心断言：两个工作区的 saveCommitSelections 均被发送，未被取消
+      const ws1Save = sentRequests.find((r) => r.type === 'saveCommitSelections' && r.payload.workspace_id === 'workspace-1');
+      const ws2Save = sentRequests.find((r) => r.type === 'saveCommitSelections' && r.payload.workspace_id === 'workspace-2');
+      expect(ws1Save).toBeDefined();
+      expect(ws2Save).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stashOperation prevents concurrent operations on the same repository in the same workspace', async () => {
+    let pendingResolve: (val: any) => void = () => undefined;
+    const pendingPromise = new Promise((resolve) => {
+      pendingResolve = resolve;
+    });
+
+    const requests: any[] = [];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'stashOperation') {
+        requests.push(command);
+        return pendingPromise;
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: snapshot('workspace-1', 1),
+    });
+
+    // 第一次调用进入 pending
+    const firstCall = useAppStore.getState().stashOperation('repo-1', { type: 'pop', reference: 'stash@{0}' });
+
+    // 第二次并发调用相同仓库相同工作区
+    const secondCall = useAppStore.getState().stashOperation('repo-1', { type: 'pop', reference: 'stash@{0}' });
+
+    // 核心断言：第二次调用直接返回 false，被并发锁阻断
+    const secondResult = await secondCall;
+    expect(secondResult).toBe(false);
+    expect(requests.length).toBe(1);
+
+    // 完成第一次调用
+    pendingResolve([]);
+    const firstResult = await firstCall;
+    expect(firstResult).toBe(true);
+  });
+
+  it('stashOperation and shelfOperation respect targetWorkspaceId independent of active tab', async () => {
+    const requests: any[] = [];
+    const bridge = new MockBridge((command) => {
+      requests.push(command);
+      return [];
+    });
+
+    // 当前活跃工作区是 workspace-2
+    useAppStore.setState({
+      bridge,
+      snapshot: snapshot('workspace-2', 2),
+    });
+
+    // 显式指定 targetWorkspaceId = 'workspace-1' 调用 stashOperation
+    await useAppStore.getState().stashOperation('repo-1', { type: 'create', message: 'test', paths: ['a.ts'], include_untracked: true }, 'workspace-1');
+
+    const stashReq = requests.find((r) => r.type === 'stashOperation');
+    expect(stashReq).toBeDefined();
+    expect(stashReq?.payload.workspace_id).toBe('workspace-1');
+
+    // 显式指定 targetWorkspaceId = 'workspace-1' 调用 shelfOperation
+    await useAppStore.getState().shelfOperation('repo-1', { type: 'create', name: 'shelf-1', paths: ['a.ts'] }, 'workspace-1');
+
+    const shelfReq = requests.find((r) => r.type === 'shelfOperation');
+    expect(shelfReq).toBeDefined();
+    expect(shelfReq?.payload.workspace_id).toBe('workspace-1');
+  });
+
+  it('sync isolates targetWorkspaceId for requests, notifications, and commit reload across workspace switches', async () => {
+    const requests: any[] = [];
+    const updateResult = {
+      update: {
+        summary: {
+          kind: 'incoming',
+          commitCount: 1,
+          fileCount: 2,
+          detail: { commits: [{ repoId: 'repo-1', hash: 'c1', shortHash: 'c1', author: 'a', message: 'm', date: '', parents: [] }] },
+        },
+      },
+    };
+
+    let resolveSync: (val: any) => void = () => undefined;
+    const syncPromise = new Promise((resolve) => {
+      resolveSync = resolve;
+    });
+
+    const bridge = new MockBridge((command) => {
+      requests.push(command);
+      if (command.type === 'sync') {
+        return syncPromise;
+      }
+      if (command.type === 'unpushedCommits') {
+        return [{ hash: 'u1', shortHash: 'u1', author: 'u', message: 'unpushed', date: '', repoId: command.payload.repo_id }];
+      }
+      if (command.type === 'incomingCommits') {
+        return [{ hash: 'i1', shortHash: 'i1', author: 'i', message: 'incoming', date: '', repoId: command.payload.repo_id }];
+      }
+      return [];
+    });
+
+    const session1 = {
+      unpushedCommits: {},
+      incomingCommits: {},
+      stashes: {},
+      shelves: {},
+    } as any;
+
+    useAppStore.setState({
+      bridge,
+      snapshot: snapshot('workspace-1', 1),
+      allRepositories: [repository('repo-1', 'Repo 1')],
+      sessions: {
+        'workspace-1': session1,
+      },
+    });
+
+    // 在 workspace-1 发起 fetch，但中途切换到 workspace-2
+    const syncCall = useAppStore.getState().sync('repo-1', 'fetch', true, {}, 'workspace-1');
+
+    // 模拟用户在等待期间切换到了 workspace-2
+    useAppStore.setState({
+      snapshot: snapshot('workspace-2', 2),
+      sessions: {
+        'workspace-1': session1,
+        'workspace-2': { unpushedCommits: {}, incomingCommits: {} } as any,
+      },
+    });
+
+    // 完成 sync
+    resolveSync(updateResult);
+    await syncCall;
+
+    // 1. sync 请求的 workspace_id 必须是 workspace-1
+    const syncReq = requests.find((r) => r.type === 'sync');
+    expect(syncReq?.payload.workspace_id).toBe('workspace-1');
+
+    // 2. 随后的 unpushedCommits 与 incomingCommits 请求也必须是 workspace-1
+    const unpushedReq = requests.find((r) => r.type === 'unpushedCommits');
+    expect(unpushedReq?.payload.workspace_id).toBe('workspace-1');
+    const incomingReq = requests.find((r) => r.type === 'incomingCommits');
+    expect(incomingReq?.payload.workspace_id).toBe('workspace-1');
+
+    // 3. 通知的 workspaceId 必须是 workspace-1，绝不能被标成切走后的 workspace-2
+    const notification = useAppStore.getState().notifications.find((n) => n.title === 'Repository update');
+    expect(notification).toBeDefined();
+    expect(notification?.workspaceId).toBe('workspace-1');
+
+    // 4. sessions['workspace-1'] 成功更新了 unpushedCommits 和 incomingCommits
+    const updatedSession1 = useAppStore.getState().sessions['workspace-1'];
+    expect(updatedSession1.unpushedCommits['repo-1']?.[0]?.hash).toBe('u1');
+    expect(updatedSession1.incomingCommits['repo-1']?.[0]?.hash).toBe('i1');
+  });
+
+  it('handlePullAutoStashError records pending auto-stash under target workspace and does not hijack active tab of another workspace', async () => {
+    const stashHash = 'abcdef1234567890';
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync') {
+        throw new BridgeError({
+          code: 'GIT_PULL_CONFLICT_WITH_AUTO_STASH',
+          message: 'Conflict with auto stash',
+          command: 'git',
+          exitCode: 1,
+          stderr: 'conflict',
+          recoverable: true,
+          repositoryId: 'repo-1',
+          subject: `stash:${stashHash}`,
+        });
+      }
+      if (command.type === 'stashes') {
+        return [{ reference: 'stash@{0}', hash: stashHash, branch: 'main', message: 'auto', fullMessage: 'auto', date: '', files: [] }];
+      }
+      return [];
+    });
+
+    const bootstrap = {
+      state: { layout: { activeTab: 'sync' } },
+    } as any;
+
+    useAppStore.setState({
+      bridge,
+      bootstrap,
+      snapshot: snapshot('workspace-1', 1),
+      allRepositories: [repository('repo-1', 'Repo 1')],
+      sessions: {
+        'workspace-1': { stashes: {} } as any,
+        'workspace-2': { stashes: {} } as any,
+      },
+    });
+
+    // 模拟在 workspace-1 发起 pull，但切到 workspace-2（当前前台标签为 'sync'）
+    useAppStore.setState({ snapshot: snapshot('workspace-2', 2) });
+
+    await useAppStore.getState().sync('repo-1', 'pull', true, {}, 'workspace-1');
+
+    // 1. 产生错误恢复提示，所属工作区必须是 workspace-1
+    const notification = useAppStore.getState().notifications.find((n) => n.title === 'Restoring local changes needs attention');
+    expect(notification).toBeDefined();
+    expect(notification?.workspaceId).toBe('workspace-1');
+
+    // 2. 当前前台（workspace-2）的活跃页签未被篡改，依然保持 'sync'（不会被强制切成 'changes' 或 'stash'）
+    expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('sync');
   });
 });
