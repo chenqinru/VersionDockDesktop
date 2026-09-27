@@ -3894,6 +3894,11 @@ button.conflict-action-item {
 .compare-repo-badge { min-width: 0; max-width: 180px; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; }
 .compare-repo-badge > i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
 .compare-repo-badge > span { min-width: 0; overflow: hidden; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: .04em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.compare-repo-tabs { display: inline-flex; align-items: center; gap: 4px; max-width: 320px; overflow-x: auto; overflow-y: hidden; }
+.compare-repo-tab { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; color: var(--versiondock-muted); background: transparent; border: 1px solid transparent; cursor: pointer; }
+.compare-repo-tab:hover { background: var(--versiondock-hover); color: var(--versiondock-fg); }
+.compare-repo-tab.active { background: var(--versiondock-selection); color: var(--versiondock-accent); border-color: var(--versiondock-accent); }
+.compare-repo-tab > i { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; }
 .compare-title { min-width: 0; flex: 0 1 auto; overflow: hidden; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .compare-header > button { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; margin-left: auto; padding: 0; }
 .compare-stack { min-height: 0; flex: 1; display: grid; grid-template-rows: minmax(110px, 1fr) 4px minmax(110px, 1fr); overflow: hidden; }
@@ -5084,6 +5089,18 @@ button.danger:not(:disabled):hover,
   padding-left: 20px;
 }
 
+.statusbar-menu-item.warning {
+  color: var(--versiondock-warning);
+}
+
+.statusbar-menu-item.non-clickable {
+  cursor: default;
+}
+
+.statusbar-menu-item.non-clickable:hover {
+  background: transparent;
+}
+
 .statusbar-menu-item-text {
   display: flex;
   flex-direction: column;
@@ -5111,6 +5128,18 @@ button.danger:not(:disabled):hover,
   margin-top: 1px;
 }
 
+.statusbar-menu-item-detail {
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  color: var(--versiondock-faint);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
 .submenu-arrow {
   font-size: 11px;
   color: var(--versiondock-faint);
@@ -5124,6 +5153,25 @@ button.danger:not(:disabled):hover,
   background: color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
   color: var(--versiondock-accent);
   font-weight: 600;
+}
+
+.statusbar-repo-op-label {
+  font-style: italic;
+  color: var(--versiondock-warning, #cca700);
+}
+
+.statusbar-active-repo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--versiondock-accent) 20%, transparent);
+  color: var(--versiondock-accent);
+  font-weight: 500;
+  margin-left: 2px;
 }
 
 /* ===== 账号身份 Popover 样式 ===== */

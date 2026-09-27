@@ -91,7 +91,8 @@ export type AppNotificationAction =
   | { type: 'addUntracked'; label: NotificationText; files: Array<{ repoId: string; path: string }> }
   | { type: 'retryBatchResult'; label: NotificationText; repoId: string; reportId?: string; workspaceId?: string }
   | { type: 'disableIncoming'; label: NotificationText }
-  | { type: 'openLogPanel'; label: NotificationText };
+  | { type: 'openLogPanel'; label: NotificationText }
+  | { type: 'openBranchComparison'; label: NotificationText; repoId: string; target: string };
 
 export interface AppNotification {
   id: string;
@@ -3395,19 +3396,29 @@ export const useAppStore = create<AppStore>((set, get) => {
           return undefined;
         }
         const target = value.name;
+        let recoveryResult: BranchRecoveryResult | undefined;
         await queueBranchRecoveryDialog(async () => {
-        if (value.type === 'merge') {
-          const selected = await choiceDialog({ title: t('Uncommitted changes'), message: t('Local changes would be overwritten by merging "{0}".', target), choices: [{ id: 'stash', label: t('Stash and merge'), description: t('Save all local changes to a retained stash, then merge.'), icon: 'archive' }, { id: 'cancel', label: t('Cancel'), icon: 'close' }] });
-          if (selected === 'stash') {
-            const recovery = await get().branchRecovery(repoId, { type: 'stashAndMerge', target });
-            if (recovery?.status === 'conflicted') suggestMergeMessage();
+          if (value.type === 'merge') {
+            const selected = await choiceDialog({ title: t('Uncommitted changes'), message: t('Local changes would be overwritten by merging "{0}".', target), choices: [{ id: 'stash', label: t('Stash and merge'), description: t('Save all local changes to a retained stash, then merge.'), icon: 'archive' }, { id: 'cancel', label: t('Cancel'), icon: 'close' }] });
+            if (selected === 'stash') {
+              const recovery = await get().branchRecovery(repoId, { type: 'stashAndMerge', target });
+              recoveryResult = recovery;
+              if (recovery?.status === 'conflicted') suggestMergeMessage();
+            }
+            return;
           }
-          return;
-        }
-        const selected = await choiceDialog({ title: t('Uncommitted changes'), message: t('Choose how to handle local changes before switching to "{0}".', target), choices: [{ id: 'stash', label: t('Stash and checkout'), description: t('Keep changes in a stash and switch branches.'), icon: 'archive' }, { id: 'carry', label: t('Carry changes'), description: t('Switch branches and apply the changes there.'), icon: 'arrow-right' }, { id: 'force', label: t('Force checkout'), description: t('Discard tracked local changes and switch branches.'), icon: 'warning', danger: true }, { id: 'cancel', label: t('Cancel'), icon: 'close' }] });
-        const recovery = selected === 'stash' ? { type: 'stashAndCheckout', target } as const : selected === 'carry' ? { type: 'carryChanges', target } as const : selected === 'force' ? { type: 'forceCheckout', target } as const : undefined;
-        if (recovery) await get().branchRecovery(repoId, recovery);
+          const selected = await choiceDialog({ title: t('Uncommitted changes'), message: t('Choose how to handle local changes before switching to "{0}".', target), choices: [{ id: 'stash', label: t('Stash and checkout'), description: t('Keep changes in a stash and switch branches.'), icon: 'archive' }, { id: 'carry', label: t('Carry changes'), description: t('Switch branches and apply the changes there.'), icon: 'arrow-right' }, { id: 'force', label: t('Force checkout'), description: t('Discard tracked local changes and switch branches.'), icon: 'warning', danger: true }, { id: 'cancel', label: t('Cancel'), icon: 'close' }] });
+          const recovery = selected === 'stash' ? { type: 'stashAndCheckout', target } as const : selected === 'carry' ? { type: 'carryChanges', target } as const : selected === 'force' ? { type: 'forceCheckout', target } as const : undefined;
+          if (recovery) {
+            recoveryResult = await get().branchRecovery(repoId, recovery);
+          }
         });
+        if (recoveryResult && recoveryResult.status !== 'partialFailure') {
+          return {
+            completed: recoveryResult.status === 'completed',
+            conflicted: recoveryResult.status === 'conflicted',
+          };
+        }
         return undefined;
       }
     },
@@ -4469,6 +4480,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (notification.workspaceId && notification.workspaceId !== get().activeTabId) {
         await get().switchTab(notification.workspaceId);
       }
+      const workspaceMismatch = Boolean(notification.workspaceId && get().snapshot?.workspace.id !== notification.workspaceId);
+      if (workspaceMismatch && action.type !== 'disableIncoming' && action.type !== 'openLogPanel' && action.type !== 'viewUpdateDetails' && action.type !== 'viewUpdateResults') {
+        return;
+      }
       switch (action.type) {
         case 'updateProject': await get().updateProject(); break;
         case 'openPush': get().setActiveTab('sync'); break;
@@ -4494,6 +4509,22 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
         case 'retryBatchResult': await get().retryBatchResult(action.repoId, { reportId: action.reportId, workspaceId: action.workspaceId }); break;
         case 'disableIncoming': await get().updateSettings({ notifyIncomingCommits: false }); break;
+        case 'openBranchComparison': {
+          const currentWorkspace = get().snapshot;
+          if (!currentWorkspace) return;
+          if (notification.workspaceId && currentWorkspace.workspace.id !== notification.workspaceId) return;
+          if (!currentWorkspace.repositories.some((r) => r.meta.id === action.repoId)) return;
+
+          const wid = currentWorkspace.workspace.id;
+          if (get().selectedRepoId !== action.repoId) {
+            await get().selectRepo(action.repoId, false);
+          }
+          if (get().snapshot?.workspace.id !== wid) return;
+          if (!get().snapshot?.repositories.some((r) => r.meta.id === action.repoId)) return;
+
+          get().openBranchComparison(action.repoId, action.target);
+          break;
+        }
       }
     },
     markNotificationAsRead: (id) => {

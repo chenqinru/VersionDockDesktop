@@ -1,5 +1,5 @@
 export type DialogRequest = {
-  kind: 'confirm' | 'prompt' | 'choice' | 'editor';
+  kind: 'confirm' | 'prompt' | 'choice' | 'multiChoice' | 'editor';
   title: string;
   message: string;
   confirmLabel?: string;
@@ -7,10 +7,11 @@ export type DialogRequest = {
   danger?: boolean;
   inputLabel?: string;
   initialValue?: string;
+  initialSelected?: string[];
   choices?: Array<{ id: string; label: string; description?: string; icon?: string; danger?: boolean }>;
   items?: Array<{ id: string; label: string; description?: string }>;
   submit?: (value: string) => Promise<boolean>;
-  resolve: (value: boolean | string | null) => void;
+  resolve: (value: boolean | string | string[] | null) => void;
 };
 
 let current: DialogRequest | undefined;
@@ -33,6 +34,10 @@ export function promptDialog(options: Omit<DialogRequest, 'kind' | 'resolve'>): 
 
 export function choiceDialog(options: Omit<DialogRequest, 'kind' | 'resolve' | 'inputLabel' | 'initialValue' | 'confirmLabel'> & { choices: NonNullable<DialogRequest['choices']> }): Promise<string | null> {
   return new Promise((resolve) => publishDialog({ ...options, kind: 'choice', resolve: (value) => resolve(typeof value === 'string' ? value : null) }));
+}
+
+export function multiChoiceDialog(options: Omit<DialogRequest, 'kind' | 'resolve' | 'inputLabel' | 'initialValue'> & { choices: NonNullable<DialogRequest['choices']>; initialSelected?: string[] }): Promise<string[] | null> {
+  return new Promise((resolve) => publishDialog({ ...options, kind: 'multiChoice', resolve: (value) => resolve(Array.isArray(value) ? value : null) }));
 }
 
 export function editorDialog(options: Omit<DialogRequest, 'kind' | 'resolve' | 'choices'> & { submit: NonNullable<DialogRequest['submit']> }): Promise<void> {

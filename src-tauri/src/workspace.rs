@@ -1389,7 +1389,12 @@ fn git_operation(root: &Path) -> Option<String> {
     } else {
         let value = std::fs::read_to_string(git).ok()?;
         let target = value.trim().strip_prefix("gitdir: ")?;
-        root.join(target)
+        let target = Path::new(target);
+        if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            root.join(target)
+        }
     };
     if git_dir.join("MERGE_HEAD").exists() {
         Some("merge".into())
@@ -1397,6 +1402,8 @@ fn git_operation(root: &Path) -> Option<String> {
         Some("rebase".into())
     } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
         Some("cherry-pick".into())
+    } else if git_dir.join("REVERT_HEAD").exists() {
+        Some("revert".into())
     } else {
         None
     }
@@ -1630,5 +1637,52 @@ mod tests {
                 .as_deref(),
             Some("REPOSITORY_CONFLICTED")
         );
+    }
+
+    #[test]
+    fn git_operation_detects_all_vcs_operation_states() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let git_dir = root.join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+
+        assert_eq!(git_operation(root), None);
+
+        // 1. merge
+        let merge_head = git_dir.join("MERGE_HEAD");
+        std::fs::write(&merge_head, "abc").unwrap();
+        assert_eq!(git_operation(root).as_deref(), Some("merge"));
+        std::fs::remove_file(&merge_head).unwrap();
+
+        // 2. rebase
+        let rebase_merge = git_dir.join("rebase-merge");
+        std::fs::create_dir_all(&rebase_merge).unwrap();
+        assert_eq!(git_operation(root).as_deref(), Some("rebase"));
+        std::fs::remove_dir_all(&rebase_merge).unwrap();
+
+        // 3. cherry-pick
+        let cp_head = git_dir.join("CHERRY_PICK_HEAD");
+        std::fs::write(&cp_head, "abc").unwrap();
+        assert_eq!(git_operation(root).as_deref(), Some("cherry-pick"));
+        std::fs::remove_file(&cp_head).unwrap();
+
+        // 4. revert
+        let revert_head = git_dir.join("REVERT_HEAD");
+        std::fs::write(&revert_head, "abc").unwrap();
+        assert_eq!(git_operation(root).as_deref(), Some("revert"));
+        std::fs::remove_file(&revert_head).unwrap();
+
+        // 5. worktree file link
+        let wt_root = root.join("worktree");
+        std::fs::create_dir_all(&wt_root).unwrap();
+        let wt_git_dir = root.join("separate_git_dir");
+        std::fs::create_dir_all(&wt_git_dir).unwrap();
+        std::fs::write(
+            wt_root.join(".git"),
+            format!("gitdir: {}\n", wt_git_dir.display()),
+        )
+        .unwrap();
+        std::fs::write(wt_git_dir.join("REVERT_HEAD"), "abc").unwrap();
+        assert_eq!(git_operation(&wt_root).as_deref(), Some("revert"));
     }
 }

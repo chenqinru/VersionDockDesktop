@@ -897,12 +897,29 @@ pub enum SyncAction {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum BranchOperation {
-    Create { name: String, from: Option<String> },
-    Checkout { name: String },
-    Merge { name: String },
-    Rebase { name: String },
-    Rename { old_name: String, new_name: String },
-    Delete { name: String, force: bool },
+    Create {
+        name: String,
+        from: Option<String>,
+        #[serde(default)]
+        checkout: Option<bool>,
+    },
+    Checkout {
+        name: String,
+    },
+    Merge {
+        name: String,
+    },
+    Rebase {
+        name: String,
+    },
+    Rename {
+        old_name: String,
+        new_name: String,
+    },
+    Delete {
+        name: String,
+        force: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2486,6 +2503,10 @@ pub struct BranchInfo {
     pub detached_tag: Option<String>,
     #[serde(default)]
     pub detached_hash: Option<String>,
+    #[serde(default)]
+    pub last_commit_message: Option<String>,
+    #[serde(default)]
+    pub last_commit_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

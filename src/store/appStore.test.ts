@@ -81,6 +81,105 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().notifications[0].read).toBe(true);
   });
 
+  it('handles openBranchComparison notification action by switching repo and opening comparison', async () => {
+    const workspace = snapshot('workspace', 1);
+    workspace.repositories = [repository('repo-1', 'Repo 1'), repository('repo-2', 'Repo 2')];
+    useAppStore.setState({ snapshot: workspace, selectedRepoId: 'repo-1' });
+
+    const notifId = useAppStore.getState().addNotification({
+      type: 'info',
+      title: 'Compare feature',
+      message: 'Compare result',
+      workspaceId: 'workspace',
+      actions: [{ type: 'openBranchComparison', label: 'Repo 2', repoId: 'repo-2', target: 'feature/login' }],
+    });
+
+    await useAppStore.getState().performNotificationAction(notifId, 0);
+
+    expect(useAppStore.getState().selectedRepoId).toBe('repo-2');
+    expect(useAppStore.getState().comparisonTarget).toEqual({ repoId: 'repo-2', target: 'feature/login' });
+    expect(useAppStore.getState().mode).toBe('history');
+  });
+
+  it('does not open comparison if target workspace has been closed', async () => {
+    const currentWorkspace = snapshot('current-ws', 1);
+    currentWorkspace.repositories = [repository('repo-current', 'Current Repo')];
+    useAppStore.setState({
+      snapshot: currentWorkspace,
+      activeTabId: 'current-ws',
+      tabs: [currentWorkspace.workspace],
+      selectedRepoId: 'repo-current',
+      comparisonTarget: undefined,
+    });
+
+    const notifId = useAppStore.getState().addNotification({
+      type: 'info',
+      title: 'Compare feature',
+      message: 'Compare result',
+      workspaceId: 'closed-ws',
+      actions: [{ type: 'openBranchComparison', label: 'Old Repo', repoId: 'old-repo', target: 'feature/login' }],
+    });
+
+    await useAppStore.getState().performNotificationAction(notifId, 0);
+
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('current-ws');
+    expect(useAppStore.getState().selectedRepoId).toBe('repo-current');
+    expect(useAppStore.getState().comparisonTarget).toBeUndefined();
+  });
+
+  it('does not open comparison if target repo does not exist in workspace', async () => {
+    const currentWorkspace = snapshot('current-ws', 1);
+    currentWorkspace.repositories = [repository('repo-a', 'Repo A')];
+    useAppStore.setState({
+      snapshot: currentWorkspace,
+      activeTabId: 'current-ws',
+      tabs: [currentWorkspace.workspace],
+      selectedRepoId: 'repo-a',
+      comparisonTarget: undefined,
+    });
+
+    const notifId = useAppStore.getState().addNotification({
+      type: 'info',
+      title: 'Compare feature',
+      message: 'Compare result',
+      workspaceId: 'current-ws',
+      actions: [{ type: 'openBranchComparison', label: 'Non Existent', repoId: 'repo-nonexistent', target: 'feature/login' }],
+    });
+
+    await useAppStore.getState().performNotificationAction(notifId, 0);
+
+    expect(useAppStore.getState().selectedRepoId).toBe('repo-a');
+    expect(useAppStore.getState().comparisonTarget).toBeUndefined();
+  });
+
+  it('executes global action (such as disableIncoming) even if target workspace has been closed', async () => {
+    const bridge = new MockBridge((command) => command.type === 'updateSettings'
+      ? { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: false } }
+      : true);
+    const currentWorkspace = snapshot('current-ws', 1);
+    currentWorkspace.repositories = [repository('repo-current', 'Current Repo')];
+    useAppStore.setState({
+      bridge,
+      snapshot: currentWorkspace,
+      activeTabId: 'current-ws',
+      tabs: [currentWorkspace.workspace],
+      selectedRepoId: 'repo-current',
+      bootstrap: { ...bootstrap, state: { ...bootstrap.state, settings: { ...bootstrap.state.settings, notifyIncomingCommits: true } as import('../bindings/generated').DesktopSettings } },
+    });
+
+    const notifId = useAppStore.getState().addNotification({
+      type: 'info',
+      title: 'Incoming Commits',
+      message: 'New commits',
+      workspaceId: 'closed-ws',
+      actions: [{ type: 'disableIncoming', label: "Don't show again" }],
+    });
+
+    await useAppStore.getState().performNotificationAction(notifId, 0);
+
+    expect(useAppStore.getState().bootstrap?.state.settings?.notifyIncomingCommits).toBe(false);
+  });
+
   it('queues every notification for immediate display without overwriting earlier messages', () => {
     const first = useAppStore.getState().addNotification({ type: 'info', title: 'First', message: 'First message' });
     const second = useAppStore.getState().addNotification({ type: 'success', title: 'Second', message: 'Second message' });
@@ -1122,7 +1221,8 @@ describe('appStore async lifecycle', () => {
     const operation = useAppStore.getState().branchOperation({ type: 'checkout', name: 'feature' }, 'a');
     await vi.waitFor(() => expect(currentDialog()?.kind).toBe('choice'));
     currentDialog()?.resolve('stash');
-    await operation;
+    const result = await operation;
+    expect(result).toEqual({ completed: true, conflicted: false });
     expect(operations.find((command) => command.type === 'branchRecovery')).toMatchObject({ payload: { operation: { type: 'stashAndCheckout', target: 'feature' } } });
   });
 
@@ -1142,7 +1242,8 @@ describe('appStore async lifecycle', () => {
     const dialog = currentDialog();
     publishDialog(undefined);
     dialog?.resolve('force');
-    await operation;
+    const result = await operation;
+    expect(result).toEqual({ completed: true, conflicted: false });
     expect(currentDialog()).toBeUndefined();
     expect(operations.find((command) => command.type === 'branchRecovery')).toMatchObject({ payload: { operation: { type: 'forceCheckout', target: 'feature' } } });
   });

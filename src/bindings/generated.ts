@@ -59,9 +59,11 @@ export type BranchInfo = {
 	behind: number,
 	detachedTag?: string | null,
 	detachedHash?: string | null,
+	lastCommitMessage?: string | null,
+	lastCommitDate?: string | null,
 };
 
-export type BranchOperation = { type: "create"; name: string; from: string | null } | { type: "checkout"; name: string } | { type: "merge"; name: string } | { type: "rebase"; name: string } | { type: "rename"; old_name: string; new_name: string } | { type: "delete"; name: string; force: boolean };
+export type BranchOperation = { type: "create"; name: string; from: string | null; checkout?: boolean | null } | { type: "checkout"; name: string } | { type: "merge"; name: string } | { type: "rebase"; name: string } | { type: "rename"; old_name: string; new_name: string } | { type: "delete"; name: string; force: boolean };
 
 export type BranchOperationResult = {
 	completed: boolean,

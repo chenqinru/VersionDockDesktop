@@ -6453,7 +6453,7 @@ pub async fn branches(
         return svn_branches(repo, token).await;
     }
     let format = format!(
-        "%(refname:short){FIELD}%(refname){FIELD}%(HEAD){FIELD}%(upstream:short){FIELD}%(upstream:track){RECORD}"
+        "%(refname:short){FIELD}%(refname){FIELD}%(HEAD){FIELD}%(upstream:short){FIELD}%(upstream:track){FIELD}%(contents:subject){FIELD}%(committerdate:relative){RECORD}"
     );
     let raw = git(
         vec![
@@ -6487,6 +6487,14 @@ pub async fn branches(
             if fields.len() < 5 || fields[0].is_empty() || fields[0].ends_with("/HEAD") {
                 return None;
             }
+            let last_commit_message = fields.get(5).and_then(|s| {
+                let trimmed = s.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            });
+            let last_commit_date = fields.get(6).and_then(|s| {
+                let trimmed = s.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            });
             Some(BranchInfo {
                 name: fields[0].into(),
                 current: fields[2] == "*",
@@ -6497,6 +6505,8 @@ pub async fn branches(
                 behind: parse_counter(fields[4], "behind "),
                 detached_tag: None,
                 detached_hash: None,
+                last_commit_message,
+                last_commit_date,
             })
         })
         .collect();
@@ -6575,6 +6585,8 @@ pub async fn branches(
             behind: 0,
             detached_tag,
             detached_hash,
+            last_commit_message: None,
+            last_commit_date: None,
         });
     }
 
@@ -6607,6 +6619,8 @@ async fn svn_branches(
         behind,
         detached_tag,
         detached_hash: None,
+        last_commit_message: None,
+        last_commit_date: None,
     }];
 
     let add = |name: String, branches: &mut Vec<BranchInfo>| {
@@ -6626,6 +6640,8 @@ async fn svn_branches(
             behind: 0,
             detached_tag: None,
             detached_hash: None,
+            last_commit_message: None,
+            last_commit_date: None,
         });
     };
 
@@ -6723,7 +6739,7 @@ pub async fn branch_operation(
                     format!("Delete {target} from VersionDock"),
                 ]
             }
-            BranchOperation::Create { name, from } => {
+            BranchOperation::Create { name, from, .. } => {
                 let destination = svn_repository_target(&format!("branches/{name}"))?;
                 let relative = svn_relative_url(repo, token).await?;
                 let source = if relative.is_empty() {
@@ -6766,9 +6782,18 @@ pub async fn branch_operation(
     ensure_git(repo)?;
     let is_merge = matches!(operation, BranchOperation::Merge { .. });
     let args = match operation {
-        BranchOperation::Create { name, from } => {
+        BranchOperation::Create {
+            name,
+            from,
+            checkout,
+        } => {
             validate_ref(&name)?;
-            let mut args = vec!["switch".into(), "-c".into(), name];
+            let should_checkout = checkout.unwrap_or(true);
+            let mut args = if should_checkout {
+                vec!["switch".into(), "-c".into(), name]
+            } else {
+                vec!["branch".into(), name]
+            };
             if let Some(value) = from {
                 validate_ref(&value)?;
                 args.push(value);
@@ -8603,8 +8628,8 @@ pub(crate) async fn check_submodule_type_change_conflict(
         }
     }
 
-    if (has_submodule_stage && (has_non_submodule_stage || detected_companion.is_some()))
-        || (path.contains('~') && has_submodule_stage)
+    if (path.contains('~') || detected_companion.is_some() || has_non_submodule_stage)
+        && has_submodule_stage
     {
         return Ok(detected_companion.or_else(|| Some(path.to_string())));
     }
@@ -10798,14 +10823,12 @@ pub async fn conflict_save(
                     true,
                 ));
             }
-        } else if repo.kind == VcsKind::Svn {
-            if is_svn_conflict_binary(repo, &safe, token).await {
-                return Err(DesktopError::new(
-                    "BINARY_FILE_NOT_EDITABLE",
-                    "Binary file — no diff available",
-                    true,
-                ));
-            }
+        } else if repo.kind == VcsKind::Svn && is_svn_conflict_binary(repo, &safe, token).await {
+            return Err(DesktopError::new(
+                "BINARY_FILE_NOT_EDITABLE",
+                "Binary file — no diff available",
+                true,
+            ));
         }
     }
     if delete_file {
@@ -11184,7 +11207,7 @@ pub async fn conflict_accept(
                             token,
                         )
                         .await?;
-                        stage(repo, &[safe.clone()], false, token).await?;
+                        stage(repo, std::slice::from_ref(&safe), false, token).await?;
                     }
                     ConflictChoice::Theirs => {
                         git(
@@ -11198,10 +11221,10 @@ pub async fn conflict_accept(
                             token,
                         )
                         .await?;
-                        stage(repo, &[safe.clone()], false, token).await?;
+                        stage(repo, std::slice::from_ref(&safe), false, token).await?;
                     }
                     ConflictChoice::Working => {
-                        stage(repo, &[safe.clone()], false, token).await?;
+                        stage(repo, std::slice::from_ref(&safe), false, token).await?;
                     }
                 }
             }

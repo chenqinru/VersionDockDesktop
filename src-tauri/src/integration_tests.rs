@@ -3351,6 +3351,7 @@ async fn real_git_core_workflow() {
         BranchOperation::Create {
             name: "feature/test".into(),
             from: None,
+            checkout: None,
         },
         &token,
     )
