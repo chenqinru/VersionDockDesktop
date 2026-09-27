@@ -3710,6 +3710,7 @@ async fn real_git_core_workflow() {
         "conflict.txt",
         "<<<<<<< ours\n=======\n>>>>>>> theirs\n",
         &versions.fingerprint,
+        false,
         true,
         &token,
     )
@@ -3722,6 +3723,7 @@ async fn real_git_core_workflow() {
         "conflict.txt",
         "resolved\n",
         &versions.fingerprint,
+        false,
         true,
         &token,
     )
@@ -3734,6 +3736,7 @@ async fn real_git_core_workflow() {
         "conflict.txt",
         "resolved\n",
         &versions.fingerprint,
+        false,
         true,
         &token,
     )
@@ -3791,6 +3794,165 @@ async fn real_git_core_workflow() {
         .files
         .iter()
         .any(|file| file.path == "binary.bin" && file.conflicted));
+}
+
+#[tokio::test]
+async fn real_git_rebase_conflict_continue_and_abort_guards() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "test@versiondock.com"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "commit.gpgsign", "false"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("file.txt"), "line 1\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "init"], directory.path());
+
+    command("git", &["switch", "-c", "feature"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "line 1 feature\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "feature edit"], directory.path());
+
+    command("git", &["switch", "main"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "line 1 main\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "main edit"], directory.path());
+
+    command("git", &["switch", "feature"], directory.path());
+    let _ = Command::new("git")
+        .args(["rebase", "main"])
+        .current_dir(directory.path())
+        .output();
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    let status = workspace::git_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    assert_eq!(status.operation, Some("rebase".into()));
+    assert!(status.files.iter().any(|f| f.conflicted));
+
+    let err = vcs::continue_operation(&repository, "rebase", &token)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "CONFLICTS_UNRESOLVED");
+
+    let err = vcs::continue_operation(&repository, "cherry-pick", &token)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "OPERATION_MISMATCH");
+
+    std::fs::write(directory.path().join("file.txt"), "line 1 resolved\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+
+    vcs::continue_operation(&repository, "rebase", &token)
+        .await
+        .unwrap();
+
+    let status_after = workspace::git_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    assert_eq!(status_after.operation, None);
+    assert!(!status_after.files.iter().any(|f| f.conflicted));
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+        "line 1 resolved\n"
+    );
+}
+
+#[tokio::test]
+async fn real_git_rebase_multi_commit_subsequent_conflict_keeps_rebase_active() {
+    if !available("git") {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Tester"],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "tester@example.com"],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("file.txt"), "base\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "init"], directory.path());
+
+    command("git", &["switch", "-c", "feature"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "feature 1\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "feature 1"], directory.path());
+
+    std::fs::write(directory.path().join("file.txt"), "feature 2\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "feature 2"], directory.path());
+
+    command("git", &["switch", "main"], directory.path());
+    std::fs::write(directory.path().join("file.txt"), "main edit\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+    command("git", &["commit", "-m", "main edit"], directory.path());
+
+    command("git", &["switch", "feature"], directory.path());
+    let _ = Command::new("git")
+        .args(["rebase", "main"])
+        .current_dir(directory.path())
+        .output();
+
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+
+    let status = workspace::git_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    assert_eq!(status.operation, Some("rebase".into()));
+    assert!(status.files.iter().any(|f| f.conflicted));
+
+    std::fs::write(directory.path().join("file.txt"), "resolved 1\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+
+    let continue_err = vcs::continue_operation(&repository, "rebase", &token)
+        .await
+        .unwrap_err();
+    assert!(continue_err.code == "COMMAND_FAILED" || continue_err.code == "CONFLICTS_UNRESOLVED");
+
+    let status_mid = workspace::git_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    assert_eq!(status_mid.operation, Some("rebase".into()));
+    assert!(status_mid.files.iter().any(|f| f.conflicted));
+
+    std::fs::write(directory.path().join("file.txt"), "resolved 2\n").unwrap();
+    command("git", &["add", "file.txt"], directory.path());
+
+    vcs::continue_operation(&repository, "rebase", &token)
+        .await
+        .unwrap();
+
+    let status_done = workspace::git_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    assert_eq!(status_done.operation, None);
+    assert!(!status_done.files.iter().any(|f| f.conflicted));
 }
 
 #[tokio::test]

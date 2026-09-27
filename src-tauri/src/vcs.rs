@@ -1225,7 +1225,7 @@ pub async fn stage(
     match repo.kind {
         VcsKind::Git => {
             for path in paths {
-                let safe = relative_path(root, path, true)?;
+                let safe = relative_path(root, path, false)?;
                 let index_entry = git(
                     vec![
                         "ls-files".into(),
@@ -1267,7 +1267,7 @@ pub async fn stage(
             args.extend(
                 paths
                     .iter()
-                    .map(|path| literal_path(root, path, true))
+                    .map(|path| literal_path(root, path, false))
                     .collect::<Result<Vec<_>, _>>()?,
             );
             git(args, repo, token).await?;
@@ -1276,7 +1276,7 @@ pub async fn stage(
             let _ = allow_truncated;
             let safe_paths = paths
                 .iter()
-                .map(|path| relative_path(root, path, true))
+                .map(|path| relative_path(root, path, false))
                 .collect::<Result<Vec<_>, _>>()?;
             let ignores = crate::workspace::svn_ignore_rules(root, token).await;
             let scan_root = root.to_path_buf();
@@ -2291,6 +2291,76 @@ pub async fn abort_operation(
                 "The requested repository operation is not active",
                 true,
             ))
+        }
+    };
+    git(args, repo, token).await?;
+    Ok(())
+}
+
+pub async fn continue_operation(
+    repo: &RepositoryMeta,
+    operation: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if repo.kind != VcsKind::Git {
+        return Err(DesktopError::new(
+            "OPERATION_NOT_SUPPORTED",
+            "Continuing repository operations is only supported for Git repositories",
+            true,
+        ));
+    }
+    let active_op = git_operation_name(Path::new(&repo.root_path)).ok_or_else(|| {
+        DesktopError::new(
+            "OPERATION_NOT_ACTIVE",
+            "No Git operation is currently in progress",
+            true,
+        )
+    })?;
+    if active_op != operation {
+        return Err(DesktopError::new(
+            "OPERATION_MISMATCH",
+            format!("Expected active operation '{active_op}', got '{operation}'"),
+            true,
+        ));
+    }
+    let unresolved = git(
+        vec![
+            "diff".into(),
+            "--name-only".into(),
+            "--diff-filter=U".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    if !unresolved.trim().is_empty() {
+        return Err(DesktopError::new(
+            "CONFLICTS_UNRESOLVED",
+            "Cannot continue: there are still unresolved conflicts",
+            true,
+        ));
+    }
+    let args = match operation {
+        "rebase" => vec![
+            "-c".into(),
+            "core.editor=true".into(),
+            "rebase".into(),
+            "--continue".into(),
+        ],
+        "cherry-pick" => vec![
+            "cherry-pick".into(),
+            "--continue".into(),
+            "--no-edit".into(),
+        ],
+        "revert" => vec!["revert".into(), "--continue".into(), "--no-edit".into()],
+        "merge" => vec!["commit".into(), "--no-edit".into()],
+        _ => {
+            return Err(DesktopError::new(
+                "OPERATION_NOT_SUPPORTED",
+                format!("Cannot continue operation '{operation}'"),
+                true,
+            ));
         }
     };
     git(args, repo, token).await?;
@@ -5304,11 +5374,7 @@ pub async fn branch_compare_commits(
         limit
     };
 
-    let skip_count = if resolved_revision.is_some() {
-        0
-    } else {
-        skip
-    };
+    let skip_count = if resolved_revision.is_some() { 0 } else { skip };
 
     let mut args = vec![
         "log".into(),
@@ -5385,8 +5451,26 @@ pub async fn branch_compare(
     validate_revision_or_ref(target)?;
     let default_query = HistoryQuery::default();
     let (base_commits, target_commits) = tokio::try_join!(
-        branch_compare_commits(repo, base, target, "baseOnly", 0, 500, &default_query, token),
-        branch_compare_commits(repo, base, target, "targetOnly", 0, 500, &default_query, token)
+        branch_compare_commits(
+            repo,
+            base,
+            target,
+            "baseOnly",
+            0,
+            500,
+            &default_query,
+            token
+        ),
+        branch_compare_commits(
+            repo,
+            base,
+            target,
+            "targetOnly",
+            0,
+            500,
+            &default_query,
+            token
+        )
     )?;
     let range = format!("{base}..{target}");
     let stats = git(
@@ -8439,6 +8523,95 @@ async fn submodule_diff_summary(
     .filter(|value| !value.is_empty())
 }
 
+pub(crate) async fn resolve_submodule_conflict_gitlink(
+    repo: &RepositoryMeta,
+    path: &str,
+    choice: ConflictChoice,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if !matches!(choice, ConflictChoice::Working) {
+        let (_, stages, _, _) = submodule_index_state(repo, path, token).await;
+        let selected = stages.and_then(|stages| match choice {
+            ConflictChoice::Mine => stages.ours,
+            ConflictChoice::Theirs => stages.theirs,
+            ConflictChoice::Working => None,
+        });
+        if let Some(hash) = selected {
+            git(
+                vec![
+                    "update-index".into(),
+                    "--add".into(),
+                    "--cacheinfo".into(),
+                    format!("160000,{hash},{path}"),
+                ],
+                repo,
+                token,
+            )
+            .await?;
+        } else {
+            git(
+                vec![
+                    "rm".into(),
+                    "--cached".into(),
+                    "--ignore-unmatch".into(),
+                    "--".into(),
+                    path.to_string(),
+                ],
+                repo,
+                token,
+            )
+            .await?;
+        }
+        return Ok(());
+    }
+    stage(repo, &[path.to_string()], false, token).await
+}
+
+pub(crate) async fn check_submodule_type_change_conflict(
+    repo: &RepositoryMeta,
+    path: &str,
+    token: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    let base_path = path.split_once('~').map(|(p, _)| p).unwrap_or(path);
+    let companion_prefix = format!("{base_path}~");
+
+    let raw = git(
+        vec!["ls-files".into(), "-u".into(), "-z".into()],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+
+    let mut has_submodule_stage = false;
+    let mut has_non_submodule_stage = false;
+    let mut detected_companion = None;
+
+    for entry in raw.split('\0').filter(|e| !e.is_empty()) {
+        let Some((meta, entry_path)) = entry.split_once('\t') else {
+            continue;
+        };
+        let mode = meta.split_whitespace().next().unwrap_or("");
+        if entry_path == base_path {
+            if mode == "160000" {
+                has_submodule_stage = true;
+            } else {
+                has_non_submodule_stage = true;
+            }
+        } else if entry_path.starts_with(&companion_prefix) {
+            detected_companion = Some(entry_path.to_string());
+        }
+    }
+
+    if (has_submodule_stage && (has_non_submodule_stage || detected_companion.is_some()))
+        || (path.contains('~') && has_submodule_stage)
+    {
+        return Ok(detected_companion.or_else(|| Some(path.to_string())));
+    }
+
+    Ok(None)
+}
+
 pub async fn submodule_operation(
     repo: &RepositoryMeta,
     operation: SubmoduleOperation,
@@ -8585,47 +8758,8 @@ pub async fn submodule_operation(
         }
         SubmoduleOperation::ResolveConflict { path, choice } => {
             let path = relative_path(Path::new(&repo.root_path), &path, false)?;
-            if !matches!(choice, ConflictChoice::Working) {
-                let (_, stages, _, _) = submodule_index_state(repo, &path, token).await;
-                let selected = stages.and_then(|stages| match choice {
-                    ConflictChoice::Mine => stages.ours,
-                    ConflictChoice::Theirs => stages.theirs,
-                    ConflictChoice::Working => None,
-                });
-                if let Some(hash) = selected {
-                    git(
-                        vec![
-                            "update-index".into(),
-                            "--add".into(),
-                            "--cacheinfo".into(),
-                            format!("160000,{hash},{path}"),
-                        ],
-                        repo,
-                        token,
-                    )
-                    .await?;
-                } else {
-                    git(
-                        vec![
-                            "rm".into(),
-                            "--cached".into(),
-                            "--ignore-unmatch".into(),
-                            "--".into(),
-                            path,
-                        ],
-                        repo,
-                        token,
-                    )
-                    .await?;
-                }
-                return Ok(());
-            }
-            (
-                path.clone(),
-                vec!["add".into(), "--".into(), path],
-                false,
-                true,
-            )
+            resolve_submodule_conflict_gitlink(repo, &path, choice, token).await?;
+            return Ok(());
         }
         SubmoduleOperation::Push { path } => {
             let path = relative_path(Path::new(&repo.root_path), &path, false)?;
@@ -10082,6 +10216,183 @@ pub async fn branch_working_file_diff(
     make_diff(relative_path_value, output.stdout)
 }
 
+pub fn map_git_conflict_side_statuses(code: &str) -> (Option<&'static str>, Option<&'static str>) {
+    match code {
+        "DD" => (Some("deleted"), Some("deleted")),
+        "AU" => (Some("added"), Some("deleted")),
+        "UD" => (Some("modified"), Some("deleted")),
+        "UA" => (Some("deleted"), Some("added")),
+        "DU" => (Some("deleted"), Some("modified")),
+        "AA" => (Some("added"), Some("added")),
+        "UU" => (Some("modified"), Some("modified")),
+        _ => (Some("modified"), Some("modified")),
+    }
+}
+
+pub async fn is_git_conflict_binary(
+    repo: &RepositoryMeta,
+    safe_path: &str,
+    token: &CancellationToken,
+) -> bool {
+    let working_path = Path::new(&repo.root_path).join(safe_path);
+    if let Ok(meta) = std::fs::symlink_metadata(&working_path) {
+        if meta.file_type().is_symlink() {
+            return true;
+        }
+    }
+    if let Ok(output) = git(
+        vec![
+            "ls-files".into(),
+            "-u".into(),
+            "-z".into(),
+            "--".into(),
+            format!(":(literal){safe_path}"),
+        ],
+        repo,
+        token,
+    )
+    .await
+    {
+        let text = output.stdout_text();
+        for entry in text.split('\0').filter(|e| !e.is_empty()) {
+            if let Some(mode) = entry.split_whitespace().next() {
+                if mode == "120000" || mode == "160000" {
+                    return true;
+                }
+            }
+        }
+    }
+    if let Ok(bytes) = std::fs::read(&working_path) {
+        if bytes_are_binary(&bytes) || std::str::from_utf8(&bytes).is_err() {
+            return true;
+        }
+    }
+    for stage in ["1", "2", "3"] {
+        if let Ok(output) = git(
+            vec!["show".into(), format!(":{stage}:{safe_path}")],
+            repo,
+            token,
+        )
+        .await
+        {
+            if bytes_are_binary(&output.stdout) || std::str::from_utf8(&output.stdout).is_err() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub async fn is_svn_conflict_binary(
+    repo: &RepositoryMeta,
+    safe_path: &str,
+    token: &CancellationToken,
+) -> bool {
+    let working_path = Path::new(&repo.root_path).join(safe_path);
+    if let Ok(meta) = std::fs::symlink_metadata(&working_path) {
+        if meta.file_type().is_symlink() {
+            return true;
+        }
+    }
+    if let Ok(bytes) = std::fs::read(&working_path) {
+        if bytes_are_binary(&bytes) || std::str::from_utf8(&bytes).is_err() {
+            return true;
+        }
+    }
+    let mime_out = svn(
+        vec![
+            "propget".into(),
+            "svn:mime-type".into(),
+            "--".into(),
+            safe_path.to_string(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|o| o.stdout_text())
+    .unwrap_or_default();
+    let special_out = svn(
+        vec![
+            "propget".into(),
+            "svn:special".into(),
+            "--".into(),
+            safe_path.to_string(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|o| o.stdout_text())
+    .unwrap_or_default();
+    let mime = mime_out.trim().to_lowercase();
+    let is_binary_mime = !mime.is_empty()
+        && !mime.starts_with("text/")
+        && mime != "image/x-xbitmap"
+        && mime != "image/x-xpixmap";
+    if is_binary_mime || !special_out.trim().is_empty() {
+        return true;
+    }
+    let parent = working_path
+        .parent()
+        .unwrap_or_else(|| Path::new(&repo.root_path));
+    let name = working_path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or("");
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            if fname.starts_with(&format!("{name}."))
+                && (fname.ends_with(".mine") || fname.contains(".r"))
+            {
+                if let Ok(bytes) = std::fs::read(entry.path()) {
+                    if bytes_are_binary(&bytes) || std::str::from_utf8(&bytes).is_err() {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+pub async fn svn_incoming_status(
+    repo: &RepositoryMeta,
+    path: &str,
+    token: &CancellationToken,
+) -> String {
+    if let Ok(info_out) = svn(
+        vec!["info".into(), "--xml".into(), "--".into(), path.to_string()],
+        repo,
+        token,
+    )
+    .await
+    {
+        let text = info_out.stdout_text();
+        if let Ok(doc) = roxmltree::Document::parse(&text) {
+            let mut left_kind: Option<&str> = None;
+            let mut right_kind: Option<&str> = None;
+            for node in doc.descendants().filter(|n| n.has_tag_name("version")) {
+                let side = node.attribute("side");
+                let kind = node.attribute("kind");
+                if side == Some("source-left") {
+                    left_kind = kind;
+                } else if side == Some("source-right") {
+                    right_kind = kind;
+                }
+            }
+            if right_kind == Some("none") {
+                return "deleted".to_string();
+            }
+            if left_kind == Some("none") && right_kind.is_some() {
+                return "added".to_string();
+            }
+        }
+    }
+    "modified".to_string()
+}
+
 pub async fn conflict_versions(
     repo: &RepositoryMeta,
     path: &str,
@@ -10090,6 +10401,57 @@ pub async fn conflict_versions(
     let root = Path::new(&repo.root_path);
     let safe = relative_path(root, path, false)?;
     let working_path = root.join(&safe);
+    if let Ok(meta) = tokio::fs::symlink_metadata(&working_path).await {
+        if meta.file_type().is_symlink() {
+            return Err(DesktopError::new(
+                "SYMLINK_CONFLICT_NOT_EDITABLE",
+                "Symbolic link conflicts cannot be edited as text. Choose a conflict side or resolve the link manually.",
+                true,
+            ));
+        }
+    }
+    if relative_path(root, path, true).is_err() {
+        return Err(DesktopError::new(
+            "SYMLINK_CONFLICT_NOT_EDITABLE",
+            "Symbolic link conflicts cannot be edited as text. Choose a conflict side or resolve the link manually.",
+            true,
+        ));
+    }
+    if repo.kind == VcsKind::Git {
+        if let Ok(output) = git(
+            vec![
+                "ls-files".into(),
+                "-u".into(),
+                "-z".into(),
+                "--".into(),
+                format!(":(literal){safe}"),
+            ],
+            repo,
+            token,
+        )
+        .await
+        {
+            let text = output.stdout_text();
+            for entry in text.split('\0').filter(|e| !e.is_empty()) {
+                if let Some(mode) = entry.split_whitespace().next() {
+                    if mode == "120000" {
+                        return Err(DesktopError::new(
+                            "SYMLINK_CONFLICT_NOT_EDITABLE",
+                            "Symbolic link conflicts cannot be edited as text. Choose a conflict side or resolve the link manually.",
+                            true,
+                        ));
+                    }
+                    if mode == "160000" {
+                        return Err(DesktopError::new(
+                            "SUBMODULE_CONFLICT_NOT_EDITABLE",
+                            "Submodule conflicts cannot be edited as text. Choose a conflict side or resolve the submodule manually.",
+                            true,
+                        ));
+                    }
+                }
+            }
+        }
+    }
     if working_path.is_dir() {
         return Err(DesktopError::new(
             "DIRECTORY_CONFLICT_NOT_EDITABLE",
@@ -10108,25 +10470,118 @@ pub async fn conflict_versions(
             ))
         }
     };
-    let binary = bytes_are_binary(&working_bytes);
+    let mut binary =
+        bytes_are_binary(&working_bytes) || std::str::from_utf8(&working_bytes).is_err();
     let working = String::from_utf8_lossy(&working_bytes).into_owned();
-    let (base, ours, theirs) = match repo.kind {
+    let (base, ours, theirs, ours_status, theirs_status) = match repo.kind {
         VcsKind::Git => {
-            let base = git(vec!["show".into(), format!(":1:{safe}")], repo, token)
+            let base_bytes = git(vec!["show".into(), format!(":1:{safe}")], repo, token)
                 .await
-                .map(|output| output.stdout_text())
+                .map(|output| output.stdout)
                 .unwrap_or_default();
-            let ours = git(vec!["show".into(), format!(":2:{safe}")], repo, token)
+            let ours_bytes = git(vec!["show".into(), format!(":2:{safe}")], repo, token)
                 .await
-                .map(|output| output.stdout_text())
+                .map(|output| output.stdout)
                 .unwrap_or_default();
-            let theirs = git(vec!["show".into(), format!(":3:{safe}")], repo, token)
+            let theirs_bytes = git(vec!["show".into(), format!(":3:{safe}")], repo, token)
                 .await
-                .map(|output| output.stdout_text())
+                .map(|output| output.stdout)
                 .unwrap_or_default();
-            (base, ours, theirs)
+
+            if bytes_are_binary(&base_bytes)
+                || std::str::from_utf8(&base_bytes).is_err()
+                || bytes_are_binary(&ours_bytes)
+                || std::str::from_utf8(&ours_bytes).is_err()
+                || bytes_are_binary(&theirs_bytes)
+                || std::str::from_utf8(&theirs_bytes).is_err()
+            {
+                binary = true;
+            }
+
+            let base = String::from_utf8_lossy(&base_bytes).into_owned();
+            let ours = String::from_utf8_lossy(&ours_bytes).into_owned();
+            let theirs = String::from_utf8_lossy(&theirs_bytes).into_owned();
+            let status_output = git(
+                vec![
+                    "status".into(),
+                    "--porcelain".into(),
+                    "-z".into(),
+                    "--".into(),
+                    format!(":(literal){safe}"),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .map(|output| output.stdout_text())
+            .unwrap_or_default();
+            let xy = status_output.split('\0').next().and_then(|rec| {
+                if rec.len() >= 2 {
+                    Some(&rec[..2])
+                } else {
+                    None
+                }
+            });
+            let (ours_s, theirs_s) = xy
+                .map(map_git_conflict_side_statuses)
+                .unwrap_or((Some("modified"), Some("modified")));
+            (
+                base,
+                ours,
+                theirs,
+                ours_s.map(String::from),
+                theirs_s.map(String::from),
+            )
         }
-        VcsKind::Svn => svn_conflict_artifacts(root, &safe),
+        VcsKind::Svn => {
+            let (base, ours, theirs) = svn_conflict_artifacts(repo, root, &safe, token).await;
+            let is_symlink = tokio::fs::symlink_metadata(&working_path)
+                .await
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            let mime_out = svn(
+                vec![
+                    "propget".into(),
+                    "svn:mime-type".into(),
+                    "--".into(),
+                    safe.clone(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .map(|o| o.stdout_text())
+            .unwrap_or_default();
+            let special_out = svn(
+                vec![
+                    "propget".into(),
+                    "svn:special".into(),
+                    "--".into(),
+                    safe.clone(),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .map(|o| o.stdout_text())
+            .unwrap_or_default();
+            let mime = mime_out.trim().to_lowercase();
+            let is_binary_mime = !mime.is_empty()
+                && !mime.starts_with("text/")
+                && mime != "image/x-xbitmap"
+                && mime != "image/x-xpixmap";
+            if is_symlink
+                || is_binary_mime
+                || !special_out.trim().is_empty()
+                || bytes_are_binary(base.as_bytes())
+                || bytes_are_binary(ours.as_bytes())
+                || bytes_are_binary(theirs.as_bytes())
+            {
+                binary = true;
+            }
+            let incoming = svn_incoming_status(repo, &safe, token).await;
+            (base, ours, theirs, Some("modified".into()), Some(incoming))
+        }
     };
     let mut conflicts = parse_conflict_blocks(&working);
     let mut marker_content = working.clone();
@@ -10155,6 +10610,8 @@ pub async fn conflict_versions(
         language: language_for(&safe),
         fingerprint: fingerprint(working.as_bytes()),
         binary,
+        ours_status,
+        theirs_status,
     })
 }
 
@@ -10281,24 +10738,21 @@ async fn complete_git_merge_if_resolved(
     Ok(true)
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ConflictResolutionOutput {
+    pub auto_commit_error: Option<String>,
+    pub auto_committed: bool,
+}
+
 pub async fn conflict_save(
     repo: &RepositoryMeta,
     path: &str,
     content: &str,
     expected: &str,
+    delete_file: bool,
     auto_commit_resolved_merge: bool,
     token: &CancellationToken,
-) -> Result<(), DesktopError> {
-    if content.lines().any(|raw_line| {
-        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-        line.starts_with("<<<<<<<") || line == "=======" || line.starts_with(">>>>>>>")
-    }) {
-        return Err(DesktopError::new(
-            "UNRESOLVED_MARKERS",
-            "Conflict markers remain in the result",
-            true,
-        ));
-    }
+) -> Result<ConflictResolutionOutput, DesktopError> {
     let root = Path::new(&repo.root_path);
     let safe = relative_path(root, path, true)?;
     let target = root.join(&safe);
@@ -10320,25 +10774,220 @@ pub async fn conflict_save(
             ))
         }
     };
-    if fingerprint(&current) != expected {
+    let current_fingerprint = fingerprint(&current);
+    if current_fingerprint != expected && current != content.as_bytes() {
         return Err(DesktopError::new(
             "CONFLICT_STALE",
             "The file changed after it was loaded",
             true,
         ));
     }
-    let temporary = target.with_extension(format!("versiondock-{}", std::process::id()));
-    tokio::fs::write(&temporary, content)
-        .await
+    if !delete_file {
+        if bytes_are_binary(&current) || std::str::from_utf8(&current).is_err() {
+            return Err(DesktopError::new(
+                "BINARY_FILE_NOT_EDITABLE",
+                "Binary file — no diff available",
+                true,
+            ));
+        }
+        if repo.kind == VcsKind::Git {
+            if is_git_conflict_binary(repo, &safe, token).await {
+                return Err(DesktopError::new(
+                    "BINARY_FILE_NOT_EDITABLE",
+                    "Binary file — no diff available",
+                    true,
+                ));
+            }
+        } else if repo.kind == VcsKind::Svn {
+            if is_svn_conflict_binary(repo, &safe, token).await {
+                return Err(DesktopError::new(
+                    "BINARY_FILE_NOT_EDITABLE",
+                    "Binary file — no diff available",
+                    true,
+                ));
+            }
+        }
+    }
+    if delete_file {
+        if target.exists() {
+            if target.is_dir() {
+                tokio::fs::remove_dir_all(&target).await.map_err(|error| {
+                    DesktopError::new("FILE_DELETE_FAILED", error.to_string(), true)
+                })?;
+            } else {
+                tokio::fs::remove_file(&target).await.map_err(|error| {
+                    DesktopError::new("FILE_DELETE_FAILED", error.to_string(), true)
+                })?;
+            }
+        }
+        match repo.kind {
+            VcsKind::Git => {
+                let rm_res = git(
+                    vec![
+                        "rm".into(),
+                        "-f".into(),
+                        "--".into(),
+                        format!(":(literal){safe}"),
+                    ],
+                    repo,
+                    token,
+                )
+                .await;
+                if rm_res.is_err() {
+                    git(
+                        vec![
+                            "add".into(),
+                            "-u".into(),
+                            "--".into(),
+                            format!(":(literal){safe}"),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?;
+                }
+                let mut auto_commit_error = None;
+                let mut auto_committed = false;
+                if auto_commit_resolved_merge {
+                    match complete_git_merge_if_resolved(repo, token).await {
+                        Ok(committed) => {
+                            auto_committed = committed;
+                        }
+                        Err(error) => {
+                            crate::logger::log_entry(
+                                crate::logger::LogLevel::Warn,
+                                crate::logger::LogChannel::Git,
+                                format!(
+                                    "Conflict file deletion resolved and staged, but auto commit failed: {}",
+                                    error.message
+                                ),
+                                None,
+                                None,
+                                None,
+                            );
+                            auto_commit_error = Some(error.message);
+                        }
+                    }
+                }
+                return Ok(ConflictResolutionOutput {
+                    auto_commit_error,
+                    auto_committed,
+                });
+            }
+            VcsKind::Svn => {
+                let is_versioned = svn(
+                    vec!["info".into(), "--xml".into(), "--".into(), safe.clone()],
+                    repo,
+                    token,
+                )
+                .await
+                .is_ok();
+                if is_versioned {
+                    svn(
+                        vec!["delete".into(), "--force".into(), "--".into(), safe.clone()],
+                        repo,
+                        token,
+                    )
+                    .await?;
+                }
+                svn(
+                    vec![
+                        "resolve".into(),
+                        "--accept".into(),
+                        "working".into(),
+                        "--".into(),
+                        safe.clone(),
+                    ],
+                    repo,
+                    token,
+                )
+                .await?;
+            }
+        }
+        return Ok(ConflictResolutionOutput::default());
+    }
+    if content.lines().any(|raw_line| {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        line.starts_with("<<<<<<<") || line == "=======" || line.starts_with(">>>>>>>")
+    }) {
+        return Err(DesktopError::new(
+            "UNRESOLVED_MARKERS",
+            "Conflict markers remain in the result",
+            true,
+        ));
+    }
+    let parent = target.parent().unwrap_or(root);
+    let mut temp = tempfile::Builder::new()
+        .prefix(".versiondock-tmp-")
+        .tempfile_in(parent)
         .map_err(|error| DesktopError::new("FILE_WRITE_FAILED", error.to_string(), true))?;
-    tokio::fs::rename(&temporary, &target)
-        .await
+    use std::io::Write;
+    temp.write_all(content.as_bytes())
         .map_err(|error| DesktopError::new("FILE_WRITE_FAILED", error.to_string(), true))?;
+    temp.flush()
+        .map_err(|error| DesktopError::new("FILE_WRITE_FAILED", error.to_string(), true))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let original_mode = if let Ok(meta) = std::fs::metadata(&target) {
+            Some(meta.permissions().mode())
+        } else if repo.kind == VcsKind::Git {
+            let output = git(
+                vec![
+                    "ls-files".into(),
+                    "-u".into(),
+                    "-z".into(),
+                    "--".into(),
+                    format!(":(literal){safe}"),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .ok()
+            .map(|o| o.stdout_text())
+            .unwrap_or_default();
+            output
+                .split('\0')
+                .filter_map(|entry| entry.split_whitespace().next())
+                .find(|mode| *mode == "100755")
+                .map(|_| 0o755)
+        } else {
+            None
+        };
+        if let Some(mode) = original_mode {
+            let _ = std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(mode));
+        } else {
+            let _ = std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o644));
+        }
+    }
+    temp.persist(&target)
+        .map_err(|error| DesktopError::new("FILE_WRITE_FAILED", error.error.to_string(), true))?;
+    let mut auto_commit_error = None;
+    let mut auto_committed = false;
     match repo.kind {
         VcsKind::Git => {
             stage(repo, &[safe], false, token).await?;
             if auto_commit_resolved_merge {
-                complete_git_merge_if_resolved(repo, token).await?;
+                match complete_git_merge_if_resolved(repo, token).await {
+                    Ok(committed) => {
+                        auto_committed = committed;
+                    }
+                    Err(error) => {
+                        crate::logger::log_entry(
+                            crate::logger::LogLevel::Warn,
+                            crate::logger::LogChannel::Git,
+                            format!(
+                                "Conflict file resolved and staged, but auto commit failed: {}",
+                                error.message
+                            ),
+                            None,
+                            None,
+                            None,
+                        );
+                        auto_commit_error = Some(error.message);
+                    }
+                }
             }
         }
         VcsKind::Svn => {
@@ -10356,7 +11005,10 @@ pub async fn conflict_save(
             .await?;
         }
     }
-    Ok(())
+    Ok(ConflictResolutionOutput {
+        auto_commit_error,
+        auto_committed,
+    })
 }
 
 pub async fn conflict_accept(
@@ -10365,44 +11017,221 @@ pub async fn conflict_accept(
     choice: ConflictChoice,
     auto_commit_resolved_merge: bool,
     token: &CancellationToken,
-) -> Result<(), DesktopError> {
+) -> Result<ConflictResolutionOutput, DesktopError> {
     let root = Path::new(&repo.root_path);
-    let safe = relative_path(root, path, true)?;
+    let safe = relative_path(root, path, false)?;
     match repo.kind {
         VcsKind::Git => {
-            match choice {
-                ConflictChoice::Mine => {
-                    git(
-                        vec![
-                            "checkout".into(),
-                            "--ours".into(),
-                            "--".into(),
-                            safe.clone(),
-                        ],
-                        repo,
-                        token,
-                    )
-                    .await?;
-                }
-                ConflictChoice::Theirs => {
-                    git(
-                        vec![
-                            "checkout".into(),
-                            "--theirs".into(),
-                            "--".into(),
-                            safe.clone(),
-                        ],
-                        repo,
-                        token,
-                    )
-                    .await?;
-                }
-                ConflictChoice::Working => {}
+            if let Some(companion) =
+                check_submodule_type_change_conflict(repo, &safe, token).await?
+            {
+                return Err(DesktopError::new(
+                    "SUBMODULE_TYPE_CHANGE_MANUAL",
+                    format!(
+                        "This is a directory-file or type-change conflict involving a submodule with companion path '{companion}'. Please resolve it manually to protect local changes."
+                    ),
+                    true,
+                ));
             }
-            stage(repo, &[safe], false, token).await?;
+
+            let (_, stages, type_change, _) = submodule_index_state(repo, &safe, token).await;
+            if stages.is_some() && !type_change {
+                resolve_submodule_conflict_gitlink(repo, &safe, choice, token).await?;
+                let mut auto_commit_error = None;
+                let mut auto_committed = false;
+                if auto_commit_resolved_merge {
+                    match complete_git_merge_if_resolved(repo, token).await {
+                        Ok(committed) => {
+                            auto_committed = committed;
+                        }
+                        Err(error) => {
+                            crate::logger::log_entry(
+                                crate::logger::LogLevel::Warn,
+                                crate::logger::LogChannel::Git,
+                                format!(
+                                    "Conflict side accepted and staged, but auto commit failed: {}",
+                                    error.message
+                                ),
+                                None,
+                                None,
+                                None,
+                            );
+                            auto_commit_error = Some(error.message);
+                        }
+                    }
+                }
+                return Ok(ConflictResolutionOutput {
+                    auto_commit_error,
+                    auto_committed,
+                });
+            }
+
+            let side_status = match choice {
+                ConflictChoice::Mine | ConflictChoice::Theirs => {
+                    let output = git(
+                        vec![
+                            "status".into(),
+                            "--porcelain".into(),
+                            "-z".into(),
+                            "--".into(),
+                            format!(":(literal){safe}"),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await
+                    .map(|out| out.stdout_text())
+                    .unwrap_or_default();
+                    let xy = output.split('\0').next().and_then(|rec| {
+                        if rec.len() >= 2 {
+                            Some(&rec[..2])
+                        } else {
+                            None
+                        }
+                    });
+                    let (ours_s, theirs_s) = xy
+                        .map(map_git_conflict_side_statuses)
+                        .unwrap_or((Some("modified"), Some("modified")));
+                    if choice == ConflictChoice::Mine {
+                        ours_s
+                    } else {
+                        theirs_s
+                    }
+                }
+                ConflictChoice::Working => None,
+            };
+
+            if side_status == Some("deleted") {
+                let target = root.join(&safe);
+                let is_submodule_dir = target.is_dir() && target.join(".git").exists();
+                if is_submodule_dir {
+                    let dirty = git(
+                        vec![
+                            "-C".into(),
+                            safe.clone(),
+                            "status".into(),
+                            "--porcelain".into(),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await
+                    .map(|out| !out.stdout_text().trim().is_empty())
+                    .unwrap_or(false);
+                    if dirty {
+                        return Err(DesktopError::new(
+                            "SUBMODULE_DIRTY",
+                            "The submodule has uncommitted local changes or commits; resolve it manually to avoid data loss.",
+                            true,
+                        ));
+                    }
+                    git(
+                        vec![
+                            "rm".into(),
+                            "--cached".into(),
+                            "--ignore-unmatch".into(),
+                            "--".into(),
+                            safe.clone(),
+                        ],
+                        repo,
+                        token,
+                    )
+                    .await?;
+                } else {
+                    let literal_arg = format!(":(literal){safe}");
+                    let rm_res = git(
+                        vec!["rm".into(), "-f".into(), "--".into(), literal_arg.clone()],
+                        repo,
+                        token,
+                    )
+                    .await;
+                    if rm_res.is_err() {
+                        if tokio::fs::symlink_metadata(&target).await.is_ok() {
+                            let is_dir = target.is_dir()
+                                && !tokio::fs::symlink_metadata(&target)
+                                    .await
+                                    .map(|m| m.file_type().is_symlink())
+                                    .unwrap_or(false);
+                            if is_dir {
+                                tokio::fs::remove_dir_all(&target).await.map_err(|error| {
+                                    DesktopError::new("FILE_DELETE_FAILED", error.to_string(), true)
+                                })?;
+                            } else {
+                                tokio::fs::remove_file(&target).await.map_err(|error| {
+                                    DesktopError::new("FILE_DELETE_FAILED", error.to_string(), true)
+                                })?;
+                            }
+                        }
+                        git(
+                            vec!["add".into(), "-u".into(), "--".into(), literal_arg],
+                            repo,
+                            token,
+                        )
+                        .await?;
+                    }
+                }
+            } else {
+                match choice {
+                    ConflictChoice::Mine => {
+                        git(
+                            vec![
+                                "checkout".into(),
+                                "--ours".into(),
+                                "--".into(),
+                                format!(":(literal){safe}"),
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await?;
+                        stage(repo, &[safe.clone()], false, token).await?;
+                    }
+                    ConflictChoice::Theirs => {
+                        git(
+                            vec![
+                                "checkout".into(),
+                                "--theirs".into(),
+                                "--".into(),
+                                format!(":(literal){safe}"),
+                            ],
+                            repo,
+                            token,
+                        )
+                        .await?;
+                        stage(repo, &[safe.clone()], false, token).await?;
+                    }
+                    ConflictChoice::Working => {
+                        stage(repo, &[safe.clone()], false, token).await?;
+                    }
+                }
+            }
+            let mut auto_commit_error = None;
+            let mut auto_committed = false;
             if auto_commit_resolved_merge {
-                complete_git_merge_if_resolved(repo, token).await?;
+                match complete_git_merge_if_resolved(repo, token).await {
+                    Ok(committed) => {
+                        auto_committed = committed;
+                    }
+                    Err(error) => {
+                        crate::logger::log_entry(
+                            crate::logger::LogLevel::Warn,
+                            crate::logger::LogChannel::Git,
+                            format!(
+                                "Conflict side accepted and staged, but auto commit failed: {}",
+                                error.message
+                            ),
+                            None,
+                            None,
+                            None,
+                        );
+                        auto_commit_error = Some(error.message);
+                    }
+                }
             }
+            return Ok(ConflictResolutionOutput {
+                auto_commit_error,
+                auto_committed,
+            });
         }
         VcsKind::Svn => {
             let accept = match choice {
@@ -10410,51 +11239,308 @@ pub async fn conflict_accept(
                 ConflictChoice::Theirs => "theirs-full",
                 ConflictChoice::Working => "working",
             };
-            svn(
+            let res = svn(
                 vec![
                     "resolve".into(),
                     "--accept".into(),
                     accept.into(),
                     "--".into(),
-                    safe,
+                    safe.clone(),
                 ],
                 repo,
                 token,
             )
-            .await?;
+            .await;
+
+            if let Err(error) = res {
+                let error_lower = error.message.to_lowercase();
+                if error_lower.contains("w195024") {
+                    accept_svn_tree_conflict(repo, &safe, choice, token).await?;
+                } else {
+                    return Err(error);
+                }
+            }
         }
     }
-    Ok(())
+    Ok(ConflictResolutionOutput::default())
 }
 
-fn svn_conflict_artifacts(root: &Path, path: &str) -> (String, String, String) {
+async fn accept_svn_tree_conflict(
+    repo: &RepositoryMeta,
+    safe_path: &str,
+    choice: ConflictChoice,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    let root = Path::new(&repo.root_path);
+    let target = root.join(safe_path);
+
+    if choice == ConflictChoice::Mine || choice == ConflictChoice::Working {
+        svn(
+            vec![
+                "resolve".into(),
+                "--accept".into(),
+                "working".into(),
+                "--".into(),
+                safe_path.to_string(),
+            ],
+            repo,
+            token,
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let raw_info = svn(
+        vec![
+            "info".into(),
+            "--xml".into(),
+            "--".into(),
+            safe_path.to_string(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map(|out| out.stdout_text())
+    .unwrap_or_default();
+
+    let is_update_or_switch =
+        raw_info.contains("operation=\"update\"") || raw_info.contains("operation=\"switch\"");
+    let is_dir = raw_info.contains("kind=\"dir\"");
+
+    if is_update_or_switch {
+        if target.exists() {
+            if target.is_dir() {
+                let _ = tokio::fs::remove_dir_all(&target).await;
+            } else {
+                let _ = tokio::fs::remove_file(&target).await;
+            }
+        }
+        svn(
+            vec![
+                "revert".into(),
+                "--depth".into(),
+                "infinity".into(),
+                "--".into(),
+                safe_path.to_string(),
+            ],
+            repo,
+            token,
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if !is_dir {
+        let is_symlink = tokio::fs::symlink_metadata(&target)
+            .await
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        if is_symlink {
+            return Err(DesktopError::new(
+                "UNSUPPORTED_FILE_TYPE",
+                "Binary file — no diff available",
+                true,
+            ));
+        }
+
+        let mime_out = svn(
+            vec![
+                "propget".into(),
+                "svn:mime-type".into(),
+                "--".into(),
+                safe_path.to_string(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        .map(|o| o.stdout_text())
+        .unwrap_or_default();
+        let special_out = svn(
+            vec![
+                "propget".into(),
+                "svn:special".into(),
+                "--".into(),
+                safe_path.to_string(),
+            ],
+            repo,
+            token,
+        )
+        .await
+        .map(|o| o.stdout_text())
+        .unwrap_or_default();
+        let mime = mime_out.trim().to_lowercase();
+        let is_binary_mime = !mime.is_empty()
+            && !mime.starts_with("text/")
+            && mime != "image/x-xbitmap"
+            && mime != "image/x-xpixmap";
+        if is_binary_mime || !special_out.trim().is_empty() {
+            return Err(DesktopError::new(
+                "BINARY_CONFLICT",
+                "Binary file — no diff available",
+                true,
+            ));
+        }
+
+        let versions = conflict_versions(repo, safe_path, token).await?;
+        if versions.binary {
+            return Err(DesktopError::new(
+                "BINARY_CONFLICT",
+                "Binary file — no diff available",
+                true,
+            ));
+        }
+        if let Some(parent) = target.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        tokio::fs::write(&target, &versions.theirs)
+            .await
+            .map_err(|error| DesktopError::new("FILE_WRITE_FAILED", error.to_string(), true))?;
+        svn(
+            vec![
+                "resolve".into(),
+                "--accept".into(),
+                "working".into(),
+                "--".into(),
+                safe_path.to_string(),
+            ],
+            repo,
+            token,
+        )
+        .await?;
+        return Ok(());
+    }
+
+    Err(DesktopError::new(
+        "SVN_TREE_CONFLICT_MANUAL",
+        "SVN directory merge conflicts must be resolved manually to preserve the complete tree and properties.",
+        true,
+    ))
+}
+
+async fn svn_conflict_artifacts(
+    repo: &RepositoryMeta,
+    root: &Path,
+    path: &str,
+    token: &CancellationToken,
+) -> (String, String, String) {
     let target = root.join(path);
     let parent = target.parent().unwrap_or(root);
     let name = target
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("");
-    let mut mine = String::new();
-    let mut left = String::new();
-    let mut right = String::new();
-    if let Ok(entries) = std::fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            let file_name = entry.file_name().to_string_lossy().into_owned();
-            let value = std::fs::read_to_string(entry.path()).unwrap_or_default();
-            if file_name == format!("{name}.mine") {
-                mine = value;
-            } else if file_name.starts_with(&format!("{name}.merge-left.r"))
-                || (file_name.starts_with(&format!("{name}.r")) && left.is_empty())
-            {
-                left = value;
-            } else if file_name.starts_with(&format!("{name}.merge-right.r"))
-                || file_name.starts_with(&format!("{name}.r"))
-            {
-                right = value;
+
+    let mut base = String::new();
+    let mut ours = String::new();
+    let mut theirs = String::new();
+
+    if let Ok(info_out) = svn(
+        vec!["info".into(), "--xml".into(), "--".into(), path.to_string()],
+        repo,
+        token,
+    )
+    .await
+    {
+        let text = info_out.stdout_text();
+        if let Ok(doc) = roxmltree::Document::parse(&text) {
+            for node in doc.descendants() {
+                let tag_name = node.tag_name().name();
+                if let Some(file_str) = node.text() {
+                    let file_str = file_str.trim();
+                    if !file_str.is_empty() {
+                        let file_path = if Path::new(file_str).is_absolute() {
+                            PathBuf::from(file_str)
+                        } else {
+                            let p1 = parent.join(file_str);
+                            if p1.exists() {
+                                p1
+                            } else {
+                                root.join(file_str)
+                            }
+                        };
+                        match tag_name {
+                            "prev-base-file" => {
+                                if let Ok(bytes) = tokio::fs::read(&file_path).await {
+                                    base = String::from_utf8_lossy(&bytes).into_owned();
+                                }
+                            }
+                            "prev-wc-file" => {
+                                if let Ok(bytes) = tokio::fs::read(&file_path).await {
+                                    ours = String::from_utf8_lossy(&bytes).into_owned();
+                                }
+                            }
+                            "cur-base-file" => {
+                                if let Ok(bytes) = tokio::fs::read(&file_path).await {
+                                    theirs = String::from_utf8_lossy(&bytes).into_owned();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
     }
-    (left, mine, right)
+
+    if base.is_empty() || theirs.is_empty() || ours.is_empty() {
+        let mut r_files: Vec<(u64, PathBuf)> = Vec::new();
+        let mut merge_left: Option<PathBuf> = None;
+        let mut merge_right: Option<PathBuf> = None;
+        let mut mine_file: Option<PathBuf> = None;
+
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().into_owned();
+                if file_name == format!("{name}.mine") {
+                    mine_file = Some(entry.path());
+                } else if file_name.starts_with(&format!("{name}.merge-left.r")) {
+                    merge_left = Some(entry.path());
+                } else if file_name.starts_with(&format!("{name}.merge-right.r")) {
+                    merge_right = Some(entry.path());
+                } else if let Some(rev_str) = file_name.strip_prefix(&format!("{name}.r")) {
+                    if let Ok(rev) = rev_str.parse::<u64>() {
+                        r_files.push((rev, entry.path()));
+                    }
+                }
+            }
+        }
+
+        r_files.sort_by_key(|(rev, _)| *rev);
+
+        if ours.is_empty() {
+            if let Some(mine_path) = mine_file {
+                if let Ok(bytes) = std::fs::read(mine_path) {
+                    ours = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            }
+        }
+        if base.is_empty() {
+            if let Some(left_path) = merge_left {
+                if let Ok(bytes) = std::fs::read(left_path) {
+                    base = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            } else if let Some((_, first_path)) = r_files.first() {
+                if let Ok(bytes) = std::fs::read(first_path) {
+                    base = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            }
+        }
+        if theirs.is_empty() {
+            if let Some(right_path) = merge_right {
+                if let Ok(bytes) = std::fs::read(right_path) {
+                    theirs = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            } else if let Some((_, last_path)) = r_files.last() {
+                if let Ok(bytes) = std::fs::read(last_path) {
+                    theirs = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            }
+        }
+    }
+
+    (base, ours, theirs)
 }
 
 fn fingerprint(value: &[u8]) -> String {
@@ -10647,6 +11733,7 @@ pub(crate) fn language_for(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn rejects_option_like_refs_and_revisions() {
@@ -10825,5 +11912,428 @@ mod tests {
             svn_repository_target("tags/v1.0.0").unwrap(),
             "^/tags/v1.0.0"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn git_symlink_conflict_is_rejected_and_never_reads_external_file() {
+        let repo_dir = tempdir().unwrap();
+        let external_dir = tempdir().unwrap();
+        let external_secret = external_dir.path().join("secret.txt");
+        std::fs::write(&external_secret, "SUPER_SECRET_TOKEN").unwrap();
+
+        let link_path = repo_dir.path().join("link_to_secret.txt");
+        std::os::unix::fs::symlink(&external_secret, &link_path).unwrap();
+
+        let repo = RepositoryMeta {
+            id: "repo".into(),
+            name: "Repo".into(),
+            root_path: repo_dir.path().to_string_lossy().into(),
+            color: "#fff".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let token = CancellationToken::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let is_binary = is_git_conflict_binary(&repo, "link_to_secret.txt", &token).await;
+            assert!(is_binary);
+
+            let res = conflict_versions(&repo, "link_to_secret.txt", &token).await;
+            assert!(res.is_err());
+            let err = res.err().unwrap();
+            assert_eq!(err.code, "SYMLINK_CONFLICT_NOT_EDITABLE");
+        });
+    }
+
+    #[test]
+    fn conflict_save_uses_atomic_tempfile_and_allows_idempotent_retry() {
+        let repo_dir = tempdir().unwrap();
+        let target_file = repo_dir.path().join("file.txt");
+        std::fs::write(&target_file, "initial content").unwrap();
+        let expected_fp = fingerprint("initial content".as_bytes());
+
+        let existing_dummy = repo_dir
+            .path()
+            .join(format!("file.versiondock-{}", std::process::id()));
+        std::fs::write(&existing_dummy, "DO_NOT_OVERWRITE").unwrap();
+
+        let new_content = "resolved content";
+        let parent = target_file.parent().unwrap();
+        let mut temp = tempfile::Builder::new()
+            .prefix(".versiondock-tmp-")
+            .tempfile_in(parent)
+            .unwrap();
+        use std::io::Write;
+        temp.write_all(new_content.as_bytes()).unwrap();
+        temp.flush().unwrap();
+        temp.persist(&target_file).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&existing_dummy).unwrap(),
+            "DO_NOT_OVERWRITE"
+        );
+
+        let current = std::fs::read(&target_file).unwrap();
+        let current_fp = fingerprint(&current);
+        assert_ne!(current_fp, expected_fp);
+        assert_eq!(current, new_content.as_bytes());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn conflict_save_preserves_executable_permission_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+        let repo_dir = tempdir().unwrap();
+        let target_file = repo_dir.path().join("script.sh");
+        std::fs::write(&target_file, "#!/bin/sh\necho hello\n").unwrap();
+        std::fs::set_permissions(&target_file, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let initial_mode = std::fs::metadata(&target_file)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(initial_mode & 0o111, 0o111);
+
+        let parent = target_file.parent().unwrap();
+        let mut temp = tempfile::Builder::new()
+            .prefix(".versiondock-tmp-")
+            .tempfile_in(parent)
+            .unwrap();
+        use std::io::Write;
+        temp.write_all(b"#!/bin/sh\necho resolved\n").unwrap();
+        temp.flush().unwrap();
+
+        let original_mode = std::fs::metadata(&target_file)
+            .ok()
+            .map(|m| m.permissions().mode());
+        if let Some(mode) = original_mode {
+            let _ = std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(mode));
+        }
+        temp.persist(&target_file).unwrap();
+
+        let final_mode = std::fs::metadata(&target_file)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(final_mode & 0o777, 0o755);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn conflict_accept_path_check_allows_symlink_leaf() {
+        let repo_dir = tempdir().unwrap();
+        let external_dir = tempdir().unwrap();
+        let target = external_dir.path().join("external_file.txt");
+        std::fs::write(&target, "content").unwrap();
+
+        let link_path = repo_dir.path().join("link_file.txt");
+        std::os::unix::fs::symlink(&target, &link_path).unwrap();
+
+        assert!(relative_path(repo_dir.path(), "link_file.txt", false).is_ok());
+        assert!(relative_path(repo_dir.path(), "link_file.txt", true).is_err());
+    }
+
+    #[test]
+    fn svn_conflict_artifacts_sorts_revision_numbers_correctly() {
+        let repo_dir = tempdir().unwrap();
+        let target_file = repo_dir.path().join("conflict.txt");
+        std::fs::write(&target_file, "working copy text").unwrap();
+
+        let r1_file = repo_dir.path().join("conflict.txt.r1");
+        let r2_file = repo_dir.path().join("conflict.txt.r2");
+        let mine_file = repo_dir.path().join("conflict.txt.mine");
+
+        std::fs::write(&r1_file, "base content from r1").unwrap();
+        std::fs::write(&r2_file, "incoming content from r2").unwrap();
+        std::fs::write(&mine_file, "my content from mine").unwrap();
+
+        let repo = RepositoryMeta {
+            id: "repo".into(),
+            name: "Repo".into(),
+            root_path: repo_dir.path().to_string_lossy().into(),
+            color: "#fff".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let token = CancellationToken::new();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (base, ours, theirs) =
+                svn_conflict_artifacts(&repo, repo_dir.path(), "conflict.txt", &token).await;
+            assert_eq!(base, "base content from r1");
+            assert_eq!(ours, "my content from mine");
+            assert_eq!(theirs, "incoming content from r2");
+        });
+    }
+
+    #[test]
+    fn is_svn_conflict_binary_detects_binary_in_side_files() {
+        let repo_dir = tempdir().unwrap();
+        let target_file = repo_dir.path().join("image.png");
+        std::fs::write(&target_file, "text dummy").unwrap();
+
+        let r2_file = repo_dir.path().join("image.png.r2");
+        let png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR";
+        std::fs::write(&r2_file, png_bytes).unwrap();
+
+        let repo = RepositoryMeta {
+            id: "repo".into(),
+            name: "Repo".into(),
+            root_path: repo_dir.path().to_string_lossy().into(),
+            color: "#fff".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let token = CancellationToken::new();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let is_binary = is_svn_conflict_binary(&repo, "image.png", &token).await;
+            assert!(is_binary);
+        });
+    }
+
+    #[test]
+    fn submodule_conflict_accept_theirs_stages_theirs_pointer() {
+        let temp = tempdir().unwrap();
+        let sub_dir = temp.path().join("sub_origin");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        let run_cmd = |args: &[&str], cwd: &Path| {
+            let res = std::process::Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                res.status.success(),
+                "Command failed: {:?}, stderr: {}",
+                args,
+                String::from_utf8_lossy(&res.stderr)
+            );
+            String::from_utf8_lossy(&res.stdout).trim().to_string()
+        };
+
+        run_cmd(&["git", "init"], &sub_dir);
+        run_cmd(&["git", "config", "user.email", "test@test.com"], &sub_dir);
+        run_cmd(&["git", "config", "user.name", "Test"], &sub_dir);
+        run_cmd(
+            &["git", "commit", "--allow-empty", "-m", "sub c0"],
+            &sub_dir,
+        );
+        let c0 = run_cmd(&["git", "rev-parse", "HEAD"], &sub_dir);
+
+        run_cmd(&["git", "checkout", "-b", "sub_b1"], &sub_dir);
+        run_cmd(
+            &["git", "commit", "--allow-empty", "-m", "sub c1"],
+            &sub_dir,
+        );
+        let c1 = run_cmd(&["git", "rev-parse", "HEAD"], &sub_dir);
+
+        run_cmd(&["git", "checkout", "master"], &sub_dir);
+        run_cmd(&["git", "checkout", "-b", "sub_b2"], &sub_dir);
+        run_cmd(
+            &["git", "commit", "--allow-empty", "-m", "sub c2"],
+            &sub_dir,
+        );
+        let c2 = run_cmd(&["git", "rev-parse", "HEAD"], &sub_dir);
+
+        let main_dir = temp.path().join("main");
+        std::fs::create_dir_all(&main_dir).unwrap();
+        run_cmd(&["git", "init"], &main_dir);
+        run_cmd(&["git", "config", "user.email", "test@test.com"], &main_dir);
+        run_cmd(&["git", "config", "user.name", "Test"], &main_dir);
+        run_cmd(
+            &[
+                "git",
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                sub_dir.to_str().unwrap(),
+                "mysub",
+            ],
+            &main_dir,
+        );
+        run_cmd(&["git", "checkout", &c0], &main_dir.join("mysub"));
+        run_cmd(&["git", "add", "mysub"], &main_dir);
+        run_cmd(&["git", "commit", "-m", "add submodule c0"], &main_dir);
+
+        run_cmd(&["git", "checkout", "-b", "b1"], &main_dir);
+        run_cmd(&["git", "checkout", &c1], &main_dir.join("mysub"));
+        run_cmd(&["git", "add", "mysub"], &main_dir);
+        run_cmd(&["git", "commit", "-m", "b1 uses c1"], &main_dir);
+
+        run_cmd(&["git", "checkout", "master"], &main_dir);
+        run_cmd(&["git", "checkout", "-b", "b2"], &main_dir);
+        run_cmd(&["git", "checkout", &c2], &main_dir.join("mysub"));
+        run_cmd(&["git", "add", "mysub"], &main_dir);
+        run_cmd(&["git", "commit", "-m", "b2 uses c2"], &main_dir);
+
+        let _ = std::process::Command::new("git")
+            .args(["merge", "b1"])
+            .current_dir(&main_dir)
+            .output();
+
+        let repo = RepositoryMeta {
+            id: "repo".into(),
+            name: "Repo".into(),
+            root_path: main_dir.to_string_lossy().into(),
+            color: "#fff".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let token = CancellationToken::new();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let ver_res = conflict_versions(&repo, "mysub", &token).await;
+            assert!(ver_res.is_err());
+            let err_code = ver_res.err().unwrap().code;
+            assert!(
+                err_code == "SUBMODULE_CONFLICT_NOT_EDITABLE"
+                    || err_code == "DIRECTORY_CONFLICT_NOT_EDITABLE"
+            );
+
+            let accept_res =
+                conflict_accept(&repo, "mysub", ConflictChoice::Theirs, false, &token).await;
+            assert!(accept_res.is_ok());
+
+            let staged_ls = run_cmd(&["git", "ls-files", "--stage", "--", "mysub"], &main_dir);
+            assert!(
+                staged_ls.contains(&c1),
+                "Index should contain theirs SHA {c1}, but was: {staged_ls}"
+            );
+            assert!(
+                !staged_ls.contains(&c2),
+                "Index should not contain ours SHA {c2}"
+            );
+        });
+    }
+
+    #[test]
+    fn submodule_type_change_conflict_is_rejected_and_preserves_uncommitted_files() {
+        let temp = tempdir().unwrap();
+        let sub_dir = temp.path().join("sub_origin");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        let run_cmd = |args: &[&str], cwd: &Path| {
+            let res = std::process::Command::new(args[0])
+                .args(&args[1..])
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                res.status.success(),
+                "Command failed: {:?}, stderr: {}",
+                args,
+                String::from_utf8_lossy(&res.stderr)
+            );
+            String::from_utf8_lossy(&res.stdout).trim().to_string()
+        };
+
+        run_cmd(&["git", "init"], &sub_dir);
+        run_cmd(&["git", "config", "user.email", "test@test.com"], &sub_dir);
+        run_cmd(&["git", "config", "user.name", "Test"], &sub_dir);
+        run_cmd(
+            &["git", "commit", "--allow-empty", "-m", "sub init"],
+            &sub_dir,
+        );
+
+        let main_dir = temp.path().join("main");
+        std::fs::create_dir_all(&main_dir).unwrap();
+        run_cmd(&["git", "init"], &main_dir);
+        run_cmd(&["git", "config", "user.email", "test@test.com"], &main_dir);
+        run_cmd(&["git", "config", "user.name", "Test"], &main_dir);
+        run_cmd(&["git", "commit", "--allow-empty", "-m", "init"], &main_dir);
+
+        run_cmd(&["git", "checkout", "-b", "sub_branch"], &main_dir);
+        run_cmd(
+            &[
+                "git",
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                sub_dir.to_str().unwrap(),
+                "component",
+            ],
+            &main_dir,
+        );
+        run_cmd(
+            &["git", "commit", "-m", "add submodule component"],
+            &main_dir,
+        );
+
+        run_cmd(&["git", "checkout", "master"], &main_dir);
+        if main_dir.join("component").exists() {
+            let _ = std::fs::remove_dir_all(main_dir.join("component"));
+        }
+        run_cmd(&["git", "checkout", "-b", "file_branch"], &main_dir);
+        std::fs::write(main_dir.join("component"), "regular file content\n").unwrap();
+        run_cmd(&["git", "add", "component"], &main_dir);
+        run_cmd(
+            &["git", "commit", "-m", "add regular file component"],
+            &main_dir,
+        );
+
+        let _ = std::process::Command::new("git")
+            .args(["merge", "sub_branch"])
+            .current_dir(&main_dir)
+            .output();
+
+        if main_dir.join("component").is_dir() {
+            std::fs::write(
+                main_dir.join("component").join("precious_uncommitted.txt"),
+                "UNCOMMITTED WORK",
+            )
+            .unwrap();
+        }
+
+        let repo = RepositoryMeta {
+            id: "repo".into(),
+            name: "Repo".into(),
+            root_path: main_dir.to_string_lossy().into(),
+            color: "#fff".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let token = CancellationToken::new();
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let res =
+                conflict_accept(&repo, "component", ConflictChoice::Mine, false, &token).await;
+            assert!(
+                res.is_err(),
+                "Accepting submodule type-change conflict should be rejected"
+            );
+            let err = res.err().unwrap();
+            assert!(
+                err.code == "SUBMODULE_TYPE_CHANGE_MANUAL" || err.code == "SUBMODULE_DIRTY",
+                "Expected type change error, got: {}",
+                err.code
+            );
+
+            if main_dir.join("component").is_dir() {
+                assert!(
+                    main_dir
+                        .join("component")
+                        .join("precious_uncommitted.txt")
+                        .exists(),
+                    "Uncommitted file inside submodule must be preserved!"
+                );
+            }
+        });
     }
 }

@@ -9,6 +9,7 @@ import type {
   RecentCommitMessage, RefreshScope, RepositoryCapabilities, RepositoryUpdateResult, RuntimeCapabilities,
   SyncResult, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
   BranchRecoveryResult, RepositoryCommitSelection, RestoreConflictsResult,
+  ConflictResolutionResult,
   LogEntry, LogLevel, LogChannel,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
@@ -18,7 +19,7 @@ import { choiceDialog } from '../components/dialogService';
 import { createTranslator, resolveLanguage } from '../i18n';
 import type { MergeResolution, NonConflictScope } from '../components/mergeEditorModel';
 
-export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'merge';
+export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'conflicts' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
 export type DiffRange = { fromRevision: string; toRevision: string };
 export type RepositoryCheckoutOutcome = { succeeded: boolean; authenticationRequired: boolean };
@@ -494,14 +495,17 @@ export interface AppStore {
   systemOpen: (repoId: string, path: string, reveal: boolean, external?: boolean) => Promise<void>;
   loadConflicts: (silent?: boolean, repoId?: string) => Promise<void>;
   refreshRuntimeCapabilities: () => Promise<void>;
+  openConflicts: () => void;
+  setMode: (mode: WorkspaceMode) => void;
   openMerge: (conflict: ConflictFile) => Promise<void>;
-  resolveConflict: (conflict: ConflictFile, choice: 'mine' | 'theirs' | 'working') => Promise<void>;
+  resolveConflict: (conflict: ConflictFile, choice: 'mine' | 'theirs' | 'working') => Promise<boolean>;
   setMergeResult: (value: string) => void;
   setMergeResolutions: (resolutions: Record<number, MergeResolution> | ((prev: Record<number, MergeResolution>) => Record<number, MergeResolution>)) => void;
   setMergeScope: (scope: NonConflictScope) => void;
-  saveMerge: () => Promise<void>;
-  acceptConflict: (choice: 'mine' | 'theirs' | 'working') => Promise<void>;
-  abortRepositoryOperation: (repoId: string, operation: string) => Promise<void>;
+  saveMerge: (options?: { deleteFile?: boolean }) => Promise<boolean>;
+  acceptConflict: (choice: 'mine' | 'theirs' | 'working') => Promise<boolean>;
+  abortRepositoryOperation: (repoId: string, operation: string) => Promise<boolean>;
+  continueRepositoryOperation: (repoId: string, operation: string) => Promise<boolean>;
   restoreConflicts: (repoIds: string[]) => Promise<RestoreConflictsResult[]>;
   backToHistory: () => void;
   openFileHistory: (repoId: string, path: string) => void;
@@ -4164,20 +4168,19 @@ export const useAppStore = create<AppStore>((set, get) => {
         }));
       } catch (error) {
         if (get().snapshot?.workspace.id !== wid) return;
+        const msg = error instanceof Error ? error.message : String(error);
         set((state) => ({
           loadErrors: {
             ...state.loadErrors,
-            [`conflicts:${repoId ?? 'all'}`]: error instanceof Error ? error.message : String(error),
+            [`conflicts:${repoId ?? 'all'}`]: msg,
           },
         }));
-        if (!silent) {
-          get().addNotification({
-            type: 'error',
-            title: 'Failed to load conflicts',
-            message: { raw: error instanceof Error ? error.message : String(error) },
-            workspaceId: wid,
-          });
-        }
+        get().addNotification({
+          type: 'error',
+          title: 'Failed to load conflicts',
+          message: { raw: msg },
+          workspaceId: wid,
+        });
       }
     },
 
@@ -4207,6 +4210,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
+    openConflicts: () => {
+      set({ mode: 'conflicts' });
+      void get().loadConflicts(false);
+    },
+
+    setMode: (mode) => set({ mode }),
+
     openMerge: async (conflict) => withBusy(async () => {
       if (conflict.conflictType && !['text', 'binary'].includes(conflict.conflictType)) {
         get().addNotification({ type: 'warning', urgent: true, title: 'Conflict requires attention', message: { raw: `${conflict.path}: ${conflict.conflictType} conflict requires an explicit working-copy resolution` }, workspaceId: get().snapshot?.workspace.id, actions: [{ type: 'openConflicts', label: 'Open Conflicts' }] });
@@ -4226,39 +4236,129 @@ export const useAppStore = create<AppStore>((set, get) => {
         mode: 'merge',
       });
     }, `conflict:${conflict.repoId}`),
-    resolveConflict: async (conflict, choice) => withBusy(async () => {
-      await bridge().request({ type: 'conflictAccept', payload: { workspace_id: workspaceId(), repo_id: conflict.repoId, relative_path: conflict.path, choice } });
-    }, `conflict:${conflict.repoId}`),
+    resolveConflict: async (conflict, choice) => {
+      const result = await withBusy(async () => {
+        const res = await bridge().request<ConflictResolutionResult | boolean>({
+          type: 'conflictAccept',
+          payload: { workspace_id: workspaceId(), repo_id: conflict.repoId, relative_path: conflict.path, choice },
+        });
+        if (res && typeof res === 'object' && 'autoCommitError' in res && res.autoCommitError) {
+          get().addNotification({
+            type: 'warning',
+            urgent: true,
+            title: 'Merge auto-commit failed',
+            message: { key: 'Conflict resolved, but merge commit could not be created: {0}', args: [res.autoCommitError] },
+            workspaceId: workspaceId(),
+          });
+        }
+        return true;
+      }, `conflict:${conflict.repoId}`);
+      return Boolean(result);
+    },
 
     setMergeResult: (mergeResult) => set({ mergeResult }),
     setMergeResolutions: (updater) => set((state) => ({
       mergeResolutions: typeof updater === 'function' ? updater(state.mergeResolutions) : updater,
     })),
     setMergeScope: (mergeScope) => set({ mergeScope }),
-    saveMerge: async () => withBusy(async () => {
-      const merge = get().merge;
-      const file = get().mergeTarget ?? get().selectedFile;
-      if (!merge || !file) return;
-      const targetWid = ('workspaceId' in file && file.workspaceId) ? file.workspaceId : workspaceId();
-      if (workspaceId() !== targetWid) {
-        get().addNotification({ type: 'warning', urgent: true, title: 'Workspace changed', message: { raw: 'Cannot save merge: active workspace has changed.' }, workspaceId: workspaceId() });
-        return;
+    saveMerge: async (options?: { deleteFile?: boolean }) => {
+      const result = await withBusy(async () => {
+        const merge = get().merge;
+        const file = get().mergeTarget ?? get().selectedFile;
+        if (!merge || !file) return false;
+        const targetWid = ('workspaceId' in file && file.workspaceId) ? file.workspaceId : workspaceId();
+        if (workspaceId() !== targetWid) {
+          get().addNotification({ type: 'warning', urgent: true, title: 'Workspace changed', message: { raw: 'Cannot save merge: active workspace has changed.' }, workspaceId: workspaceId() });
+          return false;
+        }
+        const res = await bridge().request<ConflictResolutionResult | boolean>({
+          type: 'conflictSave',
+          payload: {
+            workspace_id: targetWid,
+            repo_id: file.repoId,
+            relative_path: file.path,
+            content: get().mergeResult,
+            expected_fingerprint: merge.fingerprint,
+            delete_file: options?.deleteFile ?? false,
+          },
+        });
+        if (res && typeof res === 'object' && 'autoCommitError' in res && res.autoCommitError) {
+          get().addNotification({
+            type: 'warning',
+            urgent: true,
+            title: 'Merge auto-commit failed',
+            message: { key: 'Conflict resolved, but merge commit could not be created: {0}', args: [res.autoCommitError] },
+            workspaceId: targetWid,
+          });
+        }
+        return true;
+      }, 'conflict');
+      return result === true;
+    },
+    acceptConflict: async (choice) => {
+      const result = await withBusy(async () => {
+        const file = get().mergeTarget ?? get().selectedFile;
+        if (!file) return false;
+        const targetWid = ('workspaceId' in file && file.workspaceId) ? file.workspaceId : workspaceId();
+        if (workspaceId() !== targetWid) {
+          get().addNotification({ type: 'warning', urgent: true, title: 'Workspace changed', message: { raw: 'Cannot accept conflict: active workspace has changed.' }, workspaceId: workspaceId() });
+          return false;
+        }
+        const res = await bridge().request<ConflictResolutionResult | boolean>({
+          type: 'conflictAccept',
+          payload: { workspace_id: targetWid, repo_id: file.repoId, relative_path: file.path, choice },
+        });
+        if (res && typeof res === 'object' && 'autoCommitError' in res && res.autoCommitError) {
+          get().addNotification({
+            type: 'warning',
+            urgent: true,
+            title: 'Merge auto-commit failed',
+            message: { key: 'Conflict resolved, but merge commit could not be created: {0}', args: [res.autoCommitError] },
+            workspaceId: targetWid,
+          });
+        }
+        return true;
+      }, 'conflict');
+      return result === true;
+    },
+    abortRepositoryOperation: async (repoId, operation) => {
+      const result = await withBusy(async () => {
+        await bridge().request({ type: 'abortRepositoryOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
+        return true;
+      }, `conflict:${repoId}`);
+      return result === true;
+    },
+    continueRepositoryOperation: async (repoId, operation) => {
+      const result = await withBusy(async () => {
+        await bridge().request({
+          type: 'continueRepositoryOperation',
+          payload: { workspace_id: workspaceId(), repo_id: repoId, operation },
+        });
+        return true;
+      }, `conflict:${repoId}`);
+      if (!result) {
+        const wid = workspaceId();
+        await Promise.allSettled([
+          (async () => {
+            const status = await bridge().request<RepositoryStatus>(
+              { type: 'repositoryStatus', payload: { workspace_id: wid, repo_id: repoId } },
+              { showProgress: false },
+            );
+            if (get().snapshot?.workspace.id === wid) {
+              set((state) => {
+                const allRepositories = state.allRepositories.map((repo) => repo.meta.id === repoId ? status : repo);
+                return {
+                  allRepositories,
+                  snapshot: state.snapshot ? projectSnapshot({ ...state.snapshot, repositories: allRepositories }, allRepositories, settings()) : undefined,
+                };
+              });
+            }
+          })(),
+          get().loadConflicts(true, repoId),
+        ]);
       }
-      await bridge().request({ type: 'conflictSave', payload: { workspace_id: targetWid, repo_id: file.repoId, relative_path: file.path, content: get().mergeResult, expected_fingerprint: merge.fingerprint } });
-    }),
-    acceptConflict: async (choice) => withBusy(async () => {
-      const file = get().mergeTarget ?? get().selectedFile;
-      if (!file) return;
-      const targetWid = ('workspaceId' in file && file.workspaceId) ? file.workspaceId : workspaceId();
-      if (workspaceId() !== targetWid) {
-        get().addNotification({ type: 'warning', urgent: true, title: 'Workspace changed', message: { raw: 'Cannot accept conflict: active workspace has changed.' }, workspaceId: workspaceId() });
-        return;
-      }
-      await bridge().request({ type: 'conflictAccept', payload: { workspace_id: targetWid, repo_id: file.repoId, relative_path: file.path, choice } });
-    }),
-    abortRepositoryOperation: async (repoId, operation) => withBusy(async () => {
-      await bridge().request({ type: 'abortRepositoryOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-    }, `conflict:${repoId}`),
+      return result === true;
+    },
     restoreConflicts: async (repoIds) => {
       const results: RestoreConflictsResult[] = [];
       for (const repoId of [...new Set(repoIds)]) {

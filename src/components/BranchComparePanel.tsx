@@ -89,8 +89,6 @@ function ComparePane({
 
   useEffect(() => {
     if (!active) {
-      setFilteredCommits(null);
-      setLoading(false);
       return;
     }
 
@@ -179,7 +177,7 @@ function ComparePane({
     </div>
     <h3 title={title}>{title}</h3>
     <div className="compare-pane-list">
-      {loading ? (
+      {active && loading ? (
         <div className="compare-empty">{t('Loading...')}</div>
       ) : visible.length > 0 ? (
         renderCommits(visible)

@@ -18,12 +18,11 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { IgnoreRulesPanel } from './IgnoreRulesPanel';
 import { ChangelistView } from './ChangelistView';
 import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
-import { ConflictBanner } from './ConflictBanner';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 import { BranchRefBadge } from './BranchRefBadge';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { ProviderPanel } from './ProviderPanel';
-import { InvertSelectionIcon, SelectAllIcon } from './CustomIcons';
+import { InvertSelectionIcon, SelectAllIcon, WarningConflictIcon } from './CustomIcons';
 import { performCommitSafetyCheck } from '../history/safetyCheck';
 import { useSpeedSearch } from '../hooks/useSpeedSearch';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
@@ -311,6 +310,7 @@ export function CommitPanel() {
   const addIgnore = useAppStore((state) => state.addIgnore);
   const commitMany = useAppStore((state) => state.commitMany);
   const conflicts = useAppStore((state) => state.conflicts);
+  const openConflicts = useAppStore((state) => state.openConflicts);
   const openMerge = useAppStore((state) => state.openMerge);
   const resolveConflict = useAppStore((state) => state.resolveConflict);
   const abortRepositoryOperation = useAppStore((state) => state.abortRepositoryOperation);
@@ -463,6 +463,36 @@ export function CommitPanel() {
   const appliedHistoryMessageRef = useRef<string | null>(null);
   const [context, setContext] = useState<ChangeContext>();
   const [clHeaderContext, setClHeaderContext] = useState<{ x: number; y: number; changelistId: string }>();
+  const [conflictMenuOpen, setConflictMenuOpen] = useState(false);
+  const [conflictMenuPos, setConflictMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const conflictMenuRef = useRef<HTMLDivElement>(null);
+  const conflictButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!conflictMenuOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        conflictMenuRef.current &&
+        !conflictMenuRef.current.contains(target) &&
+        !conflictButtonRef.current?.contains(target)
+      ) {
+        setConflictMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setConflictMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [conflictMenuOpen]);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
@@ -526,9 +556,190 @@ export function CommitPanel() {
     if (tab === 'sync') requests.push(store.loadUnpushedCommits(), store.loadIncomingCommits());
     await Promise.all(requests);
   };
-  const activeOperationRepo = repos.find((repo) => repo.meta.kind === 'git' && repo.operation);
+  const conflictingRepos = useMemo(
+    () => repos.filter((repo) => repo.conflicts > 0 || repo.files.some((file) => file.conflicted)),
+    [repos],
+  );
+  const totalConflicts = useMemo(
+    () => conflictingRepos.reduce((sum, repo) => sum + (repo.conflicts || repo.files.filter((file) => file.conflicted).length), 0),
+    [conflictingRepos],
+  );
+  const conflictRepoCount = conflictingRepos.length;
+  const conflictSummary = useMemo(() => {
+    const repoSummary = conflictRepoCount === 1 ? t('{0} repository', conflictRepoCount) : t('{0} repositories', conflictRepoCount);
+    const fileSummary = totalConflicts === 1 ? t('{0} unresolved conflict file', totalConflicts) : t('{0} unresolved conflict files', totalConflicts);
+    return `${repoSummary} · ${fileSummary}`;
+  }, [conflictRepoCount, totalConflicts, t]);
+
+  const activeOperationRepos = useMemo(
+    () => repos.filter((repo) => repo.meta.kind === 'git' && Boolean(repo.operation)),
+    [repos],
+  );
+
+  const abortTargets = activeOperationRepos;
+  const abortStates = useMemo(() => new Set(abortTargets.map((r) => r.operation)), [abortTargets]);
+  const abortLabel = useMemo(() => {
+    if (abortTargets.length > 1) {
+      if (abortStates.size > 1) return t('Abort Merge/Rebase — Select repository');
+      if (abortStates.has('merge')) return t('Abort Merge — Select repository');
+      if (abortStates.has('rebase')) return t('Abort Rebase — Select repository');
+      if (abortStates.has('cherry-pick')) return t('Abort Cherry-pick — Select repository');
+      return t('Abort Revert — Select repository');
+    }
+    const op = abortTargets[0]?.operation;
+    if (op === 'rebase') return t('Abort Rebase');
+    if (op === 'cherry-pick') return t('Abort Cherry-pick');
+    if (op === 'revert') return t('Abort Revert');
+    return t('Abort Merge');
+  }, [abortTargets, abortStates, t]);
+  const abortDesc = useMemo(() => abortTargets.map((r) => r.meta.name).join(', '), [abortTargets]);
+  const abortDetail = useMemo(() => {
+    if (abortTargets.length > 1) {
+      if (abortStates.size > 1) return t('Select the repository whose {0} should be aborted', t('merge/rebase'));
+      if (abortStates.has('merge')) return t('Select the repository whose merge should be aborted');
+      if (abortStates.has('rebase')) return t('Select the repository whose rebase should be aborted');
+      if (abortStates.has('cherry-pick')) return t('Select the repository whose cherry-pick should be aborted');
+      return t('Select the repository whose revert should be aborted');
+    }
+    const op = abortTargets[0]?.operation;
+    if (op === 'rebase') return t('Rebase in progress — abort and restore previous state');
+    if (op === 'cherry-pick') return t('Cherry-pick in progress — abort and restore previous state');
+    if (op === 'revert') return t('Revert in progress — abort and restore previous state');
+    return t('Merge in progress — abort and restore previous state');
+  }, [abortTargets, abortStates, t]);
+
+  const continueTargets = useMemo(
+    () => activeOperationRepos.filter((repo) => repo.conflicts === 0 && !repo.files.some((f) => f.conflicted)),
+    [activeOperationRepos],
+  );
+  const continueStates = useMemo(() => new Set(continueTargets.map((r) => r.operation)), [continueTargets]);
+  const continueLabel = useMemo(() => {
+    if (continueTargets.length > 1) {
+      if (continueStates.size > 1) return t('Continue Operation — Select repository');
+      if (continueStates.has('merge')) return t('Commit Merge — Select repository');
+      if (continueStates.has('rebase')) return t('Continue Rebase — Select repository');
+      if (continueStates.has('cherry-pick')) return t('Continue Cherry-pick — Select repository');
+      return t('Continue Revert — Select repository');
+    }
+    const op = continueTargets[0]?.operation;
+    if (op === 'rebase') return t('Continue Rebase');
+    if (op === 'cherry-pick') return t('Continue Cherry-pick');
+    if (op === 'revert') return t('Continue Revert');
+    return t('Commit Merge');
+  }, [continueTargets, continueStates, t]);
+  const continueDesc = useMemo(() => continueTargets.map((r) => r.meta.name).join(', '), [continueTargets]);
+  const continueDetail = useMemo(() => {
+    if (continueTargets.length > 1) {
+      return t('All conflicts resolved. Select repository to continue operation.');
+    }
+    const op = continueTargets[0]?.operation;
+    if (op === 'rebase') return t('All conflicts resolved. Continue rebase to apply next commits.');
+    if (op === 'cherry-pick') return t('All conflicts resolved. Continue cherry-pick.');
+    if (op === 'revert') return t('All conflicts resolved. Continue revert.');
+    return t('All conflicts resolved. Complete merge commit.');
+  }, [continueTargets, t]);
+
+  const restorableRepos = useMemo(
+    () => conflictingRepos.filter((repo) => repo.meta.kind === 'git' && !repo.operation),
+    [conflictingRepos],
+  );
+  const totalRestorableFiles = useMemo(
+    () => restorableRepos.reduce((sum, repo) => sum + (repo.conflicts || repo.files.filter((file) => file.conflicted).length), 0),
+    [restorableRepos],
+  );
+  const restorableDesc = useMemo(
+    () => totalRestorableFiles === 1 ? t('{0} unresolved conflict file', totalRestorableFiles) : t('{0} unresolved conflict files', totalRestorableFiles),
+    [totalRestorableFiles, t],
+  );
+  const restorableDetail = t('Discard conflicted index and working tree changes, then restore the current branch versions');
+
   const restoreConflicts = useAppStore((state) => state.restoreConflicts);
-  const restorableConflictRepoIds = repos.filter((repo) => repo.meta.kind === 'git' && !repo.operation && (repo.conflicts > 0 || repo.files.some((file) => file.conflicted))).map((repo) => repo.meta.id);
+  const continueRepositoryOperation = useAppStore((state) => state.continueRepositoryOperation);
+
+  const handleContinueClick = useCallback(async () => {
+    setConflictMenuOpen(false);
+    let target: RepositoryStatus | undefined = continueTargets[0];
+    if (continueTargets.length > 1) {
+      const choiceId = await choiceDialog({
+        title: continueLabel,
+        message: continueDetail,
+        choices: continueTargets.map((r) => ({
+          id: r.meta.id,
+          label: r.meta.name,
+          description: r.operation ?? undefined,
+          icon: 'git-merge',
+        })),
+      });
+      if (!choiceId) return;
+      target = continueTargets.find((r) => r.meta.id === choiceId);
+    }
+    if (!target || !target.operation) return;
+    await continueRepositoryOperation(target.meta.id, target.operation);
+  }, [continueTargets, continueLabel, continueDetail, continueRepositoryOperation]);
+
+  const handleAbortClick = useCallback(async () => {
+    setConflictMenuOpen(false);
+    let target: RepositoryStatus | undefined = abortTargets[0];
+    if (abortTargets.length > 1) {
+      const choiceId = await choiceDialog({
+        title: abortLabel,
+        message: abortDetail,
+        choices: abortTargets.map((r) => ({
+          id: r.meta.id,
+          label: r.meta.name,
+          description: r.operation ?? undefined,
+          icon: 'git-branch',
+        })),
+      });
+      if (!choiceId) return;
+      target = abortTargets.find((r) => r.meta.id === choiceId);
+    }
+    if (!target || !target.operation) return;
+
+    const confirmTitle = t('Abort {0}?', target.operation);
+    const confirmMessage = target.operation === 'merge'
+      ? t('VersionDock [{0}]: Abort merge? This will restore the repository to its pre-merge state.', target.meta.name)
+      : t('VersionDock [{0}]: Abort {1}? This will restore the repository to its previous state.', target.meta.name, target.operation);
+
+    const yes = await confirmDialog({
+      title: confirmTitle,
+      message: confirmMessage,
+      danger: true,
+      confirmLabel: target.operation === 'rebase'
+        ? t('Abort Rebase')
+        : target.operation === 'cherry-pick'
+          ? t('Abort Cherry-pick')
+          : target.operation === 'revert'
+            ? t('Abort Revert')
+            : t('Abort Merge'),
+    });
+    if (yes) {
+      await abortRepositoryOperation(target.meta.id, target.operation);
+    }
+  }, [abortTargets, abortLabel, abortDetail, abortRepositoryOperation, t]);
+
+  const handleRestoreCurrentBranchClick = useCallback(async () => {
+    setConflictMenuOpen(false);
+    if (restorableRepos.length === 0 || totalRestorableFiles === 0) return;
+    const singleTarget = restorableRepos.length === 1 ? restorableRepos[0] : undefined;
+    const confirmMessage = singleTarget
+      ? (totalRestorableFiles === 1
+          ? t('VersionDock [{0}]: Restore the conflicted file to the current branch version? This discards its index and working tree changes.', singleTarget.meta.name)
+          : t('VersionDock [{0}]: Restore {1} conflicted files to their current branch versions? This discards their index and working tree changes.', singleTarget.meta.name, totalRestorableFiles))
+      : (totalRestorableFiles === 1
+          ? t('VersionDock: Restore the conflicted file to the current branch version? This discards its index and working tree changes.')
+          : t('VersionDock: Restore {0} conflicted files to their current branch versions? This discards their index and working tree changes.', totalRestorableFiles));
+
+    const yes = await confirmDialog({
+      title: t('Restore Current Branch'),
+      message: confirmMessage,
+      danger: true,
+      confirmLabel: t('Restore Current Branch'),
+    });
+    if (yes) {
+      await restoreConflicts(restorableRepos.map((r) => r.meta.id));
+    }
+  }, [restorableRepos, totalRestorableFiles, restoreConflicts, t]);
   const canRepoAmend = useCallback((repo: RepositoryStatus) => {
     if (repo.meta.kind !== 'git') return false;
     const unpushed = unpushedCommits[repo.meta.id];
@@ -1510,9 +1721,146 @@ export function CommitPanel() {
   const panelExpanded = tab === 'changes' || tab === 'shelf' || tab === 'stash' || tab === 'sync'
     ? expandedByTab[tab]
     : true;
+  const hasConflictOrOperation = conflictingRepos.length > 0 || activeOperationRepos.length > 0;
   const panelToolbar = <div className="panel-toolbar">
     <strong title={t('VersionDock Commit')}>{t('VersionDock Commit')}</strong>
     <span />
+    {hasConflictOrOperation && (
+      <div className="view-options panel-view-options conflict-action-wrapper" style={{ position: 'relative' }}>
+        <button
+          ref={conflictButtonRef}
+          type="button"
+          className={totalConflicts > 0 ? 'conflict-warning-button pulsing' : 'conflict-warning-button'}
+          title={totalConflicts > 0 ? t('Resolve Conflicts') : continueLabel}
+          aria-label={totalConflicts > 0 ? t('Resolve Conflicts') : continueLabel}
+          aria-haspopup="menu"
+          aria-expanded={conflictMenuOpen}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!conflictMenuOpen) {
+              const rect = conflictButtonRef.current?.getBoundingClientRect();
+              if (rect) {
+                const menuWidth = 360;
+                let left = rect.left;
+                if (left + menuWidth > window.innerWidth - 12) {
+                  left = Math.max(12, window.innerWidth - menuWidth - 12);
+                }
+                if (left < 12) {
+                  left = 12;
+                }
+                setConflictMenuPos({ top: rect.bottom + 5, left });
+              }
+              setConflictMenuOpen(true);
+            } else {
+              setConflictMenuOpen(false);
+            }
+          }}
+        >
+          {totalConflicts > 0 ? (
+            <WarningConflictIcon />
+          ) : (
+            <Codicon name="play" style={{ color: 'var(--vscode-testing-iconPassed, #73c991)' }} />
+          )}
+        </button>
+        {conflictMenuOpen && (
+          <div
+            ref={conflictMenuRef}
+            className="conflict-actions-menu"
+            role="menu"
+            style={{
+              position: 'fixed',
+              top: conflictMenuPos?.top ?? 35,
+              left: conflictMenuPos?.left ?? 12,
+              width: 360,
+              zIndex: 1000,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="conflict-actions-header">
+              <div className="conflict-actions-title">
+                VersionDock: {totalConflicts > 0 ? t('There are still unresolved conflicts') : t('All conflicts resolved')}
+              </div>
+              <div className="conflict-actions-subtitle">
+                {totalConflicts > 0 ? t('Select an action to resolve or handle conflicts') : t('Continue or abort the repository operation')}
+              </div>
+            </div>
+            <div className="conflict-actions-list">
+              {continueTargets.length > 0 && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="conflict-action-item"
+                  onClick={() => void handleContinueClick()}
+                >
+                  <div className="conflict-action-item__header">
+                    <Codicon name="play" className="conflict-action-item__icon" />
+                    <span className="conflict-action-item__label">{continueLabel}</span>
+                    <span className="conflict-action-item__desc">{continueDesc}</span>
+                  </div>
+                  <div className="conflict-action-item__detail">
+                    {continueDetail}
+                  </div>
+                </button>
+              )}
+              {totalConflicts > 0 && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="conflict-action-item"
+                  onClick={() => {
+                    setConflictMenuOpen(false);
+                    openConflicts();
+                  }}
+                >
+                  <div className="conflict-action-item__header">
+                    <Codicon name="git-merge" className="conflict-action-item__icon" />
+                    <span className="conflict-action-item__label">{t('Resolve Conflicts')}</span>
+                    <span className="conflict-action-item__desc">{conflictSummary}</span>
+                  </div>
+                  <div className="conflict-action-item__detail">
+                    {t('Open the conflicts panel to resolve files')}
+                  </div>
+                </button>
+              )}
+              {abortTargets.length > 0 && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="conflict-action-item danger"
+                  onClick={() => void handleAbortClick()}
+                >
+                  <div className="conflict-action-item__header">
+                    <Codicon name="close" className="conflict-action-item__icon" />
+                    <span className="conflict-action-item__label">{abortLabel}</span>
+                    <span className="conflict-action-item__desc">{abortDesc}</span>
+                  </div>
+                  <div className="conflict-action-item__detail">
+                    {abortDetail}
+                  </div>
+                </button>
+              )}
+              {restorableRepos.length > 0 && totalRestorableFiles > 0 && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="conflict-action-item danger"
+                  onClick={() => void handleRestoreCurrentBranchClick()}
+                >
+                  <div className="conflict-action-item__header">
+                    <Codicon name="discard" className="conflict-action-item__icon" />
+                    <span className="conflict-action-item__label">{t('Restore Current Branch')}</span>
+                    <span className="conflict-action-item__desc">{restorableDesc}</span>
+                  </div>
+                  <div className="conflict-action-item__detail">
+                    {restorableDetail}
+                  </div>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    )}
     {canSelectAll && (
       <button
         disabled={workspaceBusy || !currentTabHasSelectable}
@@ -1574,129 +1922,7 @@ export function CommitPanel() {
       <div className="commit-tabs"><button title={changesDisplayMode === 'changelists' || changesDisplayMode === 'vscode' ? t('Commit') : t('Changes')} className={tab === 'changes' ? 'active' : ''} onClick={() => switchTab('changes')}><Codicon name="source-control" />{tab === 'changes' && <span>{changesDisplayMode === 'changelists' || changesDisplayMode === 'vscode' ? t('Commit') : t('Changes')}</span>}{totalChanges > 0 && <b>{totalChanges}</b>}</button>{shelfEnabled && <button title={t('Shelf')} className={tab === 'shelf' ? 'active' : ''} onClick={() => switchTab('shelf')}><Codicon name="archive" />{tab === 'shelf' && <span>{t('Shelf')}</span>}{shelfCount > 0 && <b>{shelfCount}</b>}</button>}{stashEnabled && <button title={t('Stash')} className={tab === 'stash' ? 'active' : ''} onClick={() => switchTab('stash')}><Codicon name="save" />{tab === 'stash' && <span>{t('Stash')}</span>}{stashCount > 0 && <b>{stashCount}</b>}</button>}{submoduleEnabled && <button title={t('Submodules')} className={tab === 'submodule' ? 'active' : ''} onClick={() => switchTab('submodule')}><Codicon name="repo-clone" />{tab === 'submodule' && <span>{t('Submodules')}</span>}{submoduleCount > 0 && <b>{submoduleCount}</b>}</button>}{worktreeEnabled && <button title={t('Worktrees')} className={tab === 'worktree' ? 'active' : ''} onClick={() => switchTab('worktree')}><Codicon name="worktree" />{tab === 'worktree' && <span>{t('Worktrees')}</span>}{worktreeCount > 0 && <b>{worktreeCount}</b>}</button>}{subtreeEnabled && <button title={t('Subtree')} className={tab === 'subtree' ? 'active' : ''} onClick={() => switchTab('subtree')}><Codicon name="repo" />{tab === 'subtree' && <span>{t('Subtree')}</span>}{subtreeCount > 0 && <b>{subtreeCount}</b>}</button>}{gitRepos.length > 0 && <button title={t('Sync')} className={tab === 'sync' ? 'active' : ''} onClick={() => switchTab('sync')}><Codicon name="sync" />{tab === 'sync' && <span>{t('Sync')}</span>}{totalToSync > 0 && <b>{totalToSync}</b>}</button>}</div>
       {visitedTabs.has('changes') && (
         <div className="commit-tab-content changes-tab-content" style={{ display: tab === 'changes' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-      {conflicts.length > 0 ? (
-        <ConflictBanner
-          summary={(() => {
-            const conflictRepos = repos.filter((r) => r.files.some((f) => f.conflicted) || r.conflicts > 0);
-            const repoCount = conflictRepos.length || 1;
-            const fileCount = conflicts.length;
-            const repoSummary = repoCount === 1 ? t('{0} repository', repoCount) : t('{0} repositories', repoCount);
-            const fileSummary = fileCount === 1 ? t('{0} unresolved conflict file', fileCount) : t('{0} unresolved conflict files', fileCount);
-            return `${repoSummary} · ${fileSummary}`;
-          })()}
-          actions={(() => {
-            const conflict = conflicts[0];
-            const requiresSideSelection = Boolean(conflict.conflictType && !['text', 'binary'].includes(conflict.conflictType));
-            const resolutionActions = requiresSideSelection ? [
-              {
-                id: 'accept-current',
-                label: t('Accept Current'),
-                title: t('Accept Current'),
-                tone: 'primary' as const,
-                onClick: () => { void resolveConflict(conflict, 'mine'); },
-              },
-              {
-                id: 'accept-incoming',
-                label: t('Accept Incoming'),
-                title: t('Accept Incoming'),
-                tone: 'primary' as const,
-                onClick: () => { void resolveConflict(conflict, 'theirs'); },
-              },
-            ] : [
-              {
-                id: 'resolve',
-                label: t('Resolve Conflicts'),
-                title: t('Open the conflicts panel to resolve files'),
-                tone: 'primary' as const,
-                onClick: () => { void openMerge(conflict); },
-              },
-            ];
-            return [
-              ...resolutionActions,
-              ...(activeOperationRepo?.operation
-                ? [
-                  {
-                    id: 'abort',
-                    label: activeOperationRepo.operation === 'rebase' ? t('Abort Rebase') : t('Abort Merge'),
-                    title: t('Abort {0}?', activeOperationRepo.operation),
-                    tone: 'danger' as const,
-                    onClick: () => {
-                      void confirmDialog({
-                        title: t('Abort {0}?', activeOperationRepo.operation!),
-                        message: `${activeOperationRepo.meta.name}\n${t('This can discard the in-progress operation state.')}`,
-                        danger: true,
-                      }).then((yes) => {
-                        if (yes) return abortRepositoryOperation(activeOperationRepo.meta.id, activeOperationRepo.operation!);
-                      });
-                    },
-                  },
-                ]
-                : []),
-              ...(restorableConflictRepoIds.length
-                ? [{
-                  id: 'restore-current',
-                  label: t('Restore Current Branch'),
-                  title: t('Discard conflicted index and working tree changes'),
-                  tone: 'danger' as const,
-                  onClick: () => {
-                    void confirmDialog({ title: t('Restore Current Branch?'), message: t('All conflicted files without an active Git operation will be restored. This cannot be undone.'), danger: true }).then((yes) => {
-                      if (yes) return restoreConflicts(restorableConflictRepoIds);
-                    });
-                  },
-                }]
-                : []),
-            ];
-          })()}
-        />
-      ) : activeOperationRepo?.operation ? (
-        <ConflictBanner
-          title={
-            activeOperationRepo.operation === 'merge'
-              ? t('All conflicts resolved. Complete merge commit?')
-              : activeOperationRepo.operation === 'rebase'
-                ? t('Rebase in progress')
-                : t('Merge in progress')
-          }
-          summary={activeOperationRepo.meta.name}
-          actions={[
-            ...(activeOperationRepo.operation === 'merge'
-              ? [
-                  {
-                    id: 'commit-merge',
-                    label: t('Commit Merge'),
-                    title: t('Commit Merge'),
-                    tone: 'primary' as const,
-                    onClick: () => {
-                      void doCommit(false);
-                    },
-                  },
-                ]
-              : []),
-            {
-              id: 'abort',
-              label:
-                activeOperationRepo.operation === 'rebase'
-                  ? t('Abort Rebase')
-                  : activeOperationRepo.operation === 'cherry-pick'
-                    ? t('Abort Cherry-Pick')
-                    : activeOperationRepo.operation === 'revert'
-                      ? t('Abort Revert')
-                      : t('Abort Merge'),
-              title: t('Abort {0}?', activeOperationRepo.operation),
-              tone: 'danger',
-              onClick: () => {
-                void confirmDialog({
-                  title: t('Abort {0}?', activeOperationRepo.operation!),
-                  message: `${activeOperationRepo.meta.name}\n${t('This can discard the in-progress operation state.')}`,
-                  danger: true,
-                }).then((yes) => {
-                  if (yes) return abortRepositoryOperation(activeOperationRepo.meta.id, activeOperationRepo.operation!);
-                });
-              },
-            },
-          ]}
-        />
-      ) : null}
+
       <div className="changes-scroll">
         {tab === 'changes' && <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />}
         {!repos.length && <div className="empty-state"><Codicon name="source-control" />{t('No repositories found')}</div>}

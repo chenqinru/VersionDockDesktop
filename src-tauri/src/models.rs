@@ -586,6 +586,9 @@ pub enum BridgeCommand {
         relative_path: String,
         content: String,
         expected_fingerprint: String,
+        #[serde(default)]
+        #[specta(optional)]
+        delete_file: Option<bool>,
     },
     ConflictAccept {
         workspace_id: String,
@@ -594,6 +597,11 @@ pub enum BridgeCommand {
         choice: ConflictChoice,
     },
     AbortRepositoryOperation {
+        workspace_id: String,
+        repo_id: String,
+        operation: String,
+    },
+    ContinueRepositoryOperation {
         workspace_id: String,
         repo_id: String,
         operation: String,
@@ -1179,7 +1187,7 @@ pub enum SubtreeState {
     Pending,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum ConflictChoice {
     Mine,
@@ -2174,6 +2182,12 @@ pub struct FileChange {
     pub conflict_type: Option<String>,
     #[serde(default)]
     #[specta(optional)]
+    pub conflict_types: Option<Vec<String>>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub conflict_status: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
     pub submodule: bool,
     #[serde(default)]
     #[specta(optional)]
@@ -2592,7 +2606,16 @@ pub struct ConflictFile {
     pub conflict_type: String,
     #[serde(default)]
     #[specta(optional)]
+    pub conflict_types: Option<Vec<String>>,
+    #[serde(default)]
+    #[specta(optional)]
     pub actions: Vec<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub current_status: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub incoming_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -2623,6 +2646,12 @@ pub struct MergeVersions {
     pub language: String,
     pub fingerprint: String,
     pub binary: bool,
+    #[serde(default)]
+    #[specta(optional)]
+    pub ours_status: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub theirs_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -2644,6 +2673,15 @@ pub struct RestoreConflictFailure {
 pub struct RestoreConflictsResult {
     pub restored_paths: Vec<String>,
     pub failures: Vec<RestoreConflictFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictResolutionResult {
+    pub resolved: bool,
+    pub auto_commit_error: Option<String>,
+    #[serde(default)]
+    pub auto_committed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

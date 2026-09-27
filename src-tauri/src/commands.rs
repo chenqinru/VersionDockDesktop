@@ -7,10 +7,11 @@ use crate::{
     changelist, identity,
     models::{
         BootstrapData, BridgeCommand, CapabilityStatus, CheckoutRepositoryResult,
-        CloneRepositoryResult, ConflictFile, DesktopCapabilities, DesktopError,
-        InitializeRepositoryResult, NotificationPermissionState, OperationEvent, OperationStatus,
-        RefreshScope, RepositoryEvent, RepositoryEventSource, RequestEnvelope, ResponseEnvelope,
-        RuntimeCapabilities, VcsKind, WindowTabImport, WindowTabTransferCompleted,
+        CloneRepositoryResult, ConflictFile, ConflictResolutionResult, DesktopCapabilities,
+        DesktopError, InitializeRepositoryResult, NotificationPermissionState, OperationEvent,
+        OperationStatus, RefreshScope, RepositoryEvent, RepositoryEventSource, RequestEnvelope,
+        ResponseEnvelope, RuntimeCapabilities, VcsKind, WindowTabImport,
+        WindowTabTransferCompleted,
     },
     provider, shelf,
     state::{self, AppState, OperationReporter},
@@ -259,7 +260,13 @@ pub async fn bridge_request(
             failed: 1,
         }),
     };
-    if result.is_ok() {
+    if result.is_ok()
+        || matches!(
+            command,
+            BridgeCommand::ContinueRepositoryOperation { .. }
+                | BridgeCommand::AbortRepositoryOperation { .. }
+        )
+    {
         emit_refresh_events(app.clone(), state.inner(), &command, &result);
     }
     let _ = app.emit(
@@ -330,6 +337,30 @@ fn validate_request_context(
     Ok(())
 }
 
+fn command_resolved_refresh_scopes(
+    command: &BridgeCommand,
+    result: &Result<serde_json::Value, DesktopError>,
+) -> Vec<RefreshScope> {
+    let mut scopes = command_refresh_scopes(command);
+    if matches!(
+        command,
+        BridgeCommand::ConflictSave { .. } | BridgeCommand::ConflictAccept { .. }
+    ) {
+        if let Ok(value) = result {
+            if value
+                .get("autoCommitted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                scopes.push(RefreshScope::Refs);
+                scopes.push(RefreshScope::History);
+                scopes.push(RefreshScope::Unpushed);
+            }
+        }
+    }
+    scopes
+}
+
 fn emit_refresh_events(
     app: AppHandle,
     state: &AppState,
@@ -340,7 +371,7 @@ fn emit_refresh_events(
     let Some(workspace_id) = workspace_id else {
         return;
     };
-    let scopes = command_refresh_scopes(command);
+    let scopes = command_resolved_refresh_scopes(command, result);
     if scopes.is_empty() {
         return;
     }
@@ -417,6 +448,15 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
             RefreshScope::Diff,
             RefreshScope::Operation,
             RefreshScope::Conflicts,
+        ],
+        BridgeCommand::ContinueRepositoryOperation { .. } => vec![
+            RefreshScope::Status,
+            RefreshScope::Diff,
+            RefreshScope::Operation,
+            RefreshScope::Conflicts,
+            RefreshScope::Refs,
+            RefreshScope::History,
+            RefreshScope::Unpushed,
         ],
         BridgeCommand::StashOperation { .. }
         | BridgeCommand::ShelfOperation { .. }
@@ -602,6 +642,7 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         BridgeCommand::ConflictSave { .. }
         | BridgeCommand::ConflictAccept { .. }
         | BridgeCommand::AbortRepositoryOperation { .. }
+        | BridgeCommand::ContinueRepositoryOperation { .. }
         | BridgeCommand::RestoreConflicts { .. } => ("conflict", "Updating conflict state"),
         BridgeCommand::GitIdentity { .. } | BridgeCommand::GitProfileOperation { .. } => {
             ("identity", "Resolving Git identity")
@@ -810,6 +851,11 @@ fn command_error_context(
             repo_id,
         }
         | BridgeCommand::AbortRepositoryOperation {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::ContinueRepositoryOperation {
             workspace_id,
             repo_id,
             ..
@@ -3228,14 +3274,7 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(
                 vcs::branch_compare_commits(
-                    &repo,
-                    &base,
-                    &target,
-                    &side,
-                    skip,
-                    limit,
-                    &query,
-                    token,
+                    &repo, &base, &target, &side, skip, limit, &query, token,
                 )
                 .await?,
             )
@@ -3285,38 +3324,59 @@ async fn dispatch(
                 };
                 statuses.push(status);
             }
-            let files = statuses
-                .iter()
-                .flat_map(|repository| {
-                    repository
-                        .files
-                        .iter()
-                        .filter(|file| file.conflicted)
-                        .map(|file| ConflictFile {
-                            repo_id: repository.meta.id.clone(),
-                            repo_name: repository.meta.name.clone(),
-                            repo_color: repository.meta.color.clone(),
-                            path: file.path.clone(),
-                            kind: repository.meta.kind,
-                            binary: std::fs::read(
-                                Path::new(&repository.meta.root_path).join(&file.path),
-                            )
-                            .is_ok_and(|bytes| vcs::bytes_are_binary(&bytes)),
-                            conflict_type: file
-                                .conflict_type
-                                .clone()
-                                .unwrap_or_else(|| "text".into()),
-                            actions: if file.conflict_type.as_deref().is_some_and(|kind| {
-                                kind == "property" || kind == "tree" || kind == "obstruction"
-                            }) {
-                                vec!["working".into()]
-                            } else {
-                                vec!["mine".into(), "theirs".into(), "working".into()]
-                            },
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>();
+            let mut files = Vec::new();
+            for repository in &statuses {
+                for file in repository.files.iter().filter(|f| f.conflicted) {
+                    let (current_status, incoming_status) = match repository.meta.kind {
+                        VcsKind::Git => {
+                            let code = file.conflict_status.as_deref().unwrap_or("UU");
+                            let (ours_s, theirs_s) = vcs::map_git_conflict_side_statuses(code);
+                            (ours_s.map(String::from), theirs_s.map(String::from))
+                        }
+                        VcsKind::Svn => {
+                            let curr = match file.conflict_status.as_deref() {
+                                Some("added") => "added",
+                                Some("deleted") | Some("missing") => "deleted",
+                                _ => "modified",
+                            };
+                            let incoming =
+                                vcs::svn_incoming_status(&repository.meta, &file.path, token).await;
+                            (Some(curr.to_string()), Some(incoming))
+                        }
+                    };
+                    let binary = match repository.meta.kind {
+                        VcsKind::Git => {
+                            vcs::is_git_conflict_binary(&repository.meta, &file.path, token).await
+                        }
+                        VcsKind::Svn => {
+                            vcs::is_svn_conflict_binary(&repository.meta, &file.path, token).await
+                        }
+                    };
+                    let conflict_type = if file.submodule {
+                        "submodule".into()
+                    } else {
+                        file.conflict_type.clone().unwrap_or_else(|| "text".into())
+                    };
+                    let conflict_types = if file.submodule {
+                        Some(vec!["submodule".into()])
+                    } else {
+                        file.conflict_types.clone()
+                    };
+                    files.push(ConflictFile {
+                        repo_id: repository.meta.id.clone(),
+                        repo_name: repository.meta.name.clone(),
+                        repo_color: repository.meta.color.clone(),
+                        path: file.path.clone(),
+                        kind: repository.meta.kind,
+                        binary,
+                        conflict_type,
+                        conflict_types,
+                        actions: vec!["mine".into(), "theirs".into(), "working".into()],
+                        current_status,
+                        incoming_status,
+                    });
+                }
+            }
             json(files)
         }
         BridgeCommand::ConflictVersions {
@@ -3334,22 +3394,29 @@ async fn dispatch(
             relative_path,
             content,
             expected_fingerprint,
+            delete_file,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let auto_commit = state.app.read().await.settings.auto_commit_resolved_merge;
-            with_write(state, &repo_id, token, async {
+            let should_delete = delete_file.unwrap_or(false);
+            let output = with_write(state, &repo_id, token, async {
                 vcs::conflict_save(
                     &repo,
                     &relative_path,
                     &content,
                     &expected_fingerprint,
+                    should_delete,
                     auto_commit,
                     token,
                 )
                 .await
             })
             .await?;
-            json(true)
+            json(ConflictResolutionResult {
+                resolved: true,
+                auto_commit_error: output.auto_commit_error,
+                auto_committed: output.auto_committed,
+            })
         }
         BridgeCommand::ConflictAccept {
             workspace_id,
@@ -3359,11 +3426,15 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let auto_commit = state.app.read().await.settings.auto_commit_resolved_merge;
-            with_write(state, &repo_id, token, async {
+            let output = with_write(state, &repo_id, token, async {
                 vcs::conflict_accept(&repo, &relative_path, choice, auto_commit, token).await
             })
             .await?;
-            json(true)
+            json(ConflictResolutionResult {
+                resolved: true,
+                auto_commit_error: output.auto_commit_error,
+                auto_committed: output.auto_committed,
+            })
         }
         BridgeCommand::AbortRepositoryOperation {
             workspace_id,
@@ -3373,6 +3444,18 @@ async fn dispatch(
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
                 vcs::abort_operation(&repo, &operation, token).await
+            })
+            .await?;
+            json(true)
+        }
+        BridgeCommand::ContinueRepositoryOperation {
+            workspace_id,
+            repo_id,
+            operation,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            with_write(state, &repo_id, token, async {
+                vcs::continue_operation(&repo, &operation, token).await
             })
             .await?;
             json(true)
@@ -3870,6 +3953,52 @@ mod tests {
             },
         };
         assert!(command_refresh_scopes(&initialize).contains(&RefreshScope::WorkspaceSnapshot));
+    }
+
+    #[test]
+    fn conflict_resolution_broadcasts_history_refs_and_unpushed_when_auto_committed() {
+        let save_cmd = BridgeCommand::ConflictSave {
+            workspace_id: "workspace".into(),
+            repo_id: "repo".into(),
+            relative_path: "conflict.txt".into(),
+            content: "resolved".into(),
+            expected_fingerprint: "abc".into(),
+            delete_file: None,
+        };
+        let not_committed_res: Result<serde_json::Value, DesktopError> = Ok(serde_json::json!({
+            "resolved": true,
+            "autoCommitError": null,
+            "autoCommitted": false,
+        }));
+        let scopes = command_resolved_refresh_scopes(&save_cmd, &not_committed_res);
+        assert!(scopes.contains(&RefreshScope::Status));
+        assert!(scopes.contains(&RefreshScope::Conflicts));
+        assert!(!scopes.contains(&RefreshScope::History));
+        assert!(!scopes.contains(&RefreshScope::Refs));
+        assert!(!scopes.contains(&RefreshScope::Unpushed));
+
+        let committed_res: Result<serde_json::Value, DesktopError> = Ok(serde_json::json!({
+            "resolved": true,
+            "autoCommitError": null,
+            "autoCommitted": true,
+        }));
+        let scopes = command_resolved_refresh_scopes(&save_cmd, &committed_res);
+        assert!(scopes.contains(&RefreshScope::Status));
+        assert!(scopes.contains(&RefreshScope::Conflicts));
+        assert!(scopes.contains(&RefreshScope::History));
+        assert!(scopes.contains(&RefreshScope::Refs));
+        assert!(scopes.contains(&RefreshScope::Unpushed));
+
+        let accept_cmd = BridgeCommand::ConflictAccept {
+            workspace_id: "workspace".into(),
+            repo_id: "repo".into(),
+            relative_path: "conflict.txt".into(),
+            choice: crate::models::ConflictChoice::Theirs,
+        };
+        let scopes = command_resolved_refresh_scopes(&accept_cmd, &committed_res);
+        assert!(scopes.contains(&RefreshScope::History));
+        assert!(scopes.contains(&RefreshScope::Refs));
+        assert!(scopes.contains(&RefreshScope::Unpushed));
     }
 
     #[tokio::test]

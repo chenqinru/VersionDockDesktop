@@ -939,4 +939,115 @@ describe('CommitPanel capabilities and file view', () => {
     // 验证子模块 (depth: 1) 排在父仓库 (depth: 0) 之前提交
     expect(receivedTargets.map((t) => t.repoId)).toEqual(['submodule', 'parent']);
   });
+
+  it('renders conflict action popup with full title, description and detail aligned with plugin', () => {
+    const conflictedRepo: RepositoryStatus = {
+      ...gitRepo,
+      operation: 'merge',
+      conflicts: 1,
+      files: [{ path: 'file.txt', status: 'modified', staged: false, unstaged: false, conflicted: true }],
+    };
+    useAppStore.setState({
+      bootstrap: bootstrap(false),
+      snapshot: { ...gitSnapshot, repositories: [conflictedRepo] },
+      selectedRepoId: 'repo',
+    });
+
+    renderPanel();
+
+    const triggerBtn = screen.getByRole('button', { name: 'Resolve Conflicts' });
+    expect(triggerBtn).toBeInTheDocument();
+
+    // 点击打开弹窗
+    fireEvent.click(triggerBtn);
+
+    // 验证弹窗标题与副标题
+    expect(screen.getByText('VersionDock: There are still unresolved conflicts')).toBeInTheDocument();
+    expect(screen.getByText('Select an action to resolve or handle conflicts')).toBeInTheDocument();
+
+    // 验证第一项：解决冲突，以及其统计描述和详情
+    expect(screen.getByRole('menuitem', { name: /Resolve Conflicts/ })).toBeInTheDocument();
+    expect(screen.getByText('1 repository · 1 unresolved conflict file')).toBeInTheDocument();
+    expect(screen.getByText('Open the conflicts panel to resolve files')).toBeInTheDocument();
+
+    // 验证第二项：中止合并及其描述详情
+    expect(screen.getByRole('menuitem', { name: /Abort Merge/ })).toBeInTheDocument();
+    expect(document.querySelector('.conflict-action-item.danger .conflict-action-item__desc')).toHaveTextContent('Repository');
+    expect(screen.getByText('Merge in progress — abort and restore previous state')).toBeInTheDocument();
+
+    // 按 Escape 键可以关闭弹窗
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText('VersionDock: There are still unresolved conflicts')).not.toBeInTheDocument();
+  });
+
+  it('renders correct abort label and confirm label for cherry-pick and revert operations', async () => {
+    const cherryPickRepo: RepositoryStatus = {
+      ...gitRepo,
+      operation: 'cherry-pick',
+      conflicts: 1,
+      files: [{ path: 'file.txt', status: 'modified', staged: false, unstaged: false, conflicted: true }],
+    };
+    const confirmSpy = vi.spyOn(dialogService, 'confirmDialog').mockResolvedValue(true);
+    const abortRepositoryOperation = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({
+      bootstrap: bootstrap(false),
+      snapshot: { ...gitSnapshot, repositories: [cherryPickRepo] },
+      selectedRepoId: 'repo',
+      abortRepositoryOperation,
+    });
+
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve Conflicts' }));
+    const abortItem = screen.getByRole('menuitem', { name: /Abort Cherry-pick/ });
+    expect(abortItem).toBeInTheDocument();
+
+    fireEvent.click(abortItem);
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          confirmLabel: 'Abort Cherry-pick',
+        }),
+      );
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it('renders continue button and allows continuing rebase when all conflicts are resolved', async () => {
+    const resolvedRebaseRepo: RepositoryStatus = {
+      ...gitRepo,
+      operation: 'rebase',
+      conflicts: 0,
+      files: [{ path: 'file.txt', status: 'modified', staged: true, unstaged: false, conflicted: false }],
+    };
+    const continueRepositoryOperation = vi.fn().mockResolvedValue(true);
+    useAppStore.setState({
+      bootstrap: bootstrap(false),
+      snapshot: { ...gitSnapshot, repositories: [resolvedRebaseRepo] },
+      selectedRepoId: 'repo',
+      continueRepositoryOperation,
+    });
+
+    renderPanel();
+
+    const triggerBtn = screen.getByRole('button', { name: 'Continue Rebase' });
+    expect(triggerBtn).toBeInTheDocument();
+
+    fireEvent.click(triggerBtn);
+
+    expect(screen.getByText('VersionDock: All conflicts resolved')).toBeInTheDocument();
+    expect(screen.getByText('Continue or abort the repository operation')).toBeInTheDocument();
+
+    const continueItem = screen.getByRole('menuitem', { name: /Continue Rebase/ });
+    expect(continueItem).toBeInTheDocument();
+    expect(screen.getByText('All conflicts resolved. Continue rebase to apply next commits.')).toBeInTheDocument();
+
+    const abortItem = screen.getByRole('menuitem', { name: /Abort Rebase/ });
+    expect(abortItem).toBeInTheDocument();
+
+    fireEvent.click(continueItem);
+    await waitFor(() => {
+      expect(continueRepositoryOperation).toHaveBeenCalledWith('repo', 'rebase');
+    });
+  });
 });

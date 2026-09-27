@@ -444,12 +444,17 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	relative_path: string,
 	content: string,
 	expected_fingerprint: string,
+	delete_file?: boolean | null,
 } } | { type: "conflictAccept"; payload: {
 	workspace_id: string,
 	repo_id: string,
 	relative_path: string,
 	choice: ConflictChoice,
 } } | { type: "abortRepositoryOperation"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	operation: string,
+} } | { type: "continueRepositoryOperation"; payload: {
 	workspace_id: string,
 	repo_id: string,
 	operation: string,
@@ -600,7 +605,16 @@ export type ConflictFile = {
 	kind: VcsKind,
 	binary: boolean,
 	conflictType?: string,
+	conflictTypes?: string[] | null,
 	actions?: string[],
+	currentStatus?: string | null,
+	incomingStatus?: string | null,
+};
+
+export type ConflictResolutionResult = {
+	resolved: boolean,
+	autoCommitError: string | null,
+	autoCommitted?: boolean,
 };
 
 export type DefaultCommitAction = "commit" | "commitAndPush";
@@ -723,6 +737,8 @@ export type FileChange = {
 	unstaged: boolean,
 	conflicted: boolean,
 	conflictType?: string | null,
+	conflictTypes?: string[] | null,
+	conflictStatus?: string | null,
 	submodule?: boolean,
 	isTruncated?: boolean,
 	truncationReason?: string | null,
@@ -908,6 +924,8 @@ export type MergeVersions = {
 	language: string,
 	fingerprint: string,
 	binary: boolean,
+	oursStatus?: string | null,
+	theirsStatus?: string | null,
 };
 
 export type NotificationPermissionState = "notRequested" | "allowed" | "denied" | "restricted" | "unavailable";

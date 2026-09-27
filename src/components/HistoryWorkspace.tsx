@@ -590,8 +590,6 @@ export function HistoryWorkspace() {
   const [menu, setMenu] = useState<FilterMenu>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [filters, setFilters] = useState<ViewFilters>(EMPTY_FILTERS);
-  const [authorQuery, setAuthorQuery] = useState('');
-  const [refQuery, setRefQuery] = useState('');
   const [expandedRepoIds, setExpandedRepoIds] = useState(new Set<string>());
   const activeFilter = useRef<HTMLDivElement>(null);
   const selectedRepoId = useAppStore((state) => state.selectedRepoId);
@@ -752,13 +750,6 @@ export function HistoryWorkspace() {
     document.addEventListener('pointerdown', handleOutside, true);
     document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', handleOutside, true); document.removeEventListener('keydown', escape); };
-  }, [menu]);
-
-  useEffect(() => {
-    if (!menu) {
-      setAuthorQuery('');
-      setRefQuery('');
-    }
   }, [menu]);
 
   if (!selectedRepoId) return <div className="workspace-empty"><Codicon name="repo" />{t('Select a repository')}</div>;

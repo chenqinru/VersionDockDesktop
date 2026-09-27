@@ -1305,6 +1305,7 @@ describe('appStore async lifecycle', () => {
       relative_path: 'conflict.txt',
       content: 'resolved content',
       expected_fingerprint: 'fp-1',
+      delete_file: false,
     });
   });
 
@@ -2993,5 +2994,58 @@ describe('appStore async lifecycle', () => {
 
     // 2. 当前前台（workspace-2）的活跃页签未被篡改，依然保持 'sync'（不会被强制切成 'changes' 或 'stash'）
     expect(useAppStore.getState().bootstrap?.state.layout?.activeTab).toBe('sync');
+  });
+
+  it('reloads repository status and conflicts when continueRepositoryOperation fails', async () => {
+    let statusRequested = false;
+    let conflictsRequested = false;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'continueRepositoryOperation') {
+        throw new BridgeError({
+          code: 'OPERATION_FAILED',
+          message: 'rebase failed due to conflict',
+          command: 'git',
+          exitCode: 1,
+          stderr: 'CONFLICT (content): Merge conflict in file.txt',
+          recoverable: true,
+          repositoryId: 'repo-1',
+        });
+      }
+      if (command.type === 'repositoryStatus') {
+        statusRequested = true;
+        return {
+          meta: { id: 'repo-1', name: 'Repo 1', rootPath: '/tmp/repo-1', color: '#ff0000', kind: 'git', depth: 0, isSubmodule: false, isWorktree: false, parentRepoId: null },
+          branch: 'feature',
+          revision: 'abc',
+          ahead: 0,
+          behind: 0,
+          files: [{ path: 'file.txt', status: 'modified', staged: false, unstaged: false, conflicted: true }],
+          conflicts: 1,
+          operation: 'rebase',
+        };
+      }
+      if (command.type === 'conflicts') {
+        conflictsRequested = true;
+        return [
+          { repoId: 'repo-1', repoName: 'Repo 1', repoColor: '#ff0000', path: 'file.txt', kind: 'git', binary: false, conflictType: 'text' },
+        ];
+      }
+      return [];
+    });
+
+    const repo = repository('repo-1', 'Repo 1');
+    useAppStore.setState({
+      bridge,
+      snapshot: { ...snapshot('workspace-1', 1), repositories: [repo] },
+      allRepositories: [repo],
+      conflicts: [],
+    });
+
+    const ok = await useAppStore.getState().continueRepositoryOperation('repo-1', 'rebase');
+    expect(ok).toBe(false);
+    expect(statusRequested).toBe(true);
+    expect(conflictsRequested).toBe(true);
+    expect(useAppStore.getState().conflicts).toHaveLength(1);
+    expect(useAppStore.getState().conflicts[0].path).toBe('file.txt');
   });
 });

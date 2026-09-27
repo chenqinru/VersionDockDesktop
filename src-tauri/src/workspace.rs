@@ -482,7 +482,7 @@ pub async fn git_status(
             let _original_path = fields.next();
         }
         let conflicted = matches!(xy, b"DD" | b"AU" | b"UD" | b"UA" | b"DU" | b"AA" | b"UU");
-        let submodule = submodule_paths.contains(&path);
+        let submodule = submodule_paths.contains(&path) || root.join(&path).join(".git").exists();
         files.push(FileChange {
             path,
             status: if submodule {
@@ -493,7 +493,21 @@ pub async fn git_status(
             staged: xy[0] != b' ' && xy[0] != b'?' && !conflicted,
             unstaged: xy[1] != b' ' && !conflicted || xy == b"??",
             conflicted,
-            conflict_type: conflicted.then(|| "text".into()),
+            conflict_type: conflicted.then(|| {
+                if submodule {
+                    "submodule".into()
+                } else {
+                    "text".into()
+                }
+            }),
+            conflict_types: conflicted.then(|| {
+                vec![if submodule {
+                    "submodule".into()
+                } else {
+                    "text".into()
+                }]
+            }),
+            conflict_status: conflicted.then(|| String::from_utf8_lossy(xy).to_string()),
             submodule,
             is_truncated: false,
             truncation_reason: None,
@@ -562,17 +576,21 @@ pub async fn svn_status(
             continue;
         };
         let item = status.attribute("item").unwrap_or("modified");
-        let conflict_type = if status.attribute("tree-conflicted") == Some("true") {
-            Some("tree".to_string())
-        } else if item == "obstructed" {
-            Some("obstruction".to_string())
-        } else if status.attribute("props") == Some("conflicted") {
-            Some("property".to_string())
-        } else if item == "conflicted" {
-            Some("text".to_string())
-        } else {
-            None
-        };
+        let mut types = Vec::new();
+        if item == "conflicted" {
+            types.push("text".to_string());
+        }
+        if status.attribute("props") == Some("conflicted") {
+            types.push("property".to_string());
+        }
+        if status.attribute("tree-conflicted") == Some("true") {
+            types.push("tree".to_string());
+        }
+        if item == "obstructed" {
+            types.push("obstruction".to_string());
+        }
+        let conflict_types = if types.is_empty() { None } else { Some(types) };
+        let conflict_type = conflict_types.as_ref().map(|t| t[0].clone());
         let conflicted = conflict_type.is_some();
         if item == "normal" && !conflicted {
             continue;
@@ -584,6 +602,8 @@ pub async fn svn_status(
             unstaged: true,
             conflicted,
             conflict_type,
+            conflict_types,
+            conflict_status: conflicted.then(|| item.to_string()),
             submodule: false,
             is_truncated: false,
             truncation_reason: None,
@@ -746,6 +766,8 @@ fn collect_svn_untracked(
                     unstaged: true,
                     conflicted: false,
                     conflict_type: None,
+                    conflict_types: None,
+                    conflict_status: None,
                     submodule: false,
                     is_truncated: false,
                     truncation_reason: None,
@@ -1464,6 +1486,8 @@ mod tests {
             unstaged: true,
             conflicted: false,
             conflict_type: None,
+            conflict_types: None,
+            conflict_status: None,
             submodule: false,
             is_truncated: false,
             truncation_reason: None,
@@ -1593,6 +1617,8 @@ mod tests {
             unstaged: false,
             conflicted: true,
             conflict_type: Some("bothModified".into()),
+            conflict_types: Some(vec!["bothModified".into()]),
+            conflict_status: Some("UU".into()),
             submodule: false,
             is_truncated: false,
             truncation_reason: None,

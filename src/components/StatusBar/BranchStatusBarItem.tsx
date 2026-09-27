@@ -27,6 +27,8 @@ export function BranchStatusBarItem() {
     headLabel,
     hasUncommitted,
     hasConflicts,
+    hasOngoingOperation,
+    opLabel,
     totalConflicts,
     totalBehind,
     totalAhead,
@@ -37,6 +39,8 @@ export function BranchStatusBarItem() {
         headLabel: t('No repo'),
         hasUncommitted: false,
         hasConflicts: false,
+        hasOngoingOperation: false,
+        opLabel: '',
         totalConflicts: 0,
         totalBehind: 0,
         totalAhead: 0,
@@ -48,9 +52,25 @@ export function BranchStatusBarItem() {
     const uniqueBranches = Array.from(new Set(branches));
     const isDiverged = gitRepos.length > 1 && new Set(gitRepos.map((r) => r.branch ?? 'HEAD')).size > 1;
 
-    const label = uniqueBranches.length === 1
+    const ongoingOperations = gitRepos
+      .map((r) => r.operation)
+      .filter((op): op is NonNullable<(typeof gitRepos)[number]['operation']> => Boolean(op));
+    const hasOngoingOperation = ongoingOperations.length > 0;
+    const uniqueOngoingOps = Array.from(new Set(ongoingOperations));
+    const opLabel = uniqueOngoingOps.length === 1
+      ? uniqueOngoingOps[0] === 'merge'
+        ? t('merging')
+        : uniqueOngoingOps[0] === 'rebase'
+        ? t('rebasing')
+        : uniqueOngoingOps[0] === 'cherry-pick'
+        ? t('cherry-picking')
+        : t('reverting')
+      : uniqueOngoingOps.join('/');
+    const opSuffix = hasOngoingOperation ? ` (${opLabel})` : '';
+
+    const label = (uniqueBranches.length === 1
       ? uniqueBranches[0]
-      : `${uniqueBranches[0]} +${uniqueBranches.length - 1}`;
+      : `${uniqueBranches[0]} +${uniqueBranches.length - 1}`) + opSuffix;
 
     const uncommitted = repositories.some(
       (r) => (r.files?.length ?? 0) > 0
@@ -64,6 +84,8 @@ export function BranchStatusBarItem() {
       headLabel: label,
       hasUncommitted: uncommitted,
       hasConflicts: conflictsCount > 0,
+      hasOngoingOperation,
+      opLabel,
       totalConflicts: conflictsCount,
       totalBehind: behindCount,
       totalAhead: aheadCount,
@@ -72,7 +94,7 @@ export function BranchStatusBarItem() {
   }, [repositories, gitRepos, t]);
 
   const showDiverged = branchesDiverged && !suppressDivergedWarning;
-  const isWarningBg = hasConflicts || showDiverged;
+  const isWarningBg = hasConflicts || hasOngoingOperation || showDiverged;
 
   const getStatusItemClasses = () => {
     const classes = ['statusbar-item', 'branch-status-item'];
@@ -87,6 +109,7 @@ export function BranchStatusBarItem() {
 
   const getTooltip = () => {
     const parts: string[] = [];
+    if (hasOngoingOperation) parts.push(t('Operation in progress: {0}', opLabel));
     if (hasConflicts) parts.push(t('Merge conflicts in workspace ({0} files)', totalConflicts));
     if (showDiverged) parts.push(t('Branches have diverged across repositories'));
     if (hasUncommitted) parts.push(t('Uncommitted changes present'));
