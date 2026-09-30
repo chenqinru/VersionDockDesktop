@@ -339,7 +339,6 @@ export class BrowserDevBridge implements VersionDockBridge {
   async selectDirectory(): Promise<string | null> { return workspace.paths[0] ?? null; }
   async selectExecutable(): Promise<string | null> { return '/usr/local/bin/zed'; }
   async saveFileDialog(): Promise<string | null> { return null; }
-  async notify(): Promise<boolean> { return false; }
   async openInNewWindow(paths?: string[], _position?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string> {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams({ window: 'new' });

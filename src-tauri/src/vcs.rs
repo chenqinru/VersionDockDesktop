@@ -1,7 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
     time::{Duration, Instant},
 };
 
@@ -43,6 +46,14 @@ struct PendingSvnMerge {
     added_paths: Vec<String>,
 }
 
+#[derive(Debug)]
+struct SvnProbeState {
+    task_id: u64,
+    active_revision: u64,
+    pending: Option<(RepositoryMeta, u64)>,
+    token: CancellationToken,
+}
+
 static SVN_MERGES: OnceLock<Mutex<HashMap<String, PendingSvnMerge>>> = OnceLock::new();
 static SUBTREE_SPLIT_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 static SUBTREE_STATUS_CACHE: OnceLock<Mutex<HashMap<String, (Instant, SubtreePushStatus)>>> =
@@ -54,6 +65,9 @@ static SVN_BRANCH_CACHE: OnceLock<Mutex<HashMap<String, SvnBranchCacheEntry>>> =
 static SVN_TAG_CACHE: OnceLock<Mutex<HashMap<String, SvnTagCacheEntry>>> = OnceLock::new();
 static SVN_INCOMING_CACHE: OnceLock<Mutex<HashMap<String, SvnIncomingCacheEntry>>> =
     OnceLock::new();
+static SVN_INCOMING_GENERATION: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+static SVN_INCOMING_PROBING: OnceLock<Mutex<HashMap<String, SvnProbeState>>> = OnceLock::new();
+static SVN_PROBE_TASK_SEQ: AtomicU64 = AtomicU64::new(1);
 static STASH_FILES_CACHE: OnceLock<Mutex<HashMap<String, Vec<ShelfFileEntry>>>> = OnceLock::new();
 
 fn svn_merges() -> &'static Mutex<HashMap<String, PendingSvnMerge>> {
@@ -84,6 +98,29 @@ pub fn invalidate_svn_ref_caches(repo_id: &str) {
     }
     if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
         cache.remove(repo_id);
+        if let Ok(mut gens) = SVN_INCOMING_GENERATION.get_or_init(Default::default).lock() {
+            let entry = gens.entry(repo_id.to_string()).or_insert(0);
+            *entry = entry.wrapping_add(1);
+        }
+    } else if let Ok(mut gens) = SVN_INCOMING_GENERATION.get_or_init(Default::default).lock() {
+        let entry = gens.entry(repo_id.to_string()).or_insert(0);
+        *entry = entry.wrapping_add(1);
+    }
+    if let Ok(mut probing) = SVN_INCOMING_PROBING.get_or_init(Default::default).lock() {
+        if let Some(state) = probing.remove(repo_id) {
+            state.token.cancel();
+        }
+    }
+    #[cfg(test)]
+    if let Ok(mut map) = SVN_WC_REVISION_MOCK.get_or_init(Default::default).lock() {
+        map.remove(repo_id);
+    }
+    #[cfg(test)]
+    if let Ok(mut map) = SVN_INCOMING_MOCK_HANDLERS
+        .get_or_init(Default::default)
+        .lock()
+    {
+        map.remove(repo_id);
     }
 }
 
@@ -2294,6 +2331,29 @@ pub async fn abort_operation(
         }
     };
     git(args, repo, token).await?;
+    Ok(())
+}
+
+pub async fn skip_operation(
+    repo: &RepositoryMeta,
+    operation: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    if repo.kind != VcsKind::Git || operation != "cherry-pick" {
+        return Err(DesktopError::new(
+            "OPERATION_NOT_SUPPORTED",
+            "Only cherry-pick steps can be skipped",
+            false,
+        ));
+    }
+    if git_operation_name(Path::new(&repo.root_path)) != Some(operation) {
+        return Err(DesktopError::new(
+            "OPERATION_NOT_ACTIVE",
+            "No matching cherry-pick operation is active",
+            true,
+        ));
+    }
+    git(vec!["cherry-pick".into(), "--skip".into()], repo, token).await?;
     Ok(())
 }
 
@@ -6608,7 +6668,15 @@ async fn svn_branches(
 ) -> Result<Vec<BranchInfo>, DesktopError> {
     let relative_url = svn_relative_url(repo, token).await?;
     let (current_name, detached_tag) = svn_display_ref(&relative_url);
-    let behind = svn_incoming_revisions(repo, token).await;
+    let revision = svn(
+        vec!["info".into(), "--show-item".into(), "revision".into()],
+        repo,
+        token,
+    )
+    .await
+    .map(|v| v.stdout_text().trim().to_string())
+    .unwrap_or_default();
+    let behind = svn_incoming_revisions_cached(repo, &revision);
     let mut branches = vec![BranchInfo {
         name: current_name.clone(),
         current: true,
@@ -7403,7 +7471,423 @@ fn parse_svn_list_entries(
         .collect())
 }
 
-async fn svn_incoming_revisions(repo: &RepositoryMeta, token: &CancellationToken) -> u32 {
+async fn fetch_svn_incoming_revisions(
+    repo: &RepositoryMeta,
+    revision: u64,
+    token: &CancellationToken,
+) -> Result<u32, DesktopError> {
+    #[cfg(test)]
+    let mock_result = if let Ok(lock) = SVN_INCOMING_MOCK_HANDLERS
+        .get_or_init(Default::default)
+        .lock()
+    {
+        lock.get(&repo.id).and_then(|handler| handler(revision))
+    } else {
+        None
+    };
+    #[cfg(test)]
+    if let Some((delay, res)) = mock_result {
+        if delay > Duration::ZERO {
+            tokio::select! {
+                _ = tokio::time::sleep(delay) => {},
+                _ = token.cancelled() => {
+                    return Err(DesktopError::new("PROBE_CANCELLED", "Probe cancelled", false));
+                }
+            }
+        }
+        if token.is_cancelled() {
+            return Err(DesktopError::new(
+                "PROBE_CANCELLED",
+                "Probe cancelled",
+                false,
+            ));
+        }
+        return res;
+    }
+
+    let Some(start) = revision.checked_add(1) else {
+        return Ok(0);
+    };
+    let output = svn_with_timeout(
+        vec![
+            "log".into(),
+            "--xml".into(),
+            "-r".into(),
+            format!("{start}:HEAD"),
+        ],
+        repo,
+        token,
+        Duration::from_secs(20),
+    )
+    .await?;
+    let raw = output.stdout_text();
+    let behind = roxmltree::Document::parse(&raw)
+        .ok()
+        .map(|document| {
+            document
+                .descendants()
+                .filter(|node| node.has_tag_name("logentry"))
+                .count()
+                .min(u32::MAX as usize) as u32
+        })
+        .unwrap_or(0);
+    Ok(behind)
+}
+
+pub fn svn_incoming_cached_behind(repo_id: &str, revision_str: &str) -> Option<u32> {
+    let Ok(revision) = revision_str.trim().parse::<u64>() else {
+        return None;
+    };
+    let cached = SVN_INCOMING_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(repo_id).cloned());
+    match cached {
+        Some((_, cached_revision, cached_behind)) if cached_revision == revision => {
+            Some(cached_behind)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+pub fn set_svn_incoming_cached_for_test(repo_id: &str, revision: u64, behind: u32) {
+    if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
+        cache.insert(repo_id.to_string(), (Instant::now(), revision, behind));
+    }
+}
+
+#[cfg(test)]
+type SvnIncomingMockHandler =
+    Box<dyn Fn(u64) -> Option<(Duration, Result<u32, DesktopError>)> + Send + Sync>;
+#[cfg(test)]
+static SVN_INCOMING_MOCK_HANDLERS: OnceLock<Mutex<HashMap<String, SvnIncomingMockHandler>>> =
+    OnceLock::new();
+
+#[cfg(test)]
+pub fn set_svn_incoming_mock_handler_for_test(
+    repo_id: &str,
+    handler: Option<SvnIncomingMockHandler>,
+) {
+    if let Ok(mut lock) = SVN_INCOMING_MOCK_HANDLERS
+        .get_or_init(Default::default)
+        .lock()
+    {
+        if let Some(h) = handler {
+            lock.insert(repo_id.to_string(), h);
+        } else {
+            lock.remove(repo_id);
+        }
+    }
+}
+
+#[cfg(test)]
+pub fn get_svn_incoming_probing_state_for_test(repo_id: &str) -> Option<(u64, Option<u64>)> {
+    SVN_INCOMING_PROBING
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|map| {
+            map.get(repo_id)
+                .map(|s| (s.active_revision, s.pending.as_ref().map(|(_, rev)| *rev)))
+        })
+}
+
+async fn notify_repo_status_changed(repo_id: &str) {
+    if let Some(app) = crate::logger::global_app_handle() {
+        use tauri::{Emitter, Manager};
+        let state = app.state::<crate::state::AppState>();
+        let workspace_ids = state.workspaces_for_repository(repo_id).await;
+        if workspace_ids.is_empty() {
+            state.record_pending_repo_status_changed(repo_id);
+            return;
+        }
+        let generation = state.next_generation();
+        for workspace_id in workspace_ids {
+            let _ = app.emit(
+                "versiondock://event",
+                crate::models::RepositoryEvent {
+                    workspace_id,
+                    repo_id: Some(repo_id.to_string()),
+                    generation,
+                    source: crate::models::RepositoryEventSource::Watcher,
+                    scopes: vec![crate::models::RefreshScope::Status],
+                },
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+static SVN_WC_REVISION_MOCK: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+#[cfg(test)]
+pub fn set_svn_wc_revision_for_test(repo_id: &str, revision: Option<u64>) {
+    if let Ok(mut map) = SVN_WC_REVISION_MOCK.get_or_init(Default::default).lock() {
+        if let Some(rev) = revision {
+            map.insert(repo_id.to_string(), rev);
+        } else {
+            map.remove(repo_id);
+        }
+    }
+}
+
+async fn svn_wc_revision(repo: &RepositoryMeta, token: &CancellationToken) -> Option<u64> {
+    #[cfg(test)]
+    if let Ok(map) = SVN_WC_REVISION_MOCK.get_or_init(Default::default).lock() {
+        if let Some(&rev) = map.get(&repo.id) {
+            return Some(rev);
+        }
+    }
+
+    let output = svn_with_timeout(
+        vec!["info".into(), "--show-item".into(), "revision".into()],
+        repo,
+        token,
+        Duration::from_secs(5),
+    )
+    .await
+    .ok()?;
+    output.stdout_text().trim().parse::<u64>().ok()
+}
+
+fn spawn_svn_incoming_probe(repo: RepositoryMeta, revision: u64, previous_behind: Option<u32>) {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    let repo_id = repo.id.clone();
+    let probing = SVN_INCOMING_PROBING.get_or_init(Default::default);
+    let cancel_token = CancellationToken::new();
+    let (task_id, task_generation) = {
+        let Ok(mut map) = probing.lock() else { return };
+        if let Some(state) = map.get_mut(&repo_id) {
+            if state.active_revision != revision {
+                state.pending = Some((repo, revision));
+            }
+            return;
+        }
+        let task_id = SVN_PROBE_TASK_SEQ.fetch_add(1, Ordering::Relaxed);
+        let task_generation = {
+            let Ok(mut gens) = SVN_INCOMING_GENERATION.get_or_init(Default::default).lock() else {
+                return;
+            };
+            *gens.entry(repo_id.clone()).or_insert(0)
+        };
+        map.insert(
+            repo_id.clone(),
+            SvnProbeState {
+                task_id,
+                active_revision: revision,
+                pending: None,
+                token: cancel_token.clone(),
+            },
+        );
+        (task_id, task_generation)
+    };
+
+    let task_token = cancel_token.clone();
+    tokio::spawn(async move {
+        struct ProbeGuard {
+            repo_id: String,
+            task_id: u64,
+        }
+        impl Drop for ProbeGuard {
+            fn drop(&mut self) {
+                if let Ok(mut map) = SVN_INCOMING_PROBING.get_or_init(Default::default).lock() {
+                    if let Some(state) = map.get(&self.repo_id) {
+                        if state.task_id == self.task_id {
+                            map.remove(&self.repo_id);
+                        }
+                    }
+                }
+            }
+        }
+        let _guard = ProbeGuard {
+            repo_id: repo_id.clone(),
+            task_id,
+        };
+
+        let mut current_repo = repo;
+        let mut current_revision = revision;
+        let mut current_prev_behind = previous_behind;
+
+        loop {
+            if task_token.is_cancelled() {
+                break;
+            }
+            let is_gen_valid = {
+                if let Ok(gens) = SVN_INCOMING_GENERATION.get_or_init(Default::default).lock() {
+                    gens.get(&current_repo.id).copied().unwrap_or(0) == task_generation
+                } else {
+                    false
+                }
+            };
+            if !is_gen_valid {
+                break;
+            }
+
+            let result =
+                fetch_svn_incoming_revisions(&current_repo, current_revision, &task_token).await;
+
+            if task_token.is_cancelled() {
+                break;
+            }
+
+            let probing = SVN_INCOMING_PROBING.get_or_init(Default::default);
+            let pending_opt = {
+                let Ok(mut map) = probing.lock() else { break };
+                if let Some(state) = map.get_mut(&current_repo.id) {
+                    if state.task_id == task_id {
+                        state.pending.take()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            let is_still_active = {
+                let Ok(map) = probing.lock() else { break };
+                map.get(&current_repo.id)
+                    .map(|s| s.task_id == task_id)
+                    .unwrap_or(false)
+            };
+            if !is_still_active {
+                break;
+            }
+
+            if let Some((pending_repo, pending_rev)) = pending_opt {
+                // 探测运行期间检测到曾有异版本请求到达！
+                let real_rev = svn_wc_revision(&current_repo, &task_token)
+                    .await
+                    .unwrap_or(pending_rev);
+
+                if real_rev != current_revision {
+                    {
+                        if let Ok(mut map) = probing.lock() {
+                            if let Some(state) = map.get_mut(&current_repo.id) {
+                                if state.task_id == task_id {
+                                    state.active_revision = real_rev;
+                                }
+                            }
+                        }
+                    }
+                    current_repo = pending_repo;
+                    current_revision = real_rev;
+                    current_prev_behind = None;
+                    continue;
+                }
+            }
+
+            // 没有后续新任务（或确认当前版本为真实最终状态），从 map 中移除活跃标记
+            {
+                if let Ok(mut map) = probing.lock() {
+                    if let Some(state) = map.get(&current_repo.id) {
+                        if state.task_id == task_id {
+                            map.remove(&current_repo.id);
+                        }
+                    }
+                }
+            }
+
+            // 原子核对代次与有效性，并写回缓存
+            let mut should_notify = false;
+            {
+                let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() else {
+                    break;
+                };
+                let current_gen = if let Ok(gens) =
+                    SVN_INCOMING_GENERATION.get_or_init(Default::default).lock()
+                {
+                    gens.get(&current_repo.id).copied().unwrap_or(0)
+                } else {
+                    break;
+                };
+                if current_gen != task_generation || task_token.is_cancelled() {
+                    // 关键保护：代次不匹配或任务已取消，说明在写回前发生过缓存失效（如分支切换），绝对禁止写回！
+                    break;
+                }
+
+                match result {
+                    Ok(fresh_behind) => {
+                        cache.insert(
+                            current_repo.id.clone(),
+                            (Instant::now(), current_revision, fresh_behind),
+                        );
+                        let changed = match current_prev_behind {
+                            Some(prev) => prev != fresh_behind,
+                            None => fresh_behind > 0,
+                        };
+                        if changed {
+                            should_notify = true;
+                        }
+                    }
+                    Err(_) => {
+                        if let Some(prev) = current_prev_behind {
+                            cache.insert(
+                                current_repo.id.clone(),
+                                (Instant::now(), current_revision, prev),
+                            );
+                        } else if let Some((_, cached_rev, _)) = cache.get(&current_repo.id) {
+                            if *cached_rev != current_revision {
+                                cache.remove(&current_repo.id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if should_notify {
+                notify_repo_status_changed(&current_repo.id).await;
+            }
+
+            break;
+        }
+    });
+}
+
+pub(crate) fn svn_incoming_revisions_cached(repo: &RepositoryMeta, revision_str: &str) -> u32 {
+    let Ok(revision) = revision_str.trim().parse::<u64>() else {
+        return 0;
+    };
+    let cached = SVN_INCOMING_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&repo.id).cloned());
+
+    match cached {
+        Some((checked_at, cached_revision, cached_behind)) => {
+            if cached_revision == revision && checked_at.elapsed() < Duration::from_secs(60) {
+                cached_behind
+            } else {
+                let previous_behind = if cached_revision == revision {
+                    Some(cached_behind)
+                } else {
+                    None
+                };
+                spawn_svn_incoming_probe(repo.clone(), revision, previous_behind);
+                if cached_revision == revision {
+                    cached_behind
+                } else {
+                    0
+                }
+            }
+        }
+        None => {
+            spawn_svn_incoming_probe(repo.clone(), revision, None);
+            0
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) async fn svn_incoming_revisions(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> u32 {
     let revision = svn(
         vec!["info".into(), "--show-item".into(), "revision".into()],
         repo,
@@ -7424,41 +7908,10 @@ async fn svn_incoming_revisions(repo: &RepositoryMeta, token: &CancellationToken
             return behind;
         }
     }
-    let Some(start) = revision.checked_add(1) else {
-        return 0;
+    let behind = match fetch_svn_incoming_revisions(repo, revision, token).await {
+        Ok(count) => count,
+        Err(_) => cached.map(|(_, _, behind)| behind).unwrap_or(0),
     };
-    let raw = match svn_with_timeout(
-        vec![
-            "log".into(),
-            "--xml".into(),
-            "-r".into(),
-            format!("{start}:HEAD"),
-        ],
-        repo,
-        token,
-        Duration::from_secs(20),
-    )
-    .await
-    {
-        Ok(value) => value.stdout_text(),
-        Err(_) => {
-            let behind = cached.map(|(_, _, behind)| behind).unwrap_or(0);
-            if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
-                cache.insert(repo.id.clone(), (Instant::now(), revision, behind));
-            }
-            return behind;
-        }
-    };
-    let behind = roxmltree::Document::parse(&raw)
-        .ok()
-        .map(|document| {
-            document
-                .descendants()
-                .filter(|node| node.has_tag_name("logentry"))
-                .count()
-                .min(u32::MAX as usize) as u32
-        })
-        .unwrap_or(0);
     if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
         cache.insert(repo.id.clone(), (Instant::now(), revision, behind));
     }
@@ -11758,6 +12211,53 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    #[tokio::test]
+    async fn svn_incoming_revisions_cached_does_not_block_on_uncached_or_expired_state() {
+        let repo = RepositoryMeta {
+            id: "svn-perf-repo".into(),
+            name: "SvnPerfRepo".into(),
+            root_path: "/nonexistent/svn/repo".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        // 1. 无缓存时：耗时必须远小于远端超时 20 秒（< 50ms），且非阻塞返回 0
+        invalidate_svn_ref_caches(&repo.id);
+        let start = Instant::now();
+        let behind = svn_incoming_revisions_cached(&repo, "100");
+        let elapsed = start.elapsed();
+        assert_eq!(behind, 0);
+        assert!(elapsed < Duration::from_millis(50));
+
+        // 2. 预置缓存后：立即返回缓存中的 behind
+        if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
+            cache.insert(repo.id.clone(), (Instant::now(), 100, 5));
+        }
+        let start = Instant::now();
+        let behind = svn_incoming_revisions_cached(&repo, "100");
+        let elapsed = start.elapsed();
+        assert_eq!(behind, 5);
+        assert!(elapsed < Duration::from_millis(10));
+
+        // 3. 缓存过期时：仍然立即返回已知的 behind（5），耗时远小于 20 秒（< 50ms），后台非阻塞刷新
+        if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
+            let expired_instant = Instant::now() - Duration::from_secs(120);
+            cache.insert(repo.id.clone(), (expired_instant, 100, 5));
+        }
+        let start = Instant::now();
+        let behind = svn_incoming_revisions_cached(&repo, "100");
+        let elapsed = start.elapsed();
+        assert_eq!(behind, 5);
+        assert!(elapsed < Duration::from_millis(50));
+
+        // 清理缓存
+        invalidate_svn_ref_caches(&repo.id);
+    }
+
     #[test]
     fn rejects_option_like_refs_and_revisions() {
         assert!(validate_ref("--upload-pack=evil").is_err());
@@ -12151,6 +12651,7 @@ mod tests {
             &["git", "commit", "--allow-empty", "-m", "sub c0"],
             &sub_dir,
         );
+        let sub_main_branch = run_cmd(&["git", "branch", "--show-current"], &sub_dir);
         let c0 = run_cmd(&["git", "rev-parse", "HEAD"], &sub_dir);
 
         run_cmd(&["git", "checkout", "-b", "sub_b1"], &sub_dir);
@@ -12160,7 +12661,7 @@ mod tests {
         );
         let c1 = run_cmd(&["git", "rev-parse", "HEAD"], &sub_dir);
 
-        run_cmd(&["git", "checkout", "master"], &sub_dir);
+        run_cmd(&["git", "checkout", &sub_main_branch], &sub_dir);
         run_cmd(&["git", "checkout", "-b", "sub_b2"], &sub_dir);
         run_cmd(
             &["git", "commit", "--allow-empty", "-m", "sub c2"],
@@ -12188,13 +12689,14 @@ mod tests {
         run_cmd(&["git", "checkout", &c0], &main_dir.join("mysub"));
         run_cmd(&["git", "add", "mysub"], &main_dir);
         run_cmd(&["git", "commit", "-m", "add submodule c0"], &main_dir);
+        let main_default_branch = run_cmd(&["git", "branch", "--show-current"], &main_dir);
 
         run_cmd(&["git", "checkout", "-b", "b1"], &main_dir);
         run_cmd(&["git", "checkout", &c1], &main_dir.join("mysub"));
         run_cmd(&["git", "add", "mysub"], &main_dir);
         run_cmd(&["git", "commit", "-m", "b1 uses c1"], &main_dir);
 
-        run_cmd(&["git", "checkout", "master"], &main_dir);
+        run_cmd(&["git", "checkout", &main_default_branch], &main_dir);
         run_cmd(&["git", "checkout", "-b", "b2"], &main_dir);
         run_cmd(&["git", "checkout", &c2], &main_dir.join("mysub"));
         run_cmd(&["git", "add", "mysub"], &main_dir);
@@ -12277,6 +12779,7 @@ mod tests {
         run_cmd(&["git", "config", "user.email", "test@test.com"], &main_dir);
         run_cmd(&["git", "config", "user.name", "Test"], &main_dir);
         run_cmd(&["git", "commit", "--allow-empty", "-m", "init"], &main_dir);
+        let main_default_branch = run_cmd(&["git", "branch", "--show-current"], &main_dir);
 
         run_cmd(&["git", "checkout", "-b", "sub_branch"], &main_dir);
         run_cmd(
@@ -12296,7 +12799,7 @@ mod tests {
             &main_dir,
         );
 
-        run_cmd(&["git", "checkout", "master"], &main_dir);
+        run_cmd(&["git", "checkout", &main_default_branch], &main_dir);
         if main_dir.join("component").exists() {
             let _ = std::fs::remove_dir_all(main_dir.join("component"));
         }
@@ -12358,5 +12861,306 @@ mod tests {
                 );
             }
         });
+    }
+
+    #[tokio::test]
+    async fn svn_incoming_probe_failure_does_not_pollute_new_revision_with_old_count() {
+        let repo = RepositoryMeta {
+            id: "svn-pollute-test-repo".into(),
+            name: "SvnPolluteTest".into(),
+            root_path: "/nonexistent/test/svn/path".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        // 1. 旧修订号 100 曾缓存了 behind = 5
+        set_svn_incoming_cached_for_test(&repo.id, 100, 5);
+
+        // 2. 工作副本变迁到新修订号 105，触发读取（此路径由于路径不存在，probe 必定失败）
+        let initial_behind = svn_incoming_revisions_cached(&repo, "105");
+        assert_eq!(initial_behind, 0);
+
+        // 等待后台 probe 异步执行完成
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // 3. 核心断言：失败后绝不能将旧修订号 100 的 5 写入新修订号 105 之下！
+        let fresh_behind_from_cache = svn_incoming_cached_behind(&repo.id, "105");
+        assert_eq!(fresh_behind_from_cache, None);
+
+        // 再次读取也不会读出失效的旧计数 5
+        let recheck_behind = svn_incoming_revisions_cached(&repo, "105");
+        assert_eq!(recheck_behind, 0);
+
+        invalidate_svn_ref_caches(&repo.id);
+    }
+
+    #[tokio::test]
+    async fn svn_incoming_probe_chains_pending_new_revision_and_prevents_stale_overwrite() {
+        let repo = RepositoryMeta {
+            id: "svn-chain-test-repo".into(),
+            name: "SvnChainTest".into(),
+            root_path: "/test/svn/chain/path".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        invalidate_svn_ref_caches(&repo.id);
+
+        // 安装 mock 处理函数：
+        // 探测 r100 耗时 80ms，返回 Ok(0)（计数无变化）
+        // 探测 r105 耗时 10ms，返回 Ok(4)（新修订号有 4 个待更新提交）
+        set_svn_incoming_mock_handler_for_test(
+            &repo.id,
+            Some(Box::new(|rev| {
+                if rev == 100 {
+                    Some((Duration::from_millis(80), Ok(0)))
+                } else if rev == 105 {
+                    Some((Duration::from_millis(10), Ok(4)))
+                } else {
+                    None
+                }
+            })),
+        );
+
+        // 1. 发起 r100 的探测（此时进入后台运行 80ms）
+        let initial_behind = svn_incoming_revisions_cached(&repo, "100");
+        assert_eq!(initial_behind, 0);
+
+        // 确认当前探测处于活跃状态，active_revision 为 100
+        let state1 = get_svn_incoming_probing_state_for_test(&repo.id);
+        assert_eq!(state1, Some((100, None)));
+
+        // 2. 在 r100 探测尚未结束时（经过 15ms），工作副本更新到 r105，触发状态读取
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        let behind_105_early = svn_incoming_revisions_cached(&repo, "105");
+        assert_eq!(behind_105_early, 0);
+
+        // 核心断言 1：新修订号 r105 绝没有被丢弃，而是被准确挂接在 pending 队列中！
+        let state2 = get_svn_incoming_probing_state_for_test(&repo.id);
+        assert_eq!(state2, Some((100, Some(105))));
+
+        // 3. 等待足够时间，让 r100 完成（80ms）、自动串联启动 r105 并完成（10ms）
+        tokio::time::sleep(Duration::from_millis(120)).await;
+
+        // 核心断言 2：探测链条已全部完成并退出活跃状态
+        let state3 = get_svn_incoming_probing_state_for_test(&repo.id);
+        assert_eq!(state3, None);
+
+        // 核心断言 3：r105 的真实探测结果 4 已被准确写入缓存，没有被旧 r100 的 0 覆盖，也不会发生通知漏报！
+        let cached_105 = svn_incoming_cached_behind(&repo.id, "105");
+        assert_eq!(cached_105, Some(4));
+
+        let recheck_behind = svn_incoming_revisions_cached(&repo, "105");
+        assert_eq!(recheck_behind, 4);
+
+        // 清理 mock 与缓存
+        set_svn_incoming_mock_handler_for_test(&repo.id, None);
+        set_svn_wc_revision_for_test(&repo.id, None);
+        invalidate_svn_ref_caches(&repo.id);
+    }
+
+    #[tokio::test]
+    async fn svn_incoming_probe_delayed_stale_request_does_not_clear_pending_new_revision() {
+        let repo = RepositoryMeta {
+            id: "svn-delayed-stale-repo".into(),
+            name: "SvnDelayedStale".into(),
+            root_path: "/test/svn/delayed/path".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        invalidate_svn_ref_caches(&repo.id);
+
+        // 安装 mock：
+        // r100 探测耗时 80ms，返回 Ok(0)（计数无变化）
+        // r105 探测耗时 10ms，返回 Ok(3)（新修订号有 3 个待更新提交）
+        set_svn_incoming_mock_handler_for_test(
+            &repo.id,
+            Some(Box::new(|rev| {
+                if rev == 100 {
+                    Some((Duration::from_millis(80), Ok(0)))
+                } else if rev == 105 {
+                    Some((Duration::from_millis(10), Ok(3)))
+                } else {
+                    None
+                }
+            })),
+        );
+
+        // 模拟真实工作副本此时已经变迁到 r105
+        set_svn_wc_revision_for_test(&repo.id, Some(105));
+
+        // 1. 发起 r100 探测（旧状态读取）
+        let _ = svn_incoming_revisions_cached(&repo, "100");
+        assert_eq!(
+            get_svn_incoming_probing_state_for_test(&repo.id),
+            Some((100, None))
+        );
+
+        // 2. 15ms 后，工作副本更新到 r105，触发状态读取，挂接 pending = 105
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        let _ = svn_incoming_revisions_cached(&repo, "105");
+        assert_eq!(
+            get_svn_incoming_probing_state_for_test(&repo.id),
+            Some((100, Some(105)))
+        );
+
+        // 3. 30ms 后，一个较早发起的旧状态请求（如早前发起的并发扫描）延迟到达，再次传入 r100
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        let _ = svn_incoming_revisions_cached(&repo, "100");
+
+        // 核心断言 1：迟到的旧请求绝不会把 r105 的待探测任务清除！pending 依然牢固保持为 Some(105)
+        assert_eq!(
+            get_svn_incoming_probing_state_for_test(&repo.id),
+            Some((100, Some(105)))
+        );
+
+        // 4. 等待足够时间，让 r100 结束（80ms）并自动重查工作副本（确认当前真实为 105），串联执行 r105 探测（10ms）
+        tokio::time::sleep(Duration::from_millis(120)).await;
+
+        // 核心断言 2：r105 探测成功完成并写入缓存，通知得以正常发布，未发生任何漏报！
+        assert_eq!(svn_incoming_cached_behind(&repo.id, "105"), Some(3));
+        assert_eq!(svn_incoming_revisions_cached(&repo, "105"), 3);
+
+        set_svn_incoming_mock_handler_for_test(&repo.id, None);
+        set_svn_wc_revision_for_test(&repo.id, None);
+        invalidate_svn_ref_caches(&repo.id);
+    }
+
+    #[tokio::test]
+    async fn svn_incoming_probe_real_rollback_recheck_adopts_active_result() {
+        let repo = RepositoryMeta {
+            id: "svn-rollback-recheck-repo".into(),
+            name: "SvnRollbackRecheck".into(),
+            root_path: "/test/svn/rollback/path".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        invalidate_svn_ref_caches(&repo.id);
+
+        // 安装 mock：
+        // r200 探测耗时 80ms，返回 Ok(2)
+        set_svn_incoming_mock_handler_for_test(
+            &repo.id,
+            Some(Box::new(|rev| {
+                if rev == 200 {
+                    Some((Duration::from_millis(80), Ok(2)))
+                } else {
+                    None
+                }
+            })),
+        );
+
+        // 1. 发起 r200 探测
+        let _ = svn_incoming_revisions_cached(&repo, "200");
+        assert_eq!(
+            get_svn_incoming_probing_state_for_test(&repo.id),
+            Some((200, None))
+        );
+
+        // 2. 状态曾短暂更新到 205，排队 pending
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        let _ = svn_incoming_revisions_cached(&repo, "205");
+        assert_eq!(
+            get_svn_incoming_probing_state_for_test(&repo.id),
+            Some((200, Some(205)))
+        );
+
+        // 3. 模拟用户真实执行了 svn update -r 200 回滚操作，工作副本真实变回 200
+        set_svn_wc_revision_for_test(&repo.id, Some(200));
+
+        // 4. 等待 r200 探测完成（80ms）
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // 核心断言：旧任务结束后重查真实工作副本为 200，精确判定为真实回滚，直接采纳已完成的 200 结果（2），且未发起多余探测！
+        assert_eq!(svn_incoming_cached_behind(&repo.id, "200"), Some(2));
+        assert_eq!(svn_incoming_revisions_cached(&repo, "200"), 2);
+        assert_eq!(get_svn_incoming_probing_state_for_test(&repo.id), None);
+
+        set_svn_incoming_mock_handler_for_test(&repo.id, None);
+        set_svn_wc_revision_for_test(&repo.id, None);
+        invalidate_svn_ref_caches(&repo.id);
+    }
+
+    #[tokio::test]
+    async fn svn_incoming_probe_branch_switch_invalidation_prevents_stale_writeback() {
+        let repo = RepositoryMeta {
+            id: "svn-branch-switch-repo".into(),
+            name: "SvnBranchSwitch".into(),
+            root_path: "/test/svn/branch/switch/path".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        invalidate_svn_ref_caches(&repo.id);
+
+        // 安装 mock 处理函数：
+        // 旧分支探测 r100 耗时 80ms，返回 Ok(7)（代表旧分支有 7 个待更新修订）
+        set_svn_incoming_mock_handler_for_test(
+            &repo.id,
+            Some(Box::new(|rev| {
+                if rev == 100 {
+                    Some((Duration::from_millis(80), Ok(7)))
+                } else {
+                    None
+                }
+            })),
+        );
+
+        // 1. 发起原分支的 r100 探测（进入后台运行 80ms）
+        let initial_behind = svn_incoming_revisions_cached(&repo, "100");
+        assert_eq!(initial_behind, 0);
+
+        // 确认原分支探测当前处于活跃状态，active_revision 为 100
+        let state1 = get_svn_incoming_probing_state_for_test(&repo.id);
+        assert_eq!(state1, Some((100, None)));
+
+        // 2. 在探测运行中（15ms 后），用户执行切换分支操作！
+        // 切换分支触发 invalidate_svn_ref_caches，代次递增，任务被标记取消并从 probing 移除
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        invalidate_svn_ref_caches(&repo.id);
+
+        // 确认此时 probing 已被清除，缓存也为空
+        assert_eq!(get_svn_incoming_probing_state_for_test(&repo.id), None);
+        assert_eq!(svn_incoming_cached_behind(&repo.id, "100"), None);
+
+        // 3. 等待足够时间（100ms），让原分支的旧探测异步任务完成
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // 核心断言 1：旧任务结束时由于代次不匹配/已取消，绝对禁止把旧分支的 7 写回缓存！
+        assert_eq!(
+            svn_incoming_cached_behind(&repo.id, "100"),
+            None,
+            "旧分支的待更新数绝不能写回到缓存中！"
+        );
+
+        // 核心断言 2：新分支的本地修订号碰巧也是 100 时，状态读取绝不会读到旧分支的错误计数 7！
+        let fresh_behind_on_new_branch = svn_incoming_cached_behind(&repo.id, "100");
+        assert_eq!(fresh_behind_on_new_branch, None);
+
+        set_svn_incoming_mock_handler_for_test(&repo.id, None);
+        set_svn_wc_revision_for_test(&repo.id, None);
+        invalidate_svn_ref_caches(&repo.id);
     }
 }

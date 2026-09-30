@@ -608,7 +608,6 @@ export function HistoryWorkspace() {
   const historyScope = useAppStore((state) => state.historyScope);
   const loadHistory = useAppStore((state) => state.loadHistory);
   const refresh = useAppStore((state) => state.refresh);
-  const sync = useAppStore((state) => state.sync);
   const storedBranchWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.branches ?? state.bootstrap?.state.panelSizes?.branches ?? 220);
   const storedDetailWidth = useAppStore((state) => state.bootstrap?.state.layout?.panelSizes.detail ?? state.bootstrap?.state.panelSizes?.detail ?? 380);
   const branchWidth = Math.min(400, Math.max(120, storedBranchWidth));
@@ -732,7 +731,7 @@ export function HistoryWorkspace() {
     }
   };
   const fetchAndRefresh = async () => {
-    await Promise.all(snapshotRepos.filter((repo) => repo.meta.kind === 'git').map((repo) => sync(repo.meta.id, 'fetch')));
+    await useAppStore.getState().fetchRepositories(snapshotRepos.filter((repo) => repo.meta.kind === 'git').map((repo) => repo.meta.id));
     await refresh();
   };
   const toggleRepoNames = () => {

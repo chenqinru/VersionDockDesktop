@@ -5027,3 +5027,101 @@ async fn real_git_unpushed_operations_reject_when_remote_unreachable() {
         .message
         .contains("Cannot verify remote tracking state for 'origin'"));
 }
+
+#[tokio::test]
+async fn notification_skip_cherry_pick_uses_real_git_and_checks_active_operation() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], root.path());
+    command("git", &["config", "user.name", "Test"], root.path());
+    command(
+        "git",
+        &["config", "user.email", "test@example.test"],
+        root.path(),
+    );
+    std::fs::write(root.path().join("file.txt"), "base\n").unwrap();
+    command("git", &["add", "."], root.path());
+    command("git", &["commit", "-m", "base"], root.path());
+    command("git", &["switch", "-c", "feature"], root.path());
+    std::fs::write(root.path().join("file.txt"), "feature\n").unwrap();
+    command("git", &["commit", "-am", "feature"], root.path());
+    command("git", &["switch", "main"], root.path());
+    std::fs::write(root.path().join("file.txt"), "main\n").unwrap();
+    command("git", &["commit", "-am", "main"], root.path());
+    let repository = repo(root.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+    assert!(vcs::skip_operation(&repository, "cherry-pick", &token)
+        .await
+        .is_err());
+    let conflict = Command::new("git")
+        .args(["cherry-pick", "feature"])
+        .current_dir(root.path())
+        .output()
+        .unwrap();
+    assert!(!conflict.status.success());
+    assert!(vcs::skip_operation(&repository, "rebase", &token)
+        .await
+        .is_err());
+    vcs::skip_operation(&repository, "cherry-pick", &token)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("file.txt")).unwrap(),
+        "main\n"
+    );
+    assert!(!root.path().join(".git/CHERRY_PICK_HEAD").exists());
+}
+
+#[tokio::test]
+async fn notification_unlock_resolves_git_and_worktree_metadata_without_deleting_other_files() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], root.path());
+    command("git", &["config", "user.name", "Test"], root.path());
+    command(
+        "git",
+        &["config", "user.email", "test@example.test"],
+        root.path(),
+    );
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "base"],
+        root.path(),
+    );
+    let lock = root.path().join(".git/index.lock");
+    let other = root.path().join("index.lock");
+    std::fs::write(&lock, "").unwrap();
+    std::fs::write(&other, "keep").unwrap();
+    crate::cli::unlock_git_index(root.path()).unwrap();
+    assert!(!lock.exists());
+    assert!(other.exists());
+    crate::cli::unlock_git_index(root.path()).unwrap();
+    let worktree = root.path().join("worktree");
+    command(
+        "git",
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature",
+            worktree.to_str().unwrap(),
+        ],
+        root.path(),
+    );
+    let metadata = std::fs::read_to_string(worktree.join(".git")).unwrap();
+    let gitdir = Path::new(metadata.trim().strip_prefix("gitdir: ").unwrap());
+    std::fs::write(gitdir.join("index.lock"), "").unwrap();
+    crate::cli::unlock_git_index(&worktree).unwrap();
+    assert!(!gitdir.join("index.lock").exists());
+    assert!(other.exists());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&other, &lock).unwrap();
+        assert!(crate::cli::unlock_git_index(root.path()).is_err());
+        assert!(other.exists());
+    }
+}

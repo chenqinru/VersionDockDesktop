@@ -460,6 +460,10 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	operation: string,
+	skip?: boolean | null,
+} } | { type: "gitUnlockIndex"; payload: {
+	workspace_id: string,
+	repo_id: string,
 } } | { type: "restoreConflicts"; payload: {
 	workspace_id: string,
 	repo_id: string,

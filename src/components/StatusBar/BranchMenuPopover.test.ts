@@ -930,3 +930,26 @@ describe('BranchMenuPopover & BranchStatusBarItem alignment tests', () => {
     expect(revertInfoZh.confirmMessage).toBe('VersionDock [核心仓库]：中止 还原？这将把仓库恢复到先前的状态。');
   });
 });
+
+describe('BranchMenuPopover Fetch All notification contract', () => {
+  it('formats fetch complete notification text for single repo and multi repo workspaces', () => {
+    const singleRepo = [repository('repo-1', '/work/repo1', null, false)];
+    const multiRepos = [
+      repository('repo-1', '/work/repo1', null, false),
+      repository('repo-2', '/work/repo2', null, false),
+    ];
+
+    const formatFetchCompleteMessage = (gitRepos: RepositoryStatus[]): unknown => {
+      return gitRepos.length === 1
+        ? { key: 'VersionDock [{0}]: Fetch complete.', args: [gitRepos[0].meta.name] }
+        : 'VersionDock: Fetch complete.';
+    };
+
+    expect(formatFetchCompleteMessage(singleRepo)).toEqual({
+      key: 'VersionDock [{0}]: Fetch complete.',
+      args: ['repo-1'],
+    });
+
+    expect(formatFetchCompleteMessage(multiRepos)).toBe('VersionDock: Fetch complete.');
+  });
+});

@@ -9,8 +9,9 @@ import { CommitDetailWorkspace } from './components/CommitDetailWorkspace';
 import { MergeWorkspace } from './components/MergeWorkspace';
 import { ConflictsWorkspace } from './components/ConflictsWorkspace';
 import { Codicon } from './components/Codicon';
-import { resolveNotificationText, useAppStore } from './store/appStore';
-import { createTranslator, I18nContext, resolveLanguage, useI18n } from './i18n';
+import { NotificationToast } from './components/NotificationToast';
+import { useAppStore } from './store/appStore';
+import { createTranslator, I18nContext, resolveLanguage } from './i18n';
 import { applyTheme, resolveTheme } from './theme';
 import { useResizable } from './hooks/useResizable';
 import { useBridge } from './platform/context';
@@ -41,34 +42,7 @@ function splitCheckoutTarget(path: string): { parent: string; name: string } {
   return { parent, name: trimmed.slice(separator + 1) };
 }
 
-export function NotificationToast() {
-  const { t } = useI18n();
-  const notifications = useAppStore((state) => state.notifications);
-  const toastNotificationIds = useAppStore((state) => state.toastNotificationIds ?? []);
-  const dismissToast = useAppStore((state) => state.dismissToast);
-  const performNotificationAction = useAppStore((state) => state.performNotificationAction);
-  const notification = notifications.find((item) => item.id === toastNotificationIds[0]);
-
-  useEffect(() => {
-    if (!notification || notification.type === 'warning' || notification.type === 'error') return;
-    const timer = window.setTimeout(dismissToast, 5_000);
-    return () => window.clearTimeout(timer);
-  }, [dismissToast, notification]);
-
-  if (!notification) return null;
-  return <div className={`toast ${notification.type}`} role="alert">
-    <div className={`notification-severity-icon ${notification.type}`}><Codicon name={notification.type === 'error' ? 'error' : notification.type === 'warning' ? 'warning' : notification.type === 'success' ? 'pass' : 'info'} /></div>
-    <div className="toast-content">
-      <div className="toast-header"><strong className="toast-title">{resolveNotificationText(notification.title, t)}</strong></div>
-      <div className="toast-message">{resolveNotificationText(notification.message, t)}</div>
-      {notification.actions.length > 0 && <div className="notification-item-actions">
-        {notification.actions.map((action, index) => <button type="button" className="notification-item-action-btn" key={`${action.type}-${index}`} onClick={() => void performNotificationAction(notification.id, index)}>{resolveNotificationText(action.label, t)}</button>)}
-      </div>}
-      {notification.details && <details className="toast-details"><summary>{t('Technical details')}</summary><pre>{notification.details}</pre></details>}
-    </div>
-    <button type="button" className="toast-close" aria-label={t('Close')} title={t('Close')} onClick={dismissToast}><Codicon name="close" /></button>
-  </div>;
-}
+export { NotificationToast } from './components/NotificationToast';
 
 export function App() {
   const bridge = useBridge();

@@ -59,7 +59,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const fileViewMode = useAppStore((state) => (state.bootstrap?.state.layout?.fileViewMode ?? state.bootstrap?.state.fileViewMode) === 'list' ? 'list' : 'tree');
   const externalEditor = settings?.externalEditor;
   const repositories = useAppStore((state) => state.allRepositories);
-  const runtime = useAppStore((state) => state.bootstrap?.runtime);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const openAbout = useAppStore((state) => state.openAbout);
   const setTheme = useAppStore((state) => state.setTheme);
@@ -517,11 +516,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         checked={settings?.notifyUnpushedCommits ?? false}
                         onChange={(value) => void updateSettings({ notifyUnpushedCommits: value })}
                       />
-                      {runtime && !runtime.systemNotifications.available && <div className="settings-capability-warning" role="status">
-                        <Codicon name="warning" />
-                        <span>{t('System notifications are unavailable. Notifications will remain in the in-app notification center.')}</span>
-                        {runtime.systemNotifications.detail && <small>{runtime.systemNotifications.detail}</small>}
-                      </div>}
                     </SettingsCard>
                   </SettingsSection>
                 )}

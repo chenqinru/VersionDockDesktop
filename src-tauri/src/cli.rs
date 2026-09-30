@@ -320,6 +320,36 @@ fn git_index_lock_path(cwd: &Path) -> Option<PathBuf> {
     resolve_git_dir(cwd).map(|directory| directory.join("index.lock"))
 }
 
+pub fn unlock_git_index(cwd: &Path) -> Result<(), DesktopError> {
+    let path = git_index_lock_path(cwd).ok_or_else(|| {
+        DesktopError::new(
+            "NOT_A_GIT_REPOSITORY",
+            "Git metadata directory was not found",
+            false,
+        )
+    })?;
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(DesktopError::new(
+                "GIT_UNLOCK_FAILED",
+                error.to_string(),
+                true,
+            ))
+        }
+    };
+    if !metadata.file_type().is_file() {
+        return Err(DesktopError::new(
+            "GIT_UNLOCK_FAILED",
+            "Git index lock must be a regular file",
+            false,
+        ));
+    }
+    std::fs::remove_file(path)
+        .map_err(|error| DesktopError::new("GIT_UNLOCK_FAILED", error.to_string(), true))
+}
+
 fn try_remove_stale_index_lock(lock_path: &Path, reason: &str) -> bool {
     match std::fs::remove_file(lock_path) {
         Ok(_) => {

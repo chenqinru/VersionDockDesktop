@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { PushPanel } from './PushPanel';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, UnpushedCommit } from '../bindings/generated';
@@ -199,63 +199,28 @@ describe('PushPanel', () => {
     });
   });
 
-  it('locks target workspace id during push retry on non-fast-forward rejection across workspace switches', async () => {
-    const syncCalls: Array<{ repoId: string; action: string; targetWid?: string }> = [];
+  it('locks the original workspace through the store push recovery after the foreground workspace changes', async () => {
+    const syncCalls: Array<{ repoId: string; action: string; targetWid: string }> = [];
     let pushAttempts = 0;
-    const mockSync = vi.fn().mockImplementation(async (repoId: string, action: string, _interactive?: boolean, _opts?: unknown, targetWid?: string) => {
-      syncCalls.push({ repoId, action, targetWid });
-      if (action === 'push') {
-        pushAttempts += 1;
-        if (pushAttempts === 1) {
-          // 首次 push 被远程拒绝
-          throw new Error('[rejected] (fetch first) error: failed to push some refs');
-        }
-        return true;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync') {
+        const payload = command.payload;
+        syncCalls.push({ repoId: payload.repo_id, action: payload.action, targetWid: payload.workspace_id });
+        if (payload.action === 'push' && ++pushAttempts === 1) throw new Error('[rejected] (fetch first) error: failed to push some refs');
+        if (payload.action === 'pullRebase') useAppStore.setState({ snapshot: { ...snapshot, workspace: { ...snapshot.workspace, id: 'workspace-2' } } });
+        return { output: 'done', update: null };
       }
-      if (action === 'pullRebase') {
-        // 在 pullRebase 执行期间切换前台工作区至 workspace-2
-        useAppStore.setState({
-          snapshot: {
-            ...snapshot,
-            workspace: { ...snapshot.workspace, id: 'workspace-2' },
-          },
-        });
-        return true;
-      }
-      return true;
+      return [];
     });
-
-    const bridge = new MockBridge(() => []);
     useAppStore.setState({
-      bridge,
-      snapshot,
-      sync: mockSync,
+      bridge, snapshot,
       unpushedCommits: { 'repo-1': sampleUnpushed },
       branchesByRepo: { 'repo-1': [{ name: 'main', current: true, remote: false, upstream: 'origin/main', ahead: 2, behind: 0 }] },
-      bootstrap: {
-        state: {
-          settings: {
-            onPushRejected: 'rebaseAndRetry',
-            showPushDialogForProtectedBranches: false,
-          },
-        },
-      } as any,
+      bootstrap: { state: { settings: { onPushRejected: 'rebaseAndRetry', showPushDialogForProtectedBranches: false } } } as any,
     });
-
-    render(
-      <BridgeContext.Provider value={bridge}>
-        <PushPanel repos={[gitRepo1]} />
-      </BridgeContext.Provider>,
-    );
-
-    const pushBtn = screen.getByRole('button', { name: 'Push' });
-    fireEvent.click(pushBtn);
-
-    await waitFor(() => {
-      expect(syncCalls.length).toBe(3);
-    });
-
-    // 验证首次 push、重试 pullRebase、第二次 push 全程都锁定了 workspace-1
+    render(<BridgeContext.Provider value={bridge}><PushPanel repos={[gitRepo1]} /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+    await waitFor(() => expect(syncCalls).toHaveLength(3));
     expect(syncCalls).toEqual([
       { repoId: 'repo-1', action: 'push', targetWid: 'workspace-1' },
       { repoId: 'repo-1', action: 'pullRebase', targetWid: 'workspace-1' },

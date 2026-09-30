@@ -342,7 +342,7 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
   });
   const fetchRepo = async () => {
     const wid = useAppStore.getState().snapshot?.workspace.id;
-    await sync(repo.meta.id, 'fetch', false, undefined, wid);
+    await useAppStore.getState().fetchRepositories([repo.meta.id], true, wid);
     await loadIncoming(repo.meta.id, wid);
   };
   const toggleDisplayMode = () => {
@@ -539,7 +539,7 @@ export function SyncPanel({ repos, expansionCommand, selectionCommand, fileViewM
   const countedPushLabel = pushableRepos.length > 1 ? `${pushLabel} (${pushableRepos.length})` : pushLabel;
   const fetchAll = async () => {
     const wid = useAppStore.getState().snapshot?.workspace.id;
-    await Promise.allSettled(repos.map((repo) => sync(repo.meta.id, 'fetch', false, undefined, wid)));
+    await useAppStore.getState().fetchRepositories(repos.map((repo) => repo.meta.id), true, wid);
     await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
   const syncSelected = async (strategy?: 'merge' | 'rebase' | 'ff-only') => {

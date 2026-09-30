@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, DiffDocument, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
 import { currentDialog, publishDialog } from '../components/dialogService';
 import { commitKey } from '../history/commitDetails';
@@ -34,16 +34,239 @@ const deferred = <T>() => {
 afterEach(() => {
   publishDialog(undefined);
   useAppStore.getState().dispose();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', diffReturnMode: undefined, operations: {}, notifications: [], toastNotificationIds: [], ready: false });
+  if (typeof localStorage !== 'undefined') localStorage.clear();
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', diffReturnMode: undefined, operations: {}, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, ready: false });
 });
 
 describe('appStore async lifecycle', () => {
-  it('publishes plugin-compatible startup notifications once per workspace session', async () => {
-    const workspace = snapshot('notifications', 1);
-    workspace.repositories = [
-      { ...repository('repo-a', 'A'), ahead: 2, behind: 3, conflicts: 1 },
+  it('shows long foreground operation progress, cancels without switching workspace, and removes it on completion', async () => {
+    vi.useFakeTimers();
+    let listener: ((event: BridgeEvent) => void) | undefined;
+    const bridge = new MockBridge((command) => command.type === 'bootstrap' ? bootstrap : []);
+    bridge.subscribe = (handler) => { listener = handler; return () => { listener = undefined; }; };
+    const cancel = vi.spyOn(bridge, 'cancelOperation');
+    try {
+      await useAppStore.getState().initialize(bridge);
+      const operation: OperationEvent = {
+        operationId: 'native-progress',
+        context: { generation: 1, domain: 'sync', visibility: 'foreground', workspaceId: 'original', repositoryId: 'repo', target: null },
+        status: 'running', phase: 'Fetching remote updates', message: 'Fetching...',
+        startedAt: new Date().toISOString(), cancellable: true, completed: 0, total: 10, error: null,
+      };
+      listener?.(operation);
+      vi.advanceTimersByTime(200);
+      expect(useAppStore.getState().notifications.filter((n) => n.progress)).toHaveLength(0);
+      vi.advanceTimersByTime(50);
+      const progress = useAppStore.getState().notifications.find((n) => n.operationId === operation.operationId)!;
+      expect(progress.workspaceId).toBe('original');
+      listener?.({ ...operation, completed: 5, message: 'Half way' });
+      expect(useAppStore.getState().notifications.find((n) => n.id === progress.id)?.progressValue).toBe(50);
+      useAppStore.setState({ activeTabId: 'another', snapshot: snapshot('another', 1) });
+      await useAppStore.getState().performNotificationAction(progress.id, 0);
+      expect(cancel).toHaveBeenCalledWith(operation.operationId);
+      expect(useAppStore.getState().activeTabId).toBe('another');
+      listener?.({ ...operation, status: 'cancelled' });
+      expect(useAppStore.getState().notifications.some((n) => n.id === progress.id)).toBe(false);
+      listener?.({ ...operation, operationId: 'fast' });
+      listener?.({ ...operation, operationId: 'fast', status: 'succeeded' });
+      listener?.({ ...operation, operationId: 'background', context: { ...operation.context, visibility: 'background' } });
+      vi.advanceTimersByTime(1_000);
+      expect(useAppStore.getState().notifications.filter((n) => n.progress)).toHaveLength(0);
+    } finally {
+      useAppStore.getState().dispose();
+      vi.useRealTimers();
+      cancel.mockRestore();
+    }
+  });
+
+  it('keeps scheduler states out of toast content even while an operation waits', async () => {
+    vi.useFakeTimers();
+    let listener: ((event: BridgeEvent) => void) | undefined;
+    const bridge = new MockBridge((command) => command.type === 'bootstrap' ? bootstrap : []);
+    bridge.subscribe = (handler) => { listener = handler; return () => { listener = undefined; }; };
+    try {
+      await useAppStore.getState().initialize(bridge);
+      const operation: OperationEvent = {
+        operationId: 'scheduled-job', context: { generation: 1, domain: 'sync', visibility: 'foreground', workspaceId: 'workspace', repositoryId: 'repo', target: null },
+        status: 'queued', phase: 'waitingForWriteSlot', message: 'Waiting for a repository write slot', startedAt: new Date().toISOString(), cancellable: true, completed: null, total: null, error: null,
+      };
+      listener?.(operation);
+      vi.advanceTimersByTime(1_000);
+      expect(useAppStore.getState().notifications).toHaveLength(0);
+      expect(useAppStore.getState().operations[operation.operationId].status).toBe('queued');
+      listener?.({ ...operation, status: 'running', phase: 'loadCommits', message: 'Loading repository commits' });
+      vi.advanceTimersByTime(1_000);
+      expect(useAppStore.getState().notifications).toHaveLength(0);
+      listener?.({ ...operation, status: 'running', phase: 'pushing', message: 'Pushing repository changes' });
+      listener?.({ ...operation, phase: 'waitingForReadSlot', message: 'Waiting for a repository read slot' });
+      vi.advanceTimersByTime(250);
+      expect(useAppStore.getState().notifications[0].message).toEqual({ key: 'Pushing repository changes' });
+      listener?.({ ...operation, status: 'running', phase: 'readingRepository', message: 'Reading repository data' });
+      expect(useAppStore.getState().notifications[0].message).toEqual({ key: 'Pushing repository changes' });
+      listener?.({ ...operation, status: 'succeeded' });
+      expect(useAppStore.getState().notifications).toHaveLength(0);
+    } finally {
+      useAppStore.getState().dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends automatic fetch with progress disabled', async () => {
+    const current = snapshot('silent-fetch', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    const options: RequestOptions[] = [];
+    const bridge = new MockBridge((command, requestOptions) => {
+      if (command.type === 'sync') { options.push(requestOptions ?? {}); return { output: '', update: null }; }
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories });
+    await useAppStore.getState().sync('repo', 'fetch', false);
+    expect(options).toHaveLength(1);
+    expect(options[0].showProgress).toBe(false);
+    expect(useAppStore.getState().notifications.some((item) => item.progress)).toBe(false);
+    useAppStore.setState({ bridge: new MockBridge((command) => { if (command.type === 'sync') throw new Error('Automatic fetch offline'); return []; }) });
+    await useAppStore.getState().sync('repo', 'fetch', false);
+    expect(useAppStore.getState().notifications).toHaveLength(0);
+  });
+
+  it('aggregates manual fetch progress and keeps the original workspace through completion', async () => {
+    const current = snapshot('fetch-original', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const first = deferred<{ output: string; update: null }>();
+    const second = deferred<{ output: string; update: null }>();
+    const calls: Array<{ workspaceId: string; repoId: string; showProgress?: boolean }> = [];
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'sync') {
+        calls.push({ workspaceId: command.payload.workspace_id, repoId: command.payload.repo_id, showProgress: options?.showProgress });
+        return command.payload.repo_id === 'a' ? first.promise : second.promise;
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, activeTabId: current.workspace.id });
+    const fetching = useAppStore.getState().fetchRepositories(['a', 'b']);
+    const progress = useAppStore.getState().notifications.filter((item) => item.progress);
+    expect(progress).toHaveLength(1);
+    expect(progress[0].message).toBe('VersionDock: Fetching all remotes…');
+    expect(progress[0].actions).toEqual([]);
+    expect(calls).toEqual([{ workspaceId: current.workspace.id, repoId: 'a', showProgress: false }, { workspaceId: current.workspace.id, repoId: 'b', showProgress: false }]);
+    useAppStore.setState({ snapshot: snapshot('another-workspace', 1), activeTabId: 'another-workspace', allRepositories: [] });
+    first.resolve({ output: '', update: null });
+    second.resolve({ output: '', update: null });
+    await fetching;
+    expect(useAppStore.getState().notifications.some((item) => item.progress)).toBe(false);
+    const completion = useAppStore.getState().notifications.find((item) => item.message === 'VersionDock: Fetch complete.');
+    expect(completion?.workspaceId).toBe(current.workspace.id);
+  });
+
+  it('removes fetch progress on failure without announcing a successful fetch', async () => {
+    const current = snapshot('fetch-failure', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync') throw new Error('Remote unavailable');
+      if (command.type === 'workspaceRefresh') return current;
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, activeTabId: current.workspace.id });
+    await useAppStore.getState().fetchRepositories(['repo']);
+    expect(useAppStore.getState().notifications.some((item) => item.progress)).toBe(false);
+    expect(useAppStore.getState().notifications.some((item) => item.title === 'Sync failed')).toBe(true);
+    expect(useAppStore.getState().notifications.some((item) => item.title === 'Fetch All')).toBe(false);
+  });
+
+  it('notifies unpushed and incoming commits on startup, deduplicates within session on count growth, and notifies new conflicts', async () => {
+    let currentWorkspace = snapshot('notifications', 1);
+    currentWorkspace.repositories = [
+      { ...repository('repo-a', 'A'), ahead: 2, behind: 3, conflicts: 0 },
       { ...repository('repo-b', 'B'), ahead: 1, behind: 1 },
       { ...repository('worktree', 'Worktree'), ahead: 9, behind: 9, meta: { ...repository('worktree', 'Worktree').meta, isWorktree: true } },
+    ];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') return currentWorkspace;
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` }, ready: true });
+
+    // 首次打开工作区：对齐插件在启动发现未同步提交时立即通知一次，并建立基线
+    await useAppStore.getState().openWorkspace(currentWorkspace.workspace.paths);
+    expect(useAppStore.getState().notifications).toHaveLength(2);
+
+    // 再次刷新无变化：基线已建立，不重复通知
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications).toHaveLength(2);
+
+    // 状态更新：未推送与传入提交数量增加，且产生了冲突
+    currentWorkspace = {
+      ...currentWorkspace,
+      generation: 2,
+      repositories: [
+        { ...repository('repo-a', 'A'), ahead: 3, behind: 4, conflicts: 1 },
+        { ...repository('repo-b', 'B'), ahead: 1, behind: 1 },
+        { ...repository('worktree', 'Worktree'), ahead: 9, behind: 9, meta: { ...repository('worktree', 'Worktree').meta, isWorktree: true } },
+      ],
+    };
+    await useAppStore.getState().refresh(true);
+
+    const all = useAppStore.getState().notifications;
+    // 提交通知对齐插件每次启动最多提醒一次（同一会话内增长不再弹窗），新产生的冲突触发警报（总计 2 + 1 = 3 条）
+    expect(all).toHaveLength(3);
+    const conflictNotif = all.find((n) => n.title === 'Merge conflicts detected');
+    expect(conflictNotif).toBeDefined();
+    expect(conflictNotif?.message).toBe('VersionDock: Merge conflicts detected. Use the Merge Editor to resolve them.');
+  });
+
+  it('notifies with repository name for single repository incoming and unpushed commits when count increases', async () => {
+    let currentWorkspace = snapshot('single-repo-notifications', 1);
+    currentWorkspace.repositories = [
+      { ...repository('repo-solo', 'SoloRepo'), ahead: 0, behind: 0 },
+    ];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') return currentWorkspace;
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` }, ready: true, notifications: [], toastNotificationIds: [] });
+
+    await useAppStore.getState().openWorkspace(currentWorkspace.workspace.paths);
+    expect(useAppStore.getState().notifications).toHaveLength(0);
+
+    // 状态更新：产生了 1 个未推送提交和 1 个传入提交
+    currentWorkspace = {
+      ...currentWorkspace,
+      generation: 2,
+      repositories: [
+        { ...repository('repo-solo', 'SoloRepo'), ahead: 1, behind: 1 },
+      ],
+    };
+    await useAppStore.getState().refresh(true);
+
+    const notifications = useAppStore.getState().notifications;
+    expect(notifications).toHaveLength(2);
+
+    const unpushed = notifications.find((n) => n.title === 'Unpushed Commits');
+    expect(unpushed).toBeDefined();
+    expect(unpushed?.message).toEqual({
+      key: 'VersionDock [{0}]: {1} unpushed commit ready to push.',
+      args: ['SoloRepo', 1],
+    });
+    expect(unpushed?.actions[0]).toEqual({ type: 'openPush', label: 'Go to Push' });
+
+    const incoming = notifications.find((n) => n.title === 'Incoming Commits');
+    expect(incoming).toBeDefined();
+    expect(incoming?.message).toEqual({
+      key: 'VersionDock [{0}]: {1} incoming commit available to update.',
+      args: ['SoloRepo', 1],
+    });
+    expect(incoming?.actions[0]).toEqual({ type: 'updateProject', label: 'Update' });
+  });
+
+  it('alerts merge conflicts, unpushed, and incoming commits on initial workspace open without duplicate notifications on subsequent refresh', async () => {
+    const workspace = snapshot('conflict-startup-ws', 1);
+    workspace.repositories = [
+      { ...repository('repo-c', 'ConflictRepo'), ahead: 2, behind: 3, conflicts: 2 },
     ];
     const bridge = new MockBridge((command) => {
       if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') return workspace;
@@ -51,20 +274,1601 @@ describe('appStore async lifecycle', () => {
       if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
       return [];
     });
-    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` }, ready: true });
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` }, ready: true, notifications: [] });
 
     await useAppStore.getState().openWorkspace(workspace.workspace.paths);
-    const first = useAppStore.getState().notifications;
-    expect(first).toHaveLength(3);
-    expect(first.map((item) => typeof item.message === 'string' ? item.message : 'key' in item.message ? item.message.key : item.message.raw)).toEqual([
-      'VersionDock: {0} unpushed commits across {1} repositories.',
-      'VersionDock: {0} incoming commits across {1} repositories.',
-      'VersionDock: Merge conflicts detected. Use the Merge Editor to resolve them.',
-    ]);
-    expect(first[1].actions.map((action) => action.type)).toEqual(['updateProject', 'disableIncoming']);
+    const notifications = useAppStore.getState().notifications;
+    expect(notifications).toHaveLength(3);
+    const conflictNotif = notifications.find((n) => n.title === 'Merge conflicts detected');
+    expect(conflictNotif).toBeDefined();
+    expect(conflictNotif?.type).toBe('warning');
+    expect(conflictNotif?.actions[0]).toEqual({ type: 'openConflicts', label: 'Open Conflict List' });
+    expect(notifications.some((n) => n.title === 'Unpushed Commits')).toBe(true);
+    expect(notifications.some((n) => n.title === 'Incoming Commits')).toBe(true);
 
+    // 再次刷新，若冲突与未同步数量未增加，不重复弹通知
     await useAppStore.getState().refresh(true);
     expect(useAppStore.getState().notifications).toHaveLength(3);
+  });
+
+  it('notifies immediately on startup when unpushed or incoming commits exist, and avoids repeat notifications during session', async () => {
+    const ws = snapshot('startup-instant-notice-ws', 1);
+    const repo = { ...repository('repo-instant', 'InstantRepo'), ahead: 3, behind: 5 };
+    ws.repositories = [{ ...repo }];
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') return ws;
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` },
+      ready: true,
+      notifications: [],
+    });
+
+    // 首次打开工作区：启动时立即提醒传入与未推送提交
+    await useAppStore.getState().openWorkspace(ws.workspace.paths);
+    const initial = useAppStore.getState().notifications;
+    expect(initial).toHaveLength(2);
+    expect(initial.some((n) => n.title === 'Incoming Commits')).toBe(true);
+    expect(initial.some((n) => n.title === 'Unpushed Commits')).toBe(true);
+
+    // 会话中多次刷新（数量未改变）：严禁重复产生弹窗
+    await useAppStore.getState().refresh(true);
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications).toHaveLength(2);
+  });
+
+  it('updates all non-worktree repositories including hidden ones, and excludes worktrees', async () => {
+    const workspace = snapshot('update-targets-ws', 1);
+    const repoNormal = repository('repo-normal', 'Normal');
+    const repoHidden = repository('repo-hidden', 'Hidden');
+    const repoWorktree = { ...repository('repo-wt', 'Worktree'), meta: { ...repository('repo-wt', 'Worktree').meta, isWorktree: true } };
+    workspace.repositories = [repoNormal, repoHidden, repoWorktree];
+
+    const pulledRepoIds: string[] = [];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync') {
+        const payload = command.payload as { repo_id: string; action: string };
+        pulledRepoIds.push(payload.repo_id);
+        return {
+          output: 'Already up to date.',
+          update: {
+            repoId: payload.repo_id,
+            beforeRevision: 'rev1',
+            afterRevision: 'rev1',
+            summary: { kind: 'noChanges', commitCount: 0, fileCount: 0, containsMerge: false, detail: { commits: [], files: [] } },
+            summaryError: null,
+            beforeStatus: 'clean',
+            afterStatus: 'clean',
+          },
+        };
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: { ...workspace, repositories: [repoNormal, repoWorktree] }, // repo-hidden 在可见视图中被隐藏
+      allRepositories: [repoNormal, repoHidden, repoWorktree], // allRepositories 包含全部仓库
+      bootstrap: { ...bootstrap, state: { ...bootstrap.state, settings: { ...bootstrap.state.settings, hiddenRepositoryIds: ['repo-hidden'] } as any } },
+    });
+
+    await useAppStore.getState().updateProject();
+
+    // 验证：包含被隐藏的普通仓库，排除 worktree！
+    expect(pulledRepoIds).toContain('repo-normal');
+    expect(pulledRepoIds).toContain('repo-hidden');
+    expect(pulledRepoIds).not.toContain('repo-wt');
+  });
+
+  it('notifies incoming commits once upon startup fetch and establishes baseline to avoid duplicate notifications within session', async () => {
+    const workspace = snapshot('fetch-startup-ws', 1);
+    const repo = { ...repository('repo-git', 'GitRepo'), ahead: 0, behind: 0 };
+    workspace.repositories = [{ ...repo }];
+
+    let behindCount = 0;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          launchWorkspaceId: 'fetch-startup-ws',
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: true, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [workspace.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen') {
+        // 初始打开时远端尚未 fetch，behind 为 0
+        return {
+          ...workspace,
+          repositories: [{ ...repo, behind: 0 }],
+        };
+      }
+      if (command.type === 'sync') {
+        const payload = command.payload as { action: string };
+        if (payload.action === 'fetch') {
+          // fetch 完成，远端存在 2 个提交；注意：sync 并不直接原地修改前端对象
+          behindCount = 2;
+          return { output: 'Fetched 2 new commits from remote' };
+        }
+      }
+      if (command.type === 'workspaceRefresh') {
+        return {
+          ...workspace,
+          repositories: [{ ...repo, behind: behindCount }],
+        };
+      }
+      if (command.type === 'repositoryStatus') {
+        return { ...repo, behind: behindCount };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    useAppStore.setState({ notifications: [] });
+
+    // 启动应用
+    await useAppStore.getState().initialize(bridge);
+
+    // 验证：启动完成后，启动 Fetch 发现的 2 个传入提交对齐插件立即发出通知，并记录基线
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+
+    // 模拟随后即使收到 watcher 的防抖刷新事件（behind 依然是 2），也不重复弹通知
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+
+    // 随后运行过程中，远程又增加了提交（2 -> 3）
+    behindCount = 3;
+    await useAppStore.getState().refresh(true);
+    // 对齐插件：同一会话内已通知过，数量再次增加保持静默，绝不重复弹窗打扰！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:fetch-startup-ws:incoming')).toBe('3');
+
+    // 模拟新会话重启：
+    const bridgeSession2 = new MockBridge((command) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: 'fetch-startup-ws-session-2',
+          launchWorkspaceId: 'fetch-startup-ws',
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [workspace.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...workspace,
+          repositories: [{ ...repo, behind: 3 }],
+        };
+      }
+      return [];
+    });
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeSession2);
+    // 新会话启动后，检测到未更新的提交，再次发出新会话的 1 次通知！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+  });
+
+  it('notifies unresolved conflicts upon subsequent application launches while deduplicating within the same session', async () => {
+    const ws = snapshot('conflict-relaunch-ws', 1);
+    const repo = { ...repository('repo-conflict', 'ConflictRepo'), conflicts: 1 };
+    ws.repositories = [{ ...repo }];
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return { ...ws, repositories: [{ ...repo }] };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    useAppStore.setState({ notifications: [], bridge });
+
+    // 会话 1：首次打开带冲突的工作区 -> 立即弹出报警
+    await useAppStore.getState().openWorkspace(['/repo-conflict']);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Merge conflicts detected')).toHaveLength(1);
+
+    // 会话 1 运行期间：再次刷新（冲突仍为 1） -> 去重不重复报警
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Merge conflicts detected')).toHaveLength(1);
+
+    // 模拟应用退出（清理会话内存状态）：即使 localStorage 可能留有历史值
+    useAppStore.getState().dispose();
+    useAppStore.setState({ notifications: [], tabs: [], activeTabId: undefined, snapshot: undefined, allRepositories: [], bridge });
+
+    // 会话 2（再次启动应用打开该工作区）：未解决的冲突必须再次提醒用户！
+    await useAppStore.getState().openWorkspace(['/repo-conflict']);
+    // 会话 2 运行期间：再次刷新（冲突仍为 1） -> 再次去重
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Merge conflicts detected')).toHaveLength(1);
+  });
+
+  it('fetches hidden repositories during startup fetch to ensure complete remote status', async () => {
+    const ws = snapshot('ws-hidden-fetch', 1);
+    const repoVisible = { ...repository('repo-visible', 'VisibleRepo'), ahead: 0, behind: 0 };
+    const repoHidden = { ...repository('repo-hidden', 'HiddenRepo'), ahead: 0, behind: 0 };
+    ws.repositories = [{ ...repoVisible }, { ...repoHidden }];
+
+    const fetchedRepoIds: string[] = [];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          launchWorkspaceId: 'ws-hidden-fetch',
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: true, hiddenRepositoryIds: ['repo-hidden'] } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return { ...ws, repositories: [{ ...repoVisible }, { ...repoHidden }] };
+      }
+      if (command.type === 'sync') {
+        const payload = command.payload as { repo_id: string; action: string };
+        if (payload.action === 'fetch') {
+          fetchedRepoIds.push(payload.repo_id);
+          return { output: 'Fetched' };
+        }
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridge);
+
+    expect(fetchedRepoIds).toContain('repo-visible');
+    expect(fetchedRepoIds).toContain('repo-hidden');
+    useAppStore.getState().dispose();
+  });
+
+  it('allows concurrent startup fetch in multiple windows for different workspaces while preventing duplicate fetch and notification for same workspace', async () => {
+    class WindowMockBridge extends MockBridge {
+      constructor(private readonly windowLabel: string, responder: (command: any) => unknown | Promise<unknown>) {
+        super(responder);
+      }
+      override async getWindowLabel(): Promise<string> {
+        return this.windowLabel;
+      }
+    }
+
+    const wsA = snapshot('ws-multi-window-a', 1);
+    const repoA = { ...repository('repo-a', 'RepoA'), ahead: 0, behind: 0 };
+    wsA.repositories = [{ ...repoA }];
+
+    const wsB = snapshot('ws-multi-window-b', 1);
+    const repoB = { ...repository('repo-b', 'RepoB'), ahead: 0, behind: 0 };
+    wsB.repositories = [{ ...repoB }];
+
+    let fetchCallsRepoA = 0;
+    let fetchCallsRepoB = 0;
+    let behindRepoA = 0;
+
+    const makeResponder = (targetWs: typeof wsA, targetRepo: typeof repoA, onFetch: () => void, getBehind?: () => number) => (command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          launchWorkspaceId: targetWs.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: true, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [targetWs.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen') {
+        return {
+          ...targetWs,
+          repositories: [{ ...targetRepo, behind: 0 }],
+        };
+      }
+      if (command.type === 'workspaceRefresh') {
+        return {
+          ...targetWs,
+          repositories: [{ ...targetRepo, behind: getBehind ? getBehind() : 0 }],
+        };
+      }
+      if (command.type === 'repositoryStatus') {
+        return { ...targetRepo, behind: getBehind ? getBehind() : 0 };
+      }
+      if (command.type === 'sync') {
+        const payload = command.payload as { action: string };
+        if (payload.action === 'fetch') {
+          onFetch();
+          return { output: 'Fetched' };
+        }
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    };
+
+    const bridgeWindow1 = new WindowMockBridge('window-1', makeResponder(wsA, repoA, () => {
+      fetchCallsRepoA += 1;
+      behindRepoA = 2;
+    }, () => behindRepoA));
+
+    const bridgeWindow2 = new WindowMockBridge('window-2', makeResponder(wsB, repoB, () => {
+      fetchCallsRepoB += 1;
+    }));
+
+    const bridgeWindow3 = new WindowMockBridge('window-3', makeResponder(wsA, repoA, () => {
+      fetchCallsRepoA += 1;
+    }, () => behindRepoA));
+
+    // 窗口 1：打开项目 A -> 成功获取租约并执行启动 Fetch，远端 2 个提交对齐插件提醒一次，并设为基线 2
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridgeWindow1);
+    expect(fetchCallsRepoA).toBe(1);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+
+    // 窗口 2：在 60 秒内打开不同项目 B -> 由于租约按工作区隔离，窗口 2 依然能获取到项目 B 的租约并执行 Fetch！
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow2);
+    expect(fetchCallsRepoB).toBe(1);
+
+    // 窗口 3：在 60 秒内打开相同项目 A -> 跳过项目 A 的重复启动 Fetch，且绝不以旧状态或共享基线误报通知！
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow3);
+    // 启动完成，无重复 Fetch，且无传入提交通知！
+    expect(fetchCallsRepoA).toBe(1);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 窗口 3 随后执行状态刷新（获取到 behind = 2）：验证从共享存储同步基线，依然不发通知！
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 随后运行过程中，远程又增加了提交（2 -> 3）：
+    // 对齐插件：同一会话内项目 A 已经由窗口 1 提醒过，窗口 3 在会话内不重复弹窗，基线更新为 3！
+    behindRepoA = 3;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-window-a:incoming')).toBe('3');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('prevents stale lagging window from overwriting newer baseline count and avoids false notifications across interleaved windows', async () => {
+    class WindowMockBridge extends MockBridge {
+      constructor(private readonly windowLabel: string, responder: (command: any) => unknown | Promise<unknown>) {
+        super(responder);
+      }
+      override async getWindowLabel(): Promise<string> {
+        return this.windowLabel;
+      }
+    }
+
+    const ws = snapshot('ws-interleaved-counts', 1);
+    const repo = { ...repository('repo-interleaved', 'InterleavedRepo'), ahead: 0, behind: 0 };
+    ws.repositories = [{ ...repo }];
+
+    let remoteBehind = 2;
+
+    const makeResponder = (currentBehind: () => number) => (command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [{ ...repo, behind: currentBehind() }],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    };
+
+    // 窗口 1：状态已经同步为 behind = 2，首次启动提醒一次，建立共享基线 2
+    const bridgeWindow1 = new WindowMockBridge('window-1', makeResponder(() => remoteBehind));
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridgeWindow1);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    // 验证 localStorage 中基线已经成功记录为 2
+    expect(localStorage.getItem('versiondock:notification-count:ws-interleaved-counts:incoming')).toBe('2');
+
+    // 窗口 2：模拟一个快照尚未同步的旧窗口（本地依然保留 behind = 0）
+    let window2Behind = 0;
+    const bridgeWindow2 = new WindowMockBridge('window-2', makeResponder(() => window2Behind));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow2);
+
+    // 核心验证：窗口 2 处于滞后状态 (behind = 0)，绝不能将共享存储中的 2 降级改写回 0！
+    expect(localStorage.getItem('versiondock:notification-count:ws-interleaved-counts:incoming')).toBe('2');
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 窗口 3：模拟新打开的第三个窗口，读取最新状态 (behind = 2)
+    const bridgeWindow3 = new WindowMockBridge('window-3', makeResponder(() => remoteBehind));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow3);
+    // 核心验证：窗口 3 读到了未被旧窗口污染的基线 2，绝不将已有历史提交误报为新通知！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 窗口 2 自身也随后刷新到了最新状态 (behind = 2)
+    window2Behind = 2;
+    await useAppStore.getState().refresh(true);
+    // 核心验证：窗口 2 也依然零通知！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 随后远端新增提交 (2 -> 3)
+    remoteBehind = 3;
+    await useAppStore.getState().refresh(true);
+    // 对齐插件：同一会话内窗口 1 启动时已提醒过，会话内提交数增加保持静默，不重复弹窗！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+    // 验证共享存储中的基线已更新为 3
+    expect(localStorage.getItem('versiondock:notification-count:ws-interleaved-counts:incoming')).toBe('3');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('notifies when incoming commits arrive after app restart where commits were pulled via external Git CLI before launch', async () => {
+    const ws = snapshot('ws-restart-git-pull', 1);
+    const repo = { ...repository('repo-pulled', 'PulledRepo'), ahead: 0, behind: 3 };
+    ws.repositories = [{ ...repo }];
+
+    let currentBehind = 3;
+
+    const makeBridge = (sessionId: string) => new MockBridge((command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: sessionId,
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [{ ...repo, behind: currentBehind }],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    // 会话 1：启动应用，当前存在 3 个传入提交，对齐插件提醒一次，并建立基准线 3
+    const bridgeSession1 = makeBridge('session-first-launch');
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridgeSession1);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-restart-git-pull:incoming')).toBe('3');
+
+    // 模拟应用完全退出关闭
+    useAppStore.getState().dispose();
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+
+    // 用户在应用关闭期间，使用系统终端 Git CLI 执行 git pull，远端传入提交全部被消除，落后数降为 0
+    currentBehind = 0;
+
+    // 会话 2：再次启动应用 (冷启动，新 applicationSessionId)，打开该工作区
+    const bridgeSession2 = makeBridge('session-relaunch-after-pull');
+    await useAppStore.getState().initialize(bridgeSession2);
+
+    // 核心验证 1：启动完成，真实状态 behind = 0，零通知
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+    // 核心验证 2：共享基准线已合法降为 0，旧会话的 3 绝不阻断现实基线建立！
+    expect(localStorage.getItem('versiondock:notification-count:ws-restart-git-pull:incoming')).toBe('0');
+
+    // 随后运行过程中，远端新增了 1 个提交 (0 -> 1)
+    currentBehind = 1;
+    await useAppStore.getState().refresh(true);
+    // 核心验证 3：远端新提交到达后，正常触发 1 次通知，彻底消除 P1 漏报！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+
+    // 随后远端又新增了 1 个提交 (1 -> 2)
+    currentBehind = 2;
+    await useAppStore.getState().refresh(true);
+    // 核心验证 4：对齐插件，同一会话内首次非零已提醒过 (0->1 时已提醒)，数量再次增加时不重复打扰 (依然保持 1 条通知)！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-restart-git-pull:incoming')).toBe('2');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('prevents lagging window holding stale higher count from overwriting lowered baseline and notifies when new commits arrive', async () => {
+    class WindowMockBridge extends MockBridge {
+      constructor(private readonly windowLabel: string, responder: (command: any) => unknown | Promise<unknown>) {
+        super(responder);
+      }
+      override async getWindowLabel(): Promise<string> {
+        return this.windowLabel;
+      }
+    }
+
+    const ws = snapshot('ws-reverse-race', 1);
+    const repo = { ...repository('repo-race', 'RaceRepo'), ahead: 0, behind: 2 };
+    ws.repositories = [{ ...repo }];
+
+    let behindCount = 2;
+
+    const makeResponder = (getBehind: () => number) => (command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: 'session-reverse-race',
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [{ ...repo, behind: getBehind() }],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    };
+
+    // 1. 窗口 A 与窗口 B 均在同个项目启动，窗口 A 初始 behind = 2，提醒一次并建立共享基线 2
+    const bridgeWindowA = new WindowMockBridge('window-a', makeResponder(() => behindCount));
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridgeWindowA);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-reverse-race:incoming')).toBe('2');
+
+    // 窗口 B 在同一会话中打开
+    let windowBBehind = 2;
+    const bridgeWindowB = new WindowMockBridge('window-b', makeResponder(() => windowBBehind));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindowB);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 2. 窗口 A 拉取提交，仓库客观状态降为 behind = 0，窗口 A 将共享基线成功降为 0
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindowA);
+    behindCount = 0;
+    await useAppStore.getState().refresh(true);
+    expect(localStorage.getItem('versiondock:notification-count:ws-reverse-race:incoming')).toBe('0');
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 3. 关键反向竞态：窗口 B 此时尚未刷新，依然持有旧快照 behind = 2
+    // 切换到窗口 B 触发状态检查
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindowB);
+    // 窗口 B 刷新，但其仓库依然处于滞后快照 2
+    windowBBehind = 2;
+    await useAppStore.getState().refresh(true);
+
+    // 核心断言 1：窗口 B 绝不能误报通知！
+    expect(useAppStore.getState().notifications.map((n) => n.title)).toEqual([]);
+    // 核心断言 2：窗口 B 绝不能凭本地旧记忆把共享基线从 0 写回 2！共享基线必须牢牢保持为 0！
+    expect(localStorage.getItem('versiondock:notification-count:ws-reverse-race:incoming')).toBe('0');
+
+    // 4. 随后窗口 B 自身也刷新到了最新状态 behind = 0
+    windowBBehind = 0;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 5. 远端新增了 1 个提交 (0 -> 1)
+    // 模拟新会话冷启动打开该项目：
+    behindCount = 1;
+    const bridgeWindowARelaunch = new WindowMockBridge('window-a', (cmd) => {
+      if (cmd.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: 'session-reverse-race-relaunch',
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      return makeResponder(() => behindCount)(cmd);
+    });
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindowARelaunch);
+    await useAppStore.getState().refresh(true);
+
+    // 核心断言 3：共享基线未被污染，新会话启动且新提交到达时正常触发通知，彻底消除 P1 漏报！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-reverse-race:incoming')).toBe('1');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('notifies lagging window when remote commits arrive after another window pulls and closes without lagging window ever seeing zero', async () => {
+    class WindowMockBridge extends MockBridge {
+      constructor(private readonly windowLabel: string, responder: (command: any) => unknown | Promise<unknown>) {
+        super(responder);
+      }
+      override async getWindowLabel(): Promise<string> {
+        return this.windowLabel;
+      }
+    }
+
+    const ws = snapshot('ws-lagging-close-race', 1);
+    const repo = { ...repository('repo-lagging', 'LaggingRepo'), ahead: 0, behind: 2, revision: 'rev1' };
+    ws.repositories = [{ ...repo }];
+
+    let behindCount = 2;
+    let repoRevision = 'rev1';
+
+    const makeResponder = (getBehind: () => number, getRev: () => string, sessionId = 'session-lagging-close-race') => (command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: sessionId,
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [{ ...repo, behind: getBehind(), revision: getRev() }],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    };
+
+    // 1. 窗口 A 与窗口 B 均在同个项目启动，窗口 A 初始 behind = 2，提醒一次并建立共享基线 2
+    const bridgeWindowA = new WindowMockBridge('window-a', makeResponder(() => behindCount, () => repoRevision));
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridgeWindowA);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-lagging-close-race:incoming')).toBe('2');
+
+    // 窗口 B 在同一会话中打开并同步基准 2
+    let windowBBehind = 2;
+    let windowBRevision = 'rev1';
+    const bridgeWindowB = new WindowMockBridge('window-b', makeResponder(() => windowBBehind, () => windowBRevision));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindowB);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 2. 窗口 A 执行拉取，本地仓库 HEAD 演进为 rev2，behind 降为 0
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindowA);
+    behindCount = 0;
+    repoRevision = 'rev2';
+    await useAppStore.getState().refresh(true);
+    expect(localStorage.getItem('versiondock:notification-count:ws-lagging-close-race:incoming')).toBe('0');
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 窗口 A 关闭，不再活动
+    useAppStore.getState().dispose();
+
+    // 3. 关键 ABA 与漏报时序：
+    // 窗口 B 从未看到过 0！此时远端新增了 1 个新提交 (0 -> 1)
+    // 本地仓库因为已被窗口 A 拉取过，HEAD 依然是 rev2，当前客观落后数量为 1
+    // 用户在新会话中激活窗口 B 重新加载项目
+    windowBBehind = 1;
+    windowBRevision = 'rev2';
+
+    const bridgeWindowBNewSession = new WindowMockBridge('window-b', makeResponder(() => windowBBehind, () => windowBRevision, 'session-lagging-close-race-relaunch'));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindowBNewSession);
+    await useAppStore.getState().refresh(true);
+
+    // 核心断言：窗口 B 成功识破新纪元的新增提交，绝不因 1 <= 本地旧记忆 2 而漏报！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-lagging-close-race:incoming')).toBe('1');
+
+    // 4. 极端 ABA 场景验证：两个窗口都曾见过 2，A 拉取到 0 后关闭，远端又恰好新增了 2 个提交 (2 -> 0 -> 2)
+    // 窗口 B 再次面临 currentCount === 2，但仓库版本签名已演进为 rev3
+    windowBBehind = 2;
+    windowBRevision = 'rev3';
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().refresh(true);
+    // 对齐插件：同一会话内已提醒过，会话内数量再次增加保持静默不重复打扰，通知为 0，基线更新为 2！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+    expect(localStorage.getItem('versiondock:notification-count:ws-lagging-close-race:incoming')).toBe('2');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('does not falsely notify stale incoming commits of repo A when unrelated repo B commits locally in multi-repo workspace', async () => {
+    class WindowMockBridge extends MockBridge {
+      constructor(private readonly windowLabel: string, responder: (command: any) => unknown | Promise<unknown>) {
+        super(responder);
+      }
+      override async getWindowLabel(): Promise<string> {
+        return this.windowLabel;
+      }
+    }
+
+    const ws = snapshot('ws-multi-repo-false-alarm', 2);
+    const repoA = { ...repository('repo-a', 'RepoA'), ahead: 0, behind: 2, revision: 'revA1' };
+    const repoB = { ...repository('repo-b', 'RepoB'), ahead: 0, behind: 0, revision: 'revB1' };
+    ws.repositories = [{ ...repoA }, { ...repoB }];
+
+    let repoABehind = 2;
+    let repoARevision = 'revA1';
+    const repoBBehind = 0;
+    const repoBRevision = 'revB1';
+
+    const makeResponder = (
+      getSnapshot: () => { repoABehind: number; repoARev: string; repoBBehind: number; repoBRev: string },
+      sessionId = 'session-multi-repo-false-alarm',
+    ) => (command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: sessionId,
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        const s = getSnapshot();
+        return {
+          ...ws,
+          repositories: [
+            { ...repoA, behind: s.repoABehind, revision: s.repoARev },
+            { ...repoB, behind: s.repoBBehind, revision: s.repoBRev },
+          ],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    };
+
+    // 1. 窗口 1 与窗口 2 启动，窗口 1 初始仓库 A behind = 2，提醒一次并建立共享基线 2
+    const bridgeWindow1 = new WindowMockBridge('window-1', makeResponder(() => ({
+      repoABehind,
+      repoARev: repoARevision,
+      repoBBehind,
+      repoBRev: repoBRevision,
+    })));
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridgeWindow1);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-false-alarm:incoming')).toBe('2');
+
+    // 窗口 2 在同一会话中打开并同步基准 2
+    let win2RepoABehind = 2;
+    let win2RepoARev = 'revA1';
+    let win2RepoBBehind = 0;
+    let win2RepoBRev = 'revB1';
+    const bridgeWindow2 = new WindowMockBridge('window-2', makeResponder(() => ({
+      repoABehind: win2RepoABehind,
+      repoARev: win2RepoARev,
+      repoBBehind: win2RepoBBehind,
+      repoBRev: win2RepoBRev,
+    })));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow2);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 2. 窗口 1 执行拉取仓库 A，仓库 A 降为 behind = 0，revision 演进为 revA2；共享基准成功降为 0
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow1);
+    repoABehind = 0;
+    repoARevision = 'revA2';
+    await useAppStore.getState().refresh(true);
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-false-alarm:incoming')).toBe('0');
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 3. 关键多仓库时序：
+    // 用户此时在【无关的仓库 B】本地提交了代码，仓库 B 的 HEAD 演进为 revB2
+    // 而窗口 2 对【仓库 A】依然持有滞后的旧快照 (behind = 2, revision = revA1)
+    win2RepoABehind = 2;
+    win2RepoARev = 'revA1';
+    win2RepoBBehind = 0;
+    win2RepoBRev = 'revB2'; // 仓库 B 发生了 HEAD 演进！
+
+    // 切换到窗口 2 触发状态检查
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow2);
+    await useAppStore.getState().refresh(true);
+
+    // 核心断言 1：窗口 2 绝不能因仓库 B 的本地 commit 而误报“仓库 A 有 2 个传入提交”！
+    expect(useAppStore.getState().notifications.map((n) => n.title)).toEqual([]);
+    // 核心断言 2：共享基线绝不能被旧快照污染写回 2，必须保持为 0！
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-false-alarm:incoming')).toBe('0');
+
+    // 4. 随后窗口 2 自身的仓库 A 也刷新到了最新状态 (behind = 0, revA2)
+    win2RepoABehind = 0;
+    win2RepoARev = 'revA2';
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 5. 远端随后在仓库 A 新增了 1 个新提交 (behind = 1)
+    // 模拟新会话冷启动打开该项目：
+    win2RepoABehind = 1;
+    const bridgeWindow2NewSession = new WindowMockBridge('window-2', makeResponder(() => ({
+      repoABehind: win2RepoABehind,
+      repoARev: win2RepoARev,
+      repoBBehind: win2RepoBBehind,
+      repoBRev: win2RepoBRev,
+    }), 'session-multi-repo-false-alarm-relaunch'));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow2NewSession);
+    await useAppStore.getState().refresh(true);
+
+    // 此时新会话启动且新提交到达，基线为 0 未被旧快照污染，正常触发通知！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-false-alarm:incoming')).toBe('1');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('notifies accurate count excluding stale phantom count when another repo has incoming commits in multi-repo workspace', async () => {
+    class WindowMockBridge extends MockBridge {
+      constructor(private readonly windowLabel: string, responder: (command: any) => unknown | Promise<unknown>) {
+        super(responder);
+      }
+      override async getWindowLabel(): Promise<string> {
+        return this.windowLabel;
+      }
+    }
+
+    const ws = snapshot('ws-multi-repo-accurate-count', 2);
+    const repoA = { ...repository('repo-a', 'RepoA'), ahead: 0, behind: 2, revision: 'revA1' };
+    const repoB = { ...repository('repo-b', 'RepoB'), ahead: 0, behind: 2, revision: 'revB1' };
+    ws.repositories = [{ ...repoA }, { ...repoB }];
+
+    let repoABehind = 2;
+    let repoARevision = 'revA1';
+    const repoBBehind = 2;
+    const repoBRevision = 'revB1';
+    const notifyIncoming = false;
+
+    const makeResponder = (
+      getSnapshot: () => { repoABehind: number; repoARev: string; repoBBehind: number; repoBRev: string },
+      sessionId = 'session-multi-repo-accurate-count',
+    ) => (command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: sessionId,
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: notifyIncoming } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        const s = getSnapshot();
+        return {
+          ...ws,
+          repositories: [
+            { ...repoA, behind: s.repoABehind, revision: s.repoARev },
+            { ...repoB, behind: s.repoBBehind, revision: s.repoBRev },
+          ],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    };
+
+    // 1. 窗口 1 与窗口 2 启动，初始仓库 A behind = 2，仓库 B behind = 2，建立共享基线 4
+    const bridgeWindow1 = new WindowMockBridge('window-1', makeResponder(() => ({
+      repoABehind,
+      repoARev: repoARevision,
+      repoBBehind,
+      repoBRev: repoBRevision,
+    })));
+    useAppStore.setState({ notifications: [] });
+    await useAppStore.getState().initialize(bridgeWindow1);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-accurate-count:incoming')).toBe('4');
+
+    // 窗口 2 在同一会话中打开并同步基线 4
+    let win2RepoABehind = 2;
+    let win2RepoARev = 'revA1';
+    let win2RepoBBehind = 2;
+    let win2RepoBRev = 'revB1';
+    const bridgeWindow2 = new WindowMockBridge('window-2', makeResponder(() => ({
+      repoABehind: win2RepoABehind,
+      repoARev: win2RepoARev,
+      repoBBehind: win2RepoBBehind,
+      repoBRev: win2RepoBRev,
+    })));
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow2);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 2. 窗口 1 执行拉取仓库 A，仓库 A 降为 behind = 0，revision 演进为 revA2；仓库 B 保持 behind = 2；共享基线降为 2
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow1);
+    repoABehind = 0;
+    repoARevision = 'revA2';
+    await useAppStore.getState().refresh(true);
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-accurate-count:incoming')).toBe('2');
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 3. 关键多仓库时序与数量准确性验证：
+    // 远端仓库 B 新增了传入提交 (behind 从 2 增至 3)
+    // 切换到窗口 2：仓库 B 刷新到了最新状态 (behind = 3)，但仓库 A 滞后未刷新，仍持有旧快照 (behind = 2, revA1)
+    win2RepoABehind = 2;
+    win2RepoARev = 'revA1';
+    win2RepoBBehind = 3;
+    win2RepoBRev = 'revB1';
+
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeWindow2);
+    await useAppStore.getState().refresh(true);
+
+    // 核心断言 1：同一会话内步骤 1 已提醒过，对齐插件：数量再次增加保持静默不重复弹窗！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 核心断言 2：共享基线精确更新为 3，消除滞后幽灵计数（精确为 3，绝非包含滞后快照的 5）！
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-accurate-count:incoming')).toBe('3');
+
+    // 4. 随后窗口 2 自身的仓库 A 也刷新到了最新状态 (behind = 0, revA2)
+    win2RepoABehind = 0;
+    win2RepoARev = 'revA2';
+    await useAppStore.getState().refresh(true);
+    // 仓库 A 正常归零，总数为 3 <= 3，不产生重复通知
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 5. 远端随后在仓库 A 新增了 1 个新提交 (behind 从 0 增至 1，总数变为 4)
+    win2RepoABehind = 1;
+    await useAppStore.getState().refresh(true);
+    // 对齐插件：会话内步骤 1 已发出过提醒，会话内数量再次增加保持静默不重复打扰，通知保持 0 条！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+    expect(localStorage.getItem('versiondock:notification-count:ws-multi-repo-accurate-count:incoming')).toBe('4');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('notifies accurate incoming revisions for SVN repository and updates baseline', async () => {
+    const ws = snapshot('ws-svn-incoming-notification', 1);
+    const svnRepo: RepositoryStatus = {
+      ...repository('repo-svn', 'RepoSVN'),
+      meta: {
+        ...repository('repo-svn', 'RepoSVN').meta,
+        kind: 'svn',
+      },
+      branch: 'trunk',
+      revision: '100',
+      ahead: 0,
+      behind: 0,
+    };
+    ws.repositories = [{ ...svnRepo }];
+
+    let currentBehind = 0;
+    let currentRevision = '100';
+    let currentAhead = 0;
+
+    const bridge = new MockBridge((command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: 'session-svn-incoming-test',
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true, notifyUnpushedCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [
+            { ...svnRepo, behind: currentBehind, ahead: currentAhead, revision: currentRevision },
+          ],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridge);
+
+    // 1. 初始 behind 为 0 时，无通知
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // 2. 远端 SVN 有 3 个待更新修订（behind 变为 3）
+    currentBehind = 3;
+    await useAppStore.getState().refresh(true);
+
+    const incomingNotifications = useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits');
+    expect(incomingNotifications).toHaveLength(1);
+    expect(incomingNotifications[0].message).toEqual({
+      key: 'VersionDock [{0}]: {1} incoming commits available to update.',
+      args: ['RepoSVN', 3],
+    });
+    expect(incomingNotifications[0].actions).toEqual([
+      { type: 'updateProject', label: 'Update' },
+      { type: 'dismiss', label: 'Dismiss' },
+      { type: 'disableIncoming', label: "Don't show again" },
+    ]);
+    expect(localStorage.getItem('versiondock:notification-count:ws-svn-incoming-notification:incoming')).toBe('3');
+
+    // 3. SVN 不会发出 unpushed 通知（即使由于异常数据设置 ahead > 0）
+    currentAhead = 2;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(0);
+
+    // 4. SVN 仓库执行更新（update）后 behind 降为 0，revision 演进为 103
+    currentBehind = 0;
+    currentAhead = 0;
+    currentRevision = '103';
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-svn-incoming-notification:incoming')).toBe('0');
+
+    // 5. 远端再次新增 1 个修订（behind 从 0 增至 1）
+    currentBehind = 1;
+    await useAppStore.getState().refresh(true);
+    // 对齐插件：同一会话内步骤 2 已提醒过，会话内数量再次增加保持静默不重复打扰，通知保持 1 条！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:ws-svn-incoming-notification:incoming')).toBe('1');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('accurately aggregates incoming commits across Git and SVN multi-repo workspace', async () => {
+    const ws = snapshot('ws-mixed-git-svn-notification', 2);
+    const gitRepo: RepositoryStatus = {
+      ...repository('repo-git', 'RepoGit'),
+      meta: { ...repository('repo-git', 'RepoGit').meta, kind: 'git' },
+      branch: 'main',
+      revision: 'gitrev1',
+      ahead: 0,
+      behind: 0,
+    };
+    const svnRepo: RepositoryStatus = {
+      ...repository('repo-svn', 'RepoSVN'),
+      meta: { ...repository('repo-svn', 'RepoSVN').meta, kind: 'svn' },
+      branch: 'trunk',
+      revision: '100',
+      ahead: 0,
+      behind: 0,
+    };
+    ws.repositories = [{ ...gitRepo }, { ...svnRepo }];
+
+    let gitBehind = 0;
+    let svnBehind = 0;
+
+    const bridge = new MockBridge((command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: 'session-mixed-git-svn-test',
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [
+            { ...gitRepo, behind: gitBehind },
+            { ...svnRepo, behind: svnBehind },
+          ],
+        };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridge);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+
+    // Git 出现 2 个待拉取提交，SVN 出现 3 个待更新修订
+    gitBehind = 2;
+    svnBehind = 3;
+    await useAppStore.getState().refresh(true);
+
+    const notifications = useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits');
+    expect(notifications).toHaveLength(1);
+    // Git(2) + SVN(3) = 5 个待更新，跨 2 个仓库
+    expect(notifications[0].message).toEqual({
+      key: 'VersionDock: {0} incoming commits across {1} repositories to update.',
+      args: [5, 2],
+    });
+    expect(localStorage.getItem('versiondock:notification-count:ws-mixed-git-svn-notification:incoming')).toBe('5');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('notifies SVN incoming revisions when probe completes during workspace open and handles in-flight watcher event', async () => {
+    const ws = snapshot('ws-svn-probe-open-race', 1);
+    let svnBehind = 0;
+    const svnRepo: RepositoryStatus = {
+      ...repository('repo-svn-race', 'RepoSVNRace'),
+      meta: { ...repository('repo-svn-race', 'RepoSVNRace').meta, kind: 'svn' },
+      branch: 'trunk',
+      revision: '100',
+      ahead: 0,
+      behind: 0,
+    };
+    ws.repositories = [{ ...svnRepo }];
+
+    let subscriber: ((event: any) => void) | undefined;
+    const bridge = new MockBridge((command: any) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: 'session-svn-probe-race-test',
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [{ ...svnRepo, behind: svnBehind }],
+        };
+      }
+      if (command.type === 'repositoryStatus') {
+        return { ...svnRepo, behind: svnBehind };
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+
+    bridge.subscribe = (handler: any) => {
+      subscriber = handler;
+      return () => undefined;
+    };
+
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridge);
+
+    // 1. 首次打开工作区：初始快照 behind 为 0，基准线正常初始化为 0
+    await useAppStore.getState().openWorkspace(ws.workspace.paths);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits')).toHaveLength(0);
+    expect(localStorage.getItem('versiondock:notification-count:ws-svn-probe-open-race:incoming')).toBe('0');
+
+    // 2. 后台探测返回，远端落后 3 个修订，后端发射 watcher 事件（在打开交接窗口不被前端丢弃）
+    svnBehind = 3;
+    subscriber?.({
+      workspaceId: ws.workspace.id,
+      repoId: svnRepo.meta.id,
+      generation: 2,
+      source: 'watcher',
+      scopes: ['status'],
+    });
+
+    // 等待 watcher 300ms 防抖并刷新完成
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    const notifications = useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits');
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].message).toEqual({
+      key: 'VersionDock [{0}]: {1} incoming commits available to update.',
+      args: ['RepoSVNRace', 3],
+    });
+    expect(localStorage.getItem('versiondock:notification-count:ws-svn-probe-open-race:incoming')).toBe('3');
+
+    useAppStore.getState().dispose();
+  });
+
+  it('buffers and drains watcher events that arrive before workspace snapshot finishes applying during first open', async () => {
+    vi.useFakeTimers();
+    try {
+      const ws = snapshot('ws-svn-probe-inflight-buffer', 1);
+      let svnBehind = 0;
+      const svnRepo: RepositoryStatus = {
+        ...repository('repo-svn-inflight', 'RepoSVNInflight'),
+        meta: { ...repository('repo-svn-inflight', 'RepoSVNInflight').meta, kind: 'svn' },
+        branch: 'trunk',
+        revision: '100',
+        ahead: 0,
+        behind: 0,
+      };
+      ws.repositories = [{ ...svnRepo }];
+
+      let subscriber: ((event: any) => void) | undefined;
+      const openDeferred = deferred<WorkspaceSnapshot>();
+
+      const bridge = new MockBridge((command: any) => {
+        if (command.type === 'bootstrap') {
+          return {
+            ...bootstrap,
+            launchWorkspaceId: undefined,
+            applicationSessionId: 'session-svn-probe-inflight-test',
+            state: {
+              ...bootstrap.state,
+              recentWorkspaces: [],
+              settings: { ...bootstrap.state.settings, fetchOnStartup: false, notifyIncomingCommits: true } as any,
+            },
+          };
+        }
+        if (command.type === 'workspaceOpen') {
+          return openDeferred.promise;
+        }
+        if (command.type === 'workspaceRefresh' || command.type === 'repositoryStatus') {
+          return { ...svnRepo, behind: svnBehind };
+        }
+        if (command.type === 'history') return { commits: [], hasMore: false };
+        if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+        return [];
+      });
+
+      bridge.subscribe = (handler: any) => {
+        subscriber = handler;
+        return () => undefined;
+      };
+
+      useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+      await useAppStore.getState().initialize(bridge);
+
+      // 1. 发起打开工作区请求（此时请求正在网络传输中，尚未返回快照）
+      const openPromise = useAppStore.getState().openWorkspace(ws.workspace.paths);
+
+      // 断言此时前端尚未建立任何快照与当前工作区
+      expect(useAppStore.getState().snapshot).toBeUndefined();
+      expect(useAppStore.getState().activeTabId).toBeNull();
+
+      // 2. 关键竞态：在快照到达并被前端应用之前，后台探测先行完成并向前端发出了 watcher 事件
+      svnBehind = 3;
+      subscriber?.({
+        workspaceId: ws.workspace.id,
+        repoId: svnRepo.meta.id,
+        generation: 2,
+        source: 'watcher',
+        scopes: ['status'],
+      });
+
+      // 3. 此时快照终于通过 IPC 传输到达前端（快照生成时仍为旧值 behind = 0）
+      openDeferred.resolve({
+        ...ws,
+        repositories: [{ ...svnRepo, behind: 0 }],
+      });
+      await openPromise;
+
+      // 初始快照挂载后，因 behind = 0 且基线初始化，初始不应触发通知
+      expect(localStorage.getItem('versiondock:notification-count:ws-svn-probe-inflight-buffer:incoming')).toBe('0');
+
+      // 4. 等待挂起的 watcher 事件被自动激活并在 300ms 防抖后完成刷新
+      await vi.advanceTimersByTimeAsync(350);
+
+      // 核心断言：先前在快照返回前到达的事件没有被丢弃，成功触发了状态刷新并准确弹出待更新通知！
+      const notifications = useAppStore.getState().notifications.filter((n) => n.title === 'Incoming Commits');
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message).toEqual({
+        key: 'VersionDock [{0}]: {1} incoming commits available to update.',
+        args: ['RepoSVNInflight', 3],
+      });
+      expect(localStorage.getItem('versiondock:notification-count:ws-svn-probe-inflight-buffer:incoming')).toBe('3');
+    } finally {
+      vi.useRealTimers();
+      useAppStore.getState().dispose();
+    }
+  });
+
+  it('does not exhaust startup notification if count starts at 0, and notifies when commits arrive later', async () => {
+    const workspace = snapshot('lazy-commits-notifications', 1);
+    workspace.repositories = [
+      { ...repository('repo-x', 'RepoX'), ahead: 0, behind: 0 },
+    ];
+    let currentWorkspace = workspace;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') return currentWorkspace;
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` }, ready: true, notifications: [], toastNotificationIds: [] });
+
+    await useAppStore.getState().openWorkspace(workspace.workspace.paths);
+    expect(useAppStore.getState().notifications).toHaveLength(0);
+
+    // Later, fetch completes or status updates to behind: 2
+    currentWorkspace = {
+      ...workspace,
+      generation: 2,
+      repositories: [
+        { ...repository('repo-x', 'RepoX'), ahead: 0, behind: 2 },
+      ],
+    };
+    await useAppStore.getState().refresh(true);
+
+    const notifications = useAppStore.getState().notifications;
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].title).toBe('Incoming Commits');
+    expect(notifications[0].message).toEqual({
+      key: 'VersionDock [{0}]: {1} incoming commits available to update.',
+      args: ['RepoX', 2],
+    });
+  });
+
+  it('dispatches incoming and unpushed actions entirely through in-app notifications', async () => {
+    let currentWorkspace = snapshot('ws-native-actions', 1);
+    currentWorkspace.repositories = [
+      { ...repository('repo-n1', 'RepoN1'), ahead: 0, behind: 0 },
+    ];
+    const notifyCalls: Array<{ title: string; body: string }> = [];
+    let updatedProjectCalled = false;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync' && (command.payload as any)?.action === 'pullRebase') {
+        updatedProjectCalled = true;
+        return { output: 'Already up to date.' };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return currentWorkspace;
+      }
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'runtimeCapabilities') return { systemNotifications: { available: false, reasonCode: null, detail: null }, notificationPermission: 'unavailable', secureCredentials: { status: { available: false, reasonCode: null, detail: null }, backend: null, passwordStdinSupported: false } };
+      return [];
+    });
+    Object.assign(bridge, { notify: async (title?: string, body?: string) => {
+      notifyCalls.push({ title: title ?? '', body: body ?? '' });
+      return true;
+    } });
+
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, applicationSessionId: `session-${crypto.randomUUID()}` }, ready: true, notifications: [], toastNotificationIds: [] });
+    await useAppStore.getState().openWorkspace(currentWorkspace.workspace.paths);
+
+    currentWorkspace = {
+      ...currentWorkspace,
+      generation: 2,
+      repositories: [
+        { ...repository('repo-n1', 'RepoN1'), ahead: 1, behind: 2 },
+      ],
+    };
+    await useAppStore.getState().refresh(true);
+
+    // 1. 不再向操作系统发送原生系统通知，通知行为完全收拢在应用内
+    expect(notifyCalls.length).toBe(0);
+
+    // 2. 真正的业务交互：由应用内 Toast 承载并包含隔离的工作区上下文，与插件完全对齐动作列表
+    const incomingNotification = useAppStore.getState().notifications.find((n) => n.title === 'Incoming Commits');
+    expect(incomingNotification).toBeDefined();
+    expect(incomingNotification?.actions).toEqual([
+      { type: 'updateProject', label: 'Update' },
+      { type: 'dismiss', label: 'Dismiss' },
+      { type: 'disableIncoming', label: "Don't show again" },
+    ]);
+
+    const unpushedNotification = useAppStore.getState().notifications.find((n) => n.title === 'Unpushed Commits');
+    expect(unpushedNotification).toBeDefined();
+    expect(unpushedNotification?.actions).toEqual([
+      { type: 'openPush', label: 'Go to Push' },
+      { type: 'dismiss', label: 'Dismiss' },
+    ]);
+
+    // 触发应用内 incoming Toast 的 update 动作
+    if (incomingNotification) {
+      await useAppStore.getState().performNotificationAction(incomingNotification.id, 0);
+      expect(updatedProjectCalled).toBe(true);
+    }
+
+    // 触发应用内 unpushed Toast 的 dismiss 动作
+    if (unpushedNotification) {
+      expect(useAppStore.getState().toastNotificationIds).toContain(unpushedNotification.id);
+      await useAppStore.getState().performNotificationAction(unpushedNotification.id, 1);
+      const afterDismiss = useAppStore.getState().notifications.find((n) => n.id === unpushedNotification.id);
+      expect(afterDismiss?.read).toBe(true);
+      expect(useAppStore.getState().toastNotificationIds).not.toContain(unpushedNotification.id);
+    }
+
+    useAppStore.getState().dispose();
+  });
+
+  it('includes Resolve Conflicts and Push to Remote actions when Update Project encounters conflicts or missing upstream', async () => {
+    const workspace = snapshot('update-actions-ws', 1);
+    workspace.repositories = [
+      repository('repo-conflict', 'ConflictRepo'),
+      repository('repo-no-upstream', 'NoUpstreamRepo'),
+    ];
+    let pushedRepoId: string | null = null;
+    let pushShouldFail = false;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync') {
+        const payload = command.payload as { repo_id: string; action: string };
+        if (payload.action === 'push') {
+          pushedRepoId = payload.repo_id;
+          if (pushShouldFail) {
+            throw new BridgeError({ code: 'PUSH_FAILED', message: 'remote rejected', command: 'git push', exitCode: 1, stderr: '', recoverable: true });
+          }
+          return { output: 'Pushed and tracking configured' };
+        }
+        if (payload.repo_id === 'repo-conflict') {
+          throw new BridgeError({ code: 'CONFLICT', message: 'Automatic merge failed; fix conflicts and commit the result.', command: 'git pull', exitCode: 1, stderr: '', recoverable: true });
+        }
+        if (payload.repo_id === 'repo-no-upstream') {
+          return {
+            output: 'No remote tracking branch — skipped',
+            update: {
+              repoId: 'repo-no-upstream',
+              beforeRevision: 'rev1',
+              afterRevision: 'rev1',
+              summary: { kind: 'noChanges', commitCount: 0, fileCount: 0, containsMerge: false, detail: { commits: [], files: [] } },
+              summaryError: null,
+              beforeStatus: 'clean',
+              afterStatus: 'clean',
+            },
+          };
+        }
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge, snapshot: workspace, allRepositories: workspace.repositories, notifications: [], toastNotificationIds: [] });
+
+    await useAppStore.getState().updateProject();
+    const notification = useAppStore.getState().notifications[0];
+    expect(notification).toBeDefined();
+    expect(notification.type).toBe('warning');
+    expect(notification.actions).toEqual(expect.arrayContaining([
+      { type: 'openConflicts', label: 'Resolve Conflicts' },
+      { type: 'pushToRemote', label: 'Push to Remote', repoId: 'repo-no-upstream' },
+    ]));
+
+    // 1. Click "Push to Remote" when it fails
+    pushShouldFail = true;
+    const pushActionIndex = notification.actions.findIndex((a) => a.type === 'pushToRemote');
+    await useAppStore.getState().performNotificationAction(notification.id, pushActionIndex);
+    expect(pushedRepoId).toBe('repo-no-upstream');
+    expect(useAppStore.getState().notifications.some((n) => n.title === 'Push completed')).toBe(false);
+
+    // 2. Click "Push to Remote" when it succeeds
+    pushShouldFail = false;
+    await useAppStore.getState().performNotificationAction(notification.id, pushActionIndex);
+    const completedNotif = useAppStore.getState().notifications.find((n) => n.title === 'Push completed');
+    expect(completedNotif).toBeDefined();
+    expect(completedNotif?.message).toEqual({
+      key: 'VersionDock [{0}]: Pushed and configured remote tracking.',
+      args: ['NoUpstreamRepo'],
+    });
+  });
+
+  it('correctly tracks status notification counts and enforces single notification per session on count fluctuations', async () => {
+    const ws = snapshot('count-ws', 1);
+    const repoA = repository('repo-a', 'RepoA');
+    ws.repositories = [repoA];
+    let currentAhead = 2;
+    const session1Id = `test-session-count-${Date.now()}`;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: session1Id,
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, notifyUnpushedCommits: true } as import('../bindings/generated').DesktopSettings,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceRefresh' || command.type === 'workspaceOpen') {
+        return {
+          ...ws,
+          repositories: [{ ...repoA, ahead: currentAhead }],
+        };
+      }
+      return [];
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: ws,
+      allRepositories: [repoA],
+      notifications: [],
+      bootstrap: {
+        ...bootstrap,
+        applicationSessionId: session1Id,
+        state: { ...bootstrap.state, settings: { ...bootstrap.state.settings, notifyUnpushedCommits: true } as import('../bindings/generated').DesktopSettings },
+      },
+    });
+
+    // 首次启动：发现 2 个未推送提交，对齐插件提醒一次，建立基准线 2
+    currentAhead = 2;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:count-ws:unpushed')).toBe('2');
+
+    // 再次以 2 触发 -> 不重复通知
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
+
+    // 2 -> 3：数量增加 -> 对齐插件：会话内已通知过，不重复弹窗，基线更新为 3
+    currentAhead = 3;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:count-ws:unpushed')).toBe('3');
+
+    // 3 -> 1：数量下降 -> 不通知，但计数更新为 1
+    currentAhead = 1;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:count-ws:unpushed')).toBe('1');
+
+    // 1 -> 2：数量从 1 回升到 2 -> 会话内已通知过，不重复弹窗，基线更新为 2
+    currentAhead = 2;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:count-ws:unpushed')).toBe('2');
+
+    // 2 -> 0：数量归零 -> 不通知，计数更新为 0
+    currentAhead = 0;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:count-ws:unpushed')).toBe('0');
+
+    // 0 -> 1：数量从 0 回升到 1 -> 会话内已通知过，不重复弹窗，计数更新为 1
+    currentAhead = 1;
+    await useAppStore.getState().refresh(true);
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
+    expect(localStorage.getItem('versiondock:notification-count:count-ws:unpushed')).toBe('1');
+
+    // 重启应用（新会话启动）：
+    const session2Id = `test-session-count-relaunch-${Date.now()}`;
+    const bridgeSession2 = new MockBridge((command) => {
+      if (command.type === 'bootstrap') {
+        return {
+          ...bootstrap,
+          applicationSessionId: session2Id,
+          launchWorkspaceId: ws.workspace.id,
+          state: {
+            ...bootstrap.state,
+            settings: { ...bootstrap.state.settings, notifyUnpushedCommits: true } as import('../bindings/generated').DesktopSettings,
+            recentWorkspaces: [ws.workspace],
+          },
+        };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        return {
+          ...ws,
+          repositories: [{ ...repoA, ahead: 1 }],
+        };
+      }
+      return [];
+    });
+    useAppStore.setState({ notifications: [], tabs: [], snapshot: undefined, allRepositories: [] });
+    await useAppStore.getState().initialize(bridgeSession2);
+    // 新会话启动后，检测到未推送提交，发出新会话的 1 次通知！
+    expect(useAppStore.getState().notifications.filter((n) => n.title === 'Unpushed Commits')).toHaveLength(1);
   });
 
   it('keeps notification text translatable until render time and executes actions', async () => {
@@ -180,12 +1984,184 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().bootstrap?.state.settings?.notifyIncomingCommits).toBe(false);
   });
 
+  it('does not switch active workspace when dismissing or disabling incoming notification of another workspace', async () => {
+    const wsA = snapshot('ws-a', 1);
+    wsA.repositories = [repository('repo-a', 'Repo A')];
+    const wsB = snapshot('ws-b', 1);
+    wsB.repositories = [repository('repo-b', 'Repo B')];
+
+    let switchTabCalled = false;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'updateSettings') {
+        return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: false } };
+      }
+      if (command.type === 'workspaceOpen' || command.type === 'workspaceRefresh') {
+        switchTabCalled = true;
+        return wsB;
+      }
+      return true;
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: wsA,
+      activeTabId: 'ws-a',
+      tabs: [wsA.workspace, wsB.workspace],
+      selectedRepoId: 'repo-a',
+      notifications: [],
+      toastNotificationIds: [],
+      bootstrap: { ...bootstrap, state: { ...bootstrap.state, settings: { ...bootstrap.state.settings, notifyIncomingCommits: true } as import('../bindings/generated').DesktopSettings } },
+    });
+
+    const notifId = useAppStore.getState().addNotification({
+      type: 'info',
+      title: 'Incoming Commits',
+      message: 'New commits in Project B',
+      workspaceId: 'ws-b',
+      actions: [
+        { type: 'updateProject', label: 'Update' },
+        { type: 'dismiss', label: 'Dismiss' },
+        { type: 'disableIncoming', label: "Don't show again" },
+      ],
+    });
+
+    // 1. 点击 Dismiss：通知被标记为已读，从 Toast 中移除，当前工作区必须保持 ws-a，绝不切换到 ws-b
+    expect(useAppStore.getState().toastNotificationIds).toContain(notifId);
+    await useAppStore.getState().performNotificationAction(notifId, 1);
+    expect(useAppStore.getState().activeTabId).toBe('ws-a');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('ws-a');
+    expect(switchTabCalled).toBe(false);
+    const dismissedNotif = useAppStore.getState().notifications.find((n) => n.id === notifId);
+    expect(dismissedNotif?.read).toBe(true);
+    expect(useAppStore.getState().toastNotificationIds).not.toContain(notifId);
+
+    // 2. 点击 Don't show again：当前工作区保持 ws-a，设置被更新
+    const notif2Id = useAppStore.getState().addNotification({
+      type: 'info',
+      title: 'Incoming Commits',
+      message: 'Another commit in Project B',
+      workspaceId: 'ws-b',
+      actions: [
+        { type: 'updateProject', label: 'Update' },
+        { type: 'dismiss', label: 'Dismiss' },
+        { type: 'disableIncoming', label: "Don't show again" },
+      ],
+    });
+
+    await useAppStore.getState().performNotificationAction(notif2Id, 2);
+    expect(useAppStore.getState().activeTabId).toBe('ws-a');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('ws-a');
+    expect(switchTabCalled).toBe(false);
+    expect(useAppStore.getState().bootstrap?.state.settings?.notifyIncomingCommits).toBe(false);
+  });
+
+  it('blocks viewUpdateDetails and viewUpdateResults when target workspace is closed to prevent polluting active workspace', async () => {
+    const wsA = snapshot('ws-a', 1);
+    wsA.repositories = [repository('repo-a', 'Repo A')];
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      return true;
+    });
+
+    useAppStore.setState({
+      bridge,
+      snapshot: wsA,
+      activeTabId: 'ws-a',
+      tabs: [wsA.workspace],
+      selectedRepoId: 'repo-a',
+      selectedCommits: [],
+      selectedCommit: undefined,
+      selectedCommitDetails: {},
+      mode: 'history',
+      notifications: [],
+      toastNotificationIds: [],
+    });
+
+    const fakeCommit: CommitNode = {
+      hash: 'b'.repeat(40),
+      shortHash: 'bbbbbbb',
+      message: 'Commit from workspace B',
+      author: 'Author B',
+      email: 'b@example.com',
+      authorDate: '2026-09-30T10:00:00Z',
+      committerDate: '2026-09-30T10:00:00Z',
+      parents: [],
+      refs: [],
+      repoId: 'repo-b',
+    };
+
+    const notifId = useAppStore.getState().addNotification({
+      type: 'success',
+      title: 'Project update',
+      message: 'Updated Project B',
+      workspaceId: 'ws-b',
+      actions: [
+        {
+          type: 'viewUpdateDetails',
+          label: 'View update details',
+          result: {
+            repoId: 'repo-b',
+            beforeRevision: '1',
+            afterRevision: '2',
+            beforeStatus: '',
+            afterStatus: '',
+            summaryError: null,
+            summary: {
+              kind: 'updated',
+              containsMerge: false,
+              commitCount: 1,
+              fileCount: 1,
+              detail: {
+                commits: [fakeCommit],
+                files: [],
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    // 点击 viewUpdateDetails
+    await useAppStore.getState().performNotificationAction(notifId, 0);
+
+    // 验证：因为 ws-b 已关闭（workspaceMismatch），操作被安全阻断，工作区 A 状态未被污染
+    expect(useAppStore.getState().activeTabId).toBe('ws-a');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('ws-a');
+    expect(useAppStore.getState().selectedCommits).toEqual([]);
+    expect(useAppStore.getState().selectedCommit).toBeUndefined();
+    expect(useAppStore.getState().selectedCommitDetails).toEqual({});
+    expect(useAppStore.getState().mode).toBe('history');
+  });
+
   it('queues every notification for immediate display without overwriting earlier messages', () => {
     const first = useAppStore.getState().addNotification({ type: 'info', title: 'First', message: 'First message' });
     const second = useAppStore.getState().addNotification({ type: 'success', title: 'Second', message: 'Second message' });
     expect(useAppStore.getState().toastNotificationIds).toEqual([first, second]);
     useAppStore.getState().dismissToast();
     expect(useAppStore.getState().toastNotificationIds).toEqual([second]);
+  });
+
+  it('prunes toastNotificationIds to stay in sync with the 100-notification limit', () => {
+    useAppStore.setState({ notifications: [], toastNotificationIds: [] });
+    const ids: string[] = [];
+    for (let i = 0; i < 105; i++) {
+      ids.push(useAppStore.getState().addNotification({ type: 'warning', title: `W${i}`, message: `Message ${i}` }));
+    }
+    const state = useAppStore.getState();
+    expect(state.notifications).toHaveLength(100);
+    // The first 5 notifications should have been trimmed from notifications
+    expect(state.notifications.map((n) => n.id)).not.toContain(ids[0]);
+    expect(state.notifications.map((n) => n.id)).not.toContain(ids[4]);
+    expect(state.notifications.map((n) => n.id)).toContain(ids[5]);
+    expect(state.notifications.map((n) => n.id)).toContain(ids[104]);
+
+    // toastNotificationIds should also have been trimmed to exactly match the surviving 100 items
+    expect(state.toastNotificationIds).toHaveLength(100);
+    expect(state.toastNotificationIds).not.toContain(ids[0]);
+    expect(state.toastNotificationIds).not.toContain(ids[4]);
+    expect(state.toastNotificationIds).toContain(ids[5]);
+    expect(state.toastNotificationIds).toContain(ids[104]);
   });
 
   it('publishes operation-specific errors as critical notifications and ignores cancellation', async () => {
@@ -581,6 +2557,25 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState()).toMatchObject({ mode: 'diff', });
     expect(requests.find(({ command }) => command.type === 'workspaceRefresh')?.options?.showProgress).toBe(false);
     expect(requests.find(({ command }) => command.type === 'conflicts')?.options?.showProgress).toBe(false);
+  });
+
+  it('keeps first history load inside the history view without a native progress notification', async () => {
+    const current = snapshot('first-history-load', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    const loading = deferred<{ commits: CommitNode[]; hasMore: boolean }>();
+    const requestOptions: RequestOptions[] = [];
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'history') { requestOptions.push(options ?? {}); return loading.promise; }
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories });
+    const pending = useAppStore.getState().loadHistory(true);
+    expect(useAppStore.getState().historyLoading).toBe(true);
+    expect(requestOptions[0].showProgress).toBe(false);
+    loading.resolve({ commits: [], hasMore: false });
+    await pending;
+    expect(useAppStore.getState().historyLoading).toBe(false);
+    expect(useAppStore.getState().notifications).toHaveLength(0);
   });
 
   it('keeps silent history refresh out of loading state and native progress', async () => {
@@ -1074,6 +3069,58 @@ describe('appStore async lifecycle', () => {
     expect(notification?.details).toContain('B: offline');
     const action = notification?.actions.find((item) => item.type === 'viewUpdateResults');
     expect(action).toMatchObject({ type: 'viewUpdateResults', results: [expect.objectContaining({ repoId: 'a' })] });
+  });
+
+  it('creates progress notification during Update Project, reports each repo progress, and dismisses progress toast when complete', async () => {
+    const current = snapshot('progress-ws', 1);
+    current.repositories = [repository('repo-1', 'Repo 1'), repository('repo-2', 'Repo 2')];
+
+    const capturedProgressMessages: unknown[] = [];
+    const unsubscribe = useAppStore.subscribe((state) => {
+      const progressNotif = state.notifications.find((n) => n.title === 'Updating Project');
+      if (progressNotif) {
+        capturedProgressMessages.push(progressNotif.message);
+      }
+    });
+
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'sync') {
+        return {
+          output: '',
+          update: {
+            repoId: command.payload.repo_id,
+            beforeRevision: '1',
+            afterRevision: '2',
+            beforeStatus: 'x',
+            afterStatus: 'x',
+            summary: { kind: 'fastForward', commitCount: 1, fileCount: 2, containsMerge: false, detail: { commits: [], files: [] } },
+            summaryError: null,
+          },
+        };
+      }
+      return [];
+    });
+
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    try {
+      await useAppStore.getState().updateProject('merge');
+    } finally {
+      unsubscribe();
+    }
+
+    // 验证过程中成功上报并更新了进度
+    expect(capturedProgressMessages).toContainEqual({
+      key: '({0}/{1}) {2}',
+      args: [1, 2, expect.any(String)],
+    });
+
+    // 验证更新全部完成后，临时进度通知已从列表中自动清理
+    const progressNotif = useAppStore.getState().notifications.find((n) => n.title === 'Updating Project');
+    expect(progressNotif).toBeUndefined();
+
+    // 验证最终产生了汇总结果通知
+    const summaryNotif = useAppStore.getState().notifications.find((n) => n.actions.some((a) => a.type === 'viewUpdateResults'));
+    expect(summaryNotif).toBeDefined();
   });
 
   it('sends the selected branch and rebase strategy to the sync backend', async () => {

@@ -1877,7 +1877,7 @@ export function CommitPanel() {
         {currentTabIsAllSelected ? <InvertSelectionIcon /> : <SelectAllIcon />}
       </button>
     )}
-    <button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void Promise.all(fetchTargets.map((repo) => useAppStore.getState().sync(repo.meta.id, 'fetch')))}><Codicon name="cloud-download" /></button>
+    <button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void useAppStore.getState().fetchRepositories(fetchTargets.map((repo) => repo.meta.id))}><Codicon name="cloud-download" /></button>
     <button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></button>
     <button
       title={t('Manage Remote Accounts')}

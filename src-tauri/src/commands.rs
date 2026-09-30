@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{
-    changelist, identity,
+    changelist, cli, identity,
     models::{
         BootstrapData, BridgeCommand, CapabilityStatus, CheckoutRepositoryResult,
         CloneRepositoryResult, ConflictFile, ConflictResolutionResult, DesktopCapabilities,
@@ -443,7 +443,8 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
         BridgeCommand::ConflictSave { .. }
         | BridgeCommand::ConflictAccept { .. }
         | BridgeCommand::AbortRepositoryOperation { .. }
-        | BridgeCommand::RestoreConflicts { .. } => vec![
+        | BridgeCommand::RestoreConflicts { .. }
+        | BridgeCommand::GitUnlockIndex { .. } => vec![
             RefreshScope::Status,
             RefreshScope::Diff,
             RefreshScope::Operation,
@@ -562,31 +563,16 @@ fn tool_capability(available: bool, tool: &str, version: Option<&str>) -> Capabi
 }
 
 fn system_notification_capability() -> CapabilityStatus {
-    let available = cfg!(target_os = "macos")
-        || cfg!(target_os = "windows")
-        || (cfg!(target_os = "linux")
-            && (std::env::var_os("DISPLAY").is_some()
-                || std::env::var_os("WAYLAND_DISPLAY").is_some())
-            && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some());
-    if available {
-        CapabilityStatus::available()
-    } else {
-        CapabilityStatus::unavailable(
-            "SYSTEM_NOTIFICATIONS_UNAVAILABLE",
-            "No supported desktop notification session is available",
-        )
-    }
+    CapabilityStatus::unavailable(
+        "SYSTEM_NOTIFICATIONS_DISABLED",
+        "Notifications are displayed only inside VersionDock",
+    )
 }
 
 async fn runtime_capabilities() -> RuntimeCapabilities {
-    let system_notifications = system_notification_capability();
     RuntimeCapabilities {
-        notification_permission: if system_notifications.available {
-            NotificationPermissionState::NotRequested
-        } else {
-            NotificationPermissionState::Unavailable
-        },
-        system_notifications,
+        notification_permission: NotificationPermissionState::Unavailable,
+        system_notifications: system_notification_capability(),
         secure_credentials: svn_account::secure_store_capability().await,
     }
 }
@@ -644,6 +630,7 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         | BridgeCommand::AbortRepositoryOperation { .. }
         | BridgeCommand::ContinueRepositoryOperation { .. }
         | BridgeCommand::RestoreConflicts { .. } => ("conflict", "Updating conflict state"),
+        BridgeCommand::GitUnlockIndex { .. } => ("index", "Unlocking Git index"),
         BridgeCommand::GitIdentity { .. } | BridgeCommand::GitProfileOperation { .. } => {
             ("identity", "Resolving Git identity")
         }
@@ -861,6 +848,10 @@ fn command_error_context(
             ..
         }
         | BridgeCommand::RestoreConflicts {
+            workspace_id,
+            repo_id,
+        }
+        | BridgeCommand::GitUnlockIndex {
             workspace_id,
             repo_id,
         } => (
@@ -1308,8 +1299,9 @@ async fn dispatch(
                 None,
                 None,
             );
-            let snapshot =
+            let mut snapshot =
                 workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
+            workspace::reconcile_repositories_incoming(&mut snapshot.repositories);
             state
                 .cache_repositories(&descriptor.id, &snapshot.repositories)
                 .await;
@@ -1325,6 +1317,10 @@ async fn dispatch(
                 None,
             );
             state.watch_workspace(&descriptor, &snapshot.repositories, &settings, app.clone())?;
+            workspace::reconcile_repositories_incoming(&mut snapshot.repositories);
+            state
+                .cache_repositories(&descriptor.id, &snapshot.repositories)
+                .await;
             json(snapshot)
         }
         BridgeCommand::WorkspaceRemoveRecent { workspace_id } => {
@@ -1383,13 +1379,18 @@ async fn dispatch(
                 None,
                 None,
             );
-            let snapshot =
+            let mut snapshot =
                 workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
+            workspace::reconcile_repositories_incoming(&mut snapshot.repositories);
             state
                 .cache_repositories(&descriptor.id, &snapshot.repositories)
                 .await;
             state.cache_tools(snapshot.tools.clone()).await;
             state.watch_workspace(&descriptor, &snapshot.repositories, &settings, app.clone())?;
+            workspace::reconcile_repositories_incoming(&mut snapshot.repositories);
+            state
+                .cache_repositories(&descriptor.id, &snapshot.repositories)
+                .await;
             json(snapshot)
         }
         BridgeCommand::InitializeRepository {
@@ -1423,8 +1424,9 @@ async fn dispatch(
             .await?;
             let generation = state.next_generation();
             let settings = state.app.read().await.settings.clone();
-            let snapshot =
+            let mut snapshot =
                 workspace::snapshot(descriptor.clone(), generation, &settings, token).await?;
+            workspace::reconcile_repositories_incoming(&mut snapshot.repositories);
             let repository_id = snapshot
                 .repositories
                 .iter()
@@ -3452,10 +3454,33 @@ async fn dispatch(
             workspace_id,
             repo_id,
             operation,
+            skip,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
-                vcs::continue_operation(&repo, &operation, token).await
+                if skip.unwrap_or(false) {
+                    vcs::skip_operation(&repo, &operation, token).await
+                } else {
+                    vcs::continue_operation(&repo, &operation, token).await
+                }
+            })
+            .await?;
+            json(true)
+        }
+        BridgeCommand::GitUnlockIndex {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            if repo.kind != VcsKind::Git {
+                return Err(DesktopError::new(
+                    "UNSUPPORTED_OPERATION",
+                    "Index unlock is only available for Git",
+                    false,
+                ));
+            }
+            with_write(state, &repo_id, token, async {
+                cli::unlock_git_index(Path::new(&repo.root_path))
             })
             .await?;
             json(true)
@@ -3853,6 +3878,20 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+
+    #[tokio::test]
+    async fn notifications_are_in_app_only_on_every_platform() {
+        let runtime = runtime_capabilities().await;
+        assert!(!runtime.system_notifications.available);
+        assert_eq!(
+            runtime.system_notifications.reason_code.as_deref(),
+            Some("SYSTEM_NOTIFICATIONS_DISABLED")
+        );
+        assert!(matches!(
+            runtime.notification_permission,
+            NotificationPermissionState::Unavailable
+        ));
+    }
 
     #[test]
     fn tab_drop_only_snaps_near_the_target_title_bar() {

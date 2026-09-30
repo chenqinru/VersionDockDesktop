@@ -59,7 +59,12 @@ export function checkIncomingAndUnpushedCommits({
           ? totalBehind === 1
             ? { key: 'VersionDock: {0} incoming commit available to pull.', args: [totalBehind] }
             : { key: 'VersionDock: {0} incoming commits available to pull.', args: [totalBehind] }
-          : { key: 'VersionDock: {0} incoming commits across {1} repositories.', args: [totalBehind, reposWithBehind] };
+          : {
+              key: totalBehind === 1
+                ? 'VersionDock: {0} incoming commit across {1} repository to update.'
+                : 'VersionDock: {0} incoming commits across {1} repositories to update.',
+              args: [totalBehind, reposWithBehind],
+            };
 
       addNotification({
         type: 'info',

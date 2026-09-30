@@ -605,6 +605,13 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
         operation: String,
+        #[serde(default)]
+        #[specta(optional)]
+        skip: Option<bool>,
+    },
+    GitUnlockIndex {
+        workspace_id: String,
+        repo_id: String,
     },
     RestoreConflicts {
         workspace_id: String,

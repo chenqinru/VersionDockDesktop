@@ -88,6 +88,12 @@ pub fn get_logger() -> Option<Arc<LogManager>> {
     GLOBAL_LOGGER.get().cloned()
 }
 
+pub fn global_app_handle() -> Option<AppHandle> {
+    GLOBAL_LOGGER
+        .get()
+        .and_then(|mgr| mgr.app_handle.lock().ok().and_then(|lock| lock.clone()))
+}
+
 pub fn log_entry(
     level: LogLevel,
     channel: LogChannel,

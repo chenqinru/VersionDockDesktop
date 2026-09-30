@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore } from '../../store/appStore';
 import { useI18n } from '../../i18n';
@@ -6,7 +6,9 @@ import { NotificationCenterPopover } from './NotificationCenterPopover';
 
 export function NotificationStatusBarItem() {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const open = useAppStore((state) => state.notificationCenterOpen);
+  const setOpen = useAppStore((state) => state.setNotificationCenterOpen);
+  useEffect(() => () => setOpen(false), [setOpen]);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const notifications = useAppStore((state) => state.notifications);
@@ -26,7 +28,7 @@ export function NotificationStatusBarItem() {
     if (!open && anchorRef.current) {
       setAnchorRect(anchorRef.current.getBoundingClientRect());
     }
-    setOpen((prev) => !prev);
+    setOpen(!open);
   };
 
   let tooltip = t('Notifications');

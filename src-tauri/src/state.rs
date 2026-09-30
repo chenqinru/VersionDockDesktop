@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -75,6 +75,7 @@ pub struct AppState {
     pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
     pub window_bounds: std::sync::Mutex<HashMap<String, (f64, f64, f64, f64)>>,
     watchers: std::sync::Mutex<HashMap<String, Vec<RecommendedWatcher>>>,
+    pub pending_repo_status_events: std::sync::Mutex<HashSet<String>>,
     generation: AtomicU32,
 }
 
@@ -148,6 +149,7 @@ impl AppState {
             window_workspaces: std::sync::Mutex::new(HashMap::new()),
             window_bounds: std::sync::Mutex::new(HashMap::new()),
             watchers: std::sync::Mutex::new(HashMap::new()),
+            pending_repo_status_events: std::sync::Mutex::new(HashSet::new()),
             generation: AtomicU32::new(1),
         }
     }
@@ -202,6 +204,55 @@ impl AppState {
             .clone()
     }
 
+    pub fn record_pending_repo_status_changed(&self, repo_id: &str) {
+        if let Ok(mut pending) = self.pending_repo_status_events.lock() {
+            pending.insert(repo_id.to_string());
+        }
+    }
+
+    pub fn take_pending_repo_status_changed(&self, repo_ids: &[String]) -> Vec<String> {
+        let Ok(mut pending) = self.pending_repo_status_events.lock() else {
+            return Vec::new();
+        };
+        let mut matched = Vec::new();
+        for id in repo_ids {
+            if pending.remove(id) {
+                matched.push(id.clone());
+            }
+        }
+        matched
+    }
+
+    pub async fn pre_cache_repositories(&self, workspace_id: &str, metas: &[RepositoryMeta]) {
+        {
+            let mut cache = self.repository_cache.write().await;
+            let entry = cache.entry(workspace_id.to_string()).or_default();
+            for meta in metas {
+                entry.insert(meta.id.clone(), meta.clone());
+            }
+        }
+        let repo_ids: Vec<String> = metas.iter().map(|meta| meta.id.clone()).collect();
+        let pending = self.take_pending_repo_status_changed(&repo_ids);
+        if !pending.is_empty() {
+            if let Some(app) = crate::logger::global_app_handle() {
+                use tauri::Emitter;
+                let generation = self.next_generation();
+                for repo_id in pending {
+                    let _ = app.emit(
+                        "versiondock://event",
+                        crate::models::RepositoryEvent {
+                            workspace_id: workspace_id.to_string(),
+                            repo_id: Some(repo_id),
+                            generation,
+                            source: crate::models::RepositoryEventSource::Watcher,
+                            scopes: vec![crate::models::RefreshScope::Status],
+                        },
+                    );
+                }
+            }
+        }
+    }
+
     pub async fn cache_repositories(&self, workspace_id: &str, repositories: &[RepositoryStatus]) {
         self.repository_cache.write().await.insert(
             workspace_id.to_string(),
@@ -210,6 +261,26 @@ impl AppState {
                 .map(|repository| (repository.meta.id.clone(), repository.meta.clone()))
                 .collect(),
         );
+        let repo_ids: Vec<String> = repositories.iter().map(|r| r.meta.id.clone()).collect();
+        let pending = self.take_pending_repo_status_changed(&repo_ids);
+        if !pending.is_empty() {
+            if let Some(app) = crate::logger::global_app_handle() {
+                use tauri::Emitter;
+                let generation = self.next_generation();
+                for repo_id in pending {
+                    let _ = app.emit(
+                        "versiondock://event",
+                        crate::models::RepositoryEvent {
+                            workspace_id: workspace_id.to_string(),
+                            repo_id: Some(repo_id),
+                            generation,
+                            source: crate::models::RepositoryEventSource::Watcher,
+                            scopes: vec![crate::models::RefreshScope::Status],
+                        },
+                    );
+                }
+            }
+        }
     }
 
     pub async fn cached_repository(
@@ -241,6 +312,16 @@ impl AppState {
             .get(workspace_id)
             .map(|repositories| repositories.values().cloned().collect())
             .unwrap_or_default()
+    }
+
+    pub async fn workspaces_for_repository(&self, repository_id: &str) -> Vec<String> {
+        self.repository_cache
+            .read()
+            .await
+            .iter()
+            .filter(|(_, repos)| repos.contains_key(repository_id))
+            .map(|(workspace_id, _)| workspace_id.clone())
+            .collect()
     }
 
     pub async fn remove_cached_workspace(&self, workspace_id: &str) {
@@ -932,5 +1013,41 @@ mod tests {
             watcher_scopes(&[PathBuf::from("/workspace/new/.git")], false),
             vec![RefreshScope::WorkspaceSnapshot]
         );
+    }
+
+    #[tokio::test]
+    async fn pre_cache_and_pending_status_changed_records_and_clears() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state = AppState::load(temp_dir.path().to_path_buf());
+
+        state.record_pending_repo_status_changed("repo-pending-1");
+        assert!(state
+            .pending_repo_status_events
+            .lock()
+            .unwrap()
+            .contains("repo-pending-1"));
+
+        let meta = RepositoryMeta {
+            id: "repo-pending-1".into(),
+            name: "repo".into(),
+            root_path: "/test/repo".into(),
+            color: "#fff".into(),
+            kind: crate::models::VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        state.pre_cache_repositories("workspace-1", &[meta]).await;
+        let workspaces = state.workspaces_for_repository("repo-pending-1").await;
+        assert_eq!(workspaces, vec!["workspace-1".to_string()]);
+
+        // Pending events should be cleared when pre-cached or cached
+        assert!(!state
+            .pending_repo_status_events
+            .lock()
+            .unwrap()
+            .contains("repo-pending-1"));
     }
 }

@@ -8,10 +8,8 @@ import { AuthorAvatar } from './AuthorAvatar';
 import { BranchRefBadge } from './BranchRefBadge';
 import { FileIcon } from './FileIcon';
 import { branchColor, readableAccentColor } from './branchColor';
-import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { confirmDialog, promptDialog } from './dialogService';
 import { isBranchProtected } from '../history/branchProtection';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { buildPullRequestUrl } from '../history/prUrlHelper';
 
 export interface PushCommitFile {
   path: string;
@@ -1150,66 +1148,7 @@ export function PushPanel({ repos, selectedRepoIds, onToggleRepo, query }: {
     }
 
     for (const repo of targets) {
-      let pushSuccess = false;
-      const branch = branchesByRepo[repo.meta.id]?.find((item) => item.current);
-      const branchName = branch?.name || 'HEAD';
-      try {
-        await sync(repo.meta.id, 'push', true, { force }, wid);
-        pushSuccess = true;
-      } catch (error: unknown) {
-        const errStr = String(error);
-        const isRejected = errStr.includes('[rejected]') || errStr.includes('non-fast-forward') || errStr.includes('fetch first');
-        if (isRejected) {
-          const onPushRejectedSetting = useAppStore.getState().bootstrap?.state.settings?.onPushRejected ?? 'prompt';
-          if (onPushRejectedSetting === 'rebaseAndRetry') {
-            await sync(repo.meta.id, 'pullRebase', undefined, undefined, wid);
-            await sync(repo.meta.id, 'push', undefined, undefined, wid);
-          } else if (onPushRejectedSetting === 'error') {
-            throw error;
-          } else {
-            const choice = await choiceDialog({
-              title: t('Push Rejected'),
-              message: t('VersionDock [{0}]: Push was rejected because the remote contains work that you do not have locally.', repo.meta.name),
-              choices: [
-                { id: 'rebase', label: t('Rebase & Push'), icon: 'repo-forked' },
-                { id: 'merge', label: t('Merge & Push'), icon: 'git-merge' },
-                { id: 'force', label: t('Force Push'), icon: 'alert' },
-              ],
-            });
-            if (choice === 'rebase') {
-              await sync(repo.meta.id, 'pullRebase', undefined, undefined, wid);
-              await sync(repo.meta.id, 'push', undefined, undefined, wid);
-            } else if (choice === 'merge') {
-              await sync(repo.meta.id, 'pull', undefined, undefined, wid);
-              await sync(repo.meta.id, 'push', undefined, undefined, wid);
-            } else if (choice === 'force') {
-              await handlePush([repo], true, wid);
-            }
-          }
-        } else {
-          throw error;
-        }
-      }
-      if (pushSuccess && targets.length === 1 && branchName !== 'HEAD') {
-        const remotesList = useAppStore.getState().remotes[repo.meta.id] ?? [];
-        const matchingRemote = remotesList[0];
-        const remoteUrl = matchingRemote?.pushUrl || matchingRemote?.fetchUrl || '';
-        const prInfo = remoteUrl ? buildPullRequestUrl(remoteUrl, branchName) : undefined;
-        if (prInfo) {
-          void choiceDialog({
-            title: t('Branch Pushed'),
-            message: t('VersionDock: Branch "{0}" pushed to {1}.', branchName, prInfo.platform),
-            choices: [
-              { id: 'create-pr', label: t('Create Pull Request'), icon: 'link-external' },
-              { id: 'dismiss', label: t('Dismiss'), icon: 'close' },
-            ],
-          }).then((choice) => {
-            if (choice === 'create-pr') {
-              void openUrl(prInfo.url);
-            }
-          });
-        }
-      }
+      await sync(repo.meta.id, 'push', true, { force }, wid);
     }
     await loadUnpushedCommits();
   };

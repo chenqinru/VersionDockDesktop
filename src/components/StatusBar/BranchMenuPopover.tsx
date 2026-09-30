@@ -74,6 +74,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const tagsByRepo = useAppStore((state) => state.tagsByRepo);
   const refresh = useAppStore((state) => state.refresh);
+  const fetchRepositories = useAppStore((state) => state.fetchRepositories);
   const remotes = useAppStore((state) => state.remotes);
   const loadRemotes = useAppStore((state) => state.loadRemotes);
   const selectedRepoId = useAppStore((state) => state.selectedRepoId);
@@ -315,8 +316,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   // 全局动作：Fetch All
   const handleFetchAll = async () => {
     onClose();
-    await Promise.allSettled(gitRepos.map((r) => sync(r.meta.id, 'fetch')));
-    await refresh(true);
+    await fetchRepositories(gitRepos.map((repo) => repo.meta.id));
   };
 
   // 全局动作：推送（对齐插件版 pushMenu：选择仓库与远端）

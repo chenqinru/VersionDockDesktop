@@ -28,7 +28,6 @@
     "opener:allow-default-urls",
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",
-    "notification:default",
     "os:default",
     "updater:default",
     "process:default",

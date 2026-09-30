@@ -114,6 +114,11 @@ pub async fn snapshot(
     let tools = tool_availability(token).await;
     let secure_credentials = crate::svn_account::secure_store_capability().await;
     let metas = scan(&workspace, settings)?;
+    if let Some(app) = crate::logger::global_app_handle() {
+        use tauri::Manager;
+        let state = app.state::<crate::state::AppState>();
+        state.pre_cache_repositories(&workspace.id, &metas).await;
+    }
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
     let mut tasks = tokio::task::JoinSet::new();
     for (index, meta) in metas.into_iter().enumerate() {
@@ -153,12 +158,25 @@ pub async fn snapshot(
         .map(|(_, status)| status)
         .collect::<Vec<_>>();
     apply_nested_git_ownership(&mut repositories);
+    reconcile_repositories_incoming(&mut repositories);
     Ok(WorkspaceSnapshot {
         workspace,
         repositories,
         generation,
         tools,
     })
+}
+
+pub fn reconcile_repositories_incoming(repositories: &mut [RepositoryStatus]) {
+    for repository in repositories.iter_mut() {
+        if repository.meta.kind == VcsKind::Svn {
+            if let Some(fresh_behind) =
+                crate::vcs::svn_incoming_cached_behind(&repository.meta.id, &repository.revision)
+            {
+                repository.behind = fresh_behind;
+            }
+        }
+    }
 }
 
 pub fn apply_nested_git_ownership(repositories: &mut [RepositoryStatus]) {
@@ -679,12 +697,13 @@ pub async fn svn_status(
     let operation = crate::vcs::svn_merge_active(&meta, token)
         .await
         .then(|| "merge".into());
+    let behind = crate::vcs::svn_incoming_revisions_cached(&meta, &revision);
     Ok(RepositoryStatus {
         meta,
         branch: info,
         revision,
         ahead: 0,
-        behind: 0,
+        behind,
         files,
         conflicts,
         operation,
@@ -1684,5 +1703,61 @@ mod tests {
         .unwrap();
         std::fs::write(wt_git_dir.join("REVERT_HEAD"), "abc").unwrap();
         assert_eq!(git_operation(&wt_root).as_deref(), Some("revert"));
+    }
+
+    #[test]
+    fn svn_status_reads_behind_nonblockingly() {
+        let repo = RepositoryMeta {
+            id: "svn-status-perf-test".into(),
+            name: "SvnStatusPerfTest".into(),
+            root_path: "/nonexistent/test/path".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        crate::vcs::invalidate_svn_ref_caches(&repo.id);
+        let start = std::time::Instant::now();
+        let behind = crate::vcs::svn_incoming_revisions_cached(&repo, "200");
+        let elapsed = start.elapsed();
+        assert_eq!(behind, 0);
+        assert!(elapsed < std::time::Duration::from_millis(50));
+    }
+
+    #[test]
+    fn reconcile_repositories_incoming_updates_behind_from_fresh_cache() {
+        let repo = RepositoryMeta {
+            id: "svn-reconcile-test".into(),
+            name: "SvnReconcileTest".into(),
+            root_path: "/test/path".into(),
+            color: "#000".into(),
+            kind: VcsKind::Svn,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+
+        crate::vcs::set_svn_incoming_cached_for_test(&repo.id, 1234, 5);
+
+        let mut repositories = vec![RepositoryStatus {
+            meta: repo.clone(),
+            branch: "trunk".into(),
+            revision: "1234".into(),
+            ahead: 0,
+            behind: 0,
+            files: vec![],
+            conflicts: 0,
+            operation: None,
+            capabilities: repository_capabilities(VcsKind::Svn, true),
+            tool_available: true,
+        }];
+
+        reconcile_repositories_incoming(&mut repositories);
+        assert_eq!(repositories[0].behind, 5);
+        crate::vcs::invalidate_svn_ref_caches(&repo.id);
     }
 }
