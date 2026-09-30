@@ -4,6 +4,13 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Potential conflict: this file has local uncommitted modifications': 'Potential conflict: this file has local uncommitted modifications',
+  'Recorded in Parent:': 'Recorded in Parent:',
+  'Current HEAD:': 'Current HEAD:',
+  'Parent: {0}': 'Parent: {0}',
+  'Tracked branch: {0}': 'Tracked branch: {0}',
+  'VersionDock [{0}]: Deinit submodule "{1}"? The working directory will be cleared.': 'VersionDock [{0}]: Deinit submodule "{1}"? The working directory will be cleared.',
+  'VersionDock [{0}]: Submodule "{1}" has uncommitted changes or detached HEAD. Discard changes and force deinitialize?': 'VersionDock [{0}]: Submodule "{1}" has uncommitted changes or detached HEAD. Discard changes and force deinitialize?',
   "VersionDock [{0}]: Fetching all remotes…": "VersionDock [{0}]: Fetching all remotes…",
   "VersionDock: Fetching all remotes…": "VersionDock: Fetching all remotes…",
 
@@ -723,6 +730,13 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Potential conflict: this file has local uncommitted modifications': '潜在冲突：此文件存在本地未提交更改',
+  'Recorded in Parent:': '父仓库记录：',
+  'Current HEAD:': '当前 HEAD：',
+  'Parent: {0}': '父仓库：{0}',
+  'Tracked branch: {0}': '跟踪分支：{0}',
+  'VersionDock [{0}]: Deinit submodule "{1}"? The working directory will be cleared.': 'VersionDock [{0}]：取消初始化子模块“{1}”？工作目录将被清空。',
+  'VersionDock [{0}]: Submodule "{1}" has uncommitted changes or detached HEAD. Discard changes and force deinitialize?': 'VersionDock [{0}]：子模块“{1}”存在未提交更改或分离 HEAD。要丢弃更改并强制取消初始化吗？',
   "VersionDock [{0}]: Fetching all remotes…": "VersionDock [{0}]：正在获取所有远程…",
   "VersionDock: Fetching all remotes…": "VersionDock：正在获取所有远程…",
 

@@ -687,8 +687,8 @@ function RefBadges({ detail, repoKind, collapsible = false }: { detail: CommitDe
         const remoteBranch = ref.kind === 'remote' && ref.label.includes('/')
           ? ref.label.slice(ref.label.indexOf('/') + 1)
           : ref.label;
-        const color = ref.kind === 'revision'
-          ? tagColor()
+        const color = ref.isSvnRevision
+          ? ref.label === 'HEAD' ? headColor() : branchColor(ref.label)
           : ref.kind === 'head'
             ? headColor()
             : ref.kind === 'tag'

@@ -191,6 +191,7 @@ export function ChangelistGroup({
     <section className="repo-change-group changelist-group">
       <div
         className="repo-heading changelist-heading"
+        onClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, label')) setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded }); }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -206,6 +207,7 @@ export function ChangelistGroup({
         />
         <button
           title={name}
+          aria-expanded={expanded}
           onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
         >
           <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
@@ -406,6 +408,7 @@ function RepoSubGroup({
         } as React.CSSProperties}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
+        onClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, label')) setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded }); }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -424,6 +427,7 @@ function RepoSubGroup({
             type="button"
             className="repo-heading-toggle"
             title={repo.meta.name}
+            aria-expanded={expanded}
             onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
           >
             <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
@@ -446,6 +450,7 @@ function RepoSubGroup({
           <button
             type="button"
             className="repo-branch-trigger"
+            data-branch-switch-badge=""
             title={t('Switch branch')}
             aria-haspopup="menu"
             aria-expanded={Boolean(branchMenuAnchor)}
@@ -455,7 +460,7 @@ function RepoSubGroup({
               setBranchMenuAnchor((cur) => (cur ? undefined : rect));
             }}
           >
-            <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
+            <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.isWorktree ? 'worktree' : 'branch'} color={branch} className="branch-chip" />
           </button>
         </div>
         {branchMenuAnchor && (

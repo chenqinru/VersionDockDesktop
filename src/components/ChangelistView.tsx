@@ -141,6 +141,8 @@ export function ChangelistView({
 
   const totalUnversionedFiles = unversionedRepoGroups.reduce((sum, g) => sum + g.files.length, 0);
 
+  const [repoExpansion, setRepoExpansion] = useState({ sequence: expansion.sequence, expanded: true });
+  const repoExpanded = repoExpansion.sequence === expansion.sequence ? repoExpansion.expanded : expansion.expanded;
   const branch = singleRepoStatus ? branchColor(singleRepoStatus.branch || singleRepoStatus.revision) : '';
 
   return (
@@ -159,12 +161,13 @@ export function ChangelistView({
         <div
           className="repo-heading single-repo-header"
           style={{
+            '--repo-color': singleRepoStatus.meta.color,
             background: `color-mix(in srgb, ${singleRepoStatus.meta.color} 14%, var(--versiondock-surface))`,
             height: 26,
             padding: '0 8px 0 6px',
             cursor: 'pointer',
-          }}
-          onClick={() => onManageRepo?.(singleRepoStatus.meta.id)}
+          } as React.CSSProperties}
+          onClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, label')) setRepoExpansion({ sequence: expansion.sequence, expanded: !repoExpanded }); }}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -172,6 +175,8 @@ export function ChangelistView({
           }}
         >
           <div className="repo-heading-main" style={{ gap: 6 }}>
+            <button type="button" className="repo-heading-toggle" title={singleRepoStatus.meta.name} aria-expanded={repoExpanded} onClick={() => setRepoExpansion({ sequence: expansion.sequence, expanded: !repoExpanded })}>
+              <Codicon name={repoExpanded ? 'chevron-down' : 'chevron-right'} />
             <span
               style={{
                 width: 8,
@@ -194,6 +199,7 @@ export function ChangelistView({
             >
               {singleRepoStatus.meta.name}
             </strong>
+            </button>
             {singleRepoStatus.meta.isSubmodule && (
               <span className="submodule-badge" title={t('Submodule')}>
                 {t('SUB')}
@@ -202,6 +208,7 @@ export function ChangelistView({
             <button
               type="button"
               className="repo-branch-trigger"
+              data-branch-switch-badge=""
               title={t('Switch branch')}
               aria-haspopup="menu"
               aria-expanded={Boolean(branchMenuAnchor)}
@@ -211,9 +218,10 @@ export function ChangelistView({
                 setBranchMenuAnchor((cur) => (cur ? undefined : rect));
               }}
             >
-              <BranchRefBadge label={singleRepoStatus.branch || singleRepoStatus.revision} kind={singleRepoStatus.meta.kind === 'svn' ? 'revision' : singleRepoStatus.meta.isWorktree ? 'worktree' : 'branch'} color={singleRepoStatus.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
+              <BranchRefBadge label={singleRepoStatus.branch || singleRepoStatus.revision} kind={singleRepoStatus.meta.isWorktree ? 'worktree' : 'branch'} color={branch} className="branch-chip" />
             </button>
           </div>
+          {onManageRepo && <div className="repo-actions"><button type="button" title={t('Git Identity')} onClick={(event) => { event.stopPropagation(); onManageRepo(singleRepoStatus.meta.id); }}><Codicon name="account" /></button></div>}
           {branchMenuAnchor && (
             <BranchMenuPopover
               anchorRect={branchMenuAnchor}
@@ -225,6 +233,7 @@ export function ChangelistView({
         </div>
       )}
 
+      <div hidden={singleRepo && !repoExpanded} style={{ display: singleRepo && !repoExpanded ? 'none' : 'flex', flexDirection: 'column', flex: 1 }}>
       {changelistErrors.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 12px', background: 'var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1))', color: 'var(--vscode-errorForeground, #f48771)', fontSize: 12 }}>
           {changelistErrors.map((item) => (
@@ -315,6 +324,7 @@ export function ChangelistView({
           onEmptyContextMenu(e);
         }}
       />
+      </div>
     </div>
   );
 }

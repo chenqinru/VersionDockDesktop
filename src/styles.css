@@ -37,6 +37,8 @@
   --vscode-descriptionForeground: var(--versiondock-muted);
   --vscode-sideBarSectionHeader-background: var(--versiondock-surface-alt);
   --vscode-toolbar-hoverBackground: var(--versiondock-hover);
+  --vscode-charts-orange: #d18616;
+  --vscode-charts-purple: #b180d7;
   --vscode-list-inactiveSelectionBackground: color-mix(in srgb, var(--versiondock-selected) 55%, transparent);
   --vscode-textLink-foreground: var(--versiondock-accent);
   --vscode-button-background: var(--versiondock-accent-bg);
@@ -3351,6 +3353,7 @@ button.conflict-action-item {
 .commit-tabs button.active { padding: 5px 12px; color: var(--versiondock-text); font-weight: 600; border-bottom: 2px solid var(--versiondock-accent); }
 .commit-tabs button:not(.active):hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
 .commit-tabs button.active:hover { background: transparent; }
+.commit-slot .commit-tabs button:not(:disabled):hover { background: var(--vscode-toolbar-hoverBackground, var(--versiondock-hover)); color: var(--versiondock-text); }
 .commit-tabs button > .codicon { margin-right: 0; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); transition: margin .15s; }
 .commit-tabs button.active > .codicon { margin-right: 5px; }
 .commit-tabs button > span { animation: gs-tab-label-in 0.18s ease-out both; min-width: 0; overflow: hidden; display: inline-block; white-space: nowrap; }
@@ -3386,11 +3389,15 @@ button.conflict-action-item {
 .repo-heading-main .vcs-badge,
 .repo-heading .vcs-badge { font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: 0; color: var(--versiondock-badge-foreground, #fff); border-radius: 3px; padding: 1px 4px; flex-shrink: 0; line-height: 12px; }
 .repo-heading-main .vcs-badge.svn,
-.repo-heading .vcs-badge.svn { background: var(--vscode-charts-purple, #8957e5); }
+.repo-heading .vcs-badge.svn { background: var(--vscode-charts-purple, #b180d7); }
 .repo-heading-main .vcs-badge.git,
-.repo-heading .vcs-badge.git { background: var(--vscode-charts-orange, #f05033); }
+.repo-heading .vcs-badge.git { background: var(--vscode-charts-orange, #d18616); }
 .repo-heading .repo-branch-trigger { min-width: 0; max-width: 160px; flex: 0 1 auto; height: 100%; display: inline-flex; align-items: center; margin-left: 4px; padding: 0; background: transparent; border: 0; color: inherit; cursor: pointer; overflow: hidden; }
 .repo-heading .repo-branch-trigger:hover { background: transparent; }
+.commit-slot [data-branch-switch-badge] { transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease; overflow: visible; }
+.commit-slot [data-branch-switch-badge]:hover { transform: translateY(-1px); filter: brightness(1.12); }
+.commit-slot [data-branch-switch-badge]:hover > .branch-chip { box-shadow: 0 2px 7px color-mix(in srgb, currentColor 28%, transparent); }
+.commit-slot [data-branch-switch-badge]:active { transform: translateY(0); }
 .repo-heading .branch-chip { min-width: 0; max-width: 160px; height: 19px; flex: 0 1 auto; align-items: center; padding: 0 5px; border: 1px solid; border-radius: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; overflow: hidden; white-space: nowrap; }
 .repo-heading .branch-chip > .codicon { flex: 0 0 auto; }
 .repo-heading .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3398,7 +3405,7 @@ button.conflict-action-item {
 .repo-heading > b { min-width: 18px; height: 16px; flex: 0 0 auto; padding: 0 5px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 16px; text-align: center; }
 .file-row, .directory-row { height: 22px; min-height: 22px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 22px; user-select: none; -webkit-user-select: none; }
 .file-row { min-width: 0; display: flex; align-items: center; gap: 3px; padding-right: 8px; overflow: hidden; white-space: nowrap; }
-.selection-checkbox { position: relative; width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border)); border-radius: 2px; background: transparent; color: #fff; }
+.selection-checkbox { position: relative; width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border)); border-radius: 3px; background: transparent; color: #fff; }
 .selection-checkbox.selected {
   border-color: var(--versiondock-accent-bg);
   background-color: var(--versiondock-accent-bg);
@@ -3422,6 +3429,12 @@ button.conflict-action-item {
 .directory-row > button > .codicon:first-child { width: 12px; flex: 0 0 12px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .directory-row > button > span:last-child { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .directory-row > b { min-width: 14px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; text-align: center; margin-left: 6px; flex-shrink: 0; }
+.change-row-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; opacity: 0; pointer-events: none; }
+.file-row, .directory-row { cursor: pointer; }
+.file-row:hover .change-row-actions, .directory-row:hover .change-row-actions, .change-row-actions:focus-within { opacity: 1; pointer-events: auto; }
+.change-row-actions > button { width: 20px; height: 20px; flex: 0 0 20px; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; }
+.change-row-actions > button > .codicon { font-size: 13px; }
+.commit-panel .change-row-actions > button.conflict-resolve-action { color: var(--vscode-gitDecoration-conflictingResourceForeground, var(--versiondock-danger)); }
 .repo-no-changes { padding: 12px 8px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
 .changelist-group { border-bottom: 0; }
 .changelist-heading {
@@ -3501,7 +3514,7 @@ button.conflict-action-item {
 .commit-targets { min-height: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; }
 .commit-targets > span { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .commit-targets > em { height: 20px; padding: 1px 7px 1px 4px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid; border-radius: 10px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 16px; font-style: normal; }
-.commit-targets > em button { width: 12px; height: 12px; padding: 0; display: grid; place-items: center; color: inherit; }
+.commit-targets > em button:not(.pill-amend-button) { width: 12px; height: 12px; padding: 0; display: grid; place-items: center; color: inherit; }
 .commit-targets > em button .codicon { font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .commit-targets > em b { min-width: 14px; height: 14px; padding: 0 3px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; background: rgba(255,255,255,.15); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .commit-options { min-height: 22px; display: flex; align-items: center; justify-content: flex-start; gap: 6px; }
@@ -3634,9 +3647,9 @@ button.conflict-action-item {
 .branch-head-badge, .branch-vcs-badge, .branch-submodule-badge { flex: 0 0 auto; height: 14px; padding: 0 4px; border-radius: 2px; font-style: normal; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 14px; }
 .branch-head-badge { background: var(--versiondock-accent-bg); color: #fff; letter-spacing: .02em; }
 .branch-submodule-badge { background: color-mix(in srgb, var(--versiondock-text) 14%, transparent); color: var(--versiondock-text); letter-spacing: .02em; margin-left: auto; }
-.branch-vcs-badge { color: var(--vscode-button-foreground); }
-.branch-vcs-badge.git { background: var(--versiondock-warning); }
-.branch-vcs-badge.svn { background: var(--versiondock-accent-bg); }
+.branch-vcs-badge { color: var(--versiondock-badge-foreground, #fff); border-radius: 3px; }
+.branch-vcs-badge.git { background: var(--vscode-charts-orange, #d18616); }
+.branch-vcs-badge.svn { background: var(--vscode-charts-purple, #b180d7); }
 .branch-repo-dots { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
 .branch-repo-dots i { width: 6px; height: 6px; border-radius: 50%; }
 .branch-ahead-behind { flex: 0 0 auto; display: flex; gap: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
@@ -4855,6 +4868,10 @@ button.danger:not(:disabled):hover,
   border-bottom: 1px solid var(--versiondock-border) !important;
   border-radius: 0 !important;
   background: color-mix(in srgb, var(--repo-color, #888) 15%, transparent) !important;
+}
+.commit-slot .repo-heading, .commit-slot .repository-group-header { cursor: pointer; }
+.commit-slot .repo-heading:hover, .commit-slot .repository-group-header:hover {
+  background: color-mix(in srgb, var(--repo-color, #888) 20%, transparent) !important;
 }
 
 .repository-group-header [data-action-btn] {
@@ -6844,19 +6861,14 @@ button.notification-item-action-btn:focus-visible {
 .sync-header-action.visible { opacity: 1; pointer-events: auto; }
 .sync-header-action:hover,
 .repository-group-header > button:not(.repository-group-main):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
-.repository-group-main:not(:disabled):hover,
-.sync-repo-toggle:not(:disabled):hover,
-.sync-branch-trigger:not(:disabled):hover {
-  background: transparent !important;
-}
-.sync-direction-pill { min-width: 0; height: 18px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; margin-left: 2px; padding: 1px 6px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 14px; border-radius: 8px; background: transparent; }
-.sync-direction-pill.outgoing { color: var(--versiondock-success); border: 1px solid color-mix(in srgb, var(--versiondock-success) 45%, transparent); }
-.sync-direction-pill.incoming { color: var(--versiondock-info); border: 1px solid color-mix(in srgb, var(--versiondock-info) 55%, transparent); }
-.sync-direction-pill.outgoing.active { background: color-mix(in srgb, var(--versiondock-success) 20%, transparent); }
-.sync-direction-pill.incoming.active { background: color-mix(in srgb, var(--versiondock-info) 20%, transparent); }
-.sync-direction-pill.outgoing.active { border-color: var(--versiondock-success); }
-.sync-direction-pill.incoming.active { border-color: var(--versiondock-info); }
-.sync-direction-pill:not(.active) { opacity: .45; border-color: transparent; background: transparent; }
+.sync-direction-pill { --sync-direction-background: transparent; min-width: 0; height: 18px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; margin-left: 2px; padding: 1px 6px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 14px; border-radius: 8px; background: var(--sync-direction-background); }
+.commit-panel .sync-direction-pill.outgoing { color: var(--versiondock-success); border: 1px solid color-mix(in srgb, var(--versiondock-success) 45%, transparent); }
+.commit-panel .sync-direction-pill.incoming { color: var(--versiondock-info); border: 1px solid color-mix(in srgb, var(--versiondock-info) 55%, transparent); }
+.sync-direction-pill.outgoing.active { --sync-direction-background: color-mix(in srgb, var(--versiondock-success) 20%, transparent); }
+.sync-direction-pill.incoming.active { --sync-direction-background: color-mix(in srgb, var(--versiondock-info) 20%, transparent); }
+.commit-panel .sync-direction-pill.outgoing.active { border-color: var(--versiondock-success); }
+.commit-panel .sync-direction-pill.incoming.active { border-color: var(--versiondock-info); }
+.commit-panel .sync-direction-pill:not(.active) { opacity: .45; border-color: transparent; background: transparent; }
 .sync-conflict-warning { display: inline-flex; align-items: center; gap: 3px; margin-left: 4px; color: var(--versiondock-warning); font-size: 10px; }
 .sync-publish-badge { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; padding: 1px 6px; color: var(--versiondock-badge-foreground, #fff); background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); border-radius: 8px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; }
 .sync-timeline-card { border-bottom: 1px solid var(--versiondock-border); }
@@ -6883,6 +6895,9 @@ button.notification-item-action-btn:focus-visible {
 .sync-row-actions > button { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: var(--versiondock-text); background: transparent; border: 0; border-radius: 3px; }
 .sync-row-actions > button:hover { background: var(--versiondock-hover); }
 .sync-commit-detail { padding: 0 0 6px; background: var(--versiondock-surface); border-top: 1px solid var(--versiondock-border); }
+.sync-detail-error { display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: var(--versiondock-danger); font-size: 11px; }
+.sync-detail-error > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.sync-detail-error > button { flex: 0 0 auto; color: inherit; background: transparent; border: none; text-decoration: underline; cursor: pointer; }
 .sync-merge-empty { min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .sync-merge-empty > .codicon { font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
 .sync-aggregate-section { padding-bottom: 6px; border-top: 1px solid var(--versiondock-border); }
@@ -6969,6 +6984,7 @@ button.notification-item-action-btn:focus-visible {
 .submodule-title-line > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .submodule-title-line > small { flex: 0 0 auto; color: var(--versiondock-muted); }
 .submodule-meta-line { color: var(--versiondock-muted); font-size: 10.5px; }
+.submodule-tracking-branch { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .submodule-meta-line > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .submodule-status { flex: 0 0 auto; padding: 1px 5px; border-radius: 3px; font-size: 10px; background: var(--versiondock-selected); }
 .submodule-status.conflict { color: var(--versiondock-danger); }
@@ -6979,6 +6995,7 @@ button.notification-item-action-btn:focus-visible {
 .submodule-status.unpushed { color: var(--versiondock-info); }
 .submodule-row-actions { display: flex; align-items: center; gap: 3px; opacity: 0; pointer-events: none; }
 .submodule-row-actions.visible { opacity: 1; pointer-events: auto; }
+.submodule-row:focus-within .submodule-row-actions { opacity: 1; pointer-events: auto; }
 .submodule-row-actions > button { min-width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 5px; color: inherit; background: transparent; border: 0; border-radius: 3px; }
 .submodule-row-actions > button:hover { background: color-mix(in srgb, var(--versiondock-text) 12%, transparent); }
 .submodule-row-actions > button.primary { padding: 0 8px; color: var(--versiondock-button-foreground, #fff); background: var(--versiondock-accent-bg); }
@@ -7534,3 +7551,43 @@ button.notification-item-action-btn:focus-visible {
   color: var(--versiondock-muted);
   border: 1px solid var(--versiondock-border-soft);
 }
+
+/* Panel actions also use inline styles; one scoped rule keeps hover feedback
+   consistent across every tab without changing buttons elsewhere. */
+.commit-panel {
+  --vscode-toolbar-hoverBackground: color-mix(in srgb, var(--versiondock-text) 12%, transparent);
+}
+.commit-panel button:where(:not(.sync-direction-pill):not(:disabled)):is(:hover, :focus-visible) {
+  background: var(--panel-button-hover, var(--vscode-toolbar-hoverBackground, var(--versiondock-hover))) !important;
+}
+.commit-panel button:where(:not(.sync-primary-action):not(.sync-primary-more):not(.sync-direction-pill):not(.commit-tabs button):not(.split-button > button)):is(:hover, :focus-visible) {
+  border-radius: 4px;
+}
+.commit-panel .repository-group-main,
+.commit-panel .repo-heading-toggle,
+.commit-panel .sync-repo-toggle,
+.commit-panel .repo-branch-trigger,
+.commit-panel .sync-branch-trigger { --panel-button-hover: transparent; }
+.commit-panel .sync-direction-pill:hover,
+.commit-panel .sync-direction-pill:focus-visible { background: var(--sync-direction-background); border-radius: 8px; }
+.commit-panel :is(.file-row > button, .directory-row > button, .repository-group-main, .repo-heading-toggle, .sync-repo-toggle, .repo-branch-trigger, .sync-branch-trigger):is(:hover, :focus-visible) {
+  background: transparent !important;
+  border-radius: 0;
+}
+.commit-form textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--versiondock-muted)); opacity: 1; }
+.commit-panel .commit-action > button,
+.commit-panel .sync-primary-action,
+.commit-panel .sync-primary-more,
+.commit-panel button.primary {
+  --panel-button-hover: var(--vscode-button-hoverBackground);
+}
+.commit-panel .sync-primary-action.push,
+.commit-panel .sync-primary-more.push {
+  --panel-button-hover: color-mix(in srgb, var(--versiondock-success) 75%, #fff 25%);
+}
+.commit-panel .sync-primary-action.pull,
+.commit-panel .sync-primary-more.pull {
+  --panel-button-hover: color-mix(in srgb, var(--versiondock-info) 75%, #fff 25%);
+}
+.commit-panel button.danger { --panel-button-hover: color-mix(in srgb, var(--versiondock-danger) 80%, #fff 20%); }
+.repository-group-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; margin-left: auto; }

@@ -19,7 +19,7 @@ use crate::{
 };
 
 const COLORS: [&str; 8] = [
-    "#4EC9B0", "#569CD6", "#C586C0", "#DCDCAA", "#CE9178", "#9CDCFE", "#B5CEA8", "#D7BA7D",
+    "#4EC9B0", "#569CD6", "#DCDCAA", "#C586C0", "#F44747", "#4FC1FF", "#CE9178", "#B5CEA8",
 ];
 const SKIP: [&str; 11] = [
     ".git",
@@ -697,6 +697,7 @@ pub async fn svn_status(
     let operation = crate::vcs::svn_merge_active(&meta, token)
         .await
         .then(|| "merge".into());
+    let revision = crate::vcs::svn_effective_revision(&meta, &revision, token).await;
     let behind = crate::vcs::svn_incoming_revisions_cached(&meta, &revision);
     Ok(RepositoryStatus {
         meta,

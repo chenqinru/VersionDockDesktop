@@ -69,7 +69,7 @@ describe('CommitPanel capabilities and file view', () => {
     const emptyRepo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'empty', name: 'Empty' } };
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo, emptyRepo] }, selectedRepoId: 'repo' });
     const { container } = renderPanel();
-    expect(screen.queryByTitle('Rollback')).not.toBeInTheDocument();
+    expect(container.querySelector('.panel-toolbar [title="Rollback"]')).not.toBeInTheDocument();
     expect(screen.getByTitle('More')).toBeInTheDocument();
     fireEvent.click(screen.getByTitle('More'));
     expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
@@ -273,7 +273,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(useAppStore.getState().bootstrap?.state.layout?.fileViewMode).toBe('tree');
   });
 
-  it('refreshes the active stash data together with the workspace snapshot', async () => {
+  it('delegates stash refresh to the workspace refresh without a duplicate panel request', async () => {
     const data = bootstrap(true);
     data.state.layout = { panelSizes: { commit: 360, branches: 220, detail: 380 }, activeTab: 'stash', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
     const refresh = vi.fn().mockResolvedValue(undefined);
@@ -283,7 +283,7 @@ describe('CommitPanel capabilities and file view', () => {
     loadStashes.mockClear();
     fireEvent.click(screen.getAllByTitle('Refresh')[0]);
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-    expect(loadStashes).toHaveBeenCalledOnce();
+    expect(loadStashes).not.toHaveBeenCalled();
   });
 
   it('shows shelf only after its storage and backend capability is enabled', () => {

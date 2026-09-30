@@ -75,6 +75,7 @@ function PillAmendButton({
   return (
     <button
       type="button"
+      className="pill-amend-button"
       data-action-btn=""
       style={{
         display: 'inline-flex',
@@ -87,6 +88,8 @@ function PillAmendButton({
         borderRadius: '8px',
         fontSize: '10px',
         boxSizing: 'border-box',
+        flexShrink: 0,
+        whiteSpace: 'nowrap',
         cursor: 'pointer',
         userSelect: 'none',
         transition: 'all 0.12s ease',
@@ -138,25 +141,31 @@ function flattenVisibleTree(nodes: FileTreeNode[], isExpanded: (path: string) =>
   return result;
 }
 
-function TreeRow({ node, depth, expanded, toggleExpanded, showDirectory, repo, selected, setFiles, onFile, onContext, onFolderContext }: { node: FileTreeNode; depth: number; expanded: boolean; toggleExpanded: () => void; showDirectory: boolean; repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void }) {
+function TreeRow({ node, depth, expanded, toggleExpanded, showDirectory, repo, selected, setFiles, onFile, onContext, onFolderContext, onRollback, onOpenFile, onResolve, onStage }: { node: FileTreeNode; depth: number; expanded: boolean; toggleExpanded: () => void; showDirectory: boolean; repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; onRollback: (files: FileChange[]) => void; onOpenFile: (file: FileChange) => void; onResolve: (file: FileChange) => void; onStage: (file: FileChange) => void }) {
   const { t } = useI18n();
   if (!node.file) {
     const selectable = node.files.filter((file) => !file.isTruncated);
     const selectedCount = selectable.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
     const allSelected = selectable.length > 0 && selectedCount === selectable.length;
-    return <div className="directory-row" style={{ paddingLeft: 20 + depth * 20 }} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectable.length} onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={toggleExpanded}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><b>{node.files.length}</b></div>;
+    return <div className="directory-row" style={{ paddingLeft: 20 + depth * 20 }} onClick={toggleExpanded} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectable.length} onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={(event) => { event.stopPropagation(); toggleExpanded(); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><span className="change-row-actions" onClick={(event) => event.stopPropagation()}><button type="button" title={t('Rollback all files in folder')} onClick={() => onRollback(node.files)}><Codicon name="discard" /></button></span><b>{node.files.length}</b></div>;
   }
   const key = `${repo.meta.id}\0${node.file.path}`;
   const pathParts = node.file.path.split('/');
   const fileName = pathParts.pop() ?? node.name;
-  return <div className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''}`} style={{ paddingLeft: 20 + depth * 20 }} onDoubleClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
+  return <div className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
     <SelectionCheckbox label={node.file.path} checked={selected.has(key)} disabled={node.file.isTruncated} onChange={() => setFiles(repo.meta.id, [node.file!.path], !selected.has(key))} />
-    <button title={node.file.path} onClick={() => onFile(node.file!)}><FileIcon name={fileName} /><span className="file-name-group"><span className="file-name">{fileName}</span>{showDirectory && <small>{pathParts.join('/')}</small>}</span></button>
+    <button title={node.file.path} onClick={(event) => { event.stopPropagation(); onFile(node.file!); }}><FileIcon name={fileName} /><span className="file-name-group"><span className="file-name">{fileName}</span>{showDirectory && <small>{pathParts.join('/')}</small>}</span></button>
+    {!node.file.submodule && <span className="change-row-actions" onClick={(event) => event.stopPropagation()}>
+      {node.file.conflicted && <button type="button" className="conflict-resolve-action" title={t('Resolve Conflicts')} aria-label={`${t('Resolve Conflicts')}: ${node.file.path}`} onClick={() => onResolve(node.file!)}><Codicon name="git-merge" /></button>}
+      <button type="button" title={t('Open file')} onClick={() => onOpenFile(node.file!)}><Codicon name="go-to-file" /></button>
+      {!node.file.isTruncated && <button type="button" title={t('Rollback')} onClick={() => onRollback([node.file!])}><Codicon name="discard" /></button>}
+      {repo.meta.kind === 'svn' && node.file.status === 'untracked' && !node.file.staged && <button type="button" title={t(node.file.isTruncated ? 'Add directory recursively to SVN' : 'Add to SVN')} onClick={() => onStage(node.file!)}><Codicon name="add" /></button>}
+    </span>}
     {node.file.isTruncated && <span title={node.file.truncationReason === 'depth-limit' ? t('Directory scan depth limit reached') : t('Directory scan item limit reached')}><Codicon name="warning" /></span>}{node.file.staged && <span className="staged-dot" />}<StatusMark file={node.file} />
   </div>;
 }
 
-function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContext, onRepoContext, viewMode, expansion, onManualExpansionChange }: { repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; onRepoContext: (event: React.MouseEvent) => void; viewMode: 'tree' | 'list'; expansion: ExpansionCommand; onManualExpansionChange: () => void }) {
+function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContext, onRepoContext, viewMode, expansion, onManualExpansionChange, onRollback, onOpenFile, onResolve, onStage }: { repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; onRepoContext: (event: React.MouseEvent) => void; viewMode: 'tree' | 'list'; expansion: ExpansionCommand; onManualExpansionChange: () => void; onRollback: (files: FileChange[]) => void; onOpenFile: (file: FileChange) => void; onResolve: (file: FileChange) => void; onStage: (file: FileChange) => void }) {
   const { t } = useI18n();
   const mixedKinds = useAppStore((state) => hasMixedRepositoryKinds(state.snapshot?.repositories ?? []));
   const repoLabel = repositoryLabel(repo, mixedKinds);
@@ -206,6 +215,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onContextMenu={onRepoContext}
+        onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}
       >
         <SelectionCheckbox label={repoLabel} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectableFiles.length} onChange={() => setFiles(repo.meta.id, selectableFiles.map((file) => file.path), !allSelected)} />
         <div className="repo-heading-main">
@@ -213,7 +223,9 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
             type="button"
             className="repo-heading-toggle"
             title={repo.meta.name}
-            onClick={() => {
+            aria-expanded={expanded}
+            onClick={(event) => {
+              event.stopPropagation();
               onManualExpansionChange();
               setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded });
             }}
@@ -238,6 +250,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
           <button
             type="button"
             className="repo-branch-trigger"
+            data-branch-switch-badge=""
             title={t('Switch branch')}
             aria-haspopup="menu"
             aria-expanded={Boolean(branchMenuAnchor)}
@@ -247,7 +260,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
               setBranchMenuAnchor((cur) => (cur ? undefined : rect));
             }}
           >
-            <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'} color={repo.meta.kind === 'svn' ? undefined : branch} className="branch-chip" />
+            <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.isWorktree ? 'worktree' : 'branch'} color={branch} className="branch-chip" />
           </button>
         </div>
         {branchMenuAnchor && (
@@ -291,7 +304,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
       </div>
       {expanded && !repo.files.length && <div className="repo-no-changes">{t('No changes')}</div>}
       {expanded && <div ref={setFilesContainer} className="virtual-change-files" style={shouldVirtualize ? { height: virtualizer.getTotalSize(), position: 'relative' } : undefined}>
-        {(shouldVirtualize ? virtualizer.getVirtualItems().map((virtualRow) => ({ item: flatItems[virtualRow.index], start: virtualRow.start - virtualizer.options.scrollMargin })) : flatItems.map((item) => ({ item, start: undefined }))).map(({ item, start }) => item && <div key={item.key} style={start === undefined ? undefined : { position: 'absolute', top: 0, left: 0, width: '100%', height: 22, transform: `translateY(${start}px)` }}><TreeRow node={item.node} depth={item.depth} expanded={item.node.file ? false : (folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded)} toggleExpanded={() => { if (item.node.file) return; onManualExpansionChange(); const current = folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded; setFolderExpansion((value) => ({ ...value, [item.node.path]: { sequence: expansion.sequence, expanded: !current } })); }} showDirectory={viewMode === 'list'} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onContext={onContext} onFolderContext={onFolderContext} /></div>)}
+        {(shouldVirtualize ? virtualizer.getVirtualItems().map((virtualRow) => ({ item: flatItems[virtualRow.index], start: virtualRow.start - virtualizer.options.scrollMargin })) : flatItems.map((item) => ({ item, start: undefined }))).map(({ item, start }) => item && <div key={item.key} style={start === undefined ? undefined : { position: 'absolute', top: 0, left: 0, width: '100%', height: 22, transform: `translateY(${start}px)` }}><TreeRow node={item.node} depth={item.depth} expanded={item.node.file ? false : (folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded)} toggleExpanded={() => { if (item.node.file) return; onManualExpansionChange(); const current = folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded; setFolderExpansion((value) => ({ ...value, [item.node.path]: { sequence: expansion.sequence, expanded: !current } })); }} showDirectory={viewMode === 'list'} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onRollback={onRollback} onOpenFile={onOpenFile} onResolve={onResolve} onStage={onStage} onContext={onContext} onFolderContext={onFolderContext} /></div>)}
       </div>}
     </section>
   );
@@ -367,6 +380,14 @@ export function CommitPanel() {
       ]);
     } else if (targetTab === 'submodule') {
       void useAppStore.getState().loadSubmodules();
+    } else if (targetTab === 'shelf') {
+      void useAppStore.getState().loadShelves();
+    } else if (targetTab === 'stash') {
+      void useAppStore.getState().loadStashes();
+    } else if (targetTab === 'worktree') {
+      void useAppStore.getState().loadWorktrees();
+    } else if (targetTab === 'subtree') {
+      void useAppStore.getState().loadSubtrees();
     }
   }, [setTab]);
   const speedSearch = useSpeedSearch(tab, tab === 'changes');
@@ -546,15 +567,9 @@ export function CommitPanel() {
   const refreshPanel = async () => {
     lastTabSyncAtRef.current[tab] = Date.now();
     const store = useAppStore.getState();
-    const requests: Promise<unknown>[] = [store.refresh()];
-    if (tab === 'changes' && changelistEnabled) requests.push(store.loadChangelists());
-    if (tab === 'shelf') requests.push(store.loadShelves());
-    if (tab === 'stash') requests.push(store.loadStashes());
-    if (tab === 'worktree') requests.push(store.loadWorktrees());
-    if (tab === 'subtree') requests.push(store.loadSubtrees());
-    if (tab === 'submodule') requests.push(store.loadSubmodules());
-    if (tab === 'sync') requests.push(store.loadUnpushedCommits(), store.loadIncomingCommits());
-    await Promise.all(requests);
+    await store.refresh();
+    if (useAppStore.getState().snapshot?.workspace.id !== snapshot?.workspace.id) return;
+    if (tab === 'changes' && changelistEnabled) await store.loadChangelists();
   };
   const conflictingRepos = useMemo(
     () => repos.filter((repo) => repo.conflicts > 0 || repo.files.some((file) => file.conflicted)),
@@ -2041,6 +2056,18 @@ export function CommitPanel() {
             const fileProps = {
               selected,
               setFiles,
+              onRollback: (files: FileChange[]) => { void confirmDiscard(repo, files); },
+              onOpenFile: (file: FileChange) => { void systemOpen(repo.meta.id, file.path, false); },
+              onResolve: (file: FileChange) => {
+                const conflict = conflicts.find((item) => item.repoId === repo.meta.id && item.path === file.path);
+                if (conflict) void openMerge(conflict);
+              },
+              onStage: (file: FileChange) => {
+                void (async () => {
+                  if (file.isTruncated && !await confirmDialog({ title: t('Add directory recursively to SVN'), message: t('The directory scan was truncated. SVN will add all eligible descendants recursively. Continue?') })) return;
+                  await stage(repo.meta.id, [file.path], Boolean(file.isTruncated));
+                })();
+              },
               onFile: (file: FileChange) => {
                 if (file.submodule) {
                   setSubmoduleDiffTarget({ repo, file });

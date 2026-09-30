@@ -78,7 +78,7 @@ function badgeKind(group: RefGroup): BranchRefKind {
 function badgeColor(group: RefGroup): string {
   if (group.isSvnRevision && group.label === 'HEAD') return headColor();
   if (group.isRemoteHead || (group.isHead && group.isDetached)) return headColor();
-  if (group.isTag || group.isSvnRevision) return tagColor();
+  if (group.isTag) return tagColor();
   return branchColor(group.label, false);
 }
 
@@ -192,6 +192,8 @@ function CommitList({
   const openCommitDetail = useAppStore((state) => state.openCommitDetail);
   const openChanges = useAppStore((state) => state.openCommitChanges);
   const loadHistory = useAppStore((state) => state.loadHistory);
+  const revealTarget = useAppStore((state) => state.historyRevealTarget);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const historyOperation = useAppStore((state) => state.historyOperation);
   const unpushedOperation = useAppStore((state) => state.unpushedOperation);
   const branchOperation = useAppStore((state) => state.branchOperation);
@@ -227,6 +229,21 @@ function CommitList({
     estimateSize: () => COMMIT_ROW_HEIGHT,
     overscan: 14,
   });
+  useEffect(() => {
+    if (!revealTarget || revealTarget.workspaceId !== workspaceId) return;
+    const index = commits.findIndex((commit) => commit.repoId === revealTarget.repoId && commit.hash === revealTarget.hash);
+    if (index >= 0) {
+      virtualizer.scrollToIndex(index, { align: 'center' });
+      useAppStore.setState({ historyRevealTarget: undefined });
+      void selectCommit(commits[index]);
+    } else if (hasMore && !loading) {
+      void loadHistory().catch(() => {
+        if (useAppStore.getState().historyRevealTarget === revealTarget) useAppStore.setState({ historyRevealTarget: undefined });
+      });
+    } else if (!hasMore && !loading) {
+      useAppStore.setState({ historyRevealTarget: undefined });
+    }
+  }, [commits, hasMore, loadHistory, loading, revealTarget, selectCommit, virtualizer, workspaceId]);
   const [hoveredKey, setHoveredKey] = useState<string>();
   const [containerWidth, setContainerWidth] = useState(0);
   const [context, setContext] = useState<{ x: number; y: number; commit: CommitNode }>();

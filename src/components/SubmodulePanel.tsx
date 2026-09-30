@@ -10,21 +10,13 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { confirmDialog, promptDialog } from './dialogService';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 
-type Translate = (key: string, ...args: Array<string | number>) => string;
-
-function statusLabel(entry: SubmoduleEntry, t: Translate): string {
-  if (entry.syncStatus === 'conflict') return t('Conflict');
-  if (entry.syncStatus === 'uninitialized') return t('Uninitialized');
-  if (entry.syncStatus === 'outOfSync') return t('Out of sync');
-  return t('Synced');
-}
-
 function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: SubmoduleEntry; busy: boolean }) {
   const operate = useAppStore((state) => state.submoduleOperation);
   const systemOpen = useAppStore((state) => state.systemOpen);
   const bridge = useAppStore((state) => state.bridge);
   const conflicts = useAppStore((state) => state.conflicts);
   const openMerge = useAppStore((state) => state.openMerge);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -41,13 +33,13 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
       message: t('VersionDock [{0}]: Remove submodule "{1}"? This will deinitialize, unregister from .gitmodules, and delete its files.{2}', repo.meta.name, entry.path, riskWarning),
       confirmLabel: t('Remove'),
       danger: true,
-    })) return;
+    }) || useAppStore.getState().snapshot?.workspace.id !== workspaceId) return;
     try {
       await operate(repo.meta.id, { type: 'remove', path: entry.path, force: false }, { rethrow: true });
     } catch (error) {
       const errorCode = (error as { code?: string })?.code;
-      if (errorCode !== 'SUBMODULE_DIRTY' && !String(error).includes('SUBMODULE_DIRTY')) throw error;
-      if (await confirmDialog({ title: t('Force Remove Submodule'), message: t('The submodule has local changes. Force removal can discard them.'), confirmLabel: t('Force Remove'), danger: true })) {
+      if (errorCode !== 'SUBMODULE_DIRTY' && !String(error).includes('SUBMODULE_DIRTY')) return;
+      if (await confirmDialog({ title: t('Force Remove Submodule'), message: t('The submodule has local changes. Force removal can discard them.'), confirmLabel: t('Force Remove'), danger: true }) && useAppStore.getState().snapshot?.workspace.id === workspaceId) {
         await operate(repo.meta.id, { type: 'remove', path: entry.path, force: true });
       }
     }
@@ -62,12 +54,32 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
   const reveal = () => void systemOpen(repo.meta.id, entry.path, true);
   const openInFileManager = () => void systemOpen(repo.meta.id, entry.path, false);
   const openInNewWindow = () => void bridge?.openInNewWindow([absolutePath]);
+  const deinitialize = async () => {
+    if (!await confirmDialog({
+      title: t('Deinitialize Submodule'),
+      message: t('VersionDock [{0}]: Deinit submodule "{1}"? The working directory will be cleared.', repo.meta.name, entry.path),
+      confirmLabel: t('Deinitialize'),
+      danger: true,
+    }) || useAppStore.getState().snapshot?.workspace.id !== workspaceId) return;
+    try {
+      await operate(repo.meta.id, { type: 'deinit', path: entry.path, force: false }, { rethrow: true });
+    } catch (error) {
+      if (!/local modifications|--force|\s-f\b/i.test(String(error))) return;
+      if (await confirmDialog({
+        title: t('Force Deinitialize Submodule'),
+        message: t('VersionDock [{0}]: Submodule "{1}" has uncommitted changes or detached HEAD. Discard changes and force deinitialize?', repo.meta.name, entry.path),
+        confirmLabel: t('Force Deinitialize Submodule'),
+        danger: true,
+      }) && useAppStore.getState().snapshot?.workspace.id === workspaceId) await operate(repo.meta.id, { type: 'deinit', path: entry.path, force: true });
+    }
+  };
   const run = (type: string) => {
+    if (busy || useAppStore.getState().snapshot?.workspace.id !== workspaceId) return;
     if (type === 'init') void operate(repo.meta.id, { type: 'init', path: entry.path, recursive: true });
-    else if (type === 'update') void operate(repo.meta.id, { type: 'update', path: entry.path, init: true, recursive: true, remote: false });
+    else if (type === 'update') void operate(repo.meta.id, { type: 'update', path: entry.path, init: true, recursive: false, remote: false });
     else if (type === 'updateRemote') void operate(repo.meta.id, { type: 'update', path: entry.path, init: true, recursive: true, remote: true });
-    else if (type === 'sync') void operate(repo.meta.id, { type: 'sync', path: entry.path, recursive: true });
-    else if (type === 'deinit') void operate(repo.meta.id, { type: 'deinit', path: entry.path, force: false });
+    else if (type === 'sync') void operate(repo.meta.id, { type: 'sync', path: entry.path, recursive: false });
+    else if (type === 'deinit') void deinitialize();
     else if (type === 'push') void operate(repo.meta.id, { type: 'push', path: entry.path });
     else if (type === 'pull') void operate(repo.meta.id, { type: 'pull', path: entry.path, rebase: false });
     else if (type === 'ours') void operate(repo.meta.id, { type: 'resolveConflict', path: entry.path, choice: 'mine' });
@@ -79,7 +91,7 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
     else if (type === 'diff') setDetailsOpen((value) => !value);
   };
 
-  const contextItems: ContextMenuEntry[] = [
+  const contextItems: ContextMenuEntry[] = ([
     ...(entry.syncStatus === 'conflict'
       ? entry.typeChange
         ? [{ id: 'merge', label: t('Resolve in Merge Editor'), icon: 'git-merge' } as ContextMenuEntry, { separator: true } as ContextMenuEntry]
@@ -104,7 +116,7 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
     ...(entry.diffSummary ? [{ id: 'diff', label: t('Show Diff Summary'), icon: 'diff' } as ContextMenuEntry] : []),
     ...(entry.initialized ? [{ separator: true } as ContextMenuEntry, { id: 'sync', label: t('Sync URL'), icon: 'refresh' } as ContextMenuEntry, { id: 'deinit', label: t('Deinitialize'), icon: 'clear-all', danger: true } as ContextMenuEntry] : []),
     { id: 'remove', label: t('Remove'), icon: 'trash', danger: true },
-  ];
+  ] satisfies ContextMenuEntry[]).map((item) => 'separator' in item ? item : { ...item, disabled: busy || ('disabled' in item && item.disabled) });
 
   const primaryAction = entry.syncStatus === 'conflict'
     ? entry.typeChange
@@ -123,14 +135,17 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
         <div className="submodule-title-line">
           <strong title={entry.path}>{entry.path}</strong>
           {entry.name !== entry.path && <small>({entry.name})</small>}
-          <span className={`submodule-status ${entry.syncStatus}`}>{statusLabel(entry, t)}</span>
-          {entry.typeChange && <span className="submodule-status conflict">{t('Type-change conflict')}</span>}
+          <span className={`submodule-status ${entry.initialized ? 'synced' : 'uninitialized'}`}>{t(entry.initialized ? 'Initialized' : 'Uninitialized')}</span>
+          {entry.syncStatus === 'conflict' && <span className="submodule-status conflict">{t(entry.typeChange ? 'Type-change conflict' : 'Conflict')}</span>}
           {entry.dirty && <span className="submodule-status dirty">{t('Dirty')}</span>}
           {entry.unpushedCount > 0 && <span className="submodule-status unpushed">{t('{0} unpushed', entry.unpushedCount)}</span>}
         </div>
         <div className="submodule-meta-line">
-          {entry.currentBranch && <BranchRefBadge label={entry.currentBranch} />}
-          {entry.detached && entry.revision && <BranchRefBadge label={entry.revision.slice(0, 8)} kind="head" />}
+          {entry.syncStatus === 'outOfSync' && <span className="submodule-status" title={`${t('Recorded in Parent:')} ${entry.recordedCommit ?? ''}\n${t('Current HEAD:')} ${entry.revision ?? ''}`}>
+            {entry.recordedCommit ? t('Parent: {0}', entry.recordedCommit.slice(0, 8)) : t('Out of sync')}
+          </span>}
+          {(entry.currentBranch || entry.revision) && <BranchRefBadge label={entry.currentBranch ?? entry.revision!.slice(0, 8)} kind={entry.detached || !entry.currentBranch ? 'head' : 'branch'} />}
+          {entry.branch && <span className="submodule-tracking-branch" title={t('Tracked branch: {0}', entry.branch)}><Codicon name="link" />{entry.branch}</span>}
           <span title={entry.url}>{entry.url}</span>
         </div>
       </div>
@@ -161,10 +176,10 @@ export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
   const total = useMemo(() => repos.reduce((sum, repo) => sum + (entries[repo.meta.id]?.length ?? 0), 0), [entries, repos]);
 
   useEffect(() => {
-    if (repos.length > 0 && repos.some((repo) => !entries[repo.meta.id])) {
+    if (repos.some((repo) => !repo.meta.isSubmodule && !entries[repo.meta.id] && !loadErrors[`submodules:${repo.meta.id}`])) {
       void load();
     }
-  }, [entries, load, repos]);
+  }, [entries, load, loadErrors, repos]);
 
   const add = async (repo: RepositoryStatus) => {
     const url = await promptDialog({ title: t('Add Submodule'), message: repo.meta.name, inputLabel: t('Repository URL') });
@@ -191,8 +206,8 @@ export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
         const outOfSync = allItems.filter((entry) => entry.syncStatus === 'outOfSync').length;
         const error = loadErrors[`submodules:${repo.meta.id}`];
         return <section className="submodule-repo" key={repo.meta.id}>
-          <header className="repository-group-header" style={{ '--repo-color': color } as React.CSSProperties}>
-            <button className="repository-group-main" title={repo.meta.name} onClick={() => setCollapsedRepoIds((current) => { const next = new Set(current); if (next.has(repo.meta.id)) next.delete(repo.meta.id); else next.add(repo.meta.id); return next; })}>
+          <header className="repository-group-header" style={{ '--repo-color': color } as React.CSSProperties} onClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, label')) setCollapsedRepoIds((current) => { const next = new Set(current); if (next.has(repo.meta.id)) next.delete(repo.meta.id); else next.add(repo.meta.id); return next; }); }}>
+            <button className="repository-group-main" title={repo.meta.name} aria-expanded={!collapsed} onClick={() => setCollapsedRepoIds((current) => { const next = new Set(current); if (next.has(repo.meta.id)) next.delete(repo.meta.id); else next.add(repo.meta.id); return next; })}>
               <Codicon name={collapsed ? 'chevron-right' : 'chevron-down'} />
               <i style={{ background: color }} />
               <strong>{repo.meta.name}</strong>

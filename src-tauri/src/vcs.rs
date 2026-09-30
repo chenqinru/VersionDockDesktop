@@ -3296,6 +3296,7 @@ pub async fn svn_working_copy_info(
             DesktopError::new("SVN_REVISION_MISSING", "Unable to read SVN revision", true)
         })?
         .to_string();
+    let revision = svn_effective_revision(repo, &revision, token).await;
     let wc_url = document
         .descendants()
         .find(|n| n.has_tag_name("url"))
@@ -3365,6 +3366,41 @@ fn map_svn_path_to_working_copy(
             None
         }
     }
+}
+
+pub(crate) async fn svn_effective_revision(
+    repo: &RepositoryMeta,
+    revision: &str,
+    token: &CancellationToken,
+) -> String {
+    let Ok(root_revision) = revision.parse::<u64>() else {
+        return revision.to_string();
+    };
+    // A partial commit can leave the working-copy root at an older revision.
+    // Match the extension's BASE marker using the upper svnversion revision.
+    let output = cli::run(
+        "svnversion",
+        &[".".into()],
+        Path::new(&repo.root_path),
+        None,
+        Duration::from_secs(5),
+        token,
+    )
+    .await;
+    let working_revision = output.ok().and_then(|output| {
+        let text = output.stdout_text();
+        let range = text
+            .trim()
+            .split(|character: char| !character.is_ascii_digit() && character != ':')
+            .next()?;
+        range
+            .split(':')
+            .filter_map(|value| value.parse::<u64>().ok())
+            .max()
+    });
+    root_revision
+        .max(working_revision.unwrap_or(root_revision))
+        .to_string()
 }
 
 async fn current_revision(
@@ -6544,7 +6580,7 @@ pub async fn branches(
         .split(RECORD)
         .filter_map(|record| {
             let fields = record.trim().split(FIELD).collect::<Vec<_>>();
-            if fields.len() < 5 || fields[0].is_empty() || fields[0].ends_with("/HEAD") {
+            if fields.len() < 5 || fields[0].is_empty() || fields[1].ends_with("/HEAD") {
                 return None;
             }
             let last_commit_message = fields.get(5).and_then(|s| {
@@ -6668,14 +6704,7 @@ async fn svn_branches(
 ) -> Result<Vec<BranchInfo>, DesktopError> {
     let relative_url = svn_relative_url(repo, token).await?;
     let (current_name, detached_tag) = svn_display_ref(&relative_url);
-    let revision = svn(
-        vec!["info".into(), "--show-item".into(), "revision".into()],
-        repo,
-        token,
-    )
-    .await
-    .map(|v| v.stdout_text().trim().to_string())
-    .unwrap_or_default();
+    let revision = current_revision(repo, token).await.unwrap_or_default();
     let behind = svn_incoming_revisions_cached(repo, &revision);
     let mut branches = vec![BranchInfo {
         name: current_name.clone(),
@@ -7649,7 +7678,10 @@ async fn svn_wc_revision(repo: &RepositoryMeta, token: &CancellationToken) -> Op
     )
     .await
     .ok()?;
-    output.stdout_text().trim().parse::<u64>().ok()
+    svn_effective_revision(repo, output.stdout_text().trim(), token)
+        .await
+        .parse::<u64>()
+        .ok()
 }
 
 fn spawn_svn_incoming_probe(repo: RepositoryMeta, revision: u64, previous_behind: Option<u32>) {
@@ -8864,7 +8896,9 @@ pub async fn submodules(
             SubmoduleSyncStatus::Conflict
         } else if !initialized {
             SubmoduleSyncStatus::Uninitialized
-        } else if marker == '+' {
+        } else if marker == '+'
+            || matches!((&recorded_commit, &revision), (Some(recorded), Some(head)) if recorded != head)
+        {
             SubmoduleSyncStatus::OutOfSync
         } else {
             SubmoduleSyncStatus::Synced
@@ -9096,6 +9130,44 @@ pub async fn submodule_operation(
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     ensure_git(repo)?;
+    let align_path = match &operation {
+        SubmoduleOperation::Update {
+            path,
+            remote: false,
+            ..
+        } => Some(Some(relative_path(
+            Path::new(&repo.root_path),
+            path,
+            false,
+        )?)),
+        SubmoduleOperation::UpdateAll { remote: false, .. } => Some(None),
+        _ => None,
+    };
+    if let Some(target_path) = align_path {
+        let entries = submodules(repo, token).await?;
+        for entry in entries
+            .iter()
+            .filter(|entry| target_path.as_ref().is_none_or(|path| path == &entry.path))
+        {
+            // Update aligns to the pointer committed in the parent, even when a
+            // different gitlink has already been staged. Leave conflicts intact.
+            if entry.sync_status != SubmoduleSyncStatus::Conflict
+                && matches!((&entry.index_commit, &entry.recorded_commit), (Some(index), Some(recorded)) if index != recorded)
+            {
+                git(
+                    vec![
+                        "checkout".into(),
+                        "HEAD".into(),
+                        "--".into(),
+                        literal_path(Path::new(&repo.root_path), &entry.path, false)?,
+                    ],
+                    repo,
+                    token,
+                )
+                .await?;
+            }
+        }
+    }
     let mut permit_file_protocol = true;
     let (path, mut args, network, requires_existing) = match operation {
         SubmoduleOperation::Add {

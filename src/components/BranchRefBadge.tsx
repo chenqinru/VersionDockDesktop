@@ -25,7 +25,7 @@ export function BranchRefBadge({
   title?: string;
   style?: CSSProperties;
 }) {
-  const resolvedColor = color ?? (kind === 'tag' || kind === 'revision' ? tagColor() : kind === 'head' ? headColor() : branchColor(label));
+  const resolvedColor = color ?? (kind === 'tag' ? tagColor() : kind === 'head' || (kind === 'revision' && label === 'HEAD') ? headColor() : branchColor(label));
   const resolvedIcons = icons ?? [kind === 'tag' ? 'tag' : kind === 'remote' ? 'cloud' : kind === 'head' ? 'git-commit' : kind === 'revision' ? 'versions' : kind === 'worktree' ? 'repo-clone' : 'git-branch'];
   const compact = variant === 'ref';
   const Element = compact ? 'em' : 'span';
@@ -43,8 +43,8 @@ export function BranchRefBadge({
       gap: 3,
       overflow: 'hidden',
       padding: compact ? '0 6px' : '1px 5px',
-      color: resolvedColor,
-      background: selected ? `${resolvedColor}55` : `${resolvedColor}33`,
+      color: selected ? 'var(--vscode-editor-background, var(--versiondock-bg))' : resolvedColor,
+      background: selected ? resolvedColor : `${resolvedColor}33`,
       border: `1px solid ${selected ? resolvedColor : `${resolvedColor}88`}`,
       borderRadius: 3,
       boxSizing: 'border-box',

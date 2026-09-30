@@ -309,10 +309,14 @@ function VscodeFolderNode({
 }
 
 function SingleRepoHeader({
+  expanded,
+  onToggle,
   repo,
   onRepoContext,
   showVcsBadge,
 }: {
+  expanded: boolean;
+  onToggle: () => void;
   repo: RepositoryStatus;
   onRepoContext: (event: React.MouseEvent, repo: RepositoryStatus, staged: boolean) => void;
   showVcsBadge?: boolean;
@@ -324,6 +328,7 @@ function SingleRepoHeader({
   return (
     <div
       className="repo-heading vscode-single-repo-header"
+      onClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, label')) onToggle(); }}
       style={{
         '--repo-color': repo.meta.color,
         padding: '0 8px 0 14px',
@@ -336,10 +341,13 @@ function SingleRepoHeader({
       onContextMenu={(e) => onRepoContext(e, repo, false)}
     >
       <div className="repo-heading-main" style={{ gap: 6 }}>
+        <button type="button" className="repo-heading-toggle" title={repo.meta.name} aria-expanded={expanded} onClick={onToggle}>
+          <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
         <i style={{ background: repo.meta.color, width: 8, height: 8, borderRadius: '50%', flexShrink: 0 }} />
         <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
           {repo.meta.name}
         </strong>
+        </button>
         {repo.meta.isSubmodule && (
           <span className="submodule-badge" title={t('Submodule')}>
             {t('SUB')}
@@ -356,6 +364,7 @@ function SingleRepoHeader({
         <button
           type="button"
           className="repo-branch-trigger"
+          data-branch-switch-badge=""
           title={t('Switch branch')}
           aria-haspopup="menu"
           aria-expanded={Boolean(branchMenuAnchor)}
@@ -367,8 +376,8 @@ function SingleRepoHeader({
         >
           <BranchRefBadge
             label={repo.branch || repo.revision}
-            kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'}
-            color={repo.meta.kind === 'svn' ? undefined : branchClr}
+            kind={repo.meta.isWorktree ? 'worktree' : 'branch'}
+            color={branchClr}
             className="branch-chip"
           />
         </button>
@@ -489,6 +498,7 @@ function VscodeRepoSection({
         } as React.CSSProperties}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
+        onClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, label')) setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded }); }}
         onContextMenu={(e) => onRepoContext(e, repo, staged)}
       >
         {(staged || repo.meta.kind === 'svn') && onToggleRepoSelection && (
@@ -516,6 +526,7 @@ function VscodeRepoSection({
             type="button"
             className="repo-heading-toggle"
             title={repo.meta.name}
+            aria-expanded={expanded}
             onClick={() => setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded })}
           >
             <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
@@ -538,6 +549,7 @@ function VscodeRepoSection({
           <button
             type="button"
             className="repo-branch-trigger"
+            data-branch-switch-badge=""
             title={t('Switch branch')}
             aria-haspopup="menu"
             aria-expanded={Boolean(branchMenuAnchor)}
@@ -549,8 +561,8 @@ function VscodeRepoSection({
           >
             <BranchRefBadge
               label={repo.branch || repo.revision}
-              kind={repo.meta.kind === 'svn' ? 'revision' : repo.meta.isWorktree ? 'worktree' : 'branch'}
-              color={repo.meta.kind === 'svn' ? undefined : branchClr}
+              kind={repo.meta.isWorktree ? 'worktree' : 'branch'}
+              color={branchClr}
               className="branch-chip"
             />
           </button>
@@ -731,6 +743,8 @@ export function VscodeChangesView({
   const hasSvnUntracked = unstagedRepos.some((g) => g.repo.meta.kind === 'svn' && g.files.some((f) => f.status === 'untracked' && !f.isTruncated));
   const canStageAll = allReposAreSvn ? hasSvnUntracked : totalUnstaged > 0;
   const stageAllTitle = allReposAreSvn ? t('Add to SVN') : t('Stage All');
+  const [repoExpansion, setRepoExpansion] = useState({ sequence: expansion.sequence, expanded: true });
+  const repoExpanded = repoExpansion.sequence === expansion.sequence ? repoExpansion.expanded : expansion.expanded;
   const isSingleRepo = repos.length === 1;
   const singleRepo = isSingleRepo ? repos[0] : undefined;
 
@@ -769,12 +783,15 @@ export function VscodeChangesView({
       {/* ── Single Repo Header ── */}
       {isSingleRepo && singleRepo && (
         <SingleRepoHeader
+          expanded={repoExpanded}
+          onToggle={() => setRepoExpansion({ sequence: expansion.sequence, expanded: !repoExpanded })}
           repo={singleRepo}
           onRepoContext={onRepoContext}
           showVcsBadge={showVcsBadges}
         />
       )}
 
+      <div hidden={isSingleRepo && !repoExpanded} style={{ display: isSingleRepo && !repoExpanded ? 'none' : 'contents' }}>
       {/* ── Staged Changes Section ── */}
       {showStagedSection && (
         <div className="vscode-section" style={{ borderBottom: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))' }}>
@@ -996,6 +1013,7 @@ export function VscodeChangesView({
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

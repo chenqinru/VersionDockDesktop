@@ -466,6 +466,8 @@ export interface AppStore {
   lastCommitMessage: (repoId: string, signal?: AbortSignal) => Promise<string | null>;
   loadHistory: (reset?: boolean, silent?: boolean) => Promise<void>;
   setHistoryFilter: (value: string) => void;
+  historyRevealTarget?: { workspaceId: string; repoId: string; hash: string };
+  revealHistoryCommit: (repoId: string, hash: string) => void;
   setHistoryQuery: (query: HistoryQuery) => void;
   openHistoryForPath: (repoId: string, path: string) => Promise<void>;
   openHistoryForLineRange: (repoId: string, path: string, lineRange: LineRange, revision?: string | null) => Promise<void>;
@@ -2001,12 +2003,17 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
         if (scopes.has('unpushed') || scopes.has('refs')) {
           const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
-          if (repo?.meta.kind === 'git') await Promise.all([get().loadUnpushedCommits(repoId), get().loadIncomingCommits(repoId)]);
+          if (repo?.meta.kind === 'git') await Promise.all([
+            get().loadUnpushedCommits(repoId), get().loadIncomingCommits(repoId),
+            ...(scopes.has('refs') ? [get().loadStashes(repoId)] : []),
+          ]);
         }
         if (scopes.has('conflicts')) await get().loadConflicts(true, repoId);
         if (scopes.has('worktrees')) await get().loadWorktrees(repoId);
         if (scopes.has('subtrees')) await get().loadSubtrees(repoId);
-        if (scopes.has('submodules')) await get().loadSubmodules(repoId);
+        if (scopes.has('submodules') || scopes.has('index') || scopes.has('status') || scopes.has('refs')) {
+          await get().loadSubmodules(repoId);
+        }
         const selected = get().selectedFile;
         if (scopes.has('diff') && selected?.repoId === repoId && get().mode === 'diff') {
           const generation = ++diffRequestGeneration;
@@ -3679,6 +3686,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     setHistoryFilter: (value) => set((state) => ({ historyFilter: value, historyQuery: { ...state.historyQuery, text: value || null } })),
+    revealHistoryCommit: (repoId, hash) => {
+      const wid = get().snapshot?.workspace.id;
+      if (!wid) return;
+      get().backToHistory();
+      set({ mode: 'history', diffReturnMode: undefined, historyRevealTarget: { workspaceId: wid, repoId, hash } });
+    },
     setHistoryQuery: (historyQuery) => {
       abortHistoryRequests();
       set({ historyQuery, historyFilter: historyQuery.text ?? '', history: [], historyByRepo: {}, historyHasMore: false, historyTopology: [], historyTopologyByRepo: {} });
@@ -4696,8 +4709,9 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     submoduleOperation: async (repoId, operation, options) => withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'submoduleWrite')) return;
-      await bridge().request({ type: 'submoduleOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } }, { timeoutMs: 600_000 });
-      await get().loadSubmodules(repoId);
+      const wid = workspaceId();
+      await bridge().request({ type: 'submoduleOperation', payload: { workspace_id: wid, repo_id: repoId, operation } }, { timeoutMs: 600_000 });
+      if (get().snapshot?.workspace.id === wid) await get().loadSubmodules(repoId);
     }, `submodule:${repoId}`, undefined, options).then(() => undefined),
     loadUnpushedCommits: async (repoId, targetWorkspaceId) => {
       const b = get().bridge;

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
+import { RepositoryGroup } from './RepositoryGroup';
 import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
@@ -329,11 +330,7 @@ function RepoSection({
 
   return (
     <div className="subtree-repo-section" style={css.repoSection}>
-      {multiRepo && (
-        <div className="repository-group-header" style={{ ...css.repoHeader(projectColor), '--repo-color': projectColor } as React.CSSProperties}>
-          <span style={css.dot(projectColor)} />
-          <span style={css.repoName}>{meta.name}</span>
-          {summary && <span style={css.repoStatus}>{summary}</span>}
+      <RepositoryGroup name={meta.name} color={projectColor} extras={summary && <span style={css.repoStatus}>{summary}</span>} actions={multiRepo ? (
           <div style={css.headerActions}>
             <button
               data-action-btn=""
@@ -352,8 +349,8 @@ function RepoSection({
               <Codicon name="list-tree" style={{ fontSize: '12px' }} />
             </button>
           </div>
-        </div>
-      )}
+      ) : undefined}>
+
       {entries.length === 0 ? (
         <div style={css.empty}>{t('No subtrees registered')}</div>
       ) : (
@@ -387,6 +384,7 @@ function RepoSection({
           </button>
         </div>
       )}
+      </RepositoryGroup>
     </div>
   );
 }
@@ -424,7 +422,8 @@ export function SubtreePanel({
   useEffect(() => {
     if (!explicitEntries && repos.length > 0) {
       for (const repo of repos) {
-        void loadSubtrees(repo.meta.id);
+        const state = useAppStore.getState();
+        if (!state.subtrees[repo.meta.id] && !state.loadErrors[`subtrees:${repo.meta.id}`]) void loadSubtrees(repo.meta.id);
       }
     }
   }, [explicitEntries, loadSubtrees, repos]);
@@ -687,31 +686,6 @@ const css = {
   repoSection: {
     borderBottom: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))',
   } as React.CSSProperties,
-  repoHeader: (color: string): React.CSSProperties => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '4px 8px',
-    minHeight: '26px',
-    background: `${color}22`,
-    borderBottom: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))',
-    boxSizing: 'border-box',
-  }),
-  dot: (color: string): React.CSSProperties => ({
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: color,
-    flexShrink: 0,
-  }),
-  repoName: {
-    fontSize: '11px',
-    fontWeight: 'bold' as const,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.04em',
-    flex: 1,
-    color: 'var(--vscode-foreground, var(--versiondock-text))',
-  },
   repoStatus: {
     flexShrink: 0,
     maxWidth: '92px',

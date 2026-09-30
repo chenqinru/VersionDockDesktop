@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Codicon } from './Codicon';
+import { RepositoryGroup } from './RepositoryGroup';
 import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu } from './ContextMenu';
 import { FileIcon } from './FileIcon';
@@ -581,11 +582,11 @@ export function StashPanel({
 
   useEffect(() => {
     for (const repo of repos) {
-      if (repo.meta.kind === 'git') {
+      if (repo.meta.kind === 'git' && !stashes[repo.meta.id] && !loadErrors[`stashes:${repo.meta.id}`]) {
         void loadStashes(repo.meta.id);
       }
     }
-  }, [loadStashes, repos]);
+  }, [loadStashes, loadErrors, repos, stashes]);
 
   const handleApply = async (repoId: string, reference: string, expectedHash?: string) => {
     if (operatingRepos.has(repoId)) return;
@@ -646,11 +647,8 @@ export function StashPanel({
           return (
             <section key={repo.meta.id} style={css.repoSection} className="stash-repo">
               {/* Repository Header - Always shown to match design */}
-              <div style={css.repoHeader(projectColor)}>
-                <span style={css.dot(projectColor)} />
-                <span style={css.repoName}>{repo.meta.name}</span>
-                {worktreeBranch && <BranchRefBadge label={worktreeBranch} kind="worktree" color={branchColor(worktreeBranch)} />}
-              </div>
+              <RepositoryGroup expansion={expansion} onToggle={onManualExpansionChange} name={repo.meta.name} color={projectColor} extras={worktreeBranch && <BranchRefBadge label={worktreeBranch} kind="worktree" color={branchColor(worktreeBranch)} />}>
+
 
               {/* Stash items or empty */}
               {error && (
@@ -681,6 +679,7 @@ export function StashPanel({
                   />
                 ))
               )}
+              </RepositoryGroup>
             </section>
           );
         })}
@@ -706,30 +705,6 @@ const css = {
   },
   repoSection: {
     borderBottom: '1px solid var(--versiondock-border, var(--vscode-panel-border, #333))',
-  },
-  repoHeader: (color: string): React.CSSProperties => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '4px 8px',
-    minHeight: '26px',
-    background: color + '22',
-    borderBottom: '1px solid var(--versiondock-border, var(--vscode-panel-border, #333))',
-    boxSizing: 'border-box',
-  }),
-  dot: (color: string): React.CSSProperties => ({
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: color,
-    flexShrink: 0,
-  }),
-  repoName: {
-    fontSize: '11px',
-    fontWeight: 'bold' as const,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.04em',
-    color: 'var(--versiondock-text, #fff)',
   },
   empty: {
     padding: '16px 12px',
