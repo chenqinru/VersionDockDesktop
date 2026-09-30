@@ -2804,6 +2804,93 @@ async fn pull_non_current_branch(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_with_worktree_backup(
+    config_dir: &Path,
+    repo: &RepositoryMeta,
+    action: SyncAction,
+    remote: Option<String>,
+    branch: Option<String>,
+    force: bool,
+    settings: &crate::models::DesktopSettings,
+    token: &CancellationToken,
+) -> Result<SyncResult, DesktopError> {
+    let use_shelf = repo.kind == VcsKind::Git
+        && settings.update_project_clean_working_tree
+            == crate::models::CleanWorkingTreeMethod::Shelve
+        && matches!(
+            action,
+            SyncAction::Pull | SyncAction::PullRebase | SyncAction::PullFfOnly
+        )
+        && branch.is_none()
+        && !git_has_conflicts(repo, token).await
+        && git_operation_name(Path::new(&repo.root_path)).is_none();
+    if !use_shelf {
+        return sync(repo, action, remote, branch, force, settings, token).await;
+    }
+    if git(
+        vec!["status".into(), "--porcelain=v1".into(), "-z".into()],
+        repo,
+        token,
+    )
+    .await?
+    .stdout
+    .is_empty()
+    {
+        return sync(repo, action, remote, branch, force, settings, token).await;
+    }
+    let before_status = status_fingerprint(repo, token).await?;
+    let name = format!(
+        "Auto-shelved before update ({})",
+        chrono::Local::now().format("%H:%M:%S")
+    );
+    let shelf_id = match crate::shelf::create(config_dir, repo, &name, &[], token).await {
+        Ok(id) => id,
+        Err(error) => {
+            // Fall back to the existing stash path only if capture restored the
+            // original working tree. Never continue after a partial capture.
+            if status_fingerprint(repo, token).await? != before_status {
+                return Err(error);
+            }
+            return sync(repo, action, remote, branch, force, settings, token).await;
+        }
+    };
+    let result = sync(repo, action, remote, branch, force, settings, token).await;
+    // Cancellation stops the update, but recovery must still run to restore
+    // local changes or leave an identifiable shelf for manual recovery.
+    let recovery_token = CancellationToken::new();
+    let restore =
+        crate::shelf::restore_after_update(config_dir, repo, &shelf_id, &recovery_token).await;
+    let conflicted = git_has_conflicts(repo, &recovery_token).await;
+    if restore.is_err() || conflicted {
+        let cause = restore.err().or_else(|| result.as_ref().err().cloned());
+        let mut error = DesktopError::new(
+            "GIT_AUTO_SHELF_RESTORE_FAILED",
+            format!("Conflicts detected while restoring local changes. Shelve backup has been retained: \"{name}\" ({shelf_id})."),
+            true,
+        );
+        error.subject = Some(format!("shelf:{shelf_id}"));
+        error.hint = Some(
+            "Open the Shelf panel and keep the backup until local changes are verified".into(),
+        );
+        error.stderr = cause.and_then(|error| error.stderr.or(Some(error.message)));
+        return Err(error);
+    }
+    crate::shelf::operate(
+        config_dir,
+        repo,
+        crate::models::ShelfOperation::Drop { shelf_id },
+        &recovery_token,
+    )
+    .await?;
+    let mut result = result?;
+    if let Some(update) = result.update.as_mut() {
+        update.before_status = before_status;
+        update.after_status = status_fingerprint(repo, &recovery_token).await?;
+    }
+    Ok(result)
+}
+
 pub async fn sync(
     repo: &RepositoryMeta,
     action: SyncAction,
@@ -3106,17 +3193,9 @@ async fn create_pull_auto_stash(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Option<PullAutoStash>, DesktopError> {
-    let tracked_status = git(
-        vec![
-            "status".into(),
-            "--porcelain=v1".into(),
-            "--untracked-files=no".into(),
-        ],
-        repo,
-        token,
-    )
-    .await?
-    .stdout_text();
+    let tracked_status = git(vec!["status".into(), "--porcelain=v1".into()], repo, token)
+        .await?
+        .stdout_text();
     if tracked_status.trim().is_empty() {
         return Ok(None);
     }
@@ -3130,6 +3209,7 @@ async fn create_pull_auto_stash(
         vec![
             "stash".into(),
             "push".into(),
+            "--include-untracked".into(),
             "--message".into(),
             format!("VersionDock automatic stash before update ({marker})"),
         ],

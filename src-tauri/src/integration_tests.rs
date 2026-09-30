@@ -1468,13 +1468,17 @@ async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
     std::fs::write(working.join("local.txt"), "unstaged\n").unwrap();
     std::fs::write(working.join("untracked.txt"), "untracked\n").unwrap();
 
-    vcs::sync(
+    vcs::sync_with_worktree_backup(
+        root.path(),
         &repo(&working, VcsKind::Git),
         SyncAction::Pull,
         None,
         None,
         false,
-        &crate::models::DesktopSettings::default(),
+        &crate::models::DesktopSettings {
+            update_project_clean_working_tree: crate::models::CleanWorkingTreeMethod::Stash,
+            ..Default::default()
+        },
         &CancellationToken::new(),
     )
     .await
@@ -1492,7 +1496,7 @@ async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
 }
 
 #[tokio::test]
-async fn real_git_pull_auto_stash_keeps_backup_when_restore_conflicts() {
+async fn real_git_pull_auto_shelf_keeps_backup_when_restore_conflicts() {
     if !available("git") {
         return;
     }
@@ -1553,7 +1557,8 @@ async fn real_git_pull_auto_stash_keeps_backup_when_restore_conflicts() {
     command("git", &["push"], &upstream);
     std::fs::write(working.join("shared.txt"), "local\n").unwrap();
 
-    let error = vcs::sync(
+    let error = vcs::sync_with_worktree_backup(
+        root.path(),
         &repo(&working, VcsKind::Git),
         SyncAction::Pull,
         None,
@@ -1565,8 +1570,11 @@ async fn real_git_pull_auto_stash_keeps_backup_when_restore_conflicts() {
     .await
     .unwrap_err();
 
-    assert_eq!(error.code, "GIT_AUTO_STASH_CONFLICT");
-    assert!(!command_output("git", &["stash", "list"], &working).is_empty());
+    assert_eq!(error.code, "GIT_AUTO_SHELF_RESTORE_FAILED");
+    assert!(!shelf::list(root.path(), &repo(&working, VcsKind::Git))
+        .await
+        .unwrap()
+        .is_empty());
     assert!(
         !command_output("git", &["diff", "--name-only", "--diff-filter=U"], &working).is_empty()
     );

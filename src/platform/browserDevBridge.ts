@@ -319,11 +319,14 @@ export class BrowserDevBridge implements VersionDockBridge {
 
   readonly window = {
     startDragging: async () => undefined,
+    hasOtherWorkspaceWindows: async () => false,
     toggleMaximize: async () => undefined,
     minimize: async () => undefined,
     close: async () => undefined,
+    show: async () => undefined,
     isMaximized: async () => false,
     dragGeometry: async () => null,
+    setPosition: async () => undefined,
     setCursorIcon: async () => undefined,
     setSize: async () => undefined,
     onDragDrop: async () => () => undefined,
@@ -349,7 +352,8 @@ export class BrowserDevBridge implements VersionDockBridge {
     }
     return 'browser-window-new';
   }
-  async transferTab(transfer: WindowTabTransfer, _point: { screenX: number; screenY: number }, placement: NewWindowPlacement): Promise<boolean> {
+  async transferTab(transfer: WindowTabTransfer, _point: { screenX: number; screenY: number }, placement: NewWindowPlacement, _attachToExisting?: boolean, createIfUnattached = true): Promise<boolean> {
+    if (!createIfUnattached) return false;
     await this.openInNewWindow(transfer.paths, placement, transfer);
     return true;
   }

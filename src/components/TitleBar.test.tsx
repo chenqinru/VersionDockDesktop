@@ -49,17 +49,17 @@ describe('TitleBar tab dragging', () => {
     }
   });
 
-  it('avoids native HTML dragging and only uses the copy cursor after the detach threshold', () => {
+  it('avoids native HTML dragging and only uses the copy cursor after the detach threshold with multiple tabs', () => {
     Object.defineProperties(window, {
       screenX: { configurable: true, value: 100 },
       screenY: { configurable: true, value: 80 },
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, });
+    useAppStore.setState({ tabs: [workspace, { ...workspace, id: 'other', paths: ['/tmp/other'] }], activeTabId: workspace.id, });
     render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
 
-    const tab = screen.getByRole('tab');
+    const tab = screen.getAllByRole('tab')[0];
     Object.assign(tab, {
       setPointerCapture: vi.fn(),
       hasPointerCapture: vi.fn(() => false),
@@ -359,6 +359,7 @@ describe('TitleBar tab dragging', () => {
   });
 
   it('hides the source tab immediately but keeps ownership until the destination acknowledges', async () => {
+    const remainingTab = { ...workspace, id: 'remaining', paths: ['/tmp/remaining'] };
     let acceptTransfer: ((accepted: boolean) => void) | undefined;
     const transferCompleted = new Promise<boolean>((resolve) => { acceptTransfer = resolve; });
     const transferBridge = new MockBridge(() => []) as VersionDockBridge;
@@ -370,10 +371,10 @@ describe('TitleBar tab dragging', () => {
       outerWidth: { configurable: true, value: 1200 },
       outerHeight: { configurable: true, value: 800 },
     });
-    useAppStore.setState({ bridge: transferBridge, tabs: [workspace], activeTabId: workspace.id, });
+    useAppStore.setState({ bridge: transferBridge, tabs: [workspace, remainingTab], activeTabId: remainingTab.id, });
     render(<BridgeContext.Provider value={transferBridge}><TitleBar /></BridgeContext.Provider>);
 
-    const tab = screen.getByRole('tab');
+    const tab = screen.getAllByRole('tab')[0];
     Object.assign(tab, {
       setPointerCapture: vi.fn(),
       hasPointerCapture: vi.fn(() => false),
@@ -383,11 +384,11 @@ describe('TitleBar tab dragging', () => {
     fireEvent.pointerMove(window, { pointerId: 2, screenX: 420, screenY: 180, clientX: 320, clientY: 100 });
     fireEvent.pointerUp(window, { pointerId: 2, screenX: 420, screenY: 180, clientX: 320, clientY: 100 });
 
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
-    expect(useAppStore.getState().tabs).toEqual([workspace]);
+    expect(tab).not.toBeInTheDocument();
+    expect(useAppStore.getState().tabs).toEqual([workspace, remainingTab]);
     expect(transferBridge.broadcastTabDragState).not.toHaveBeenCalledWith(null);
     await act(async () => acceptTransfer?.(true));
-    await waitFor(() => expect(useAppStore.getState().tabs).toEqual([]));
+    await waitFor(() => expect(useAppStore.getState().tabs).toEqual([remainingTab]));
     await waitFor(() => expect(transferBridge.broadcastTabDragState).toHaveBeenCalledWith(null));
   });
 
@@ -457,4 +458,3 @@ describe('TitleBar tab dragging', () => {
     expect(menuIcon).toHaveTextContent('JM');
   });
 });
-

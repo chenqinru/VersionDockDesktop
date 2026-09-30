@@ -88,3 +88,26 @@
 - 最后补漏后，11 个文件、230 项既有前端测试通过，未新增单元测试；TypeScript、lint、i18n 与 diff 空白检查通过。bindings 一致性检查和 macOS Debug App 打包成功；汇总文件冲突标记已移除，hover 排除规则已加入。后续恢复日志定位、调整红色冲突图标和灰色暗文；原生交互及后续 hover 颜色截图仍未验收。
 
 本轮主要涉及 `RepositoryGroup.tsx`、`StashPanel.tsx`、`ShelfPanel.tsx`、`WorktreePanel.tsx`、`SubtreePanel.tsx`、`SubmodulePanel.tsx`、`CommitPanel.tsx`、`ChangelistGroup.tsx`、`ChangelistView.tsx`、`VscodeChangesView.tsx`、`SyncPanel.tsx`、`HistoryWorkspace.tsx`、`appStore.ts` 和 `styles.css`。
+
+## 顶部全选、更新项目、刷新提交面板
+
+- 对照插件 `package.json` 的 `view/title` 与 `registerCommands.ts`、`commitStore.ts`、`BranchStatusBar.updateProject` 和 `COMMIT_REFRESH_START` 调用链。
+- 全选/反选仅改变文件选择，三个更改视图沿用相同逻辑，排除截断占位目录；删除 VS Code 视图中误接的 stage/unstage。无可选项或不支持选择的标签页隐藏按钮；同步页仍复用已有仓库选择命令。SVG 形状保留插件路径，默认颜色对齐 dark/light 的 `#c5c5c5`/`#424242`。
+- 云朵按钮从 Fetch 改接现有 `updateProject`，提示为“更新项目”；Git 按配置执行 rebase/merge，纯 SVN 执行 update；策略选择顺序与插件一致。策略对话框取消或其间工作区改变时不执行更新。
+- 刷新提示为“刷新提交面板”。复用 Store refresh 的可选 `reloadRepository: false`，刷新仓库状态及冲突；面板刷新计数/同步数据与当前工作树、子模块或 Subtree 数据。重置其他标签页刷新节流，下一次访问重新加载；不重载日志或所有隐藏列表。隐藏 Subtree 页取消状态查询，避免刷新状态间接触发远端检查。
+- 三个按钮沿用已有 hover 与 16px 图标尺寸；更新/刷新执行期间防止重复点击，错误显示在已有通知面板。共享 Store 的其他 refresh 调用保持默认范围。
+- 修改现有刷新/按钮断言，没有新增单元测试。最终 160 项相关既有测试、TypeScript、lint、i18n、diff 空白检查通过，最新 macOS Debug App 打包成功。原生控件读取仍超时，未执行用户真实仓库的 pull/update 或原生像素验收。
+
+## 顶部命令与更新通知再次复核
+
+上一轮“已对齐”的结论不完整：命令提示漏了 `VersionDock：` 前缀，更新项目复用了并行执行、忽略自动清理策略的旧实现。本轮按插件原始命令和更新服务重新修正。
+
+- 顶部提示使用插件 `package.nls.zh-cn.json` 的“VersionDock：全选 / 反选 / 更新项目 / 刷新提交面板 / 解决冲突 / 管理远端账号 (GitHub / GitLab / Gitee) / 设置”；更多菜单使用 VS Code 标题栏的“更多操作...”。
+- 更新项目按仓库顺序执行，每仓库 45 秒超时。进度持续显示“正在更新所有项目…”或单仓库名称，并补当前执行项 `(N/总数) 仓库名`；完成后移除临时进度并刷新状态。
+- Rust Sync 命令在原有写锁内复用 Shelf 存储，遵循 `updateProjectCleanWorkingTree`：默认搁置；搁置捕获失败且原工作副本恢复完整时回退现有暂存。暂存包括未跟踪文件。更新之后恢复本地修改，恢复冲突保留可识别备份；自动搁置恢复使用三方合并产生真实冲突，取消更新后仍执行恢复。
+- 成功、失败、混合结果、无更新、无跟踪分支、详情统计失败及本地修改恢复冲突文案，逐句对齐插件 `l10n/bundle.l10n.zh-cn.json`。单仓库无更新包含仓库名；信息通知沿用 info 级别；关闭更新成功通知只屏蔽有提交的成功结果，无更新/跳过/失败照常提示。
+- 通知操作按钮按结果分支提供：失败/混合冲突提供解决冲突；有可查看提交提供更新详情；仅无跟踪分支且没有更高优先级结果时提供推送到远端。明确传入空操作列表时不额外补“查看日志”。
+- 前端相关 164 项既有检查通过；真实临时 Git 仓库已验证自动暂存恢复、自动搁置恢复冲突与备份保留，既有 Shelf 导入检查通过。Rust fmt/clippy、类型/lint/i18n、bindings 与 macOS Debug App 打包通过；最后通知范围补漏已纳入交付包。
+- 发现曾运行的打包 App 进程在 23:53:22 启动，早于上一包的 00:02:20 构建；更新磁盘包不会替换已运行进程。旧进程画面不能代表新包，原生交互读取仍超时；本轮没有对用户真实远端执行 pull/update。
+
+新增涉及 `src-tauri/src/shelf.rs`、`src-tauri/src/vcs.rs`、`src-tauri/src/commands.rs`、`src/components/NotificationToast.tsx`；调整现有 `integration_tests.rs` 与 `appStore.test.ts` 检查，没有新增单元测试。

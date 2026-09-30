@@ -40,7 +40,7 @@ export interface VersionDockBridge {
   selectExecutable(title: string): Promise<string | null>;
   saveFileDialog(options: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>;
   openInNewWindow(paths?: string[], placement?: NewWindowPlacement, transfer?: WindowTabTransfer): Promise<string>;
-  transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting?: boolean): Promise<boolean>;
+  transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting?: boolean, createIfUnattached?: boolean): Promise<boolean>;
   syncWindowTabs(workspacePaths: string[][], activeWorkspaceId: string | null): Promise<void>;
   syncWindowBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
   focusWorkspaceAcrossWindows(paths: string[]): Promise<boolean>;
@@ -60,11 +60,14 @@ export interface VersionDockBridge {
   pushClientLog(level: LogLevel, channel: LogChannel, message: string, details?: string): Promise<void>;
   window: {
     startDragging(): Promise<void>;
+    hasOtherWorkspaceWindows(): Promise<boolean>;
     toggleMaximize(): Promise<void>;
     minimize(): Promise<void>;
     close(): Promise<void>;
+    show(): Promise<void>;
     isMaximized(): Promise<boolean>;
     dragGeometry(): Promise<WindowDragGeometry | null>;
+    setPosition(x: number, y: number): Promise<void>;
     setCursorIcon(icon: 'default' | 'grab' | 'grabbing' | 'copy'): Promise<void>;
     setSize(width: number, height: number, center?: boolean): Promise<void>;
     onDragDrop(handler: (paths: string[]) => void): Promise<() => void>;
@@ -218,10 +221,26 @@ export class TauriBridge implements VersionDockBridge {
 
   readonly window = {
     startDragging: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().startDragging(),
+    hasOtherWorkspaceWindows: async () => {
+      const { getAllWebviewWindows, getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const currentLabel = getCurrentWebviewWindow().label;
+      return (await getAllWebviewWindows()).some((window) => window.label !== currentLabel && !window.label.startsWith('tab-drag-preview-'));
+    },
     toggleMaximize: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().toggleMaximize(),
     minimize: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().minimize(),
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
+    show: async () => {
+      const currentWindow = (await import('@tauri-apps/api/window')).getCurrentWindow();
+      await currentWindow.show();
+      await currentWindow.setFocus();
+    },
     isMaximized: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().isMaximized(),
+    setPosition: async (x: number, y: number) => {
+      const [{ LogicalPosition }, { getCurrentWindow }] = await Promise.all([
+        import('@tauri-apps/api/dpi'), import('@tauri-apps/api/window'),
+      ]);
+      await getCurrentWindow().setPosition(new LogicalPosition(x, y));
+    },
     setCursorIcon: async (icon: 'default' | 'grab' | 'grabbing' | 'copy') => (await import('@tauri-apps/api/window')).getCurrentWindow().setCursorIcon(icon),
     setSize: async (width: number, height: number, center = false) => {
       try {
@@ -456,7 +475,7 @@ export class TauriBridge implements VersionDockBridge {
       },
     }, { showProgress: false });
   }
-  async transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting = true): Promise<boolean> {
+  async transferTab(transfer: WindowTabTransfer, point: { screenX: number; screenY: number }, placement: NewWindowPlacement, attachToExisting = true, createIfUnattached = true): Promise<boolean> {
     let dispose: (() => void) | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let resolveCompletion: (accepted: boolean) => void = () => undefined;
@@ -471,6 +490,7 @@ export class TauriBridge implements VersionDockBridge {
       });
       timeout = setTimeout(() => resolveCompletion(false), 120_000);
       const attached = attachToExisting && await this.windowTabDrop(transfer, point);
+      if (!attached && !createIfUnattached) return false;
       if (!attached) await this.openInNewWindow(transfer.paths, placement, transfer);
       return await completed;
     } finally {
@@ -635,7 +655,8 @@ export class MockBridge implements VersionDockBridge {
     return Promise.resolve();
   }
   readonly window = {
-    startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined,
-    isMaximized: async () => false, dragGeometry: async () => null, setCursorIcon: async () => undefined, setSize: async () => undefined, onDragDrop: async () => () => undefined,
+    startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined, show: async () => undefined,
+    hasOtherWorkspaceWindows: async () => false,
+    isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined, onDragDrop: async () => () => undefined,
   };
 }

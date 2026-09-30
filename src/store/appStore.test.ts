@@ -1741,19 +1741,21 @@ describe('appStore async lifecycle', () => {
     expect(notification.type).toBe('warning');
     expect(notification.actions).toEqual(expect.arrayContaining([
       { type: 'openConflicts', label: 'Resolve Conflicts' },
-      { type: 'pushToRemote', label: 'Push to Remote', repoId: 'repo-no-upstream' },
     ]));
 
+    // The mixed failure summary only offers conflict resolution, matching the plugin.
+    useAppStore.getState().addNotification({ type: 'warning', title: 'Project update', message: 'Missing upstream', actions: [{ type: 'pushToRemote', label: 'Push to Remote', repoId: 'repo-no-upstream' }] });
+    const pushNotification = useAppStore.getState().notifications[0];
     // 1. Click "Push to Remote" when it fails
     pushShouldFail = true;
-    const pushActionIndex = notification.actions.findIndex((a) => a.type === 'pushToRemote');
-    await useAppStore.getState().performNotificationAction(notification.id, pushActionIndex);
+    const pushActionIndex = pushNotification.actions.findIndex((a) => a.type === 'pushToRemote');
+    await useAppStore.getState().performNotificationAction(pushNotification.id, pushActionIndex);
     expect(pushedRepoId).toBe('repo-no-upstream');
     expect(useAppStore.getState().notifications.some((n) => n.title === 'Push completed')).toBe(false);
 
     // 2. Click "Push to Remote" when it succeeds
     pushShouldFail = false;
-    await useAppStore.getState().performNotificationAction(notification.id, pushActionIndex);
+    await useAppStore.getState().performNotificationAction(pushNotification.id, pushActionIndex);
     const completedNotif = useAppStore.getState().notifications.find((n) => n.title === 'Push completed');
     expect(completedNotif).toBeDefined();
     expect(completedNotif?.message).toEqual({
@@ -3079,7 +3081,7 @@ describe('appStore async lifecycle', () => {
     const unsubscribe = useAppStore.subscribe((state) => {
       const progressNotif = state.notifications.find((n) => n.title === 'Updating Project');
       if (progressNotif) {
-        capturedProgressMessages.push(progressNotif.message);
+        capturedProgressMessages.push(progressNotif.progressMessage);
       }
     });
 

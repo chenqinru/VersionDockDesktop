@@ -2777,16 +2777,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   line-height: 1.35;
 }
 
-.welcome-action-shortcut {
-  font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1));
-  font-family: var(--versiondock-code);
-  padding: 3px 6px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--versiondock-input) 80%, transparent);
-  border: 1px solid var(--versiondock-border);
-  color: var(--versiondock-faint);
-}
-
 .welcome-dropzone {
   display: flex;
   align-items: center;
@@ -3160,6 +3150,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   display: block;
   flex-shrink: 0;
 }
+.panel-toolbar button.panel-selection-action { color: #c5c5c5; }
+:root[data-theme="light"] .panel-toolbar button.panel-selection-action,
+:root[data-theme="light2026"] .panel-toolbar button.panel-selection-action { color: #424242; }
 .panel-view-options {
   display: flex;
   align-items: center;

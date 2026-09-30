@@ -11,8 +11,6 @@ export function WorkspaceChooser() {
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const removeRecent = useAppStore((state) => state.removeRecent);
   const openAbout = useAppStore((state) => state.openAbout);
-  const initializeRepository = useAppStore((state) => state.initializeRepository);
-  const initializeAvailable = useAppStore((state) => state.bootstrap?.capabilities?.availability?.initializeRepository?.available ?? state.bootstrap?.tools?.git ?? false);
   const cloneAvailable = useAppStore((state) => state.bootstrap?.capabilities?.availability?.cloneRepository?.available ?? state.bootstrap?.tools?.git ?? false);
   const svnAvailable = useAppStore((state) => state.bootstrap?.tools?.svn ?? false);
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
@@ -31,11 +29,6 @@ export function WorkspaceChooser() {
       }
     }
   };
-  const initialize = async () => {
-    const path = await bridge.selectDirectory(t('Initialize Repository'));
-    if (!path || !await openWorkspace([path])) return;
-    await initializeRepository(path);
-  };
 
   const handleRecentClick = (event: React.MouseEvent, paths: string[]) => {
     if (event.metaKey || event.ctrlKey) {
@@ -50,8 +43,6 @@ export function WorkspaceChooser() {
     const q = filterText.trim().toLowerCase();
     return recent.filter((w) => w.name.toLowerCase().includes(q) || w.paths.some((p) => p.toLowerCase().includes(q)));
   }, [recent, filterText]);
-
-  const isMac = bridge.platform() === 'macos';
 
   return (
     <main className="welcome-container">
@@ -93,11 +84,6 @@ export function WorkspaceChooser() {
                 <span className="welcome-action-title">{t('Open Local Folder')}</span>
                 <span className="welcome-action-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
               </div>
-              <span className="welcome-action-shortcut">{isMac ? '⌘ O' : 'Ctrl+O'}</span>
-            </button>
-            <button type="button" className="welcome-action-btn" disabled={busy || !initializeAvailable} onClick={() => void initialize()}>
-              <div className="welcome-action-icon"><Codicon name="repo-create" /></div>
-              <div className="welcome-action-text"><span className="welcome-action-title">{t('Initialize Repository')}</span><span className="welcome-action-desc">{t('Create a Git repository in a selected folder.')}</span></div>
             </button>
             <button type="button" className="welcome-action-btn" disabled={busy || !cloneAvailable} onClick={() => setCheckoutKind('git')}>
               <div className="welcome-action-icon"><Codicon name="repo-clone" /></div>
@@ -106,21 +92,6 @@ export function WorkspaceChooser() {
             <button type="button" className="welcome-action-btn" disabled={busy || !svnAvailable} onClick={() => setCheckoutKind('svn')}>
               <div className="welcome-action-icon"><Codicon name="cloud-download" /></div>
               <div className="welcome-action-text"><span className="welcome-action-title">{t('Checkout SVN Repository')}</span><span className="welcome-action-desc">{t('Check out an SVN repository into a local folder.')}</span></div>
-            </button>
-            <button
-              type="button"
-              className="welcome-action-btn"
-              disabled={busy}
-              onClick={() => void choose(true)}
-            >
-              <div className="welcome-action-icon">
-                <Codicon name="window" />
-              </div>
-              <div className="welcome-action-text">
-                <span className="welcome-action-title">{t('Open in New Window')}</span>
-                <span className="welcome-action-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
-              </div>
-              <span className="welcome-action-shortcut">{isMac ? '⇧⌘ O' : 'Ctrl+Shift+O'}</span>
             </button>
           </div>
 

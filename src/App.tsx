@@ -24,6 +24,7 @@ import { AboutDialog } from './components/AboutDialog';
 import { OutputPanel } from './components/OutputPanel/OutputPanel';
 import { choiceDialog } from './components/dialogService';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './components/RepositoryCheckoutDialog';
+import { startupTransferTab } from './windowing/startupTabTransfer';
 
 const UI_FONT_SIZE = {
   minimum: { pixels: '11px', scale: '0.8461538462' },
@@ -66,6 +67,8 @@ export function App() {
   const [dropActive, setDropActive] = useState(false);
   const [checkoutKind, setCheckoutKind] = useState<RepositoryCheckoutKind>();
   const focusFetchRunning = useRef(false);
+  const [startupTab] = useState(startupTransferTab);
+  const startupTabTransfer = useRef(new URLSearchParams(window.location.search).has('tabTransfer'));
   const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
   const languagePreference = bootstrap?.state.settings?.language ?? bootstrap?.state.language ?? 'system';
   const uiFontSize = bootstrap?.state.settings?.uiFontSize ?? bootstrap?.state.uiFontSize ?? 'standard';
@@ -85,6 +88,13 @@ export function App() {
   const comparisonDiffOpen = mode === 'diff' && Boolean(comparisonTarget);
   const checkoutTarget = splitCheckoutTarget(snapshot?.workspace.paths[0] ?? '');
   const resizeCommit = useResizable(commitWidth, 280, 620, (value) => setPanelSize('commit', value));
+
+  useEffect(() => {
+    if (!startupTab) return;
+    // The first render already contains the transferred tab. Repository loading
+    // continues independently of revealing the native window.
+    void bridge.window.show().catch((error) => console.warn('Unable to show transferred window', error));
+  }, [bridge, startupTab]);
 
   useEffect(() => {
     const handleFocus = () => {
@@ -151,6 +161,7 @@ export function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!useAppStore.getState().snapshot) return;
       const isCmdOrCtrl = event.metaKey || event.ctrlKey;
       if (isCmdOrCtrl && event.key.toLowerCase() === 'w' && !event.shiftKey && !event.altKey) {
         const activeId = useAppStore.getState().activeTabId;
@@ -187,6 +198,12 @@ export function App() {
   const hasSnapshot = Boolean(snapshot);
   useEffect(() => {
     if (!ready) return;
+    // The transferred window already has the source size and drop position.
+    // Skip both startup sizing passes; later empty/workspace transitions still resize.
+    if (startupTabTransfer.current) {
+      if (hasSnapshot) startupTabTransfer.current = false;
+      return;
+    }
     if (hasSnapshot) {
       void bridge.window.setSize(0, 0, true);
     } else {
@@ -198,8 +215,8 @@ export function App() {
 
   return <I18nContext.Provider value={{ language, preference: languagePreference, t }}>
     <div className="app-shell">
-      <TitleBar />
-      {!ready ? <div className="startup"><Codicon name="loading codicon-modifier-spin" />{t('Loading workspace…')}</div> : !snapshot ? <WorkspaceChooser /> : (
+      <TitleBar startupTab={!ready && !snapshot ? startupTab : undefined} />
+      {!ready && !snapshot ? <div className="startup"><Codicon name="loading codicon-modifier-spin" />{t('Loading workspace…')}</div> : !snapshot ? <WorkspaceChooser /> : (
         <main className="main-workspace">
           <div style={{ width: commitWidth }} className="commit-slot"><CommitPanel key={snapshot.workspace.id} /></div>
           <div className="resize-handle" role="separator" tabIndex={0} aria-label={t('Resize commit panel')} aria-orientation="vertical" aria-valuemin={280} aria-valuemax={620} aria-valuenow={commitWidth} onPointerDown={resizeCommit} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('commit', Math.min(620, Math.max(280, commitWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />

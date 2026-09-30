@@ -36,6 +36,7 @@ export interface SubtreePushStatus {
 export type SubtreeOp = 'add' | 'pull' | 'push' | 'split' | 'merge' | 'remove' | 'register' | 'edit' | 'delete';
 
 export interface SubtreePanelProps {
+  active?: boolean;
   repos?: RepositoryStatus[];
   entries?: NormalizedSubtreeEntry[] | BoundSubtreeEntry[];
   repoMetas?: Array<{ id: string; name: string; color: string }>;
@@ -390,6 +391,7 @@ function RepoSection({
 }
 
 export function SubtreePanel({
+  active: isActive = true,
   repos = [],
   entries: explicitEntries,
   repoMetas: explicitRepoMetas,
@@ -420,13 +422,13 @@ export function SubtreePanel({
   const [loadedStatuses, setLoadedStatuses] = useState<Record<string, SubtreePushStatus | undefined>>({});
 
   useEffect(() => {
-    if (!explicitEntries && repos.length > 0) {
+    if (isActive && !explicitEntries && repos.length > 0) {
       for (const repo of repos) {
         const state = useAppStore.getState();
         if (!state.subtrees[repo.meta.id] && !state.loadErrors[`subtrees:${repo.meta.id}`]) void loadSubtrees(repo.meta.id);
       }
     }
-  }, [explicitEntries, loadSubtrees, repos]);
+  }, [isActive, explicitEntries, loadSubtrees, repos]);
 
   const resolvedRepoMetas = useMemo(() => {
     if (explicitRepoMetas) return explicitRepoMetas;
@@ -448,7 +450,7 @@ export function SubtreePanel({
   }, [explicitEntries, repos, storeSubtrees]);
 
   useEffect(() => {
-    if (explicitEntries || !bridge || !workspaceId || repos.length === 0) return;
+    if (!isActive || explicitEntries || !bridge || !workspaceId || repos.length === 0) return;
     let active = true;
     const controller = new AbortController();
     void Promise.all(repos.map(async (repo) => {
@@ -486,7 +488,7 @@ export function SubtreePanel({
       setLoadedStatuses(next);
     });
     return () => { active = false; controller.abort(); };
-  }, [bridge, explicitEntries, repos, resolvedEntries, t, workspaceId]);
+  }, [isActive, bridge, explicitEntries, repos, resolvedEntries, t, workspaceId]);
   const resolvedStatuses = explicitEntries ? statuses : loadedStatuses;
 
   const grouped = useMemo(() => {

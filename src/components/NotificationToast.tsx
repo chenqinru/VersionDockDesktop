@@ -48,7 +48,7 @@ function ToastItem({
         <div className={`notification-severity-icon ${notification.type}`}>
           <Codicon name={notification.type === 'error' ? 'error' : notification.type === 'warning' ? 'warning' : 'info'} />
         </div>
-        <div className="toast-message" title={resolveNotificationText(notification.title, t)}>{resolveNotificationText(notification.message, t)}</div>
+        <div className="toast-message" title={resolveNotificationText(notification.title, t)}>{resolveNotificationText(notification.message, t)}{notification.progressMessage && <> {resolveNotificationText(notification.progressMessage, t)}</>}</div>
         {!notification.progress && <button
           type="button"
           className="toast-close"

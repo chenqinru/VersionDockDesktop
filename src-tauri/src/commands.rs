@@ -49,7 +49,9 @@ pub fn follow_tab_drag_preview(
                 let x = (cursor.x - f64::from(size.width) / 2.0).round() as i32;
                 let y = (cursor.y - f64::from(size.height) / 2.0).round() as i32;
                 let _ = preview.set_position(tauri::PhysicalPosition::new(x, y));
-                if last_broadcast.elapsed() >= std::time::Duration::from_millis(16) {
+                if preview.is_visible().unwrap_or(false)
+                    && last_broadcast.elapsed() >= std::time::Duration::from_millis(16)
+                {
                     let scale = preview.scale_factor().unwrap_or(1.0).max(f64::EPSILON);
                     let mut target_window_label: Option<String> = None;
                     let mut target_client_x: Option<f64> = None;
@@ -1720,6 +1722,10 @@ async fn dispatch(
                 .title(" ")
                 .inner_size(width.unwrap_or(880.0), height.unwrap_or(540.0))
                 .min_inner_size(800.0, 480.0)
+                // The frontend reveals a transfer after rendering its initial tab,
+                // without waiting for the workspace scan and repository panels.
+                .visible(transfer.is_none())
+                .focused(transfer.is_none())
                 .resizable(true);
 
             #[cfg(target_os = "macos")]
@@ -1754,8 +1760,10 @@ async fn dispatch(
                 let _ = window.set_title_bar_overlay(true);
             }
 
-            let _ = window.show();
-            let _ = window.set_focus();
+            if transfer.is_none() {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
 
             json(label)
         }
@@ -1997,6 +2005,14 @@ async fn dispatch(
                     "The tab transfer target does not match the invoking window",
                     false,
                 ));
+            }
+            // Fallback if the first-render reveal failed, including failed imports.
+            // Do not steal focus again when background loading finishes.
+            if !invoking_window.is_visible().unwrap_or(false) {
+                invoking_window.show().map_err(|error| {
+                    DesktopError::new("WINDOW_SHOW_FAILED", error.to_string(), true)
+                })?;
+                let _ = invoking_window.set_focus();
             }
             let Some(source) = app.get_webview_window(&source_window_label) else {
                 return json(false);
@@ -2723,7 +2739,8 @@ async fn dispatch(
                     None,
                 );
                 let settings = state.app.read().await.settings.clone();
-                Box::pin(vcs::sync(
+                Box::pin(vcs::sync_with_worktree_backup(
+                    &state.config_dir,
                     &repo,
                     action,
                     remote,

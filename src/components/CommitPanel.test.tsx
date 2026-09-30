@@ -70,8 +70,8 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [changedRepo, emptyRepo] }, selectedRepoId: 'repo' });
     const { container } = renderPanel();
     expect(container.querySelector('.panel-toolbar [title="Rollback"]')).not.toBeInTheDocument();
-    expect(screen.getByTitle('More')).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('More'));
+    expect(screen.getByTitle('More Actions...')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('More Actions...'));
     expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Collapse all' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stage' })).not.toBeInTheDocument();
@@ -98,10 +98,10 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getAllByText('No changes')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: /Empty Two/ }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
-    fireEvent.click(screen.getByTitle('More'));
+    fireEvent.click(screen.getByTitle('More Actions...'));
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('More'));
+    fireEvent.click(screen.getByTitle('More Actions...'));
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
   });
@@ -112,7 +112,7 @@ describe('CommitPanel capabilities and file view', () => {
     renderPanel();
 
     fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
-    fireEvent.click(screen.getByTitle('More'));
+    fireEvent.click(screen.getByTitle('More Actions...'));
 
     expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveClass('selected');
     expect(screen.getByRole('button', { name: 'Collapse all' })).not.toHaveClass('selected');
@@ -266,24 +266,24 @@ describe('CommitPanel capabilities and file view', () => {
     data.state.layout = { panelSizes: { commit: 360, branches: 220, detail: 360 }, activeTab: 'stash', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
     useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo' });
     renderPanel();
-    fireEvent.click(screen.getByTitle('More'));
+    fireEvent.click(screen.getByTitle('More Actions...'));
     fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'View options' }));
     fireEvent.click(screen.getByRole('button', { name: 'Flat list' }));
     expect(useAppStore.getState().bootstrap?.state.layout?.stashViewMode).toBe('list');
     expect(useAppStore.getState().bootstrap?.state.layout?.fileViewMode).toBe('tree');
   });
 
-  it('delegates stash refresh to the workspace refresh without a duplicate panel request', async () => {
+  it('refreshes panel status and stash data once without reloading the workspace log', async () => {
     const data = bootstrap(true);
     data.state.layout = { panelSizes: { commit: 360, branches: 220, detail: 380 }, activeTab: 'stash', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
     const refresh = vi.fn().mockResolvedValue(undefined);
     const loadStashes = vi.fn().mockResolvedValue(undefined);
-    useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo', refresh, loadStashes });
+    useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo', stashes: { repo: [] }, refresh, loadStashes });
     renderPanel();
     loadStashes.mockClear();
-    fireEvent.click(screen.getAllByTitle('Refresh')[0]);
-    await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
-    expect(loadStashes).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTitle('VersionDock: Refresh Commit Panel'));
+    await waitFor(() => expect(loadStashes).toHaveBeenCalledOnce());
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(false, { reloadRepository: false });
   });
 
   it('shows shelf only after its storage and backend capability is enabled', () => {
@@ -369,9 +369,9 @@ describe('CommitPanel capabilities and file view', () => {
     const { container } = render(<BridgeContext.Provider value={diffBridge}><CommitPanel /></BridgeContext.Provider>);
     expect(container.querySelector('.branch-working-diff-panel')).toBeInTheDocument();
     expect(screen.getByTitle('VersionDock Commit')).toBeInTheDocument();
-    expect(screen.getByTitle('Fetch')).toBeInTheDocument();
-    expect(screen.getByTitle('Refresh')).toBeInTheDocument();
-    expect(screen.getByTitle('Settings')).toBeInTheDocument();
+    expect(screen.getByTitle('VersionDock: Update Project')).toBeInTheDocument();
+    expect(screen.getByTitle('VersionDock: Refresh Commit Panel')).toBeInTheDocument();
+    expect(screen.getByTitle('VersionDock: Settings')).toBeInTheDocument();
     expect(container.querySelector('.commit-tabs')).not.toBeInTheDocument();
     expect(screen.getByText('refs/remotes/origin/feature vs Working Tree')).toBeInTheDocument();
     expect(screen.getByTitle('src')).toHaveTextContent('2');
@@ -463,7 +463,7 @@ describe('CommitPanel capabilities and file view', () => {
     const { container } = render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
 
     // 1. 验证顶栏中的全选按钮
-    const selectAllBtn = container.querySelector('.panel-toolbar button[title="Select All"]');
+    const selectAllBtn = container.querySelector('.panel-toolbar button[title="VersionDock: Select All"]');
     expect(selectAllBtn).toBeInTheDocument();
     expect(selectAllBtn?.querySelector('.custom-icon')).toBeInTheDocument();
 
@@ -472,7 +472,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(useAppStore.getState().commitSelections['repo']).toEqual(['src/file1.ts', 'src/file2.ts']);
 
     // 全选后变为反选
-    const invertBtn = container.querySelector('.panel-toolbar button[title="Invert Selection"]');
+    const invertBtn = container.querySelector('.panel-toolbar button[title="VersionDock: Invert Selection"]');
     expect(invertBtn).toBeInTheDocument();
     expect(invertBtn?.querySelector('.custom-icon')).toBeInTheDocument();
 
@@ -481,7 +481,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(useAppStore.getState().commitSelections['repo'] ?? []).toEqual([]);
 
     // 2. 验证顶栏管理远端账号按钮
-    const remoteAccountsBtn = container.querySelector('.panel-toolbar button[title="Manage Remote Accounts"]');
+    const remoteAccountsBtn = container.querySelector('.panel-toolbar button[title="VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)"]');
     expect(remoteAccountsBtn).toBeInTheDocument();
     expect(remoteAccountsBtn?.querySelector('.codicon-account')).toBeInTheDocument();
 
@@ -490,11 +490,11 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByRole('dialog', { name: 'Remote Providers' })).toBeInTheDocument();
 
     // 3. 验证更多菜单中不再包含全选和反选
-    const moreBtn = container.querySelector('.panel-toolbar button[title="More"]');
+    const moreBtn = container.querySelector('.panel-toolbar button[title="More Actions..."]');
     expect(moreBtn).toBeInTheDocument();
     fireEvent.click(moreBtn!);
-    expect(screen.queryByText('Select All', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Invert Selection', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
+    expect(screen.queryByText('VersionDock: Select All', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
+    expect(screen.queryByText('VersionDock: Invert Selection', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
   });
 
   it('calculates commit targets for pure SVN workspace in VS Code mode', async () => {
@@ -955,7 +955,7 @@ describe('CommitPanel capabilities and file view', () => {
 
     renderPanel();
 
-    const triggerBtn = screen.getByRole('button', { name: 'Resolve Conflicts' });
+    const triggerBtn = screen.getByRole('button', { name: 'VersionDock: Resolve Conflicts' });
     expect(triggerBtn).toBeInTheDocument();
 
     // 点击打开弹窗
@@ -998,7 +998,7 @@ describe('CommitPanel capabilities and file view', () => {
 
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resolve Conflicts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'VersionDock: Resolve Conflicts' }));
     const abortItem = screen.getByRole('menuitem', { name: /Abort Cherry-pick/ });
     expect(abortItem).toBeInTheDocument();
 

@@ -546,10 +546,9 @@ export function CommitPanel() {
   }), [repos, speedNeedle]);
   const totalChanges = repos.reduce((sum, repo) => sum + repo.files.length, 0);
   const gitRepos = useMemo(() => repos.filter((repo) => repo.meta.kind === 'git'), [repos]);
-  const fetchTargets = gitRepos.filter((repo) => !isOperationActiveForRepositories(operations, [repo.meta.id], {
-    workspaceId: snapshot?.workspace.id,
-    domain: 'sync',
-  }));
+  const updateProject = useAppStore((state) => state.updateProject);
+  const [toolbarAction, setToolbarAction] = useState<'refresh' | 'update' | undefined>();
+  const toolbarActionRef = useRef<'refresh' | 'update' | undefined>();
   const unpushedCommits = useAppStore((state) => state.unpushedCommits);
   const incomingCommits = useAppStore((state) => state.incomingCommits);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
@@ -564,13 +563,31 @@ export function CommitPanel() {
     return sum + (unpushedCommits[r.meta.id]?.length ?? (r.ahead || 0));
   }, 0), [branchesByRepo, gitRepos, unpushedCommits]);
   const totalToSync = useMemo(() => totalToPush + gitRepos.reduce((sum, repo) => sum + Math.max(repo.behind, incomingCommits[repo.meta.id]?.length ?? 0), 0), [gitRepos, incomingCommits, totalToPush]);
-  const refreshPanel = async () => {
-    lastTabSyncAtRef.current[tab] = Date.now();
-    const store = useAppStore.getState();
-    await store.refresh();
-    if (useAppStore.getState().snapshot?.workspace.id !== snapshot?.workspace.id) return;
-    if (tab === 'changes' && changelistEnabled) await store.loadChangelists();
+  const runToolbarAction = async (action: 'refresh' | 'update', operation: () => Promise<void>) => {
+    if (toolbarActionRef.current) return;
+    toolbarActionRef.current = action;
+    setToolbarAction(action);
+    try {
+      await operation();
+    } catch (error) {
+      useAppStore.getState().addNotification({ type: 'error', title: action === 'update' ? 'Project update' : 'Workspace refresh failed', message: String(error), workspaceId: snapshot?.workspace.id });
+    } finally {
+      toolbarActionRef.current = undefined;
+      setToolbarAction(undefined);
+    }
   };
+  const refreshPanel = () => runToolbarAction('refresh', async () => {
+    lastTabSyncAtRef.current = { [tab]: Date.now() };
+    const store = useAppStore.getState();
+    await store.refresh(false, { reloadRepository: false });
+    if (useAppStore.getState().snapshot?.workspace.id !== snapshot?.workspace.id) return;
+    const requests = [store.loadStashes(), store.loadShelves(), store.loadUnpushedCommits(), store.loadIncomingCommits()];
+    if (changelistCapability) requests.push(store.loadChangelists());
+    if (tab === 'worktree') requests.push(store.loadWorktrees());
+    else if (tab === 'submodule') requests.push(store.loadSubmodules());
+    else if (tab === 'subtree') requests.push(store.loadSubtrees());
+    await Promise.all(requests);
+  });
   const conflictingRepos = useMemo(
     () => repos.filter((repo) => repo.conflicts > 0 || repo.files.some((file) => file.conflicted)),
     [repos],
@@ -924,22 +941,12 @@ export function CommitPanel() {
   const [noVerify, setNoVerify] = useState(settingsNoVerify);
   const setFiles = useCallback((repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value), [setCommitSelection]);
   const isVscode = changesDisplayMode === 'vscode';
-  const changesTotalFiles = repos.reduce((sum, repo) => sum + repo.files.length, 0);
+  const changesTotalFiles = repos.reduce((sum, repo) => sum + repo.files.filter((file) => !file.isTruncated).length, 0);
   const changesHasSelectable = changesTotalFiles > 0;
   const changesIsAllSelected = useMemo(() => {
     if (!changesHasSelectable) return false;
-    if (isVscode) {
-      return repos.every((repo) => {
-        if (repo.meta.kind === 'svn') {
-          return repo.files.every((file) => selected.has(`${repo.meta.id}\0${file.path}`));
-        }
-        const hasUnstaged = repo.files.some((file) => file.unstaged || file.status === 'untracked');
-        const hasStaged = repo.files.some((file) => file.staged);
-        return !hasUnstaged && hasStaged;
-      });
-    }
-    return repos.every((repo) => repo.files.every((file) => selected.has(`${repo.meta.id}\0${file.path}`)));
-  }, [changesHasSelectable, isVscode, repos, selected]);
+    return repos.every((repo) => repo.files.filter((file) => !file.isTruncated).every((file) => selected.has(`${repo.meta.id}\0${file.path}`)));
+  }, [changesHasSelectable, repos, selected]);
   const canSelectAll = tab === 'changes' || tab === 'sync';
   const currentTabHasSelectable = tab === 'changes'
     ? changesHasSelectable
@@ -953,50 +960,25 @@ export function CommitPanel() {
       : false;
   const handleSelectAll = useCallback(() => {
     if (tab === 'changes') {
-      if (isVscode) {
-        for (const repo of repos) {
-          if (repo.meta.kind === 'git') {
-            const unstaged = repo.files.filter((f) => f.unstaged || f.status === 'untracked').map((f) => f.path);
-            if (unstaged.length > 0) void stage(repo.meta.id, unstaged);
-          } else {
-            setFiles(repo.meta.id, repo.files.map((file) => file.path), true);
-          }
-        }
-      } else {
-        for (const repo of repos) {
-          setFiles(repo.meta.id, repo.files.map((file) => file.path), true);
-        }
+      for (const repo of repos) {
+        setFiles(repo.meta.id, repo.files.filter((file) => !file.isTruncated).map((file) => file.path), true);
       }
     } else if (tab === 'sync') {
       setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'selectAll' }));
     }
-  }, [isVscode, repos, setFiles, stage, tab]);
+  }, [repos, setFiles, tab]);
   const handleInvertSelection = useCallback(() => {
     if (tab === 'changes') {
-      if (isVscode) {
-        for (const repo of repos) {
-          if (repo.meta.kind === 'git') {
-            const staged = repo.files.filter((f) => f.staged).map((f) => f.path);
-            if (staged.length > 0) void unstage(repo.meta.id, staged);
-          } else {
-            const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []);
-            const allPaths = repo.files.map((file) => file.path);
-            setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false);
-            setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true);
-          }
-        }
-      } else {
-        for (const repo of repos) {
-          const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []);
-          const allPaths = repo.files.map((file) => file.path);
-          setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false);
-          setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true);
-        }
+      for (const repo of repos) {
+        const selectedPaths = new Set(commitSelections[repo.meta.id] ?? []);
+        const allPaths = repo.files.filter((file) => !file.isTruncated).map((file) => file.path);
+        setFiles(repo.meta.id, allPaths.filter((path) => selectedPaths.has(path)), false);
+        setFiles(repo.meta.id, allPaths.filter((path) => !selectedPaths.has(path)), true);
       }
     } else if (tab === 'sync') {
       setSyncSelectionCommand((current) => ({ sequence: current.sequence + 1, action: 'invert' }));
     }
-  }, [commitSelections, isVscode, repos, setFiles, tab, unstage]);
+  }, [commitSelections, repos, setFiles, tab]);
   const doCommit = async (push: boolean) => {
     if (!message.trim() || !commitTargets.length || commitBusy || isSubmitting || commitUnavailable || (push && pushUnavailable)) return;
     const targetWid = snapshot?.workspace.id ?? useAppStore.getState().snapshot?.workspace.id ?? '';
@@ -1746,8 +1728,8 @@ export function CommitPanel() {
           ref={conflictButtonRef}
           type="button"
           className={totalConflicts > 0 ? 'conflict-warning-button pulsing' : 'conflict-warning-button'}
-          title={totalConflicts > 0 ? t('Resolve Conflicts') : continueLabel}
-          aria-label={totalConflicts > 0 ? t('Resolve Conflicts') : continueLabel}
+          title={totalConflicts > 0 ? t('VersionDock: Resolve Conflicts') : continueLabel}
+          aria-label={totalConflicts > 0 ? t('VersionDock: Resolve Conflicts') : continueLabel}
           aria-haspopup="menu"
           aria-expanded={conflictMenuOpen}
           onClick={(e) => {
@@ -1876,11 +1858,12 @@ export function CommitPanel() {
         )}
       </div>
     )}
-    {canSelectAll && (
+    {canSelectAll && currentTabHasSelectable && (
       <button
-        disabled={workspaceBusy || !currentTabHasSelectable}
-        title={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
-        aria-label={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
+        className="panel-selection-action"
+        disabled={workspaceBusy || Boolean(toolbarAction)}
+        title={currentTabIsAllSelected ? t('VersionDock: Invert Selection') : t('VersionDock: Select All')}
+        aria-label={currentTabIsAllSelected ? t('VersionDock: Invert Selection') : t('VersionDock: Select All')}
         onClick={() => {
           if (currentTabIsAllSelected) {
             handleInvertSelection();
@@ -1892,11 +1875,11 @@ export function CommitPanel() {
         {currentTabIsAllSelected ? <InvertSelectionIcon /> : <SelectAllIcon />}
       </button>
     )}
-    <button disabled={workspaceBusy || fetchTargets.length === 0} title={t('Fetch')} onClick={() => void useAppStore.getState().fetchRepositories(fetchTargets.map((repo) => repo.meta.id))}><Codicon name="cloud-download" /></button>
-    <button disabled={workspaceBusy} title={t('Refresh')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></button>
+    <button disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Update Project')} aria-label={t('VersionDock: Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></button>
+    <button disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Refresh Commit Panel')} aria-label={t('VersionDock: Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></button>
     <button
-      title={t('Manage Remote Accounts')}
-      aria-label={t('Manage Remote Accounts')}
+      title={t('VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)')}
+      aria-label={t('VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)')}
       onClick={() => {
         setViewMenu(false);
         setSettings(false);
@@ -1905,9 +1888,9 @@ export function CommitPanel() {
     >
       <Codicon name="account" />
     </button>
-    <button className={settings ? 'selected' : ''} title={t('Settings')} aria-label={t('Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></button>
+    <button className={settings ? 'selected' : ''} title={t('VersionDock: Settings')} aria-label={t('VersionDock: Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></button>
     <div ref={viewMenuRef} className="view-options panel-view-options">
-      <button title={t('More')} aria-label={t('More')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu('expand'); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></button>
+      <button title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu('expand'); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></button>
       {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
         <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('expand')} onFocus={() => setViewSubmenu('expand')}>
           <button type="button" role="menuitem" className={viewSubmenu === 'expand' ? 'active' : ''} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
@@ -2263,7 +2246,7 @@ export function CommitPanel() {
       )}
       {visitedTabs.has('subtree') && (
         <div className="commit-tab-content subtree-tab-content" style={{ display: tab === 'subtree' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-          <SubtreePanel repos={gitRepos} />
+          <SubtreePanel repos={gitRepos} active={tab === 'subtree'} />
         </div>
       )}
       {visitedTabs.has('submodule') && (

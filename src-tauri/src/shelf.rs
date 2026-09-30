@@ -102,11 +102,11 @@ pub async fn operate(
 ) -> Result<(), DesktopError> {
     ensure_git(repo)?;
     match operation {
-        ShelfOperation::Create { name, paths } => {
-            create(config_dir, repo, &name, &paths, token).await
-        }
+        ShelfOperation::Create { name, paths } => create(config_dir, repo, &name, &paths, token)
+            .await
+            .map(|_| ()),
         ShelfOperation::Apply { shelf_id, paths } => {
-            apply(config_dir, repo, &shelf_id, paths.as_deref(), token).await
+            apply(config_dir, repo, &shelf_id, paths.as_deref(), false, token).await
         }
         ShelfOperation::Drop { shelf_id } => drop_shelf(config_dir, repo, &shelf_id).await,
     }
@@ -168,13 +168,13 @@ pub async fn file_diff(
     })
 }
 
-async fn create(
+pub(crate) async fn create(
     config_dir: &Path,
     repo: &RepositoryMeta,
     name: &str,
     paths: &[String],
     token: &CancellationToken,
-) -> Result<(), DesktopError> {
+) -> Result<String, DesktopError> {
     let name = name.trim();
     if name.is_empty() || name.len() > 200 || name.contains('\0') {
         return Err(DesktopError::new(
@@ -334,7 +334,17 @@ async fn create(
         restore_captured(repo, &hash, stash_ref, token).await?;
         return Err(error);
     }
-    drop_captured(repo, &hash, stash_ref, token).await
+    drop_captured(repo, &hash, stash_ref, token).await?;
+    Ok(id)
+}
+
+pub(crate) async fn restore_after_update(
+    config_dir: &Path,
+    repo: &RepositoryMeta,
+    shelf_id: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    apply(config_dir, repo, shelf_id, None, true, token).await
 }
 
 async fn apply(
@@ -342,6 +352,7 @@ async fn apply(
     repo: &RepositoryMeta,
     shelf_id: &str,
     paths: Option<&[String]>,
+    three_way: bool,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     validate_id(shelf_id)?;
@@ -365,6 +376,9 @@ async fn apply(
         "--binary".into(),
         "--whitespace=nowarn".into(),
     ];
+    if three_way {
+        args.push("--3way".into());
+    }
     if let Some(paths) = paths {
         let root = Path::new(&repo.root_path);
         for path in paths {

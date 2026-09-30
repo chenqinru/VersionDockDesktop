@@ -50,7 +50,7 @@ function transferId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function TitleBar() {
+export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = {}) {
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const addAnchorRef = useRef<HTMLButtonElement>(null);
@@ -68,8 +68,9 @@ export function TitleBar() {
   const suppressClickRef = useRef<string | null>(null);
   const bridge = useBridge();
   const platform = bridge.platform();
-  const tabs = useAppStore((state) => state.tabs);
-  const activeTabId = useAppStore((state) => state.activeTabId);
+  const loadedTabs = useAppStore((state) => state.tabs);
+  const tabs = loadedTabs.length === 0 && startupTab ? [startupTab] : loadedTabs;
+  const activeTabId = useAppStore((state) => state.activeTabId) ?? startupTab?.id;
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const recentWorkspaces = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
@@ -306,6 +307,7 @@ export function TitleBar() {
     point: ScreenPoint,
     sourceBounds: WindowBounds,
     attachToExisting = true,
+    createIfUnattached = true,
   ): Promise<boolean> => {
     if (transferringTabsRef.current.has(tab.id)) return false;
     transferringTabsRef.current.add(tab.id);
@@ -323,7 +325,7 @@ export function TitleBar() {
         y: point.screenY - 18,
         width: sourceBounds.width,
         height: sourceBounds.height,
-      }, attachToExisting);
+      }, attachToExisting, createIfUnattached);
     } catch (error) {
       useAppStore.getState().addNotification({ type: 'error', title: 'Workspace operation failed', message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: useAppStore.getState().snapshot?.workspace.id });
       return false;
@@ -337,14 +339,20 @@ export function TitleBar() {
     point: ScreenPoint,
     sourceBounds: WindowBounds,
     attachToExisting: boolean,
+    createIfUnattached = true,
   ) => {
-    setPendingTransferTabIds((current) => new Set(current).add(tab.id));
-    const isLastTab = useAppStore.getState().tabs.length <= 1;
+    if (createIfUnattached) setPendingTransferTabIds((current) => new Set(current).add(tab.id));
     try {
-      const accepted = await completeTransfer(tab, point, sourceBounds, attachToExisting);
-      if (!accepted) return;
+      const accepted = await completeTransfer(tab, point, sourceBounds, attachToExisting, createIfUnattached);
+      if (!accepted) return false;
+      const remainingTabs = useAppStore.getState().tabs;
+      if (remainingTabs.length === 1 && remainingTabs[0].id === tab.id) {
+        // Close the native window before clearing its last tab, so it cannot
+        // briefly render and resize into the welcome screen.
+        await bridge.window.close();
+      }
       await closeTab(tab.id);
-      if (isLastTab && useAppStore.getState().tabs.length === 0) await bridge.window.close();
+      return true;
     } finally {
       setPendingTransferTabIds((current) => {
         const next = new Set(current);
@@ -368,6 +376,7 @@ export function TitleBar() {
   };
 
   const beginTabPointerDrag = (event: React.PointerEvent<HTMLDivElement>, tab: WorkspaceDescriptor) => {
+    if (startupTab?.id === tab.id) return;
     if (event.button !== 0 || transferringTabsRef.current.has(tab.id) || (event.target instanceof Element && event.target.closest('button'))) return;
     const element = event.currentTarget;
     const tabRect = element.getBoundingClientRect();
@@ -409,6 +418,61 @@ export function TitleBar() {
     };
     activeTabDragRef.current = drag;
     element.setPointerCapture(event.pointerId);
+
+    const singleTabWindow = useAppStore.getState().tabs.length === 1;
+    let movesWindow: boolean | null = singleTabWindow ? null : false;
+    let latestPointer: PointerEvent | undefined;
+    let awaitingRelease = false;
+    let previewWarmed = false;
+    const warmPreview = () => {
+      if (previewWarmed || activeTabDragRef.current !== drag) return;
+      previewWarmed = true;
+      void tabDragPreviewWindow.prepare({
+        sourceWindowLabel: windowLabelRef.current,
+        tabId: tab.id,
+        tabName: tab.name,
+        tabWidth,
+        paths: tab.paths,
+      }, drag.lastPoint, document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+    };
+    // No drag mode is selected until enumeration finishes, even for a fast gesture.
+    const modeReady = singleTabWindow
+      ? bridge.window.hasOtherWorkspaceWindows().catch((error) => {
+        console.warn('Unable to enumerate workspace windows', error);
+        return false;
+      }).then((hasOtherWindows) => {
+        movesWindow = !hasOtherWindows;
+        if (!movesWindow) warmPreview();
+        if (latestPointer && activeTabDragRef.current === drag) move(latestPointer);
+      })
+      : Promise.resolve();
+    const nativeGeometry = singleTabWindow ? bridge.window.dragGeometry().catch(() => null) : Promise.resolve(null);
+    let pendingWindowPoint: ScreenPoint | null = null;
+    let movingWindow: Promise<void> | undefined;
+    let moveFrame: number | undefined;
+    const moveWindow = async (point: ScreenPoint) => {
+      const geometry = await nativeGeometry;
+      const origin = geometry?.sourceBounds ?? drag.sourceBounds;
+      await bridge.window.setPosition(
+        origin.x + point.screenX - drag.startPoint.screenX,
+        origin.y + point.screenY - drag.startPoint.screenY,
+      );
+    };
+    const scheduleWindowMove = () => {
+      if (moveFrame !== undefined || movingWindow || !pendingWindowPoint) return;
+      moveFrame = requestAnimationFrame(() => {
+        moveFrame = undefined;
+        const point = pendingWindowPoint;
+        pendingWindowPoint = null;
+        if (!point) return;
+        movingWindow = moveWindow(point)
+          .catch((error) => console.warn('Unable to move tab window', error))
+          .finally(() => {
+            movingWindow = undefined;
+            scheduleWindowMove();
+          });
+      });
+    };
 
     const publishDrag = (point: ScreenPoint) => {
       void bridge.broadcastTabDragState({
@@ -469,19 +533,34 @@ export function TitleBar() {
       if (pointer.pointerId !== drag.pointerId || activeTabDragRef.current !== drag) return;
       const point = dragPoint(pointer, drag.lastPoint);
       drag.lastPoint = point;
-      const travelledDistance = Math.hypot(
+      latestPointer = pointer;
+      if (movesWindow === null) return;
+      const travelledDistance = movesWindow ? Math.hypot(
+        point.screenX - drag.startPoint.screenX,
+        point.screenY - drag.startPoint.screenY,
+      ) : Math.hypot(
         pointer.clientX - drag.startClientX,
         pointer.clientY - drag.startClientY,
       );
       if (!drag.started && travelledDistance < 4) return;
       if (!drag.started) {
         drag.started = true;
-        setDraggingTabId(tab.id);
+        if (!movesWindow) setDraggingTabId(tab.id);
         document.body.classList.add('is-dragging-tab');
         void bridge.window.setCursorIcon('grabbing');
         publishDrag(point);
       }
       pointer.preventDefault();
+      if (movesWindow) {
+        pendingWindowPoint = point;
+        scheduleWindowMove();
+        const now = performance.now();
+        if (now - drag.lastBroadcastAt >= 32) {
+          drag.lastBroadcastAt = now;
+          publishDrag(point);
+        }
+        return;
+      }
       const detaching = !isInSourceTitleBar(pointer)
         && shouldDetachTab(point, drag.sourceBounds, travelledDistance);
       if (!detaching) {
@@ -492,21 +571,13 @@ export function TitleBar() {
       }
       if (detaching && !drag.previewPrepared) {
         drag.previewPrepared = true;
-        void tabDragPreviewWindow.prepare(
-          {
-            sourceWindowLabel: windowLabelRef.current,
-            tabId: tab.id,
-            tabName: tab.name,
-            tabWidth,
-            paths: tab.paths,
-          },
-          point,
-          document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
-        );
+        warmPreview();
         tabDragPreviewWindow.activate();
       } else if (!detaching && drag.previewPrepared) {
         drag.previewPrepared = false;
-        tabDragPreviewWindow.hide();
+        void tabDragPreviewWindow.deactivate().then(() => {
+          if (!tabDragPreviewWindow.tracking) return bridge.broadcastTabDragState(null);
+        });
       }
       document.body.classList.toggle('is-detaching-tab', detaching);
       if (drag.detaching !== detaching) {
@@ -523,7 +594,7 @@ export function TitleBar() {
         detaching,
       });
       const now = performance.now();
-      const nativePreviewOwnsTracking = '__TAURI_INTERNALS__' in window && drag.previewPrepared;
+      const nativePreviewOwnsTracking = '__TAURI_INTERNALS__' in window && tabDragPreviewWindow.tracking;
       if (!nativePreviewOwnsTracking && now - drag.lastBroadcastAt >= 32) {
         drag.lastBroadcastAt = now;
         publishDrag(point);
@@ -531,6 +602,9 @@ export function TitleBar() {
     };
 
     const cleanup = () => {
+      pendingWindowPoint = null;
+      if (moveFrame !== undefined) cancelAnimationFrame(moveFrame);
+      moveFrame = undefined;
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', finish, true);
       window.removeEventListener('pointercancel', cancel, true);
@@ -546,6 +620,15 @@ export function TitleBar() {
 
     const end = (pointer: PointerEvent, cancelled: boolean) => {
       if (pointer.pointerId !== drag.pointerId || activeTabDragRef.current !== drag) return;
+      if (awaitingRelease) return;
+      if (movesWindow === null) {
+        awaitingRelease = true;
+        void modeReady.then(() => {
+          awaitingRelease = false;
+          end(pointer, cancelled);
+        });
+        return;
+      }
       const point = dragPoint(pointer, drag.lastPoint);
       const travelledDistance = Math.hypot(
         pointer.clientX - drag.startClientX,
@@ -571,13 +654,30 @@ export function TitleBar() {
       setTimeout(() => {
         if (suppressClickRef.current === tab.id) suppressClickRef.current = null;
       });
+      if (movesWindow) {
+        void (async () => {
+          await movingWindow;
+          if (cancelled) return;
+          await moveWindow(point);
+          const dropGeometry = await bridge.window.dragGeometry().catch(() => null);
+          await transferTabWithImmediateVisualRemoval(tab, dropGeometry?.point ?? point, drag.sourceBounds, true, false);
+        })().catch((error) => {
+          useAppStore.getState().addNotification({ type: 'error', title: 'Workspace operation failed', message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: tab.id });
+        }).finally(() => { void bridge.broadcastTabDragState(null); });
+        return;
+      }
       if (!detaching) {
         void bridge.broadcastTabDragState(null);
         return;
       }
 
-      void transferTabWithImmediateVisualRemoval(tab, point, drag.sourceBounds, true)
-        .finally(() => { void bridge.broadcastTabDragState(null); });
+      void (async () => {
+        const accepted = await transferTabWithImmediateVisualRemoval(tab, point, drag.sourceBounds, true, !singleTabWindow);
+        // The last tab already has a window: an unattached drop repositions it.
+        if (singleTabWindow && !accepted) await moveWindow(point);
+      })().catch((error) => {
+        useAppStore.getState().addNotification({ type: 'error', title: 'Workspace operation failed', message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: tab.id });
+      }).finally(() => { void bridge.broadcastTabDragState(null); });
     };
 
     function finish(pointer: PointerEvent) { end(pointer, false); }
@@ -586,6 +686,7 @@ export function TitleBar() {
     window.addEventListener('pointermove', move, true);
     window.addEventListener('pointerup', finish, true);
     window.addEventListener('pointercancel', cancel, true);
+    if (!singleTabWindow) warmPreview();
   };
 
   const remoteInsertionActive = snapInsertionIndex !== null
@@ -652,6 +753,7 @@ export function TitleBar() {
                         transform: `translate3d(${dragTranslateX}px, 0, 0)${isLocalDragging ? ' scale(1.025)' : ''}`,
                       } : undefined}
                       onClick={(event) => {
+                        if (startupTab?.id === tab.id) return;
                         if (suppressClickRef.current === tab.id) {
                           suppressClickRef.current = null;
                           event.preventDefault();
@@ -662,6 +764,7 @@ export function TitleBar() {
                       }}
                       onContextMenu={(event) => {
                         event.preventDefault();
+                        if (startupTab?.id === tab.id) return;
                         setContextMenu({
                           visible: true,
                           x: event.clientX,
@@ -670,6 +773,7 @@ export function TitleBar() {
                         });
                       }}
                       onAuxClick={(event) => {
+                        if (startupTab?.id === tab.id) return;
                         if (event.button === 1) {
                           event.preventDefault();
                           void closeTab(tab.id);
@@ -688,6 +792,7 @@ export function TitleBar() {
                       <button
                         type="button"
                         className="titlebar-tab-close"
+                        disabled={startupTab?.id === tab.id}
                         aria-label={t('Close Tab')}
                         title={t('Close Tab')}
                         onClick={(event) => {
@@ -724,7 +829,7 @@ export function TitleBar() {
               aria-label={t('New Tab')}
               aria-hidden={draggingTabId !== null || remoteInsertionActive}
               title={t('Open Another Workspace')}
-              disabled={busy}
+              disabled={busy || Boolean(startupTab)}
               tabIndex={draggingTabId !== null || remoteInsertionActive ? -1 : undefined}
               onClick={toggleNewTabMenu}
             >
