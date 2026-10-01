@@ -5,9 +5,10 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { useBridge } from '../platform/context';
-import type { TabDragPayload } from '../platform/bridge';
+import type { TabDragPayload, WindowDragGeometry } from '../platform/bridge';
 import type { WindowTabTransfer, WorkspaceDescriptor } from '../bindings/generated';
 import { dragPoint, shouldDetachTab, tabSnapInsertionIndex, type ScreenPoint, type WindowBounds } from '../windowing/tabDrag';
+import { TabStripAutoScroller } from '../windowing/tabStripAutoScroller';
 import { TabDragPreviewWindow } from '../windowing/tabDragPreviewWindow';
 
 interface ActiveTabDrag {
@@ -26,6 +27,8 @@ interface ActiveTabDrag {
   started: boolean;
   tabRects: Array<{ left: number; width: number }>;
   tabGap: number;
+  tabIds: string[];
+  startScrollLeft: number;
 }
 
 interface TabDragPreview {
@@ -78,13 +81,14 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
   const closeTab = useAppStore((state) => state.closeTab);
   const { t } = useI18n();
   const [tabDragPreviewWindow] = useState(() => new TabDragPreviewWindow());
+  const [tabAutoScroller] = useState(() => new TabStripAutoScroller());
 
   useEffect(() => {
     if (platform !== 'linux') return;
     void bridge.window.isMaximized().then(setMaximized);
   }, [bridge, platform]);
 
-  useEffect(() => () => tabDragPreviewWindow.hide(), [tabDragPreviewWindow]);
+  useEffect(() => () => { tabDragPreviewWindow.hide(); tabAutoScroller.stop(); }, [tabDragPreviewWindow, tabAutoScroller]);
 
   useEffect(() => {
     if (!newTabMenuOpen) return;
@@ -179,10 +183,25 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     let unlistenState: (() => void) | undefined;
     let unlistenImport: (() => void) | undefined;
 
-    void bridge.onImportTab(({ transfer }) => {
+    void bridge.onImportTab(({ transfer, targetClientX }) => {
       void (async () => {
-        const insertionIndex = snapInsertionIndexRef.current ?? useAppStore.getState().tabs.length;
+        const currentTabs = useAppStore.getState().tabs;
+        const visibleTabs = Array.from(tabsRef.current?.querySelectorAll<HTMLElement>('.titlebar-tab') ?? []);
+        const strip = tabsRef.current;
+        const stripLeft = strip?.getBoundingClientRect().left ?? 0;
+        const slotIndex = targetClientX === null || targetClientX === undefined ? snapInsertionIndexRef.current : (() => {
+          const index = visibleTabs.findIndex((element) => {
+            const rect = element.getBoundingClientRect();
+            const midpoint = element.offsetWidth > 0 ? stripLeft + element.offsetLeft - (strip?.scrollLeft ?? 0) + element.offsetWidth / 2 : rect.left + rect.width / 2;
+            return targetClientX < midpoint;
+          });
+          return index < 0 ? visibleTabs.length : index;
+        })();
+        const nextTabId = slotIndex === null ? undefined : visibleTabs[slotIndex]?.dataset.tabId;
+        const nextTabIndex = currentTabs.findIndex((tab) => tab.id === nextTabId);
+        const insertionIndex = nextTabIndex < 0 ? currentTabs.length : nextTabIndex;
         importingRemoteTabIdRef.current = transfer.tabId;
+        tabAutoScroller.stop();
         snapInsertionIndexRef.current = null;
         remoteDragTabIdRef.current = null;
         remoteTabRectsRef.current = null;
@@ -194,19 +213,23 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
           remoteDropTargetRef.current = false;
           void bridge.window.setCursorIcon('default');
         }
-        const accepted = await openWorkspace(transfer.paths, true, {
-          skipCrossWindowFocus: true,
-          insertionIndex,
-        });
+        let accepted = false;
+        try {
+          accepted = await useAppStore.getState().importTab(transfer, insertionIndex);
+        } catch (error) {
+          useAppStore.getState().addNotification({ type: 'error', title: 'Workspace operation failed', message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: transfer.tabId });
+        }
         const targetWindowLabel = windowLabelRef.current || await bridge.getWindowLabel();
         await bridge.completeTabTransfer(transfer, targetWindowLabel, accepted);
-      })();
+      })().catch((error) => {
+        useAppStore.getState().addNotification({ type: 'error', title: 'Workspace operation failed', message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: transfer.tabId });
+      });
     }).then((unlisten) => {
       if (disposed) unlisten();
       else unlistenImport = unlisten;
     });
 
-    void bridge.onTabDragState((state) => {
+    const handleDragState = (state: TabDragPayload | null) => {
       if (state && importingRemoteTabIdRef.current === state.tabId) return;
       if (!state) importingRemoteTabIdRef.current = null;
       const nativeTargetSpecified = state?.targetWindowLabel !== undefined;
@@ -219,6 +242,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
       const targetsThisWindow = !nativeTargetSpecified
         || state?.targetWindowLabel === windowLabelRef.current;
       if (!state || state.sourceWindowLabel === windowLabelRef.current || !targetsThisWindow) {
+        if (!activeTabDragRef.current) tabAutoScroller.stop();
         remoteDragTabIdRef.current = null;
         if (!state) nativeRemoteTrackingTabIdRef.current = null;
         remoteTabRectsRef.current = null;
@@ -278,12 +302,18 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         setRemoteDropSlotLeft(contentLeft);
       }
       const isDropTarget = insertionIndex !== null;
+      if (!activeTabDragRef.current) {
+        if (isDropTarget) tabAutoScroller.update(tabsRef.current,
+          state.targetClientX ?? state.screenX - window.screenX, () => handleDragState(state));
+        else tabAutoScroller.stop();
+      }
       document.body.classList.toggle('is-tab-drop-target', isDropTarget);
       if (remoteDropTargetRef.current !== isDropTarget) {
         remoteDropTargetRef.current = isDropTarget;
         void bridge.window.setCursorIcon(isDropTarget ? 'grabbing' : 'default');
       }
-    }).then((unlisten) => {
+    };
+    void bridge.onTabDragState(handleDragState).then((unlisten) => {
       if (disposed) unlisten();
       else unlistenState = unlisten;
     });
@@ -300,7 +330,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         void bridge.window.setCursorIcon('default');
       }
     };
-  }, [bridge, openWorkspace]);
+  }, [bridge, openWorkspace, tabAutoScroller]);
 
   const completeTransfer = async (
     tab: WorkspaceDescriptor,
@@ -320,12 +350,18 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         tabName: tab.name,
         paths: tab.paths,
       };
-      return await bridge.transferTab(transfer, point, {
-        x: point.screenX - 140,
-        y: point.screenY - 18,
-        width: sourceBounds.width,
-        height: sourceBounds.height,
-      }, attachToExisting, createIfUnattached);
+      const session = useAppStore.getState().exportTabSession(tab.id);
+      if (session) await bridge.request({ type: 'windowStoreTabSession', payload: { transfer, session } }, { showProgress: false });
+      try {
+        return await bridge.transferTab(transfer, point, {
+          x: point.screenX - 140,
+          y: point.screenY - 18,
+          width: sourceBounds.width,
+          height: sourceBounds.height,
+        }, attachToExisting, createIfUnattached);
+      } finally {
+        if (session) await bridge.request({ type: 'windowDiscardTabSession', payload: { transfer_id: transfer.transferId } }, { showProgress: false }).catch((error) => console.warn('Unable to release tab transfer session', error));
+      }
     } catch (error) {
       useAppStore.getState().addNotification({ type: 'error', title: 'Workspace operation failed', message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: useAppStore.getState().snapshot?.workspace.id });
       return false;
@@ -340,10 +376,12 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     sourceBounds: WindowBounds,
     attachToExisting: boolean,
     createIfUnattached = true,
+    geometry?: Promise<WindowDragGeometry | null>,
   ) => {
     if (createIfUnattached) setPendingTransferTabIds((current) => new Set(current).add(tab.id));
     try {
-      const accepted = await completeTransfer(tab, point, sourceBounds, attachToExisting, createIfUnattached);
+      const dropGeometry = geometry ? await geometry : null;
+      const accepted = await completeTransfer(tab, dropGeometry?.point ?? point, sourceBounds, attachToExisting, createIfUnattached);
       if (!accepted) return false;
       const remainingTabs = useAppStore.getState().tabs;
       if (remainingTabs.length === 1 && remainingTabs[0].id === tab.id) {
@@ -381,12 +419,15 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     const element = event.currentTarget;
     const tabRect = element.getBoundingClientRect();
     const tabWidth = tabRect.width;
-    const tabRects = Array.from(tabsRef.current?.querySelectorAll<HTMLElement>('.titlebar-tab') ?? [])
+    const tabElements = Array.from(tabsRef.current?.querySelectorAll<HTMLElement>('.titlebar-tab') ?? []);
+    const tabIds = tabElements.map((node) => node.dataset.tabId ?? '');
+    const tabRects = tabElements
       .map((node) => {
         const rect = node.getBoundingClientRect();
         return { left: rect.left, width: rect.width };
       });
-    const originalIndex = useAppStore.getState().tabs.findIndex((item) => item.id === tab.id);
+    const originalIndex = tabIds.indexOf(tab.id);
+    if (originalIndex < 0) return;
     const previousRect = tabRects[Math.max(0, originalIndex - 1)];
     const tabGap = originalIndex > 0 && previousRect
       ? Math.max(0, tabRects[originalIndex].left - previousRect.left - previousRect.width)
@@ -415,6 +456,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
       started: false,
       tabRects,
       tabGap,
+      tabIds,
+      startScrollLeft: tabsRef.current?.scrollLeft ?? 0,
     };
     activeTabDragRef.current = drag;
     element.setPointerCapture(event.pointerId);
@@ -498,11 +541,12 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
       if (!isInSourceTitleBar(pointer)) return;
       if (drag.originalIndex === -1 || drag.tabRects.length === 0) return;
       const originalRect = drag.tabRects[drag.originalIndex];
+      if (!originalRect) return;
       const firstRect = drag.tabRects[0];
       const lastRect = drag.tabRects[drag.tabRects.length - 1];
       const minDeltaX = firstRect.left - originalRect.left;
       const maxDeltaX = lastRect.left + lastRect.width - originalRect.left - tabWidth;
-      const deltaX = Math.max(minDeltaX, Math.min(pointer.clientX - drag.startClientX, maxDeltaX));
+      const deltaX = Math.max(minDeltaX, Math.min(pointer.clientX - drag.startClientX + (tabsRef.current?.scrollLeft ?? 0) - drag.startScrollLeft, maxDeltaX));
       const draggedCenter = originalRect.left + deltaX + tabWidth / 2;
       const midpoints = drag.tabRects.map((rect) => rect.left + rect.width / 2);
       const reachedLeftBoundary = deltaX < 0 && deltaX <= minDeltaX + 0.5;
@@ -565,8 +609,11 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         && shouldDetachTab(point, drag.sourceBounds, travelledDistance);
       if (!detaching) {
         updateReorderTarget(pointer);
+        if (isInSourceTitleBar(pointer)) tabAutoScroller.update(tabsRef.current, pointer.clientX, () => updateReorderTarget(latestPointer ?? pointer));
+        else tabAutoScroller.stop();
         setTabDragPreview(null);
       } else {
+        tabAutoScroller.stop();
         setLocalTabDragLayout(null);
       }
       if (detaching && !drag.previewPrepared) {
@@ -602,6 +649,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     };
 
     const cleanup = () => {
+      tabAutoScroller.stop();
       pendingWindowPoint = null;
       if (moveFrame !== undefined) cancelAnimationFrame(moveFrame);
       moveFrame = undefined;
@@ -643,8 +691,9 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         updateReorderTarget(pointer);
         const currentTabs = useAppStore.getState().tabs;
         const currentIndex = currentTabs.findIndex((item) => item.id === tab.id);
-        if (currentIndex !== -1 && currentIndex !== drag.targetIndex) {
-          reorderTabs(currentIndex, drag.targetIndex);
+        const targetIndex = currentTabs.findIndex((item) => item.id === drag.tabIds[drag.targetIndex]);
+        if (currentIndex !== -1 && targetIndex !== -1 && currentIndex !== targetIndex) {
+          reorderTabs(currentIndex, targetIndex);
         }
       }
       const started = drag.started;
@@ -672,7 +721,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
       }
 
       void (async () => {
-        const accepted = await transferTabWithImmediateVisualRemoval(tab, point, drag.sourceBounds, true, !singleTabWindow);
+        const accepted = await transferTabWithImmediateVisualRemoval(tab, point, drag.sourceBounds, true, !singleTabWindow,
+          bridge.window.dragGeometry().catch(() => null));
         // The last tab already has a window: an unattached drop repositions it.
         if (singleTabWindow && !accepted) await moveWindow(point);
       })().catch((error) => {

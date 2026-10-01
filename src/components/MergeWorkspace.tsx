@@ -33,13 +33,23 @@ export function MergeWorkspace() {
   const accept = useAppStore((state) => state.acceptConflict);
 
   const file = useMemo(() => (merge ? toMergeConflictFile(merge) : null), [merge]);
+  const storedDraft = useAppStore.getState().mergeEditorDraft;
+  const initialDraft = storedDraft?.fingerprint === merge?.fingerprint ? storedDraft : undefined;
 
-  const [resolutions, setResolutions] = useState<Record<number, Resolution>>({});
-  const [normalEdits, setNormalEdits] = useState<NormalEdits>({});
-  const [nonConflictingSelections, setNonConflictingSelections] = useState<NonConflictingSelections>({});
-  const [appliedNonConflictingScope, setAppliedNonConflictingScope] = useState<NonConflictingChangeScope | null>(null);
-  const [currentConflictIndex, setCurrentConflictIndex] = useState(0);
-  const [syncScrollEnabled, setSyncScrollEnabled] = useState(true);
+  const [resolutions, setResolutions] = useState<Record<number, Resolution>>(initialDraft?.resolutions ?? {});
+  const [normalEdits, setNormalEdits] = useState<NormalEdits>(initialDraft?.normalEdits ?? {});
+  const [nonConflictingSelections, setNonConflictingSelections] = useState<NonConflictingSelections>(initialDraft?.nonConflictingSelections ?? {});
+  const [appliedNonConflictingScope, setAppliedNonConflictingScope] = useState<NonConflictingChangeScope | null>(initialDraft?.appliedNonConflictingScope ?? null);
+  const [currentConflictIndex, setCurrentConflictIndex] = useState(initialDraft?.currentConflictIndex ?? 0);
+  const [syncScrollEnabled, setSyncScrollEnabled] = useState(initialDraft?.syncScrollEnabled ?? true);
+
+  useEffect(() => {
+    if (!merge) return;
+    useAppStore.setState({ mergeEditorDraft: {
+      fingerprint: merge.fingerprint, resolutions, normalEdits, nonConflictingSelections,
+      appliedNonConflictingScope, currentConflictIndex, syncScrollEnabled,
+    } });
+  }, [merge, resolutions, normalEdits, nonConflictingSelections, appliedNonConflictingScope, currentConflictIndex, syncScrollEnabled]);
 
   // 初始化或切换冲突文件时重置状态
   const [lastFingerprint, setLastFingerprint] = useState(merge?.fingerprint);

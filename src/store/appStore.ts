@@ -19,6 +19,7 @@ import { choiceDialog, promptDialog, multiChoiceDialog, confirmDialog } from '..
 import { buildPullRequestUrl } from '../history/prUrlHelper';
 import { createTranslator, resolveLanguage } from '../i18n';
 import type { MergeResolution, NonConflictScope } from '../components/mergeEditorModel';
+import type { Resolution, NormalEdits, NonConflictingSelections, NonConflictingChangeScope } from '../components/mergeEngine';
 
 export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'conflicts' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
@@ -267,6 +268,7 @@ export function calculateWorkspaceUnreadErrors(
 }
 
 export interface WorkspaceSessionState {
+  mergeEditorDraft?: MergeEditorDraft;
   snapshot: WorkspaceSnapshot;
   allRepositories: RepositoryStatus[];
   selectedRepoId?: string;
@@ -335,7 +337,20 @@ export interface WorkspaceSessionState {
   loadErrors: Record<string, string | null>;
 }
 
+export interface MergeEditorDraft {
+  fingerprint: string;
+  resolutions: Record<number, Resolution>;
+  normalEdits: NormalEdits;
+  nonConflictingSelections: NonConflictingSelections;
+  appliedNonConflictingScope: NonConflictingChangeScope | null;
+  currentConflictIndex: number;
+  syncScrollEnabled: boolean;
+}
+
 export interface AppStore {
+  mergeEditorDraft?: MergeEditorDraft;
+  exportTabSession: (workspaceId: string) => WorkspaceSessionState | undefined;
+  importTab: (transfer: WindowTabTransfer, insertionIndex?: number) => Promise<boolean>;
   bridge?: VersionDockBridge;
   ready: boolean;
   operations: Record<string, OperationEvent>;
@@ -1635,6 +1650,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       mergeResolutions: state.mergeResolutions,
       mergeScope: state.mergeScope,
       mergeResult: state.mergeResult,
+      mergeEditorDraft: state.mergeEditorDraft,
       commitMessage: state.commitMessage,
       mergeMessageSuggestion: state.mergeMessageSuggestion,
       amendRepoIds: state.amendRepoIds,
@@ -1874,7 +1890,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
+      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     checkStatusNotifications(allRepositories, snapshot.workspace.id);
@@ -2082,7 +2098,33 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
-    ready: false, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', diffReturnMode: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, batchCommitReports: {}, loadErrors: {},
+    exportTabSession: (id) => get().snapshot?.workspace.id === id ? extractCurrentSession(get()) : get().sessions[id],
+    importTab: async (transfer, insertionIndex) => {
+      const value = await bridge().request<WorkspaceSessionState | null>({
+        type: 'windowReadTabSession', payload: { transfer_id: transfer.transferId },
+      }, { showProgress: false });
+      if (!value?.snapshot) return get().openWorkspace(transfer.paths, true, { skipCrossWindowFocus: true, insertionIndex });
+      if (value.snapshot.workspace.id !== transfer.tabId || !workspacePathsEqual(value.snapshot.workspace.paths, transfer.paths)) {
+        throw new Error('Transferred workspace session does not match the tab');
+      }
+      if (get().tabs.some((tab) => tab.id === transfer.tabId)) {
+        get().addNotification({ type: 'warning', title: 'Workspace operation failed', message: { raw: 'This workspace is already open in the destination window. Its existing session was preserved.' }, workspaceId: transfer.tabId });
+        return false;
+      }
+      const tabs = [...get().tabs];
+      tabs.splice(Math.max(0, Math.min(insertionIndex ?? tabs.length, tabs.length)), 0, value.snapshot.workspace);
+      set((state) => ({ tabs, sessions: { ...state.sessions, [transfer.tabId]: value } }));
+      await get().switchTab(transfer.tabId);
+      // Register ownership before the source can release its watcher references.
+      try {
+        await persistTabs(get().tabs, get().activeTabId);
+      } catch (error) {
+        await get().closeTab(transfer.tabId).catch((cleanupError) => console.warn('Unable to roll back tab import', cleanupError));
+        throw error;
+      }
+      return get().snapshot?.workspace.id === transfer.tabId;
+    },
+    ready: false, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', diffReturnMode: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, batchCommitReports: {}, loadErrors: {},
     logPanelOpen: false,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
     logEntries: [],
@@ -2471,6 +2513,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           historyTopology: cachedSession.historyTopology,
           historyTopologyByRepo: cachedSession.historyTopologyByRepo,
           historyHasMoreByRepo: cachedSession.historyHasMoreByRepo,
+          historyRepoErrors: cachedSession.historyRepoErrors ?? {},
           historyLoading: false,
           branchesLoading: false,
           historyScope: cachedSession.historyScope,
@@ -2497,6 +2540,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           mergeResolutions: cachedSession.mergeResolutions ?? {},
           mergeScope: cachedSession.mergeScope ?? 'all',
           mergeResult: cachedSession.mergeResult,
+          mergeEditorDraft: cachedSession.mergeEditorDraft,
           commitMessage: cachedSession.commitMessage ?? '',
           mergeMessageSuggestion: cachedSession.mergeMessageSuggestion,
           amendRepoIds: cachedSession.amendRepoIds ?? [],
@@ -2514,6 +2558,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           comparison: cachedSession.comparison,
           remotes: cachedSession.remotes,
           batchCommitReport: cachedSession.batchCommitReport,
+          loadErrors: cachedSession.loadErrors,
         });
         if (missingInRestored.length > 0) {
           const targetWorkspaceId = workspaceId;
@@ -2747,7 +2792,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             if (encodedTransfer) transfer = JSON.parse(encodedTransfer) as WindowTabTransfer;
             const paths = JSON.parse(encodedPaths) as string[];
             if (Array.isArray(paths) && paths.length > 0) {
-              const accepted = await get().openWorkspace(paths, true, { skipCrossWindowFocus: true });
+              const accepted = transfer ? await get().importTab(transfer) : await get().openWorkspace(paths, true, { skipCrossWindowFocus: true });
               if (transfer) {
                 await bridge().completeTabTransfer(transfer, currentWindowLabel, accepted);
               }
@@ -5114,6 +5159,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const resolutions: Record<number, MergeResolution> = Object.fromEntries((merge.conflicts ?? []).map((item) => [item.index, 'unresolved']));
       set({
         merge,
+        mergeEditorDraft: undefined,
         mergeTarget: { repoId: conflict.repoId, path: conflict.path, workspaceId: targetWorkspaceId },
         mergeResolutions: resolutions,
         mergeScope: 'all',

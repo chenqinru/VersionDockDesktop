@@ -53,40 +53,10 @@ pub fn follow_tab_drag_preview(
                     && last_broadcast.elapsed() >= std::time::Duration::from_millis(16)
                 {
                     let scale = preview.scale_factor().unwrap_or(1.0).max(f64::EPSILON);
-                    let mut target_window_label: Option<String> = None;
-                    let mut target_client_x: Option<f64> = None;
-                    for (window_label, window) in app.webview_windows() {
-                        if window_label == source_window_label
-                            || window_label.starts_with("tab-drag-preview-")
-                            || !window.is_visible().unwrap_or(false)
-                            || window.is_minimized().unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        if let (Ok(position), Ok(window_size), Ok(window_scale)) = (
-                            window.outer_position(),
-                            window.outer_size(),
-                            window.scale_factor(),
-                        ) {
-                            let window_scale = window_scale.max(f64::EPSILON);
-                            let window_x = f64::from(position.x) / window_scale;
-                            let window_y = f64::from(position.y) / window_scale;
-                            let window_width = f64::from(window_size.width) / window_scale;
-                            let point_x = cursor.x / window_scale;
-                            let point_y = cursor.y / window_scale;
-                            if point_in_tab_snap_zone(
-                                point_x,
-                                point_y,
-                                window_x,
-                                window_y,
-                                window_width,
-                            ) {
-                                target_client_x = Some(point_x - window_x);
-                                target_window_label = Some(window_label);
-                                break;
-                            }
-                        }
-                    }
+                    let target =
+                        crate::tab_drag::drop_target(&app, &source_window_label, None).await;
+                    let target_window_label = target.as_ref().map(|target| target.label.clone());
+                    let target_client_x = target.map(|target| target.client_x);
                     let _ = app.emit(
                         "versiondock://tab-drag-state",
                         serde_json::json!({
@@ -1669,6 +1639,85 @@ async fn dispatch(
             }
             json(result)
         }
+        BridgeCommand::WindowStoreTabSession { transfer, session } => {
+            if transfer.source_window_label != invoking_window.label()
+                || session
+                    .pointer("/snapshot/workspace/id")
+                    .and_then(|value| value.as_str())
+                    != Some(&transfer.tab_id)
+                || session.pointer("/snapshot/workspace/paths")
+                    != Some(&serde_json::json!(transfer.paths))
+            {
+                return Err(DesktopError::new(
+                    "TAB_TRANSFER_SOURCE_MISMATCH",
+                    "The session does not match the source tab",
+                    false,
+                ));
+            }
+            let mut sessions = state.tab_sessions.lock().map_err(|_| {
+                DesktopError::new(
+                    "WINDOW_STATE_LOCK_FAILED",
+                    "Unable to store tab session",
+                    true,
+                )
+            })?;
+            if sessions.contains_key(&transfer.transfer_id) {
+                return Err(DesktopError::new(
+                    "TAB_TRANSFER_EXISTS",
+                    "The tab transfer already exists",
+                    false,
+                ));
+            }
+            sessions.insert(
+                transfer.transfer_id.clone(),
+                state::PendingTabSession {
+                    transfer,
+                    session,
+                    target: None,
+                },
+            );
+            json(true)
+        }
+        BridgeCommand::WindowReadTabSession { transfer_id } => {
+            let sessions = state.tab_sessions.lock().map_err(|_| {
+                DesktopError::new(
+                    "WINDOW_STATE_LOCK_FAILED",
+                    "Unable to read tab session",
+                    true,
+                )
+            })?;
+            match sessions.get(&transfer_id) {
+                Some(session) if session.target.as_deref() == Some(invoking_window.label()) => {
+                    json(session.session.clone())
+                }
+                Some(_) => Err(DesktopError::new(
+                    "TAB_TRANSFER_TARGET_MISMATCH",
+                    "The session belongs to another destination",
+                    false,
+                )),
+                None => json(serde_json::Value::Null),
+            }
+        }
+        BridgeCommand::WindowDiscardTabSession { transfer_id } => {
+            let mut sessions = state.tab_sessions.lock().map_err(|_| {
+                DesktopError::new(
+                    "WINDOW_STATE_LOCK_FAILED",
+                    "Unable to release tab session",
+                    true,
+                )
+            })?;
+            if sessions.get(&transfer_id).is_some_and(|session| {
+                session.transfer.source_window_label != invoking_window.label()
+            }) {
+                return Err(DesktopError::new(
+                    "TAB_TRANSFER_SOURCE_MISMATCH",
+                    "The session belongs to another source",
+                    false,
+                ));
+            }
+            sessions.remove(&transfer_id);
+            json(true)
+        }
         BridgeCommand::WindowOpenNew {
             paths,
             x,
@@ -1745,6 +1794,10 @@ async fn dispatch(
                 builder.center()
             };
 
+            // Bind before building: the new webview may immediately request its session.
+            if let Some(transfer) = &transfer {
+                state.bind_tab_session(transfer, &label)?;
+            }
             let window = builder.build().map_err(|err| {
                 DesktopError::new(
                     "WINDOW_CREATE_FAILED",
@@ -1912,79 +1965,41 @@ async fn dispatch(
                     false,
                 ));
             }
-            let mut target_window_label: Option<String> = None;
-            let registered_windows = state
-                .window_workspaces
-                .lock()
-                .map_err(|_| {
-                    DesktopError::new(
-                        "WINDOW_STATE_LOCK_FAILED",
-                        "Unable to read window tabs",
-                        true,
-                    )
-                })?
-                .keys()
-                .cloned()
-                .collect::<std::collections::HashSet<_>>();
-
-            if screen_x.is_finite() && screen_y.is_finite() {
-                let windows = app.webview_windows();
-                for (label, window) in windows {
-                    if label != transfer.source_window_label
-                        && registered_windows.contains(&label)
-                        && window.is_visible().unwrap_or(false)
-                        && !window.is_minimized().unwrap_or(false)
-                    {
-                        if let (Ok(pos), Ok(size), Ok(scale)) = (
-                            window.outer_position(),
-                            window.outer_size(),
-                            window.scale_factor(),
-                        ) {
-                            let scale = if scale <= 0.0 { 1.0 } else { scale };
-                            let win_x = pos.x as f64 / scale;
-                            let win_y = pos.y as f64 / scale;
-                            let win_w = size.width as f64 / scale;
-                            if point_in_tab_snap_zone(screen_x, screen_y, win_x, win_y, win_w) {
-                                target_window_label = Some(label);
-                                break;
-                            }
-                        }
-                    }
-                }
+            if !screen_x.is_finite() || !screen_y.is_finite() {
+                return json(false);
             }
+            let scale = invoking_window.scale_factor().unwrap_or(1.0);
+            let drop_target = crate::tab_drag::drop_target(
+                app,
+                &transfer.source_window_label,
+                Some(tauri::PhysicalPosition::new(
+                    screen_x * scale,
+                    screen_y * scale,
+                )),
+            )
+            .await;
 
-            if target_window_label.is_none() {
-                let bounds_map = state.window_bounds.lock().map_err(|_| {
-                    DesktopError::new(
-                        "WINDOW_STATE_LOCK_FAILED",
-                        "Unable to read window bounds",
-                        true,
-                    )
-                })?;
-                for (label, (win_x, win_y, win_w, _)) in bounds_map.iter() {
-                    if label != &transfer.source_window_label
-                        && registered_windows.contains(label)
-                        && app.get_webview_window(label).is_some()
-                        && point_in_tab_snap_zone(screen_x, screen_y, *win_x, *win_y, *win_w)
-                    {
-                        target_window_label = Some(label.clone());
-                        break;
-                    }
-                }
-            }
-
-            if let Some(target_label) = target_window_label {
+            if let Some(drop_target) = drop_target {
+                let target_label = drop_target.label;
                 if let Some(target) = app.get_webview_window(&target_label) {
+                    state.bind_tab_session(&transfer, &target_label)?;
                     let _ = target.unminimize();
                     let _ = target.show();
                     let _ = target.set_focus();
+                    let transfer_id = transfer.transfer_id.clone();
                     let payload = WindowTabImport {
                         transfer,
                         screen_x,
                         screen_y,
+                        target_client_x: Some(drop_target.client_x),
                     };
                     if target.emit("versiondock://import-tab", payload).is_ok() {
                         return json(true);
+                    }
+                    if let Ok(mut sessions) = state.tab_sessions.lock() {
+                        if let Some(session) = sessions.get_mut(&transfer_id) {
+                            session.target = None;
+                        }
                     }
                 }
             }
@@ -2005,6 +2020,28 @@ async fn dispatch(
                     "The tab transfer target does not match the invoking window",
                     false,
                 ));
+            }
+            {
+                let mut sessions = state.tab_sessions.lock().map_err(|_| {
+                    DesktopError::new(
+                        "WINDOW_STATE_LOCK_FAILED",
+                        "Unable to complete tab transfer",
+                        true,
+                    )
+                })?;
+                if let Some(session) = sessions.get(&transfer_id) {
+                    if session.target.as_deref() != Some(invoking_window.label())
+                        || session.transfer.source_window_label != source_window_label
+                        || session.transfer.tab_id != tab_id
+                    {
+                        return Err(DesktopError::new(
+                            "TAB_TRANSFER_MISMATCH",
+                            "Tab acknowledgement does not match its session",
+                            false,
+                        ));
+                    }
+                }
+                sessions.remove(&transfer_id);
             }
             // Fallback if the first-render reveal failed, including failed imports.
             // Do not steal focus again when background loading finishes.
@@ -3868,7 +3905,7 @@ fn paths_match(a: &[String], b: &[String]) -> bool {
 const TAB_SNAP_MARGIN: f64 = 40.0;
 const TAB_BAR_HEIGHT: f64 = 42.0;
 
-fn point_in_tab_snap_zone(
+pub(crate) fn point_in_tab_snap_zone(
     point_x: f64,
     point_y: f64,
     window_x: f64,

@@ -93,6 +93,7 @@ pub struct WindowTabImport {
     pub transfer: WindowTabTransfer,
     pub screen_x: f64,
     pub screen_y: f64,
+    pub target_client_x: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -222,6 +223,17 @@ pub enum BridgeCommand {
         width: Option<f64>,
         height: Option<f64>,
         transfer: Option<WindowTabTransfer>,
+    },
+    WindowStoreTabSession {
+        transfer: WindowTabTransfer,
+        #[specta(type = specta_typescript::Unknown)]
+        session: serde_json::Value,
+    },
+    WindowReadTabSession {
+        transfer_id: String,
+    },
+    WindowDiscardTabSession {
+        transfer_id: String,
     },
     WindowSyncTabs {
         workspace_paths: Vec<Vec<String>>,

@@ -15,6 +15,7 @@ mod provider;
 mod shelf;
 mod state;
 mod svn_account;
+mod tab_drag;
 mod vcs;
 mod workspace;
 

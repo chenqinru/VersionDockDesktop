@@ -21,6 +21,9 @@ const child = spawn(npmCommand, args, {
   stdio: 'inherit',
   env: {
     ...process.env,
+    // Avoid LLVM anonymous-symbol link failures in cached macOS debug objects.
+    // This only changes Rust code generation; Vite HMR and the Tauri watcher stay on.
+    ...(platform === 'macos' ? { CARGO_INCREMENTAL: '0' } : {}),
     VERSIONDOCK_STABLE_DEV: stableSession ? '1' : '0',
   },
 });

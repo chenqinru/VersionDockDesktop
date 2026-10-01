@@ -17,7 +17,7 @@ use crate::models::{
     AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState,
     OperationEvent, OperationStatus, RefreshScope, RepositoryCommitSelection, RepositoryEvent,
     RepositoryEventSource, RepositoryMeta, RepositoryStatus, RequestContext, ThemePreference,
-    ToolAvailability, UiFontSizePreference, WorkspaceDescriptor,
+    ToolAvailability, UiFontSizePreference, WindowTabTransfer, WorkspaceDescriptor,
 };
 
 #[derive(Clone)]
@@ -74,9 +74,16 @@ pub struct AppState {
     tool_cache: RwLock<Option<ToolAvailability>>,
     pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
     pub window_bounds: std::sync::Mutex<HashMap<String, (f64, f64, f64, f64)>>,
+    pub tab_sessions: std::sync::Mutex<HashMap<String, PendingTabSession>>,
     watchers: std::sync::Mutex<HashMap<String, Vec<RecommendedWatcher>>>,
     pub pending_repo_status_events: std::sync::Mutex<HashSet<String>>,
     generation: AtomicU32,
+}
+
+pub struct PendingTabSession {
+    pub transfer: WindowTabTransfer,
+    pub session: serde_json::Value,
+    pub target: Option<String>,
 }
 
 impl AppState {
@@ -148,6 +155,7 @@ impl AppState {
             tool_cache: RwLock::new(None),
             window_workspaces: std::sync::Mutex::new(HashMap::new()),
             window_bounds: std::sync::Mutex::new(HashMap::new()),
+            tab_sessions: std::sync::Mutex::new(HashMap::new()),
             watchers: std::sync::Mutex::new(HashMap::new()),
             pending_repo_status_events: std::sync::Mutex::new(HashSet::new()),
             generation: AtomicU32::new(1),
@@ -156,6 +164,38 @@ impl AppState {
 
     pub fn next_generation(&self) -> u32 {
         self.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn bind_tab_session(
+        &self,
+        transfer: &WindowTabTransfer,
+        target: &str,
+    ) -> Result<(), DesktopError> {
+        let mut sessions = self.tab_sessions.lock().map_err(|_| {
+            DesktopError::new(
+                "WINDOW_STATE_LOCK_FAILED",
+                "Unable to read tab transfer state",
+                true,
+            )
+        })?;
+        if let Some(session) = sessions.get_mut(&transfer.transfer_id) {
+            if session.transfer.source_window_label != transfer.source_window_label
+                || session.transfer.tab_id != transfer.tab_id
+                || session.transfer.paths != transfer.paths
+                || session
+                    .target
+                    .as_deref()
+                    .is_some_and(|label| label != target)
+            {
+                return Err(DesktopError::new(
+                    "TAB_TRANSFER_MISMATCH",
+                    "Tab transfer identity does not match",
+                    false,
+                ));
+            }
+            session.target = Some(target.into());
+        }
+        Ok(())
     }
 
     pub async fn register_request(&self, request_id: &str) -> CancellationToken {
@@ -630,6 +670,12 @@ impl AppState {
         };
         if let Ok(mut bounds) = self.window_bounds.lock() {
             bounds.remove(window_label);
+        }
+        if let Ok(mut sessions) = self.tab_sessions.lock() {
+            sessions.retain(|_, session| {
+                session.transfer.source_window_label != window_label
+                    && session.target.as_deref() != Some(window_label)
+            });
         }
         self.retain_workspace_watchers(&workspace_ids)
     }

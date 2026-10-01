@@ -156,6 +156,13 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	width: number | null,
 	height: number | null,
 	transfer: WindowTabTransfer | null,
+} } | { type: "windowStoreTabSession"; payload: {
+	transfer: WindowTabTransfer,
+	session: unknown,
+} } | { type: "windowReadTabSession"; payload: {
+	transfer_id: string,
+} } | { type: "windowDiscardTabSession"; payload: {
+	transfer_id: string,
 } } | { type: "windowSyncTabs"; payload: {
 	workspace_paths: string[][],
 	active_workspace_id: string | null,
@@ -1358,6 +1365,7 @@ export type WindowTabImport = {
 	transfer: WindowTabTransfer,
 	screenX: number | null,
 	screenY: number | null,
+	targetClientX: number | null,
 };
 
 export type WindowTabTransfer = {
