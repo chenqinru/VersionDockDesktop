@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
@@ -11,8 +11,9 @@ import { confirmDialog } from './dialogService';
 import { AuthorAvatar } from './AuthorAvatar';
 import { branchColor, headColor, isPrimaryBranch, tagColor } from './branchColor';
 import { BranchRefBadge } from './BranchRefBadge';
-import { useSpeedSearch } from '../hooks/useSpeedSearch';
-import { SpeedSearchIndicator } from './SpeedSearchIndicator';
+import { useFileSearch } from '../hooks/useFileSearch';
+import { useResizable } from '../hooks/useResizable';
+import { FileSearchWidget } from './FileSearchWidget';
 
 type DetailTreeNode = { name: string; path: string; key: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
 
@@ -183,42 +184,44 @@ function openTarget(target: DetailFileTarget, openDiff: AppStore['openDiff'], on
   void openDiff(target.repoId, target.path, false, range ? undefined : target.commitHash, range);
 }
 
-function DetailFileContextMenu({ position, file, close, openDiff }: { position: { x: number; y: number }; file: DetailFileTarget; close: () => void; openDiff: AppStore['openDiff'] }) {
+function DetailFileContextMenu({ position, file, close, openDiff, workspaceView }: { workspaceView: boolean; position: { x: number; y: number }; file: DetailFileTarget; close: () => void; openDiff: AppStore['openDiff'] }) {
   const { t } = useI18n();
   const systemOpen = useAppStore((state) => state.systemOpen);
-  const openFileHistory = useAppStore((state) => state.openFileHistory);
-  const openHistoryForPath = useAppStore((state) => state.openHistoryForPath);
   const historyOperation = useAppStore((state) => state.historyOperation);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
   const repoKind = useAppStore((state) => state.snapshot?.repositories.find((repo) => repo.meta.id === file.repoId)?.meta.kind);
   const isMergeParent = Boolean(file.isMergeParentDiff || file.comparisonBaseHash);
-  const canRevertOrCherryPick = repoKind === 'git' && !isMergeParent;
+  const selectionWorkspaceId = useAppStore((state) => state.snapshot?.workspace.id);
+  const canRevert = repoKind === 'git' && !isMergeParent && (!workspaceView || selectedCommits.length === 1);
+  const canCherryPick = canRevert && !workspaceView;
   const items: ContextMenuEntry[] = [
     { id: 'diff', label: t('Show Diff'), icon: 'diff' },
-    { id: 'history', label: t('File history'), icon: 'history' },
-    { id: 'commit-history', label: t('Show in commit history'), icon: 'git-commit' },
     { id: 'open', label: t('Open file'), icon: 'go-to-file' },
-    { id: 'reveal', label: t('Reveal in File Manager'), icon: 'folder-opened' },
-    ...(canRevertOrCherryPick ? [
+    ...(!workspaceView ? [{ id: 'reveal', label: t('Reveal in File Manager'), icon: 'folder-opened' } as ContextMenuEntry] : []),
+    ...(canRevert ? [
+      { separator: true } as ContextMenuEntry,
       { id: 'revert-file', label: t('Revert Selected Changes'), icon: 'discard', danger: true } as ContextMenuEntry,
-      { id: 'checkout-file', label: t('Cherry-Pick Selected Changes'), icon: 'git-commit' } as ContextMenuEntry,
+    ] : []),
+    ...(canCherryPick ? [{ id: 'checkout-file', label: t('Cherry-Pick Selected Changes'), icon: 'git-commit' } as ContextMenuEntry] : []),
+    ...(workspaceView ? [
+      { separator: true } as ContextMenuEntry,
+      { id: 'reveal', label: t('Reveal in File Manager'), icon: 'folder-opened' } as ContextMenuEntry,
     ] : []),
   ];
   return <ContextMenu x={position.x} y={position.y} items={items} onSelect={(id) => {
     if (id === 'diff') openTarget(file, openDiff);
-    if (id === 'history') openFileHistory(file.repoId, file.path);
-    if (id === 'commit-history') void openHistoryForPath(file.repoId, file.path);
     if (id === 'open') void systemOpen(file.repoId, file.path, false);
     if (id === 'reveal') void systemOpen(file.repoId, file.path, true);
-    if (id === 'checkout-file') void confirmDialog({ title: t('Get file from revision?'), message: `${file.path}\n${file.commitHash}`, danger: true }).then((yes) => { if (yes) return historyOperation(file.repoId, { type: 'applyPaths', entries: commitPathEntries([file], selectedCommits, selectedDetails, 'apply') }); });
-    if (id === 'revert-file') void confirmDialog({ title: t('Revert file to parent revision?'), message: `${file.path}\n\n${t('Current working-copy content will be replaced.')}`, danger: true }).then((yes) => { if (yes) return historyOperation(file.repoId, { type: 'revertPaths', entries: commitPathEntries([file], selectedCommits, selectedDetails, 'revert') }); });
+    if (id === 'checkout-file') void confirmDialog({ title: t('Get file from revision?'), message: `${file.path}\n${file.commitHash}`, danger: true }).then((yes) => { if (yes && useAppStore.getState().snapshot?.workspace.id === selectionWorkspaceId) return historyOperation(file.repoId, { type: 'applyPaths', entries: commitPathEntries([file], selectedCommits, selectedDetails, 'apply') }); });
+    if (id === 'revert-file') void confirmDialog({ title: t('Revert file to parent revision?'), message: `${file.path}\n\n${t('Current working-copy content will be replaced.')}`, danger: true }).then((yes) => { if (yes && useAppStore.getState().snapshot?.workspace.id === selectionWorkspaceId) return historyOperation(file.repoId, { type: 'revertPaths', entries: commitPathEntries([file], selectedCommits, selectedDetails, 'revert') }); });
     close();
   }} onClose={close} />;
 }
 
 function DetailDirectoryContextMenu({ position, files, close }: { position: { x: number; y: number }; files: DetailFileTarget[]; close: () => void }) {
   const { t } = useI18n();
+  const selectionWorkspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const repositories = useAppStore((state) => state.snapshot?.repositories ?? []);
   const historyOperation = useAppStore((state) => state.historyOperation);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
@@ -247,7 +250,7 @@ function DetailDirectoryContextMenu({ position, files, close }: { position: { x:
       message: `${affected}\n\n${t(reverting ? 'The selected commit changes will be reversed in the working copy.' : 'The selected commit versions will replace the working-copy files.')}`,
       danger: true,
     }).then((yes) => {
-      if (!yes) return;
+      if (!yes || useAppStore.getState().snapshot?.workspace.id !== selectionWorkspaceId) return;
       return historyOperation(repoId, { type: reverting ? 'revertPaths' : 'applyPaths', entries });
     });
     close();
@@ -432,6 +435,7 @@ function DetailFlatFileRow({
 
 function DetailRepoGroup({
   files,
+  showRepo,
   repoName,
   repoColor,
   openDiff,
@@ -448,6 +452,7 @@ function DetailRepoGroup({
   onDirectoryContextMenu,
 }: {
   files: DetailFileTarget[];
+  showRepo: boolean;
   repoName: string;
   repoColor?: string;
   openDiff: AppStore['openDiff'];
@@ -464,10 +469,10 @@ function DetailRepoGroup({
   onDirectoryContextMenu?: (event: React.MouseEvent, files: DetailFileTarget[]) => void;
 }) {
   const repoId = files[0]?.repoId ?? repoName;
-  const isExpanded = isDirOpen(`repo:${repoId}`);
+  const isExpanded = !showRepo || isDirOpen(`repo:${repoId}`);
   return (
     <div className="detail-repo-group">
-      <button
+      {showRepo && <button
         type="button"
         className="detail-root-label"
         title={repoName}
@@ -478,12 +483,12 @@ function DetailRepoGroup({
         <i style={{ background: repoColor ?? 'var(--versiondock-accent)' }} />
         <strong><HighlightText text={repoName} query={searchQuery} /></strong>
         <b>{files.length}</b>
-      </button>
+      </button>}
       {isExpanded && buildTree(files, `dir:${repoId}`).map((node) => (
         <DetailTreeNodeView
           key={node.key}
           node={collapseTree(node)}
-          depth={1}
+          depth={showRepo ? 1 : 0}
           openDiff={openDiff}
           selectedFile={selectedFile}
           isDirOpen={isDirOpen}
@@ -878,7 +883,7 @@ function ExtendedCommitSummary({
       <div className="extended-detail-block">
         <h3>{t('Author')}</h3>
         <div className="extended-author">
-          <AuthorAvatar name={commit.author} email={commit.email} repoId={commit.repoId} size={24} />
+          <AuthorAvatar name={commit.author} email={commit.email} repoId={commit.repoId} size={36} />
           <span><strong>{commit.author}</strong><small>{commit.email}</small></span>
         </div>
       </div>
@@ -917,6 +922,7 @@ function AuthorMeta({ commit }: { commit: CommitNode }) {
 
 export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onCollapse: () => void; variant?: 'sidebar' | 'workspace' }) {
   const detail = useAppStore((state) => state.selectedCommit);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
   const selectedCommitError = useAppStore((state) => state.selectedCommitError);
@@ -928,7 +934,6 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   ));
   const repositories = useAppStore((state) => state.snapshot?.repositories ?? []);
   const openDiff = useAppStore((state) => state.openDiff);
-  const openFileHistory = useAppStore((state) => state.openFileHistory);
   const openCommitDetail = useAppStore((state) => state.openCommitDetail);
   const openChanges = useAppStore((state) => state.openCommitChanges);
   const diff = useAppStore((state) => state.diff);
@@ -941,11 +946,24 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
     });
   const [openingDiffPath, setOpeningDiffPath] = useState<string | null>(null);
   const openingDiffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [fileMode, setFileMode] = useState<'tree' | 'list'>('tree');
+  const openingDiffFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detailViewKey = `versiondock:detailView:${workspaceId ?? ''}:${variant}:${variant === 'workspace' ? selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash)).join('|') : ''}`;
+  const [fileMode, setFileMode] = useState<'tree' | 'list'>(() => {
+    try { return localStorage.getItem(detailViewKey) === 'list' ? 'list' : 'tree'; } catch { return 'tree'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(detailViewKey, fileMode); } catch { /* Keep the view functional without storage. */ }
+  }, [detailViewKey, fileMode]);
   const [allTreeExpanded, setAllTreeExpanded] = useState<boolean | null>(null);
   const [collapsedDirs, setCollapsedDirs] = useState<Record<string, boolean>>({});
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
+  const [messagesExpandedByDefault, setMessagesExpandedByDefault] = useState(() => {
+    try { return localStorage.getItem('versiondock:commitMessagesExpandedByDefault') === 'true'; } catch { return false; }
+  });
   const [infoHeight, setInfoHeight] = useState<number>();
+  const [containerHeight, setContainerHeight] = useState(0);
+  const containerRef = useRef<HTMLElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
   const [fileContextMenu, setFileContextMenu] = useState<{ position: { x: number; y: number }; file: DetailFileTarget }>();
   const [dirContextMenu, setDirContextMenu] = useState<{ position: { x: number; y: number }; files: DetailFileTarget[] }>();
 
@@ -972,20 +990,28 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
     setActiveMatchIndex((prev) => (prev + direction + list.length) % list.length);
   }, []);
 
-  const speedSearch = useSpeedSearch('commit-detail', true, '.commit-detail', handleNavigateMatch);
+  const speedSearch = useFileSearch('.commit-detail', handleNavigateMatch);
   const queryLower = speedSearch.query.trim().toLowerCase();
 
   useEffect(() => {
+    if (openingDiffTimerRef.current) clearTimeout(openingDiffTimerRef.current);
+    if (openingDiffFallbackRef.current) clearTimeout(openingDiffFallbackRef.current);
     const frame = requestAnimationFrame(() => setOpeningDiffPath(null));
     return () => cancelAnimationFrame(frame);
-  }, [diff]);
+  }, [diff, selectedCommits]);
+
+  useEffect(() => () => {
+    if (openingDiffTimerRef.current) clearTimeout(openingDiffTimerRef.current);
+    if (openingDiffFallbackRef.current) clearTimeout(openingDiffFallbackRef.current);
+  }, []);
 
   const handleOpeningDiff = useCallback((path: string) => {
     if (openingDiffTimerRef.current) clearTimeout(openingDiffTimerRef.current);
+    if (openingDiffFallbackRef.current) clearTimeout(openingDiffFallbackRef.current);
     openingDiffTimerRef.current = setTimeout(() => {
       setOpeningDiffPath(path);
     }, 120);
-    setTimeout(() => {
+    openingDiffFallbackRef.current = setTimeout(() => {
       setOpeningDiffPath((current) => (current === path ? null : current));
     }, 6000);
   }, []);
@@ -993,8 +1019,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   const repoMap = useMemo(() => new Map(repositories.map((repo) => [repo.meta.id, repo])), [repositories]);
   const historyPath = useAppStore((state) => state.historyQuery.path);
   const targets = useMemo(
-    () => buildCommitFileTargets(selectedCommits, selectedDetails, repositories, historyPath),
-    [selectedCommits, selectedDetails, repositories, historyPath],
+    () => buildCommitFileTargets(selectedCommits, selectedDetails, repositories, variant === 'sidebar' ? historyPath : undefined),
+    [selectedCommits, selectedDetails, repositories, historyPath, variant],
   );
 
   const isMultiSelection = selectedCommits.length > 1;
@@ -1163,19 +1189,36 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
     setExpandedParentHashes(new Set());
   }, [selectedCommits]);
 
-  const resizeInfo = (event: React.PointerEvent) => {
-    event.preventDefault();
-    const startY = event.clientY;
-    const initial = infoHeight ?? Math.max(160, Math.round(window.innerHeight * .28));
-    const move = (next: PointerEvent) => setInfoHeight(Math.min(Math.max(150, initial - (next.clientY - startY)), Math.max(230, window.innerHeight - 120)));
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); document.body.classList.remove('is-resizing'); };
-    document.body.classList.add('is-resizing');
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
+  const minInfoHeight = Math.min(160, Math.max(96, Math.floor((containerHeight - 4) / 4)));
+  const maxInfoHeight = Math.max(minInfoHeight, containerHeight - 4 - minInfoHeight);
+  const clampInfoHeight = useCallback((height: number) => Math.min(maxInfoHeight, Math.max(minInfoHeight, height)), [maxInfoHeight, minInfoHeight]);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || variant === 'workspace') return;
+    const update = () => {
+      const height = container.getBoundingClientRect().height;
+      if (height <= 4) return;
+      const minimum = Math.min(160, Math.max(96, Math.floor((height - 4) / 4)));
+      const maximum = Math.max(minimum, height - 4 - minimum);
+      setContainerHeight(height);
+      setInfoHeight((current) => Math.min(maximum, Math.max(minimum, current ?? summaryRef.current?.getBoundingClientRect().height ?? 220)));
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [detail, selectedCommits.length, variant]);
+  const resizeInfo = useResizable(infoHeight ?? 220, minInfoHeight, maxInfoHeight, setInfoHeight, -1, 'y');
 
-  const allMessagesExpanded = selectedCommits.length > 0 && selectedCommits.every((commit) => expandedMessages.has(commitKey(commit.repoId, commit.hash)));
-  const toggleAllMessages = () => setExpandedMessages(allMessagesExpanded ? new Set() : new Set(selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
+  useEffect(() => {
+    setExpandedMessages(new Set(messagesExpandedByDefault ? selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash)) : []));
+  }, [messagesExpandedByDefault, selectedCommits]);
+  const toggleAllMessages = () => {
+    const next = !messagesExpandedByDefault;
+    setMessagesExpandedByDefault(next);
+    try { localStorage.setItem('versiondock:commitMessagesExpandedByDefault', String(next)); } catch { /* Preferences remain usable without storage. */ }
+  };
 
   const groupedTargets = useMemo(() => {
     const ids = [...targetsByRepo.keys()];
@@ -1183,6 +1226,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
       ? [...targetsByRepo.entries()]
       : [[ids[0] ?? selectedPrimary?.repoId ?? '', targets]] as Array<[string, DetailFileTarget[]]>;
   }, [targetsByRepo, selectedPrimary?.repoId, targets]);
+  const showRepoGrouping = repositories.length > 1 || groupedTargets.length > 1;
+  const highlightedFile = fileContextMenu ? { ...fileContextMenu.file, staged: false } : selectedFile;
   const workspaceView = variant === 'workspace';
 
   const flatItems = useMemo<FlatItem[]>(() => {
@@ -1193,14 +1238,14 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
       const repoOpen = isDirOpen(repoKey);
       const repoName = repoMap.get(repoId)?.meta.name ?? repoId;
       const repoColor = repoMap.get(repoId)?.meta.color;
-      items.push({ kind: 'repo', repoId, repoName, repoColor, fileCount: files.length, files, key: repoKey });
-      if (repoOpen) {
+      if (showRepoGrouping) items.push({ kind: 'repo', repoId, repoName, repoColor, fileCount: files.length, files, key: repoKey });
+      if (!showRepoGrouping || repoOpen) {
         const tree = buildTree(files, `dir:${repoId}`).map(collapseTree);
-        items.push(...flattenVisibleTreeNodes(tree, isDirOpen, 1));
+        items.push(...flattenVisibleTreeNodes(tree, isDirOpen, showRepoGrouping ? 1 : 0));
       }
     }
     return items;
-  }, [fileMode, groupedTargets, isDirOpen, repoMap]);
+  }, [fileMode, groupedTargets, isDirOpen, repoMap, showRepoGrouping]);
 
   const itemCount = fileMode === 'tree' ? flatItems.length : targets.length;
   const shouldVirtualize = itemCount > 40;
@@ -1209,7 +1254,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   const virtualizer = useVirtualizer({
     count: shouldVirtualize ? itemCount : 0,
     getScrollElement: () => fileListRef.current,
-    estimateSize: () => 24,
+    estimateSize: () => 22,
     overscan: 10,
     enabled: shouldVirtualize,
     initialRect: { width: 400, height: 800 },
@@ -1275,12 +1320,11 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
   }
 
   return (
-    <aside className={`commit-detail ${workspaceView ? 'commit-detail-expanded' : ''}`}>
+    <aside ref={containerRef} className={`commit-detail ${workspaceView ? 'commit-detail-expanded' : ''}`}>
       <section className="detail-file-section">
         <div className="detail-files-title">
-          <strong>{targets.length} {t('files')}</strong>
+          <strong>{t(targets.length === 1 ? '{0} file' : '{0} files', targets.length)}</strong>
           <span className="detail-files-spacer" />
-          {targets[0] && <button type="button" title={t('File history')} onClick={() => openFileHistory(targets[0].repoId, targets[0].path)}><Codicon name="history" /></button>}
           {fileMode === 'tree' && (
             <>
               <button type="button" title={t('Expand all')} onClick={() => { setAllTreeExpanded(true); setCollapsedDirs({}); }}><Codicon name="expand-all" /></button>
@@ -1289,15 +1333,9 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
             </>
           )}
           <button type="button" className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-tree" /></button>
-          <button type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-flat" /></button>
+          <button type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('Flat list')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-flat" /></button>
         </div>
-        <SpeedSearchIndicator
-          query={speedSearch.query}
-          onClear={speedSearch.clear}
-          count={queryLower ? { current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length } : undefined}
-          onPrev={() => handleNavigateMatch(-1)}
-          onNext={() => handleNavigateMatch(1)}
-        />
+        <FileSearchWidget query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length }} onNavigate={handleNavigateMatch} />
         <div className="detail-files" ref={fileListRef}>
           {loading && !targets.length && <div className="detail-loading">{t('Loading files...')}</div>}
           {!loading && isMergeCommit && targets.length === 0 && (
@@ -1364,7 +1402,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                           node={item.node}
                           depth={item.depth}
                           openDiff={openDiff}
-                          selectedFile={selectedFile}
+                          selectedFile={highlightedFile}
                           isDirOpen={isDirOpen}
                           toggleDir={toggleDir}
                           openingDiffPath={openingDiffPath}
@@ -1386,8 +1424,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                       <DetailFlatFileRow
                         file={file}
                         repoName={repoMap.get(file.repoId)?.meta.name ?? file.repoId}
-                        showRepo={selectedCommits.length > 1}
-                        selectedFile={selectedFile}
+                        showRepo={showRepoGrouping}
+                        selectedFile={highlightedFile}
                         openDiff={openDiff}
                         openingDiffPath={openingDiffPath}
                         onOpeningDiff={handleOpeningDiff}
@@ -1407,10 +1445,11 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                   <DetailRepoGroup
                     key={repoId}
                     files={files}
+                    showRepo={showRepoGrouping}
                     repoName={repoMap.get(repoId)?.meta.name ?? repoId}
                     repoColor={repoMap.get(repoId)?.meta.color}
                     openDiff={openDiff}
-                    selectedFile={selectedFile}
+                    selectedFile={highlightedFile}
                     isDirOpen={isDirOpen}
                     toggleDir={toggleDir}
                     openingDiffPath={openingDiffPath}
@@ -1429,8 +1468,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                     key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
                     file={file}
                     repoName={repoMap.get(file.repoId)?.meta.name ?? file.repoId}
-                    showRepo={selectedCommits.length > 1}
-                    selectedFile={selectedFile}
+                    showRepo={showRepoGrouping}
+                    selectedFile={highlightedFile}
                     openDiff={openDiff}
                     openingDiffPath={openingDiffPath}
                     onOpeningDiff={handleOpeningDiff}
@@ -1453,7 +1492,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
                 commitHash={detail!.commit.hash}
                 repoId={detail!.commit.repoId}
                 viewMode={fileMode}
-                selectedFile={selectedFile}
+                selectedFile={highlightedFile}
                 openDiff={openDiff}
                 isDirOpen={isDirOpen}
                 toggleDir={toggleDir}
@@ -1470,8 +1509,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           })}
         </div>
       </section>
-      {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={150} aria-valuemax={Math.max(230, window.innerHeight - 120)} aria-valuenow={Math.round(infoHeight ?? Math.max(160, window.innerHeight * .28))} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setInfoHeight((value) => Math.max(150, Math.min(Math.max(230, window.innerHeight - 120), (value ?? Math.max(160, window.innerHeight * .28)) + (event.key === 'ArrowUp' ? 10 : -10)))); } }}><i /></div>}
-      {workspaceView ? <ExtendedCommitSummary detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section className="detail-summary" style={infoHeight ? { height: infoHeight } : undefined}>
+      {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={minInfoHeight} aria-valuemax={maxInfoHeight} aria-valuenow={Math.round(infoHeight ?? 220)} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setInfoHeight((value) => clampInfoHeight((value ?? 220) + (event.key === 'ArrowUp' ? 10 : -10))); } }}><i /></div>}
+      {workspaceView ? <ExtendedCommitSummary detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section ref={summaryRef} className="detail-summary" style={infoHeight !== undefined ? { flex: `0 0 ${infoHeight}px`, minHeight: 0, maxHeight: 'none' } : undefined}>
         <header className="detail-toolbar">
           <span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}>
             <Codicon name={selectedCommits.length > 1 ? 'git-commit' : 'repo'} />
@@ -1480,7 +1519,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           <div className="detail-actions">
             <button type="button" title={t('Open Commit Detail')} onClick={openCommitDetail}><Codicon name="open-preview" /></button>
             <button type="button" title={t('Open Changes')} disabled={!canOpenChanges} onClick={openChanges}><Codicon name="diff-multiple" /></button>
-            <button type="button" title={allMessagesExpanded ? t('Collapse commit messages by default') : t('Expand commit messages by default')} onClick={toggleAllMessages}><Codicon name={allMessagesExpanded ? 'collapse-all' : 'expand-all'} /></button>
+            <button type="button" title={messagesExpandedByDefault ? t('Collapse commit messages by default') : t('Expand commit messages by default')} aria-pressed={messagesExpandedByDefault} onClick={toggleAllMessages}><Codicon name={messagesExpandedByDefault ? 'collapse-all' : 'expand-all'} /></button>
             <button type="button" title={t('Collapse commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></button>
           </div>
         </header>
@@ -1556,10 +1595,11 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           position={fileContextMenu.position}
           file={fileContextMenu.file}
           openDiff={openDiff}
+          workspaceView={workspaceView}
           close={() => setFileContextMenu(undefined)}
         />
       )}
-      {dirContextMenu && (
+      {dirContextMenu && !workspaceView && (
         <DetailDirectoryContextMenu
           position={dirContextMenu.position}
           files={dirContextMenu.files}

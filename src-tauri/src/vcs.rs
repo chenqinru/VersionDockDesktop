@@ -5266,10 +5266,12 @@ async fn git_history(
             commit.refs = refs.clone();
         }
     }
-    let unpushed = git_revision_hashes(repo, vec!["@{upstream}..HEAD".into()], token).await;
+    let unpushed = git_unpushed_history_hashes(repo, token).await;
     let incoming = git_revision_hashes(repo, vec!["HEAD..@{upstream}".into()], token).await;
     for commit in &mut commits {
-        commit.unpushed = unpushed.contains(&commit.hash);
+        commit.unpushed = unpushed
+            .as_ref()
+            .is_none_or(|hashes| hashes.contains(&commit.hash));
         commit.incoming = incoming.contains(&commit.hash);
     }
     let has_more = commits.len() > limit as usize;
@@ -5421,12 +5423,51 @@ fn parse_git_log(repo_id: &str, raw: &str) -> Vec<CommitNode> {
         .collect()
 }
 
+// None means there are no remote references: all visible commits are local.
+async fn git_unpushed_history_hashes(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Option<HashSet<String>> {
+    if git(
+        vec!["rev-parse".into(), "--verify".into(), "@{upstream}".into()],
+        repo,
+        token,
+    )
+    .await
+    .is_ok()
+    {
+        return Some(git_revision_hashes(repo, vec!["@{upstream}..HEAD".into()], token).await);
+    }
+    match git(
+        vec![
+            "for-each-ref".into(),
+            "--format=%(refname)".into(),
+            "refs/remotes/".into(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    {
+        Ok(output) if output.stdout_text().trim().is_empty() => None,
+        Ok(_) => Some(
+            git_revision_hashes(
+                repo,
+                vec!["HEAD".into(), "--not".into(), "--remotes".into()],
+                token,
+            )
+            .await,
+        ),
+        Err(_) => Some(HashSet::new()),
+    }
+}
+
 async fn git_revision_hashes(
     repo: &RepositoryMeta,
     revisions: Vec<String>,
     token: &CancellationToken,
 ) -> HashSet<String> {
-    let mut args = vec!["rev-list".into(), "--max-count=500".into()];
+    let mut args = vec!["rev-list".into()];
     args.extend(revisions);
     git(args, repo, token)
         .await
@@ -5908,6 +5949,10 @@ async fn svn_history(
             }
         }
         commit.refs = refs;
+        commit.incoming = clean_base
+            .and_then(|base| base.parse::<u64>().ok())
+            .zip(clean_c.parse::<u64>().ok())
+            .is_some_and(|(base, revision)| revision > base);
     }
     let mut commits = all.into_iter().skip(skip as usize).collect::<Vec<_>>();
     let has_more = commits.len() > limit as usize;

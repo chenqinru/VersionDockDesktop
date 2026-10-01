@@ -4,6 +4,7 @@ import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 
 export function CommitDetailWorkspace() {
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const back = useAppStore((state) => state.backToHistory);
   const { t } = useI18n();
@@ -22,7 +23,7 @@ export function CommitDetailWorkspace() {
         <code>{revision}</code>
         <strong title={title}>{title}</strong>
       </header>
-      <CommitDetailPanel variant="workspace" onCollapse={back} />
+      <CommitDetailPanel key={`${workspaceId}:${selectedCommits.map((commit) => `${commit.repoId}:${commit.hash}`).join('|')}`} variant="workspace" onCollapse={back} />
     </section>
   );
 }

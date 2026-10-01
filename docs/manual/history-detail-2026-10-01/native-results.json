@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-01",
+  "appBaseline": "2738e72116d10fc757c503f9e710e84dc6d1bd04",
+  "pluginReference": "378d8eade1d259a767a113c6de7b8e07626a1497",
+  "fixtureRevisions": {
+    "root": "f05dbf1814f9a0fbfb40a3b0f523467d59f5a9d7",
+    "second": "95ed4c7464eb21fa014b0315fca4d0701700cbb6",
+    "rename": "d8a856489dd95c69299d04a75d33134c81abcb2d",
+    "merge": "d748a6ad299f10ac65bc8d0d77be408bcc870c60",
+    "bulk": "5d1a874b9e2c2122b7605285e73e7c9884aa008f"
+  },
+  "frontendTests": 523,
+  "rustTests": 117,
+  "nativeChecks": [
+    "Single detail: full hash, author/email/dates, refs, full message, file diff, return navigation",
+    "Same repository aggregate including root: two files, +2 root lines, empty left side in real diff",
+    "Cross repository aggregate: same src/renamed.txt remains separate in alpha and beta; read-only aggregate file menu",
+    "65 files: tree/flat views, Cmd+F, native editable search, 1/1 match item_64.ts, scroll and neutral selection, Escape",
+    "Summary resize: actual native drag expands past initial 48 percent while retaining file pane",
+    "Merge parent: native expansion loads feature.txt; opening it displays feature detail",
+    "SVN r3: native payment.txt diff shows payment base and payment next",
+    "Unpublished Git history: latest Rust runtime shows unpushed arrows on alpha and beta commits",
+    "VS Code Extension Development Host: log sidebar, same single/aggregate detail, aggregate file menu"
+  ],
+  "boundaries": [
+    "macOS only; Windows/Linux not manually exercised",
+    "No AI or comfortable layout",
+    "Network credentials and every destructive dialog path were not replayed in native UI",
+    "UI host frame, theme, language and avatar colors differ; no zero-pixel-error claim"
+  ],
+  "screenshots": [
+    "app-history.png",
+    "app-single-detail.png",
+    "app-aggregate-detail.png",
+    "app-cross-repository-menu.png",
+    "app-root-aggregate-diff.png",
+    "app-file-search.png",
+    "app-summary-resize.png",
+    "app-merge-parent.png",
+    "app-merge-diff.png",
+    "app-svn-diff.png",
+    "plugin-log-single.png",
+    "plugin-single-detail.png",
+    "plugin-aggregate-detail.png",
+    "plugin-aggregate-menu.png"
+  ]
+}

@@ -48,8 +48,12 @@ function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded }: { ope
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => { if (!ref.current?.contains(event.target as Node)) onToggle(); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') onToggle(); };
+    const blur = () => onToggle();
     document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    document.addEventListener('keydown', escape);
+    window.addEventListener('blur', blur);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', escape); window.removeEventListener('blur', blur); };
   }, [onToggle, open]);
   return <div ref={ref} className="history-more"><button type="button" className={`more-button ${open ? 'selected' : ''}`} title={t('More actions')} aria-label={t('More actions')} onClick={onToggle}><Codicon name="three-bars" style={{ fontSize: '14px' }} /></button>{open && <div className="more-menu">
     <button onClick={() => { onFetch(); onToggle(); }}><Codicon name="sync" />{t('Fetch and Refresh')}</button>
@@ -522,7 +526,7 @@ function CommitList({
         const key = commitKey(commit.repoId, commit.hash);
         const isSelected = selected.has(key);
         const isMergeCommit = commit.parents.length > 1;
-        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); window.getSelection()?.removeAllRanges(); if (hoverTimer.current) clearTimeout(hoverTimer.current); setPopover(undefined); setContext({ x: event.clientX, y: event.clientY, commit }); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void selectCommit(commit, 'single', commits); }}>
+        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); window.getSelection()?.removeAllRanges(); if (hoverTimer.current) clearTimeout(hoverTimer.current); setPopover(undefined); setContext({ x: event.clientX, y: event.clientY, commit }); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits); } }}>
           {labelColWidth > 0 && <div style={{ width: labelColWidth, flexShrink: 0 }} />}
           <CommitGraph commit={commit} selected={isSelected} />
           <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} maxVisible={maxVisibleRefs} />
@@ -603,6 +607,7 @@ function CommitList({
 }
 
 export function HistoryWorkspace() {
+  const snapshotWorkspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const { t } = useI18n();
   const [menu, setMenu] = useState<FilterMenu>(null);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -822,7 +827,7 @@ export function HistoryWorkspace() {
         renderCommits={(commits) => <CommitList history={commits} loading={false} expandedRepoIds={new Set()} onToggleRepoName={() => undefined} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} isFiltered repoSortKeyById={repoSortKeyById} hasMoreOverride={false} singleRepository />}
       /> : <CommitList history={visibleHistory} loading={historyLoading} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} hasRevisionFilter={hasBranchFilter} repoSortKeyById={repoSortKeyById} />}</div>
       {!detailSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize detail sidebar')} aria-orientation="vertical" aria-valuemin={220} aria-valuemax={680} aria-valuenow={detailWidth} onPointerDown={resizeDetail} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('detail', Math.min(680, Math.max(220, detailWidth + (event.key === 'ArrowLeft' ? 10 : -10)))); } }} />}
-      <div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <button className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></button> : <CommitDetailPanel onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
+      <div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <button className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></button> : <CommitDetailPanel key={snapshotWorkspaceId} onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
     </div>
   </section>;
 }

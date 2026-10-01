@@ -37,6 +37,7 @@ const originalBack = useAppStore.getState().backToHistory;
 
 afterEach(() => {
   cleanup();
+  for (const key of Object.keys(localStorage)) if (key.startsWith('versiondock:detailView:')) localStorage.removeItem(key);
   useAppStore.setState({
     snapshot: undefined,
     selectedCommit: undefined,
@@ -45,6 +46,7 @@ afterEach(() => {
     selectedCommitLoading: {},
     backToHistory: originalBack,
     mode: 'history',
+    historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null },
   });
 });
 
@@ -97,6 +99,32 @@ describe('CommitDetailWorkspace', () => {
     expect(screen.getByText('feat: oldest change')).toBeInTheDocument();
     expect(screen.getByText('Newest full message.')).toBeInTheDocument();
     expect(screen.getByText('Oldest full message.')).toBeInTheDocument();
-    expect(screen.getAllByText('Example Repo')).toHaveLength(3);
+    expect(screen.getAllByText('Example Repo')).toHaveLength(2);
   });
+  it('shows all commit files independently of the log path filter and uses the single-detail menu', () => {
+    const selected = commit('single-detail-hash', 'feat: complete detail', '2026-08-26T10:00:00Z');
+    const selectedDetail = detail(selected, 'Full message.', 'src/detail.tsx');
+    selectedDetail.files.push({ path: 'README.md', status: 'A', added: 1, removed: 0 });
+    useAppStore.setState({ snapshot, selectedCommit: selectedDetail, selectedCommits: [selected], selectedCommitDetails: { [commitKey('repo', selected.hash)]: selectedDetail }, historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: 'src/detail.tsx', revision: null } });
+    render(<CommitDetailWorkspace />);
+    expect(screen.getByText('README.md')).toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByText('README.md').closest('button')!);
+    expect(screen.getByRole('menuitem', { name: 'Revert Selected Changes' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cherry-Pick Selected Changes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'File history' })).not.toBeInTheDocument();
+  });
+
+  it('keeps file mutations out of the aggregated detail menu', () => {
+    const newest = commit('newest', 'New', '2026-08-27T10:00:00Z');
+    const oldest = commit('oldest', 'Old', '2026-08-26T10:00:00Z');
+    const newestDetail = detail(newest, 'New body', 'shared.txt');
+    const oldestDetail = detail(oldest, 'Old body', 'shared.txt');
+    useAppStore.setState({ snapshot, selectedCommit: newestDetail, selectedCommits: [newest, oldest], selectedCommitDetails: { [commitKey('repo', newest.hash)]: newestDetail, [commitKey('repo', oldest.hash)]: oldestDetail } });
+    render(<CommitDetailWorkspace />);
+    fireEvent.contextMenu(screen.getByText('shared.txt').closest('button')!);
+    expect(screen.getByRole('menuitem', { name: 'Show Diff' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Revert Selected Changes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cherry-Pick Selected Changes' })).not.toBeInTheDocument();
+  });
+
 });

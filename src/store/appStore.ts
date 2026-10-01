@@ -298,6 +298,7 @@ export interface WorkspaceSessionState {
   selectedCommit?: CommitDetail;
   selectedCommits: CommitNode[];
   selectedPrimaryKey?: string;
+  commitSelectionAnchorKey?: string;
   selectedCommitDetails: Record<string, CommitDetail>;
   selectedCommitLoading: Record<string, boolean>;
   selectedCommitError?: Record<string, string>;
@@ -404,6 +405,7 @@ export interface AppStore {
   selectedCommit?: CommitDetail;
   selectedCommits: CommitNode[];
   selectedPrimaryKey?: string;
+  commitSelectionAnchorKey?: string;
   selectedCommitDetails: Record<string, CommitDetail>;
   selectedCommitLoading: Record<string, boolean>;
   selectedCommitError: Record<string, string>;
@@ -1637,6 +1639,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       selectedCommit: state.selectedCommit,
       selectedCommits: state.selectedCommits,
       selectedPrimaryKey: state.selectedPrimaryKey,
+      commitSelectionAnchorKey: state.commitSelectionAnchorKey,
       selectedCommitDetails: state.selectedCommitDetails,
       selectedCommitLoading: state.selectedCommitLoading,
       selectedCommitError: state.selectedCommitError,
@@ -1895,7 +1898,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
+      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     checkStatusNotifications(allRepositories, snapshot.workspace.id);
@@ -2544,6 +2547,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           selectedCommit: cachedSession.selectedCommit ?? (cachedSession.selectedPrimaryKey ? cachedSession.selectedCommitDetails[cachedSession.selectedPrimaryKey] : (cachedSession.selectedCommits[0] ? cachedSession.selectedCommitDetails[commitKey(cachedSession.selectedCommits[0].repoId, cachedSession.selectedCommits[0].hash)] : undefined)),
           selectedCommits: cachedSession.selectedCommits,
           selectedPrimaryKey: cachedSession.selectedPrimaryKey ?? (cachedSession.selectedCommits[0] ? commitKey(cachedSession.selectedCommits[0].repoId, cachedSession.selectedCommits[0].hash) : undefined),
+          commitSelectionAnchorKey: cachedSession.commitSelectionAnchorKey ?? cachedSession.selectedPrimaryKey,
           selectedCommitDetails: cachedSession.selectedCommitDetails,
           selectedCommitLoading: restoredLoading,
           selectedCommitError: cachedSession.selectedCommitError ?? {},
@@ -2679,7 +2683,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             historyQuery: { ...EMPTY_HISTORY_QUERY },
             selectedCommit: undefined,
             selectedCommits: [],
-            selectedPrimaryKey: undefined,
+            selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined,
             selectedCommitDetails: {},
             selectedCommitLoading: {},
             selectedCommitError: {},
@@ -2768,7 +2772,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         historyQuery: { ...EMPTY_HISTORY_QUERY },
         selectedCommit: undefined,
         selectedCommits: [],
-        selectedPrimaryKey: undefined,
+        selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined,
         selectedCommitDetails: {},
         selectedCommitLoading: {},
         selectedCommitError: {},
@@ -2922,7 +2926,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         ...(repoChanged ? {
           selectedCommit: undefined,
           selectedCommits: [],
-          selectedPrimaryKey: undefined,
+          selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined,
           selectedCommitLoading: {},
           selectedCommitError: {},
           mergeCommitsLoading: {},
@@ -3024,7 +3028,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         return !state.selectedCommitDetails[key] || state.selectedCommitLoading[key] || Boolean(state.selectedCommitError[key]);
       });
       if (hasUnfinishedCommit) return;
-      const files = buildCommitFileTargets(state.selectedCommits, state.selectedCommitDetails, state.snapshot?.repositories ?? [], state.historyQuery.path);
+      const files = buildCommitFileTargets(state.selectedCommits, state.selectedCommitDetails, state.snapshot?.repositories ?? []);
       if (!files.length) return;
       set({
         changes: { kind: 'commits', commits: state.selectedCommits, files },
@@ -3620,6 +3624,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({
         selectedCommits: commits,
         selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash),
+        commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash),
         selectedCommit: details[0],
         selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey },
         historyScope,
@@ -3640,6 +3645,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({
         selectedCommits: commits,
         selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash),
+        commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash),
         selectedCommit: details[0],
         selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey },
         historyScope,
@@ -4036,18 +4042,21 @@ export const useAppStore = create<AppStore>((set, get) => {
       const clickedKey = commitKey(commit.repoId, commit.hash);
       const source = rangeSource ?? state.history;
       let selected: CommitNode[];
+      let anchorKey = state.commitSelectionAnchorKey ?? state.selectedPrimaryKey ?? clickedKey;
       if (mode === 'single') {
         selected = [commit];
+        anchorKey = clickedKey;
       } else if (mode === 'toggle') {
         const selectedKeys = new Set(state.selectedCommits.map((item) => commitKey(item.repoId, item.hash)));
         if (selectedKeys.has(clickedKey)) selectedKeys.delete(clickedKey);
         else selectedKeys.add(clickedKey);
+        if (selectedKeys.size === 0) selectedKeys.add(clickedKey);
         selected = source.filter((item) => selectedKeys.has(commitKey(item.repoId, item.hash)));
+        if (!selectedKeys.has(anchorKey)) anchorKey = clickedKey;
       } else {
-        const anchorKey = state.selectedPrimaryKey ?? (state.selectedCommits[0] ? commitKey(state.selectedCommits[0].repoId, state.selectedCommits[0].hash) : clickedKey);
         const anchorIndex = source.findIndex((item) => commitKey(item.repoId, item.hash) === anchorKey);
         const clickedIndex = source.findIndex((item) => commitKey(item.repoId, item.hash) === clickedKey);
-        if (anchorIndex < 0 || clickedIndex < 0) selected = [commit];
+        if (anchorIndex < 0 || clickedIndex < 0) { selected = [commit]; anchorKey = clickedKey; }
         else {
           const start = Math.min(anchorIndex, clickedIndex);
           const end = Math.max(anchorIndex, clickedIndex);
@@ -4057,10 +4066,17 @@ export const useAppStore = create<AppStore>((set, get) => {
 
       const primary = selected.length ? (selected.find((item) => commitKey(item.repoId, item.hash) === clickedKey) ?? selected[selected.length - 1]) : undefined;
       const primaryKey = primary ? commitKey(primary.repoId, primary.hash) : undefined;
+      const selectionChanged = primaryKey !== state.selectedPrimaryKey
+        || selected.length !== state.selectedCommits.length
+        || selected.some((item, index) => commitKey(item.repoId, item.hash) !== commitKey(state.selectedCommits[index].repoId, state.selectedCommits[index].hash));
+      if (selectionChanged) {
+        diffRequestGeneration += 1;
+        requestControllers.get('diff')?.abort();
+      }
       const generation = ++commitSelectionGeneration;
       const targetWorkspaceId = workspaceId();
       const loading = Object.fromEntries(selected.filter((item) => !state.selectedCommitDetails[commitKey(item.repoId, item.hash)]).map((item) => [commitKey(item.repoId, item.hash), true]));
-      set({ selectedCommits: selected, selectedPrimaryKey: primaryKey, selectedCommit: primaryKey ? state.selectedCommitDetails[primaryKey] : undefined, selectedCommitLoading: loading, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history', diffReturnMode: undefined });
+      set({ selectedCommits: selected, selectedPrimaryKey: primaryKey, commitSelectionAnchorKey: anchorKey, ...(selectionChanged ? { selectedFile: undefined, diff: undefined } : {}), selectedCommit: primaryKey ? state.selectedCommitDetails[primaryKey] : undefined, selectedCommitLoading: loading, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history', diffReturnMode: undefined });
       const missing = selected.filter((item) => !state.selectedCommitDetails[commitKey(item.repoId, item.hash)]);
       const results = await mapWithConcurrency(missing, 4, async (item) => {
         try {
@@ -4312,7 +4328,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     clearCommitSelection: () => {
       commitSelectionGeneration += 1;
-      set({ selectedCommit: undefined, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommitLoading: {}, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history' });
+      set({ selectedCommit: undefined, selectedCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommitLoading: {}, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history' });
     },
 
     branchOperation: async (operation, requestedRepoId) => {
@@ -5062,7 +5078,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       requestControllers.get('branch-comparison')?.abort();
       set({
         comparisonTarget: { repoId, target }, comparison: undefined, diff: undefined, selectedFile: undefined,
-        selectedCommit: undefined, selectedCommits: [], selectedPrimaryKey: undefined, selectedCommitLoading: {},
+        selectedCommit: undefined, selectedCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommitLoading: {},
         selectedCommitError: {},
         mode: 'history',
       });

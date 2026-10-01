@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CommitDetail, CommitNode, RepositoryStatus } from '../bindings/generated';
-import { buildCommitFileTargets, commitKey } from './commitDetails';
+import { buildCommitFileTargets, commitKey, GIT_EMPTY_TREE, commitComparisonBase } from './commitDetails';
 
 const repo: RepositoryStatus = {
   meta: { id: 'repo', name: 'Repo', rootPath: '/tmp/repo', color: '#4ec9b0', kind: 'git', parentRepoId: null, depth: 0, isSubmodule: false, isWorktree: false },
@@ -74,4 +74,23 @@ describe('commit detail aggregation', () => {
     const filteredAll = buildCommitFileTargets([targetCommit], details, [repo]);
     expect(filteredAll).toHaveLength(3);
   });
+  it('compares an aggregate including the root commit against the empty tree', () => {
+    const root = commit('root', undefined);
+    const newest = commit('newest', root.hash);
+    const details: Record<string, CommitDetail> = {
+      [commitKey('repo', root.hash)]: { commit: root, fullMessage: 'Root', branches: { local: [], remote: [], tags: [] }, files: [{ path: 'root.txt', status: 'A', added: 1, removed: 0 }] },
+      [commitKey('repo', newest.hash)]: { commit: newest, fullMessage: 'Newest', branches: { local: [], remote: [], tags: [] }, files: [{ path: 'root.txt', status: 'M', added: 1, removed: 0 }] },
+    };
+    const [target] = buildCommitFileTargets([newest, root], details, [repo]);
+    expect(target).toMatchObject({ fromRevision: GIT_EMPTY_TREE, toRevision: newest.hash, added: 2 });
+  });
+
+  it('uses actual parent revisions for file-content and line-history actions', () => {
+    expect(commitComparisonBase(commit('root', undefined), 'git')).toBe(GIT_EMPTY_TREE);
+    expect(commitComparisonBase(commit('merge', 'first-parent'), 'git')).toBe('first-parent');
+    expect(commitComparisonBase(commit('r3', undefined), 'svn')).toBe('2');
+    expect(commitComparisonBase(commit('1', undefined), 'svn')).toBe('0');
+    expect(commitComparisonBase(commit('not-a-revision', undefined), 'svn')).toBeUndefined();
+  });
+
 });

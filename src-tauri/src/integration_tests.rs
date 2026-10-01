@@ -1326,6 +1326,13 @@ async fn real_git_lists_only_unpushed_commits() {
     std::fs::write(directory.path().join("base.txt"), "base\n").unwrap();
     command("git", &["add", "base.txt"], directory.path());
     command("git", &["commit", "-m", "base"], directory.path());
+    let repository = repo(directory.path(), VcsKind::Git);
+    let token = CancellationToken::new();
+    let unpublished = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(unpublished.commits.iter().all(|commit| commit.unpushed));
+
     command(
         "git",
         &["remote", "add", "origin", remote.path().to_str().unwrap()],
@@ -1339,6 +1346,24 @@ async fn real_git_lists_only_unpushed_commits() {
     std::fs::write(directory.path().join("local.txt"), "one\ntwo\n").unwrap();
     command("git", &["add", "local.txt"], directory.path());
     command("git", &["commit", "-m", "local only"], directory.path());
+
+    let tracked = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert_eq!(tracked.commits.len(), 2);
+    assert!(tracked.commits[0].unpushed);
+    assert!(!tracked.commits[1].unpushed);
+    command("git", &["branch", "--unset-upstream"], directory.path());
+    let untracked_branch = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(untracked_branch.commits[0].unpushed);
+    assert!(!untracked_branch.commits[1].unpushed);
+    command(
+        "git",
+        &["branch", "--set-upstream-to=origin/main"],
+        directory.path(),
+    );
 
     let commits = vcs::unpushed_commits(
         &repo(directory.path(), VcsKind::Git),
@@ -2352,6 +2377,26 @@ async fn real_svn_history_with_line_range_returns_expected_commits() {
     assert!(hashes3_r2.contains(&"1"));
     assert!(!hashes3_r2.contains(&"3"));
     assert!(!hashes3_r2.contains(&"2"));
+    command("svn", &["update", "-r", "1"], &checkout);
+    let incoming_page = vcs::history(&repository, 0, 10, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(
+        incoming_page
+            .commits
+            .iter()
+            .find(|commit| commit.hash == "3")
+            .unwrap()
+            .incoming
+    );
+    assert!(
+        !incoming_page
+            .commits
+            .iter()
+            .find(|commit| commit.hash == "1")
+            .unwrap()
+            .incoming
+    );
 }
 
 #[tokio::test]
@@ -4078,6 +4123,21 @@ async fn real_git_commit_detail_merge_refs_and_range_diff() {
         .await
         .unwrap();
     assert!(tagged.branches.tags.iter().any(|tag| tag == "v-detail"));
+
+    // An aggregate including the root must compare against the empty tree,
+    // retaining the root's original lines rather than showing only the latest commit.
+    let root_range = vcs::diff(
+        &repository,
+        "base.txt",
+        false,
+        None,
+        Some("4b825dc642cb6eb9a060e54bf8d69288fbee4904".into()),
+        Some(merge_hash.clone()),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(root_range.content.contains("+base"));
 
     let range = vcs::diff(
         &repository,

@@ -5,6 +5,7 @@ import { useI18n } from '../i18n';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { FileIcon } from './FileIcon';
 import { DiffPlaceholder } from './DiffPlaceholder';
+import { commitComparisonBase } from '../history/commitDetails';
 import { UnifiedDiffView } from './UnifiedDiffView';
 
 export function DiffWorkspace() {
@@ -25,6 +26,7 @@ export function DiffWorkspace() {
     }
   };
   const file = useAppStore((state) => state.selectedFile);
+  const selectedCommits = useAppStore((state) => state.selectedCommits);
   const externalEditor = useAppStore((state) => state.bootstrap?.state.settings?.externalEditor ?? state.bootstrap?.state.externalEditor);
   const snapshot = useAppStore((state) => state.snapshot);
   const repo = snapshot?.repositories.find((item) => item.meta.id === file?.repoId);
@@ -35,7 +37,10 @@ export function DiffWorkspace() {
   const fileName = diff.path.split('/').pop() ?? diff.path;
   const revisionLabel = file && !file.revision ? t(file.staged ? 'Index ↔ HEAD' : 'Working tree') : undefined;
   const isWorking = file?.toRevision === 'WORKTREE' || file?.toRevision === 'WORKING' || (!file?.revision && !file?.toRevision);
-  const oldRevision = file?.fromRevision ?? (file?.revision ? `${file.revision}~1` : 'HEAD');
+  const commit = selectedCommits.find((item) => item.repoId === file?.repoId && item.hash === file?.revision);
+  const kind = repo?.meta.kind ?? 'git';
+  const oldRevision = file?.fromRevision ?? (commit ? commitComparisonBase(commit, kind)
+    : file?.revision ? kind === 'svn' ? commitComparisonBase({ hash: file.revision, parents: [] }, kind) : `${file.revision}~1` : 'HEAD');
   const newRevision = isWorking ? undefined : (file?.toRevision ?? file?.revision);
   const backLabel = comparisonTarget
     ? t('Back to compare')

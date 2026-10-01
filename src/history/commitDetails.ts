@@ -1,5 +1,8 @@
 import type { CommitDetail, CommitFile, CommitNode, RepositoryStatus } from '../bindings/generated';
 
+// Git's empty tree is the comparison base for selections that include the root commit.
+export const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
 export type DetailFileTarget = CommitFile & {
   repoId: string;
   commitHash: string;
@@ -8,11 +11,6 @@ export type DetailFileTarget = CommitFile & {
   toRevision?: string;
   comparisonBaseHash?: string;
   isMergeParentDiff?: boolean;
-};
-
-export type SelectedCommitDetail = {
-  commit: CommitNode;
-  detail: CommitDetail;
 };
 
 export function commitKey(repoId: string, hash: string): string {
@@ -48,6 +46,12 @@ export function filterFilesForHistoryPath<T extends { path: string }>(files: T[]
   return mappedMatches.filter((file) => normalizeHistoryPath(file.path).length === maxPathLength);
 }
 
+export function commitComparisonBase(commit: Pick<CommitNode, 'hash' | 'parents'>, kind: 'git' | 'svn'): string | undefined {
+  if (kind === 'git') return commit.parents[0] ?? GIT_EMPTY_TREE;
+  const revision = Number(commit.hash.replace(/^r/i, ''));
+  return Number.isInteger(revision) && revision > 0 ? String(revision - 1) : undefined;
+}
+
 export function buildCommitFileTargets(
   commits: CommitNode[],
   details: Record<string, CommitDetail>,
@@ -63,12 +67,9 @@ export function buildCommitFileTargets(
     if (repoCommits.length < 2) continue;
     const oldest = repoCommits[repoCommits.length - 1];
     const newest = repoCommits[0];
-    if (repoKinds.get(repoId) === 'git' && oldest.parents[0]) {
-      ranges.set(repoId, { fromRevision: oldest.parents[0], toRevision: newest.hash });
-    } else if (repoKinds.get(repoId) === 'svn') {
-      const revision = Number.parseInt(oldest.hash.replace(/^r/i, ''), 10);
-      if (Number.isFinite(revision) && revision > 0) ranges.set(repoId, { fromRevision: String(revision - 1), toRevision: newest.hash });
-    }
+    const kind = repoKinds.get(repoId);
+    const fromRevision = kind ? commitComparisonBase(oldest, kind) : undefined;
+    if (fromRevision) ranges.set(repoId, { fromRevision, toRevision: newest.hash });
   }
 
   const targets = new Map<string, DetailFileTarget>();
@@ -97,8 +98,4 @@ export function buildCommitFileTargets(
     }
   }
   return [...targets.values()];
-}
-
-export function fileTargetRevision(target: DetailFileTarget): string | undefined {
-  return target.toRevision ? undefined : target.commitHash;
 }

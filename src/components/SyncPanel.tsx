@@ -719,7 +719,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
           const color = readableAccentColor(repo.meta.color);
           const ahead = Math.max(repo.ahead, outgoing[repo.meta.id]?.length ?? 0);
           const behind = Math.max(repo.behind, incoming[repo.meta.id]?.length ?? 0);
-          return <span className="sync-selected-pill" style={{ color, borderColor: `${color}60`, background: `${color}28` }} key={repo.meta.id}>
+          return <span className="sync-selected-pill" style={{ color, borderColor: 'var(--versiondock-selection-border)', background: 'var(--versiondock-selection-background)' }} key={repo.meta.id}>
             <button title={t('Remove {0}', repo.meta.name)} onClick={() => toggleChecked(repo.meta.id)}><Codicon name="close" /></button>
             <span>{repo.meta.name.toLocaleLowerCase()}</span>
             {outgoingActive(repo.meta.id) && ahead > 0 && <small><Codicon name="arrow-up" />{ahead}</small>}

@@ -98,16 +98,16 @@ function PillAmendButton({
         userSelect: 'none',
         transition: 'all 0.12s ease',
         border: active
-          ? `1px solid ${color}`
+          ? '1px solid var(--versiondock-selection-border)'
           : hovered
             ? `1px solid ${color}80`
             : `1px solid transparent`,
         background: active
-          ? `${color}38`
+          ? 'var(--versiondock-selection-background)'
           : hovered
             ? 'rgba(255, 255, 255, 0.16)'
             : 'rgba(255, 255, 255, 0.08)',
-        color: active ? color : 'inherit',
+        color: active ? 'var(--versiondock-selection-foreground)' : 'inherit',
         opacity: active ? 1 : hovered ? 0.9 : 0.65,
         fontWeight: active ? 600 : 400,
       }}

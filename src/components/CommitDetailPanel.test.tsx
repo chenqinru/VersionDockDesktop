@@ -80,7 +80,9 @@ const originalHistoryOperation = useAppStore.getState().historyOperation;
 
 afterEach(() => {
   cleanup();
+  for (const key of Object.keys(localStorage)) if (key.startsWith('versiondock:detailView:')) localStorage.removeItem(key);
   publishDialog(undefined);
+  localStorage.removeItem('versiondock:commitMessagesExpandedByDefault');
   useAppStore.setState({
     snapshot: undefined,
     selectedCommit: undefined,
@@ -139,7 +141,7 @@ describe('CommitDetailPanel merge commits', () => {
   it('shows only restore and cherry-pick actions on directories and applies every descendant file', async () => {
     const historyOperation = vi.fn().mockResolvedValue(undefined);
     useAppStore.setState({
-      snapshot,
+      snapshot: { ...snapshot, repositories: [...snapshot.repositories, { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' } }] },
       selectedCommit: directoryDetail,
       selectedCommits: [directoryCommit],
       selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: directoryDetail },
@@ -289,7 +291,7 @@ describe('CommitDetailPanel merge commits', () => {
 
   it('allows expanding a directory immediately on first click after collapse all', () => {
     useAppStore.setState({
-      snapshot,
+      snapshot: { ...snapshot, repositories: [...snapshot.repositories, { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' } }] },
       selectedCommit: directoryDetail,
       selectedCommits: [directoryDetail.commit],
       selectedCommitDetails: { [commitKey('repo-1', directoryDetail.commit.hash)]: directoryDetail },
@@ -411,7 +413,7 @@ describe('CommitDetailPanel merge commits', () => {
       files: virtualFiles,
     };
     useAppStore.setState({
-      snapshot,
+      snapshot: { ...snapshot, repositories: [...snapshot.repositories, { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' } }] },
       selectedCommit: virtualDetail,
       selectedCommits: [virtualCommit],
       selectedCommitDetails: { [commitKey('repo-1', virtualCommit.hash)]: virtualDetail },
@@ -661,7 +663,7 @@ describe('CommitDetailPanel merge commits', () => {
     fireEvent.keyDown(window, { key: 's' });
 
     expect(screen.getByRole('search')).toBeInTheDocument();
-    expect(screen.getByRole('search')).toHaveTextContent('ts');
+    expect(screen.getByRole('textbox', { name: 'Search files...' })).toHaveValue('ts');
     expect(screen.getByRole('search')).toHaveTextContent('1/2');
 
     const nextBtn = screen.getByTitle('Next match');
@@ -1244,4 +1246,74 @@ describe('CommitDetailPanel merge commits', () => {
     fireEvent.click(retryBtns[0]);
     expect(reloadSelectedCommits).toHaveBeenCalledTimes(1);
   });
+  it('keeps an editable file search open, handles keyboard navigation, and restores collapsed folders', () => {
+    useAppStore.setState({ snapshot, selectedCommit: directoryDetail, selectedCommits: [directoryCommit], selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: directoryDetail } });
+    render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    const collapse = screen.getByTitle('Collapse all');
+    fireEvent.click(collapse);
+    collapse.focus();
+    fireEvent.keyDown(collapse, { key: 'f', metaKey: true });
+    const input = screen.getByRole('textbox', { name: 'Search files...' });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: '.ts' } });
+    expect(screen.getByRole('search')).toHaveTextContent('1/2');
+    expect(screen.getByRole('button', { name: /alpha\.ts/ })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByRole('search')).toHaveTextContent('2/2');
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(screen.getByRole('search')).toHaveTextContent('1/2');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('search')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /alpha\.ts/ })).not.toBeInTheDocument();
+    expect(collapse).toHaveFocus();
+  });
+
+  it('uses the message expansion preference on subsequently selected commits', () => {
+    const first = { ...directoryDetail, fullMessage: directoryCommit.message + '\n\nFirst body' };
+    useAppStore.setState({ snapshot, selectedCommit: first, selectedCommits: [directoryCommit], selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: first } });
+    const view = render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    fireEvent.click(screen.getByTitle('Expand commit messages by default'));
+    expect(screen.getByText('First body')).toBeInTheDocument();
+    const nextCommit = { ...directoryCommit, hash: 'next', message: 'Second subject' };
+    const second = { ...directoryDetail, commit: nextCommit, fullMessage: 'Second subject\n\nSecond body' };
+    useAppStore.setState({ selectedCommit: second, selectedCommits: [nextCommit], selectedCommitDetails: { [commitKey(nextCommit.repoId, nextCommit.hash)]: second } });
+    view.rerender(<CommitDetailPanel onCollapse={vi.fn()} />);
+    expect(screen.getByText('Second body')).toBeInTheDocument();
+    expect(screen.getByTitle('Collapse commit messages by default')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not restore files into a workspace switched while the confirmation was open', async () => {
+    const historyOperation = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ snapshot, selectedCommit: directoryDetail, selectedCommits: [directoryCommit], selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: directoryDetail }, historyOperation });
+    render(<><CommitDetailPanel onCollapse={vi.fn()} /><DialogHost /></>);
+    fireEvent.contextMenu(screen.getByText('alpha.ts').closest('button')!);
+    fireEvent.click(screen.getByText('Revert Selected Changes'));
+    useAppStore.setState({ snapshot: { ...snapshot, workspace: { ...snapshot.workspace, id: 'another-workspace' } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(historyOperation).not.toHaveBeenCalled();
+  });
+
+  it('allows resizing the summary beyond its initial percentage while retaining space for files', () => {
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const height = this.classList.contains('commit-detail') ? 600 : this.classList.contains('detail-summary') ? 220 : 0;
+      return height ? { x: 0, y: 0, top: 0, left: 0, right: 400, bottom: height, width: 400, height, toJSON: () => ({}) } : original.call(this);
+    });
+    try {
+      useAppStore.setState({ snapshot, selectedCommit: directoryDetail, selectedCommits: [directoryCommit], selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: directoryDetail } });
+      render(<CommitDetailPanel onCollapse={vi.fn()} />);
+      const separator = screen.getByRole('separator', { name: 'Resize commit detail' });
+      for (let index = 0; index < 40; index++) fireEvent.keyDown(separator, { key: 'ArrowUp' });
+      const expandedHeight = Number(separator.getAttribute('aria-valuenow'));
+      expect(expandedHeight).toBeGreaterThan(600 * .48);
+      expect(expandedHeight).toBeLessThan(600 - 96);
+      expect(document.querySelector('.detail-summary')).toHaveStyle({ maxHeight: 'none', flex: `0 0 ${expandedHeight}px` });
+      for (let index = 0; index < 60; index++) fireEvent.keyDown(separator, { key: 'ArrowDown' });
+      expect(Number(separator.getAttribute('aria-valuenow'))).toBeGreaterThanOrEqual(96);
+    } finally {
+      bounds.mockRestore();
+    }
+  });
+
 });

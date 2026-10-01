@@ -403,7 +403,7 @@ export function MergeWorkspace() {
                       height: 22,
                       boxSizing: 'border-box',
                       gap: 4,
-                      border: `1px solid ${active ? 'var(--vscode-focusBorder, #007fd4)' : 'var(--vscode-panel-border, #444444)'}`,
+                      border: `1px solid ${active ? 'var(--versiondock-selection-border)' : 'var(--vscode-panel-border, #444444)'}`,
                       borderRadius: 3,
                       background: active ? 'var(--vscode-list-activeSelectionBackground, var(--versiondock-selection-background))' : 'transparent',
                       color: !canApplyNonConflicting ? 'var(--vscode-disabledForeground, #777777)' : active ? 'var(--vscode-list-activeSelectionForeground, var(--versiondock-selection-foreground))' : 'var(--vscode-foreground, #cccccc)',

@@ -3,7 +3,7 @@ import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { useAppStore, type WorkingChangeTarget } from '../store/appStore';
 import { useI18n } from '../i18n';
-import type { DetailFileTarget } from '../history/commitDetails';
+import { commitComparisonBase, type DetailFileTarget } from '../history/commitDetails';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { DiffPlaceholder } from './DiffPlaceholder';
 import { UnifiedDiffView } from './UnifiedDiffView';
@@ -49,10 +49,12 @@ export function CommitChangesWorkspace() {
     && diff.path === selected.path
   );
   const repoNames = useMemo(() => Object.fromEntries(repositories.map((repo) => [repo.meta.id, repo.meta.name])), [repositories]);
+  const selectedCommit = selected && !isWorking(selected) && changes?.kind === 'commits' ? changes.commits.find((commit) => commit.repoId === selected.repoId && commit.hash === selected.commitHash) : undefined;
+  const selectedRepoKind = repositories.find((repo) => repo.meta.id === selected?.repoId)?.meta.kind ?? 'git';
   const oldRevision = selected
     ? isWorking(selected)
       ? 'HEAD'
-      : selected.fromRevision ?? (selected.commitHash ? `${selected.commitHash}~1` : undefined)
+      : selected.fromRevision ?? (selectedCommit ? commitComparisonBase(selectedCommit, selectedRepoKind) : selectedRepoKind === 'svn' ? commitComparisonBase({ hash: selected.commitHash, parents: [] }, 'svn') : `${selected.commitHash}~1`)
     : undefined;
   const newRevision = selected
     ? isWorking(selected)

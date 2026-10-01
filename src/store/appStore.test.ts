@@ -35,7 +35,7 @@ afterEach(() => {
   publishDialog(undefined);
   useAppStore.getState().dispose();
   if (typeof localStorage !== 'undefined') localStorage.clear();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', diffReturnMode: undefined, operations: {}, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, ready: false });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], commitSelectionAnchorKey: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', diffReturnMode: undefined, operations: {}, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, ready: false });
 });
 
 describe('appStore async lifecycle', () => {
@@ -2235,6 +2235,38 @@ describe('appStore async lifecycle', () => {
   it('compares multi-root workspace paths independent of selection order', () => {
     expect(workspacePathsEqual(['/repo/admin', '/repo/api'], ['/repo/api', '/repo/admin'])).toBe(true);
     expect(workspacePathsEqual(['/repo/admin'], ['/repo/api'])).toBe(false);
+  });
+
+
+  it('retains the original Shift selection anchor and clears stale file diffs', async () => {
+    const commits: CommitNode[] = Array.from({ length: 4 }, (_, index) => ({ repoId: 'a', hash: `commit-${index}`, shortHash: `c${index}`, parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `Commit ${index}`, refs: [] }));
+    const details = Object.fromEntries(commits.map((commit) => [commitKey('a', commit.hash), { commit, fullMessage: commit.message, branches: { local: [], remote: [], tags: [] }, files: [] }]));
+    const workspace = { ...snapshot('workspace', 1), repositories: [repository('a', 'Alpha')] };
+    useAppStore.setState({ snapshot: workspace, history: commits, selectedCommitDetails: details, selectedCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined });
+    await useAppStore.getState().selectCommit(commits[2]);
+    useAppStore.setState({ selectedFile: { repoId: 'a', path: 'same.txt', staged: false, revision: commits[2].hash } });
+    await useAppStore.getState().selectCommit(commits[0], 'range');
+    expect(useAppStore.getState().selectedCommits).toEqual(commits.slice(0, 3));
+    expect(useAppStore.getState().selectedFile).toBeUndefined();
+    await useAppStore.getState().selectCommit(commits[3], 'range');
+    expect(useAppStore.getState().selectedCommits).toEqual(commits.slice(2, 4));
+    await useAppStore.getState().selectCommit(commits[3]);
+    await useAppStore.getState().selectCommit(commits[3], 'toggle');
+    expect(useAppStore.getState().selectedCommits).toEqual([commits[3]]);
+  });
+
+  it('ignores a file diff that resolves after the commit selection changes', async () => {
+    const pending = deferred<DiffDocument>();
+    const commit: CommitNode = { repoId: 'a', hash: 'next', shortHash: 'next', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'Next', refs: [] };
+    const bridge = new MockBridge((command) => command.type === 'fileDiff' ? pending.promise : []);
+    useAppStore.setState({ bridge, snapshot: { ...snapshot('workspace', 1), repositories: [repository('a', 'Alpha')] }, history: [commit], selectedCommits: [], selectedCommitDetails: { [commitKey('a', commit.hash)]: { commit, fullMessage: 'Next', branches: { local: [], remote: [], tags: [] }, files: [] } }, selectedPrimaryKey: undefined });
+    const opening = useAppStore.getState().openDiff('a', 'old.txt', false, 'old');
+    await useAppStore.getState().selectCommit(commit);
+    pending.resolve({ path: 'old.txt', content: 'old diff', language: 'text', binary: false, truncated: false, lineCount: 1 });
+    await opening;
+    expect(useAppStore.getState().mode).toBe('history');
+    expect(useAppStore.getState().selectedFile).toBeUndefined();
+    expect(useAppStore.getState().diff).toBeUndefined();
   });
 
   it('supports single, toggle, and range commit selection with aggregated revision diffs', async () => {
