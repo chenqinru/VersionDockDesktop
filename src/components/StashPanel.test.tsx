@@ -138,7 +138,7 @@ describe('StashPanel', () => {
     expect(screen.getAllByText('src/components').length).toBe(2);
   });
 
-  it('invokes pop on double click', async () => {
+  it('expands on row click and restores only through an explicit action', async () => {
     let requestedOperation: unknown = null;
     const bridge = new MockBridge((command) => {
       if (command.type === 'stashOperation') {
@@ -155,7 +155,13 @@ describe('StashPanel', () => {
     );
 
     const titleEl = screen.getByText('fix login navigation layout');
-    fireEvent.doubleClick(titleEl.closest('div[title*="double-click"]')!);
+    const header = titleEl.closest('div[title]')!;
+    fireEvent.click(header);
+    expect(screen.getByText('LoginModal.tsx')).toBeInTheDocument();
+    fireEvent.doubleClick(header);
+    expect(requestedOperation).toBeNull();
+    fireEvent.mouseEnter(header);
+    fireEvent.click(screen.getByTitle('Pop (apply and drop)'));
 
     expect(requestedOperation).toEqual({
       type: 'pop',
@@ -182,7 +188,7 @@ describe('StashPanel', () => {
     );
 
     const titleEl = screen.getByText('fix login navigation layout');
-    const rowEl = titleEl.closest('div[title*="double-click"]')!;
+    const rowEl = titleEl.closest('div[title]')!;
     fireEvent.mouseEnter(rowEl);
 
     const dropBtn = screen.getByTitle('Drop stash');
@@ -259,14 +265,14 @@ describe('StashPanel', () => {
     );
 
     const titleEl = screen.getByText('fix login navigation layout');
-    const headerEl = titleEl.closest('div[title*="double-click"]')!;
+    const headerEl = titleEl.closest('div[title]')!;
 
-    // 第一次双击
-    fireEvent.doubleClick(headerEl);
+    fireEvent.mouseEnter(headerEl);
+    const popButton = screen.getByTitle('Pop (apply and drop)');
+    fireEvent.click(popButton);
     expect(operationCount).toBe(1);
 
-    // 紧接着发起第二次双击（此时第一次仍处于 pending 状态）
-    fireEvent.doubleClick(headerEl);
+    fireEvent.click(popButton);
     // 核心断言：由于已被锁定，绝不触发第二次请求！
     expect(operationCount).toBe(1);
 

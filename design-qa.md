@@ -142,3 +142,9 @@ final result: passed
 8 主题 WebKit 计算样式验证见 `neutral-theme-colors.json`；这是实际 CSS 的独立渲染核验，没有把模拟 loading 状态当作 App 后端运行证明。原生瞬态加载截图未捕获。
 
 final result: passed
+
+## 2026-10-01 提交面板七标签页续作
+
+依据插件紧凑布局和宿主行为，继续更改、搁置、暂存、子模块、工作树、Subtree、同步的代码与原生对照。修正多仓库 amend、SVN 提交动作、视图菜单、灰色文件高亮、Changelist hover、记录双击误恢复、隐藏页搜索抢输入、HEAD 菜单、子模块主操作和跳转定位；删除重复保存记录构树和标签渲染。子模块初始化/对齐后刷新父子仓库列表与 refs，未初始化目录不再冒充仓库。
+
+七页原生截图和混合提交、保留暂存恢复、子模块对齐/初始化的真实结果见 `docs/manual/commit-panel-2026-10-01/`；详细核对矩阵与测试、载入期间超时、图标/语言差异及未逐项手工验收的范围见 `docs/commit-panel-parity-2026-10-01.md`。保留之前 Sync/Submodule 与分支面板 QA。

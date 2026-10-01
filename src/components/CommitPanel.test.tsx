@@ -82,7 +82,8 @@ describe('CommitPanel capabilities and file view', () => {
     expect(childRow).toHaveStyle({ paddingLeft: '40px' });
     fireEvent.click(screen.getByLabelText('src/App.tsx'));
     expect(container.querySelector('.commit-targets em')).toHaveTextContent('Repository');
-    expect(screen.getByText('Amend last commit')).toBeInTheDocument();
+    expect(screen.queryByText('Amend last commit')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Amend last commit for Repository')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Commit message history' })).toBeEnabled());
     expect(screen.queryByTitle('Use Last Commit Message')).not.toBeInTheDocument();
   });
@@ -254,10 +255,10 @@ describe('CommitPanel capabilities and file view', () => {
   it('hides the stash surface until its real capability is enabled', () => {
     useAppStore.setState({ bootstrap: bootstrap(false) });
     const { rerender } = renderPanel();
-    expect(screen.queryByTitle('Stash')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Stash' })).not.toBeInTheDocument();
     useAppStore.setState({ bootstrap: bootstrap(true) });
     rerender(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
-    expect(screen.getByTitle('Stash')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Stash' })).toBeInTheDocument();
     expect(screen.queryByText('AI Commit Message')).not.toBeInTheDocument();
   });
 
@@ -271,6 +272,20 @@ describe('CommitPanel capabilities and file view', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Flat list' }));
     expect(useAppStore.getState().bootstrap?.state.layout?.stashViewMode).toBe('list');
     expect(useAppStore.getState().bootstrap?.state.layout?.fileViewMode).toBe('tree');
+  });
+
+  it('keeps keyboard search owned by the visible tab after visiting saved-change tabs', async () => {
+    useAppStore.setState({ bridge, bootstrap: bootstrap(true, true), snapshot: gitSnapshot, stashes: { repo: [] }, shelves: { repo: [] } });
+    const { container } = renderPanel();
+    fireEvent.click(screen.getByRole('tab', { name: 'Shelf' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Stash' }));
+    const activeTab = screen.getByRole('tab', { name: 'Stash' });
+    activeTab.focus();
+    fireEvent.keyDown(activeTab, { key: 'x' });
+    await waitFor(() => expect(container.querySelector('.stash-tab-content .speed-search-indicator')).toHaveTextContent('x'));
+    expect(container.querySelector('.shelf-tab-content .speed-search-indicator')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Changes' }));
+    await waitFor(() => expect(container.querySelector('.stash-tab-content .speed-search-indicator')).not.toBeInTheDocument());
   });
 
   it('refreshes panel status and stash data once without reloading the workspace log', async () => {
@@ -289,17 +304,17 @@ describe('CommitPanel capabilities and file view', () => {
   it('shows shelf only after its storage and backend capability is enabled', () => {
     useAppStore.setState({ bootstrap: bootstrap(false, true) });
     renderPanel();
-    expect(screen.getByTitle('Shelf')).toBeInTheDocument();
-    expect(screen.queryByTitle('Stash')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Shelf' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Stash' })).not.toBeInTheDocument();
   });
 
   it('hides Subtree until enabled, then opens its real panel', () => {
     useAppStore.setState({ bridge, bootstrap: bootstrap(false, false), snapshot: gitSnapshot, selectedRepoId: 'repo', subtrees: {} });
     const { rerender } = renderPanel();
-    expect(screen.queryByTitle('Subtree')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Subtrees' })).not.toBeInTheDocument();
     useAppStore.setState({ bootstrap: bootstrap(false, false, true), subtrees: {} });
     rerender(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
-    fireEvent.click(screen.getByTitle('Subtree'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Subtrees' }));
     expect(screen.getByText('No subtrees registered')).toBeInTheDocument();
   });
 
@@ -334,8 +349,8 @@ describe('CommitPanel capabilities and file view', () => {
   it('keeps all enabled capability tabs in the settled order', () => {
     useAppStore.setState({ bootstrap: bootstrap(true, true, true, true), snapshot: gitSnapshot });
     const { container } = renderPanel();
-    const tabs = Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('title'));
-    expect(tabs).toEqual(['Changes', 'Shelf', 'Stash', 'Submodules', 'Worktrees', 'Subtree', 'Sync']);
+    const tabs = Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('aria-label'));
+    expect(tabs).toEqual(['Changes', 'Shelf', 'Stash', 'Submodules', 'Worktrees', 'Subtrees', 'Sync']);
   });
 
   it('shows a branch-to-working-tree diff across the whole commit panel instead of the Worktrees tab', async () => {
@@ -393,7 +408,7 @@ describe('CommitPanel capabilities and file view', () => {
     const pushBridge = new MockBridge((command) => command.type === 'unpushedCommits' ? [{ hash: 'abc', shortHash: 'abc', message: 'local commit', author: 'Test', date: '2026-08-13T00:00:00Z', filesChanged: 1, additions: 2, deletions: 0 }] : []);
     useAppStore.setState({ bridge: pushBridge, bootstrap: { ...bootstrap(false), state: { ...bootstrap(false).state, activeTab: 'push' } }, snapshot: { ...gitSnapshot, repositories: [{ ...gitRepo, ahead: 1 }] }, selectedRepoId: 'repo', unpushedCommits: {} });
     render(<BridgeContext.Provider value={pushBridge}><CommitPanel /></BridgeContext.Provider>);
-    expect(screen.getByTitle('Sync')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Sync' })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('local commit')).toBeInTheDocument());
     expect(screen.queryByText('AI Commit Message')).not.toBeInTheDocument();
     expect(screen.queryByText('AI Code Review')).not.toBeInTheDocument();
@@ -401,7 +416,9 @@ describe('CommitPanel capabilities and file view', () => {
 
   it('matches the VersionDock file, folder, and repository context menus', async () => {
     const diffRequests: boolean[] = [];
+    const shelfRequests: string[][] = [];
     const menuBridge = new MockBridge((command) => {
+      if (command.type === 'shelfOperation' && command.payload.operation.type === 'create') shelfRequests.push(command.payload.operation.paths ?? []);
       if (command.type === 'fileDiff') {
         diffRequests.push(command.payload.staged);
         return { path: command.payload.relative_path, content: 'diff --git a/file b/file', language: 'diff', binary: false, truncated: false, lineCount: 1 };
@@ -431,13 +448,18 @@ describe('CommitPanel capabilities and file view', () => {
     fireEvent.contextMenu(container.querySelector('.repo-heading')!);
     expect(screen.getByText('Manage Repository')).toBeInTheDocument();
     expect(screen.getByText('View Git Log')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByLabelText('src/file.ts'));
+    fireEvent.contextMenu(container.querySelector('.repo-heading')!);
+    fireEvent.click(screen.getByText('Shelve Changes'));
+    await waitFor(() => expect(shelfRequests).toEqual([['src/file.ts']]));
   });
 
   it('keeps the gitlink menu focused and exposes the dedicated Submodule tab', () => {
     const submoduleRepo = { ...gitRepo, files: [{ path: 'vendor/module', status: 'submodule', staged: false, unstaged: true, conflicted: false, submodule: true }] };
     useAppStore.setState({ bridge, bootstrap: bootstrap(true, true, true, true), snapshot: { ...gitSnapshot, repositories: [submoduleRepo] }, selectedRepoId: 'repo', submodules: { repo: [{ name: 'module', path: 'vendor/module', url: 'https://example.test/module.git', initialized: true, revision: 'abcdef1', branch: 'main', dirty: true, syncStatus: 'outOfSync', recordedCommit: '1234567', currentBranch: 'main', detached: false, unpushedCount: 0 }] } });
     const { container } = render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
-    expect(Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('title'))).toContain('Submodules');
+    expect(Array.from(container.querySelectorAll('.commit-tabs button')).map((button) => button.getAttribute('aria-label'))).toContain('Submodules');
     fireEvent.contextMenu(screen.getByTitle('vendor/module').closest('.file-row')!);
     expect(screen.getByText('Stage')).toBeInTheDocument();
     expect(screen.getByText('Refresh')).toBeInTheDocument();
@@ -529,7 +551,7 @@ describe('CommitPanel capabilities and file view', () => {
             language: 'system',
             uiFontSize: 'standard',
             changesDisplayMode: 'vscode',
-            defaultCommitAction: 'commit',
+            defaultCommitAction: 'commitAndPush',
             defaultSaveAction: 'stash',
             promptBeforeAddingUntracked: true,
             suppressDivergedWarning: false,
@@ -551,6 +573,9 @@ describe('CommitPanel capabilities and file view', () => {
     });
 
     const { container } = renderPanel();
+    expect(screen.getByRole('button', { name: 'Commit' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Commit & Push' })).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.commit-action > button')).toHaveLength(1);
     // 纯 SVN 模式下不应该渲染暂存区
     expect(screen.queryByText('Staged Changes')).not.toBeInTheDocument();
     // Changes 区分组应存在并列出文件

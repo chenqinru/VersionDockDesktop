@@ -4824,7 +4824,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!ensureRepositoryCapability(repoId, 'submoduleWrite')) return;
       const wid = workspaceId();
       await bridge().request({ type: 'submoduleOperation', payload: { workspace_id: wid, repo_id: repoId, operation } }, { timeoutMs: 600_000 });
-      if (get().snapshot?.workspace.id === wid) await get().loadSubmodules(repoId);
+      if (get().snapshot?.workspace.id === wid) await get().refresh();
     }, `submodule:${repoId}`, undefined, options).then(() => undefined),
     loadUnpushedCommits: async (repoId, targetWorkspaceId) => {
       const b = get().bridge;

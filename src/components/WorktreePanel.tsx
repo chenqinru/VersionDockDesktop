@@ -35,6 +35,7 @@ export interface RepoWorktrees {
 }
 
 export interface WorktreePanelProps {
+  active?: boolean;
   repos?: RepositoryStatus[];
   customRepos?: RepoWorktrees[];
   loading?: boolean;
@@ -356,7 +357,7 @@ function RepoSection({
 
 // ── Public component ──────────────────────────────────────────────────────────
 
-export function WorktreePanel({
+export function WorktreePanel({ active = true,
   repos = [],
   customRepos,
   loading: externalLoading,
@@ -372,7 +373,7 @@ export function WorktreePanel({
   onRequestCreate,
 }: WorktreePanelProps) {
   const { t } = useI18n();
-  const speedSearch = useSpeedSearch('worktrees');
+  const speedSearch = useSpeedSearch('worktrees', active);
   const storeWorktrees = useAppStore((state) => state.worktrees);
   const loadWorktrees = useAppStore((state) => state.loadWorktrees);
   const worktreeOperation = useAppStore((state) => state.worktreeOperation);

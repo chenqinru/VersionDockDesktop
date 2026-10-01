@@ -412,7 +412,7 @@ export function SubtreePanel({
   onReveal,
 }: SubtreePanelProps) {
   const { t } = useI18n();
-  const speedSearch = useSpeedSearch('subtree');
+  const speedSearch = useSpeedSearch('subtree', isActive);
   const storeSubtrees = useAppStore((state) => state.subtrees);
   const loadSubtrees = useAppStore((state) => state.loadSubtrees);
   const subtreeOperation = useAppStore((state) => state.subtreeOperation);

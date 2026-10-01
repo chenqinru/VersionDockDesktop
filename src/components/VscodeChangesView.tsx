@@ -1,3 +1,4 @@
+import { useChangeRowHighlight } from './changeRowHighlight';
 import React, { useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
@@ -61,11 +62,12 @@ function VscodeFileRow({
   const fileName = parts.at(-1) ?? file.path;
   const dirPath = parts.slice(0, -1).join('/');
   const isSvn = repo.meta.kind === 'svn';
+  const highlight = useChangeRowHighlight(repo.meta.id, file.path);
   const canAddToSvn = isSvn && !staged && file.status === 'untracked';
 
   return (
     <div
-      className="file-item"
+      className={`file-item ${highlight}`}
       style={{
         paddingLeft: viewMode === 'tree' ? 14 + depth * 14 : 14,
         display: 'flex',
@@ -440,6 +442,7 @@ function VscodeRepoSection({
   const tree = useMemo(() => buildFileTree(files), [files]);
   const branchClr = branchColor(repo.branch || repo.revision);
   const isSvn = repo.meta.kind === 'svn';
+
   const canAddToSvn = isSvn && !staged && files.some((f) => f.status === 'untracked' && !f.isTruncated);
 
   const renderFiles = () => (

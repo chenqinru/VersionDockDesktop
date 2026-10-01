@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RepositoryStatus, SubmoduleEntry } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { isOperationActive, useAppStore } from '../store/appStore';
@@ -10,7 +10,7 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { confirmDialog, promptDialog } from './dialogService';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 
-function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: SubmoduleEntry; busy: boolean }) {
+function SubmoduleRow({ repo, entry, busy, highlighted }: { repo: RepositoryStatus; entry: SubmoduleEntry; busy: boolean; highlighted: boolean }) {
   const operate = useAppStore((state) => state.submoduleOperation);
   const systemOpen = useAppStore((state) => state.systemOpen);
   const bridge = useAppStore((state) => state.bridge);
@@ -19,7 +19,8 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (highlighted) rowRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [highlighted]);
   const [context, setContext] = useState<{ x: number; y: number }>();
 
   const remove = async () => {
@@ -80,15 +81,12 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
     else if (type === 'updateRemote') void operate(repo.meta.id, { type: 'update', path: entry.path, init: true, recursive: true, remote: true });
     else if (type === 'sync') void operate(repo.meta.id, { type: 'sync', path: entry.path, recursive: false });
     else if (type === 'deinit') void deinitialize();
-    else if (type === 'push') void operate(repo.meta.id, { type: 'push', path: entry.path });
-    else if (type === 'pull') void operate(repo.meta.id, { type: 'pull', path: entry.path, rebase: false });
     else if (type === 'ours') void operate(repo.meta.id, { type: 'resolveConflict', path: entry.path, choice: 'mine' });
     else if (type === 'theirs') void operate(repo.meta.id, { type: 'resolveConflict', path: entry.path, choice: 'theirs' });
     else if (type === 'remove') void remove();
     else if (type === 'reveal') reveal();
     else if (type === 'fileManager') openInFileManager();
     else if (type === 'newWindow') openInNewWindow();
-    else if (type === 'diff') setDetailsOpen((value) => !value);
   };
 
   const contextItems: ContextMenuEntry[] = ([
@@ -96,39 +94,37 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
       ? entry.typeChange
         ? [{ id: 'merge', label: t('Resolve in Merge Editor'), icon: 'git-merge' } as ContextMenuEntry, { separator: true } as ContextMenuEntry]
         : [
-            { id: 'ours', label: entry.conflictStages?.ours ? t('Use Ours') : t('Accept Ours Deletion'), icon: entry.conflictStages?.ours ? 'check' : 'trash' } as ContextMenuEntry,
-            { id: 'theirs', label: entry.conflictStages?.theirs ? t('Use Theirs') : t('Accept Theirs Deletion'), icon: entry.conflictStages?.theirs ? 'fold-down' : 'trash' } as ContextMenuEntry,
+            { id: 'ours', label: !entry.conflictStages || entry.conflictStages.ours ? t('Resolve Conflict: Use Current (Ours)') : t('Resolve Conflict: Accept Deletion (Ours)'), icon: !entry.conflictStages || entry.conflictStages.ours ? 'check' : 'trash' } as ContextMenuEntry,
+            { id: 'theirs', label: !entry.conflictStages || entry.conflictStages.theirs ? t('Resolve Conflict: Use Incoming (Theirs)') : t('Resolve Conflict: Accept Deletion (Theirs)'), icon: !entry.conflictStages || entry.conflictStages.theirs ? 'fold-down' : 'trash' } as ContextMenuEntry,
             { separator: true } as ContextMenuEntry,
           ]
       : []),
     ...(!entry.initialized
-      ? [{ id: 'init', label: t('Initialize'), icon: 'cloud-download' } as ContextMenuEntry]
+      ? [{ id: 'init', label: t('Initialize Submodule'), icon: 'cloud-download' } as ContextMenuEntry]
       : [
-          { id: 'update', label: t('Update'), icon: 'sync' } as ContextMenuEntry,
+          { id: 'update', label: t('Update Submodule'), icon: 'sync' } as ContextMenuEntry,
           { id: 'updateRemote', label: t('Update from Remote'), icon: 'cloud-download' } as ContextMenuEntry,
-          { id: 'pull', label: t('Pull'), icon: 'cloud-download' } as ContextMenuEntry,
-          { id: 'push', label: t('Push'), icon: 'cloud-upload', disabled: entry.detached } as ContextMenuEntry,
         ]),
     { separator: true },
-    { id: 'reveal', label: t('Reveal'), icon: 'folder-opened' },
+    { id: 'reveal', label: t('Reveal in Explorer'), icon: 'folder-opened' },
     { id: 'newWindow', label: t('Open in New Window'), icon: 'link-external' },
-    { id: 'fileManager', label: t('Open in File Manager'), icon: 'folder' },
-    ...(entry.diffSummary ? [{ id: 'diff', label: t('Show Diff Summary'), icon: 'diff' } as ContextMenuEntry] : []),
-    ...(entry.initialized ? [{ separator: true } as ContextMenuEntry, { id: 'sync', label: t('Sync URL'), icon: 'refresh' } as ContextMenuEntry, { id: 'deinit', label: t('Deinitialize'), icon: 'clear-all', danger: true } as ContextMenuEntry] : []),
-    { id: 'remove', label: t('Remove'), icon: 'trash', danger: true },
+    { id: 'fileManager', label: t(/Mac/i.test(navigator.platform) ? 'Reveal in Finder' : /Win/i.test(navigator.platform) ? 'Show in Explorer' : 'Show in File Manager'), icon: 'folder' },
+    ...(entry.initialized ? [{ separator: true } as ContextMenuEntry, { id: 'sync', label: t('Sync URL to Git Config'), icon: 'refresh' } as ContextMenuEntry, { id: 'deinit', label: t('Deinitialize Submodule'), icon: 'clear-all', danger: true } as ContextMenuEntry] : []),
+    { id: 'remove', label: t('Remove Submodule'), icon: 'trash', danger: true },
   ] satisfies ContextMenuEntry[]).map((item) => 'separator' in item ? item : { ...item, disabled: busy || ('disabled' in item && item.disabled) });
 
-  const primaryAction = entry.syncStatus === 'conflict'
-    ? entry.typeChange
-      ? { id: 'merge', icon: 'git-merge', label: t('Resolve in Merge Editor') }
-      : { id: 'ours', icon: entry.conflictStages?.ours ? 'check' : 'trash', label: entry.conflictStages?.ours ? t('Use Ours') : t('Accept Ours Deletion') }
-    : entry.syncStatus === 'outOfSync'
-      ? { id: 'update', icon: 'arrow-swap', label: t('Update') }
-      : !entry.initialized
-        ? { id: 'init', icon: 'cloud-download', label: t('Initialize') }
+  const hasOurs = !entry.conflictStages || Boolean(entry.conflictStages.ours);
+  const primaryAction = !entry.initialized
+    ? { id: 'init', icon: 'cloud-download', label: t('Initialize'), title: t('Initialize this submodule (git submodule init && update)') }
+    : entry.syncStatus === 'conflict'
+      ? entry.typeChange
+        ? { id: 'merge', icon: 'git-merge', label: t('Resolve in Merge Editor'), title: t('Resolve in Merge Editor') }
+        : { id: 'ours', icon: hasOurs ? 'check' : 'trash', label: hasOurs ? t('Use Ours') : t('Delete (Ours)'), title: hasOurs ? t('Resolve Conflict: Use Current Pointer (Ours)') : t('Resolve Conflict: Accept Deletion (Ours)') }
+      : entry.syncStatus === 'outOfSync'
+        ? { id: 'update', icon: 'arrow-swap', label: t('Align'), title: t('Align submodule with recorded parent commit') }
         : undefined;
 
-  return <div className="submodule-row" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY }); }}>
+  return <div ref={rowRef} className={`submodule-row ${highlighted ? 'selected' : context ? 'context-active' : ''}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY }); }}>
     <div className="submodule-row-main">
       <Codicon name={entry.initialized ? 'repo' : 'repo-clone'} />
       <div className="submodule-info">
@@ -136,7 +132,7 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
           <strong title={entry.path}>{entry.path}</strong>
           {entry.name !== entry.path && <small>({entry.name})</small>}
           <span className={`submodule-status ${entry.initialized ? 'synced' : 'uninitialized'}`}>{t(entry.initialized ? 'Initialized' : 'Uninitialized')}</span>
-          {entry.syncStatus === 'conflict' && <span className="submodule-status conflict">{t(entry.typeChange ? 'Type-change conflict' : 'Conflict')}</span>}
+          {entry.syncStatus === 'conflict' && <span className="submodule-status conflict">{t(entry.typeChange ? 'Type-Change Conflict' : 'Conflict')}</span>}
           {entry.dirty && <span className="submodule-status dirty">{t('Dirty')}</span>}
           {entry.unpushedCount > 0 && <span className="submodule-status unpushed">{t('{0} unpushed', entry.unpushedCount)}</span>}
         </div>
@@ -149,21 +145,19 @@ function SubmoduleRow({ repo, entry, busy }: { repo: RepositoryStatus; entry: Su
           <span title={entry.url}>{entry.url}</span>
         </div>
       </div>
-      <div className={`submodule-row-actions ${hovered ? 'visible' : ''}`}>
+      <div className="submodule-row-actions">
         {busy ? <Codicon name="loading~spin" /> : <>
-          {primaryAction && <button className="primary" title={primaryAction.label} onClick={() => primaryAction.id === 'merge' ? openConflict() : run(primaryAction.id)}><Codicon name={primaryAction.icon} /><span>{primaryAction.label}</span></button>}
-          {entry.initialized && <button title={t('Update from Remote')} onClick={() => run('updateRemote')}><Codicon name="cloud-download" /></button>}
-          <button title={t('Reveal')} onClick={reveal}><Codicon name="folder-opened" /></button>
-          <button title={t('Open in New Window')} onClick={openInNewWindow}><Codicon name="link-external" /></button>
+          {primaryAction && <button className={`primary ${entry.syncStatus === 'conflict' ? 'conflict' : ''}`} title={primaryAction.title} onClick={() => primaryAction.id === 'merge' ? openConflict() : run(primaryAction.id)}><Codicon name={primaryAction.icon} /><span>{primaryAction.label}</span></button>}
+          {entry.initialized && hovered && <span className="submodule-hover-actions"><button title={t('Reveal in Explorer')} onClick={reveal}><Codicon name="folder-opened" /></button><button title={t('Update from Remote')} onClick={() => run('updateRemote')}><Codicon name="cloud-download" /></button>
+          <button title={t('Open in New Window')} onClick={openInNewWindow}><Codicon name="link-external" /></button></span>}
         </>}
       </div>
     </div>
-    {detailsOpen && entry.diffSummary && <pre className="submodule-diff-summary">{entry.diffSummary}</pre>}
     {context && <ContextMenu x={context.x} y={context.y} items={contextItems} onSelect={(id) => id === 'merge' ? openConflict() : run(id)} onClose={() => setContext(undefined)} />}
   </div>;
 }
 
-export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
+export function SubmodulePanel({ repos, highlight, active = true }: { repos: RepositoryStatus[]; active?: boolean; highlight?: { repoId: string; path: string } }) {
   const entries = useAppStore((state) => state.submodules);
   const loadErrors = useAppStore((state) => state.loadErrors);
   const load = useAppStore((state) => state.loadSubmodules);
@@ -171,8 +165,9 @@ export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
   const operations = useAppStore((state) => state.operations);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const { t } = useI18n();
-  const speedSearch = useSpeedSearch('submodules');
+  const speedSearch = useSpeedSearch('submodules', active);
   const [collapsedRepoIds, setCollapsedRepoIds] = useState<Set<string>>(new Set());
+  useEffect(() => { if (highlight) queueMicrotask(() => setCollapsedRepoIds((current) => { const next = new Set(current); next.delete(highlight.repoId); return next; })); }, [highlight]);
   const total = useMemo(() => repos.reduce((sum, repo) => sum + (entries[repo.meta.id]?.length ?? 0), 0), [entries, repos]);
 
   useEffect(() => {
@@ -212,15 +207,15 @@ export function SubmodulePanel({ repos }: { repos: RepositoryStatus[] }) {
               <i style={{ background: color }} />
               <strong>{repo.meta.name}</strong>
               {allItems.length > 0 && <span className="repository-count">{allItems.length}</span>}
-              {uninitialized > 0 && <span className="submodule-status uninitialized">{uninitialized} {t('Uninitialized')}</span>}
-              {outOfSync > 0 && <span className="submodule-status outOfSync">{outOfSync} {t('Out of sync')}</span>}
+              {uninitialized > 0 && <span className="submodule-status uninitialized">{t('{0} uninit', uninitialized)}</span>}
             </button>
-            {allItems.length > 0 && <button data-action-btn="" disabled={busy} title={t('Update All')} onClick={() => void operate(repo.meta.id, { type: 'updateAll', init: true, recursive: true, remote: false })}><Codicon name={busy ? 'loading~spin' : 'arrow-swap'} /></button>}
-            <button data-action-btn="" disabled={busy} title={t('Add Submodule')} onClick={() => void add(repo)}><Codicon name="add" /></button>
+            {outOfSync > 0 && <button className="submodule-status outOfSync" disabled={busy} title={t('Align all submodules with parent commits (git submodule update --recursive)')} onClick={() => void operate(repo.meta.id, { type: 'updateAll', init: true, recursive: true, remote: false })}>{t('{0} out of sync', outOfSync)}</button>}
+            {allItems.length > 0 && <button data-action-btn="" disabled={busy} title={t('Align all submodules with parent commits (git submodule update --init --recursive)')} onClick={() => void operate(repo.meta.id, { type: 'updateAll', init: true, recursive: true, remote: false })}><Codicon name={busy ? 'loading~spin' : 'arrow-swap'} /></button>}
+            <button data-action-btn="" disabled={busy} title={t('Add Submodule to {0}', repo.meta.name)} onClick={() => void add(repo)}><Codicon name="add" /></button>
           </header>
           {!collapsed && <div className="submodule-repo-body">
             {error && <div className="sync-empty" style={{ color: 'var(--vscode-errorForeground, #f48771)', justifyContent: 'flex-start', padding: '6px 12px' }}><Codicon name="error" /> {error}</div>}
-            {items.length ? items.map((entry) => <SubmoduleRow key={entry.path} repo={repo} entry={entry} busy={busy} />) : !error && <div className="sync-empty">{needle && total > 0 ? t('No commits found') : t('No submodules')}</div>}
+            {items.length ? items.map((entry) => <SubmoduleRow key={entry.path} repo={repo} entry={entry} busy={busy} highlighted={highlight?.repoId === repo.meta.id && highlight.path === entry.path} />) : !error && <div className="sync-empty">{needle && total > 0 ? t('No commits found') : t('No submodules')}</div>}
           </div>}
         </section>;
       })}

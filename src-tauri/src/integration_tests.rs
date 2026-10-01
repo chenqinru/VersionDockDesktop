@@ -3156,6 +3156,14 @@ async fn real_git_submodule_lifecycle_supports_uninitialized_modules() {
     assert_eq!(entries[0].path, "vendor/中文 module");
     assert!(entries[0].initialized);
 
+    let ws = workspace::descriptor(vec![parent.path().to_string_lossy().into_owned()]).unwrap();
+    let discovered = workspace::scan(&ws, &crate::models::DesktopSettings::default()).unwrap();
+    let child_meta = discovered.iter().find(|meta| meta.is_submodule).unwrap();
+    assert!(
+        !child_meta.is_worktree,
+        "a submodule gitfile is not a linked worktree"
+    );
+
     vcs::submodule_operation(
         &repository,
         SubmoduleOperation::Deinit {
@@ -3167,6 +3175,13 @@ async fn real_git_submodule_lifecycle_supports_uninitialized_modules() {
     .await
     .unwrap();
     assert!(!vcs::submodules(&repository, &token).await.unwrap()[0].initialized);
+    let discovered = workspace::scan(&ws, &crate::models::DesktopSettings::default()).unwrap();
+    assert_eq!(
+        discovered.len(),
+        1,
+        "the empty deinitialized directory must not be reported as its parent Git repository"
+    );
+
     vcs::submodule_operation(
         &repository,
         SubmoduleOperation::Init {

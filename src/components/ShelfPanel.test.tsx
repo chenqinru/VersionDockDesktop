@@ -102,7 +102,7 @@ describe('ShelfPanel', () => {
     expect(screen.getAllByText('src/components').length).toBe(2);
   });
 
-  it('invokes apply on double click', async () => {
+  it('expands on row click and restores only through an explicit action', async () => {
     let requestedOperation: unknown = null;
     const bridge = new MockBridge((command) => {
       if (command.type === 'shelfOperation') {
@@ -119,7 +119,13 @@ describe('ShelfPanel', () => {
     );
 
     const titleEl = screen.getByText('feat: add modern shelf panel');
-    fireEvent.doubleClick(titleEl.closest('div[title*="double-click"]')!);
+    const header = titleEl.closest('div[title="feat: add modern shelf panel"]')!;
+    fireEvent.click(header);
+    expect(screen.getByText('ShelfPanel.tsx')).toBeInTheDocument();
+    fireEvent.doubleClick(header);
+    expect(requestedOperation).toBeNull();
+    fireEvent.mouseEnter(header);
+    fireEvent.click(screen.getByTitle('Apply and keep'));
 
     expect(requestedOperation).toEqual({
       type: 'apply',

@@ -1,7 +1,6 @@
+import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import React, { useMemo, useState } from 'react';
 import { ChangelistGroup, type ChangelistRepoGroup, type ExpansionCommand } from './ChangelistGroup';
-import { branchColor } from './branchColor';
-import { BranchRefBadge } from './BranchRefBadge';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
@@ -143,7 +142,6 @@ export function ChangelistView({
 
   const [repoExpansion, setRepoExpansion] = useState({ sequence: expansion.sequence, expanded: true });
   const repoExpanded = repoExpansion.sequence === expansion.sequence ? repoExpansion.expanded : expansion.expanded;
-  const branch = singleRepoStatus ? branchColor(singleRepoStatus.branch || singleRepoStatus.revision) : '';
 
   return (
     <div
@@ -218,7 +216,7 @@ export function ChangelistView({
                 setBranchMenuAnchor((cur) => (cur ? undefined : rect));
               }}
             >
-              <BranchRefBadge label={singleRepoStatus.branch || singleRepoStatus.revision} kind={singleRepoStatus.meta.isWorktree ? 'worktree' : 'branch'} color={branch} className="branch-chip" />
+              <RepositoryBranchBadge repo={singleRepoStatus} className="branch-chip" />
             </button>
           </div>
           {onManageRepo && <div className="repo-actions"><button type="button" title={t('Git Identity')} onClick={(event) => { event.stopPropagation(); onManageRepo(singleRepoStatus.meta.id); }}><Codicon name="account" /></button></div>}

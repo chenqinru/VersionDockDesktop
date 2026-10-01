@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BranchInfo, CommitDetail, IncomingCommit, RepositoryStatus, RevisionChanges, UnpushedCommit, UnpushedOperation } from '../bindings/generated';
 import { useI18n } from '../i18n';
-import { capabilityAvailable, isOperationActive, resolveNotificationText, useAppStore } from '../store/appStore';
+import { capabilityAvailable, isOperationActive, isOperationActiveForRepositories, resolveNotificationText, useAppStore } from '../store/appStore';
 import { useSpeedSearch } from '../hooks/useSpeedSearch';
 import { branchColor, readableAccentColor } from './branchColor';
 import { BranchRefBadge } from './BranchRefBadge';
@@ -175,28 +175,28 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
       await editorDialog({ title: t('Squash {0} commits…', outgoingCommits.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: outgoingCommits.map((candidate) => candidate.commit.fullMessage || candidate.commit.message).reverse().join('\n\n'), confirmLabel: t('Squash'), submit: (message) => submitRewrite({ type: 'squash', hashes: selectedHashes, message }) });
       return;
     }
-    if (!await confirmDialog({ title: action === 'drop' ? t('Drop {0} commits?', selectedHashes.length) : action === 'revert' ? t('Revert {0} commits', selectedHashes.length) : t('Undo Commit'), message: sameKindSelection.map((candidate) => `${candidate.commit.shortHash} ${candidate.commit.message}`).join('\n') || `${commit.shortHash} ${commit.message}`, danger: action !== 'revert' })) return;
+    if (!await confirmDialog({ title: action === 'drop' ? t('Drop {0} commits', selectedHashes.length) : action === 'revert' ? t('Revert {0} commits', selectedHashes.length) : t('Undo Commit'), message: sameKindSelection.map((candidate) => `${candidate.commit.shortHash} ${candidate.commit.message}`).join('\n') || `${commit.shortHash} ${commit.message}`, danger: action !== 'revert' })) return;
     if (action === 'undoHead') await unpushedOperation(repo.meta.id, { type: 'undoHead', expectedHash: commit.hash });
     else await unpushedOperation(repo.meta.id, { type: action, hashes: selectedHashes });
   };
 
   const menuItems: ContextMenuEntry[] = item.kind === 'incoming'
     ? [
-        { id: 'cherry', label: selectedHashes.length > 1 ? t('Cherry-Pick All') : t('Cherry-pick'), icon: 'git-pull-request-go-to-changes', disabled: sameKindSelection.some((candidate) => candidate.kind === 'incoming' && candidate.commit.parents.length > 1), disabledReason: t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') },
-        { id: 'branch', label: t('Create Branch'), icon: 'git-branch', disabled: selectedHashes.length > 1 },
+        { id: 'cherry', label: selectedHashes.length > 1 ? t('Cherry-pick {0} commits', selectedHashes.length) : t('Cherry-pick Commit'), icon: 'git-pull-request-go-to-changes', disabled: sameKindSelection.some((candidate) => candidate.kind === 'incoming' && candidate.commit.parents.length > 1), disabledReason: t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') },
+        { id: 'branch', label: t('New Branch from Here…'), icon: 'git-branch', disabled: selectedHashes.length > 1 },
         { separator: true },
-        { id: 'log', label: t('Open in Log'), icon: 'git-commit', disabled: selectedHashes.length > 1 },
+        { id: 'log', label: t('View in Git Log'), icon: 'go-to-file', disabled: selectedHashes.length > 1 },
       ]
     : selectedHashes.length > 1 ? [
         { id: 'squash', label: t('Squash {0} commits…', selectedHashes.length), icon: 'fold-down' },
         { id: 'revert', label: t('Revert {0} commits', selectedHashes.length), icon: 'discard' },
-        { id: 'drop', label: t('Drop {0} commits?', selectedHashes.length), icon: 'trash', danger: true },
+        { id: 'drop', label: t('Drop {0} commits', selectedHashes.length), icon: 'trash', danger: true },
       ] : [
-        { id: 'log', label: t('Open in Log'), icon: 'git-commit' },
-        { id: 'edit', label: t('Edit Commit Message…'), icon: 'edit' },
+        { id: 'log', label: t('View in Git Log'), icon: 'go-to-file' },
+        ...(item.isHead ? [{ id: 'edit', label: t('Edit Commit Message…'), icon: 'edit' } as ContextMenuEntry] : []),
         { id: 'revert', label: t('Revert Commit'), icon: 'discard' },
         ...(item.isHead ? [{ id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', danger: true } as ContextMenuEntry] : []),
-        { id: 'drop', label: t('Drop Commit'), icon: 'trash', danger: true },
+        ...(item.isHead ? [{ id: 'drop', label: t('Drop Commit'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
       ];
 
   const runMenu = (id: string) => {
@@ -221,7 +221,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
         <span className="sync-commit-meta">
           <AuthorAvatar className="mini-avatar" name={commit.author} email={commit.authorEmail ?? ''} repoId={repo.meta.id} size={15} />
           <span className="sync-commit-meta-text">{commit.author} · {relativeDate(commit.date, t)}</span>
-          <span className="sync-commit-stats">· {commit.filesChanged} {t('files')}{commit.additions > 0 && <b>+{commit.additions}</b>}{commit.deletions > 0 && <i>-{commit.deletions}</i>}</span>
+          <span className="sync-commit-stats">· {t(commit.filesChanged === 1 ? '{0} file' : '{0} files', commit.filesChanged)}{commit.additions > 0 && <b>+{commit.additions}</b>}{commit.deletions > 0 && <i>-{commit.deletions}</i>}</span>
         </span>
       </div>
       <span className="sync-row-actions">
@@ -516,7 +516,8 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
   </section>;
 }
 
-export function SyncPanel({ repos, expansionCommand, selectionCommand, fileViewMode = 'tree', onFileViewModeChange = () => undefined, onExpansionChange, onSelectionChange }: {
+export function SyncPanel({ active = true, repos, expansionCommand, selectionCommand, fileViewMode = 'tree', onFileViewModeChange = () => undefined, onExpansionChange, onSelectionChange }: {
+  active?: boolean;
   repos: RepositoryStatus[];
   expansionCommand?: { sequence: number; expanded: boolean };
   selectionCommand?: { sequence: number; action: 'selectAll' | 'invert' };
@@ -532,7 +533,18 @@ export function SyncPanel({ repos, expansionCommand, selectionCommand, fileViewM
   const loadIncoming = useAppStore((state) => state.loadIncomingCommits);
   const sync = useAppStore((state) => state.sync);
   const { t } = useI18n();
-  const speedSearch = useSpeedSearch('sync');
+  const operations = useAppStore((state) => state.operations);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
+  const [performingAction, setPerformingAction] = useState(false);
+  const actionRunningRef = useRef(false);
+  const actionBusy = performingAction || isOperationActiveForRepositories(operations, repos.map((repo) => repo.meta.id), { workspaceId, domain: ['sync', 'history'] });
+  const runAction = async (action: () => Promise<unknown>) => {
+    if (actionRunningRef.current || actionBusy) return;
+    actionRunningRef.current = true;
+    setPerformingAction(true);
+    try { await action(); } finally { actionRunningRef.current = false; setPerformingAction(false); }
+  };
+  const speedSearch = useSpeedSearch('sync', active);
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const [filters, setFilters] = useState<Record<string, DirectionFilter>>({});
   const [footerMenu, setFooterMenu] = useState<{ x: number; y: number }>();
@@ -716,10 +728,10 @@ export function SyncPanel({ repos, expansionCommand, selectionCommand, fileViewM
         })}
       </div>}
       <div className="sync-primary-split">
-        <button className={`sync-primary-action ${mainAction.tone}`} onClick={() => void (pullableRepos.length || pushableRepos.length ? syncSelected() : fetchAll())}><Codicon name={mainAction.icon} />{mainAction.label}</button>
-        {footerItems.length > 0 && <button className={`sync-primary-more ${mainAction.tone}`} title={t('More Actions')} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu({ x: Math.max(6, rect.right - 190), y: rect.top }); }}><Codicon name="chevron-down" /></button>}
+        <button className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} onClick={() => void runAction(() => pullableRepos.length || pushableRepos.length ? syncSelected() : fetchAll())}><Codicon name={mainAction.icon} />{mainAction.label}</button>
+        {footerItems.length > 0 && <button className={`sync-primary-more ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} title={t('More Actions')} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu({ x: Math.max(6, rect.right - 190), y: rect.top }); }}><Codicon name="chevron-down" /></button>}
       </div>
-      {footerMenu && <ContextMenu x={footerMenu.x} y={footerMenu.y} items={footerItems} onSelect={(id) => void runFooterMenu(id)} onClose={() => setFooterMenu(undefined)} />}
+      {footerMenu && <ContextMenu x={footerMenu.x} y={footerMenu.y} items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}
     </footer>
   </div>;
 }

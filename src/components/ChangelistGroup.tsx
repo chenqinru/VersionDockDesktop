@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { RepositoryBranchBadge } from './RepositoryBranchBadge';
+import { ChangeRowActions, ChangeFolderActions } from './ChangeRowActions';
+import { ChangeRowHighlightContext, useChangeRowHighlight } from './changeRowHighlight';
+import { useContext, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
-import { branchColor } from './branchColor';
-import { BranchRefBadge } from './BranchRefBadge';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { useI18n } from '../i18n';
 import { buildFileTree, type FileTreeNode } from './fileTree';
@@ -44,6 +45,7 @@ export function TreeNode({
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
   const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
   const currentPad = basePad + depth * 20;
+  const highlight = useChangeRowHighlight(repo.meta.id, node.path);
 
   if (!node.file) {
     const selectable = node.files.filter((file) => !file.isTruncated);
@@ -52,8 +54,9 @@ export function TreeNode({
     return (
       <div className="tree-directory">
         <div
-          className="directory-row"
+          className={`directory-row ${highlight}`}
           style={{ paddingLeft: currentPad }}
+          onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}
           onContextMenu={(event) => onFolderContext(event, node.path, node.files)}
         >
           <SelectionCheckbox
@@ -63,11 +66,12 @@ export function TreeNode({
             disabled={!selectable.length}
             onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)}
           />
-          <button title={node.path} onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}>
+          <button title={node.path} onClick={(event) => { event.stopPropagation(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}>
             <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
             <FileIcon name={node.name} folder open={expanded} />
             <span>{node.name}</span>
           </button>
+          <ChangeFolderActions repo={repo} files={node.files} />
           <b>{node.files.length}</b>
         </div>
         {expanded &&
@@ -93,9 +97,9 @@ export function TreeNode({
   const key = `${repo.meta.id}\0${node.file.path}`;
   return (
     <div
-      className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''}`}
+      className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`}
       style={{ paddingLeft: currentPad }}
-      onDoubleClick={() => onFile(node.file!)}
+      onClick={() => onFile(node.file!)}
       onContextMenu={(event) => onContext(event, node.file!)}
     >
       <SelectionCheckbox
@@ -110,6 +114,7 @@ export function TreeNode({
           <span className="file-name">{node.name}</span>
         </span>
       </button>
+      <ChangeRowActions repo={repo} file={node.file} />
       {node.file.staged && <span className="staged-dot" />}
       <StatusMark file={node.file} />
     </div>
@@ -296,6 +301,7 @@ function SingleRepoFileList({
   expansion: ExpansionCommand;
 }) {
   const tree = useMemo(() => buildFileTree(files), [files]);
+  const highlight = useContext(ChangeRowHighlightContext);
 
   if (viewMode === 'tree') {
     return (
@@ -327,10 +333,10 @@ function SingleRepoFileList({
         const fileName = parts.pop();
         return (
           <div
-            className={`file-row status-${file.status} ${file.conflicted ? 'conflicted' : ''}`}
+            className={`file-row status-${file.status} ${file.conflicted ? 'conflicted' : ''} ${highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path ? 'selected' : highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path ? 'context-active' : ''}`}
             style={{ paddingLeft: basePad }}
             key={key}
-            onDoubleClick={() => onFile(repo.meta.id, file)}
+            onClick={() => onFile(repo.meta.id, file)}
             onContextMenu={(event) => onContext(event, file, repo)}
           >
             <SelectionCheckbox
@@ -346,6 +352,7 @@ function SingleRepoFileList({
                 <small>{parts.join('/')}</small>
               </span>
             </button>
+            <ChangeRowActions repo={repo} file={file} />
             {file.staged && <span className="staged-dot" />}
             <StatusMark file={file} />
           </div>
@@ -393,7 +400,6 @@ function RepoSubGroup({
   const selectableFiles = files.filter((file) => !file.isTruncated);
   const selectedCount = selectableFiles.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
   const allSelected = selectableFiles.length > 0 && selectedCount === selectableFiles.length;
-  const branch = branchColor(repo.branch || repo.revision);
   const [hovered, setHovered] = useState(false);
   const [branchMenuAnchor, setBranchMenuAnchor] = useState<DOMRect | undefined>(undefined);
   const mixedKinds = useAppStore((state) => hasMixedRepositoryKinds(state.snapshot?.repositories ?? []));
@@ -460,7 +466,7 @@ function RepoSubGroup({
               setBranchMenuAnchor((cur) => (cur ? undefined : rect));
             }}
           >
-            <BranchRefBadge label={repo.branch || repo.revision} kind={repo.meta.isWorktree ? 'worktree' : 'branch'} color={branch} className="branch-chip" />
+            <RepositoryBranchBadge repo={repo} className="branch-chip" />
           </button>
         </div>
         {branchMenuAnchor && (

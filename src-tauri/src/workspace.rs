@@ -278,7 +278,7 @@ pub fn scan(
                 })
                 .unwrap_or(0);
             let git_file = path.join(".git");
-            let is_worktree = *kind == VcsKind::Git && git_file.is_file();
+            let is_worktree_candidate = *kind == VcsKind::Git && git_file.is_file();
             let is_submodule = *kind == VcsKind::Git
                 && paths.iter().any(|(parent_path, parent_kind, parent_id)| {
                     if *parent_kind != VcsKind::Git
@@ -312,7 +312,7 @@ pub fn scan(
                 parent_repo_id: parent.map(|(_, _, candidate_id)| candidate_id.clone()),
                 depth,
                 is_submodule,
-                is_worktree,
+                is_worktree: is_worktree_candidate && !is_submodule,
             }
         })
         .collect())
@@ -449,7 +449,7 @@ fn discover_submodules(
             continue;
         }
         let child = parent.join(path);
-        if !child.starts_with(parent) || !child.exists() {
+        if !child.starts_with(parent) || !child.join(".git").exists() {
             continue;
         }
         let key = format!("{}::git", child.display());

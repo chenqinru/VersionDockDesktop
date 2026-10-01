@@ -3502,7 +3502,7 @@ button.conflict-action-item {
 .file-type-icon.tone-npm { color: #cb3837; }
 .file-type-icon.tone-docker { color: #2496ed; }
 .file-type-icon.tone-git { color: #f05032; }
-.commit-form { position: relative; flex: 0 0 auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--versiondock-surface); border-top: 1px solid var(--versiondock-border); }
+.commit-form { position: relative; flex: 0 0 auto; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; background: var(--versiondock-surface); border-top: 1px solid var(--versiondock-border); }
 .commit-resize-grip { position: absolute; z-index: 2; top: -4px; left: 0; right: 0; height: 9px; display: flex; align-items: center; justify-content: center; cursor: ns-resize; touch-action: none; }
 .commit-resize-grip i { width: 32px; height: 2px; border-radius: 2px; background: var(--versiondock-border); }
 .commit-resize-grip:hover i, .commit-resize-grip:active i { background: var(--versiondock-accent); }
@@ -3544,7 +3544,8 @@ button.conflict-action-item {
 .save-action { color: var(--versiondock-text); background: var(--versiondock-surface-alt); }
 .commit-action { min-width: 0; flex: 1; color: white; background: var(--versiondock-accent-bg); border-color: transparent; }
 .commit-action > button:first-child { flex: 1; }
-.split-button button:disabled { opacity: .42; }
+.split-button:has(> button:first-child:disabled) { opacity: .4; }
+.split-button button:disabled { opacity: 1; }
 .split-menu { position: absolute; z-index: 130; left: 0; bottom: 34px; min-width: 165px; padding: 3px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 18px #0008; }
 .split-menu.right { left: auto; right: 0; }
 .split-menu button { width: 100%; height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 7px; text-align: left; }
@@ -4868,7 +4869,7 @@ button.danger:not(:disabled):hover,
 }
 .commit-slot .repo-heading, .commit-slot .repository-group-header { cursor: pointer; }
 .commit-slot .repo-heading:hover, .commit-slot .repository-group-header:hover {
-  background: color-mix(in srgb, var(--repo-color, #888) 20%, transparent) !important;
+  background: color-mix(in srgb, var(--repo-color, #888) 22%, transparent) !important;
 }
 
 .repository-group-header [data-action-btn] {
@@ -6979,25 +6980,27 @@ button.notification-item-action-btn:focus-visible {
 .submodule-row-main > .codicon { flex: 0 0 auto; }
 .submodule-info { min-width: 0; flex: 1; }
 .submodule-title-line,
-.submodule-meta-line { min-width: 0; min-height: 20px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.submodule-meta-line { min-width: 0; min-height: 18px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
 .submodule-title-line > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .submodule-title-line > small { flex: 0 0 auto; color: var(--versiondock-muted); }
 .submodule-meta-line { color: var(--versiondock-muted); font-size: 10.5px; }
 .submodule-tracking-branch { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .submodule-meta-line > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.submodule-status { flex: 0 0 auto; padding: 1px 5px; border-radius: 3px; font-size: 10px; background: var(--versiondock-selected); }
-.submodule-status.conflict { color: var(--versiondock-danger); }
+.submodule-status { flex: 0 0 auto; padding: 0 4px; border-radius: 3px; font-size: 9.5px; line-height: 14px; white-space: nowrap; background: var(--versiondock-selected); }
+.submodule-status.conflict { color: var(--versiondock-danger); background: rgba(248, 81, 73, .15); }
 .submodule-status.outOfSync,
 .submodule-status.uninitialized,
-.submodule-status.dirty { color: var(--versiondock-warning); }
-.submodule-status.synced { color: var(--versiondock-success); }
-.submodule-status.unpushed { color: var(--versiondock-info); }
-.submodule-row-actions { display: flex; align-items: center; gap: 3px; opacity: 0; pointer-events: none; }
+.submodule-status.dirty { color: var(--versiondock-warning); background: rgba(204, 167, 0, .15); }
+.submodule-status.synced { color: var(--versiondock-success); background: rgba(78, 198, 93, .15); }
+.submodule-status.unpushed { color: var(--vscode-gitDecoration-modifiedResourceForeground); background: rgba(163, 113, 247, .15); }
+.submodule-row-actions { display: flex; align-items: center; gap: 3px; opacity: 1; pointer-events: auto; flex-shrink: 0; }
+.submodule-hover-actions { display: flex; align-items: center; gap: 3px; }
 .submodule-row-actions.visible { opacity: 1; pointer-events: auto; }
 .submodule-row:focus-within .submodule-row-actions { opacity: 1; pointer-events: auto; }
-.submodule-row-actions > button { min-width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 5px; color: inherit; background: transparent; border: 0; border-radius: 3px; }
-.submodule-row-actions > button:hover { background: color-mix(in srgb, var(--versiondock-text) 12%, transparent); }
-.submodule-row-actions > button.primary { padding: 0 8px; color: var(--versiondock-button-foreground, #fff); background: var(--versiondock-accent-bg); }
+.submodule-row-actions > button, .submodule-hover-actions > button { min-width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 5px; color: inherit; background: transparent; border: 0; border-radius: 3px; }
+.submodule-row-actions > button:hover, .submodule-hover-actions > button:hover { background: color-mix(in srgb, var(--versiondock-text) 12%, transparent); }
+.submodule-row-actions > button.primary { padding: 2px 8px; height: 22px; font-size: 11px; color: var(--versiondock-button-foreground, #fff); background: var(--versiondock-accent-bg); }
+.submodule-row-actions > button.primary.conflict { color: #000; background: var(--versiondock-warning); }
 .submodule-diff-summary { margin: 7px 0 0 21px; padding: 8px; max-height: 180px; overflow: auto; color: var(--versiondock-muted); background: var(--versiondock-bg); border: 1px solid var(--versiondock-border); border-radius: 4px; font: 11px/1.45 var(--versiondock-code); white-space: pre-wrap; }
 .sync-panel button:disabled,
 .submodule-panel button:disabled { opacity: .45; cursor: default; }
@@ -7590,3 +7593,12 @@ button.notification-item-action-btn:focus-visible {
 }
 .commit-panel button.danger { --panel-button-hover: color-mix(in srgb, var(--versiondock-danger) 80%, #fff 20%); }
 .repository-group-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; margin-left: auto; }
+
+/* File focus and menu targets are separate from the commit checkbox selection. */
+.commit-panel :is(.file-row, .file-item, .directory-row, .submodule-row).selected {
+  background: var(--versiondock-selection-background);
+  color: var(--versiondock-selection-foreground);
+}
+.commit-panel :is(.file-row, .file-item, .directory-row, .submodule-row).context-active {
+  background: var(--versiondock-selection-inactive-background);
+}
