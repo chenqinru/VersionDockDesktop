@@ -19,11 +19,14 @@ import {
   shouldDeleteResolvedFile,
 } from './mergeEngine';
 import { ThreeWayLayout } from './ThreeWayLayout';
+import { mergeEditorIdentity } from './mergeEditorModel';
 
 export function MergeWorkspace() {
   const { t } = useI18n();
   const merge = useAppStore((state) => state.merge);
   const mergeTarget = useAppStore((state) => state.mergeTarget ?? state.selectedFile);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id ?? state.mergeTarget?.workspaceId);
+  const setDraft = useAppStore((state) => state.setMergeEditorDraft);
   const setResult = useAppStore((state) => state.setMergeResult);
   const save = useAppStore((state) => state.saveMerge);
   const openConflicts = useAppStore((state) => state.openConflicts);
@@ -34,7 +37,8 @@ export function MergeWorkspace() {
 
   const file = useMemo(() => (merge ? toMergeConflictFile(merge) : null), [merge]);
   const storedDraft = useAppStore.getState().mergeEditorDraft;
-  const initialDraft = storedDraft?.fingerprint === merge?.fingerprint ? storedDraft : undefined;
+  const identity = mergeEditorIdentity(workspaceId, mergeTarget?.repoId, merge?.path, merge?.fingerprint);
+  const initialDraft = storedDraft?.identity === identity ? storedDraft : undefined;
 
   const [resolutions, setResolutions] = useState<Record<number, Resolution>>(initialDraft?.resolutions ?? {});
   const [normalEdits, setNormalEdits] = useState<NormalEdits>(initialDraft?.normalEdits ?? {});
@@ -45,25 +49,25 @@ export function MergeWorkspace() {
 
   useEffect(() => {
     if (!merge) return;
-    useAppStore.setState({ mergeEditorDraft: {
-      fingerprint: merge.fingerprint, resolutions, normalEdits, nonConflictingSelections,
+    setDraft({
+      identity, fingerprint: merge.fingerprint, resolutions, normalEdits, nonConflictingSelections,
       appliedNonConflictingScope, currentConflictIndex, syncScrollEnabled,
-    } });
-  }, [merge, resolutions, normalEdits, nonConflictingSelections, appliedNonConflictingScope, currentConflictIndex, syncScrollEnabled]);
+    });
+  }, [merge, identity, resolutions, normalEdits, nonConflictingSelections, appliedNonConflictingScope, currentConflictIndex, syncScrollEnabled, setDraft]);
 
   // 初始化或切换冲突文件时重置状态
-  const [lastFingerprint, setLastFingerprint] = useState(merge?.fingerprint);
-  if (merge && merge.fingerprint !== lastFingerprint) {
-    setLastFingerprint(merge.fingerprint);
+  const [lastIdentity, setLastIdentity] = useState(identity);
+  if (merge && identity !== lastIdentity) {
+    setLastIdentity(identity);
     const initialRes: Record<number, Resolution> = {};
     merge.conflicts.forEach((c) => {
       initialRes[c.index] = 'unresolved';
     });
-    setResolutions(initialRes);
-    setNormalEdits({});
-    setNonConflictingSelections({});
-    setAppliedNonConflictingScope(null);
-    setCurrentConflictIndex(0);
+    setResolutions(initialDraft?.resolutions ?? initialRes);
+    setNormalEdits(initialDraft?.normalEdits ?? {});
+    setNonConflictingSelections(initialDraft?.nonConflictingSelections ?? {});
+    setAppliedNonConflictingScope(initialDraft?.appliedNonConflictingScope ?? null);
+    setCurrentConflictIndex(initialDraft?.currentConflictIndex ?? 0);
   }
 
   // 工具栏计数统计

@@ -18,7 +18,7 @@ import { checkAppUpdate, openExternalLink, type AppUpdateCheckResult } from '../
 import { choiceDialog, promptDialog, multiChoiceDialog, confirmDialog } from '../components/dialogService';
 import { buildPullRequestUrl } from '../history/prUrlHelper';
 import { createTranslator, resolveLanguage } from '../i18n';
-import type { MergeResolution, NonConflictScope } from '../components/mergeEditorModel';
+import { mergeEditorIdentity, type MergeResolution, type NonConflictScope } from '../components/mergeEditorModel';
 import type { Resolution, NormalEdits, NonConflictingSelections, NonConflictingChangeScope } from '../components/mergeEngine';
 
 export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'conflicts' | 'merge';
@@ -338,6 +338,7 @@ export interface WorkspaceSessionState {
 }
 
 export interface MergeEditorDraft {
+  identity: string;
   fingerprint: string;
   resolutions: Record<number, Resolution>;
   normalEdits: NormalEdits;
@@ -348,8 +349,12 @@ export interface MergeEditorDraft {
 }
 
 export interface AppStore {
+  transferringTabIds: Record<string, true>;
+  beginTabTransfer: (workspaceId: string) => boolean;
+  endTabTransfer: (workspaceId: string) => void;
   mergeEditorDraft?: MergeEditorDraft;
   exportTabSession: (workspaceId: string) => WorkspaceSessionState | undefined;
+  setMergeEditorDraft: (draft: MergeEditorDraft) => void;
   importTab: (transfer: WindowTabTransfer, insertionIndex?: number) => Promise<boolean>;
   bridge?: VersionDockBridge;
   ready: boolean;
@@ -443,7 +448,7 @@ export interface AppStore {
   cloneRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, providerAccountId?: string) => Promise<boolean>;
   checkoutSvnRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, username?: string, password?: string) => Promise<RepositoryCheckoutOutcome>;
   switchTab: (workspaceId: string) => Promise<void>;
-  closeTab: (workspaceId: string) => Promise<void>;
+  closeTab: (workspaceId: string, options?: { closeWindowIfLast?: boolean }) => Promise<void>;
   closeOtherTabs: (workspaceId: string) => Promise<void>;
   closeAllTabs: () => Promise<void>;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
@@ -2098,6 +2103,21 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
+    transferringTabIds: {},
+    setMergeEditorDraft: (draft) => {
+      if (get().transferringTabIds[get().snapshot?.workspace.id ?? '']) return;
+      set({ mergeEditorDraft: draft });
+    },
+    beginTabTransfer: (id) => {
+      if (get().transferringTabIds[id] || !get().tabs.some((tab) => tab.id === id)) return false;
+      set((state) => ({ transferringTabIds: { ...state.transferringTabIds, [id]: true } }));
+      return true;
+    },
+    endTabTransfer: (id) => set((state) => {
+      const transferringTabIds = { ...state.transferringTabIds };
+      delete transferringTabIds[id];
+      return { transferringTabIds };
+    }),
     exportTabSession: (id) => get().snapshot?.workspace.id === id ? extractCurrentSession(get()) : get().sessions[id],
     importTab: async (transfer, insertionIndex) => {
       const value = await bridge().request<WorkspaceSessionState | null>({
@@ -2119,10 +2139,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       try {
         await persistTabs(get().tabs, get().activeTabId);
       } catch (error) {
-        await get().closeTab(transfer.tabId).catch((cleanupError) => console.warn('Unable to roll back tab import', cleanupError));
+        await get().closeTab(transfer.tabId, { closeWindowIfLast: false }).catch((cleanupError) => console.warn('Unable to roll back tab import', cleanupError));
         throw error;
       }
-      return get().snapshot?.workspace.id === transfer.tabId;
+      return get().tabs.some((tab) => tab.id === transfer.tabId)
+        && Boolean(get().sessions[transfer.tabId]);
     },
     ready: false, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', diffReturnMode: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, batchCommitReports: {}, loadErrors: {},
     logPanelOpen: false,
@@ -2300,6 +2321,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     dispose: () => {
+      set({ transferringTabIds: {} });
       cancelRequests();
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
       if (watcherTimer) clearTimeout(watcherTimer);
@@ -2587,7 +2609,23 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
-    closeTab: async (workspaceId: string) => {
+    closeTab: async (workspaceId: string, options) => {
+      if (get().transferringTabIds[workspaceId]) return;
+      if (options?.closeWindowIfLast !== false && get().tabs.length === 1 && get().tabs[0].id === workspaceId) {
+        try {
+          const hasOtherWindows = await bridge().window.hasOtherWorkspaceWindows();
+          // Close before clearing the workspace so the welcome screen cannot flash.
+          // Recheck after enumeration: another tab may have arrived in the meantime.
+          if (get().transferringTabIds[workspaceId]) return;
+          if (hasOtherWindows && get().tabs.length === 1 && get().tabs[0].id === workspaceId) {
+            await bridge().window.close();
+            return;
+          }
+        } catch (error) {
+          publishError('Workspace operation failed', error, workspaceId);
+          return;
+        }
+      }
       const currentTabs = get().tabs;
       const tabIndex = currentTabs.findIndex((t) => t.id === workspaceId);
       if (tabIndex === -1) return;
@@ -2686,6 +2724,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     closeOtherTabs: async (workspaceId: string) => {
+      if (Object.keys(get().transferringTabIds).some((id) => id !== workspaceId)) return;
       const targetTab = get().tabs.find((t) => t.id === workspaceId);
       if (!targetTab) return;
       const nextTabs = [targetTab];
@@ -2702,6 +2741,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     closeAllTabs: async () => {
+      if (Object.keys(get().transferringTabIds).length) return;
       set({
         tabs: [],
         activeTabId: null,
@@ -3074,7 +3114,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     }, `diff:${target.repoId}`),
 
-    setCommitMessage: (commitMessage) => set({ commitMessage }),
+    setCommitMessage: (commitMessage) => {
+      if (get().transferringTabIds[get().snapshot?.workspace.id ?? '']) return;
+      set({ commitMessage });
+    },
     applyMergeMessageSuggestion: () => set((state) => ({ commitMessage: state.mergeMessageSuggestion ?? state.commitMessage, mergeMessageSuggestion: undefined })),
     dismissMergeMessageSuggestion: () => set({ mergeMessageSuggestion: undefined }),
     setAmendRepoIds: (amendRepoIds) => set({ amendRepoIds: [...new Set(amendRepoIds)] }),
@@ -5157,9 +5200,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       const merge = await bridge().request<MergeVersions>({ type: 'conflictVersions', payload: { workspace_id: targetWorkspaceId, repo_id: conflict.repoId, relative_path: conflict.path } });
       if (workspaceId() !== targetWorkspaceId) return;
       const resolutions: Record<number, MergeResolution> = Object.fromEntries((merge.conflicts ?? []).map((item) => [item.index, 'unresolved']));
+      const draft = get().mergeEditorDraft;
+      const identity = mergeEditorIdentity(targetWorkspaceId, conflict.repoId, merge.path, merge.fingerprint);
       set({
         merge,
-        mergeEditorDraft: undefined,
+        mergeEditorDraft: draft?.identity === identity ? draft : undefined,
         mergeTarget: { repoId: conflict.repoId, path: conflict.path, workspaceId: targetWorkspaceId },
         mergeResolutions: resolutions,
         mergeScope: 'all',
@@ -5188,7 +5233,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       return Boolean(result);
     },
 
-    setMergeResult: (mergeResult) => set({ mergeResult }),
+    setMergeResult: (mergeResult) => {
+      if (get().transferringTabIds[get().snapshot?.workspace.id ?? '']) return;
+      set({ mergeResult });
+    },
     setMergeResolutions: (updater) => set((state) => ({
       mergeResolutions: typeof updater === 'function' ? updater(state.mergeResolutions) : updater,
     })),

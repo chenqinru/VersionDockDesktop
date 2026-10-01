@@ -2,6 +2,9 @@ import type { ConflictBlock, MergeVersions } from '../bindings/generated';
 
 export type MergeResolution = 'unresolved' | 'ours' | 'theirs' | 'both' | { type: 'custom'; lines: string[] };
 export type NonConflictScope = 'base' | 'left' | 'right' | 'all';
+export function mergeEditorIdentity(workspaceId?: string, repoId?: string, path?: string, fingerprint?: string): string {
+  return JSON.stringify([workspaceId ?? '', repoId ?? '', path ?? '', fingerprint ?? '']);
+}
 type SideChange = { baseStart: number; baseEnd: number; lines: string[] };
 type ThreeWayBlock = { state: 'equal' | 'left' | 'right' | 'both' | 'conflict'; base: string[]; left: string[]; right: string[] };
 

@@ -52,6 +52,7 @@ export function App() {
   const mode = useAppStore((state) => state.mode);
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
   const ready = useAppStore((state) => state.ready);
+  const transferringWorkspace = useAppStore((state) => Boolean(state.transferringTabIds[state.snapshot?.workspace.id ?? '']));
   const sync = useAppStore((state) => state.sync);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const initializeRepository = useAppStore((state) => state.initializeRepository);
@@ -217,7 +218,7 @@ export function App() {
     <div className="app-shell">
       <TitleBar startupTab={!ready && !snapshot ? startupTab : undefined} />
       {!ready && !snapshot ? <div className="startup"><Codicon name="loading codicon-modifier-spin" />{t('Loading workspace…')}</div> : !snapshot ? <WorkspaceChooser /> : (
-        <main className="main-workspace">
+        <main className="main-workspace" ref={(element) => { if (element) element.inert = transferringWorkspace; }} aria-busy={transferringWorkspace || undefined}>
           <div style={{ width: commitWidth }} className="commit-slot"><CommitPanel key={snapshot.workspace.id} /></div>
           <div className="resize-handle" role="separator" tabIndex={0} aria-label={t('Resize commit panel')} aria-orientation="vertical" aria-valuemin={280} aria-valuemax={620} aria-valuenow={commitWidth} onPointerDown={resizeCommit} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('commit', Math.min(620, Math.max(280, commitWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />
           <div className="workspace-slot">{missingTools ? <div className="workspace-empty"><Codicon name="tools" /><strong>{t('Git and SVN are not installed')}</strong><span>{t('Install at least one command-line tool to load repositories.')}</span></div> : noRepositories ? <div className="workspace-empty"><Codicon name="repo" /><strong>{t('No repositories found')}</strong><span>{t('Initialize a local repository, or clone / checkout from Git or SVN.')}</span><div className="workspace-empty-actions"><button className="primary" disabled={!initializeAvailable} title={bootstrap?.capabilities.availability?.initializeRepository?.detail ?? undefined} onClick={() => void initialize()}><Codicon name="repo-create" />{t('Initialize Repository')}</button><button disabled={!cloneAvailable} onClick={() => setCheckoutKind('git')}><Codicon name="repo-clone" />{t('Clone Git Repository')}</button><button disabled={!svnCheckoutAvailable} onClick={() => setCheckoutKind('svn')}><Codicon name="cloud-download" />{t('Checkout SVN Repository')}</button></div></div> : mode === 'history' || comparisonDiffOpen ? <><HistoryWorkspace />{comparisonDiffOpen && <div className="comparison-diff-overlay"><DiffWorkspace /></div>}</> : mode === 'commit-detail' ? <CommitDetailWorkspace /> : mode === 'diff' ? <DiffWorkspace /> : mode === 'changes' ? <CommitChangesWorkspace /> : mode === 'conflicts' ? <ConflictsWorkspace /> : <MergeWorkspace key={snapshot.workspace.id} />}</div>

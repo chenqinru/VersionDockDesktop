@@ -63,6 +63,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
   const transferringTabsRef = useRef(new Set<string>());
   const windowLabelRef = useRef('');
   const activeTabDragRef = useRef<ActiveTabDrag | null>(null);
+  const cancelActiveDragRef = useRef<(() => void) | null>(null);
+  const restoringDragRef = useRef(false);
   const remoteDragTabIdRef = useRef<string | null>(null);
   const nativeRemoteTrackingTabIdRef = useRef<string | null>(null);
   const importingRemoteTabIdRef = useRef<string | null>(null);
@@ -72,6 +74,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
   const bridge = useBridge();
   const platform = bridge.platform();
   const loadedTabs = useAppStore((state) => state.tabs);
+  const transferringTabIds = useAppStore((state) => state.transferringTabIds);
   const tabs = loadedTabs.length === 0 && startupTab ? [startupTab] : loadedTabs;
   const activeTabId = useAppStore((state) => state.activeTabId) ?? startupTab?.id;
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
@@ -88,7 +91,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     void bridge.window.isMaximized().then(setMaximized);
   }, [bridge, platform]);
 
-  useEffect(() => () => { tabDragPreviewWindow.hide(); tabAutoScroller.stop(); }, [tabDragPreviewWindow, tabAutoScroller]);
+  useEffect(() => () => { cancelActiveDragRef.current?.(); tabDragPreviewWindow.hide(); tabAutoScroller.stop(); }, [tabDragPreviewWindow, tabAutoScroller]);
 
   useEffect(() => {
     if (!newTabMenuOpen) return;
@@ -378,6 +381,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     createIfUnattached = true,
     geometry?: Promise<WindowDragGeometry | null>,
   ) => {
+    if (!useAppStore.getState().beginTabTransfer(tab.id)) return false;
     if (createIfUnattached) setPendingTransferTabIds((current) => new Set(current).add(tab.id));
     try {
       const dropGeometry = geometry ? await geometry : null;
@@ -389,9 +393,11 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         // briefly render and resize into the welcome screen.
         await bridge.window.close();
       }
-      await closeTab(tab.id);
+      useAppStore.getState().endTabTransfer(tab.id);
+      await closeTab(tab.id, { closeWindowIfLast: false });
       return true;
     } finally {
+      useAppStore.getState().endTabTransfer(tab.id);
       setPendingTransferTabIds((current) => {
         const next = new Set(current);
         next.delete(tab.id);
@@ -414,6 +420,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
   };
 
   const beginTabPointerDrag = (event: React.PointerEvent<HTMLDivElement>, tab: WorkspaceDescriptor) => {
+    if (activeTabDragRef.current || restoringDragRef.current) return;
+    if (useAppStore.getState().transferringTabIds[tab.id]) return;
     if (startupTab?.id === tab.id) return;
     if (event.button !== 0 || transferringTabsRef.current.has(tab.id) || (event.target instanceof Element && event.target.closest('button'))) return;
     const element = event.currentTarget;
@@ -656,6 +664,9 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', finish, true);
       window.removeEventListener('pointercancel', cancel, true);
+      window.removeEventListener('keydown', handleDragKeyDown, true);
+      element.removeEventListener('lostpointercapture', handleLostCapture);
+      cancelActiveDragRef.current = null;
       if (element.hasPointerCapture(drag.pointerId)) element.releasePointerCapture(drag.pointerId);
       if (activeTabDragRef.current === drag) activeTabDragRef.current = null;
       setDraggingTabId(null);
@@ -666,8 +677,31 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
       void bridge.window.setCursorIcon('default');
     };
 
+    const abortDrag = () => {
+      if (activeTabDragRef.current !== drag) return;
+      const started = drag.started;
+      cleanup();
+      restoringDragRef.current = Boolean(movesWindow && started);
+      suppressClickRef.current = started ? tab.id : null;
+      setTimeout(() => { if (suppressClickRef.current === tab.id) suppressClickRef.current = null; });
+      void (async () => {
+        // Let an in-flight native move settle before restoring the original position.
+        await movingWindow;
+        if (movesWindow && started && useAppStore.getState().tabs.some((item) => item.id === tab.id)) {
+          const geometry = await nativeGeometry;
+          const origin = geometry?.sourceBounds ?? drag.sourceBounds;
+          await bridge.window.setPosition(origin.x, origin.y);
+        }
+      })().catch((error) => console.warn('Unable to restore cancelled tab drag', error))
+        .finally(() => {
+          restoringDragRef.current = false;
+          if (!activeTabDragRef.current) void bridge.broadcastTabDragState(null);
+        });
+    };
+
     const end = (pointer: PointerEvent, cancelled: boolean) => {
       if (pointer.pointerId !== drag.pointerId || activeTabDragRef.current !== drag) return;
+      if (cancelled) { abortDrag(); return; }
       if (awaitingRelease) return;
       if (movesWindow === null) {
         awaitingRelease = true;
@@ -732,10 +766,25 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
 
     function finish(pointer: PointerEvent) { end(pointer, false); }
     function cancel(pointer: PointerEvent) { end(pointer, true); }
+    function handleDragKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      abortDrag();
+    }
+    function handleLostCapture(pointer: PointerEvent) {
+      if (pointer.pointerId !== drag.pointerId) return;
+      // pointerup releases capture automatically, even while window enumeration
+      // is pending. Keep that release queued; only unexpected capture loss cancels.
+      if (!awaitingRelease) abortDrag();
+    }
 
+    cancelActiveDragRef.current = abortDrag;
     window.addEventListener('pointermove', move, true);
     window.addEventListener('pointerup', finish, true);
     window.addEventListener('pointercancel', cancel, true);
+    window.addEventListener('keydown', handleDragKeyDown, true);
+    element.addEventListener('lostpointercapture', handleLostCapture);
     if (!singleTabWindow) warmPreview();
   };
 
@@ -842,7 +891,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                       <button
                         type="button"
                         className="titlebar-tab-close"
-                        disabled={startupTab?.id === tab.id}
+                        disabled={startupTab?.id === tab.id || Boolean(transferringTabIds[tab.id])}
                         aria-label={t('Close Tab')}
                         title={t('Close Tab')}
                         onClick={(event) => {
@@ -939,10 +988,10 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
           x={contextMenu.x}
           y={contextMenu.y}
           items={[
-            { id: 'new-window', label: t('Open in New Window'), icon: 'window' },
+            { id: 'new-window', label: t('Open in New Window'), icon: 'window', disabled: Boolean(transferringTabIds[contextMenu.tabId]) },
             { separator: true },
-            { id: 'close', label: t('Close Tab'), icon: 'close' },
-            ...(tabs.length > 1 ? [{ id: 'close-others', label: t('Close Other Tabs'), icon: 'close-all' } as ContextMenuEntry] : []),
+            { id: 'close', label: t('Close Tab'), icon: 'close', disabled: Boolean(transferringTabIds[contextMenu.tabId]) },
+            ...(tabs.length > 1 ? [{ id: 'close-others', label: t('Close Other Tabs'), icon: 'close-all', disabled: Object.keys(transferringTabIds).some((id) => id !== contextMenu.tabId) } as ContextMenuEntry] : []),
           ]}
           onSelect={(id) => {
             const targetTab = tabs.find((t) => t.id === contextMenu.tabId);
