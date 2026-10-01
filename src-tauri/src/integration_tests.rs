@@ -5133,3 +5133,82 @@ async fn notification_unlock_resolves_git_and_worktree_metadata_without_deleting
         assert!(other.exists());
     }
 }
+
+#[tokio::test]
+async fn real_git_sidebar_branch_names_and_checkout_survive_tag_namespace_collisions() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let path = directory.path();
+    command("git", &["init", "-b", "main"], path);
+    command("git", &["config", "user.name", "Sidebar Test"], path);
+    command(
+        "git",
+        &["config", "user.email", "sidebar@example.test"],
+        path,
+    );
+    std::fs::write(path.join("file.txt"), "base\n").unwrap();
+    command("git", &["add", "."], path);
+    command("git", &["commit", "-m", "base"], path);
+    command("git", &["tag", "main"], path);
+    command("git", &["branch", "topic", "refs/heads/main"], path);
+    command(
+        "git",
+        &["remote", "add", "origin", path.to_str().unwrap()],
+        path,
+    );
+    command("git", &["fetch", "origin"], path);
+    command("git", &["tag", "origin/topic"], path);
+    command("git", &["branch", "-D", "topic"], path);
+    let repository = repo(path, VcsKind::Git);
+    let token = CancellationToken::new();
+    let branches = vcs::branches(&repository, &token).await.unwrap();
+    assert!(branches
+        .iter()
+        .any(|branch| branch.name == "main" && branch.current && !branch.remote));
+    assert!(branches.iter().any(|branch| branch.name == "origin/topic"
+        && branch.remote
+        && branch.remote_name.as_deref() == Some("origin")));
+    assert!(!branches
+        .iter()
+        .any(|branch| branch.name.starts_with("heads/") || branch.name.starts_with("remotes/")));
+    vcs::branch_operation(
+        &repository,
+        BranchOperation::Checkout {
+            name: "origin/topic".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        command_output("git", &["branch", "--show-current"], path),
+        "topic"
+    );
+    assert_eq!(
+        command_output(
+            "git",
+            &["rev-parse", "--symbolic-full-name", "@{upstream}"],
+            path
+        ),
+        "refs/remotes/origin/topic"
+    );
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Checkout {
+            name: "main".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    let head = vcs::branches(&repository, &token)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.current)
+        .unwrap();
+    assert_eq!(head.name, "HEAD");
+    assert!(head.detached_tag.is_some());
+}

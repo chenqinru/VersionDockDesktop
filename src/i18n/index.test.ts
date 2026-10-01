@@ -14,8 +14,8 @@ describe('i18n', () => {
 
   it('translates notification messages before the plugin bundle finishes loading', () => {
     const t = createTranslator('zh-CN');
-    expect(t('VersionDock: Already up to date. No files updated.')).toBe('VersionDock：已是最新状态，没有更新文件。');
-    expect(t('VersionDock: Updated {0} files in {1} commits.', 4, 2)).toBe('VersionDock：已通过 2 个提交更新 4 个文件。');
+    expect(t('VersionDock: Already up to date. No files updated.')).toBe('VersionDock：已是最新版本，无文件更新。');
+    expect(t('VersionDock: Updated {0} files in {1} commits.', 4, 2)).toBe('VersionDock：已更新 4 个文件（2 个提交）。');
     expect(t('VersionDock: Merge conflicts detected. Use the Merge Editor to resolve them.')).toBe('VersionDock：检测到合并冲突，请使用合并编辑器解决。');
     expect(t('Rebase & Push')).toBe('变基并推送');
   });

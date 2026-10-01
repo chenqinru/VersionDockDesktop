@@ -943,8 +943,8 @@ function FileRowItem({
         padding: '2px 10px 2px 0',
         paddingLeft: 6 + depth * 16,
         cursor: 'pointer',
-        background: selected ? 'var(--vscode-list-activeSelectionBackground, #094771)' : 'transparent',
-        color: selected ? 'var(--vscode-list-activeSelectionForeground, #ffffff)' : 'var(--vscode-foreground)',
+        background: selected ? 'var(--vscode-list-activeSelectionBackground, var(--versiondock-selection-background))' : 'transparent',
+        color: selected ? 'var(--vscode-list-activeSelectionForeground, var(--versiondock-selection-foreground))' : 'var(--vscode-foreground)',
         fontSize: 13,
         userSelect: 'none',
       }}

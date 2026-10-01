@@ -92,3 +92,53 @@ Fixes:
 - The latest native Desktop window with the user's repositories and these exact three interaction states has not been captured. The browser demo's different data and the blocked same-input screenshot comparison still prevent a final pixel-level pass.
 
 final result: blocked
+
+---
+
+# 分支面板视觉 QA
+
+## 基准与捕获
+
+用户两张附件是 App 原有状态；视觉目标采用实际 VS Code Extension Development Host 的紧凑分支面板。原始插件截图：`docs/manual/branch-sidebar-2026-10-01/plugin-final.png`；App 原始截图：`docs/manual/branch-sidebar-2026-10-01/native-final.png`。
+
+两端 viewport 均为 1440×900 CSS px，原始 PNG 均为 1440×900，捕获 DPR=1。分支面板宽度均为 220 CSS px。插件裁剪 `(353,107,220,370)`，App 裁剪 `(405,75,220,370)`，以搜索栏顶端对齐；并排图片等比例放大 2 倍，未重绘或修改原始 UI。菜单分别裁剪 215×230、180×230；宽度按各自语言文本自适应。
+
+状态：同一个临时工作区，两 Git 仓库 main、SVN trunk，本地 4 个聚合分支、origin 2 个聚合分支、混合 VCS 同名标签 2 行，展开全部分组。主题的背景、前景、仓库颜色、accent、badge 与 VCS 颜色在独立 VS Code 验收配置中归一到 App 现有 dark2026 token。
+
+完整截图检查整体比例、分组和滚动区域。聚焦证据：`sidebar-comparison.png`、`menu-comparison.png`。内置浏览器连接因工具可信路径错误不可用；本次没有采用浏览器演示，而是捕获实际 App 和实际插件宿主。
+
+## 五项检查
+
+- 字体：仓库 10px/700，分组 11px/700，分支 12px，主要分支 500/HEAD 600，徽章 9px、计数 10px；同一行保持单行截断，无徽章挤压换行。
+- 间距：搜索栏 35px，仓库 20px，分组/分支 22px；内边距、7px 圆点和徽章顺序与当前插件源码对照；长分支截断，右侧元数据保留。
+- 色彩：既有 App 主题决定宿主色彩；HEAD 边线、绿色 detached tag、VCS Git/SVN 色、选中/筛选/右键状态分别呈现。主题带来的菜单边框/分隔线明暗差异保留，未硬编码 VS Code 的全局默认菜单色。
+- 资产：全为 UI 文本和原有 Codicons，无照片/插图资产，没有新增位图或重绘截图内容。
+- 文案：菜单项目/顺序对齐插件语义。插件宿主为英文、App 为中文；该运行时语言差异明确保留，并通过英中文案资源核对，而非把两种语言声称为相同像素。
+
+## 比较历史
+
+1. 原生 `native-local.png` 与插件 `plugin-maximized.png`：发现分组标题 25px 对 22px、菜单 padding 每项多 1px，累计改变行位置，记为 P2。
+2. 修复分组高度、字号、行内 padding、右键状态和菜单紧凑变体；最终原始截图及两张并排图验证分组节奏/菜单高度。没有剩余 P0/P1/P2。
+3. 复核实际操作：共享仓库检出、部分/全部 HEAD、两仓库标签检出、当前标签无删除入口、仓库选择、双方独有提交比较、真实工作区文件内容 diff、SVN Switch。自动化回归另覆盖取消、远程 ref 范围、异步标签折叠与键盘激活。
+
+## 可接受差异与 P3
+
+- 中文与英文的字体形态、文案长度及菜单宽度来自语言选择。
+- 完全同名的 Git/SVN 标签 tie 顺序：插件由异步响应插入顺序决定，App 按工作区仓库顺序稳定呈现，保持两个独立 VCS 操作目标。
+- WebKit/Chromium 字形抗锯齿和现有宿主主题分隔线亮度有轻微差异，未影响密度或核心可用性。
+- 未验证跨平台像素、真实账号/网络远端操作；不把此次视觉验收扩展为这些能力的手动验收。
+
+## 实施检查
+
+源项目未修改；无 AI 或舒适布局新增。完整结果、测试及运行时限制参见 `docs/branch-sidebar-parity-2026-10-01.md`。
+
+final result: passed
+
+
+## 颜色反馈后续修正
+
+用户明确要求列表选中背景及加载提示为灰色，覆盖此前蓝色宿主 selection token。已统一主题变量与兼容别名；当前原生 App 选中效果见 `docs/manual/branch-sidebar-2026-10-01/native-neutral-selection.png`。
+
+8 主题 WebKit 计算样式验证见 `neutral-theme-colors.json`；这是实际 CSS 的独立渲染核验，没有把模拟 loading 状态当作 App 后端运行证明。原生瞬态加载截图未捕获。
+
+final result: passed

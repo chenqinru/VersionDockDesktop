@@ -799,7 +799,7 @@ const row = {
         ? 'var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-charts-green, var(--versiondock-success)))'
         : tone === 'error'
           ? 'var(--vscode-errorForeground, var(--versiondock-danger))'
-          : 'var(--vscode-descriptionForeground, var(--versiondock-muted))';
+          : 'var(--versiondock-loading-foreground)';
     return {
       flexShrink: 0,
       maxWidth: '86px',
@@ -890,8 +890,8 @@ const row = {
     borderRadius: '3px',
     fontSize: '10px',
     lineHeight: '14px',
-    color: 'var(--vscode-progressBar-background, var(--versiondock-accent))',
-    background: 'color-mix(in srgb, var(--vscode-progressBar-background, var(--versiondock-accent)) 16%, transparent)',
+    color: 'var(--versiondock-loading-foreground)',
+    background: 'var(--versiondock-loading-background)',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',

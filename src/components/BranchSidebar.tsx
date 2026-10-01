@@ -8,19 +8,21 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog } from './dialogService';
 import { isBranchProtected } from '../history/branchProtection';
 import { ProviderPanel } from './ProviderPanel';
+import { isPrimaryBranch, readableAccentColor } from './branchColor';
 
 interface Props {
   repoFilter: Set<string>;
   refFilter: Set<string>;
   onRepoFilter: (repoId: string) => void;
-  onRefFilter: (ref: string) => void;
+  onRefFilter: (ref: string, repoIds: string[]) => void;
+  refRepoIds?: readonly string[] | null;
   onCompare: (repoId: string, target: string) => void;
   onCollapse: () => void;
 }
 
 type SectionKey = 'local' | `remote:${string}` | 'tags';
 
-export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter, onCompare, onCollapse }: Props) {
+export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter, onCompare, onCollapse, refRepoIds }: Props) {
   const allRepos = useAppStore((state) => state.snapshot?.repositories ?? []);
   const repos = useMemo(() => allRepos.filter((repo) => !repo.meta.isWorktree), [allRepos]);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
@@ -34,13 +36,11 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const deferredFilter = useDeferredValue(filter);
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [publishRepoId, setPublishRepoId] = useState<string | null>(null);
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
-    const initial = new Set(persistedSections);
-    const tagCount = Object.values(tagsByRepo).reduce((count, tags) => count + tags.length, 0);
-    const detachedOnTag = Object.values(branchesByRepo).some((branches) => branches.some((branch) => Boolean(branch.detachedTag)));
-    if (tagCount > 25 && !detachedOnTag) initial.add('tags');
-    return initial;
-  });
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set(persistedSections));
+  const [tagsCollapsedOverride, setTagsCollapsedOverride] = useState<boolean | null>(null);
+  const tagsCollapsed = tagsCollapsedOverride ?? (collapsedSections.has('tags') ||
+    (repos.reduce((total, repo) => total + (tagsByRepo[repo.meta.id]?.length ?? 0), 0) > 25 &&
+      !repos.some((repo) => branchesByRepo[repo.meta.id]?.some((branch) => branch.detachedTag))));
   const [context, setContext] = useState<{ x: number; y: number; kind: 'branch' | 'tag'; branch?: SidebarBranch; tag?: SidebarTag }>();
   const branchOperation = useAppStore((state) => state.branchOperation);
   const sync = useAppStore((state) => state.sync);
@@ -49,9 +49,11 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
 
   const model = useMemo(() => buildSidebarModel(repos, branchesByRepo, tagsByRepo, deferredFilter), [branchesByRepo, deferredFilter, tagsByRepo, repos]);
   const showVcsBadges = repos.some((repo) => repo.meta.kind === 'git') && repos.some((repo) => repo.meta.kind === 'svn');
-  const repoColors = useMemo(() => Object.fromEntries(repos.map((repo) => [repo.meta.id, repo.meta.color])), [repos]);
+  const repoColors = useMemo(() => Object.fromEntries(repos.map((repo) => [repo.meta.id, readableAccentColor(repo.meta.color)])), [repos]);
   const toggleSection = (key: SectionKey) => {
     const next = new Set(collapsedSections);
+    if (tagsCollapsed) next.add('tags');
+    if (key === 'tags') setTagsCollapsedOverride(!tagsCollapsed);
     if (next.has(key)) next.delete(key); else next.add(key);
     setCollapsedSections(next);
     setBranchSidebarState(sidebarCollapsed, [...next]);
@@ -65,7 +67,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
       choices: targetBranch.instances.map((item) => ({
         id: item.repoId,
         label: item.repo.meta.name,
-        description: item.branch.current ? t('Current HEAD') : item.branch.remote ? t('Remote branch') : undefined,
+        description: targetBranch.ref.replace(/^refs\/(?:heads|remotes)\//, ''),
         icon: 'repo',
       })),
     });
@@ -86,31 +88,15 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
     });
   };
 
-  const pickTargetTagInstance = async (targetTag: SidebarTag, title: string) => {
-    const gitInstances = targetTag.instances.filter((item) => item.repo.meta.kind === 'git');
-    if (gitInstances.length === 0) return null;
-    if (gitInstances.length === 1) return gitInstances[0];
-    const choice = await choiceDialog({
-      title,
-      message: `${targetTag.name}\n${t('{0} repositories', gitInstances.length)}`,
-      choices: gitInstances.map((item) => ({
-        id: item.repo.meta.id,
-        label: item.repo.meta.name,
-        description: item.repo.meta.rootPath,
-        icon: 'repo',
-      })),
-    });
-    if (!choice) return null;
-    return gitInstances.find((item) => item.repo.meta.id === choice) ?? null;
-  };
+  const isRefSelected = (branch: SidebarBranch) => refFilter.has(branch.ref) &&
+    (!refRepoIds || (refRepoIds.length === branch.repoIds.length && branch.repoIds.every((id) => refRepoIds.includes(id))));
 
   return <aside className="branch-sidebar">
     <div className="branch-sidebar-sticky-header">
       <div className="branch-sidebar-header">
         <div className="branch-search">
           <Codicon name="filter" />
-          <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
-          {filter && <button aria-label={t('Clear')} onClick={() => setFilter('')}><Codicon name="close" /></button>}
+          <input aria-label={t('Filter branches and tags')} value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
         </div>
         <button className="branch-sidebar-collapse" title={t('Collapse sidebar')} aria-label={t('Collapse sidebar')} onClick={onCollapse}>
           <Codicon name="layout-sidebar-left" />
@@ -126,7 +112,6 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         {repos.map((repo) => <RepositoryRow
           key={repo.meta.id}
           repo={repo}
-          repoColors={repoColors}
           showVcsBadges={showVcsBadges}
           selected={repoFilter.has(repo.meta.id)}
           active={activeItem === `repo:${repo.meta.id}`}
@@ -149,10 +134,11 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         repoColors={repoColors}
         multiRepo={repos.length > 1}
         showVcsBadges={showVcsBadges}
-        selected={refFilter.has(branch.ref)}
+        selected={isRefSelected(branch)}
         active={activeItem === `branch:${branch.key}`}
+        contextActive={context?.branch?.key === branch.key}
         onClick={() => setActiveItem(`branch:${branch.key}`)}
-        onDoubleClick={() => onRefFilter(branch.ref)}
+        onDoubleClick={() => onRefFilter(branch.ref, branch.repoIds)}
         onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, kind: 'branch', branch }); }}
       />)}
     </SidebarSection>
@@ -173,10 +159,11 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           repoColors={repoColors}
           multiRepo={repos.length > 1}
           showVcsBadges={showVcsBadges}
-          selected={refFilter.has(branch.ref)}
+          selected={isRefSelected(branch)}
           active={activeItem === `branch:${branch.key}`}
+          contextActive={context?.branch?.key === branch.key}
           onClick={() => setActiveItem(`branch:${branch.key}`)}
-          onDoubleClick={() => onRefFilter(branch.ref)}
+          onDoubleClick={() => onRefFilter(branch.ref, branch.repoIds)}
           onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, kind: 'branch', branch }); }}
         />)}
       </SidebarSection>;
@@ -186,7 +173,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
       icon="tag"
       title={t('Tags')}
       count={model.tags.length}
-      collapsed={collapsedSections.has('tags')}
+      collapsed={tagsCollapsed}
       onToggle={() => toggleSection('tags')}
     >
       {model.tags.map((tag) => <TagRow
@@ -195,25 +182,24 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         repoColors={repoColors}
         multiRepo={repos.length > 1}
         showVcsBadges={showVcsBadges}
-        selected={refFilter.has(tag.ref)}
         active={activeItem === `tag:${tag.key}`}
+        contextActive={context?.tag?.key === tag.key}
         detached={tag.instances.some(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name))}
         onClick={() => setActiveItem(`tag:${tag.key}`)}
-        onDoubleClick={() => onRefFilter(tag.ref)}
         onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, kind: 'tag', tag }); }}
       />)}
     </SidebarSection>}
-    {context && <ContextMenu x={context.x} y={context.y} items={((): ContextMenuEntry[] => {
+    {context && <ContextMenu variant="branchSidebar" x={context.x} y={context.y} items={((): ContextMenuEntry[] => {
       if (context.kind === 'tag') {
         const tag = context.tag!;
         const svn = tag.vcsKind === 'svn';
-        const allDetached = tag.instances.every(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name));
+        const anyDetached = tag.instances.some(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name));
         return [
           { id: 'tag-checkout', label: t(svn ? 'Switch to "{0}"' : 'Checkout "{0}"', tag.name), icon: 'arrow-right' },
           { separator: true },
           { id: 'tag-merge', label: t(svn ? 'Merge tag into working copy' : 'Merge into current'), icon: 'git-merge' },
           ...(!svn ? [{ id: 'tag-push', label: t('Push to remote...'), icon: 'cloud-upload' } as ContextMenuEntry] : []),
-          ...(!allDetached ? [{ separator: true } as ContextMenuEntry, { id: 'tag-delete', label: t(svn ? 'Delete SVN tag' : 'Delete tag'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
+          ...(!anyDetached ? [{ separator: true } as ContextMenuEntry, { id: 'tag-delete', label: t(svn ? 'Delete SVN tag' : 'Delete tag'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
         ];
       }
       const branch = context.branch!;
@@ -230,7 +216,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         ...(!svn ? [{ id: 'rebase', label: t("Rebase onto '{0}'", branch.name), icon: 'repo-forked' } as ContextMenuEntry] : []),
         ...(!branch.remote ? [
           { separator: true } as ContextMenuEntry,
-          { id: 'pull', label: t(svn ? 'Update' : 'Pull'), icon: 'cloud-download' } as ContextMenuEntry,
+          { id: 'pull', label: t('Update'), icon: 'cloud-download' } as ContextMenuEntry,
           ...(!svn ? [{ id: 'push', label: t('Push...'), icon: 'cloud-upload' } as ContextMenuEntry] : []),
         ] : []),
         ...(!branch.current && !branch.remote ? [{ separator: true } as ContextMenuEntry, { id: 'delete', label: t(svn ? 'Delete SVN branch' : 'Delete branch'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
@@ -241,28 +227,24 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         const defaultInstance = branch.instances.find((item) => item.branch.current) ?? branch.instances[0];
         if (!defaultInstance) return;
         if (id === 'checkout') for (const item of branch.instances) await branchOperation({ type: 'checkout', name: branch.vcsKind === 'svn' ? branch.ref : item.branch.name }, item.repoId);
-        const getBranchRef = (inst: BranchInstance) => {
-          if (branch.vcsKind === 'svn') return branch.ref;
-          return inst.branch.remote ? `refs/remotes/${inst.branch.name}` : inst.branch.name;
-        };
         if (id === 'compare-current') {
           const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t('Compare with Current')) : defaultInstance;
-          if (inst) onCompare(inst.repoId, getBranchRef(inst));
+          if (inst) onCompare(inst.repoId, branch.ref);
         }
         if (id === 'diff-working') {
           const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t('Compare with Working Directory')) : defaultInstance;
-          if (inst) void loadBranchWorkingDiff(inst.repoId, inst.branch.remote ? `refs/remotes/${inst.branch.name}` : `refs/heads/${inst.branch.name}`);
+          if (inst) void loadBranchWorkingDiff(inst.repoId, branch.ref);
         }
         if (id === 'merge') {
-          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t(branch.vcsKind === 'svn' ? 'Merge into working copy' : 'Merge into current')) : defaultInstance;
-          if (inst) await branchOperation({ type: 'merge', name: getBranchRef(inst) }, inst.repoId);
+          const inst = defaultInstance;
+          await branchOperation({ type: 'merge', name: branch.ref }, inst.repoId);
         }
         if (id === 'rebase') {
-          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t("Rebase onto '{0}'", branch.name)) : defaultInstance;
-          if (inst) await branchOperation({ type: 'rebase', name: getBranchRef(inst) }, inst.repoId);
+          const inst = defaultInstance;
+          await branchOperation({ type: 'rebase', name: branch.ref }, inst.repoId);
         }
         if (id === 'pull') {
-          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t(branch.vcsKind === 'svn' ? 'Update' : 'Pull')) : defaultInstance;
+          const inst = defaultInstance;
           if (!inst) return;
           if (branch.vcsKind === 'svn') {
             await sync(inst.repoId, 'update', true, { branch: branch.ref });
@@ -293,7 +275,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           }
         }
         if (id === 'push') {
-          const inst = branch.instances.length > 1 ? await pickTargetInstance(branch, t('Push Branch')) : defaultInstance;
+          const inst = defaultInstance;
           if (!inst) return;
           await useAppStore.getState().loadRemotes(inst.repoId);
           const repoRemotes = useAppStore.getState().remotes[inst.repoId] ?? [];
@@ -311,7 +293,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           }
           const remote = await pickRemote(inst.repoId, t('Push — Select remote'));
           if (repoRemotes.length > 1 && !remote) return;
-          await sync(inst.repoId, 'push', true, { remote: remote ?? undefined, branch: inst.branch.name });
+          await sync(inst.repoId, 'push', true, { remote: remote ?? undefined });
         }
         if (id === 'delete') {
           if (branch.vcsKind === 'git' && isBranchProtected(branch.name)) {
@@ -416,7 +398,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           }
         }
         if (id === 'tag-push') {
-          const inst = await pickTargetTagInstance(tag, t('Push Tag'));
+          const inst = tag.instances.find((item) => item.repo.meta.kind === 'git');
           if (!inst) return;
           const targetRepoId = inst.repo.meta.id;
           await useAppStore.getState().loadRemotes(targetRepoId);
@@ -460,7 +442,6 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
 
 function RepositoryRow({ repo, showVcsBadges, selected, active, onClick, onDoubleClick }: {
   repo: RepositoryStatus;
-  repoColors: Record<string, string>;
   showVcsBadges: boolean;
   selected: boolean;
   active: boolean;
@@ -472,7 +453,7 @@ function RepositoryRow({ repo, showVcsBadges, selected, active, onClick, onDoubl
     className={`branch-repo-row ${selected ? 'selected' : ''} ${active ? 'active' : ''}`}
     role="button"
     tabIndex={0}
-    aria-pressed={selected}
+    aria-pressed={active}
     title={t('Double-click to filter commits by repository: {0}', repo.meta.name)}
     onClick={onClick}
     onDoubleClick={onDoubleClick}
@@ -482,7 +463,7 @@ function RepositoryRow({ repo, showVcsBadges, selected, active, onClick, onDoubl
       onDoubleClick();
     }}
   >
-    <i style={{ background: repo.meta.color }} />
+    <i style={{ background: readableAccentColor(repo.meta.color) }} />
     <span>{repo.meta.name}</span>
     {repo.meta.isSubmodule && <em className="branch-submodule-badge" title={t('Submodule')}>{t('SUB')}</em>}
     {showVcsBadges && <VcsBadge kind={repo.meta.kind} />}
@@ -500,7 +481,7 @@ function SidebarSection({ icon, title, count, collapsed, onToggle, children }: {
   return <section className="branch-section">
     <div className="branch-section-title">
       <button className="branch-section-toggle" onClick={onToggle} aria-expanded={!collapsed}>
-        <Codicon name={collapsed ? 'chevron-right' : 'chevron-down'} />
+        <Codicon name={collapsed ? 'triangle-right' : 'triangle-down'} />
         <Codicon name={icon} />
         <strong>{title}</strong>
         <b>{count}</b>
@@ -510,7 +491,7 @@ function SidebarSection({ icon, title, count, collapsed, onToggle, children }: {
   </section>;
 }
 
-function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, active, onClick, onDoubleClick, onContextMenu }: {
+function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, active, contextActive, onClick, onDoubleClick, onContextMenu }: {
   branch: SidebarBranch;
   repoColors: Record<string, string>;
   multiRepo: boolean;
@@ -519,14 +500,15 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
   active: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
+  contextActive: boolean;
   onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const { t } = useI18n();
   const headCount = branch.instances.filter((instance) => instance.branch.current).length;
   const { ahead, behind } = sumBranchAheadBehind(branch);
-  const isPrimary = ['main', 'master', 'trunk', 'develop', 'dev', 'release'].includes(branch.name.toLowerCase());
+  const isPrimary = isPrimaryBranch(branch.name);
   return <div
-    className={`branch-ref-row ${branch.current ? 'head' : ''} ${selected ? 'filtered' : ''} ${active ? 'active' : ''}`}
+    className={`branch-ref-row ${branch.current ? 'head' : ''} ${selected ? 'filtered' : ''} ${active ? 'active' : ''} ${contextActive ? 'context-active' : ''} ${isPrimary ? 'primary' : ''}`}
     role="button"
     tabIndex={0}
     aria-pressed={active}
@@ -554,37 +536,35 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
         {multiRepo && headCount > 0 && headCount < branch.repoIds.length ? `HEAD ${headCount}/${branch.repoIds.length}` : 'HEAD'}
       </em>
     )}
-    {(ahead > 0 || behind > 0) && <span className="branch-ahead-behind">{ahead > 0 && <b className="ahead">↑{ahead}</b>}{behind > 0 && <b className="behind">↓{behind}</b>}</span>}
     {multiRepo && <span className="branch-repo-dots">{branch.repoIds.map((repoId) => <i key={repoId} style={{ background: repoColors[repoId] ?? 'var(--versiondock-muted)' }} />)}</span>}
+    {(ahead > 0 || behind > 0) && <span className="branch-ahead-behind">{ahead > 0 && <b className="ahead">↑{ahead}</b>}{behind > 0 && <b className="behind">↓{behind}</b>}</span>}
   </div>;
 }
 
-function TagRow({ tag, repoColors, multiRepo, showVcsBadges, selected, active, detached, onClick, onDoubleClick, onContextMenu }: {
+function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, contextActive, detached, onClick, onContextMenu }: {
   tag: SidebarTag;
   repoColors: Record<string, string>;
   multiRepo: boolean;
   showVcsBadges: boolean;
-  selected: boolean;
   active: boolean;
   detached: boolean;
   onClick: () => void;
-  onDoubleClick: () => void;
+  contextActive: boolean;
   onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const { t } = useI18n();
   return <div
-    className={`branch-ref-row tag-row ${selected ? 'filtered' : ''} ${active ? 'active' : ''} ${detached ? 'head' : ''}`}
+    className={`branch-ref-row tag-row ${active ? 'active' : ''} ${detached ? 'head' : ''} ${contextActive ? 'context-active' : ''}`}
     role="button"
     tabIndex={0}
     aria-pressed={active}
     title={`${t('Tag: {0}', tag.name)}${detached ? ` (${t('current')})` : ''}\n${t('Right-click for actions')}`}
     onClick={onClick}
-    onDoubleClick={onDoubleClick}
     onContextMenu={onContextMenu}
     onKeyDown={(event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
-      onDoubleClick();
+      onClick();
     }}
   >
     <Codicon name="tag" />

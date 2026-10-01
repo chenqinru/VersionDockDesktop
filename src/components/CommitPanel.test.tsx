@@ -373,7 +373,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByTitle('VersionDock: Refresh Commit Panel')).toBeInTheDocument();
     expect(screen.getByTitle('VersionDock: Settings')).toBeInTheDocument();
     expect(container.querySelector('.commit-tabs')).not.toBeInTheDocument();
-    expect(screen.getByText('refs/remotes/origin/feature vs Working Tree')).toBeInTheDocument();
+    expect(screen.getByText('origin/feature vs Working Tree')).toBeInTheDocument();
     expect(screen.getByTitle('src')).toHaveTextContent('2');
 
     fireEvent.click(screen.getByText('alpha.ts'));

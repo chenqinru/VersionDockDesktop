@@ -1,20 +1,8 @@
 import type { BranchInfo, CommitFile, RepositoryStatus } from '../bindings/generated';
+import { isPrimaryBranch } from './branchColor';
 import { branchRevisionRef, tagRevisionRef } from '../history/refs';
 
 export type BranchInstance = { repoId: string; repo: RepositoryStatus; branch: BranchInfo };
-export type MergedBranch = { name: string; instances: BranchInstance[]; current: boolean; remote: boolean };
-
-const MAINLINE_BRANCH = /^(main|master|prod|develop|dev|release)(?:[/-].*)?$/i;
-
-// Keep the sidebar ordering aligned with VersionDock's BranchSidebar. These
-// are exact branch names; names such as `release/candidate` remain regular
-// branches in the reference implementation.
-const SIDEBAR_PRIMARY_BRANCHES = new Set(['main', 'master', 'trunk', 'develop', 'dev', 'release']);
-
-function isSidebarPrimaryBranch(name: string): boolean {
-  return SIDEBAR_PRIMARY_BRANCHES.has(name.toLowerCase());
-}
-
 export type SidebarBranch = {
   key: string;
   name: string;
@@ -62,21 +50,23 @@ export function buildHistoryRefOptions(
   repos: readonly RepositoryStatus[],
   branchesByRepo: Readonly<Record<string, readonly BranchInfo[]>>,
   tagsByRepo: Readonly<Record<string, ReadonlyArray<{ name: string }>>>,
+  includeRemotes = false,
 ): HistoryRefOption[] {
   const branchValues = new Map<string, HistoryRefOption>();
   const tagValues = new Map<string, HistoryRefOption>();
 
   for (const repo of repos) {
     for (const branch of branchesByRepo[repo.meta.id] ?? []) {
-      if (branch.remote) continue;
+      if (branch.remote && !includeRemotes) continue;
+      if (branch.remote && branchBaseName(branch) === 'HEAD') continue;
       if (branch.name === 'HEAD') continue;
-      const revision = branchRevisionRef({ name: branch.name, isRemote: false }, repo.meta.kind);
+      const revision = branchRevisionRef({ name: branch.name, isRemote: branch.remote }, repo.meta.kind);
       const current = branchValues.get(revision);
       branchValues.set(revision, {
         id: revision,
         label: branch.name,
         icon: 'git-branch',
-        group: 'Branches',
+        group: branch.remote ? 'Remote' : 'Branches',
         repoIds: current ? [...new Set([...current.repoIds, repo.meta.id])] : [repo.meta.id],
         revisionsByRepo: { ...current?.revisionsByRepo, [repo.meta.id]: revision },
       });
@@ -118,11 +108,15 @@ function mergeSidebarBranches(
   filter: string,
 ): SidebarBranch[] {
   const values = new Map<string, SidebarBranch>();
+  const seenInstances = new Set<string>();
   const needle = filter.trim().toLowerCase();
   for (const repo of repos) {
     for (const branch of branchesByRepo[repo.meta.id] ?? []) {
       if (branch.remote !== remote) continue;
       if (!remote && branch.name === 'HEAD') continue;
+      const instanceKey = `${repo.meta.id}\0${branch.name}`;
+      if (seenInstances.has(instanceKey)) continue;
+      seenInstances.add(instanceKey);
       const name = branchBaseName(branch);
       if (remote && name === 'HEAD') continue;
       const remoteName = remote ? remoteNameFor(branch) : undefined;
@@ -152,8 +146,8 @@ function mergeSidebarBranches(
   }
   return [...values.values()].sort((left, right) => {
     if (left.current !== right.current) return left.current ? -1 : 1;
-    const leftMainline = isSidebarPrimaryBranch(left.name);
-    const rightMainline = isSidebarPrimaryBranch(right.name);
+    const leftMainline = isPrimaryBranch(left.name);
+    const rightMainline = isPrimaryBranch(right.name);
     if (leftMainline !== rightMainline) return leftMainline ? -1 : 1;
     return left.name.localeCompare(right.name);
   });
@@ -207,37 +201,6 @@ export function buildSidebarModel(
     remotes: [...remotes.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, branches]) => ({ name, branches })),
     tags: mergeSidebarTags(repos, tagsByRepo, filter),
   };
-}
-
-export function mergeBranches(repos: RepositoryStatus[], branchesByRepo: Record<string, BranchInfo[]>, remote: boolean): MergedBranch[] {
-  const values = new Map<string, MergedBranch>();
-  const seenInstances = new Set<string>();
-  for (const repo of repos) for (const branch of branchesByRepo[repo.meta.id] ?? []) {
-    if (branch.remote !== remote) continue;
-    if (!remote && branch.name === 'HEAD') continue;
-    if (remote && branchBaseName(branch) === 'HEAD') continue;
-    // Keep the remote namespace: within one repository, `origin/main` and
-    // `upstream/main` are different refs and must never be merged together.
-    const name = branch.name;
-    const key = `${remote ? 'remote' : 'local'}:${name}`;
-    const instanceKey = `${repo.meta.id}\0${branch.name}`;
-    if (seenInstances.has(instanceKey)) continue;
-    seenInstances.add(instanceKey);
-    const value = values.get(key) ?? { name, instances: [], current: false, remote };
-    value.instances.push({ repoId: repo.meta.id, repo, branch });
-    value.current ||= branch.current;
-    values.set(key, value);
-  }
-  return [...values.values()].sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
-}
-
-export function splitVisibleBranches(entries: MergedBranch[], searching: boolean) {
-  if (searching) return { primary: entries, other: [] as MergedBranch[] };
-  return entries.reduce<{ primary: MergedBranch[]; other: MergedBranch[] }>((groups, entry) => {
-    const sharedAcrossRepositories = new Set(entry.instances.map((instance) => instance.repoId)).size > 1;
-    (entry.current || MAINLINE_BRANCH.test(entry.name) || sharedAcrossRepositories ? groups.primary : groups.other).push(entry);
-    return groups;
-  }, { primary: [], other: [] });
 }
 
 export type DetailTree = { name: string; path: string; children: DetailTree[]; file?: CommitFile; fileCount: number };

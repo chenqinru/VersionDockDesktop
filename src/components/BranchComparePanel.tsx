@@ -204,24 +204,14 @@ export function BranchComparePanel({
   const compare = useAppStore((state) => state.compareBranches);
   const busy = useAppStore((state) => isOperationActive(state.operations, { repositoryId: repoId, domain: 'history' }));
   const repo = useAppStore((state) => state.snapshot?.repositories.find((item) => item.meta.id === repoId));
-  const selectRepo = useAppStore((state) => state.selectRepo);
-  const openBranchComparison = useAppStore((state) => state.openBranchComparison);
-  const allGitRepos = useAppStore((state) => (state.snapshot?.repositories ?? []).filter((r) => r.meta.kind === 'git'));
-  const branchesByRepo = useAppStore((state) => state.branchesByRepo);
-  const current = branches.find((branch) => branch.current)?.name ?? branches[0]?.name ?? '';
+  const head = branches.find((branch) => branch.current);
+  const current = head?.detachedTag ? `refs/tags/${head.detachedTag}` : head?.detachedHash ?? (head?.name && head.name !== 'HEAD' ? `refs/heads/${head.name}` : repo?.revision ?? 'HEAD');
   const fallback = branches.find((branch) => branch.name !== current)?.name ?? current;
   const target = initialTarget ?? fallback;
   const { t } = useI18n();
   const stack = useRef<HTMLDivElement>(null);
   const [topHeight, setTopHeight] = useState<number>();
   const activeComparison = comparison?.base === current && comparison.target === target ? comparison : undefined;
-
-  const candidateRepos = useMemo(() => {
-    return allGitRepos.filter((r) => {
-      const list = branchesByRepo[r.meta.id] ?? [];
-      return list.some((b) => b.name === target);
-    });
-  }, [allGitRepos, branchesByRepo, target]);
 
   useEffect(() => {
     if (current && target && current !== target && !activeComparison) void compare(repoId, current, target);
@@ -247,31 +237,7 @@ export function BranchComparePanel({
   return <section className="compare-workspace">
     <header className="compare-header">
       <strong>{t('Compare')}</strong>
-      {candidateRepos.length > 1 ? (
-        <div className="compare-repo-tabs" role="tablist" aria-label={t('Repositories')}>
-          {candidateRepos.map((r) => (
-            <button
-              key={r.meta.id}
-              type="button"
-              role="tab"
-              aria-selected={r.meta.id === repoId}
-              className={`compare-repo-tab ${r.meta.id === repoId ? 'active' : ''}`}
-              title={r.meta.name}
-              onClick={() => {
-                if (r.meta.id !== repoId) {
-                  void selectRepo(r.meta.id, false);
-                  openBranchComparison(r.meta.id, target);
-                }
-              }}
-            >
-              <i style={{ background: r.meta.color }} />
-              <span>{r.meta.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        repo && <span className="compare-repo-badge"><i style={{ background: repo.meta.color }} /><span>{repo.meta.name}</span></span>
-      )}
+      {repo && <span className="compare-repo-badge"><i style={{ background: repo.meta.color }} /><span>{repo.meta.name}</span></span>}
       <span className="compare-title" title={`${baseLabel} → ${targetLabel}`}>{t('{0} vs {1}', baseLabel, targetLabel)}</span>
       <button aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></button>
     </header>

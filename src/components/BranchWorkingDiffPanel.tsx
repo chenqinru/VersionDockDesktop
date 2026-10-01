@@ -165,6 +165,7 @@ export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree'
   const tree = useMemo(() => buildTree(files), [files]);
   if (!value) return null;
   const repo = repositories.find((item) => item.meta.id === value.repoId);
+  const baseLabel = value.baseRef.replace(/^refs\/(?:heads|remotes|tags)\//, '');
   const repoName = repo?.meta.name ?? value.repoId;
   const repoColor = repo?.meta.color ?? 'var(--versiondock-accent)';
   const select = (file: CommitFile) => {
@@ -180,8 +181,8 @@ export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree'
   return <aside className="branch-working-diff-panel">
     <header>
       <div className="branch-working-title">
-        <div><i style={{ background: repoColor }} /><strong>{repoName}</strong><span>{t('{0} vs Working Tree', value.baseRef)}</span></div>
-        <small>{t('{0} compared with {1}', value.baseRef, value.currentRef)}</small>
+        <div><i style={{ background: repoColor }} /><strong>{repoName}</strong><span>{t('{0} vs Working Tree', baseLabel)}</span></div>
+        <small>{t('{0} compared with {1}', baseLabel, value.currentRef)}</small>
       </div>
       <button type="button" title={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} aria-label={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} onClick={close}><Codicon name="arrow-left" /></button>
     </header>
@@ -198,7 +199,7 @@ export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree'
       </div>
     </div>
     <div className="branch-working-files">
-      {files.length === 0 ? <div className="empty-state">{t('No file differences between {0} and the working tree', value.baseRef)}</div> : viewMode === 'tree'
+      {files.length === 0 ? <div className="empty-state">{t('No file differences between {0} and the working tree', baseLabel)}</div> : viewMode === 'tree'
         ? tree.map((node) => <BranchWorkingTreeNode key={node.kind === 'directory' ? node.path : node.file.path} node={node} depth={0} collapsed={collapsed} selectedPath={selectedPath} toggle={(path) => setCollapsed((current) => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next; })} select={select} openContext={(event, file) => setContext({ x: event.clientX, y: event.clientY, file })} />)
         : files.map((file) => <BranchWorkingFileRow key={`${file.status}:${file.path}`} file={file} depth={0} selected={selectedPath === file.path} select={select} openContext={(event, target) => setContext({ x: event.clientX, y: event.clientY, file: target })} />)}
     </div>

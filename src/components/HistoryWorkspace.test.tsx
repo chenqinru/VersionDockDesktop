@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryWorkspace } from './HistoryWorkspace';
 import { formatRefLabel } from '../history/refs';
 import { commitKey } from '../history/commitDetails';
-import { buildDetailTree, buildHistoryRefOptions, buildSidebarModel, collapseDetailTree, mergeBranches, splitVisibleBranches, sumBranchAheadBehind } from './HistoryWorkspace.helpers';
+import { buildDetailTree, buildHistoryRefOptions, buildSidebarModel, collapseDetailTree, sumBranchAheadBehind } from './HistoryWorkspace.helpers';
 import * as dialogService from './dialogService';
 import { BranchSidebar } from './BranchSidebar';
 import { useAppStore } from '../store/appStore';
@@ -204,7 +204,7 @@ describe('HistoryWorkspace capabilities', () => {
     const targetCommit = { repoId: 'repo', hash: 'target1234567', shortHash: 'target1', parents: ['base'], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-02T00:00:00Z', committerDate: '2026-01-02T00:00:00Z', message: 'feat: target-only change', refs: ['feature/ui'] };
     const baseCommit = { ...targetCommit, hash: 'base123456789', shortHash: 'base123', message: 'fix: base-only change', refs: ['main'] };
     const compareBranches = vi.fn().mockImplementation(async () => {
-      useAppStore.setState({ comparison: { base: 'main', target: 'feature/ui', baseCommits: [baseCommit], targetCommits: [targetCommit], files: [] } });
+      useAppStore.setState({ comparison: { base: 'refs/heads/main', target: 'refs/heads/feature/ui', baseCommits: [baseCommit], targetCommits: [targetCommit], files: [] } });
     });
     useAppStore.setState({
       bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo',
@@ -242,7 +242,7 @@ describe('HistoryWorkspace capabilities', () => {
     expect(screen.queryByText('Changed files')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('feat: target-only change'));
     expect(selectCommit).toHaveBeenCalledWith(expect.objectContaining({ hash: targetCommit.hash }), 'single', [expect.objectContaining({ hash: targetCommit.hash })]);
-    expect(compareBranches).toHaveBeenCalledWith('repo', 'main', 'feature/ui');
+    expect(compareBranches).toHaveBeenCalledWith('repo', 'refs/heads/main', 'refs/heads/feature/ui');
   });
 
   it('shows non-blocking loading feedback and formats merged local/remote refs', () => {
@@ -311,8 +311,6 @@ describe('HistoryWorkspace data helpers', () => {
     const model = buildSidebarModel(snapshot.repositories, branchesWithHead, { repo: [{ name: 'v1.0.0', hash: 'a', date: '' }] });
     expect(model.local.map((b) => b.name)).toEqual(['main']);
     expect(model.remotes).toHaveLength(0);
-    const merged = mergeBranches(snapshot.repositories, branchesWithHead, false);
-    expect(merged.map((b) => b.name)).toEqual(['main']);
   });
 
   it('groups remote namespaces and preserves mixed repository identity', () => {
@@ -380,7 +378,7 @@ describe('HistoryWorkspace data helpers', () => {
     fireEvent.click(row);
     expect(onRefFilter).not.toHaveBeenCalled();
     fireEvent.doubleClick(row);
-    expect(onRefFilter).toHaveBeenCalledWith('refs/heads/feature/ui');
+    expect(onRefFilter).toHaveBeenCalledWith('refs/heads/feature/ui', ['repo']);
   });
 
   it('opens a remote branch working-tree comparison with its unambiguous full ref', () => {
@@ -466,7 +464,7 @@ describe('HistoryWorkspace data helpers', () => {
     });
   });
 
-  it('preserves shared branch filter selection when scoped to a single repository', async () => {
+  it('selects all instances of a shared sidebar branch, clearing the previous repository filter', async () => {
     const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
     useAppStore.setState({
       bootstrap: bootstrap(false, false),
@@ -488,30 +486,10 @@ describe('HistoryWorkspace data helpers', () => {
     fireEvent.doubleClick(mainBranchRow);
 
     await waitFor(() => {
-      expect(useAppStore.getState().historyScope.repoIds).toEqual(['repo']);
-      expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ repo: 'refs/heads/main' });
+      expect(useAppStore.getState().historyScope.repoIds).toEqual(['repo', 'repo-2']);
+      expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ repo: 'refs/heads/main', 'repo-2': 'refs/heads/main' });
       expect(mainBranchRow.classList.contains('filtered')).toBe(true);
     });
-  });
-
-  it('merges branch instances and only exposes shared, current, or mainline branches by default', () => {
-    const secondRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2', color: '#569CD6' } };
-    const branches = {
-      repo: [
-        { name: 'main', current: true, remote: false, upstream: null, ahead: 1, behind: 0 },
-        { name: 'feature/local', current: false, remote: false, upstream: null, ahead: 0, behind: 0 },
-        { name: 'feature/shared', current: false, remote: false, upstream: null, ahead: 0, behind: 0 },
-      ],
-      'repo-2': [
-        { name: 'develop', current: false, remote: false, upstream: null, ahead: 0, behind: 2 },
-        { name: 'feature/shared', current: false, remote: false, upstream: null, ahead: 3, behind: 0 },
-      ],
-    };
-    const merged = mergeBranches([snapshot.repositories[0], secondRepo], branches, false);
-    expect(merged.find((entry) => entry.name === 'feature/shared')?.instances).toHaveLength(2);
-    expect(splitVisibleBranches(merged, false).primary.map((entry) => entry.name)).toEqual(['main', 'develop', 'feature/shared']);
-    expect(splitVisibleBranches(merged, false).other.map((entry) => entry.name)).toEqual(['feature/local']);
-    expect(splitVisibleBranches(merged, true).other).toHaveLength(0);
   });
 
   it('keeps distinct remote namespaces from one repository out of cross-repository shared branches', () => {
@@ -521,15 +499,14 @@ describe('HistoryWorkspace data helpers', () => {
         { name: 'upstream/main', current: false, remote: true, upstream: null, ahead: 0, behind: 0 },
       ],
     };
-    const merged = mergeBranches(snapshot.repositories, branches, true);
-    expect(merged.map((entry) => entry.name)).toEqual(['origin/main', 'upstream/main']);
-    expect(merged.every((entry) => entry.instances.length === 1)).toBe(true);
-    expect(splitVisibleBranches(merged, false).primary).toHaveLength(0);
+    const merged = buildSidebarModel(snapshot.repositories, branches, {}).remotes;
+    expect(merged.map((entry) => entry.name)).toEqual(['origin', 'upstream']);
+    expect(merged.every((entry) => entry.branches[0].instances.length === 1)).toBe(true);
   });
 
   it('deduplicates identical full branch references from the same repository', () => {
     const main = { name: 'main', current: true, remote: false, upstream: null, ahead: 2, behind: 1 };
-    const merged = mergeBranches(snapshot.repositories, { repo: [main, { ...main }] }, false);
+    const merged = buildSidebarModel(snapshot.repositories, { repo: [main, { ...main }] }, {}).local;
     expect(merged).toHaveLength(1);
     expect(merged[0].instances).toHaveLength(1);
     expect(merged[0].instances[0].branch).toEqual(main);
@@ -572,6 +549,21 @@ describe('HistoryWorkspace data helpers', () => {
       expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ repo: 'refs/heads/feature/ui' });
     });
     expect(branchRow).toHaveClass('filtered');
+  });
+
+  it('scopes a remote sidebar filter to repositories containing the exact remote ref', async () => {
+    const second = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' } };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot: { ...snapshot, repositories: [snapshot.repositories[0], second] }, selectedRepoId: 'repo', branchesByRepo: {
+      repo: [{ name: 'origin/topic', current: false, remote: true, remoteName: 'origin', upstream: null, ahead: 0, behind: 0 }],
+      'repo-2': [{ name: 'upstream/topic', current: false, remote: true, remoteName: 'upstream', upstream: null, ahead: 0, behind: 0 }],
+    }, tagsByRepo: {} });
+    render(<HistoryWorkspace />);
+    const remoteRow = [...document.querySelectorAll('.branch-ref-row')].find((row) => row.textContent === 'topic')!;
+    fireEvent.doubleClick(remoteRow);
+    await waitFor(() => expect(useAppStore.getState().historyScope).toEqual({ repoIds: ['repo'], revisionsByRepo: { repo: 'refs/remotes/origin/topic' } }));
+    expect(remoteRow).toHaveClass('filtered');
+    fireEvent.doubleClick(remoteRow);
+    expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ repo: 'refs/remotes/origin/topic' });
   });
 
   it('keeps all repositories and their branches in sidebar when repository filter is active', () => {

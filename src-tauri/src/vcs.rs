@@ -6672,7 +6672,14 @@ pub async fn branches(
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
             });
             Some(BranchInfo {
-                name: fields[0].into(),
+                // Short refs become `heads/name` or `remotes/origin/name` when
+                // another namespace contains the same name. The full ref owns
+                // branch identity regardless of tag/local/remote collisions.
+                name: fields[1]
+                    .strip_prefix("refs/heads/")
+                    .or_else(|| fields[1].strip_prefix("refs/remotes/"))
+                    .unwrap_or(fields[0])
+                    .into(),
                 current: fields[2] == "*",
                 remote: fields[1].starts_with("refs/remotes/"),
                 remote_name: remote_name_for_ref(fields[1], &remote_names),
@@ -7038,7 +7045,11 @@ pub async fn branch_operation(
                     if local_exists {
                         vec!["switch".into(), local_name.to_string()]
                     } else {
-                        vec!["switch".into(), "--track".into(), name]
+                        vec![
+                            "switch".into(),
+                            "--track".into(),
+                            format!("refs/remotes/{name}"),
+                        ]
                     }
                 } else {
                     vec!["switch".into(), name]

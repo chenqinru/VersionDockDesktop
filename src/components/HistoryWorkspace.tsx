@@ -685,11 +685,11 @@ export function HistoryWorkspace() {
   const mixedKinds = hasMixedRepositoryKinds(snapshotRepos);
   const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repositoryLabel(repo, mixedKinds).toUpperCase(), color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
   const allRefOptions = useMemo(
-    () => buildHistoryRefOptions(snapshotRepos, branchesByRepo, tagsByRepo),
+    () => buildHistoryRefOptions(snapshotRepos, branchesByRepo, tagsByRepo, true),
     [branchesByRepo, snapshotRepos, tagsByRepo],
   );
   const refOptions = useMemo(
-    () => filters.repoId ? allRefOptions.filter((option) => option.repoIds.includes(filters.repoId)) : allRefOptions,
+    () => allRefOptions.filter((option) => option.group !== 'Remote' && (!filters.repoId || option.repoIds.includes(filters.repoId))),
     [allRefOptions, filters.repoId],
   );
   const selectedRepo = repoOptions.find((option) => option.id === filters.repoId);
@@ -728,14 +728,19 @@ export function HistoryWorkspace() {
   };
   useEffect(() => {
     const activeEntries = Object.entries(historyScope.revisionsByRepo);
-    const repoId = historyScope.repoIds?.length === 1 ? historyScope.repoIds[0] : '';
+    const repoId = activeEntries.length === 0 && historyScope.repoIds?.length === 1 ? historyScope.repoIds[0] : '';
     const ref = activeEntries.length === 0
       ? ''
       : (allRefOptions.find((option) => JSON.stringify(option.revisionsByRepo) === JSON.stringify(historyScope.revisionsByRepo))?.id ??
         allRefOptions.find((option) => activeEntries.every(([scopeRepoId, rev]) => option.revisionsByRepo[scopeRepoId] === rev))?.id ??
         '');
-    queueMicrotask(() => setFilters({ author: historyQuery.author ?? '', repoId, ref, from: historyQuery.fromDate ?? '', to: historyQuery.toDate ?? '' }));
+    queueMicrotask(() => setFilters((current) => ({ author: historyQuery.author ?? '', repoId: activeEntries.length > 0 && historyScope.repoIds?.includes(current.repoId) ? current.repoId : repoId, ref, from: historyQuery.fromDate ?? '', to: historyQuery.toDate ?? '' })));
   }, [allRefOptions, historyQuery.author, historyQuery.fromDate, historyQuery.toDate, historyScope]);
+  const selectSidebarRef = (ref: string, repoIds: string[]) => {
+    setFilters((current) => ({ ...current, ref, repoId: '' }));
+    setHistoryScope({ repoIds, revisionsByRepo: Object.fromEntries(repoIds.map((repoId) => [repoId, ref])) });
+    queueMicrotask(() => void loadHistory(true).catch(() => undefined));
+  };
   const clearFilters = () => {
     setHistorySearch('');
     setFilters(EMPTY_FILTERS);
@@ -807,7 +812,7 @@ export function HistoryWorkspace() {
       <MoreMenu open={moreOpen} onToggle={() => setMoreOpen((value) => !value)} onFetch={() => void fetchAndRefresh()} expanded={expandedRepoIds.size > 0 && expandedRepoIds.size === new Set(allHistory.map((commit) => commit.repoId)).size} onToggleExpanded={toggleRepoNames} />
     </div>}
     <div className="history-columns">
-      <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId: filters.repoId === repoId ? '' : repoId })} onRefFilter={(ref) => updateFilters({ ref: filters.ref === ref ? '' : ref })} onCompare={openBranchComparison} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
+      <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <button className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></button> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} refRepoIds={historyScope.repoIds} onRefFilter={selectSidebarRef} onCompare={openBranchComparison} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
       {!branchSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize branch sidebar')} aria-orientation="vertical" aria-valuemin={120} aria-valuemax={400} aria-valuenow={branchWidth} onPointerDown={resizeBranches} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('branches', Math.min(400, Math.max(120, branchWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />}
       <div className="log-pane">{compareTarget ? <BranchComparePanel
         key={`${compareTarget.repoId}:${compareTarget.target}`}

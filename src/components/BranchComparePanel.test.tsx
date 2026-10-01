@@ -68,7 +68,7 @@ const snapshot: WorkspaceSnapshot = {
 };
 
 const comparison: BranchCompareResult = {
-  base: 'main',
+  base: 'refs/heads/main',
   target: 'feature',
   baseCommits: [commit1],
   targetCommits: [commit2],
@@ -126,7 +126,7 @@ describe('BranchComparePanel', () => {
     await waitFor(() => {
       expect(compareBranchCommits).toHaveBeenCalledWith(
         'repo',
-        'main',
+        'refs/heads/main',
         'feature',
         'targetOnly',
         expect.objectContaining({ text: 'feat.*' }),
@@ -184,7 +184,7 @@ describe('BranchComparePanel', () => {
     await waitFor(() => {
       expect(compareBranchCommits).toHaveBeenCalledWith(
         'repo',
-        'main',
+        'refs/heads/main',
         'feature',
         'targetOnly',
         expect.objectContaining({ author: 'Bob' }),
@@ -195,4 +195,14 @@ describe('BranchComparePanel', () => {
     // The filter button label should now display Bob and have avatar rendered
     expect(screen.getByRole('button', { name: /Bob/ })).toBeInTheDocument();
   });
+  it.each([
+    [{ name: 'HEAD', current: true, remote: false, upstream: null, ahead: 0, behind: 0, detachedTag: 'v1' }, 'refs/tags/v1'],
+    [{ name: 'HEAD', current: true, remote: false, upstream: null, ahead: 0, behind: 0, detachedHash: 'abcdef123' }, 'abcdef123'],
+  ])('compares from the detached HEAD identity rather than a pseudo branch', async (head, base) => {
+    const compareBranches = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ snapshot, branchesByRepo: { repo: [head, branches[1]] }, comparison: undefined, compareBranches });
+    render(<BranchComparePanel repoId="repo" initialTarget="refs/heads/feature" close={() => {}} renderCommits={() => null} />);
+    await waitFor(() => expect(compareBranches).toHaveBeenCalledWith('repo', base, 'refs/heads/feature'));
+  });
+
 });

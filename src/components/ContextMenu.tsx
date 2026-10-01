@@ -20,7 +20,7 @@ interface Props {
   x: number;
   y: number;
   header?: string;
-  variant?: 'gitLog';
+  variant?: 'gitLog' | 'branchSidebar';
   items: ContextMenuEntry[];
   onSelect: (id: string, anchorRect: DOMRect) => void;
   onClose: () => void;
@@ -119,7 +119,7 @@ export function ContextMenu({ x, y, header, variant, items, onSelect, onClose }:
             role="menuitem"
             disabled={it.disabled}
             title={it.disabled ? it.disabledReason : undefined}
-            style={{ ...styles.item(!!it.danger, !!it.disabled), ...(variant === 'gitLog' ? styles.gitLogItem(!!it.disabled) : {}) }}
+            style={{ ...styles.item(!!it.danger, !!it.disabled), ...(variant ? styles.gitLogItem(!!it.disabled) : {}) }}
             onClick={(event) => { if (!it.disabled) { onSelect(it.id, event.currentTarget.getBoundingClientRect()); onClose(); } }}
             onMouseEnter={(e) => { if (!it.disabled) e.currentTarget.style.background = 'var(--vscode-list-hoverBackground, var(--versiondock-hover))'; }}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
