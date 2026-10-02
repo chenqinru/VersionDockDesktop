@@ -12,9 +12,10 @@ function itemText(node: ReactNode): string {
 // Keeping handlers on the original elements avoids a second action model.
 function filterItems(children: ReactNode, terms: string[]): ReactNode {
   return Children.toArray(children).flatMap((child): ReactNode[] => {
-    if (!isValidElement<{ children?: ReactNode; className?: string }>(child)) return [child];
-    if (child.type === 'button' || child.props.className?.includes('non-clickable')) {
-      return terms.every((term) => itemText(child).toLocaleLowerCase().includes(term)) ? [child] : [];
+    if (!isValidElement<{ children?: ReactNode; className?: string; label?: string; description?: string; detail?: string }>(child)) return [child];
+    if (child.type === 'button' || child.props.className?.includes('non-clickable') || typeof child.props.label === 'string') {
+      const text = typeof child.props.label === 'string' ? [child.props.label, child.props.description, child.props.detail].filter(Boolean).join(' ') : itemText(child);
+      return terms.every((term) => text.toLocaleLowerCase().includes(term)) ? [child] : [];
     }
     if (child.props.className?.includes('statusbar-menu-divider')) return [];
     if (!child.props.children) return [child];
@@ -27,7 +28,7 @@ function filterItems(children: ReactNode, terms: string[]): ReactNode {
 
 interface Props { title: string; active: boolean; onSearch?: () => void; onBack?: () => void; style?: CSSProperties; className?: string; children: ReactNode }
 
-export const BranchQuickMenu = forwardRef<HTMLDivElement, Props>(function BranchQuickMenu({ title, active, onSearch, onBack, style, className = '', children }, ref) {
+export const StatusBarQuickMenu = forwardRef<HTMLDivElement, Props>(function StatusBarQuickMenu({ title, active, onSearch, onBack, style, className = '', children }, ref) {
   const { t } = useI18n();
   const id = useId();
   const [query, setQuery] = useState('');
@@ -48,15 +49,16 @@ export const BranchQuickMenu = forwardRef<HTMLDivElement, Props>(function Branch
     items?.[highlighted]?.scrollIntoView?.({ block: 'nearest' });
   }, [content, highlighted, id]);
 
-  return <div role="dialog" aria-label={title} ref={ref} className={`statusbar-submenu branch-quick-menu ${className}`} style={style}
+  return <div role="dialog" aria-label={title} ref={ref} className={`statusbar-submenu statusbar-quick-menu ${className}`} style={style}
     onClick={(event) => event.stopPropagation()}
     onDoubleClick={(event) => event.stopPropagation()}
     onKeyDown={(event) => {
     if (event.nativeEvent.isComposing) return;
     const items = body.current?.querySelectorAll<HTMLButtonElement>('button.statusbar-menu-item:not(:disabled)');
     if (!items?.length) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
+      if (event.key === 'Home' || event.key === 'End') { setHighlighted(event.key === 'Home' ? 0 : items.length - 1); return; }
       const direction = event.key === 'ArrowDown' ? 1 : -1;
       setHighlighted((index) => index < 0 ? direction > 0 ? 0 : items.length - 1 : (index + direction + items.length) % items.length);
     } else if (event.key === 'Enter' && event.target === input.current) {

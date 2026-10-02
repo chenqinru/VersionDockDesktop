@@ -4040,7 +4040,7 @@ button.danger:not(:disabled):hover,
 .worktree-row strong { display: flex; align-items: center; gap: 5px; }
 .worktree-row strong em { padding: 1px 4px; border-radius: 2px; color: #fff; background: var(--versiondock-accent-bg); font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-style: normal; }
 .changelist-popover { position: fixed; z-index: 120; left: 8px; top: 102px; width: min(330px, calc(100vw - 16px)); max-height: 55vh; overflow: auto; padding: 5px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 6px 20px #0008; }.changelist-popover > header { height: 28px; display: flex; align-items: center; }.changelist-popover > header strong { flex: 1; }.changelist-create { display: flex; gap: 4px; padding: 4px 0; }.changelist-create input { min-width: 0; flex: 1; height: 27px; padding: 0 6px; border: 1px solid var(--versiondock-border); background: var(--versiondock-input); }.changelist-create button, .changelist-manage-row > button { width: 27px; border: 1px solid var(--versiondock-border); }.changelist-manage-row { min-height: 35px; display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--versiondock-border-soft); }.changelist-manage-row > span { min-width: 0; flex: 1; display: flex; flex-direction: column; }.changelist-manage-row small { color: var(--versiondock-muted); }.context-menu .context-label { display: block; padding: 3px 8px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
-.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:color-mix(in srgb,var(--versiondock-surface) 55%,transparent);backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--versiondock-surface);border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 8px 24px var(--vscode-widget-shadow,rgba(0,0,0,.2));padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent}.dialog-choices>button:hover{background:var(--versiondock-hover);border-color:var(--versiondock-border)}.dialog-choices>button>.codicon{color:var(--versiondock-accent)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.dialog-choices .danger-choice strong{color:var(--versiondock-danger)}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
+.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:color-mix(in srgb,var(--versiondock-surface) 55%,transparent);backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--versiondock-surface);border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 8px 24px var(--vscode-widget-shadow,rgba(0,0,0,.2));padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent}.dialog-choices>button:hover{background:var(--versiondock-hover);border-color:var(--versiondock-border)}.dialog-choices>button>.codicon{color:var(--versiondock-muted)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.dialog-choices .danger-choice strong{color:var(--versiondock-danger)}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
 .clone-dialog { display: grid; gap: 10px; }
 .clone-dialog > button { justify-self: start; }
 .clone-dialog footer { margin-top: 6px; }
@@ -5014,20 +5014,20 @@ button.danger:not(:disabled):hover,
 .dialog-multi-choices .choice-item.selected { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); }
 .dialog-multi-choices .choice-item:focus-visible { outline-color: var(--versiondock-muted); }
 
-.branch-quick-menu {
+.statusbar-quick-menu {
   width: min(360px, calc(100vw - 16px));
   min-width: 0 !important;
 }
-.branch-quick-menu .statusbar-menu-item { min-height: 24px; padding: 3px 10px; font-size: 12px; gap: 6px; }
-.branch-quick-menu .statusbar-menu-item-title { font-size: 12px; flex: 0 1 auto; }
-.branch-quick-menu .statusbar-menu-item-desc { font-size: 11px; margin-top: 0; flex: 1 1 0; }
-.branch-quick-menu .statusbar-menu-item-text { flex-direction: row; align-items: center; gap: 5px; }
-.branch-quick-menu .statusbar-menu-item-text:has(> .statusbar-menu-item-detail),
-.branch-quick-menu .statusbar-menu-item-text:has(> .statusbar-repo-op-label) { flex-wrap: wrap; }
-.branch-quick-menu .statusbar-menu-item-detail { width: 100%; color: var(--versiondock-muted); font-size: 11px; margin-top: 0; }
-.branch-quick-menu .statusbar-menu-section { padding: 2px 0; }
-.branch-quick-menu .statusbar-menu-section:has(> .statusbar-menu-group-header) { border-top: 1px solid var(--versiondock-border-soft); }
-.branch-quick-menu .statusbar-menu-group-header {
+.statusbar-quick-menu .statusbar-menu-item { min-height: 24px; padding: 3px 10px; font-size: 12px; gap: 6px; }
+.statusbar-quick-menu .statusbar-menu-item-title { font-size: 12px; flex: 0 1 auto; }
+.statusbar-quick-menu .statusbar-menu-item-desc { font-size: 11px; margin-top: 0; flex: 1 1 0; }
+.statusbar-quick-menu .statusbar-menu-item-text { flex-direction: row; align-items: center; gap: 5px; }
+.statusbar-quick-menu .statusbar-menu-item-text:has(> .statusbar-menu-item-detail),
+.statusbar-quick-menu .statusbar-menu-item-text:has(> .statusbar-repo-op-label) { flex-wrap: wrap; }
+.statusbar-quick-menu .statusbar-menu-item-detail { width: 100%; color: var(--versiondock-muted); font-size: 11px; margin-top: 0; }
+.statusbar-quick-menu .statusbar-menu-section { padding: 2px 0; }
+.statusbar-quick-menu .statusbar-menu-section:has(> .statusbar-menu-group-header) { border-top: 1px solid var(--versiondock-border-soft); }
+.statusbar-quick-menu .statusbar-menu-group-header {
   padding: 7px 10px 3px;
   color: var(--versiondock-muted);
   font-size: 10px;
@@ -5035,10 +5035,10 @@ button.danger:not(:disabled):hover,
   letter-spacing: 0;
   text-transform: none;
 }
-.branch-quick-menu .warning-section { background: transparent; border: 0; }
-.branch-quick-menu .warning-section .statusbar-menu-item-text { flex-direction: column; align-items: flex-start; gap: 0; }
-.branch-quick-menu .statusbar-badge,
-.branch-quick-menu .statusbar-active-repo-badge { padding: 0; font-weight: 400; border-radius: 0; background: transparent !important; }
+.statusbar-quick-menu .warning-section { background: transparent; border: 0; }
+.statusbar-quick-menu .warning-section .statusbar-menu-item-text { flex-direction: column; align-items: flex-start; gap: 0; }
+.statusbar-quick-menu .statusbar-badge,
+.statusbar-quick-menu .statusbar-active-repo-badge { padding: 0; font-weight: 400; border-radius: 0; background: transparent !important; }
 .branch-menu-toolbar {
   display: flex;
   flex-direction: column;
@@ -5093,13 +5093,13 @@ button.danger:not(:disabled):hover,
 .branch-menu-search input:focus-visible { outline: none; }
 .branch-menu-search input::placeholder { color: var(--versiondock-muted); }
 .branch-menu-clear-hidden { visibility: hidden; pointer-events: none; }
-.branch-quick-menu .statusbar-menu-item.keyboard-selected,
-.branch-quick-menu .statusbar-menu-item.selected,
-.branch-quick-menu .statusbar-menu-item:focus-visible { background: var(--versiondock-selection-background); outline: none; }
-.branch-quick-menu .statusbar-menu-item.active-ref { background: transparent; font-weight: 500; }
-.branch-quick-menu .statusbar-menu-item.active-ref:is(:hover, .selected, .keyboard-selected) { background: var(--versiondock-selection-background); }
-.branch-quick-menu .statusbar-badge,
-.branch-quick-menu .statusbar-active-repo-badge { color: var(--versiondock-muted); background: var(--versiondock-hover); }
+.statusbar-quick-menu .statusbar-menu-item.keyboard-selected,
+.statusbar-quick-menu .statusbar-menu-item.selected,
+.statusbar-quick-menu .statusbar-menu-item:focus-visible { background: var(--versiondock-selection-background); outline: none; }
+.statusbar-quick-menu .statusbar-menu-item.active-ref { background: transparent; font-weight: 500; }
+.statusbar-quick-menu .statusbar-menu-item.active-ref:is(:hover, .selected, .keyboard-selected) { background: var(--versiondock-selection-background); }
+.statusbar-quick-menu .statusbar-badge,
+.statusbar-quick-menu .statusbar-active-repo-badge { color: var(--versiondock-muted); background: var(--versiondock-hover); }
 
 /* ===== 状态栏 Popover 菜单通用浮层 ===== */
 .statusbar-popover, .statusbar-submenu {
@@ -5307,35 +5307,6 @@ button.danger:not(:disabled):hover,
   color: var(--versiondock-accent);
   font-weight: 500;
   margin-left: 2px;
-}
-
-/* ===== 账号身份 Popover 样式 ===== */
-.statusbar-effective-identity {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-  background: color-mix(in srgb, var(--versiondock-surface) 65%, transparent);
-  border-bottom: 1px solid var(--versiondock-border-soft);
-}
-
-.statusbar-effective-badge {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10.5px;
-  color: var(--versiondock-muted);
-}
-
-.statusbar-effective-name {
-  font-size: calc(13px * var(--versiondock-ui-font-scale, 1));
-  color: var(--versiondock-text);
-  font-weight: 600;
-}
-
-.statusbar-effective-email {
-  font-size: 11px;
-  color: var(--versiondock-muted);
 }
 
 /* ===== 通知中心 Popover 样式 ===== */
@@ -7757,3 +7728,19 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .commit-row-actions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+/* Identity uses the same compact search, selection and icon feedback as branches. */
+.profile-status-tooltip { width: min(440px, calc(100vw - 16px)); pointer-events: auto; }
+.profile-tooltip-heading { display: flex; align-items: flex-start; gap: 10px; }
+.profile-tooltip-heading > .codicon { font-size: 24px; color: var(--versiondock-muted); }
+.profile-tooltip-heading > div { min-width: 0; }
+.profile-tooltip-heading p { overflow-wrap: anywhere; }
+.profile-tooltip-accounts { border-top: 1px solid var(--versiondock-border-soft); border-bottom: 1px solid var(--versiondock-border-soft); padding: 9px 0; margin-top: 8px; }
+.profile-tooltip-accounts > div { display: flex; align-items: baseline; gap: 6px; padding-top: 5px; flex-wrap: wrap; }
+.profile-tooltip-accounts em { font-style: normal; color: var(--versiondock-muted); }
+.profile-tooltip-manage { display: flex; gap: 6px; align-items: center; margin-top: 8px; color: var(--versiondock-text); border: 0; background: transparent; font: inherit; padding: 4px; }
+.profile-tooltip-manage:hover { background: var(--versiondock-hover); }
+
+.app-dialog input:focus-visible { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
+
+.profile-status-item:focus-visible { outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }

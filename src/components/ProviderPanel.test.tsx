@@ -7,6 +7,14 @@ import { useAppStore } from '../store/appStore';
 
 afterEach(cleanup);
 describe('ProviderPanel', () => {
+  it('opens the requested provider form when only another platform is connected', async () => {
+    const bridge = new MockBridge((command) => command.type === 'providerAccounts'
+      ? [{ id: 'github', provider: 'github', host: 'https://github.com', login: 'octocat', displayName: null, secureStorageRef: 'ref' }] : []);
+    render(<BridgeContext.Provider value={bridge}><ProviderPanel mode="manage" initialProvider="gitlab" close={vi.fn()} /></BridgeContext.Provider>);
+    expect(await screen.findByDisplayValue('https://gitlab.com')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('glpat-...')).toBeInTheDocument();
+  });
+
   it('returns a paged private repository to the unified clone flow', async () => {
     const selected = vi.fn();
     const bridge = new MockBridge((command) => {

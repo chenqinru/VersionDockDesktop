@@ -17,7 +17,7 @@ import {
   isAbortableVcsOperation,
   getAbortOperationLabels,
 } from './branchRef';
-import { BranchQuickMenu } from './BranchQuickMenu';
+import { StatusBarQuickMenu } from './StatusBarQuickMenu';
 import { commonRepositoryRefs, deriveBranchStatus, relativeBranchDate } from './branchStatus';
 import { BRANCH_MENU_WIDTH, positionBranchSubmenu } from './branchMenuPosition';
 import { isPrimaryBranch } from '../branchColor';
@@ -754,7 +754,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     <>
       {/* ──────────────── 1. 一级主菜单面板 ──────────────── */}
       {!repoOnly && !directBranch && (
-        <BranchQuickMenu ref={popoverRef} title={t('VersionDock: Git/SVN Menu')} active={!submenuPos && !actionMenuPos}
+        <StatusBarQuickMenu ref={popoverRef} title={t('VersionDock: Git/SVN Menu')} active={!submenuPos && !actionMenuPos}
           className="statusbar-popover branch-menu-popover" onSearch={() => { backFromAction(); backFromSubmenu(); }} style={popoverStyle}>
           {/* 冲突处理 */}
           {(conflictRepos.length > 0 || operationRepos.length > 0) && (
@@ -1076,12 +1076,12 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
               })}
             </div>
           )}
-        </BranchQuickMenu>
+        </StatusBarQuickMenu>
       )}
 
       {/* ──────────────── 2. 二级菜单面板（仓库分支列表 / 公共分支动作 / 公共标签动作） ──────────────── */}
       {submenuPos && (activeSubmenuRepo || activeCommonBranch || activeCommonTag) && (
-        <BranchQuickMenu key={activeSubmenuRepoId ?? activeCommonBranch?.name ?? activeCommonTag} ref={submenuRef}
+        <StatusBarQuickMenu key={activeSubmenuRepoId ?? activeCommonBranch?.name ?? activeCommonTag} ref={submenuRef}
           title={activeSubmenuRepo ? activeSubmenuRepo.meta.kind === 'svn' ? `VersionDock — SVN: ${activeSubmenuRepo.meta.name}` : t('{0} — Branches', activeSubmenuRepo.meta.name) : activeCommonBranch?.name ?? activeCommonTag ?? ''}
           active={!actionMenuPos} onSearch={backFromAction} onBack={repoOnly ? undefined : backFromSubmenu}
           style={{ position: 'fixed', top: submenuPos.top, left: submenuPos.left, maxHeight: submenuPos.maxHeight, zIndex: 1001 }}>
@@ -2164,12 +2164,12 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 </button>
               </div>
             )}
-        </BranchQuickMenu>
+        </StatusBarQuickMenu>
       )}
 
       {/* ──────────────── 3. 三级菜单面板（具体分支 / Tag 的动作菜单） ──────────────── */}
       {actionMenuPos && (activeBranchAction || activeTagAction) && (
-        <BranchQuickMenu key={activeBranchAction?.branchName ?? activeTagAction?.tagName} ref={actionMenuRef}
+        <StatusBarQuickMenu key={activeBranchAction?.branchName ?? activeTagAction?.tagName} ref={actionMenuRef}
           title={`${activeBranchAction?.branchName ?? activeTagAction?.tagName} — ${actionRepo?.meta.name ?? ''}`}
           active onBack={backFromAction}
           style={{ position: 'fixed', top: actionMenuPos.top, left: actionMenuPos.left, maxHeight: actionMenuPos.maxHeight, zIndex: 1002 }}>
@@ -2535,7 +2535,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 </button>
               </div>
             )}
-        </BranchQuickMenu>
+        </StatusBarQuickMenu>
       )}
 
     </>

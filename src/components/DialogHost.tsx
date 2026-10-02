@@ -33,7 +33,7 @@ export function DialogHost() {
     queueMicrotask(() => returnFocus.current?.focus());
   };
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'Escape' && !submitting) { finish(false); return; }
+    if (event.key === 'Escape' && !submitting) { event.stopPropagation(); finish(false); return; }
     if (request.kind === 'editor' && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void submit(); return; }
     if (event.key !== 'Tab') return;
     const focusable = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
@@ -55,13 +55,19 @@ export function DialogHost() {
       finally { setSubmitting(false); }
       return;
     }
-    finish(request.kind === 'prompt' ? value.trim() || null : true);
+    if (request.kind === 'prompt') {
+      const result = request.inputType === 'password' ? value : value.trim();
+      if (!request.allowEmpty && !result.trim()) return;
+      const error = request.validateInput?.(result);
+      if (error) { setSubmitError(error); return; }
+      finish(request.allowEmpty ? result : result || null);
+    } else finish(true);
   };
   return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) finish(false); }}>
     <section ref={dialog} className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
       <header><Codicon name={request.danger ? 'warning' : 'question'} /><strong id="app-dialog-title">{request.title}</strong></header>
       <p>{request.message}</p>
-      {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
+      {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus aria-label={request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
       {request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
       {request.kind === 'editor' && <label><span>{request.inputLabel}</span><textarea autoFocus className="dialog-editor" value={value} onChange={(event) => setValue(event.target.value)} /></label>}
       {submitError && <p className="dialog-error" role="alert">{submitError}</p>}
@@ -92,7 +98,7 @@ export function DialogHost() {
           })}
         </div>
       )}
-      <footer><button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || request.kind === 'editor') && !value.trim())} onClick={() => void submit()}>{request.confirmLabel ?? t('Confirm')}</button>}</footer>
+      <footer><button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || request.kind === 'editor') && !request.allowEmpty && !value.trim())} onClick={() => void submit()}>{request.confirmLabel ?? t('Confirm')}</button>}</footer>
     </section>
   </div>;
 }

@@ -18,6 +18,7 @@ use crate::{
 
 const SERVICE: &str = "com.versiondock.desktop.svn";
 static SESSION_AUTH: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+static AUTH_ROOTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static SECURE_CAPABILITY: OnceLock<SecureCredentialCapability> = OnceLock::new();
 
 trait CredentialStore: Send + Sync {
@@ -132,31 +133,40 @@ pub async fn state(
     token: &CancellationToken,
 ) -> Result<SvnAccountState, DesktopError> {
     let root = repository_root(repo, token).await?;
+    if let Ok(mut roots) = AUTH_ROOTS.get_or_init(Default::default).lock() {
+        roots.insert(repo.root_path.clone(), root.clone());
+    }
     let file = load(config_dir);
-    let username = file.usernames.get(&root).cloned();
+    let stored_username = file.usernames.get(&root).cloned();
     let password_stdin_supported = svn_password_stdin_supported(repo, token).await;
     let secure_storage_available = secure_store_capability().await.status.available;
-    let password_stored = username
+    let password_stored = stored_username
         .as_ref()
         .is_some_and(|value| SYSTEM_STORE.get(&root, value).is_ok());
     let native_credentials = native_credentials(repo, &root, token)
         .await
         .unwrap_or_default();
-    let session = SESSION_AUTH
-        .get_or_init(Default::default)
-        .lock()
-        .ok()
-        .is_some_and(|cache| cache.contains_key(&repo.root_path));
-    let source = if password_stored {
-        SvnCredentialSource::VersionDockSecureStore
-    } else if session {
+    let session = cached_auth(repo);
+    let source = if session.is_some() {
         SvnCredentialSource::Session
+    } else if password_stored {
+        SvnCredentialSource::VersionDockSecureStore
     } else if !native_credentials.is_empty() {
         SvnCredentialSource::NativeCache
     } else {
         SvnCredentialSource::None
     };
+    let username = session
+        .map(|(username, _)| username)
+        .or(stored_username)
+        .or_else(|| {
+            native_credentials
+                .iter()
+                .find_map(|item| item.username.clone())
+        });
+    let repository_url = repository_url(repo, token).await?;
     Ok(SvnAccountState {
+        repository_url,
         repository_root: root,
         username,
         password_stored,
@@ -175,12 +185,53 @@ pub async fn operate(
     token: &CancellationToken,
 ) -> Result<SvnAccountState, DesktopError> {
     let root = repository_root(repo, token).await?;
+    if let Ok(mut roots) = AUTH_ROOTS.get_or_init(Default::default).lock() {
+        roots.insert(repo.root_path.clone(), root.clone());
+    }
+    static WRITE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = WRITE_LOCK.lock().await;
     let mut file = load(config_dir);
     let testing = matches!(operation, SvnAccountOperation::Test);
     match operation {
+        SvnAccountOperation::Switch {
+            username,
+            password,
+            remember,
+        } => {
+            let username = username.trim().to_string();
+            if username.is_empty()
+                || username.chars().any(char::is_control)
+                || password.is_empty()
+                || password.contains(['\n', '\r'])
+            {
+                return Err(DesktopError::new(
+                    "INVALID_SVN_USERNAME",
+                    "SVN username and password must be valid",
+                    true,
+                ));
+            }
+            if !svn_password_stdin_supported(repo, token).await {
+                return Err(DesktopError::new(
+                    "SVN_PASSWORD_STDIN_UNAVAILABLE",
+                    "This SVN client cannot receive passwords through stdin",
+                    false,
+                ));
+            }
+            let url = repository_url(repo, token).await?;
+            verify_credentials(repo, &url, Some((&username, &password)), remember, token).await?;
+            // Replace previous App credentials only after successful network authentication.
+            if let Some(previous) = file.usernames.get(&root) {
+                let _ = SYSTEM_STORE.delete(&root, previous);
+            }
+            file.usernames.remove(&root);
+            save(config_dir, &file)?;
+            if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
+                cache.insert(root.clone(), (username, password));
+            }
+        }
         SvnAccountOperation::Save { username, password } => {
             if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
-                cache.remove(&repo.root_path);
+                cache.remove(&root);
             }
             let username = username.trim().to_string();
             if username.is_empty() || username.chars().any(char::is_control) {
@@ -211,14 +262,14 @@ pub async fn operate(
                 let _ = SYSTEM_STORE.delete(&root, &username);
             }
             if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
-                cache.remove(&repo.root_path);
+                cache.remove(&root);
             }
             save(config_dir, &file)?;
         }
         SvnAccountOperation::Test => {}
         SvnAccountOperation::ClearNative { credential_id } => {
             if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
-                cache.remove(&repo.root_path);
+                cache.remove(&root);
             }
             let credentials = native_credentials(repo, &root, token).await?;
             let credential = credentials
@@ -272,6 +323,8 @@ async fn native_credentials(
 }
 
 fn parse_native_credentials(output: &str, root: &str) -> Vec<SvnNativeCredential> {
+    let root_url = url::Url::parse(root).ok();
+    let root_port = root_url.as_ref().and_then(url::Url::port_or_known_default);
     let host = url::Url::parse(root)
         .ok()
         .and_then(|url| url.host_str().map(String::from))
@@ -286,7 +339,13 @@ fn parse_native_credentials(output: &str, root: &str) -> Vec<SvnNativeCredential
         let Some(realm) = field("Authentication realm:") else {
             continue;
         };
-        if !host.is_empty() && !realm.contains(&host) {
+        let realm_url = realm
+            .strip_prefix('<')
+            .and_then(|value| value.split('>').next())
+            .and_then(|value| url::Url::parse(value).ok());
+        let realm_host = realm_url.as_ref().and_then(|value| value.host_str());
+        let realm_port = realm_url.as_ref().and_then(url::Url::port_or_known_default);
+        if host.is_empty() || realm_host != Some(host.as_str()) || realm_port != root_port {
             continue;
         }
         let username = field("Username:")
@@ -308,8 +367,15 @@ pub async fn auth(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Option<(String, String)>, DesktopError> {
+    if let Some(credentials) = cached_auth(repo) {
+        return Ok(Some(credentials));
+    }
     let value = state(config_dir, repo, token).await?;
-    let (Some(username), true) = (value.username, value.password_stdin_supported) else {
+    let (Some(username), true, true) = (
+        value.username,
+        value.password_stdin_supported,
+        value.password_stored,
+    ) else {
         return Ok(None);
     };
     let password = SYSTEM_STORE
@@ -321,17 +387,29 @@ pub async fn auth(
 pub async fn hydrate(config_dir: &Path, repo: &RepositoryMeta, token: &CancellationToken) {
     if let Ok(Some(credentials)) = auth(config_dir, repo, token).await {
         if let Ok(mut cache) = SESSION_AUTH.get_or_init(Default::default).lock() {
-            cache.insert(repo.root_path.clone(), credentials);
+            let root = AUTH_ROOTS
+                .get_or_init(Default::default)
+                .lock()
+                .ok()
+                .and_then(|roots| roots.get(&repo.root_path).cloned())
+                .unwrap_or_else(|| repo.root_path.clone());
+            cache.entry(root).or_insert(credentials);
         }
     }
 }
 
 pub fn cached_auth(repo: &RepositoryMeta) -> Option<(String, String)> {
-    SESSION_AUTH
+    let root = AUTH_ROOTS
         .get_or_init(Default::default)
         .lock()
         .ok()?
         .get(&repo.root_path)
+        .cloned()?;
+    SESSION_AUTH
+        .get_or_init(Default::default)
+        .lock()
+        .ok()?
+        .get(&root)
         .cloned()
 }
 
@@ -341,53 +419,67 @@ async fn test_connection(
     account: &SvnAccountState,
     token: &CancellationToken,
 ) -> Result<bool, DesktopError> {
-    let Some(username) = &account.username else {
-        return Ok(cli::run(
-            "svn",
-            &["info".into(), "--non-interactive".into()],
-            Path::new(&repo.root_path),
-            None,
-            cli::NETWORK_TIMEOUT,
-            token,
-        )
-        .await
-        .is_ok());
-    };
-    if let Some((_, password)) = auth(config_dir, repo, token).await? {
-        cli::run(
-            "svn",
-            &[
-                "--username".into(),
-                username.clone(),
-                "--password-from-stdin".into(),
-                "--no-auth-cache".into(),
-                "--non-interactive".into(),
-                "info".into(),
-            ],
-            Path::new(&repo.root_path),
-            Some(format!("{password}\n").as_bytes()),
-            cli::NETWORK_TIMEOUT,
-            token,
-        )
-        .await?;
-        Ok(true)
-    } else {
-        Ok(cli::run(
-            "svn",
-            &[
-                "--username".into(),
-                username.clone(),
-                "--non-interactive".into(),
-                "info".into(),
-            ],
-            Path::new(&repo.root_path),
-            None,
-            cli::NETWORK_TIMEOUT,
-            token,
-        )
-        .await
-        .is_ok())
+    let credentials = auth(config_dir, repo, token).await?;
+    verify_credentials(
+        repo,
+        &account.repository_url,
+        credentials.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
+        false,
+        token,
+    )
+    .await?;
+    Ok(true)
+}
+
+async fn verify_credentials(
+    repo: &RepositoryMeta,
+    url: &str,
+    credentials: Option<(&str, &str)>,
+    remember: bool,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    // Query the URL: working-copy `svn info` does not authenticate remotely.
+    let mut args = vec!["info".into(), "--non-interactive".into()];
+    if !remember {
+        args.push("--no-auth-cache".into());
     }
+    let input = credentials.map(|(username, password)| {
+        args.extend([
+            "--username".into(),
+            username.into(),
+            "--password-from-stdin".into(),
+        ]);
+        format!("{password}\n")
+    });
+    args.push(url.into());
+    cli::run(
+        "svn",
+        &args,
+        Path::new(&repo.root_path),
+        input.as_deref().map(str::as_bytes),
+        cli::NETWORK_TIMEOUT,
+        token,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn repository_url(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    Ok(cli::run(
+        "svn",
+        &["info".into(), "--show-item".into(), "url".into()],
+        Path::new(&repo.root_path),
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+    )
+    .await?
+    .stdout_text()
+    .trim()
+    .to_string())
 }
 
 async fn repository_root(
@@ -515,5 +607,172 @@ mod tests {
         assert_eq!(values.len(), 1);
         assert_eq!(values[0].username.as_deref(), Some("alice"));
         assert!(!format!("{values:?}").contains("secret"));
+    }
+    #[tokio::test]
+    async fn session_switch_verifies_remote_authentication_and_preserves_working_copy() {
+        use crate::models::VcsKind;
+        use std::process::{Child, Command, Stdio};
+        use tempfile::tempdir;
+        if Command::new("svnserve").arg("--version").output().is_err() {
+            return;
+        }
+        struct Server(Child);
+        impl Drop for Server {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let directory = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        assert!(Command::new("svnadmin")
+            .args(["create"])
+            .arg(&repository)
+            .status()
+            .unwrap()
+            .success());
+        let realm = format!("VersionDock-Identity-QA-{}", uuid::Uuid::new_v4());
+        std::fs::write(repository.join("conf/svnserve.conf"), format!("[general]\nanon-access = read\nauth-access = write\npassword-db = passwd\nrealm = {realm}\n")).unwrap();
+        std::fs::write(
+            repository.join("conf/passwd"),
+            "[users]\nalice = qa-alice\nbob = qa-bob\n",
+        )
+        .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let _server = Server(
+            Command::new("svnserve")
+                .args([
+                    "--daemon",
+                    "--foreground",
+                    "--listen-host",
+                    "127.0.0.1",
+                    "--listen-port",
+                    &port.to_string(),
+                    "--root",
+                ])
+                .arg(directory.path())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        for _ in 0..50 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let url = format!("svn://127.0.0.1:{port}/repository");
+        let wc = directory.path().join("wc");
+        assert!(Command::new("svn")
+            .args(["checkout", "--non-interactive", "--no-auth-cache", &url])
+            .arg(&wc)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        // Disable anonymous access after obtaining the working copy; local info still succeeds.
+        std::fs::write(repository.join("conf/svnserve.conf"), format!("[general]\nanon-access = none\nauth-access = write\npassword-db = passwd\nrealm = {realm}\n")).unwrap();
+        std::fs::write(wc.join("keep.txt"), "local change\n").unwrap();
+        let repo = RepositoryMeta {
+            id: "svn-qa".into(),
+            name: "svn-qa".into(),
+            root_path: wc.to_string_lossy().into_owned(),
+            kind: VcsKind::Svn,
+            color: "#888".into(),
+            depth: 0,
+            parent_repo_id: None,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let token = CancellationToken::new();
+        assert!(
+            operate(config.path(), &repo, SvnAccountOperation::Test, &token)
+                .await
+                .is_err()
+        );
+        assert!(operate(
+            config.path(),
+            &repo,
+            SvnAccountOperation::Switch {
+                username: "alice".into(),
+                password: "wrong".into(),
+                remember: false
+            },
+            &token
+        )
+        .await
+        .is_err());
+        assert!(!config.path().join("svn-accounts.json").exists());
+        let value = operate(
+            config.path(),
+            &repo,
+            SvnAccountOperation::Switch {
+                username: "alice".into(),
+                password: "qa-alice".into(),
+                remember: false,
+            },
+            &token,
+        )
+        .await
+        .unwrap();
+        assert_eq!(value.username.as_deref(), Some("alice"));
+        assert_eq!(value.source, SvnCredentialSource::Session);
+        assert_eq!(cached_auth(&repo).unwrap().0, "alice");
+        assert!(
+            operate(config.path(), &repo, SvnAccountOperation::Test, &token)
+                .await
+                .unwrap()
+                .connection_ok
+                .unwrap()
+        );
+        // A failed switch leaves the working session intact.
+        assert!(operate(
+            config.path(),
+            &repo,
+            SvnAccountOperation::Switch {
+                username: "bob".into(),
+                password: "wrong".into(),
+                remember: false
+            },
+            &token
+        )
+        .await
+        .is_err());
+        assert_eq!(cached_auth(&repo).unwrap().0, "alice");
+        let file = std::fs::read_to_string(config.path().join("svn-accounts.json")).unwrap();
+        assert!(!file.contains("alice"));
+        assert!(!file.contains("qa-alice"));
+        assert!(!file.contains("qa-bob"));
+        operate(config.path(), &repo, SvnAccountOperation::Delete, &token)
+            .await
+            .unwrap();
+        assert!(cached_auth(&repo).is_none());
+        assert!(
+            operate(config.path(), &repo, SvnAccountOperation::Test, &token)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(wc.join("keep.txt")).unwrap(),
+            "local change\n"
+        );
+        AUTH_ROOTS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .remove(&repo.root_path);
+    }
+
+    #[test]
+    fn native_cache_matching_rejects_host_substrings_and_other_ports() {
+        let output = "Authentication realm: <https://svn.example.test.attacker.test:443> Wrong\nUsername: eve\n\nAuthentication realm: <https://svn.example.test:8443> Other\nUsername: bob\n\nAuthentication realm: <https://svn.example.test:443> Right\nUsername: alice\n";
+        let values = parse_native_credentials(output, "https://svn.example.test/repo");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].username.as_deref(), Some("alice"));
+        assert!(parse_native_credentials(output, "file:///tmp/repo").is_empty());
     }
 }

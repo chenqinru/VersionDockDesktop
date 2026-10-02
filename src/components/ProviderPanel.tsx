@@ -6,6 +6,7 @@ import type {
   PublishRepositoryResult,
   RemoteNamespace,
   RemoteProviderAccount,
+  RemoteProviderKind,
   RemoteRepository,
   RemoteRepositoryPage,
   RemoteVisibility,
@@ -19,6 +20,7 @@ import { isAbortError } from '../platform/bridge';
 
 export interface ProviderPanelProps {
   mode: 'manage' | 'browse' | 'publish';
+  initialProvider?: RemoteProviderKind;
   repoId?: string;
   close: () => void;
   onClone?: (repository: RemoteRepository, accountId: string) => void;
@@ -26,7 +28,7 @@ export interface ProviderPanelProps {
 
 type ActiveView = 'none' | 'detail' | 'github_flow' | 'github_form' | 'gitlab_form' | 'gitee_form';
 
-export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelProps) {
+export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }: ProviderPanelProps) {
   const bridge = useBridge();
   const { t } = useI18n();
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id ?? '');
@@ -100,9 +102,14 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
     try {
       const values = await bridge.request<RemoteProviderAccount[]>({ type: 'providerAccounts' }, { showProgress: false });
       setAccounts(values);
+      if (initialProvider && !values.some((account) => account.provider === initialProvider)) {
+        setSelectedAccountId('');
+        setActiveView(initialProvider === 'github' ? 'github_form' : initialProvider === 'gitlab' ? 'gitlab_form' : 'gitee_form');
+        return;
+      }
       if (values.length > 0) {
         setSelectedAccountId((current) => {
-          const next = values.some((a) => a.id === current) ? current : values[0].id;
+          const next = values.some((a) => a.id === current) ? current : (values.find((a) => a.provider === initialProvider) ?? values[0]).id;
           return next;
         });
         setActiveView((current) => (current === 'none' || current === 'detail' ? 'detail' : current));
@@ -113,7 +120,7 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
     } catch (err) {
       if (!isAbortError(err)) setError(String(err));
     }
-  }, [bridge]);
+  }, [bridge, initialProvider]);
 
   useEffect(() => {
     let active = true;
@@ -202,6 +209,7 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
         { timeoutMs: 900_000, signal: controller.signal }
       );
       clearAvatarCache();
+      window.dispatchEvent(new Event('versiondock-provider-accounts-changed'));
       await loadAccounts();
       setSelectedAccountId(account.id);
       setActiveView('detail');
@@ -236,6 +244,7 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
       clearAvatarCache();
       setGhPat('');
       setEditingAccountId(undefined);
+      window.dispatchEvent(new Event('versiondock-provider-accounts-changed'));
       await loadAccounts();
       setSelectedAccountId(account.id);
       setActiveView('detail');
@@ -259,6 +268,7 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
       clearAvatarCache();
       setGlPat('');
       setEditingAccountId(undefined);
+      window.dispatchEvent(new Event('versiondock-provider-accounts-changed'));
       await loadAccounts();
       setSelectedAccountId(account.id);
       setActiveView('detail');
@@ -282,6 +292,7 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
       clearAvatarCache();
       setGtPat('');
       setEditingAccountId(undefined);
+      window.dispatchEvent(new Event('versiondock-provider-accounts-changed'));
       await loadAccounts();
       setSelectedAccountId(account.id);
       setActiveView('detail');
@@ -298,6 +309,7 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
       await bridge.request({ type: 'providerRemove', payload: { account_id: id } });
       clearAvatarCache();
       setConfirmRemoveId(null);
+      window.dispatchEvent(new Event('versiondock-provider-accounts-changed'));
       await loadAccounts();
     } catch (reason) {
       if (!isAbortError(reason)) setError(String(reason));

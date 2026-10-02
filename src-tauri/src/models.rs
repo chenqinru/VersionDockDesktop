@@ -1284,6 +1284,11 @@ pub struct GitIdentityState {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SvnAccountOperation {
+    Switch {
+        username: String,
+        password: String,
+        remember: bool,
+    },
     Save {
         username: String,
         password: Option<String>,
@@ -1357,6 +1362,7 @@ pub enum SvnOperation {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SvnAccountState {
+    pub repository_url: String,
     pub repository_root: String,
     pub username: Option<String>,
     pub password_stored: bool,

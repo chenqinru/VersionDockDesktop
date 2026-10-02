@@ -1278,9 +1278,10 @@ export type SubtreePushStatus = {
 
 export type SubtreeState = "active" | "pending";
 
-export type SvnAccountOperation = { type: "save"; username: string; password: string | null } | { type: "delete" } | { type: "test" } | { type: "clearNative"; credential_id: string };
+export type SvnAccountOperation = { type: "switch"; username: string; password: string; remember: boolean } | { type: "save"; username: string; password: string | null } | { type: "delete" } | { type: "test" } | { type: "clearNative"; credential_id: string };
 
 export type SvnAccountState = {
+	repositoryUrl: string,
 	repositoryRoot: string,
 	username: string | null,
 	passwordStored: boolean,

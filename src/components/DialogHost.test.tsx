@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DialogHost } from './DialogHost';
-import { editorDialog, publishDialog } from './dialogService';
+import { editorDialog, promptDialog, publishDialog } from './dialogService';
 
 afterEach(() => {
   publishDialog(undefined);
@@ -30,4 +30,33 @@ describe('DialogHost editor', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(submit).toHaveBeenCalledTimes(2);
   });
+});
+
+
+describe('DialogHost identity prompts', () => {
+  it('masks passwords and preserves intentional whitespace', async () => {
+    render(<DialogHost />);
+    let result: string | null = null;
+    await act(async () => { void promptDialog({ title: 'Password', message: '', inputType: 'password' }).then((value) => { result = value; }); });
+    const input = document.querySelector('input')!;
+    expect(input.type).toBe('password');
+    fireEvent.change(input, { target: { value: ' secret ' } });
+    fireEvent.click(screen.getByText('Confirm'));
+    await waitFor(() => expect(result).toBe(' secret '));
+  });
+  it('retains reserved-name validation feedback without dismissing the prompt', async () => {
+    render(<DialogHost />);
+    await act(async () => { void promptDialog({ title: 'Profile', message: '', validateInput: (value) => value === 'Global' ? 'Reserved name' : undefined }); });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Global' } });
+    fireEvent.click(screen.getByText('Confirm'));
+    expect(screen.getByText('Reserved name')).toHaveTextContent('Reserved name');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+  it('keeps a required empty prompt open when Enter is pressed', async () => {
+    render(<DialogHost />);
+    await act(async () => { void promptDialog({ title: 'Username', message: '' }); });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
 });

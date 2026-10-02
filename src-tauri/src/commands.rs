@@ -2288,7 +2288,7 @@ async fn dispatch(
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let identity = if repo.kind == VcsKind::Git {
                 Some(
-                    identity::state(&state.config_dir, &repo, token)
+                    identity::state(&state.config_dir, &workspace_id, Some(&repo), token)
                         .await?
                         .effective,
                 )
@@ -2582,7 +2582,9 @@ async fn dispatch(
                     }
                 };
                 let identity = if repo.kind == VcsKind::Git {
-                    match identity::state(&state.config_dir, &repo, token).await {
+                    match identity::state(&state.config_dir, &workspace_id, Some(&repo), token)
+                        .await
+                    {
                         Ok(identity) => Some(identity.effective),
                         Err(error) => {
                             let is_submodule = repo.is_submodule || repo.depth > 0;
@@ -3564,24 +3566,34 @@ async fn dispatch(
             workspace_id,
             repo_id,
         } => {
-            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            state.workspace(&workspace_id).await?;
+            let repo = if repo_id.is_empty() {
+                None
+            } else {
+                Some(resolve_repo(state, &workspace_id, &repo_id).await?)
+            };
             let _permit = state.acquire_read(token).await?;
-            if repo.kind != VcsKind::Git {
+            if repo.as_ref().is_some_and(|repo| repo.kind != VcsKind::Git) {
                 return Err(DesktopError::new(
                     "UNSUPPORTED_OPERATION",
                     "Git identity is only available for Git repositories",
                     false,
                 ));
             }
-            json(identity::state(&state.config_dir, &repo, token).await?)
+            json(identity::state(&state.config_dir, &workspace_id, repo.as_ref(), token).await?)
         }
         BridgeCommand::GitProfileOperation {
             workspace_id,
             repo_id,
             operation,
         } => {
-            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            if repo.kind != VcsKind::Git {
+            state.workspace(&workspace_id).await?;
+            let repo = if repo_id.is_empty() {
+                None
+            } else {
+                Some(resolve_repo(state, &workspace_id, &repo_id).await?)
+            };
+            if repo.as_ref().is_some_and(|repo| repo.kind != VcsKind::Git) {
                 return Err(DesktopError::new(
                     "UNSUPPORTED_OPERATION",
                     "Git identity is only available for Git repositories",
@@ -3590,7 +3602,14 @@ async fn dispatch(
             }
             json(
                 with_write(state, &repo_id, token, async {
-                    identity::operate(&state.config_dir, &repo, operation, token).await
+                    identity::operate(
+                        &state.config_dir,
+                        &workspace_id,
+                        repo.as_ref(),
+                        operation,
+                        token,
+                    )
+                    .await
                 })
                 .await?,
             )

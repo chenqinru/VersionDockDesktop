@@ -1,94 +1,52 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore } from '../../store/appStore';
-import { useBridge } from '../../platform/context';
 import { useI18n } from '../../i18n';
 import { ProfileMenuPopover } from './ProfileMenuPopover';
-import type { GitIdentityState, SvnAccountState } from '../../bindings/generated';
+import { ProfileStatusTooltip } from './ProfileStatusTooltip';
+import { gitAccountName, svnAccountName } from './profileStatus';
+import { useProfileStatus } from './useProfileStatus';
 
 export function ProfileStatusBarItem() {
-  const bridge = useBridge();
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const [identityText, setIdentityText] = useState<string>('');
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const anchorRef = useRef<HTMLButtonElement>(null);
-
   const snapshot = useAppStore((state) => state.snapshot);
   const selectedRepoId = useAppStore((state) => state.selectedRepoId);
-
-  const currentRepo = snapshot?.repositories.find((r) => r.meta.id === selectedRepoId) ?? snapshot?.repositories[0];
-  const workspaceId = snapshot?.workspace.id;
-  const currentRepoId = currentRepo?.meta.id;
-  const currentRepoKind = currentRepo?.meta.kind;
-
-  const refreshSummary = useCallback(async () => {
-    if (!workspaceId || !currentRepoId) {
-      return t('No profile');
-    }
-    try {
-      if (currentRepoKind === 'git') {
-        const data = await bridge.request<GitIdentityState>({
-          type: 'gitIdentity',
-          payload: { workspace_id: workspaceId, repo_id: currentRepoId },
-        }, { showProgress: false });
-        const name = data.effective.userName?.trim();
-        return `Git: ${name || t('No profile')}`;
-      } else if (currentRepoKind === 'svn') {
-        const data = await bridge.request<SvnAccountState>({
-          type: 'svnAccount',
-          payload: { workspace_id: workspaceId, repo_id: currentRepoId },
-        }, { showProgress: false });
-        return `SVN: ${data.username || (data.passwordStored ? t('Authenticated') : t('No account detected'))}`;
-      }
-      return t('No profile');
-    } catch {
-      return t('No profile');
-    }
-  }, [bridge, currentRepoId, currentRepoKind, t, workspaceId]);
-
+  const [selection, setSelection] = useState<{ repoId: string; selectedRepoId?: string }>();
+  const repositories = useMemo(() => snapshot?.repositories.filter((repo) => !repo.meta.isWorktree) ?? [], [snapshot?.repositories]);
+  const repoId = selection?.selectedRepoId === selectedRepoId ? selection?.repoId ?? selectedRepoId : selectedRepoId;
+  const currentRepo = repositories.find((repo) => repo.meta.id === repoId) ?? repositories[0];
+  const data = useProfileStatus(snapshot?.workspace.id, repositories);
+  const [open, setOpen] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const [hovering, setHovering] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
-    let active = true;
-    void refreshSummary().then((text) => {
-      if (active) setIdentityText(text);
-    });
-    return () => {
-      active = false;
-    };
-  }, [refreshSummary]);
-
+    if (!hovering || open) return;
+    hoverTimer.current = setTimeout(() => setShowTooltip(true), 500);
+    return () => clearTimeout(hoverTimer.current);
+  }, [hovering, open]);
+  const close = useCallback(() => { setOpen(false); anchorRef.current?.focus(); }, []);
   const handleClick = () => {
-    if (!open && anchorRef.current) {
-      setAnchorRect(anchorRef.current.getBoundingClientRect());
-    }
+    clearTimeout(hoverTimer.current); setShowTooltip(false); setHovering(false);
+    if (!open && anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect());
     setOpen((prev) => !prev);
   };
-
-  return (
-    <>
-      <button
-        ref={anchorRef}
-        type="button"
-        className={`statusbar-item profile-status-item ${open ? 'active' : ''}`}
-        title={`${identityText} · ${t('Click to manage profiles')}`}
-        aria-label={`${identityText} · ${t('Click to manage profiles')}`}
-        aria-haspopup="true"
-        aria-expanded={open}
-        onClick={handleClick}
-      >
-        <Codicon name="account" />
-        <span className="statusbar-label">{identityText || t('Git / SVN Accounts')}</span>
-      </button>
-
-      {open && (
-        <ProfileMenuPopover
-          anchorRect={anchorRect}
-          onClose={() => {
-            setOpen(false);
-            void refreshSummary().then(setIdentityText);
-          }}
-        />
-      )}
-    </>
-  );
+  const identityText = currentRepo?.meta.kind === 'svn'
+    ? `SVN: ${svnAccountName(data.svn[currentRepo.meta.id], t)}`
+    : `Git: ${gitAccountName(data.git[currentRepo?.meta.id ?? ''], t)}`;
+  const label = `${identityText} · ${t('Click to manage accounts and identities')}`;
+  return <>
+    <button ref={anchorRef} type="button" className={`statusbar-item profile-status-item ${open ? 'active' : ''}`}
+      aria-label={label} aria-haspopup="dialog" aria-expanded={open} aria-describedby={showTooltip && !open ? 'profile-status-tooltip' : undefined}
+      onMouseEnter={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); setHovering(true); }}
+      onMouseLeave={(event) => { if (!(event.relatedTarget instanceof Element) || !event.relatedTarget.closest('#profile-status-tooltip')) { setHovering(false); setShowTooltip(false); } }}
+      onFocus={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); }} onClick={handleClick}>
+      <Codicon name="account" /><span className="statusbar-label">{identityText}</span>
+    </button>
+    {showTooltip && !open && anchorRect && <ProfileStatusTooltip data={data} repo={currentRepo} repositories={repositories} anchor={anchorRect} onManage={handleClick} onLeave={() => { setHovering(false); setShowTooltip(false); }} />}
+    {open && <ProfileMenuPopover anchorRect={anchorRect} anchorRef={anchorRef} onClose={close} data={data} repositories={repositories} currentRepoId={currentRepo?.meta.id}
+      onRepositoryChange={(repoId) => setSelection({ repoId, selectedRepoId })} />}
+  </>;
 }

@@ -18,7 +18,7 @@ export function StatusBar() {
     <footer className="app-statusbar" role="contentinfo">
       <div className="statusbar-left">
         <BranchStatusBarItem key={snapshot.workspace.id} />
-        <ProfileStatusBarItem />
+        <ProfileStatusBarItem key={`profile:${snapshot.workspace.id}`} />
       </div>
       <div className="statusbar-right">
         <OperationStatusBarItem />

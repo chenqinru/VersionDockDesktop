@@ -6,6 +6,9 @@ export type DialogRequest = {
   cancelLabel?: string;
   danger?: boolean;
   inputLabel?: string;
+  inputType?: 'text' | 'password';
+  allowEmpty?: boolean;
+  validateInput?: (value: string) => string | undefined;
   initialValue?: string;
   initialSelected?: string[];
   choices?: Array<{ id: string; label: string; description?: string; icon?: string; danger?: boolean }>;

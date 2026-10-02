@@ -229,7 +229,8 @@ describe('StatusBar', () => {
       expect(screen.getByText('Work')).toBeInTheDocument();
       expect(screen.getByText('Local')).toBeInTheDocument();
       expect(screen.getByText('Global')).toBeInTheDocument();
-      expect(screen.getByText('Manage Git identities…')).toBeInTheDocument();
+      expect(screen.getByText('New Profile…')).toBeInTheDocument();
+      expect(screen.getByText('GitHub')).toBeInTheDocument();
     });
   });
 

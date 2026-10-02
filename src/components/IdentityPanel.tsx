@@ -5,6 +5,7 @@ import { useBridge } from '../platform/context';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
+import { announceIdentityChange, GLOBAL_PROFILE_ID, LOCAL_PROFILE_ID } from './StatusBar/profileStatus';
 import { confirmDialog } from './dialogService';
 
 export function IdentityPanel({ repoId, close }: { repoId: string; close: () => void }) {
@@ -134,6 +135,7 @@ function GitIdentity({
       const previousLabel = requested.type === 'delete' ? value?.profiles.find((profile) => profile.id === requested.profile_id)?.label : undefined;
       const next = await bridge.request<GitIdentityState>(operation);
       setValue(next);
+      announceIdentityChange();
       const activeLabel = requested.type === 'select' && requested.profile_id
         ? next.profiles.find((profile) => profile.id === requested.profile_id)?.label ?? next.effective.userName
         : next.effective.userName;
@@ -157,7 +159,7 @@ function GitIdentity({
         return t('from .git/config');
       case 'global':
         return t('from ~/.gitconfig');
-      case 'profile':
+      case 'custom':
         return t('Custom Profile');
       default:
         return source;
@@ -201,6 +203,8 @@ function GitIdentity({
             }
           >
             <option value="">{t('Auto · local → global')}</option>
+            <option value={LOCAL_PROFILE_ID}>{t('Local')}</option>
+            <option value={GLOBAL_PROFILE_ID}>{t('Global')}</option>
             {value.profiles.map((profile) => (
               <option key={profile.id} value={profile.id}>
                 {profile.label} ({profile.userName} &lt;{profile.email}&gt;)
@@ -385,6 +389,7 @@ function SvnAccount({
         payload: { workspace_id: workspaceId, repo_id: repoId, operation },
       });
       setValue(next);
+      announceIdentityChange();
       setPassword('');
       const message = operation.type === 'test'
         ? { key: 'VersionDock: SVN connection succeeded for {0}: {1}', args: [repoName, next.repositoryRoot] }
