@@ -1,0 +1,11 @@
+import { afterEach, expect, it } from 'vitest';
+import { isDarkTheme, currentPalette, PALETTE_DARK } from './branchColor';
+import { isLightTheme } from '../theme';
+const old = document.documentElement.dataset.theme;
+afterEach(() => { if (old === undefined) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = old; });
+it('demonstrates inconsistent classification of light2026 in branch colors', () => {
+  document.documentElement.dataset.theme = 'light2026';
+  expect(isLightTheme('light2026')).toBe(true);
+  expect(isDarkTheme()).toBe(true);
+  expect(currentPalette()).toBe(PALETTE_DARK);
+});

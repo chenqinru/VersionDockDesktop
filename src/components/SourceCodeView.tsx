@@ -1,5 +1,6 @@
+import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ThemedToken, BundledTheme, ThemeRegistrationRaw } from 'shiki';
+import type { ThemedToken } from 'shiki';
 import { highlightDiffLines } from './UnifiedDiffView';
 import { resolveShikiTheme } from '../theme';
 import { useI18n } from '../i18n';
@@ -9,7 +10,7 @@ import { Codicon } from './Codicon';
 
 export function SourceCodeView({ content, path, language = 'text' }: { content: string; path: string; language?: string }) {
   const { t } = useI18n();
-  const [theme, setTheme] = useState<BundledTheme | ThemeRegistrationRaw>(() => resolveShikiTheme(document.documentElement.dataset.theme));
+  const theme = resolveShikiTheme(useEffectiveTheme());
   const lines = useMemo(() => content.replace(/\r\n/g, '\n').split('\n'), [content]);
   const [highlighted, setHighlighted] = useState<{ content: string; path: string; theme: typeof theme; tokens: ThemedToken[][] }>();
   const [open, setOpen] = useState(false);
@@ -41,12 +42,7 @@ export function SourceCodeView({ content, path, language = 'text' }: { content: 
   const closeSearch = useCallback(() => { setOpen(false); setQuery(''); setIndex(0); trigger.current?.focus(); }, []);
   const navigate = useCallback((direction: -1 | 1) => { if (matches.length) setIndex((value) => (value + direction + matches.length) % matches.length); }, [matches.length]);
 
-  useEffect(() => {
-    if (typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(() => setTheme(resolveShikiTheme(document.documentElement.dataset.theme)));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
+
   useEffect(() => {
     let active = true;
     if (content.length > 1_000_000 || lines.length > 10_000) return;

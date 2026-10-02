@@ -484,7 +484,13 @@ export class BrowserDevBridge implements VersionDockBridge {
       } satisfies BootstrapData;
       case 'runtimeCapabilities': return unavailableRuntime;
       case 'saveAppState': this.state = structuredClone(command.payload.state); return true;
-      case 'updateSettings': this.state.settings = structuredClone(command.payload.settings); return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: true } };
+      case 'updateSettings': {
+        const { settings, changed_fields } = command.payload;
+        this.state.settings = changed_fields
+          ? { ...(this.state.settings ?? settings), ...Object.fromEntries(changed_fields.map((field) => [field, settings[field as keyof typeof settings]])) }
+          : structuredClone(settings);
+        return { settings: structuredClone(this.state.settings), effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: true } };
+      }
       case 'updateLayout': this.state.layout = structuredClone(command.payload.layout); return command.payload.layout;
       case 'workspaceOpen': case 'workspaceRefresh': this.generation += 1; return this.snapshot();
       case 'initializeRepository': this.generation += 1; return { snapshot: this.snapshot(), repositoryId: this.repositories[0]?.meta.id ?? 'admin' };

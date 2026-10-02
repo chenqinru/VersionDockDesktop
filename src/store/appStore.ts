@@ -1,3 +1,4 @@
+import { SettingsWriter } from '../services/settingsWriter';
 import { create } from 'zustand';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
@@ -1566,41 +1567,35 @@ export const useAppStore = create<AppStore>((set, get) => {
     }, seconds * 1000);
   };
 
+  let settingsWriter: { bridge: VersionDockBridge; writer: SettingsWriter } | undefined;
   const updateSettings = async (patch: Partial<DesktopSettings>) => {
     const bootstrap = get().bootstrap; if (!bootstrap) return;
-    const previous = settings();
-    const optimistic = { ...previous, ...patch };
-    set((state) => ({
-      bootstrap: { ...bootstrap, state: { ...bootstrap.state, settings: optimistic } },
-      snapshot: state.snapshot ? projectSnapshot(state.snapshot, state.allRepositories, optimistic) : undefined,
-    }));
-    if (patch.hiddenRepositoryIds && !get().snapshot?.repositories.some((repo) => repo.meta.id === get().selectedRepoId)) {
-      set({ selectedRepoId: get().snapshot?.repositories[0]?.meta.id });
+    const owner = bridge();
+    if (settingsWriter?.bridge !== owner) {
+      const active = () => get().bridge === owner && Boolean(get().bootstrap) && settingsWriter?.writer === writer;
+      const writer: SettingsWriter = new SettingsWriter(settings(),
+        (next, changed_fields) => active() ? owner.request<SettingsUpdateResult>({ type: 'updateSettings', payload: { settings: next, changed_fields } }) : Promise.reject(new Error('Settings session closed')),
+        (next) => {
+          if (!active()) return;
+          set((state) => ({
+            bootstrap: { ...state.bootstrap!, state: { ...state.bootstrap!.state, settings: next } },
+            snapshot: state.snapshot ? projectSnapshot(state.snapshot, state.allRepositories, next) : undefined,
+          }));
+          if (!get().snapshot?.repositories.some((repo) => repo.meta.id === get().selectedRepoId)) {
+            set({ selectedRepoId: get().snapshot?.repositories[0]?.meta.id });
+          }
+        },
+        async (result) => {
+          if (!active()) return;
+          if (result.effects.rescanWorkspace && get().snapshot) await get().refresh();
+          else if (result.effects.reloadHistory) await get().loadHistory(true);
+          if (result.effects.restartAutoRefresh) restartAutoRefresh();
+        },
+        (error) => { if (active()) publishError('Settings update failed', error); },
+      );
+      settingsWriter = { bridge: owner, writer };
     }
-    try {
-      const result = await bridge().request<SettingsUpdateResult>({ type: 'updateSettings', payload: { settings: optimistic } });
-      const current = get().bootstrap;
-      if (current) set((state) => ({
-        bootstrap: { ...current, state: { ...current.state, settings: result.settings } },
-        snapshot: state.snapshot ? projectSnapshot(state.snapshot, state.allRepositories, result.settings) : undefined,
-      }));
-      if (!get().snapshot?.repositories.some((repo) => repo.meta.id === get().selectedRepoId)) {
-        set({ selectedRepoId: get().snapshot?.repositories[0]?.meta.id });
-      }
-      if (result.effects.rescanWorkspace && get().snapshot) await get().refresh();
-      else if (result.effects.reloadHistory) await get().loadHistory(true);
-      if (result.effects.restartAutoRefresh) restartAutoRefresh();
-    } catch (error) {
-      const current = get().bootstrap;
-      if (current) set((state) => ({
-        bootstrap: { ...current, state: { ...current.state, settings: previous } },
-        snapshot: state.snapshot ? projectSnapshot(state.snapshot, state.allRepositories, previous) : undefined,
-      }));
-      publishError('Settings update failed', error);
-      if (!get().snapshot?.repositories.some((repo) => repo.meta.id === get().selectedRepoId)) {
-        set({ selectedRepoId: get().snapshot?.repositories[0]?.meta.id });
-      }
-    }
+    await settingsWriter.writer.update(patch);
   };
 
   const updateLayout = (next: LayoutState) => {
@@ -2324,6 +2319,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     dispose: () => {
+      settingsWriter = undefined;
       set({ transferringTabIds: {} });
       cancelRequests();
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());

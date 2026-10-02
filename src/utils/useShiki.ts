@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
 import { createHighlighterCore, type HighlighterCore } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
-import githubDark from 'shiki/themes/github-dark.mjs';
-import githubLight from 'shiki/themes/github-light.mjs';
+import darkPlus from 'shiki/themes/dark-plus.mjs';
+import lightPlus from 'shiki/themes/light-plus.mjs';
+import githubDimmed from 'shiki/themes/github-dark-dimmed.mjs';
+import oneDarkPro from 'shiki/themes/one-dark-pro.mjs';
+import dracula from 'shiki/themes/dracula.mjs';
+import nord from 'shiki/themes/nord.mjs';
+import { theme2026Dark, theme2026Light } from '../theme';
 import css from 'shiki/langs/css.mjs';
 import go from 'shiki/langs/go.mjs';
 import html from 'shiki/langs/html.mjs';
@@ -25,7 +30,7 @@ function ensureHighlighter(): Promise<HighlighterCore> {
 
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
-      themes: [githubLight, githubDark],
+      themes: [theme2026Dark, theme2026Light, darkPlus, lightPlus, githubDimmed, oneDarkPro, dracula, nord],
       langs: [javascript, typescript, json, css, html, markdown, java, xml, yaml, php, python, go, shell],
       engine: createJavaScriptRegexEngine(),
     }).then((highlighter) => {

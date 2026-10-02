@@ -20,7 +20,7 @@ import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
 import { EditorIcon } from './EditorIcons';
-import { FileIcon } from './FileIcon';
+import { ThemePreviewSelector, FileIconThemePreviewSelector } from './AppearanceSelectors';
 import { ProviderPanel } from './ProviderPanel';
 
 interface SettingsPanelProps {
@@ -209,8 +209,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {/* 1. 外观 Appearance */}
                 {activeCategory === 'settings-section-appearance-title' && (
                   <SettingsSection id="settings-section-appearance" titleId="settings-section-appearance-title" icon="color-mode" title={t('Appearance')}>
-                    <SettingsCard title={t('Appearance')} description={t('Choose the application color theme')}>
+                    <SettingsCard title={t('Theme')} description={t('Choose the application color theme')}>
                       <ThemePreviewSelector value={theme} onChange={(val) => void setTheme(val)} />
+                    </SettingsCard>
+                    <SettingsCard title={t('File icon theme')} description={t('Choose the file icon theme')}>
+                      <FileIconThemePreviewSelector value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} />
+                    </SettingsCard>
+                    <SettingsCard title={t('Language and font size')}>
                       <SettingSelect
                         label={t('Language')}
                         description={t('Choose the application language')}
@@ -235,9 +240,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(value) => void setUiFontSize(value as UiFontSizePreference)}
                       />
-                    </SettingsCard>
-                    <SettingsCard title={t('File icon theme')} description={t('Choose the file icon theme')}>
-                      <FileIconThemePreviewSelector value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} />
                     </SettingsCard>
                   </SettingsSection>
                 )}
@@ -1262,204 +1264,6 @@ function SettingToggle({
         </span>
       </span>
     </label>
-  );
-}
-
-function ThemePreviewSelector({
-  value,
-  onChange,
-}: {
-  value: ThemePreference;
-  onChange: (theme: ThemePreference) => void;
-}) {
-  const { t } = useI18n();
-
-  const themes = [
-    { id: 'system' as const, label: t('System (Default 2026)'), icon: 'color-mode', previewClass: 'theme-preview-system' },
-    { id: 'dark2026' as const, label: t('2026 Dark'), icon: 'moon', previewClass: 'theme-preview-dark2026' },
-    { id: 'light2026' as const, label: t('2026 Light'), icon: 'sun', previewClass: 'theme-preview-light2026' },
-    { id: 'githubDarkDimmed' as const, label: t('GitHub Dark Dimmed'), icon: 'github', previewClass: 'theme-preview-githubDarkDimmed' },
-    { id: 'oneDarkPro' as const, label: t('One Dark Pro'), icon: 'symbol-color', previewClass: 'theme-preview-oneDarkPro' },
-    { id: 'dracula' as const, label: t('Dracula'), icon: 'symbol-color', previewClass: 'theme-preview-dracula' },
-    { id: 'nord' as const, label: t('Nord'), icon: 'symbol-color', previewClass: 'theme-preview-nord' },
-    { id: 'dark' as const, label: t('Classic Dark'), icon: 'symbol-color', previewClass: 'theme-preview-dark' },
-    { id: 'light' as const, label: t('Classic Light'), icon: 'symbol-color', previewClass: 'theme-preview-light' },
-  ];
-
-  return (
-    <div className="settings-theme-row">
-      {/* 隐藏并同步原生 select 以保证无障碍与自动化测试兼容 */}
-      <select
-        aria-label={t('Theme')}
-        className="settings-theme-hidden-select"
-        value={value}
-        onChange={(e) => onChange(e.target.value as ThemePreference)}
-      >
-        <option value="system">{t('System (Default 2026)')}</option>
-        <option value="dark2026">{t('2026 Dark')}</option>
-        <option value="light2026">{t('2026 Light')}</option>
-        <option value="githubDarkDimmed">{t('GitHub Dark Dimmed')}</option>
-        <option value="oneDarkPro">{t('One Dark Pro')}</option>
-        <option value="dracula">{t('Dracula')}</option>
-        <option value="nord">{t('Nord')}</option>
-        <option value="dark">{t('Classic Dark')}</option>
-        <option value="light">{t('Classic Light')}</option>
-      </select>
-
-      {/* 现代分段预览控件 */}
-      <div className="settings-theme-segmented" role="radiogroup" aria-label={t('Theme')}>
-        {themes.map((item) => {
-          const isSelected = value === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="radio"
-              aria-checked={isSelected}
-              className={`settings-theme-card ${isSelected ? 'active' : ''}`}
-              onClick={() => onChange(item.id)}
-            >
-              <div className={`settings-theme-mock ${item.previewClass}`}>
-                <div className="mock-window-bar">
-                  <div className="mock-dot red" />
-                  <div className="mock-dot yellow" />
-                  <div className="mock-dot green" />
-                  <div className="mock-title-tab" />
-                </div>
-                {item.id === 'system' ? (
-                  <div className="mock-system-split">
-                    <div className="mock-half light-half">
-                      <div className="mock-sidebar">
-                        <div className="mock-side-line active" />
-                        <div className="mock-side-line" />
-                      </div>
-                      <div className="mock-main">
-                        <div className="mock-code-line">
-                          <span className="token-kw" />
-                          <span className="token-fn" />
-                        </div>
-                        <div className="mock-code-line indent diff-add">
-                          <span className="token-str" />
-                        </div>
-                        <div className="mock-code-line">
-                          <span className="token-ret" />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mock-half dark-half">
-                      <div className="mock-sidebar">
-                        <div className="mock-side-line active" />
-                        <div className="mock-side-line" />
-                      </div>
-                      <div className="mock-main">
-                        <div className="mock-code-line">
-                          <span className="token-kw" />
-                          <span className="token-fn" />
-                        </div>
-                        <div className="mock-code-line indent diff-add">
-                          <span className="token-str" />
-                        </div>
-                        <div className="mock-code-line">
-                          <span className="token-ret" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mock-window-content">
-                    <div className="mock-sidebar">
-                      <div className="mock-side-line active" />
-                      <div className="mock-side-line" />
-                      <div className="mock-side-line" />
-                    </div>
-                    <div className="mock-main">
-                      <div className="mock-code-line">
-                        <span className="token-kw" />
-                        <span className="token-fn" />
-                        <span className="token-punct" />
-                      </div>
-                      <div className="mock-code-line indent diff-add">
-                        <span className="token-var" />
-                        <span className="token-op" />
-                        <span className="token-str" />
-                      </div>
-                      <div className="mock-code-line indent">
-                        <span className="token-ret" />
-                        <span className="token-num" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="settings-theme-caption">
-                <Codicon name={item.icon} />
-                <span>{item.label}</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function FileIconThemePreviewSelector({
-  value,
-  onChange,
-}: {
-  value: FileIconThemePreference;
-  onChange: (theme: FileIconThemePreference) => void;
-}) {
-  const { t } = useI18n();
-
-  const iconThemes = [
-    { id: 'material' as const, label: t('Material Icons (Default)') },
-    { id: 'catppuccin' as const, label: t('Catppuccin Icons (Soft & Modern)') },
-    { id: 'seti' as const, label: t('Seti / Minimal (Clean & Simple)') },
-    { id: 'codicon' as const, label: t('Codicon (Classic Monochromatic)') },
-  ];
-
-  return (
-    <div className="settings-file-icon-theme-row">
-      <select
-        aria-label={t('File icon theme')}
-        className="settings-theme-hidden-select"
-        value={value}
-        onChange={(e) => onChange(e.target.value as FileIconThemePreference)}
-      >
-        <option value="material">{t('Material Icons (Default)')}</option>
-        <option value="catppuccin">{t('Catppuccin Icons (Soft & Modern)')}</option>
-        <option value="seti">{t('Seti / Minimal (Clean & Simple)')}</option>
-        <option value="codicon">{t('Codicon (Classic Monochromatic)')}</option>
-      </select>
-
-      <div className="settings-file-icon-segmented" role="radiogroup" aria-label={t('File icon theme')}>
-        {iconThemes.map((item) => {
-          const isSelected = value === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="radio"
-              aria-checked={isSelected}
-              className={`settings-file-icon-card ${isSelected ? 'active' : ''}`}
-              onClick={() => onChange(item.id)}
-            >
-              <div className="settings-file-icon-mock">
-                <FileIcon name="src" folder open={false} theme={item.id} />
-                <FileIcon name="index.ts" theme={item.id} />
-                <FileIcon name="main.rs" theme={item.id} />
-                <FileIcon name="app.py" theme={item.id} />
-                <FileIcon name="package.json" theme={item.id} />
-              </div>
-              <div className="settings-file-icon-caption">
-                <span>{item.label}</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 

@@ -26,6 +26,15 @@ const C = {
   crust: '#11111b',
 };
 
+// Matching Latte colors preserve the shapes while improving light-background contrast.
+const latte = {
+  rosewater: '#dc8a78', flamingo: '#dd7878', pink: '#ea76cb', mauve: '#8839ef',
+  red: '#d20f39', maroon: '#e64553', peach: '#fe640b', yellow: '#df8e1d',
+  green: '#40a02b', teal: '#179299', sky: '#04a5e5', sapphire: '#209fb5',
+  blue: '#1e66f5', lavender: '#7287fd', text: '#4c4f69', overlay0: '#9ca0b0',
+  surface0: '#ccd0da', crust: '#eff1f5',
+};
+
 const ICONS: Record<string, string> = {
   folder: svgWrap(`<path fill="${C.blue}" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>`),
   folderOpen: svgWrap(`<path fill="${C.lavender}" d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/><path fill="${C.blue}" opacity=".4" d="M4 8h16v10H4z"/>`),
@@ -160,3 +169,14 @@ export const catppuccinResolver: IconResolver = {
     return { type: 'svg', svg: ICONS.file };
   },
 };
+
+const lightIcons = new Map<string, string>();
+export function catppuccinLightIcon(svg: string): string {
+  let light = lightIcons.get(svg);
+  if (!light) {
+    const replacements = new Map(Object.entries(C).map(([name, color]) => [color, latte[name as keyof typeof latte]]));
+    light = svg.replace(/#[0-9a-f]{6}/gi, (color) => replacements.get(color.toLowerCase()) ?? color);
+    lightIcons.set(svg, light);
+  }
+  return light;
+}

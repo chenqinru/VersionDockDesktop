@@ -1,3 +1,4 @@
+import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { formatHistoryDate as formatDate } from '../history/dates';
 import { buildHistoryAuthorOptions } from '../history/authors';
 import { IconButton } from './IconButton';
@@ -200,13 +201,16 @@ function CommitList({
   const tagOperation = useAppStore((state) => state.tagOperation);
   const createPatch = useAppStore((state) => state.createPatch);
   const savePatch = useAppStore((state) => state.savePatch);
+  const effectiveTheme = useEffectiveTheme();
   const commits = useMemo(() => {
+    // Lane colors read the current DOM theme; recompute after appearance changes.
+    void effectiveTheme;
     if (isFiltered) return assignLanes(history, true, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
     if (hasRevisionFilter) return assignLanes(history, false, repoKindById, remoteNamesByRepo, topologyCommits, repoSortKeyById);
     return topologyCommits?.length
       ? layoutVisibleCommits(history, topologyCommits, repoKindById, remoteNamesByRepo, repoSortKeyById)
       : assignLanes(history, false, repoKindById, remoteNamesByRepo, undefined, repoSortKeyById);
-  }, [hasRevisionFilter, history, isFiltered, repoKindById, remoteNamesByRepo, repoSortKeyById, topologyCommits]);
+  }, [effectiveTheme, hasRevisionFilter, history, isFiltered, repoKindById, remoteNamesByRepo, repoSortKeyById, topologyCommits]);
   const repoMap = useMemo(() => new Map(repos.map((repo) => [repo.meta.id, repo])), [repos]);
   const repoBlocks = useMemo(() => {
     const blocks: Array<{ repoId: string; name: string; color: string; start: number; count: number }> = [];

@@ -418,6 +418,60 @@ impl AppState {
         Ok(permit)
     }
 
+    pub async fn update_settings(
+        &self,
+        incoming: DesktopSettings,
+        changed_fields: Option<&[String]>,
+    ) -> Result<crate::models::SettingsUpdateResult, DesktopError> {
+        let _state_write = self.state_write_lock.lock().await;
+        let mut snapshot = self.app.read().await.clone();
+        let previous = snapshot.settings.clone();
+        let settings = if let Some(fields) = changed_fields {
+            let mut current = serde_json::to_value(&previous).map_err(|error| {
+                DesktopError::new("SETTINGS_SERIALIZE_FAILED", error.to_string(), false)
+            })?;
+            let incoming = serde_json::to_value(incoming).map_err(|error| {
+                DesktopError::new("SETTINGS_SERIALIZE_FAILED", error.to_string(), false)
+            })?;
+            for field in fields {
+                if current.get(field).is_none() || incoming.get(field).is_none() {
+                    return Err(DesktopError::new(
+                        "INVALID_SETTINGS_FIELD",
+                        format!("Unknown setting: {field}"),
+                        false,
+                    ));
+                }
+                current[field] = incoming[field].clone();
+            }
+            serde_json::from_value::<DesktopSettings>(current)
+                .map_err(|error| {
+                    DesktopError::new("SETTINGS_SERIALIZE_FAILED", error.to_string(), false)
+                })?
+                .normalize()
+        } else {
+            incoming.normalize()
+        };
+        let effects = crate::models::SettingsEffects {
+            rescan_workspace: previous.repository_scan_depth != settings.repository_scan_depth
+                || previous.ignored_folders != settings.ignored_folders
+                || previous.exclude_ignored_directories != settings.exclude_ignored_directories,
+            reload_history: previous.maximum_graph_commits != settings.maximum_graph_commits
+                || previous.hidden_repository_ids != settings.hidden_repository_ids,
+            restart_auto_refresh: previous.auto_refresh_interval != settings.auto_refresh_interval
+                || previous.fetch_on_startup != settings.fetch_on_startup,
+        };
+        snapshot.settings = settings.clone();
+        self.save_app_state_locked(snapshot).await?;
+        Ok(crate::models::SettingsUpdateResult { settings, effects })
+    }
+
+    pub async fn update_layout(&self, layout: LayoutState) -> Result<(), DesktopError> {
+        let _state_write = self.state_write_lock.lock().await;
+        let mut snapshot = self.app.read().await.clone();
+        snapshot.layout = layout;
+        self.save_app_state_locked(snapshot).await
+    }
+
     pub async fn save_app_state(&self, mut snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
         let _state_write = self.state_write_lock.lock().await;
         snapshot.commit_selections = self.app.read().await.commit_selections.clone();
@@ -425,7 +479,6 @@ impl AppState {
     }
 
     async fn save_app_state_locked(&self, snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
-        *self.app.write().await = snapshot.clone();
         std::fs::create_dir_all(&self.config_dir).map_err(io_error)?;
         let target = self.config_dir.join("state.json");
         let temporary = self.config_dir.join("state.json.tmp");
@@ -433,7 +486,9 @@ impl AppState {
             DesktopError::new("STATE_SERIALIZE_FAILED", error.to_string(), true)
         })?;
         std::fs::write(&temporary, bytes).map_err(io_error)?;
-        std::fs::rename(&temporary, &target).map_err(io_error)
+        std::fs::rename(&temporary, &target).map_err(io_error)?;
+        *self.app.write().await = snapshot;
+        Ok(())
     }
 
     pub async fn save_commit_selections(
@@ -499,6 +554,7 @@ impl AppState {
         &self,
         workspace: WorkspaceDescriptor,
     ) -> Result<(), DesktopError> {
+        let _state_write = self.state_write_lock.lock().await;
         let mut snapshot = self.app.read().await.clone();
         snapshot
             .recent_workspaces
@@ -506,7 +562,7 @@ impl AppState {
         snapshot.recent_workspaces.insert(0, workspace.clone());
         snapshot.recent_workspaces.truncate(10);
         snapshot.last_workspace_id = Some(workspace.id);
-        self.save_app_state(snapshot).await
+        self.save_app_state_locked(snapshot).await
     }
 
     pub fn watch_workspace(
@@ -936,6 +992,64 @@ mod tests {
         let outside = tempdir().unwrap();
         symlink(outside.path(), root.path().join("link")).unwrap();
         assert!(safe_relative(root.path(), "link/file.txt", false).is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_settings_write_keeps_confirmed_memory() {
+        let root = tempdir().unwrap();
+        let state = AppState::load(root.path().to_path_buf());
+        let before = state.app.read().await.settings.clone();
+        std::fs::create_dir(root.path().join("state.json")).unwrap();
+        let mut incoming = before.clone();
+        incoming.theme = ThemePreference::Dracula;
+        assert!(state
+            .update_settings(incoming, Some(&["theme".into()]))
+            .await
+            .is_err());
+        assert_eq!(
+            serde_json::to_value(&state.app.read().await.settings).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn settings_updates_merge_only_changed_fields_and_preserve_layout() {
+        let root = tempdir().unwrap();
+        let state = AppState::load(root.path().to_path_buf());
+        let mut a = state.app.read().await.settings.clone();
+        let mut b = a.clone();
+        a.theme = ThemePreference::Light2026;
+        b.file_icon_theme = crate::models::FileIconThemePreference::Catppuccin;
+        let theme_fields = ["theme".into()];
+        let icon_fields = ["fileIconTheme".into()];
+        let (first, second) = tokio::join!(
+            state.update_settings(a, Some(&theme_fields)),
+            state.update_settings(b, Some(&icon_fields)),
+        );
+        first.unwrap();
+        second.unwrap();
+        let mut layout = state.app.read().await.layout.clone();
+        layout.panel_sizes.commit = 500;
+        state.update_layout(layout).await.unwrap();
+        let saved = AppState::load(root.path().to_path_buf());
+        assert_eq!(saved.app.read().await.layout.panel_sizes.commit, 500);
+        assert!(matches!(
+            saved.app.read().await.settings.theme,
+            ThemePreference::Light2026
+        ));
+        assert!(matches!(
+            saved.app.read().await.settings.file_icon_theme,
+            crate::models::FileIconThemePreference::Catppuccin
+        ));
+        assert_eq!(
+            saved.app.read().await.layout.panel_sizes.commit,
+            state.app.read().await.layout.panel_sizes.commit
+        );
+        let incoming = state.app.read().await.settings.clone();
+        assert!(state
+            .update_settings(incoming, Some(&["unknown".into()]))
+            .await
+            .is_err());
     }
 
     #[test]

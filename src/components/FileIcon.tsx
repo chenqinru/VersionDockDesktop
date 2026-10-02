@@ -1,3 +1,5 @@
+import { useEffectiveTheme } from '../theme/useEffectiveTheme';
+import { isLightTheme } from '../theme';
 import { useAppStore } from '../store/appStore';
 import { resolveFileIcon, type FileIconTheme } from '../fileIcons';
 import { Codicon } from './Codicon';
@@ -14,7 +16,7 @@ export function FileIcon({ name, folder = false, open = false, theme, className 
   const globalTheme = useAppStore((state) => state.bootstrap?.state.settings?.fileIconTheme ?? 'material');
   const activeTheme = theme ?? globalTheme;
 
-  const result = resolveFileIcon(name, folder, open, activeTheme);
+  const result = resolveFileIcon(name, folder, open, activeTheme, isLightTheme(useEffectiveTheme()));
 
   if (result.type === 'svg') {
     return (

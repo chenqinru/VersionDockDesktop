@@ -1,3 +1,5 @@
+import { useEffectiveTheme } from '../theme/useEffectiveTheme';
+import { resolveShikiTheme } from '../theme';
 import { IconButton } from './IconButton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HighlighterCore, ThemeRegistrationRaw } from 'shiki/core';
@@ -59,22 +61,6 @@ export interface ThreeWayLayoutProps {
 export interface AiMergeDraft {
   index: number;
   content: string;
-}
-
-export interface WebviewColorThemeData {
-  name: string;
-  type: 'dark' | 'light';
-  fg: string;
-  bg: string;
-  base: 'vs' | 'vs-dark' | 'hc-black' | 'hc-light';
-  inherit: boolean;
-  rules: Array<{ token: string; foreground?: string; background?: string; fontStyle?: string }>;
-  colors: Record<string, string>;
-  settings: Array<{ scope?: string | string[]; settings: { foreground?: string; background?: string; fontStyle?: string } }>;
-}
-
-function getVersionDockColorTheme(): WebviewColorThemeData | null {
-  return null;
 }
 
 let currentTranslator = (message: string, ...args: Array<string | number>) =>
@@ -1173,7 +1159,7 @@ function CodeLines({ lines, startLine, language, dim, changeFlags, changeTone }:
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const highlighter = useShiki();
-  const colorTheme = getVersionDockColorTheme();
+  const colorTheme = useEffectiveTheme();
   const displayedLines = useMemo(() => lines.length > 0 ? lines : [''], [lines]);
 
   const [startIdx, endIdx] = usePaneVirtualWindow(containerRef, displayedLines.length);
@@ -1225,7 +1211,7 @@ function EditableCodeBlock({ value, startLine, language, ariaLabel, dim, changeF
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlighter = useShiki();
-  const colorTheme = getVersionDockColorTheme();
+  const colorTheme = useEffectiveTheme();
   const lines = useMemo(() => {
     const split = value.split('\n');
     return split.length > 0 ? split : [''];
@@ -1343,11 +1329,11 @@ function renderShikiLines(
   highlighter: HighlighterCore | null,
   lines: string[],
   language: string,
-  colorTheme: WebviewColorThemeData | null,
+  colorTheme: ReturnType<typeof useEffectiveTheme>,
 ): React.ReactNode[] {
   if (!highlighter) return lines.map(line => line || ' ');
 
-  const theme = getShikiTheme(colorTheme);
+  const theme = resolveShikiTheme(colorTheme);
   if (typeof theme !== 'string') ensureShikiTheme(highlighter, theme);
 
   try {
@@ -1374,20 +1360,6 @@ function renderShikiLines(
   } catch {
     return lines.map(line => line || ' ');
   }
-}
-
-function getShikiTheme(colorTheme: WebviewColorThemeData | null): 'github-light' | 'github-dark' | ThemeRegistrationRaw {
-  if (colorTheme) {
-    return {
-      name: colorTheme.name,
-      type: colorTheme.type,
-      fg: colorTheme.fg,
-      bg: colorTheme.bg,
-      colors: colorTheme.colors,
-      settings: colorTheme.settings,
-    };
-  }
-  return document.body.classList.contains('vscode-light') ? 'github-light' : 'github-dark';
 }
 
 function normalizeShikiLang(language: string): SupportedShikiLanguage {

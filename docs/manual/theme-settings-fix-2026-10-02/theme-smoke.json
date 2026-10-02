@@ -1,0 +1,38 @@
+[
+  {
+    "theme": "system",
+    "persisted": true
+  },
+  {
+    "theme": "dark2026",
+    "persisted": true
+  },
+  {
+    "theme": "light2026",
+    "persisted": true
+  },
+  {
+    "theme": "githubDarkDimmed",
+    "persisted": true
+  },
+  {
+    "theme": "oneDarkPro",
+    "persisted": true
+  },
+  {
+    "theme": "dracula",
+    "persisted": true
+  },
+  {
+    "theme": "nord",
+    "persisted": true
+  },
+  {
+    "theme": "dark",
+    "persisted": true
+  },
+  {
+    "theme": "light",
+    "persisted": true
+  }
+]

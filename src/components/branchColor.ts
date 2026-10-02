@@ -1,3 +1,6 @@
+import { isLightTheme } from '../theme';
+import { getEffectiveTheme } from '../theme/useEffectiveTheme';
+
 export const HEAD_COLOR_DARK = '#c9a84c';
 export const HEAD_COLOR_LIGHT = '#8a6914';
 
@@ -34,7 +37,7 @@ export function isPrimaryBranch(name: string): boolean {
 
 export function isDarkTheme(): boolean {
   if (typeof document === 'undefined') return true;
-  return document.documentElement.dataset.theme !== 'light' && !document.body.classList.contains('vscode-light');
+  return !isLightTheme(getEffectiveTheme());
 }
 
 function parseColor(raw: string): [number, number, number] | null {

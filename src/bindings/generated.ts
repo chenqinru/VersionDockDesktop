@@ -90,6 +90,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	selections: RepositoryCommitSelection[],
 } } | { type: "updateSettings"; payload: {
 	settings: DesktopSettings,
+	changed_fields?: string[] | null,
 } } | { type: "updateLayout"; payload: {
 	layout: LayoutState,
 } } | { type: "workspaceOpen"; payload: {

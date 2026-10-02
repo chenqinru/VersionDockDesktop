@@ -1,3 +1,4 @@
+import { useEffectiveTheme } from './theme/useEffectiveTheme';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { WorkspaceChooser } from './components/WorkspaceChooser';
@@ -70,6 +71,8 @@ export function App() {
   const focusFetchRunning = useRef(false);
   const [startupTab] = useState(startupTransferTab);
   const startupTabTransfer = useRef(new URLSearchParams(window.location.search).has('tabTransfer'));
+  // Refresh color helpers throughout the workbench when system appearance changes.
+  useEffectiveTheme();
   const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
   const languagePreference = bootstrap?.state.settings?.language ?? bootstrap?.state.language ?? 'system';
   const uiFontSize = bootstrap?.state.settings?.uiFontSize ?? bootstrap?.state.uiFontSize ?? 'standard';

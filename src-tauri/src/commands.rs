@@ -1215,24 +1215,14 @@ async fn dispatch(
                     .await?,
             )
         }
-        BridgeCommand::UpdateSettings { settings } => {
-            let mut snapshot = state.app.read().await.clone();
-            let previous = snapshot.settings.clone();
-            let settings = settings.normalize();
-            let effects = crate::models::SettingsEffects {
-                rescan_workspace: previous.repository_scan_depth != settings.repository_scan_depth
-                    || previous.ignored_folders != settings.ignored_folders
-                    || previous.exclude_ignored_directories != settings.exclude_ignored_directories,
-                reload_history: previous.maximum_graph_commits != settings.maximum_graph_commits
-                    || previous.hidden_repository_ids != settings.hidden_repository_ids,
-                restart_auto_refresh: previous.auto_refresh_interval
-                    != settings.auto_refresh_interval
-                    || previous.fetch_on_startup != settings.fetch_on_startup,
-            };
-            snapshot.settings = settings.clone();
-            state.save_app_state(snapshot).await?;
-            json(crate::models::SettingsUpdateResult { settings, effects })
-        }
+        BridgeCommand::UpdateSettings {
+            settings,
+            changed_fields,
+        } => json(
+            state
+                .update_settings(settings, changed_fields.as_deref())
+                .await?,
+        ),
         BridgeCommand::UpdateLayout { mut layout } => {
             if layout.file_view_mode != "list" {
                 layout.file_view_mode = "tree".into();
@@ -1243,9 +1233,7 @@ async fn dispatch(
             layout.panel_sizes.commit = layout.panel_sizes.commit.clamp(280, 620);
             layout.panel_sizes.branches = layout.panel_sizes.branches.clamp(120, 400);
             layout.panel_sizes.detail = layout.panel_sizes.detail.clamp(220, 680);
-            let mut snapshot = state.app.read().await.clone();
-            snapshot.layout = layout.clone();
-            state.save_app_state(snapshot).await?;
+            state.update_layout(layout.clone()).await?;
             json(layout)
         }
         BridgeCommand::WorkspaceOpen { paths } => {

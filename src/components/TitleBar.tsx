@@ -1,3 +1,5 @@
+import { isLightTheme } from '../theme';
+import { getEffectiveTheme } from '../theme/useEffectiveTheme';
 import { IconButton } from './IconButton';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -485,7 +487,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         tabName: tab.name,
         tabWidth,
         paths: tab.paths,
-      }, drag.lastPoint, document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+      }, drag.lastPoint, isLightTheme(getEffectiveTheme()) ? 'light' : 'dark');
     };
     // No drag mode is selected until enumeration finishes, even for a fast gesture.
     const modeReady = singleTabWindow

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isLightTheme, resolveTheme } from '.';
+import { applyTheme, isLightTheme, resolveTheme } from '.';
+import { isDarkTheme, currentPalette, PALETTE_LIGHT } from '../components/branchColor';
 
 describe('resolveTheme', () => {
   it('follows the system default to 2026 themes for system preference', () => {
@@ -27,3 +28,8 @@ describe('resolveTheme', () => {
   });
 });
 
+
+it('uses the light branch palette for both light themes', () => {
+  for (const theme of ['light', 'light2026'] as const) { applyTheme(theme); expect(isDarkTheme()).toBe(false); expect(currentPalette()).toBe(PALETTE_LIGHT); }
+  applyTheme('dark2026');
+});

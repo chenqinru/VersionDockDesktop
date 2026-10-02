@@ -1,3 +1,4 @@
+import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { bundledLanguages, codeToTokensBase, type BundledLanguage, type BundledTheme, type ThemeRegistrationRaw, type ThemedToken } from 'shiki';
@@ -568,7 +569,7 @@ export function UnifiedDiffView({
   const [manualView, setManualView] = useState<'split' | 'inline'>();
   const [autoView, setAutoView] = useState<'split' | 'inline'>('split');
   const view = manualView ?? autoView;
-  const [theme, setTheme] = useState<BundledTheme | ThemeRegistrationRaw>(() => resolveShikiTheme(document.documentElement.dataset.theme));
+  const theme = resolveShikiTheme(useEffectiveTheme());
   const [collapsed, setCollapsed] = useState<boolean>(true);
   const [expandedFolds, setExpandedFolds] = useState<Record<string, FoldExpansion>>({});
   const parsed = useMemo(() => parseUnifiedDiff(content, path), [content, path]);
@@ -825,12 +826,7 @@ export function UnifiedDiffView({
     observer.observe(element);
     return () => observer.disconnect();
   }, [splitBreakpoint]);
-  useEffect(() => {
-    if (typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(() => setTheme(resolveShikiTheme(document.documentElement.dataset.theme)));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
+
   useEffect(() => {
     let active = true;
     const pairs = parsed.rows.filter((row): row is Extract<ParsedDiffRow, { kind: 'pair' }> => row.kind === 'pair');

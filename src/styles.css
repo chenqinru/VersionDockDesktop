@@ -1,5 +1,5 @@
 :root,
-:root[data-theme="dark2026"] {
+:root[data-theme="dark2026"], .theme-preview-surface[data-theme="dark2026"] {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --versiondock-ui-font-size: 13px;
   --vscode-font-size: var(--versiondock-ui-font-size);
@@ -78,7 +78,7 @@
   --vscode-textCodeBlock-background: var(--versiondock-input);
 }
 
-:root[data-theme="githubDarkDimmed"] {
+:root[data-theme="githubDarkDimmed"], .theme-preview-surface[data-theme="githubDarkDimmed"] {
   --versiondock-bg: #22272e;
   --versiondock-surface: #1c2128;
   --versiondock-surface-alt: #2d333b;
@@ -96,7 +96,7 @@
   --versiondock-input: #1c2128;
 }
 
-:root[data-theme="oneDarkPro"] {
+:root[data-theme="oneDarkPro"], .theme-preview-surface[data-theme="oneDarkPro"] {
   --versiondock-bg: #282c34;
   --versiondock-surface: #21252b;
   --versiondock-surface-alt: #2c313a;
@@ -114,7 +114,7 @@
   --versiondock-input: #1e2227;
 }
 
-:root[data-theme="dracula"] {
+:root[data-theme="dracula"], .theme-preview-surface[data-theme="dracula"] {
   --versiondock-bg: #282a36;
   --versiondock-surface: #21222c;
   --versiondock-surface-alt: #343746;
@@ -132,7 +132,7 @@
   --versiondock-input: #21222c;
 }
 
-:root[data-theme="nord"] {
+:root[data-theme="nord"], .theme-preview-surface[data-theme="nord"] {
   --versiondock-bg: #2e3440;
   --versiondock-surface: #272c36;
   --versiondock-surface-alt: #3b4252;
@@ -150,7 +150,7 @@
   --versiondock-input: #242933;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"], .theme-preview-surface[data-theme="dark"] {
   --versiondock-bg: #181818;
   --versiondock-surface: #1f1f1f;
   --versiondock-surface-alt: #252525;
@@ -168,7 +168,7 @@
   --versiondock-input: #313131;
 }
 
-:root[data-theme="light2026"] {
+:root[data-theme="light2026"], .theme-preview-surface[data-theme="light2026"] {
   --versiondock-bg: #FFFFFF;
   --versiondock-surface: #FAFAFD;
   --versiondock-surface-alt: #F0F0F3;
@@ -187,7 +187,7 @@
   --vscode-textCodeBlock-background: rgba(0, 0, 0, 0.035);
 }
 
-:root[data-theme="light"] {
+:root[data-theme="light"], .theme-preview-surface[data-theme="light"] {
   --versiondock-bg: #ffffff;
   --versiondock-surface: #f3f3f3;
   --versiondock-surface-alt: #ececec;
@@ -1266,6 +1266,8 @@ body.is-tab-drop-target * {
 
 /* 右侧内容主视窗 */
 .settings-content {
+  container-type: inline-size;
+  container-name: settings-content;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
@@ -1813,391 +1815,33 @@ body.is-tab-drop-target * {
 }
 
 /* 主题分段视觉预览选择器 (第一版经典质感) */
-.settings-theme-row {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-}
-
-.settings-theme-hidden-select {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
-}
-
-.settings-theme-segmented {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  width: 100%;
-}
-
-.settings-theme-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 8px 10px;
-  background: var(--versiondock-input);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-  outline: none;
-}
-
-.settings-theme-card:hover {
-  background: var(--versiondock-hover);
-  transform: translateY(-1px);
-}
-
-.settings-theme-card.active {
-  background: var(--versiondock-selection-background);
-  border-color: var(--versiondock-selection-border);
-}
-
-.settings-theme-mock {
-  width: 100%;
-  height: 64px;
-  border-radius: 6px;
-  border: 1px solid var(--versiondock-border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  position: relative;
-}
-
-.mock-window-bar {
-  height: 13px;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 5px;
-  background: rgba(128, 128, 128, 0.12);
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
-  flex-shrink: 0;
-}
-
-.mock-title-tab {
-  margin-left: 5px;
-  width: 24px;
-  height: 6px;
-  border-radius: 2px;
-  background: rgba(128, 128, 128, 0.22);
-}
-
-.mock-window-content {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  min-height: 0;
-}
-
-.mock-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 5px 3px;
-}
-
-.mock-side-line {
-  height: 2.5px;
-  border-radius: 1.5px;
-  background: rgba(128, 128, 128, 0.22);
-  width: 75%;
-}
-.mock-side-line.active {
-  width: 90%;
-  background: var(--mock-accent, #3794ff);
-}
-
-.mock-main {
-  display: flex;
-  flex-direction: column;
-  gap: 3.5px;
-  padding: 5px 6px;
-  justify-content: center;
-  min-width: 0;
-}
-
-.mock-code-line {
-  display: flex;
-  align-items: center;
-  gap: 2.5px;
-  height: 4px;
-}
-.mock-code-line.indent {
-  padding-left: 6px;
-}
-.mock-code-line.diff-add {
-  background: var(--mock-diff-add, rgba(80, 250, 123, 0.15));
-  border-radius: 2px;
-  margin: 0 -2px;
-  padding-left: 8px;
-}
-
-.mock-code-line span {
-  display: inline-block;
-  height: 3px;
-  border-radius: 1.5px;
-  flex-shrink: 0;
-}
-
-.token-kw { width: 12px; background: var(--token-kw, #ff7b72); }
-.token-fn { width: 16px; background: var(--token-fn, #d2a8ff); }
-.token-punct { width: 3px; background: var(--token-punct, #858889); }
-.token-var { width: 11px; background: var(--token-var, #ffa657); }
-.token-op { width: 4px; background: var(--token-op, #ff7b72); }
-.token-str { width: 20px; background: var(--token-str, #a5d6ff); }
-.token-ret { width: 9px; background: var(--token-ret, #ff7b72); }
-.token-num { width: 7px; background: var(--token-num, #79c0ff); }
-
-/* 系统预览分屏 */
-.mock-system-split {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  min-height: 0;
-}
-.mock-system-split .mock-half {
-  display: grid;
-  grid-template-columns: 16px 1fr;
-  min-height: 0;
-  position: relative;
-}
-.mock-system-split .mock-half.light-half {
-  background: #FFFFFF;
-  border-right: 1px solid #c8c8c8;
-  --mock-accent: #0069CC;
-  --mock-diff-add: rgba(17, 99, 41, 0.14);
-  --token-kw: #cf222e;
-  --token-fn: #8250df;
-  --token-str: #0a3069;
-  --token-ret: #cf222e;
-}
-.mock-system-split .mock-half.light-half .mock-sidebar {
-  background: #FAFAFD;
-  border-right: 1px solid #E4E5E6;
-}
-.mock-system-split .mock-half.dark-half {
-  background: #121314;
-  --mock-accent: #3994BC;
-  --mock-diff-add: rgba(126, 231, 135, 0.15);
-  --token-kw: #ff7b72;
-  --token-fn: #d2a8ff;
-  --token-str: #a5d6ff;
-  --token-ret: #ff7b72;
-}
-.mock-system-split .mock-half.dark-half .mock-sidebar {
-  background: #191A1B;
-  border-right: 1px solid #2A2B2C;
-}
-
-/* 2026 浅色 */
-.theme-preview-light2026 {
-  background: #FFFFFF;
-  --mock-accent: #0069CC;
-  --mock-diff-add: rgba(17, 99, 41, 0.14);
-  --token-kw: #cf222e;
-  --token-fn: #8250df;
-  --token-punct: #606060;
-  --token-var: #953800;
-  --token-op: #cf222e;
-  --token-str: #0a3069;
-  --token-ret: #cf222e;
-  --token-num: #0550ae;
-}
-.theme-preview-light2026 .mock-sidebar { background: #FAFAFD; border-right: 1px solid #E4E5E6; }
-.theme-preview-light2026 .mock-main { background: #FFFFFF; }
-
-/* 2026 深色 */
-.theme-preview-dark2026 {
-  background: #121314;
-  --mock-accent: #3994BC;
-  --mock-diff-add: rgba(126, 231, 135, 0.15);
-  --token-kw: #ff7b72;
-  --token-fn: #d2a8ff;
-  --token-punct: #858889;
-  --token-var: #ffa657;
-  --token-op: #ff7b72;
-  --token-str: #a5d6ff;
-  --token-ret: #ff7b72;
-  --token-num: #79c0ff;
-}
-.theme-preview-dark2026 .mock-sidebar { background: #191A1B; border-right: 1px solid #2A2B2C; }
-.theme-preview-dark2026 .mock-main { background: #121314; }
-
-/* GitHub Dark Dimmed */
-.theme-preview-githubDarkDimmed {
-  background: #22272e;
-  --mock-accent: #539bf5;
-  --mock-diff-add: rgba(87, 171, 90, 0.2);
-  --token-kw: #f47067;
-  --token-fn: #dcbdfb;
-  --token-punct: #768390;
-  --token-var: #f69d50;
-  --token-op: #f47067;
-  --token-str: #96d0ff;
-  --token-ret: #f47067;
-  --token-num: #6cb6ff;
-}
-.theme-preview-githubDarkDimmed .mock-sidebar { background: #1c2128; border-right: 1px solid #444c56; }
-.theme-preview-githubDarkDimmed .mock-main { background: #22272e; }
-
-/* One Dark Pro */
-.theme-preview-oneDarkPro {
-  background: #282c34;
-  --mock-accent: #61afef;
-  --mock-diff-add: rgba(152, 195, 121, 0.2);
-  --token-kw: #c678dd;
-  --token-fn: #61afef;
-  --token-punct: #7f848e;
-  --token-var: #e06c75;
-  --token-op: #56b6c2;
-  --token-str: #98c379;
-  --token-ret: #c678dd;
-  --token-num: #d19a66;
-}
-.theme-preview-oneDarkPro .mock-sidebar { background: #21252b; border-right: 1px solid #3a3f4b; }
-.theme-preview-oneDarkPro .mock-main { background: #282c34; }
-
-/* Dracula */
-.theme-preview-dracula {
-  background: #282a36;
-  --mock-accent: #ff79c6;
-  --mock-diff-add: rgba(80, 250, 123, 0.22);
-  --token-kw: #ff79c6;
-  --token-fn: #50fa7b;
-  --token-punct: #6272a4;
-  --token-var: #bd93f9;
-  --token-op: #ff79c6;
-  --token-str: #f1fa8c;
-  --token-ret: #ff79c6;
-  --token-num: #8be9fd;
-}
-.theme-preview-dracula .mock-sidebar { background: #21222c; border-right: 1px solid #44475a; }
-.theme-preview-dracula .mock-main { background: #282a36; }
-
-/* Nord */
-.theme-preview-nord {
-  background: #2e3440;
-  --mock-accent: #88c0d0;
-  --mock-diff-add: rgba(163, 190, 140, 0.22);
-  --token-kw: #81a1c1;
-  --token-fn: #88c0d0;
-  --token-punct: #616e88;
-  --token-var: #8fbcbb;
-  --token-op: #81a1c1;
-  --token-str: #a3be8c;
-  --token-ret: #81a1c1;
-  --token-num: #b48ead;
-}
-.theme-preview-nord .mock-sidebar { background: #272c36; border-right: 1px solid #434c5e; }
-.theme-preview-nord .mock-main { background: #2e3440; }
-
-/* 经典深色 */
-.theme-preview-dark {
-  background: #1e1e1e;
-  --mock-accent: #007acc;
-  --mock-diff-add: rgba(78, 201, 176, 0.18);
-  --token-kw: #569cd6;
-  --token-fn: #dcdcaa;
-  --token-punct: #808080;
-  --token-var: #9cdcfe;
-  --token-op: #d4d4d4;
-  --token-str: #ce9178;
-  --token-ret: #c586c0;
-  --token-num: #b5cea8;
-}
-.theme-preview-dark .mock-sidebar { background: #252526; border-right: 1px solid #333333; }
-.theme-preview-dark .mock-main { background: #1e1e1e; }
-
-/* 经典浅色 */
-.theme-preview-light {
-  background: #ffffff;
-  --mock-accent: #007acc;
-  --mock-diff-add: rgba(22, 130, 93, 0.14);
-  --token-kw: #0000ff;
-  --token-fn: #795e26;
-  --token-punct: #808080;
-  --token-var: #001080;
-  --token-op: #000000;
-  --token-str: #a31515;
-  --token-ret: #af00db;
-  --token-num: #098658;
-}
-.theme-preview-light .mock-sidebar { background: #f3f3f3; border-right: 1px solid #d4d4d4; }
-.theme-preview-light .mock-main { background: #ffffff; }
-
-.settings-theme-caption {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-  color: var(--versiondock-text);
-}
-
-/* 文件图标主题选择器卡片 */
-.settings-file-icon-segmented {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  width: 100%;
-}
-
-.settings-file-icon-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--versiondock-input);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-  outline: none;
-}
-
-.settings-file-icon-card:hover {
-  background: var(--versiondock-hover);
-  transform: translateY(-1px);
-}
-
-.settings-file-icon-card.active {
-  background: var(--versiondock-selection-background);
-  border-color: var(--versiondock-selection-border);
-}
-
-.settings-file-icon-mock {
-  width: 100%;
-  height: 48px;
-  border-radius: 6px;
-  border: 1px solid var(--versiondock-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  background: var(--versiondock-surface);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-  padding: 0 12px;
-}
-
-.settings-file-icon-caption {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-  color: var(--versiondock-text);
+/* Preview surfaces share the real root theme tokens defined above. */
+.settings-theme-segmented, .settings-file-icon-segmented { display: grid; gap: 8px; padding: 10px 12px; }
+.settings-theme-segmented { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.settings-file-icon-segmented { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-preview-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 7px; border: 1px solid var(--versiondock-border); border-radius: 5px; text-align: left; }
+.settings-preview-card:hover, .settings-preview-card.active { background: var(--versiondock-selection-background); }
+.settings-preview-card.active { border-color: var(--versiondock-selection-border); box-shadow: inset 0 0 0 1px var(--versiondock-selection-border); }
+.settings-preview-card:focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
+.settings-preview-content { min-width: 0; width: 100%; }
+.settings-preview-caption { min-width: 0; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.35; }
+.theme-preview-surface { height: 42px; display: flex; overflow: hidden; border: 1px solid var(--versiondock-border); border-radius: 3px; color: var(--versiondock-text); background: var(--versiondock-bg); }
+.theme-sample-sidebar { flex: 0 0 20px; padding: 3px; display: flex; flex-direction: column; gap: 3px; background: var(--versiondock-surface); border-right: 1px solid var(--versiondock-border); color: var(--versiondock-muted); }
+.theme-sample-sidebar .codicon { font-size: 10px; }
+.theme-sample-sidebar > span { height: 5px; background: var(--versiondock-surface-alt); }
+.theme-sample-sidebar > span.active { background: var(--versiondock-hover); }
+.theme-preview-surface pre { min-width: 0; margin: 0; padding: 6px 4px; font: 8px/14px var(--versiondock-code); white-space: pre; }
+.theme-preview-surface code { display: block; }
+.theme-sample-system { display: grid; grid-template-columns: 1fr 1fr; }
+.theme-sample-system .theme-sample-sidebar { flex-basis: 14px; }
+.settings-icon-samples { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 4px; padding: 5px 2px; background: var(--versiondock-surface); }
+.settings-icon-samples > span { min-width: 0; display: flex; align-items: center; gap: 4px; }
+.settings-icon-samples small { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); }
+.settings-icon-samples .file-type-icon, .settings-icon-samples .file-type-icon svg { width: 20px; height: 20px; flex: 0 0 20px; }
+.settings-icon-samples .file-type-icon .codicon { font-size: 20px; }
+@container settings-content (max-width: 430px) {
+  .settings-theme-segmented { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-file-icon-segmented { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* 仓库列表管理卡片 */
@@ -7785,3 +7429,9 @@ button.notification-item-action-btn:focus-visible {
 .source-code-view mark { padding: 0; background: var(--versiondock-hover); outline: 1px solid var(--versiondock-selection-border); }
 .source-code-view mark.current { background: var(--versiondock-selection-background); outline-width: 2px; }
 .source-code-workspace .detail-file-search input:focus-visible { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); }
+
+:root:is([data-theme="light"], [data-theme="light2026"]) .file-type-icon:is(.tone-javascript, .tone-json) { color: #8a7100; }
+:root:is([data-theme="light"], [data-theme="light2026"]) .file-type-icon.tone-rust { color: #92542d; }
+:root:is([data-theme="light"], [data-theme="light2026"]) .file-type-icon.tone-code { color: #2468a4; }
+:root:is([data-theme="light"], [data-theme="light2026"]) .file-type-icon.tone-markdown { color: #2468a4; }
+:root:is([data-theme="light"], [data-theme="light2026"]) .file-type-icon.tone-shell { color: #3f7224; }

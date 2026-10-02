@@ -50,27 +50,17 @@ describe('SettingsPanel', () => {
   it('changes theme, language, and file view immediately', () => {
     renderPanel();
 
-    const themeSelect = screen.getByRole('combobox', { name: 'Theme' });
-    expect(Array.from(themeSelect.querySelectorAll('option')).map((option) => option.value)).toEqual([
-      'system',
-      'dark2026',
-      'light2026',
-      'githubDarkDimmed',
-      'oneDarkPro',
-      'dracula',
-      'nord',
-      'dark',
-      'light',
-    ]);
-    fireEvent.change(themeSelect, { target: { value: 'githubDarkDimmed' } });
+    const themes = screen.getByRole('radiogroup', { name: 'Theme' });
+    expect(themes.querySelectorAll('[role="radio"]')).toHaveLength(9);
+    expect(screen.queryByRole('combobox', { name: 'Theme' })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: 'GitHub Dark Dimmed' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'zhCn' } });
     const fontSize = screen.getByRole('combobox', { name: 'UI font size' });
     expect(Array.from(fontSize.querySelectorAll('option')).map((option) => option.value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
     fireEvent.change(fontSize, { target: { value: 'maximum' } });
 
-    const fileIconThemeSelect = screen.getByRole('combobox', { name: 'File icon theme' });
-    expect(Array.from(fileIconThemeSelect.querySelectorAll('option')).map((option) => option.value)).toEqual(['material', 'catppuccin', 'seti', 'codicon']);
-    fireEvent.change(fileIconThemeSelect, { target: { value: 'catppuccin' } });
+    expect(screen.getByRole('radiogroup', { name: 'File icon theme' }).querySelectorAll('[role="radio"]')).toHaveLength(4);
+    fireEvent.click(screen.getByRole('radio', { name: 'Catppuccin Icons (Soft & Modern)' }));
 
     // 切换至 Changes and commit 分类
     fireEvent.click(screen.getByRole('link', { name: 'Changes and commit' }));
@@ -80,9 +70,9 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ fileViewMode: 'list' });
   });
 
-  it('does not steal focus from a select when the parent rerenders', () => {
+  it('does not steal focus from a theme card when the parent rerenders', () => {
     const { rerender } = renderPanel();
-    const theme = screen.getByRole('combobox', { name: 'Theme' });
+    const theme = screen.getByRole('radio', { name: 'System (Default 2026)' });
     theme.focus();
     expect(theme).toHaveFocus();
 

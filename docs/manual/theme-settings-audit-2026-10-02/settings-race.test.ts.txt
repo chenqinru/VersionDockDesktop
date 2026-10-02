@@ -1,0 +1,36 @@
+import { afterEach, expect, it } from 'vitest';
+import type { BootstrapData, DesktopSettings, SettingsUpdateResult } from '../bindings/generated';
+import { MockBridge } from '../platform/bridge';
+import { useAppStore } from './appStore';
+
+const original = useAppStore.getState();
+const bootstrap = { state: { settings: { theme: 'dark2026', fileIconTheme: 'material' } }, capabilities: {}, tools: {} } as BootstrapData;
+afterEach(() => useAppStore.setState(original, true));
+it('demonstrates an older theme response overwriting a newer icon choice', async () => {
+  const pending: Array<{ settings: DesktopSettings; done: (value: SettingsUpdateResult) => void }> = [];
+  const bridge = new MockBridge((command) => {
+    if (command.type !== 'updateSettings') return true;
+    return new Promise<SettingsUpdateResult>((done) => pending.push({ settings: command.payload.settings, done }));
+  });
+  useAppStore.setState({ bridge, bootstrap, snapshot: undefined });
+  const first = useAppStore.getState().setTheme('dracula');
+  const second = useAppStore.getState().setFileIconTheme('seti');
+  expect(useAppStore.getState().bootstrap?.state.settings?.fileIconTheme).toBe('seti');
+  const effects = { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: false };
+  pending[1].done({ settings: pending[1].settings, effects }); await second;
+  pending[0].done({ settings: pending[0].settings, effects }); await first;
+  expect(useAppStore.getState().bootstrap?.state.settings?.fileIconTheme).toBe('material');
+});
+it('demonstrates a stale failed save rolling back a successfully saved later choice', async () => {
+  const pending: Array<{ settings: DesktopSettings; done: (value: SettingsUpdateResult) => void; fail: (error: Error) => void }> = [];
+  const bridge = new MockBridge((command) => {
+    if (command.type !== 'updateSettings') return true;
+    return new Promise<SettingsUpdateResult>((done, fail) => pending.push({ settings: command.payload.settings, done, fail }));
+  });
+  useAppStore.setState({ bridge, bootstrap, snapshot: undefined });
+  const first = useAppStore.getState().setTheme('dracula');
+  const second = useAppStore.getState().setFileIconTheme('seti');
+  pending[1].done({ settings: pending[1].settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: false } }); await second;
+  pending[0].fail(new Error('Controlled failure')); await first;
+  expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'dark2026', fileIconTheme: 'material' });
+});

@@ -1,0 +1,180 @@
+7 AXStaticText 958 232 25 17   设置
+7 AXButton 1353 229 24 24 关闭 关闭 
+7 AXTextField 541 273 189 29 搜索设置… 搜索设置… 
+9 AXStaticText 576 320 24 15   外观
+9 AXStaticText 576 354 58 15   更改与提交
+9 AXStaticText 576 388 81 15   提交与安全防御
+9 AXStaticText 576 422 81 15   分支与推送防护
+9 AXStaticText 576 456 93 15   更新项目与子模块
+9 AXStaticText 576 490 81 15   差异对比与搁置
+9 AXStaticText 576 524 58 15   刷新与启动
+9 AXStaticText 576 558 58 15   仓库与历史
+9 AXStaticText 576 592 58 15   外部编辑器
+9 AXStaticText 576 626 58 15   账号与隐私
+9 AXStaticText 576 660 58 15   关于与更新
+8 AXStaticText 776 283 24 16   主题
+8 AXStaticText 776 300 61 13   选择应用主题
+9 AXRadioButton 774 331 184 79 跟随系统（默认 2026） 跟随系统（默认 2026） 0
+9 AXRadioButton 965 331 185 79 2026 深色 2026 深色 0
+9 AXRadioButton 1157 331 185 79 2026 浅色 2026 浅色 1
+9 AXRadioButton 774 417 184 79 GitHub Dark Dimmed GitHub Dark Dimmed 0
+9 AXRadioButton 965 417 185 79 One Dark Pro One Dark Pro 0
+9 AXRadioButton 1157 417 185 79 Dracula Dracula 0
+9 AXRadioButton 774 503 184 79 Nord Nord 0
+9 AXRadioButton 965 503 185 79 经典深色 经典深色 0
+9 AXRadioButton 1157 503 185 79 经典浅色 经典浅色 0
+8 AXStaticText 776 615 70 16   文件图标主题
+8 AXStaticText 776 632 101 13   选择文件图标主题风格
+9 AXRadioButton 774 663 280 95 Material Icons（默认推荐） Material Icons（默认推荐） 0
+9 AXRadioButton 1061 663 281 95 Catppuccin Icons（柔和淡雅） Catppuccin Icons（柔和淡雅） 0
+9 AXRadioButton 774 765 280 95 Seti / Minimal（极简克制） Seti / Minimal（极简克制） 1
+9 AXRadioButton 1061 765 281 95 Codicon（经典线性） Codicon（经典线性） 0
+8 AXStaticText 776 893 58 16   语言与字号
+9 AXStaticText 776 925 24 16   语言
+8 AXStaticText 776 944 61 13   选择应用语言
+8 AXPopUpButton 115 65 0 0 语言 语言 简体中文
+8 AXPopUpButton 1199 927 140 29 简体中文  
+9 AXStaticText 776 974 39 16   UI 字号
+8 AXStaticText 776 993 81 13   选择应用界面字号
+8 AXPopUpButton 115 65 0 0 UI 字号 UI 字号 标准
+8 AXPopUpButton 1199 976 140 29 标准  
+2 AXButton 128 77 16 16   
+2 AXButton 168 77 16 16   
+2 AXButton 148 77 16 16   
+4 AXMenuItem 0 1080 0 0 关于本机  
+4 AXMenuItem 0 1080 0 0 系统信息  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 系统设置…  
+4 AXMenuItem 0 1080 0 0 App Store…, 4项更新  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 最近使用的项目  
+6 AXMenuItem 0 1080 0 0 应用程序  
+6 AXMenuItem 0 1080 0 0 微信.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“微信.app”  
+6 AXMenuItem 0 1080 0 0 系统设置.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“系统设置.app”  
+6 AXMenuItem 0 1080 0 0 照片.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“照片.app”  
+6 AXMenuItem 0 1080 0 0 Antigravity.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Antigravity.app”  
+6 AXMenuItem 0 1080 0 0 AppPorts.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“AppPorts.app”  
+6 AXMenuItem 0 1080 0 0 ChatGPT.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“ChatGPT.app”  
+6 AXMenuItem 0 1080 0 0 Google Chrome.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Google Chrome.app”  
+6 AXMenuItem 0 1080 0 0 VersionDockCommitQA.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockCommitQA.app”  
+6 AXMenuItem 0 1080 0 0 VersionDockHistoryQA.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockHistoryQA.app”  
+6 AXMenuItem 0 1080 0 0 Visual Studio Code.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Visual Studio Code.app”  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 文稿  
+6 AXMenuItem 0 1080 0 0 BranchMenuPopover.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“BranchMenuPopover.tsx”  
+6 AXMenuItem 0 1080 0 0 club-management2  
+6 AXMenuItem 0 1080 0 0 在访达中显示“club-management2”  
+6 AXMenuItem 0 1080 0 0 docker-stack  
+6 AXMenuItem 0 1080 0 0 在访达中显示“docker-stack”  
+6 AXMenuItem 0 1080 0 0 k8s-nic  
+6 AXMenuItem 0 1080 0 0 在访达中显示“k8s-nic”  
+6 AXMenuItem 0 1080 0 0 nic  
+6 AXMenuItem 0 1080 0 0 在访达中显示“nic”  
+6 AXMenuItem 0 1080 0 0 README.md  
+6 AXMenuItem 0 1080 0 0 在访达中显示“README.md”  
+6 AXMenuItem 0 1080 0 0 social-pratice2  
+6 AXMenuItem 0 1080 0 0 在访达中显示“social-pratice2”  
+6 AXMenuItem 0 1080 0 0 TitleBar.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“TitleBar.tsx”  
+6 AXMenuItem 0 1080 0 0 tjhy  
+6 AXMenuItem 0 1080 0 0 在访达中显示“tjhy”  
+6 AXMenuItem 0 1080 0 0 VersionDockDesktop  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockDesktop”  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 服务器  
+6 AXMenuItem 0 1080 0 0 Macintosh HD  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 清除菜单  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 强制退出…  
+4 AXMenuItem 0 1080 0 0 强制退出“VersionDock History QA”  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 睡眠  
+4 AXMenuItem 0 1080 0 0 重新启动…  
+4 AXMenuItem 0 1080 0 0 重新启动  
+4 AXMenuItem 0 1080 0 0 关机…  
+4 AXMenuItem 0 1080 0 0 关机  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 锁定屏幕  
+4 AXMenuItem 0 1080 0 0 退出登录“陈沁如”…  
+4 AXMenuItem 0 1080 0 0 退出登录“陈沁如”  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 About VersionDock History QA  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Services  
+6 AXMenuItem 0 1080 0 0 No Services Apply  
+6 AXMenuItem 0 1080 0 0 Services Settings…  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Hide VersionDock History QA  
+4 AXMenuItem 0 1080 0 0 Hide Others  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Quit VersionDock History QA  
+4 AXMenuItem 0 1080 0 0 Quit and Keep Windows  
+4 AXMenuItem 0 1080 0 0 Close Window  
+4 AXMenuItem 0 1080 0 0 Close All  
+4 AXMenuItem 0 1080 0 0 Undo  
+4 AXMenuItem 0 1080 0 0 Redo  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Cut  
+4 AXMenuItem 0 1080 0 0 Copy  
+4 AXMenuItem 0 1080 0 0 Paste  
+4 AXMenuItem 0 1080 0 0 Select All  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 AutoFill  
+6 AXMenuItem 0 1080 0 0 Contact…  
+6 AXMenuItem 0 1080 0 0 Passwords…  
+4 AXMenuItem 0 1080 0 0 Start Dictation…  
+4 AXMenuItem 0 1080 0 0 Emoji & Symbols  
+4 AXMenuItem 0 1080 0 0 Toggle Full Screen  
+4 AXMenuItem 0 1080 0 0 Minimize  
+4 AXMenuItem 0 1080 0 0 Minimize All  
+4 AXMenuItem 0 1080 0 0 Zoom  
+4 AXMenuItem 0 1080 0 0 Zoom All  
+4 AXMenuItem 0 1080 0 0 Fill  
+4 AXMenuItem 0 1080 0 0 Center  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Move & Resize  
+6 AXMenuItem 0 1080 0 0 Halves  
+6 AXMenuItem 0 1080 0 0 Left  
+6 AXMenuItem 0 1080 0 0 Right  
+6 AXMenuItem 0 1080 0 0 Top  
+6 AXMenuItem 0 1080 0 0 Bottom  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Quarters  
+6 AXMenuItem 0 1080 0 0 Top Left  
+6 AXMenuItem 0 1080 0 0 Top Right  
+6 AXMenuItem 0 1080 0 0 Bottom Left  
+6 AXMenuItem 0 1080 0 0 Bottom Right  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Arrange  
+6 AXMenuItem 0 1080 0 0 Left & Right  
+6 AXMenuItem 0 1080 0 0 Left & Quarters  
+6 AXMenuItem 0 1080 0 0 Right & Left  
+6 AXMenuItem 0 1080 0 0 Right & Quarters  
+6 AXMenuItem 0 1080 0 0 Top & Bottom  
+6 AXMenuItem 0 1080 0 0 Top & Quarters  
+6 AXMenuItem 0 1080 0 0 Bottom & Top  
+6 AXMenuItem 0 1080 0 0 Bottom & Quarters  
+6 AXMenuItem 0 1080 0 0 Quarters  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Return to Previous Size  
+4 AXMenuItem 0 1080 0 0 Full Screen Tile  
+6 AXMenuItem 0 1080 0 0 Left of Screen  
+6 AXMenuItem 0 1080 0 0 Right of Screen  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Remove Window from Set  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Close Window  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0    

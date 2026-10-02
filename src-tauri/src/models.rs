@@ -138,6 +138,8 @@ pub enum BridgeCommand {
     },
     UpdateSettings {
         settings: DesktopSettings,
+        #[serde(default)]
+        changed_fields: Option<Vec<String>>,
     },
     UpdateLayout {
         layout: LayoutState,

@@ -1,6 +1,7 @@
+import { adaptLightPalette } from './lightPalette';
 import type { FileIconTheme, IconResult } from './types';
 import { materialResolver } from './material';
-import { catppuccinResolver } from './catppuccin';
+import { catppuccinResolver, catppuccinLightIcon } from './catppuccin';
 import { setiResolver } from './seti';
 import { codiconResolver } from './codicon';
 
@@ -11,16 +12,24 @@ export function resolveFileIcon(
   isFolder = false,
   isOpen = false,
   theme: FileIconTheme = 'material',
+  light = false,
 ): IconResult {
   switch (theme) {
-    case 'catppuccin':
-      return catppuccinResolver.resolve(name, isFolder, isOpen);
-    case 'seti':
-      return setiResolver.resolve(name, isFolder, isOpen);
+    case 'catppuccin': {
+      const result = catppuccinResolver.resolve(name, isFolder, isOpen);
+      return light && result.type === 'svg' ? { ...result, svg: catppuccinLightIcon(result.svg) } : result;
+    }
+    case 'seti': {
+      const result = setiResolver.resolve(name, isFolder, isOpen);
+      return light && result.type === 'svg' ? { ...result, svg: adaptLightPalette(result.svg, 'seti') } : result;
+    }
     case 'codicon':
       return codiconResolver.resolve(name, isFolder, isOpen);
     case 'material':
     default:
-      return materialResolver.resolve(name, isFolder, isOpen);
+      {
+        const result = materialResolver.resolve(name, isFolder, isOpen);
+        return light && result.type === 'svg' ? { ...result, svg: adaptLightPalette(result.svg, 'material') } : result;
+      }
   }
 }

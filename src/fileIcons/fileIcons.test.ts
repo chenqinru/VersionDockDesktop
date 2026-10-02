@@ -47,3 +47,22 @@ describe('fileIcons resolver', () => {
     }
   });
 });
+
+it('adapts Catppuccin to Latte in light mode without changing shapes', () => {
+  const dark = resolveFileIcon('app.js', false, false, 'catppuccin');
+  const light = resolveFileIcon('app.js', false, false, 'catppuccin', true);
+  expect(dark.type).toBe('svg'); expect(light.type).toBe('svg');
+  if (dark.type === 'svg' && light.type === 'svg') {
+    expect(light.svg).toContain('#df8e1d'); expect(light.svg).not.toContain('#f9e2af');
+    expect(light.svg.replace(/#[0-9a-f]{6}/g, 'COLOR')).toBe(dark.svg.replace(/#[0-9a-f]{6}/g, 'COLOR'));
+  }
+});
+
+it.each(['material', 'seti'] as const)('preserves %s SVG paths when improving light-mode colors', (theme) => {
+  const dark = resolveFileIcon('app.js', false, false, theme);
+  const light = resolveFileIcon('app.js', false, false, theme, true);
+  if (dark.type === 'svg' && light.type === 'svg') {
+    expect(light.svg).not.toBe(dark.svg);
+    expect(light.svg.replace(/#[0-9a-f]{6}/gi, 'COLOR')).toBe(dark.svg.replace(/#[0-9a-f]{6}/gi, 'COLOR'));
+  } else { throw new Error('Expected SVG icons'); }
+});
