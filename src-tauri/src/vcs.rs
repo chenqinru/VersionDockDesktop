@@ -309,7 +309,11 @@ fn literal_path(root: &Path, value: &str, include_leaf: bool) -> Result<String, 
 
 fn relative_path(root: &Path, value: &str, include_leaf: bool) -> Result<String, DesktopError> {
     safe_relative(root, value, include_leaf)?;
-    Ok(value.replace('\\', "/"))
+    Ok(if cfg!(windows) {
+        value.replace('\\', "/")
+    } else {
+        value.to_string()
+    })
 }
 
 fn option_like(value: &str) -> bool {
@@ -1167,29 +1171,55 @@ pub async fn diff(
                 "-U999999".into(),
             ];
             if from_revision.is_some() || to_revision.is_some() {
-                let from = from_revision.ok_or_else(|| {
+                let from = from_revision.as_deref().ok_or_else(|| {
                     DesktopError::new(
                         "INVALID_REVISION_RANGE",
                         "Both range revisions are required",
                         false,
                     )
                 })?;
-                let to = to_revision.ok_or_else(|| {
+                let to = to_revision.as_deref().ok_or_else(|| {
                     DesktopError::new(
                         "INVALID_REVISION_RANGE",
                         "Both range revisions are required",
                         false,
                     )
                 })?;
-                validate_svn_revision(&from)?;
-                validate_svn_revision(&to)?;
+                validate_svn_revision(from)?;
+                validate_svn_revision(to)?;
                 args.extend(["-r".into(), format!("{from}:{to}")]);
             } else if let Some(ref value) = revision {
                 validate_svn_revision(value)?;
                 args.extend(["-c".into(), value.clone()]);
             }
-            args.extend(["--".into(), safe.clone()]);
-            match svn(args, repo, token).await {
+            let historical_path = if to_revision.is_some() || revision.is_some() {
+                svn_repository_path(repo, &safe, token).await?
+            } else {
+                safe.clone()
+            };
+            let target = to_revision
+                .as_deref()
+                .or(revision.as_deref())
+                .map(|value| format!("{historical_path}@{value}"))
+                .unwrap_or_else(|| safe.clone());
+            args.extend(["--".into(), target]);
+            let mut output = svn(args.clone(), repo, token).await;
+            if output.is_err() {
+                let base = from_revision.clone().or_else(|| {
+                    revision
+                        .as_deref()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .and_then(|value| value.checked_sub(1))
+                        .map(|value| value.to_string())
+                });
+                if let Some(base) = base {
+                    // A deleted path cannot be pegged to its deletion revision.
+                    args.pop();
+                    args.push(format!("{historical_path}@{base}"));
+                    output = svn(args, repo, token).await;
+                }
+            }
+            match output {
                 Ok(out) => out,
                 Err(err) => {
                     if let Some(rev) = revision.as_deref() {
@@ -1237,13 +1267,14 @@ pub async fn diff(
             }
             VcsKind::Svn if target_revision.is_some() => {
                 let revision = target_revision.as_deref().unwrap_or_default();
+                let target = svn_repository_path(repo, &safe, token).await?;
                 svn(
                     vec![
                         "cat".into(),
                         "-r".into(),
                         revision.into(),
                         "--".into(),
-                        format!("{safe}@{revision}"),
+                        format!("{target}@{revision}"),
                     ],
                     repo,
                     token,
@@ -2390,11 +2421,12 @@ pub async fn file_history(
                     "--find-copies=1%".into(),
                     "--find-copies-harder".into(),
                     "--name-status".into(),
+                    "-z".into(),
                     format!("--format={format}"),
                     format!("--max-count={}", skip + limit + 1),
                     cursor.anchor_revision.clone(),
                     "--".into(),
-                    path.clone(),
+                    format!(":(literal){path}"),
                 ],
                 repo,
                 token,
@@ -2441,57 +2473,11 @@ pub async fn file_history(
             )
             .await?
             .stdout_text();
-            let document = roxmltree::Document::parse(&output)
-                .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
-            let mut entries = Vec::new();
-            for node in document
-                .descendants()
-                .filter(|node| node.has_tag_name("logentry"))
-            {
-                let revision = node.attribute("revision").unwrap_or_default().to_string();
-                if revision.is_empty() {
-                    continue;
-                }
-                let author = node
-                    .children()
-                    .find(|item| item.has_tag_name("author"))
-                    .and_then(|item| item.text())
-                    .unwrap_or_default()
-                    .to_string();
-                let date = node
-                    .children()
-                    .find(|item| item.has_tag_name("date"))
-                    .and_then(|item| item.text())
-                    .unwrap_or_default()
-                    .to_string();
-                let message = node
-                    .children()
-                    .find(|item| item.has_tag_name("msg"))
-                    .and_then(|item| item.text())
-                    .unwrap_or_default()
-                    .to_string();
-                let changed = node
-                    .descendants()
-                    .find(|item| item.has_tag_name("path") && item.text().is_some());
-                let status = changed
-                    .and_then(|item| item.attribute("action"))
-                    .unwrap_or("M")
-                    .to_string();
-                entries.push(FileHistoryEntry {
-                    previous_revision: revision
-                        .parse::<u64>()
-                        .ok()
-                        .and_then(|value| value.checked_sub(1))
-                        .map(|value| value.to_string()),
-                    revision,
-                    path: path.clone(),
-                    previous_path: None,
-                    author,
-                    date,
-                    message,
-                    status,
-                });
-            }
+            // Log paths are repository-relative, including after a file or
+            // containing directory was copied/renamed. Resolve them against
+            // the checkout prefix instead of assigning today's filename.
+            let prefix = svn_checkout_prefix(repo, token).await?;
+            let mut entries = parse_svn_file_history(&output, &path, &prefix)?;
             if skip > 0 {
                 entries.drain(..entries.len().min(skip as usize));
             }
@@ -2515,32 +2501,45 @@ pub async fn file_history(
 fn parse_git_file_history(output: &str, initial_path: &str) -> Vec<FileHistoryEntry> {
     let mut entries = Vec::new();
     let mut current_path = initial_path.to_string();
-    for record in output
-        .split(RECORD)
-        .filter(|value| !value.trim().is_empty())
-    {
-        let mut lines = record.trim().lines();
-        let Some(header) = lines.next() else {
+    let mut records = output.split('\0').peekable();
+    while let Some(record) = records.next() {
+        let Some(header) = record.trim_start_matches(['\n', '\r']).strip_prefix(RECORD) else {
             continue;
         };
-        let fields = header.split(FIELD).collect::<Vec<_>>();
+        let fields = header.splitn(5, FIELD).collect::<Vec<_>>();
         if fields.len() < 5 {
             continue;
         }
-        let changed = lines.find(|line| !line.trim().is_empty()).unwrap_or("M");
-        let parts = changed.split('\t').collect::<Vec<_>>();
-        let status = parts.first().copied().unwrap_or("M").to_string();
-        let moved_or_copied =
-            if (status.starts_with('R') || status.starts_with('C')) && parts.len() >= 3 {
-                Some((parts[1], parts[2]))
-            } else {
-                None
-            };
-        let path_at_revision = moved_or_copied
-            .map(|(_, next)| next.to_string())
-            .or_else(|| parts.get(1).map(|value| (*value).to_string()))
-            .unwrap_or_else(|| current_path.clone());
-        let previous_path = moved_or_copied.map(|(previous, _)| previous.to_string());
+        let has_change = records.peek().is_some_and(|value| {
+            !value.trim_start_matches(['\n', '\r']).starts_with(RECORD) && !value.is_empty()
+        });
+        let status = if has_change {
+            records
+                .next()
+                .unwrap_or("M")
+                .trim_start_matches(['\n', '\r'])
+                .to_string()
+        } else {
+            "M".to_string()
+        };
+        let first_path = if has_change {
+            records.next().filter(|path| !path.is_empty())
+        } else {
+            None
+        };
+        let moved_or_copied = status.starts_with('R') || status.starts_with('C');
+        let previous_path = if moved_or_copied {
+            first_path.map(str::to_string)
+        } else {
+            None
+        };
+        let path_at_revision = if moved_or_copied {
+            records.next().filter(|path| !path.is_empty())
+        } else {
+            first_path
+        }
+        .map(str::to_string)
+        .unwrap_or_else(|| current_path.clone());
         entries.push(FileHistoryEntry {
             revision: fields[0].to_string(),
             previous_revision: fields[1].split_whitespace().next().map(str::to_string),
@@ -2554,6 +2553,155 @@ fn parse_git_file_history(output: &str, initial_path: &str) -> Vec<FileHistoryEn
         current_path = previous_path.unwrap_or(path_at_revision);
     }
     entries
+}
+
+async fn svn_checkout_prefix(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    let output = svn(
+        vec!["info".into(), "--xml".into(), "--".into(), ".".into()],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let info = roxmltree::Document::parse(&output)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    Ok(info
+        .descendants()
+        .find(|node| node.has_tag_name("relative-url"))
+        .and_then(|node| node.text())
+        .map(|value| decode_svn_path(value.trim_start_matches('^').trim_matches('/')))
+        .unwrap_or_default())
+}
+
+async fn svn_repository_path(
+    repo: &RepositoryMeta,
+    path: &str,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    let repository_path = if let Some(path) = path.strip_prefix("^/") {
+        format!("/{path}")
+    } else {
+        format!("/{}/{}", svn_checkout_prefix(repo, token).await?, path).replace("//", "/")
+    };
+    let mut url = url::Url::parse("https://svn.invalid/").expect("valid constant URL");
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .expect("constant URL supports paths");
+        segments.clear();
+        for segment in repository_path.trim_start_matches('/').split('/') {
+            segments.push(segment);
+        }
+    }
+    Ok(format!("^{}", url.path()))
+}
+
+fn parse_svn_file_history(
+    output: &str,
+    initial_path: &str,
+    checkout_prefix: &str,
+) -> Result<Vec<FileHistoryEntry>, DesktopError> {
+    let document = roxmltree::Document::parse(output)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let mut current_path = if let Some(path) = initial_path.strip_prefix("^/") {
+        format!("/{path}")
+    } else {
+        format!("/{}/{}", checkout_prefix.trim_matches('/'), initial_path).replace("//", "/")
+    };
+    let local_path = |value: &str| -> String {
+        let prefix = if checkout_prefix.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}/", checkout_prefix.trim_matches('/'))
+        };
+        value
+            .strip_prefix(&prefix)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("^{value}"))
+    };
+    let mut entries = Vec::new();
+    for node in document
+        .descendants()
+        .filter(|node| node.has_tag_name("logentry"))
+    {
+        let revision = node.attribute("revision").unwrap_or_default();
+        if revision.is_empty() {
+            continue;
+        }
+        let changed = node
+            .descendants()
+            .filter(|item| item.has_tag_name("path"))
+            .filter(|item| {
+                item.text().is_some_and(|value| {
+                    value == current_path
+                        || item.attribute("kind") == Some("dir")
+                            && current_path.starts_with(&format!("{value}/"))
+                })
+            })
+            .max_by_key(|item| item.text().unwrap_or_default().len());
+        let action = changed
+            .and_then(|item| item.attribute("action"))
+            .unwrap_or("M");
+        let copy_from = changed.and_then(|item| item.attribute("copyfrom-path"));
+        let previous_path = copy_from.map(|source| {
+            let changed_path = changed.and_then(|item| item.text()).unwrap_or_default();
+            format!(
+                "{source}{}",
+                current_path.strip_prefix(changed_path).unwrap_or_default()
+            )
+        });
+        let previous_revision = if action == "A" && copy_from.is_none() {
+            None
+        } else {
+            changed
+                .and_then(|item| item.attribute("copyfrom-rev"))
+                .map(str::to_string)
+                .or_else(|| {
+                    revision
+                        .parse::<u64>()
+                        .ok()
+                        .and_then(|value| value.checked_sub(1))
+                        .map(|value| value.to_string())
+                })
+        };
+        let status = if let Some(source) = copy_from {
+            if node.descendants().any(|item| {
+                item.has_tag_name("path")
+                    && item.attribute("action") == Some("D")
+                    && item.text() == Some(source)
+            }) {
+                "R"
+            } else {
+                "C"
+            }
+        } else {
+            action
+        };
+        let text = |tag: &str| {
+            node.children()
+                .find(|item| item.has_tag_name(tag))
+                .and_then(|item| item.text())
+                .unwrap_or_default()
+                .to_string()
+        };
+        entries.push(FileHistoryEntry {
+            revision: revision.to_string(),
+            previous_revision,
+            path: local_path(&current_path),
+            previous_path: previous_path.as_deref().map(local_path),
+            author: text("author"),
+            date: text("date"),
+            message: text("msg"),
+            status: status.to_string(),
+        });
+        if let Some(previous) = previous_path {
+            current_path = previous;
+        }
+    }
+    Ok(entries)
 }
 
 pub async fn file_revision_content(
@@ -2598,13 +2746,14 @@ pub async fn file_revision_content(
             }
         }
         VcsKind::Svn => {
+            let target = svn_repository_path(repo, &path, token).await?;
             svn(
                 vec![
                     "cat".into(),
                     "-r".into(),
                     revision.into(),
                     "--".into(),
-                    format!("{path}@{revision}"),
+                    format!("{target}@{revision}"),
                 ],
                 repo,
                 token,
@@ -12961,7 +13110,7 @@ mod tests {
     #[test]
     fn file_history_tracks_the_historical_path_across_copy_and_rename_records() {
         let output = format!(
-            "{RECORD}new{FIELD}parent{FIELD}Ada{FIELD}2026-01-02{FIELD}copy file\nC007\tsrc/old.rs\tsrc/new.rs\n{RECORD}old{FIELD}root{FIELD}Ada{FIELD}2026-01-01{FIELD}edit source\nM\tsrc/old.rs\n"
+            "{RECORD}new{FIELD}parent{FIELD}Ada{FIELD}2026-01-02{FIELD}copy file\0\nC007\0src/old.rs\0src/new.rs\0{RECORD}old{FIELD}root{FIELD}Ada{FIELD}2026-01-01{FIELD}edit source\0\nM\0src/old.rs\0"
         );
         let entries = parse_git_file_history(&output, "src/new.rs");
 

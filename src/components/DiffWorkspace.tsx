@@ -92,6 +92,7 @@ export function DiffWorkspace() {
       {diff.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : !diff.content ? <DiffPlaceholder kind="empty" path={diff.path} /> : <UnifiedDiffView repoId={file?.repoId ?? comparisonTarget?.repoId ?? repo?.meta.id} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} />}
     </div>
     {context && <ContextMenu
+      preserveSelection
       x={context.x}
       y={context.y}
       items={contextItems}

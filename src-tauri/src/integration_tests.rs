@@ -5594,3 +5594,199 @@ async fn real_svn_diff_full_context_properties_and_history_mapping() {
         changed
     );
 }
+
+#[tokio::test]
+async fn real_git_file_history_preserves_special_filenames() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "History QA"], root);
+    command(
+        "git",
+        &["config", "user.email", "history@example.test"],
+        root,
+    );
+    let names = if cfg!(windows) {
+        vec!["space file.txt", "中文文件.txt", "literal[1].txt"]
+    } else {
+        vec![
+            "tab\tfile.txt",
+            "quote\" file.txt",
+            "back\\slash.txt",
+            "[literal]*.txt",
+            "newline\nfile.txt",
+            "record\u{1e}file.txt",
+        ]
+    };
+    for (index, name) in names.iter().enumerate() {
+        std::fs::write(root.join(name), format!("unique initial {index}\n")).unwrap();
+    }
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "initial"], root);
+    for (index, name) in names.iter().enumerate() {
+        std::fs::write(
+            root.join(name),
+            format!("unique initial {index}\nmodified {index}\n"),
+        )
+        .unwrap();
+    }
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "modify"], root);
+    let repository = repo(root, VcsKind::Git);
+    let token = CancellationToken::new();
+    for (index, name) in names.iter().enumerate() {
+        let page = vcs::file_history(&repository, name, None, 1, &token)
+            .await
+            .unwrap();
+        assert_eq!(page.entries[0].path, *name);
+        let source = vcs::file_revision_content(
+            &repository,
+            &page.entries[0].path,
+            &page.entries[0].revision,
+            crate::models::CatFileFilterMode::None,
+            &token,
+        )
+        .await
+        .unwrap();
+        assert!(source.content.contains(&format!("modified {index}")));
+        let old = vcs::file_history(&repository, name, page.next_cursor.as_deref(), 1, &token)
+            .await
+            .unwrap();
+        assert_eq!(old.entries[0].path, *name);
+        assert!(old.entries[0].previous_revision.is_none());
+    }
+}
+
+#[tokio::test]
+async fn real_svn_file_history_tracks_renames_directory_copies_and_target_status() {
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let store = directory.path().join("store");
+    let wc = directory.path().join("wc");
+    command(
+        "svnadmin",
+        &["create", store.to_str().unwrap()],
+        directory.path(),
+    );
+    let url = svn_file_url(&store);
+    command(
+        "svn",
+        &["checkout", &url, wc.to_str().unwrap()],
+        directory.path(),
+    );
+    command("svn", &["mkdir", "trunk", "branches"], &wc);
+    command("svn", &["commit", "-m", "structure"], &wc);
+    let trunk = wc.join("trunk");
+    let special = if cfg!(windows) {
+        "percent%20@.txt"
+    } else {
+        "percent%20@?.txt"
+    };
+    std::fs::write(trunk.join(special), "special SVN source\n").unwrap();
+    std::fs::write(trunk.join("old-name.txt"), "one\ntwo\n").unwrap();
+    std::fs::write(trunk.join("z.txt"), "original z\n").unwrap();
+    command("svn", &["add", "old-name.txt", "z.txt"], &trunk);
+    command("svn", &["add", &format!("{special}@")], &trunk);
+    command("svn", &["commit", "-m", "initial files"], &trunk);
+    std::fs::write(trunk.join("old-name.txt"), "one\ntwo updated\n").unwrap();
+    command("svn", &["commit", "-m", "edit old path"], &trunk);
+    command("svn", &["move", "old-name.txt", "new-name.txt"], &trunk);
+    command("svn", &["commit", "-m", "rename file"], &trunk);
+    std::fs::write(trunk.join("a.txt"), "new a\n").unwrap();
+    std::fs::write(trunk.join("z.txt"), "modified z\n").unwrap();
+    command("svn", &["add", "a.txt"], &trunk);
+    command("svn", &["commit", "-m", "add a and modify z"], &trunk);
+    command("svn", &["update"], &wc);
+    command("svn", &["copy", "trunk", "branches/copied"], &wc);
+    command("svn", &["commit", "-m", "copy directory"], &wc);
+    command("svn", &["update"], &wc);
+    let token = CancellationToken::new();
+    let repository = repo(&trunk, VcsKind::Svn);
+    let page = vcs::file_history(&repository, "new-name.txt", None, 1, &token)
+        .await
+        .unwrap();
+    assert_eq!(page.entries[0].status, "R");
+    assert_eq!(
+        page.entries[0].previous_path.as_deref(),
+        Some("old-name.txt")
+    );
+    let old = vcs::file_history(
+        &repository,
+        "new-name.txt",
+        page.next_cursor.as_deref(),
+        100,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(old.entries[0].path, "old-name.txt");
+    let content = vcs::file_revision_content(
+        &repository,
+        &old.entries[0].path,
+        &old.entries[0].revision,
+        crate::models::CatFileFilterMode::None,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(content.content.contains("two updated"));
+    let diff = vcs::diff(
+        &repository,
+        &old.entries[0].path,
+        false,
+        None,
+        old.entries[0].previous_revision.clone(),
+        Some(old.entries[0].revision.clone()),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(diff.content.contains("+two updated"));
+    let special_history = vcs::file_history(&repository, special, None, 100, &token)
+        .await
+        .unwrap();
+    let special_source = vcs::file_revision_content(
+        &repository,
+        special,
+        &special_history.entries[0].revision,
+        crate::models::CatFileFilterMode::None,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(special_source.content, "special SVN source\n");
+    let z = vcs::file_history(&repository, "z.txt", None, 100, &token)
+        .await
+        .unwrap();
+    assert_eq!(z.entries[0].status, "M");
+    let copied = repo(&wc.join("branches/copied"), VcsKind::Svn);
+    let page = vcs::file_history(&copied, "new-name.txt", None, 100, &token)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.entries[0].previous_path.as_deref(),
+        Some("^/trunk/new-name.txt")
+    );
+    assert_eq!(page.entries[0].status, "C");
+    let old = page
+        .entries
+        .iter()
+        .find(|entry| entry.message == "edit old path")
+        .unwrap();
+    assert_eq!(old.path, "^/trunk/old-name.txt");
+    let content = vcs::file_revision_content(
+        &copied,
+        &old.path,
+        &old.revision,
+        crate::models::CatFileFilterMode::None,
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(content.content.contains("two updated"));
+}

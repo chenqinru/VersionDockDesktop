@@ -1,0 +1,53 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BridgeContext } from '../platform/context';
+import { MockBridge } from '../platform/bridge';
+import { useAppStore } from '../store/appStore';
+import { FileHistoryPanel } from './FileHistoryPanel';
+const original = useAppStore.getState();
+const entry = { revision: 'cccccccccc', previousRevision: 'bbbbbbbbbb', path: 'old-name.txt', previousPath: null, author: 'QA', date: '2026-10-02T12:00:00+08:00', message: 'edit old path', status: 'M' };
+const snapshot = { workspace: { id: 'qa', name: 'QA', paths: ['/tmp/qa'], lastOpenedAt: '', available: true }, repositories: [], generation: 1, tools: { git: true, svn: true, svnadmin: true } };
+function mount({ empty = false, failDiff = false } = {}) {
+ const requests: unknown[] = [];
+ const history = vi.fn();
+ const bridge = new MockBridge((command) => {
+  requests.push(command);
+  if (command.type === 'fileHistory') return { entries: empty ? [] : [entry, { ...entry, revision: 'dddddddddd', message: 'another revision' }], nextCursor: null };
+  if (command.type === 'fileRevisionContent') return { revision: entry.revision, path: entry.path, content: 'old content\nnew content\n', binary: false, truncated: false };
+  if (command.type === 'fileDiff') { if (failDiff) throw new Error('QA comparison failed'); return { path: entry.path, content: '@@ -1,2 +1,2 @@\n old content\n-before\n+new content', language: 'text', binary: false, truncated: false, lineCount: 2 }; }
+  return null;
+ });
+ useAppStore.setState({ snapshot, fileHistoryTarget: { repoId: 'qa-repo', path: 'new-name.txt' }, openHistoryForLineRange: history });
+ const rendered = render(<BridgeContext.Provider value={bridge}><FileHistoryPanel /></BridgeContext.Provider>);
+ return { ...rendered, requests, history };
+}
+afterEach(() => { cleanup(); useAppStore.setState(original, true); });
+describe('file history current behavior audit', () => {
+ it('reclicking the active revision clears the preview without starting another request', async () => {
+  const { container, requests } = mount(); await waitFor(() => expect(container.querySelector('.unified-diff')).not.toBeNull());
+  const count = requests.length; fireEvent.click(screen.getByText('edit old path')); await act(async () => {});
+  expect(requests).toHaveLength(count); expect(container.querySelector('.unified-diff')).toBeNull(); expect(screen.getByText('Loading files...')).toBeInTheDocument();
+ });
+ it('Open Revision renders the same diff view instead of opening full source', async () => {
+  const { container } = mount(); await waitFor(() => expect(container.querySelector('.unified-diff')).not.toBeNull());
+  fireEvent.contextMenu(screen.getByText('another revision')); fireEvent.click(screen.getByRole('menuitem', { name: 'Open Revision' }));
+  await waitFor(() => expect(container.querySelector('.unified-diff')).not.toBeNull()); expect(container.querySelector('.source-code-view')).toBeNull();
+ });
+ it('old renamed revision correctly forwards the historical filename supplied by the diff view', async () => {
+  const { container, history } = mount(); await waitFor(() => expect(container.querySelector('.diff-code-cell.new.context code')).not.toBeNull());
+  fireEvent.contextMenu(container.querySelector('.diff-code-cell.new.context code')!);fireEvent.click(screen.getByRole('menuitem', { name: 'Show Selection History' }));
+  expect(history).toHaveBeenCalledWith('qa-repo', 'old-name.txt', expect.objectContaining({ side: 'new' }), entry.revision);
+ });
+ it('empty history has no empty-state message', async () => {
+  const { container } = mount({ empty: true }); await waitFor(() => expect(screen.queryByText('Loading files...')).toBeNull());
+  expect(container.querySelector('main')?.textContent).toBe(''); expect(container.querySelector('aside')?.textContent).toBe('');
+ });
+ it('Escape does not dismiss the modal', async () => {
+  mount(); await screen.findByText('edit old path'); fireEvent.keyDown(document, { key: 'Escape' });fireEvent.keyDown(window, { key: 'Escape' });
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+ });
+ it('comparison failure is silently displayed as source with no error or retry', async () => {
+  const { container } = mount({ failDiff: true }); await waitFor(() => expect(screen.queryByText('Loading files...')).toBeNull());
+  expect(container.querySelector('.error-row')).toBeNull(); expect(container.querySelector('.unified-diff')).toBeNull(); expect(container.querySelector('main')?.textContent).toContain('old content');
+ });
+});

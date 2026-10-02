@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<log>
+<logentry
+   revision="5">
+<author>chenqinru</author>
+<date>2026-10-02T10:35:47.080927Z</date>
+<paths>
+<path
+   prop-mods="false"
+   text-mods="true"
+   kind="file"
+   action="A">/a-file.txt</path>
+<path
+   prop-mods="false"
+   text-mods="true"
+   kind="file"
+   action="M">/z-file.txt</path>
+</paths>
+<msg>add unrelated and modify z</msg>
+</logentry>
+<logentry
+   revision="1">
+<author>chenqinru</author>
+<date>2026-10-02T10:35:42.072292Z</date>
+<paths>
+<path
+   action="A"
+   prop-mods="false"
+   text-mods="true"
+   kind="file">/old-name.txt</path>
+<path
+   action="A"
+   prop-mods="false"
+   text-mods="true"
+   kind="file">/z-file.txt</path>
+</paths>
+<msg>initial SVN files</msg>
+</logentry>
+</log>

@@ -1,0 +1,31 @@
+[
+  {
+    "command": [
+      "svn",
+      "diff",
+      "--internal-diff",
+      "-x",
+      "-U999999",
+      "-r",
+      "2:3",
+      "--",
+      "new-name.txt"
+    ],
+    "returnCode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "svn",
+      "cat",
+      "-r",
+      "2",
+      "--",
+      "new-name.txt@2"
+    ],
+    "returnCode": 1,
+    "stdout": "",
+    "stderr": "svn: warning: W160013: '/new-name.txt' path not found\nsvn: E200009: Could not cat all targets because some targets don't exist\nsvn: E200009: Illegal target for the requested operation\n"
+  }
+]

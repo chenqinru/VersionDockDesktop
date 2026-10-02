@@ -4057,6 +4057,7 @@ button.danger:not(:disabled):hover,
 .file-history-header { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
 .file-history-header > .codicon { flex: 0 0 auto; color: var(--versiondock-muted); font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
 .file-history-header > strong { flex: 0 0 auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; }
+.file-history-header > .file-type-icon { width: 14px; height: 14px; flex: 0 0 14px; }
 .file-history-path { min-width: 0; flex: 1; overflow: hidden; color: var(--versiondock-muted); font: calc(10px * var(--versiondock-ui-font-scale, 1))/16px var(--versiondock-code); text-overflow: ellipsis; white-space: nowrap; }
 .file-history-header > button { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; padding: 0; }
 .file-history-layout { min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-columns: clamp(250px, 24vw, 310px) minmax(0, 1fr); }
@@ -7765,3 +7766,15 @@ button.notification-item-action-btn:focus-visible {
 .diff-history-error { padding: 6px 10px; font-size: 12px; color: var(--versiondock-danger); }
 
 .unified-diff .detail-file-search input:focus-visible { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
+
+.file-history-empty { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--versiondock-muted); font-size: 12px; }
+.file-history-panel .error-row > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.file-history-header > button[aria-pressed='true'] { background: var(--versiondock-selection-background); color: var(--versiondock-text); }
+.source-code-workspace { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.source-code-toolbar { min-height: 28px; display: flex; justify-content: flex-end; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.source-code-workspace > .detail-file-search { position: absolute; top: 32px; right: 8px; z-index: 20; }
+.source-code-view { min-width: 0; min-height: 0; }
+.source-code-view ::selection { background: var(--versiondock-selection-background); color: inherit; }
+.source-code-view mark { padding: 0; background: var(--versiondock-hover); outline: 1px solid var(--versiondock-selection-border); }
+.source-code-view mark.current { background: var(--versiondock-selection-background); outline-width: 2px; }
+.source-code-workspace .detail-file-search input:focus-visible { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); }

@@ -21,18 +21,19 @@ interface Props {
   y: number;
   header?: string;
   variant?: 'gitLog' | 'branchSidebar';
+  preserveSelection?: boolean;
   items: ContextMenuEntry[];
   onSelect: (id: string, anchorRect: DOMRect) => void;
   onClose: () => void;
 }
 
-export function ContextMenu({ x, y, header, variant, items, onSelect, onClose }: Props) {
+export function ContextMenu({ x, y, header, variant, preserveSelection = false, items, onSelect, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
   useLayoutEffect(() => {
     const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) {
+    if (!preserveSelection && sel && !sel.isCollapsed) {
       const activeEl = document.activeElement;
       if (activeEl?.tagName !== 'INPUT' && activeEl?.tagName !== 'TEXTAREA') {
         sel.removeAllRanges();
@@ -47,7 +48,7 @@ export function ContextMenu({ x, y, header, variant, items, onSelect, onClose }:
     const posX = x + w > vw - margin ? Math.max(margin, vw - w - margin) : Math.max(margin, x);
     const posY = y + h > vh - margin ? Math.max(margin, vh - h - margin) : Math.max(margin, y);
     setPos({ x: posX, y: posY });
-  }, [x, y, header]);
+  }, [x, y, header, preserveSelection]);
 
   useEffect(() => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
@@ -104,7 +105,7 @@ export function ContextMenu({ x, y, header, variant, items, onSelect, onClose }:
       ref={ref}
       role="menu"
       style={{ ...styles.menu, ...(variant === 'gitLog' ? styles.gitLogMenu : {}), ...style }}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => { e.stopPropagation(); if (preserveSelection) e.preventDefault(); }}
     >
       {header && <><div style={styles.header}>{header}</div><div style={styles.separator} /></>}
       {items.map((item, i) => {

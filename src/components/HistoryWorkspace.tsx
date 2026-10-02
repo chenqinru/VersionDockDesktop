@@ -1,3 +1,4 @@
+import { formatHistoryDate as formatDate } from '../history/dates';
 import { buildHistoryAuthorOptions } from '../history/authors';
 import { IconButton } from './IconButton';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -30,13 +31,6 @@ type ViewFilters = { author: string; repoId: string; ref: string; from: string; 
 
 const EMPTY_FILTERS: ViewFilters = { author: '', repoId: '', ref: '', from: '', to: '' };
 const BLOCK_GAP = 4;
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const pad = (item: number) => String(item).padStart(2, '0');
-  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 function formatAuthorName(name: string): string {
   const parts = name.trim().split(/\s+/);

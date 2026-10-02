@@ -1019,6 +1019,7 @@ export function UnifiedDiffView({
     </div>
     {contextMenu && (
       <ContextMenu
+        preserveSelection
         x={contextMenu.x}
         y={contextMenu.y}
         items={[

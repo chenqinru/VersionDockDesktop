@@ -148,7 +148,7 @@ export function App() {
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      const isSelectable = target?.closest('input, textarea, select, [contenteditable="true"], .selectable-text, .unified-diff-view code, .diff-code-cell code, .diff-inline-row code, .code-view code, .detail-message-card pre, .output-panel pre');
+      const isSelectable = target?.closest('input, textarea, select, [contenteditable="true"], .selectable-text, .unified-diff code, .diff-code-cell code, .diff-inline-row code, .code-view code, .detail-message-card pre, .output-panel pre');
       if (!isSelectable) {
         const sel = window.getSelection();
         if (sel && !sel.isCollapsed) {

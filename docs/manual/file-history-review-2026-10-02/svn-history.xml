@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<log>
+<logentry
+   revision="4">
+<author>chenqinru</author>
+<date>2026-10-02T10:35:46.079822Z</date>
+<paths>
+<path
+   action="M"
+   prop-mods="false"
+   text-mods="true"
+   kind="file">/new-name.txt</path>
+</paths>
+<msg>edit SVN new path</msg>
+</logentry>
+<logentry
+   revision="3">
+<author>chenqinru</author>
+<date>2026-10-02T10:35:45.081342Z</date>
+<paths>
+<path
+   text-mods="false"
+   kind="file"
+   copyfrom-path="/old-name.txt"
+   copyfrom-rev="2"
+   action="A"
+   prop-mods="false">/new-name.txt</path>
+<path
+   text-mods="false"
+   kind="file"
+   action="D"
+   prop-mods="false">/old-name.txt</path>
+</paths>
+<msg>rename SVN file</msg>
+</logentry>
+<logentry
+   revision="2">
+<author>chenqinru</author>
+<date>2026-10-02T10:35:43.064986Z</date>
+<paths>
+<path
+   action="M"
+   prop-mods="false"
+   text-mods="true"
+   kind="file">/old-name.txt</path>
+</paths>
+<msg>edit SVN old path</msg>
+</logentry>
+<logentry
+   revision="1">
+<author>chenqinru</author>
+<date>2026-10-02T10:35:42.072292Z</date>
+<paths>
+<path
+   prop-mods="false"
+   text-mods="true"
+   kind="file"
+   action="A">/old-name.txt</path>
+<path
+   prop-mods="false"
+   text-mods="true"
+   kind="file"
+   action="A">/z-file.txt</path>
+</paths>
+<msg>initial SVN files</msg>
+</logentry>
+</log>

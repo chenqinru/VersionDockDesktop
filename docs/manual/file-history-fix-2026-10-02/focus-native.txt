@@ -1,0 +1,71 @@
+AXRole=AXButton
+AXTitle=关闭
+AXDescription=关闭
+
+AXRole=AXButton
+AXTitle=4 edit SVN new path chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=3 rename SVN file chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=2 edit SVN old path chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=1 initial SVN files chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=在文件中查找
+AXDescription=在文件中查找
+
+AXRole=AXCheckBox
+AXTitle=打开此版本
+AXDescription=打开此版本
+
+AXRole=AXCheckBox
+AXTitle=查看差异
+AXDescription=查看差异
+
+AXRole=AXButton
+AXTitle=在提交历史中显示
+AXDescription=在提交历史中显示
+
+AXRole=AXButton
+AXTitle=关闭
+AXDescription=关闭
+
+AXRole=AXButton
+AXTitle=4 edit SVN new path chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=3 rename SVN file chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=2 edit SVN old path chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=1 initial SVN files chenqinru · 2026/10/02 18:35
+AXDescription=
+
+AXRole=AXButton
+AXTitle=在文件中查找
+AXDescription=在文件中查找
+
+AXRole=AXCheckBox
+AXTitle=打开此版本
+AXDescription=打开此版本
+
+AXRole=AXCheckBox
+AXTitle=查看差异
+AXDescription=查看差异
+
+AXRole=AXButton
+AXTitle=在提交历史中显示
+AXDescription=在提交历史中显示

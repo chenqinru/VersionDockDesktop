@@ -421,6 +421,21 @@ describe('diff fixes', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
     expect(writeText).toHaveBeenCalledWith('new');
   });
+  it('keeps the selected code highlighted while opening and clicking its context menu', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { container } = render(<UnifiedDiffView content={'@@ -1 +1 @@\n-old source\n+new source'} />);
+    const code = container.querySelector('.diff-code-cell.old code')!;
+    const range = document.createRange(); range.selectNodeContents(code);
+    window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range);
+    fireEvent.mouseDown(code, { button: 2 }); fireEvent.contextMenu(code);
+    expect(window.getSelection()?.toString()).toBe('old source');
+    expect(window.getSelection()?.isCollapsed).toBe(false);
+    const copy = screen.getByRole('menuitem', { name: 'Copy' });
+    expect(fireEvent.mouseDown(copy)).toBe(false);
+    expect(window.getSelection()?.toString()).toBe('old source');
+    fireEvent.click(copy); expect(writeText).toHaveBeenCalledWith('old source');
+  });
   it('ignores a word selected by WebKit while opening the menu on an unselected line', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
