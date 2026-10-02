@@ -1,0 +1,22 @@
+Index: demo.txt
+===================================================================
+--- demo.txt	(revision 1)
++++ demo.txt	(working copy)
+@@ -2,7 +2,7 @@
+ line 002 original content
+ line 003 original content
+ line 004 original content
+-line 005 original content
++line 005 modified content
+ line 006 original content
+ line 007 original content
+ line 008 original content
+@@ -62,7 +62,7 @@
+ line 062 original content
+ line 063 original content
+ line 064 original content
+-line 065 original content
++line 065 modified content
+ line 066 original content
+ line 067 original content
+ line 068 original content

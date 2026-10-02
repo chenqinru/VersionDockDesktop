@@ -495,6 +495,12 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	operation: SvnOperation,
+} } | { type: "diffLineHistoryTarget"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	relative_path: string,
+	source_revision: string,
+	line_range: LineRange,
 } } | { type: "fileHistory"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -729,6 +735,12 @@ export type DiffDocument = {
 	binary: boolean,
 	truncated: boolean,
 	lineCount: number,
+};
+
+export type DiffLineHistoryTarget = {
+	path: string,
+	revision: string,
+	lineRange: LineRange,
 };
 
 export type EffectiveGitIdentity = {

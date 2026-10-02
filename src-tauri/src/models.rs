@@ -656,6 +656,13 @@ pub enum BridgeCommand {
         repo_id: String,
         operation: SvnOperation,
     },
+    DiffLineHistoryTarget {
+        workspace_id: String,
+        repo_id: String,
+        relative_path: String,
+        source_revision: String,
+        line_range: LineRange,
+    },
     FileHistory {
         workspace_id: String,
         repo_id: String,
@@ -2244,6 +2251,14 @@ pub struct FileChange {
     #[serde(default)]
     #[specta(optional)]
     pub truncation_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLineHistoryTarget {
+    pub path: String,
+    pub revision: String,
+    pub line_range: LineRange,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

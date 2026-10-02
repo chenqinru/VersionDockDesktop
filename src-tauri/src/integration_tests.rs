@@ -5420,3 +5420,177 @@ async fn real_git_sidebar_branch_names_and_checkout_survive_tag_namespace_collis
     assert_eq!(head.name, "HEAD");
     assert!(head.detached_tag.is_some());
 }
+
+#[tokio::test]
+async fn real_git_diff_rename_counts_and_mutable_line_history() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let path = directory.path();
+    command("git", &["init", "-b", "main"], path);
+    command("git", &["config", "user.name", "Diff QA"], path);
+    command("git", &["config", "user.email", "diff@example.test"], path);
+    let original = (1..=80)
+        .map(|line| format!("line {line:03} original\n"))
+        .collect::<String>();
+    std::fs::write(path.join("demo.txt"), &original).unwrap();
+    std::fs::write(path.join("old-name.txt"), "same content\n").unwrap();
+    command("git", &["add", "."], path);
+    command("git", &["commit", "-m", "Initial"], path);
+    let head = command_output("git", &["rev-parse", "HEAD"], path);
+    let index = format!("staged one\nstaged two\n{original}");
+    std::fs::write(path.join("demo.txt"), &index).unwrap();
+    command("git", &["add", "demo.txt"], path);
+    command("git", &["mv", "old-name.txt", "new-name.txt"], path);
+    std::fs::write(
+        path.join("demo.txt"),
+        index.replace("line 005 original", "line 005 changed"),
+    )
+    .unwrap();
+    let repository = repo(path, VcsKind::Git);
+    let token = CancellationToken::new();
+    let working = vcs::diff(&repository, "demo.txt", false, None, None, None, &token)
+        .await
+        .unwrap();
+    assert_eq!(working.line_count, 82);
+    let renamed = vcs::diff(&repository, "new-name.txt", true, None, None, None, &token)
+        .await
+        .unwrap();
+    assert!(renamed.content.contains("rename from old-name.txt"));
+    assert!(renamed.content.contains("rename to new-name.txt"));
+    assert!(!renamed.content.contains("+same content"));
+    assert_eq!(renamed.line_count, 1);
+    let range = crate::models::LineRange { start: 4, end: 6 };
+    for source in ["INDEX", "WORKTREE"] {
+        let target = vcs::diff_line_history_target(&repository, "demo.txt", source, range, &token)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(target.revision, head);
+        assert_eq!(target.path, "demo.txt");
+        assert_eq!(
+            target.line_range,
+            crate::models::LineRange { start: 2, end: 4 }
+        );
+    }
+    assert!(vcs::diff_line_history_target(
+        &repository,
+        "demo.txt",
+        "INDEX",
+        crate::models::LineRange { start: 1, end: 2 },
+        &token
+    )
+    .await
+    .unwrap()
+    .is_none());
+    let renamed_history = vcs::diff_line_history_target(
+        &repository,
+        "new-name.txt",
+        "INDEX",
+        crate::models::LineRange { start: 1, end: 1 },
+        &token,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(renamed_history.path, "old-name.txt");
+    // History at the mapped coordinates works on the real commit.
+    let result = vcs::history(
+        &repository,
+        0,
+        100,
+        HistoryQuery {
+            path: Some("demo.txt".into()),
+            revision: Some(head),
+            line_range: Some(crate::models::LineRange { start: 2, end: 4 }),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(!result.commits.is_empty());
+    assert_eq!(
+        command_output("git", &["show", ":demo.txt"], path),
+        index.trim_end()
+    );
+    assert!(
+        vcs::diff_line_history_target(&repository, "../escape", "INDEX", range, &token)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn real_svn_diff_full_context_properties_and_history_mapping() {
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let store = directory.path().join("store");
+    let wc = directory.path().join("wc");
+    command(
+        "svnadmin",
+        &["create", store.to_str().unwrap()],
+        directory.path(),
+    );
+    let url = format!("file://{}", store.display());
+    command(
+        "svn",
+        &["checkout", &url, wc.to_str().unwrap()],
+        directory.path(),
+    );
+    let original = (1..=80)
+        .map(|line| format!("line {line:03} original\n"))
+        .collect::<String>();
+    std::fs::write(wc.join("demo.txt"), &original).unwrap();
+    command("svn", &["add", "demo.txt"], &wc);
+    command("svn", &["commit", "-m", "Initial"], &wc);
+    let changed = format!(
+        "working insertion\n{}",
+        original
+            .replace("line 005 original", "line 005 changed")
+            .replace("line 065 original", "line 065 changed")
+    );
+    std::fs::write(wc.join("demo.txt"), &changed).unwrap();
+    command("svn", &["propset", "svn:keywords", "Id", "demo.txt"], &wc);
+    let repository = repo(&wc, VcsKind::Svn);
+    let token = CancellationToken::new();
+    let document = vcs::diff(&repository, "demo.txt", false, None, None, None, &token)
+        .await
+        .unwrap();
+    assert!(document.content.contains("line 040 original"));
+    assert!(document.content.contains("line 080 original"));
+    assert!(document.content.contains("Added: svn:keywords"));
+    assert_eq!(document.line_count, 81);
+    let target = vcs::diff_line_history_target(
+        &repository,
+        "demo.txt",
+        "WORKING",
+        crate::models::LineRange { start: 3, end: 5 },
+        &token,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(target.revision, "1");
+    assert_eq!(
+        target.line_range,
+        crate::models::LineRange { start: 2, end: 4 }
+    );
+    assert!(vcs::diff_line_history_target(
+        &repository,
+        "demo.txt",
+        "WORKING",
+        crate::models::LineRange { start: 1, end: 1 },
+        &token
+    )
+    .await
+    .unwrap()
+    .is_none());
+    assert_eq!(
+        std::fs::read_to_string(wc.join("demo.txt")).unwrap(),
+        changed
+    );
+}

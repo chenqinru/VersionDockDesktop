@@ -944,9 +944,15 @@ async fn resolve_git_candidate_paths(
             "-z".into(),
             "-M".into(),
             base.into(),
-            target.into(),
-            "--".into(),
-        ],
+        ]
+        .into_iter()
+        .chain(match target {
+            "INDEX" => vec!["--cached".into()],
+            "WORKTREE" | "WORKING" => vec![],
+            _ => vec![target.into()],
+        })
+        .chain(["--".into()])
+        .collect(),
         repo,
         token,
     )
@@ -997,6 +1003,7 @@ pub async fn diff(
     to_revision: Option<String>,
     token: &CancellationToken,
 ) -> Result<DiffDocument, DesktopError> {
+    let target_revision = to_revision.clone().or(revision.clone());
     let root = Path::new(&repo.root_path);
     let safe = relative_path(root, path, false)?;
     if revision.is_none() && from_revision.is_none() && to_revision.is_none() {
@@ -1126,8 +1133,17 @@ pub async fn diff(
                     .await?
                 }
             } else {
+                let candidates = resolve_git_candidate_paths(
+                    repo,
+                    "HEAD",
+                    if staged { "INDEX" } else { "WORKTREE" },
+                    &safe,
+                    token,
+                )
+                .await;
                 let mut args = vec![
                     "diff".into(),
+                    "-M".into(),
                     "-U999999".into(),
                     "--no-ext-diff".into(),
                     "--no-color".into(),
@@ -1137,12 +1153,19 @@ pub async fn diff(
                     args.push("--cached".into());
                 }
                 args.push("--".into());
-                args.push(format!(":(literal){safe}"));
+                for candidate in candidates {
+                    args.push(format!(":(literal){candidate}"));
+                }
                 git(args, repo, token).await?
             }
         }
         VcsKind::Svn => {
-            let mut args = vec!["diff".into()];
+            let mut args = vec![
+                "diff".into(),
+                "--internal-diff".into(),
+                "-x".into(),
+                "-U999999".into(),
+            ];
             if from_revision.is_some() || to_revision.is_some() {
                 let from = from_revision.ok_or_else(|| {
                     DesktopError::new(
@@ -1175,7 +1198,15 @@ pub async fn diff(
                                 let target_url =
                                     format!("{}/{}@HEAD", info.url.trim_end_matches('/'), safe);
                                 if let Ok(fallback_out) = svn(
-                                    vec!["diff".into(), "-c".into(), rev.into(), target_url],
+                                    vec![
+                                        "diff".into(),
+                                        "--internal-diff".into(),
+                                        "-x".into(),
+                                        "-U999999".into(),
+                                        "-c".into(),
+                                        rev.into(),
+                                        target_url,
+                                    ],
                                     repo,
                                     token,
                                 )
@@ -1191,17 +1222,275 @@ pub async fn diff(
             }
         }
     };
-    make_diff(path, output.stdout)
+    let mut document = make_diff(path, output.stdout)?;
+    if !document.binary && document.line_count == 0 {
+        let bytes = match repo.kind {
+            VcsKind::Git if staged || target_revision.is_some() => {
+                let spec = target_revision
+                    .as_ref()
+                    .map(|revision| format!("{revision}:{safe}"))
+                    .unwrap_or_else(|| format!(":{safe}"));
+                git(vec!["show".into(), spec], repo, token)
+                    .await
+                    .ok()
+                    .map(|out| out.stdout)
+            }
+            VcsKind::Svn if target_revision.is_some() => {
+                let revision = target_revision.as_deref().unwrap_or_default();
+                svn(
+                    vec![
+                        "cat".into(),
+                        "-r".into(),
+                        revision.into(),
+                        "--".into(),
+                        format!("{safe}@{revision}"),
+                    ],
+                    repo,
+                    token,
+                )
+                .await
+                .ok()
+                .map(|out| out.stdout)
+            }
+            _ => std::fs::read(root.join(&safe)).ok(),
+        };
+        if let Some(bytes) = bytes {
+            if !bytes_are_binary(&bytes) {
+                document.line_count = String::from_utf8_lossy(&bytes)
+                    .lines()
+                    .count()
+                    .min(u32::MAX as usize) as u32;
+            }
+        }
+    }
+    Ok(document)
 }
 
-fn make_diff(path: &str, bytes: Vec<u8>) -> Result<DiffDocument, DesktopError> {
+fn map_diff_lines_to_base(patch: &str, selected: LineRange) -> Option<LineRange> {
+    let hunks: Vec<(u32, u32, u32, u32)> = patch
+        .lines()
+        .filter(|line| line.starts_with("@@ "))
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            fields.next();
+            let parse = |text: &str| -> Option<(u32, u32)> {
+                let mut parts = text.get(1..)?.split(',');
+                Some((
+                    parts.next()?.parse().ok()?,
+                    parts.next().map(str::parse).transpose().ok()?.unwrap_or(1),
+                ))
+            };
+            let (old_start, old_count) = parse(fields.next()?)?;
+            let (new_start, new_count) = parse(fields.next()?)?;
+            Some((old_start, old_count, new_start, new_count))
+        })
+        .collect();
+    let map = |line: u32| -> Option<u32> {
+        let mut delta = 0_i64;
+        for &(old_start, old_count, new_start, new_count) in &hunks {
+            if new_count == 0 {
+                if line <= new_start {
+                    break;
+                }
+            } else {
+                if line < new_start {
+                    break;
+                }
+                if line < new_start.saturating_add(new_count) {
+                    let offset = line - new_start;
+                    return (offset < old_count)
+                        .then(|| old_start + offset)
+                        .filter(|number| *number > 0);
+                }
+            }
+            delta += i64::from(old_count) - i64::from(new_count);
+        }
+        u32::try_from(i64::from(line) + delta)
+            .ok()
+            .filter(|number| *number > 0)
+    };
+    let mut numbers = (selected.start..=selected.end).filter_map(map);
+    let first = numbers.next()?;
+    let (start, end) = numbers.fold((first, first), |(start, end), number| {
+        (start.min(number), end.max(number))
+    });
+    Some(LineRange { start, end })
+}
+
+/// Convert mutable index/working-copy coordinates into a committed history target.
+/// New-only lines have no history. This never changes the index or working copy.
+pub async fn diff_line_history_target(
+    repo: &RepositoryMeta,
+    path: &str,
+    source_revision: &str,
+    line_range: LineRange,
+    token: &CancellationToken,
+) -> Result<Option<crate::models::DiffLineHistoryTarget>, DesktopError> {
+    if line_range.start == 0
+        || line_range.end < line_range.start
+        || line_range.end - line_range.start > 50_000
+    {
+        return Err(DesktopError::new(
+            "INVALID_LINE_RANGE",
+            "Invalid diff selection line range",
+            false,
+        ));
+    }
+    let safe = relative_path(Path::new(&repo.root_path), path, false)?;
+    let (revision, history_path, patch) = match repo.kind {
+        VcsKind::Git => {
+            if !matches!(source_revision, "INDEX" | "WORKTREE" | "WORKING") {
+                return Err(DesktopError::new(
+                    "INVALID_REVISION",
+                    "Expected an index or working-tree source",
+                    false,
+                ));
+            }
+            let head = git(
+                vec!["rev-parse".into(), "--verify".into(), "HEAD".into()],
+                repo,
+                token,
+            )
+            .await;
+            let Ok(head) = head else {
+                return Ok(None);
+            };
+            let revision = head.stdout_text().trim().to_string();
+            let candidates =
+                resolve_git_candidate_paths(repo, &revision, source_revision, &safe, token).await;
+            let history_path = candidates.first().cloned().unwrap_or_else(|| safe.clone());
+            if git(
+                vec![
+                    "cat-file".into(),
+                    "-e".into(),
+                    format!("{revision}:{history_path}"),
+                ],
+                repo,
+                token,
+            )
+            .await
+            .is_err()
+            {
+                return Ok(None);
+            }
+            let mut args = vec![
+                "diff".into(),
+                "-M".into(),
+                "-U0".into(),
+                "--no-ext-diff".into(),
+                "--no-color".into(),
+                revision.clone(),
+            ];
+            if source_revision == "INDEX" {
+                args.push("--cached".into());
+            }
+            args.push("--".into());
+            args.extend(candidates.iter().map(|path| format!(":(literal){path}")));
+            let patch = git(args, repo, token).await?.stdout_text();
+            (revision, history_path, patch)
+        }
+        VcsKind::Svn => {
+            if !matches!(source_revision, "BASE" | "WORKTREE" | "WORKING") {
+                return Err(DesktopError::new(
+                    "INVALID_REVISION",
+                    "Expected a base or working-copy source",
+                    false,
+                ));
+            }
+            let revision = svn(
+                vec![
+                    "info".into(),
+                    "--show-item".into(),
+                    "revision".into(),
+                    "--".into(),
+                    safe.clone(),
+                ],
+                repo,
+                token,
+            )
+            .await?
+            .stdout_text()
+            .trim()
+            .to_string();
+            validate_svn_revision(&revision)?;
+            let patch = if source_revision == "BASE" {
+                String::new()
+            } else {
+                svn(
+                    vec![
+                        "diff".into(),
+                        "--internal-diff".into(),
+                        "-x".into(),
+                        "-U0".into(),
+                        "--".into(),
+                        safe.clone(),
+                    ],
+                    repo,
+                    token,
+                )
+                .await?
+                .stdout_text()
+            };
+            (revision, safe, patch)
+        }
+    };
+    Ok(
+        map_diff_lines_to_base(&patch, line_range).map(|line_range| {
+            crate::models::DiffLineHistoryTarget {
+                path: history_path,
+                revision,
+                line_range,
+            }
+        }),
+    )
+}
+
+fn diff_file_line_count(content: &str) -> usize {
+    let mut old = 0;
+    let mut new = 0;
+    for line in content.lines().filter(|line| line.starts_with("@@ ")) {
+        let mut fields = line.split_whitespace();
+        fields.next();
+        let extent = |value: Option<&str>| {
+            value
+                .and_then(|value| value.get(1..))
+                .map(|value| {
+                    let mut parts = value.split(',');
+                    let start = parts
+                        .next()
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    let count = parts
+                        .next()
+                        .map(|v| v.parse::<usize>().unwrap_or(0))
+                        .unwrap_or(1);
+                    if count == 0 {
+                        0
+                    } else {
+                        start.saturating_add(count - 1)
+                    }
+                })
+                .unwrap_or(0)
+        };
+        old = old.max(extent(fields.next()));
+        new = new.max(extent(fields.next()));
+    }
+    if new > 0 {
+        new
+    } else {
+        old
+    }
+}
+
+pub(crate) fn make_diff(path: &str, bytes: Vec<u8>) -> Result<DiffDocument, DesktopError> {
     let content = String::from_utf8_lossy(&bytes).into_owned();
     let binary = bytes_are_binary(&bytes)
         || content.contains("Binary files")
         || content.contains("GIT binary patch")
         || content.contains("Cannot display: file marked as a binary type.");
-    let line_count = content.lines().count();
-    let truncated = bytes.len() > DIFF_MAX_BYTES || line_count > DIFF_MAX_LINES;
+    let patch_line_count = content.lines().count();
+    let line_count = diff_file_line_count(&content);
+    let truncated = bytes.len() > DIFF_MAX_BYTES || patch_line_count > DIFF_MAX_LINES;
     Ok(DiffDocument {
         path: path.into(),
         content: if truncated { String::new() } else { content },

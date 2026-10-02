@@ -1,0 +1,89 @@
+diff --git a/demo.txt b/demo.txt
+index 4b531ca..b7ee9e4 100644
+--- a/demo.txt
++++ b/demo.txt
+@@ -1,82 +1,82 @@
+ staged inserted one
+ staged inserted two
+ line 001 original content
+ line 002 original content
+ line 003 original content
+ line 004 original content
+-line 005 original content
++line 005 modified content
+ line 006 original content
+ line 007 original content
+ line 008 original content
+ line 009 original content
+ line 010 original content
+ line 011 original content
+ line 012 original content
+ line 013 original content
+ line 014 original content
+ line 015 original content
+ line 016 original content
+ line 017 original content
+ line 018 original content
+ line 019 original content
+ line 020 original content
+ line 021 original content
+ line 022 original content
+ line 023 original content
+ line 024 original content
+ line 025 original content
+ line 026 original content
+ line 027 original content
+ line 028 original content
+ line 029 original content
+ line 030 original content
+ line 031 original content
+ line 032 original content
+ line 033 original content
+ line 034 original content
+ line 035 original content
+ line 036 original content
+ line 037 original content
+ line 038 original content
+ line 039 original content
+ line 040 original content
+ line 041 original content
+ line 042 original content
+ line 043 original content
+ line 044 original content
+ line 045 original content
+ line 046 original content
+ line 047 original content
+ line 048 original content
+ line 049 original content
+ line 050 original content
+ line 051 original content
+ line 052 original content
+ line 053 original content
+ line 054 original content
+ line 055 original content
+ line 056 original content
+ line 057 original content
+ line 058 original content
+ line 059 original content
+ line 060 original content
+ line 061 original content
+ line 062 original content
+ line 063 original content
+ line 064 original content
+-line 065 original content
++line 065 modified content
+ line 066 original content
+ line 067 original content
+ line 068 original content
+ line 069 original content
+ line 070 original content
+ line 071 original content
+ line 072 original content
+ line 073 original content
+ line 074 original content
+ line 075 original content
+ line 076 original content
+ line 077 original content
+ line 078 original content
+ line 079 original content
+ line 080 original content

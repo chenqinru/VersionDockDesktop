@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { extractDiffLineRange, highlightDiffLines, highlightParsedDiffSide, parseUnifiedDiff, resolveDiffHighlightLanguage, UnifiedDiffView } from './UnifiedDiffView';
 
@@ -374,4 +374,122 @@ describe('parseUnifiedDiff', () => {
 
     expect(onShowSelectionHistory).toHaveBeenCalledWith({ start: 1, end: 1, side: 'new' }, 'rev-new', 'new_name.ts');
   });
+});
+
+// Exercise the real rendered component rather than reproducing its handlers.
+describe('diff fixes', () => {
+  afterEach(() => { window.getSelection()?.removeAllRanges(); cleanup(); });
+  it('shows rename, permission and newline metadata in both views and preserves order', () => {
+    const patch = 'diff --git a/old.txt b/new.txt\nold mode 100644\nnew mode 100755\nrename from old.txt\nrename to new.txt\n--- a/old.txt\n+++ b/new.txt\n@@ -1 +1 @@\n-before\n+after\n\\ No newline at end of file';
+    render(<UnifiedDiffView path="new.txt" content={patch} />);
+    expect(screen.getByText('rename from old.txt')).toBeInTheDocument();
+    expect(screen.getByText('old mode 100644')).toBeInTheDocument();
+    expect(screen.getByText('\\ No newline at end of file')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Inline view'));
+    expect(screen.getByText('rename to new.txt')).toBeInTheDocument();
+  });
+  it('labels metadata-only changes without declaring no changes', () => {
+    render(<UnifiedDiffView content={'diff --git a/old b/new\nrename from old\nrename to new'} />);
+    expect(screen.getByText('Metadata changes')).toBeInTheDocument();
+    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+  });
+  it('keeps SVN property changes out of file line numbering', () => {
+    const patch = 'Index: property.txt\n--- property.txt\n+++ property.txt\nProperty changes on: property.txt\n_______\nAdded: svn:keywords\n## -0,0 +1 ##\n+Id';
+    const { container } = render(<UnifiedDiffView content={patch} />);
+    expect(screen.getByText('Added: svn:keywords')).toBeInTheDocument();
+    expect(container.querySelector('[data-line-number]')).toBeNull();
+  });
+  it('permits history on selected unchanged right-side text and replacement text', () => {
+    const history = vi.fn();
+    const { container } = render(<UnifiedDiffView path="file.txt" content={'@@ -1,2 +1,2 @@\n unchanged\n-old\n+new'} oldRevision="INDEX" newRevision="WORKTREE" onShowSelectionHistory={history} />);
+    const code = container.querySelector('.diff-code-cell.new.context code')!;
+    const range = document.createRange(); range.selectNodeContents(code); window.getSelection()?.addRange(range);
+    fireEvent.contextMenu(code, { clientX: 5, clientY: 5 });
+    const item = screen.getByRole('menuitem', { name: 'Show Selection History' });
+    expect(item).not.toBeDisabled();
+    fireEvent.click(item);
+    expect(history).toHaveBeenCalledWith({ start: 1, end: 1, side: 'new' }, undefined, 'file.txt');
+    const changed = container.querySelector('.diff-code-cell.new.addition code')!;
+    fireEvent.contextMenu(changed);
+    expect(screen.getByRole('menuitem', { name: 'Show Selection History' })).not.toBeDisabled();
+  });
+  it('copies the clicked code line when there is no text selection', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { container } = render(<UnifiedDiffView content={'@@ -1 +1 @@\n-old\n+new'} />);
+    fireEvent.contextMenu(container.querySelector('.diff-code-cell.new code')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith('new');
+  });
+  it('ignores a word selected by WebKit while opening the menu on an unselected line', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { container } = render(<UnifiedDiffView content={'@@ -1 +1 @@\n-old text\n+new text'} />);
+    const code = container.querySelector('.diff-code-cell.new code')!;
+    window.getSelection()?.removeAllRanges();
+    fireEvent.mouseDown(code, { button: 2 });
+    const range = document.createRange(); range.selectNodeContents(code.querySelector('mark') ?? code);
+    window.getSelection()?.addRange(range);
+    fireEvent.contextMenu(code);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith('new text');
+  });
+  it('finds text in folded rows, highlights it and handles zero matches', () => {
+    const lines = Array.from({ length: 60 }, (_, index) => ` context ${index + 1}`);
+    const { container } = render(<UnifiedDiffView content={'@@ -1,60 +1,60 @@\n' + lines.join('\n')} path="demo.txt" />);
+    expect(screen.queryByText('context 40')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Find in file' }));
+    const input = screen.getByRole('textbox', { name: 'Find in file' });
+    fireEvent.change(input, { target: { value: 'context 40' } });
+    expect(screen.getByText('1/2')).toBeInTheDocument();
+    expect(container.querySelector('mark.diff-search-match.current')).not.toBeNull();
+    fireEvent.change(input, { target: { value: 'does-not-exist' } });
+    expect(screen.getByText('0/0')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next match' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Speed Search' }));
+    expect(screen.queryByRole('search')).not.toBeInTheDocument();
+  });
+  it('preserves manual view choice after a resize and opens search with Cmd/Ctrl+F', () => {
+    const records: Array<{ callback: ResizeObserverCallback; elements: Element[] }> = [];
+    const previous = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      record: typeof records[number];
+      constructor(callback: ResizeObserverCallback) { this.record = { callback, elements: [] }; records.push(this.record); }
+      observe(element: Element) { this.record.elements.push(element); }
+      unobserve() {} disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const { container } = render(<UnifiedDiffView content={'@@ -1 +1 @@\n-old\n+new'} />);
+      fireEvent.click(screen.getByText('Inline view'));
+      const scroll = container.querySelector('.unified-diff-scroll')!;
+      act(() => records.filter((record) => record.elements.includes(scroll)).forEach((record) => record.callback([{ target: scroll, contentRect: { width: 1200, height: 500 } } as ResizeObserverEntry], {} as ResizeObserver)));
+      expect(container.querySelector('.unified-diff')).toHaveClass('inline');
+      (container.querySelector('.unified-diff') as HTMLElement).focus();
+      fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
+      expect(screen.getByRole('textbox', { name: 'Find in file' })).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(screen.queryByRole('search')).not.toBeInTheDocument();
+    } finally { globalThis.ResizeObserver = previous; }
+  });
+
+  it('synchronizes horizontal scrolling from either pane and gives unequal lines equal scroll extents', () => {
+    const { container, rerender } = render(<UnifiedDiffView content={'@@ -1 +1 @@\n-' + 'long old source '.repeat(40) + '\n+short new source'} />);
+    const oldPane = container.querySelector<HTMLElement>('.unified-diff-pane.old')!;
+    const newPane = container.querySelector<HTMLElement>('.unified-diff-pane.new')!;
+    oldPane.scrollLeft = 240; fireEvent.scroll(oldPane);
+    expect(newPane.scrollLeft).toBe(240);
+    newPane.scrollLeft = 120; fireEvent.scroll(newPane);
+    expect(oldPane.scrollLeft).toBe(120);
+    expect(oldPane.querySelector<HTMLElement>('.unified-diff-virtual-row')?.style.width)
+      .toBe(newPane.querySelector<HTMLElement>('.unified-diff-virtual-row')?.style.width);
+    expect(oldPane.querySelector<HTMLElement>('[aria-hidden="true"]')?.style.minWidth).toBe('100%');
+    fireEvent.click(screen.getByText('Inline view'));
+    fireEvent.click(screen.getByText('Split view'));
+    expect(container.querySelector<HTMLElement>('.unified-diff-pane.old')?.scrollLeft).toBe(120);
+    expect(container.querySelector<HTMLElement>('.unified-diff-pane.new')?.scrollLeft).toBe(120);
+    rerender(<UnifiedDiffView content={'@@ -1 +1 @@\n-old\n+new'} />);
+    expect(container.querySelector<HTMLElement>('.unified-diff-pane.old')?.scrollLeft).toBe(0);
+    expect(container.querySelector<HTMLElement>('.unified-diff-pane.new')?.scrollLeft).toBe(0);
+  });
+
 });

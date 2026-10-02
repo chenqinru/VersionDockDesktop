@@ -1,0 +1,6 @@
+{
+  "noSelectionCopiesClickedLine": true,
+  "trigger": "physicalClick",
+  "testText": "line 010 original content",
+  "existingSelectionPreserved": true
+}

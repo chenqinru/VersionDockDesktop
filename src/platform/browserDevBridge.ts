@@ -531,6 +531,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'commitMergeParentFiles': return [
         { path: 'src/demo-parent-change.ts', status: 'M', added: 12, removed: 4 },
       ] satisfies CommitFile[];
+      case 'diffLineHistoryTarget': return { path: command.payload.relative_path, revision: 'HEAD', lineRange: command.payload.line_range };
       case 'fileDiff': return this.diff(command.payload.relative_path);
       case 'stashFileDiff': case 'shelfFileDiff': return this.diff(command.payload.relative_path);
       case 'fileHistory': return { entries: (activeHistories[command.payload.repo_id] ?? []).slice(Number(command.payload.cursor ?? 0), Number(command.payload.cursor ?? 0) + command.payload.limit).map((commit, index) => ({ revision: commit.hash, previousRevision: commit.parents[0] ?? null, path: command.payload.relative_path, previousPath: null, author: commit.author, date: commit.committerDate, message: commit.message, status: index === 0 ? 'M' : 'A' })), nextCursor: null };

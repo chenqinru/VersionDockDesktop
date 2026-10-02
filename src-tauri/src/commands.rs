@@ -3660,6 +3660,26 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(vcs::file_history(&repo, &relative_path, cursor.as_deref(), limit, token).await?)
         }
+        BridgeCommand::DiffLineHistoryTarget {
+            workspace_id,
+            repo_id,
+            relative_path,
+            source_revision,
+            line_range,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(
+                vcs::diff_line_history_target(
+                    &repo,
+                    &relative_path,
+                    &source_revision,
+                    line_range,
+                    token,
+                )
+                .await?,
+            )
+        }
         BridgeCommand::FileRevisionContent {
             workspace_id,
             repo_id,

@@ -4,6 +4,8 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  "Find in file": "Find in file",
+  "Metadata changes": "Metadata changes",
   "VersionDock — Accounts & Identities": "VersionDock — Accounts & Identities",
   "VersionDock — Accounts & Identities: {0}": "VersionDock — Accounts & Identities: {0}",
   "VersionDock — Accounts & Identities: {0} ({1}/{2})": "VersionDock — Accounts & Identities: {0} ({1}/{2})",
@@ -911,6 +913,8 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  "Find in file": "在文件中查找",
+  "Metadata changes": "属性或路径变更",
   "VersionDock — Accounts & Identities": "VersionDock — 账户与提交身份",
   "VersionDock — Accounts & Identities: {0}": "VersionDock — 账户与提交身份：{0}",
   "VersionDock — Accounts & Identities: {0} ({1}/{2})": "VersionDock — 账户与提交身份：{0} ({1}/{2})",

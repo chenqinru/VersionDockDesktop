@@ -155,17 +155,7 @@ pub async fn file_diff(
         .map(|index| index + 1)
         .unwrap_or(remainder.len());
     let content = remainder[..end].to_string();
-    let line_count = content.lines().count();
-    let truncated = content.len() > 5 * 1024 * 1024 || line_count > 50_000;
-    Ok(DiffDocument {
-        path: relative_path.into(),
-        content: if truncated { String::new() } else { content },
-        language: crate::vcs::language_for(relative_path),
-        binary: remainder[..end].contains("GIT binary patch")
-            || remainder[..end].contains("Binary files"),
-        truncated,
-        line_count: line_count.min(u32::MAX as usize) as u32,
-    })
+    crate::vcs::make_diff(relative_path, content.into_bytes())
 }
 
 pub(crate) async fn create(

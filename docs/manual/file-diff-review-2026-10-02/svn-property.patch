@@ -1,0 +1,11 @@
+Index: property.txt
+===================================================================
+--- property.txt	(revision 1)
++++ property.txt	(working copy)
+
+Property changes on: property.txt
+___________________________________________________________________
+Added: svn:keywords
+## -0,0 +1 ##
++Id
+\ No newline at end of property

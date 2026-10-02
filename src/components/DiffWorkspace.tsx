@@ -41,8 +41,8 @@ export function DiffWorkspace() {
   const commit = selectedCommits.find((item) => item.repoId === file?.repoId && item.hash === file?.revision);
   const kind = repo?.meta.kind ?? 'git';
   const oldRevision = file?.fromRevision ?? (commit ? commitComparisonBase(commit, kind)
-    : file?.revision ? kind === 'svn' ? commitComparisonBase({ hash: file.revision, parents: [] }, kind) : `${file.revision}~1` : 'HEAD');
-  const newRevision = isWorking ? undefined : (file?.toRevision ?? file?.revision);
+    : file?.revision ? kind === 'svn' ? commitComparisonBase({ hash: file.revision, parents: [] }, kind) : `${file.revision}~1` : kind === 'svn' ? 'BASE' : file?.staged ? 'HEAD' : 'INDEX');
+  const newRevision = isWorking ? file?.staged && kind === 'git' ? 'INDEX' : kind === 'svn' ? 'WORKING' : 'WORKTREE' : (file?.toRevision ?? file?.revision);
   const backLabel = comparisonTarget
     ? t('Back to compare')
     : diffReturnMode === 'commit-detail'

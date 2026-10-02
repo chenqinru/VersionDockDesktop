@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { bundledLanguages, codeToTokensBase, type BundledLanguage, type BundledTheme, type ThemeRegistrationRaw, type ThemedToken } from 'shiki';
+import { BridgeContext } from '../platform/context';
+import { FileSearchWidget } from './FileSearchWidget';
+import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
 import { ContextMenu } from './ContextMenu';
 import { useI18n } from '../i18n';
@@ -97,13 +100,13 @@ export function extractDiffLineRange(container: HTMLElement, target?: Element | 
       || container.contains(range.endContainer)
     ) {
       const lineElements = Array.from(container.querySelectorAll<HTMLElement>('.diff-inline-row, .diff-code-cell, [data-line-number]'));
-      let detectedSide: 'old' | 'new' | undefined;
-      for (const el of lineElements) {
-        if (selection.containsNode(el, true)) {
+      let detectedSide: 'old' | 'new' | undefined = target?.closest('.diff-code-cell.old, .diff-line-number.old') ? 'old' : target?.closest('.diff-code-cell.new, .diff-line-number.new') ? 'new' : undefined;
+      for (const el of detectedSide ? [] : lineElements) {
+        if (range.intersectsNode(el)) {
           if (el.dataset.side === 'old' || el.closest('.unified-diff-pane.old') || el.classList.contains('deletion') || el.classList.contains('old')) {
             detectedSide = 'old';
             break;
-          } else if (el.dataset.side === 'new' || el.closest('.unified-diff-pane.new') || el.classList.contains('addition') || el.classList.contains('new')) {
+          } else if (el.dataset.side === 'new' || el.closest('.unified-diff-pane.new') || el.classList.contains('addition') && !el.dataset.historyMapped) {
             detectedSide = 'new';
           }
         }
@@ -114,7 +117,7 @@ export function extractDiffLineRange(container: HTMLElement, target?: Element | 
       const seen = new Set<HTMLElement>();
       for (const el of lineElements) {
         if (seen.has(el)) continue;
-        if (selection.containsNode(el, true)) {
+        if (range.intersectsNode(el)) {
           seen.add(el);
           let num: number | undefined;
           if (side === 'old') {
@@ -259,12 +262,16 @@ export function parseUnifiedDiff(content: string, fallbackPath = ''): ParsedUnif
   let oldNumber = 0;
   let newNumber = 0;
   let inHunk = false;
+  let inProperties = false;
   let hunkCount = 0;
   const rows: ParsedDiffRow[] = [];
   const deleted: DiffCell[] = [];
   const added: DiffCell[] = [];
 
   for (const line of lines) {
+    if (isFileBoundary(line)) inProperties = false;
+    if (line.startsWith('Property changes on:')) { flushChanges(rows, deleted, added); inHunk = false; inProperties = true; }
+    if (inProperties) { if (line && !/^_{3,}$/.test(line)) rows.push({ kind: 'meta', text: line }); continue; }
     const hunk = line.match(HUNK_HEADER) ?? line.match(SVN_HUNK_HEADER);
     if (hunk) {
       flushChanges(rows, deleted, added);
@@ -296,7 +303,7 @@ export function parseUnifiedDiff(content: string, fallbackPath = ''): ParsedUnif
         || line.startsWith('Index: ')
         || /^={3,}$/.test(line)
         || line.startsWith('index ')
-        || /^(?:new|deleted|old|new) file mode /.test(line)
+        || /^(?:new|deleted) file mode /.test(line)
         || /^(?:dis)?similarity index /.test(line)
       ) continue;
       rows.push({ kind: 'meta', text: line });
@@ -347,124 +354,47 @@ function buildRenderRows(
   collapsed: boolean,
   expandedFolds: Record<string, FoldExpansion>,
 ): RenderRow[] {
-  const pairRows: Extract<ParsedDiffRow, { kind: 'pair' }>[] = [];
-  const metaRows: Extract<ParsedDiffRow, { kind: 'meta' }>[] = [];
-  for (const row of parsed.rows) {
-    if (row.kind === 'pair') pairRows.push(row);
-    else if (row.kind === 'meta') metaRows.push(row);
-  }
-
-  if (!collapsed) {
-    const rows: RenderRow[] = [];
-    for (const row of parsed.rows) {
-      if (row.kind === 'hunk') continue;
-      if (row.kind === 'meta') {
-        rows.push(row);
-        continue;
-      }
-      if (view === 'split') {
-        rows.push({ kind: 'split', oldCell: row.oldCell, newCell: row.newCell });
-        continue;
-      }
-      if (row.oldCell.kind === 'context' && row.newCell.kind === 'context') {
-        rows.push({ kind: 'inline', side: 'both', oldNumber: row.oldCell.lineNumber, newNumber: row.newCell.lineNumber, cell: row.oldCell });
-        continue;
-      }
-      if (row.oldCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'old', oldNumber: row.oldCell.lineNumber, newNumber: null, cell: row.oldCell, peer: row.newCell.kind === 'addition' ? row.newCell : undefined });
-      if (row.newCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'new', oldNumber: null, newNumber: row.newCell.lineNumber, cell: row.newCell, peer: row.oldCell.kind === 'deletion' ? row.oldCell : undefined });
-    }
-    return rows;
-  }
-
-  const CONTEXT_MARGIN = 3;
-  const isChanged = (row: Extract<ParsedDiffRow, { kind: 'pair' }>) =>
-    row.oldCell.kind === 'deletion' || row.newCell.kind === 'addition';
-
-  const keep = new Array<boolean>(pairRows.length).fill(false);
-  const hasChanges = pairRows.some(isChanged);
-  if (!hasChanges) {
-    if (pairRows.length > 10) {
-      for (let k = 0; k < 3; k += 1) keep[k] = true;
-      for (let k = pairRows.length - 3; k < pairRows.length; k += 1) keep[k] = true;
-    } else {
-      keep.fill(true);
-    }
-  } else {
-    for (let k = 0; k < pairRows.length; k += 1) {
-      if (isChanged(pairRows[k])) {
-        const start = Math.max(0, k - CONTEXT_MARGIN);
-        const end = Math.min(pairRows.length - 1, k + CONTEXT_MARGIN);
-        for (let j = start; j <= end; j += 1) {
-          keep[j] = true;
-        }
-      }
-    }
-  }
-
   const rows: RenderRow[] = [];
-  let i = 0;
   let foldIndex = 0;
-
-  const pushPairRow = (row: Extract<ParsedDiffRow, { kind: 'pair' }>) => {
-    if (view === 'split') {
-      rows.push({ kind: 'split', oldCell: row.oldCell, newCell: row.newCell });
-    } else if (row.oldCell.kind === 'context' && row.newCell.kind === 'context') {
+  const pushPair = (row: Extract<ParsedDiffRow, { kind: 'pair' }>) => {
+    if (view === 'split') rows.push({ kind: 'split', oldCell: row.oldCell, newCell: row.newCell });
+    else if (row.oldCell.kind === 'context' && row.newCell.kind === 'context') {
       rows.push({ kind: 'inline', side: 'both', oldNumber: row.oldCell.lineNumber, newNumber: row.newCell.lineNumber, cell: row.oldCell });
     } else {
       if (row.oldCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'old', oldNumber: row.oldCell.lineNumber, newNumber: null, cell: row.oldCell, peer: row.newCell.kind === 'addition' ? row.newCell : undefined });
       if (row.newCell.kind !== 'empty') rows.push({ kind: 'inline', side: 'new', oldNumber: null, newNumber: row.newCell.lineNumber, cell: row.newCell, peer: row.oldCell.kind === 'deletion' ? row.oldCell : undefined });
     }
   };
-
-  while (i < pairRows.length) {
-    if (keep[i]) {
-      pushPairRow(pairRows[i]);
-      i += 1;
-    } else {
-      const startIdx = i;
-      while (i < pairRows.length && !keep[i]) {
-        i += 1;
-      }
-      const endIdx = i - 1;
-      const count = endIdx - startIdx + 1;
-      const foldId = `fold-${foldIndex}-${pairRows[startIdx].oldCell.lineNumber}`;
-      foldIndex += 1;
-      const expansion = expandedFolds[foldId] || { top: 0, bottom: 0 };
-
-      if (expansion.all || (expansion.top + expansion.bottom >= count)) {
-        for (let k = startIdx; k <= endIdx; k += 1) {
-          pushPairRow(pairRows[k]);
-        }
-      } else {
-        const topEnd = Math.min(endIdx, startIdx + expansion.top - 1);
-        for (let k = startIdx; k <= topEnd; k += 1) {
-          pushPairRow(pairRows[k]);
-        }
-
-        const topExpanded = Math.max(0, topEnd - startIdx + 1);
-        const bottomExpanded = Math.min(count - topExpanded, expansion.bottom);
-        const hiddenCount = count - topExpanded - bottomExpanded;
-
-        if (hiddenCount > 0) {
-          rows.push({
-            kind: 'fold',
-            foldId,
-            hiddenCount,
-          });
-        }
-
-        const bottomStart = Math.max(topEnd + 1, endIdx - bottomExpanded + 1);
-        for (let k = bottomStart; k <= endIdx; k += 1) {
-          pushPairRow(pairRows[k]);
-        }
-      }
+  let group: Extract<ParsedDiffRow, { kind: 'pair' }>[] = [];
+  const flush = () => {
+    if (!group.length) return;
+    const keep = group.map(() => !collapsed);
+    if (collapsed) {
+      const changed = group.map((row) => row.oldCell.kind === 'deletion' || row.newCell.kind === 'addition');
+      if (changed.some(Boolean)) {
+        changed.forEach((value, index) => { if (value) for (let i = Math.max(0, index - 3); i <= Math.min(group.length - 1, index + 3); i += 1) keep[i] = true; });
+      } else group.forEach((_, index) => { keep[index] = group.length <= 10 || index < 3 || index >= group.length - 3; });
     }
+    for (let i = 0; i < group.length;) {
+      if (keep[i]) { pushPair(group[i]); i += 1; continue; }
+      const start = i;
+      while (i < group.length && !keep[i]) i += 1;
+      const count = i - start;
+      const foldId = `fold-${foldIndex++}-${group[start].oldCell.lineNumber}`;
+      const expansion = expandedFolds[foldId] ?? { top: 0, bottom: 0 };
+      const top = expansion.all ? count : Math.min(count, expansion.top);
+      const bottom = Math.min(count - top, expansion.bottom);
+      for (let j = start; j < start + top; j += 1) pushPair(group[j]);
+      if (count > top + bottom) rows.push({ kind: 'fold', foldId, hiddenCount: count - top - bottom });
+      for (let j = i - bottom; j < i; j += 1) pushPair(group[j]);
+    }
+    group = [];
+  };
+  for (const row of parsed.rows) {
+    if (row.kind === 'pair') group.push(row);
+    else { flush(); if (row.kind === 'meta') rows.push(row); }
   }
-
-  for (const meta of metaRows) {
-    rows.push(meta);
-  }
-
+  flush();
   return rows;
 }
 
@@ -480,7 +410,27 @@ function changedRange(content: string, peer?: string): [number, number] | undefi
   return [prefix, content.length - suffix];
 }
 
-function changedContent(content: string, peer?: string, tokens?: ThemedToken[]): ReactNode {
+interface SearchHighlight { start: number; end: number; current: boolean }
+
+function changedContent(content: string, peer?: string, tokens?: ThemedToken[], search: SearchHighlight[] = []): ReactNode {
+  if (search.length) {
+    const range = changedRange(content, peer);
+    const points = new Set([0, content.length]);
+    search.forEach((match) => { points.add(match.start); points.add(match.end); });
+    if (range) { points.add(range[0]); points.add(range[1]); }
+    let offset = 0;
+    const colors = (tokens ?? []).map((token) => { const start = offset; offset += token.content.length; points.add(offset); return { start, end: offset, color: token.color }; });
+    const boundaries = [...points].sort((a, b) => a - b);
+    let tokenIndex = 0;
+    return boundaries.slice(0, -1).map((start, index) => {
+      const end = boundaries[index + 1];
+      while (tokenIndex < colors.length - 1 && colors[tokenIndex].end <= start) tokenIndex += 1;
+      const match = search.find((match) => match.start <= start && match.end >= end);
+      const piece = content.slice(start, end);
+      const changed = range && range[0] <= start && range[1] >= end;
+      return <span key={start} style={{ color: colors[tokenIndex]?.color }}>{match ? <mark className={`diff-search-match ${match.current ? 'current' : ''}`}>{piece}</mark> : changed ? <mark>{piece}</mark> : piece}</span>;
+    });
+  }
   const range = changedRange(content, peer);
   if (!tokens?.length) {
     if (!range) return content || ' ';
@@ -501,12 +451,12 @@ function changedContent(content: string, peer?: string, tokens?: ThemedToken[]):
   });
 }
 
-function DiffCodeCell({ cell, peer, side, tokens }: { cell: DiffCell; peer?: DiffCell; side: DiffSide; tokens?: ThemedToken[] }) {
+function DiffCodeCell({ cell, peer, side, tokens, search }: { cell: DiffCell; peer?: DiffCell; side: DiffSide; tokens?: ThemedToken[]; search?: SearchHighlight[] }) {
   const marker = cell.kind === 'deletion' ? '−' : cell.kind === 'addition' ? '+' : ' ';
-  return <div className={`diff-code-cell ${side} ${cell.kind}`} data-line-number={cell.lineNumber ?? undefined} data-side={side}>
+  return <div className={`diff-code-cell ${side} ${cell.kind}`} data-line-number={cell.lineNumber ?? undefined} data-side={side} data-history-mapped={peer?.kind === 'deletion' ? 'true' : undefined}>
     <span className="diff-marker">{marker}</span>
     <span className="diff-line-number">{cell.lineNumber ?? ''}</span>
-    <code>{cell.kind === 'empty' ? ' ' : changedContent(cell.content, peer?.content, tokens)}</code>
+    <code>{cell.kind === 'empty' ? ' ' : changedContent(cell.content, peer?.content, tokens, search)}</code>
   </div>;
 }
 
@@ -557,23 +507,24 @@ function renderRow(
   row: RenderRow,
   highlighted: WeakMap<DiffCell, ThemedToken[]> | undefined,
   onExpandFold: (foldId: string, action: 'all' | 'top' | 'bottom') => void,
+  search?: WeakMap<DiffCell, SearchHighlight[]>,
 ): ReactNode {
   if (row.kind === 'hunk') return null;
   if (row.kind === 'meta') return <div className="diff-meta-row"><Codicon name="info" /><code>{row.text}</code></div>;
   if (row.kind === 'fold') return <DiffFoldRow foldId={row.foldId} hiddenCount={row.hiddenCount} onExpand={onExpandFold} />;
   if (row.kind === 'split') {
     return <div className="diff-split-row">
-      <DiffCodeCell side="old" cell={row.oldCell} peer={row.newCell.kind === 'addition' ? row.newCell : undefined} tokens={highlighted?.get(row.oldCell)} />
-      <DiffCodeCell side="new" cell={row.newCell} peer={row.oldCell.kind === 'deletion' ? row.oldCell : undefined} tokens={highlighted?.get(row.newCell)} />
+      <DiffCodeCell side="old" cell={row.oldCell} peer={row.newCell.kind === 'addition' ? row.newCell : undefined} tokens={highlighted?.get(row.oldCell)} search={search?.get(row.oldCell)} />
+      <DiffCodeCell side="new" cell={row.newCell} peer={row.oldCell.kind === 'deletion' ? row.oldCell : undefined} tokens={highlighted?.get(row.newCell)} search={search?.get(row.newCell)} />
     </div>;
   }
   const marker = row.cell.kind === 'deletion' ? '−' : row.cell.kind === 'addition' ? '+' : ' ';
   const lineNumber = row.newNumber ?? row.oldNumber;
-  return <div className={`diff-inline-row ${row.cell.kind}`} data-line-number={lineNumber ?? undefined} data-new-line-number={row.newNumber ?? undefined} data-old-line-number={row.oldNumber ?? undefined}>
+  return <div className={`diff-inline-row ${row.cell.kind}`} data-line-number={lineNumber ?? undefined} data-new-line-number={row.newNumber ?? undefined} data-old-line-number={row.oldNumber ?? undefined} data-history-mapped={row.peer?.kind === 'deletion' ? 'true' : undefined}>
     <span className="diff-line-number old" data-side="old" data-line-number={row.oldNumber ?? undefined}>{row.oldNumber ?? ''}</span>
     <span className="diff-line-number new" data-side="new" data-line-number={row.newNumber ?? undefined}>{row.newNumber ?? ''}</span>
     <span className="diff-marker">{marker}</span>
-    <code>{changedContent(row.cell.content, row.peer?.content, highlighted?.get(row.cell))}</code>
+    <code>{changedContent(row.cell.content, row.peer?.content, highlighted?.get(row.cell), search?.get(row.cell))}</code>
   </div>;
 }
 
@@ -603,15 +554,62 @@ export function UnifiedDiffView({
   onShowSelectionHistory,
 }: UnifiedDiffViewProps) {
   const { t } = useI18n();
-  const [view, setView] = useState<'split' | 'inline'>('split');
+  const bridge = useContext(BridgeContext);
+  const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
+  const [historyError, setHistoryError] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchIndex, setSearchIndex] = useState(0);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const previousCollapsed = useRef(true);
+  const searchTrigger = useRef<HTMLElement | null>(null);
+  const historyRequest = useRef(0);
+  const contextSelection = useRef<string>();
+  const [manualView, setManualView] = useState<'split' | 'inline'>();
+  const [autoView, setAutoView] = useState<'split' | 'inline'>('split');
+  const view = manualView ?? autoView;
   const [theme, setTheme] = useState<BundledTheme | ThemeRegistrationRaw>(() => resolveShikiTheme(document.documentElement.dataset.theme));
   const [collapsed, setCollapsed] = useState<boolean>(true);
   const [expandedFolds, setExpandedFolds] = useState<Record<string, FoldExpansion>>({});
   const parsed = useMemo(() => parseUnifiedDiff(content, path), [content, path]);
-  const rows = useMemo(() => buildRenderRows(parsed, view, collapsed, expandedFolds), [parsed, view, collapsed, expandedFolds]);
+  const rows = useMemo(() => buildRenderRows(parsed, view, searchQuery ? false : collapsed, expandedFolds), [parsed, view, searchQuery, collapsed, expandedFolds]);
+  const searchRows = useMemo(() => buildRenderRows(parsed, view, false, {}), [parsed, view]);
+  const searchMatches = useMemo(() => {
+    const matches: { cell: DiffCell; side: DiffSide; start: number; end: number; rowIndex: number }[] = [];
+    const query = searchQuery.toLocaleLowerCase();
+    if (!query) return matches;
+    searchRows.forEach((row, rowIndex) => {
+      const cells = row.kind === 'split' ? [{ cell: row.oldCell, side: 'old' as const }, { cell: row.newCell, side: 'new' as const }]
+        : row.kind === 'inline' ? [{ cell: row.cell, side: row.side === 'old' || row.side === 'both' ? 'old' as const : 'new' as const }] : [];
+      cells.forEach(({ cell, side }) => {
+        const text = cell.content.toLocaleLowerCase();
+        for (let index = text.indexOf(query); index >= 0; index = text.indexOf(query, index + query.length)) matches.push({ cell, side, start: index, end: index + query.length, rowIndex });
+      });
+    });
+    return matches;
+  }, [searchQuery, searchRows]);
+  const selectedSearchIndex = searchMatches.length ? searchIndex % searchMatches.length : 0;
+  const searchHighlights = useMemo(() => {
+    const values = new WeakMap<DiffCell, SearchHighlight[]>();
+    searchMatches.forEach((match, index) => values.set(match.cell, [...values.get(match.cell) ?? [], { start: match.start, end: match.end, current: index === selectedSearchIndex }]));
+    return values;
+  }, [searchMatches, selectedSearchIndex]);
   const [highlighted, setHighlighted] = useState<WeakMap<DiffCell, ThemedToken[]>>();
   const containerRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const horizontalOffset = useRef(0);
+  const splitContentWidth = useMemo(() => {
+    const columns = (text: string) => Array.from(text.replace(/\t/g, '    ')).reduce((width, character) => width + (character.codePointAt(0)! > 255 ? 2 : 1), 0);
+    const longest = parsed.rows.reduce((width, row) => row.kind === 'pair' ? Math.max(width, columns(row.oldCell.content), columns(row.newCell.content)) : width, 0);
+    return `calc(${longest}ch + 66px)`;
+  }, [parsed]);
+  const syncHorizontalScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const source = event.currentTarget;
+    horizontalOffset.current = source.scrollLeft;
+    const peer = source.parentElement?.querySelector<HTMLElement>(source.classList.contains('old') ? '.unified-diff-pane.new' : '.unified-diff-pane.old');
+    if (!peer || Math.abs(peer.scrollLeft - source.scrollLeft) < 1) return;
+    peer.scrollLeft = source.scrollLeft;
+  }, []);
   const [activeChangeIndex, setActiveChangeIndex] = useState<number>(-1);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -631,18 +629,20 @@ export function UnifiedDiffView({
     event.stopPropagation();
 
     const selection = window.getSelection();
-    const selectionText = selection?.toString() || '';
+    const codeRow = target.closest<HTMLElement>('.diff-code-cell, .diff-inline-row, .diff-meta-row');
+    const selectionText = (contextSelection.current ?? selection?.toString()) || (codeRow?.classList.contains('empty') ? '' : codeRow?.querySelector('code')?.textContent) || '';
+    contextSelection.current = undefined;
     const lineRange = extractDiffLineRange(container, target);
-    const isWorkingTree = !newRevision || newRevision === 'WORKTREE' || newRevision === 'WORKING';
+    const isWorkingTree = !newRevision || newRevision === 'WORKTREE' || newRevision === 'WORKING' || newRevision === 'INDEX';
     let isWorkingTreeAddition = false;
     if (isWorkingTree && lineRange?.side !== 'old') {
-      const cellEl = target.closest('.diff-code-cell, .diff-inline-row');
-      if (cellEl && (cellEl.classList.contains('addition') || Boolean(cellEl.querySelector('.diff-code-cell.addition')))) {
+      const cellEl = target.closest<HTMLElement>('.diff-code-cell, .diff-inline-row');
+      if (cellEl && (cellEl.classList.contains('addition') && !cellEl.dataset.historyMapped)) {
         isWorkingTreeAddition = true;
       } else if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
         const lineElements = Array.from(container.querySelectorAll<HTMLElement>('.diff-inline-row, .diff-code-cell'));
-        const selectedEls = lineElements.filter((el) => selection.containsNode(el, true));
-        if (selectedEls.length > 0 && selectedEls.every((el) => el.classList.contains('addition') || el.classList.contains('new'))) {
+        const selectedEls = lineElements.filter((el) => selection.getRangeAt(0).intersectsNode(el));
+        if (selectedEls.length > 0 && selectedEls.every((el) => el.classList.contains('addition') && !el.dataset.historyMapped)) {
           isWorkingTreeAddition = true;
         }
       }
@@ -657,7 +657,7 @@ export function UnifiedDiffView({
     });
   };
 
-  const handleSelectContextMenu = (id: string) => {
+  const handleSelectContextMenu = async (id: string) => {
     if (id === 'copy') {
       const text = contextMenu?.selectionText || '';
       if (text) {
@@ -668,14 +668,22 @@ export function UnifiedDiffView({
       const rawRevision = isOld
         ? (oldRevision ?? (newRevision ? `${newRevision}~1` : undefined))
         : newRevision;
-      const selectedRevision = normalizeHistoryRevision(rawRevision);
+      let selectedRevision = normalizeHistoryRevision(rawRevision);
       const effectiveOldPath = oldPath || (parsed.oldLabel && parsed.oldLabel !== '/dev/null' ? parsed.oldLabel : path);
-      const selectedPath = (isOld && effectiveOldPath) ? effectiveOldPath : path;
-      if (onShowSelectionHistory) {
-        onShowSelectionHistory(contextMenu.lineRange, selectedRevision, selectedPath);
-      } else if (repoId && selectedPath) {
-        void useAppStore.getState().openHistoryForLineRange(repoId, selectedPath, contextMenu.lineRange, selectedRevision);
+      let selectedPath = (isOld && effectiveOldPath) ? effectiveOldPath : path;
+      let lineRange = contextMenu.lineRange;
+      if (bridge && repoId && workspaceId && ['INDEX', 'WORKTREE', 'WORKING', 'BASE'].includes(rawRevision ?? 'WORKTREE')) {
+        setContextMenu(undefined); setHistoryError('');
+        const request = ++historyRequest.current;
+        try {
+          const result = await bridge.request<import('../bindings/generated').DiffLineHistoryTarget | null>({ type: 'diffLineHistoryTarget', payload: { workspace_id: workspaceId, repo_id: repoId, relative_path: selectedPath, source_revision: rawRevision ?? 'WORKTREE', line_range: { start: lineRange.start, end: lineRange.end } } }, { showProgress: false });
+          if (request !== historyRequest.current || useAppStore.getState().snapshot?.workspace.id !== workspaceId) return;
+          if (!result) { setHistoryError(t('Uncommitted additions have no history')); return; }
+          selectedPath = result.path; selectedRevision = result.revision; lineRange = { ...result.lineRange, side: lineRange.side };
+        } catch (error) { if (request === historyRequest.current) setHistoryError(String(error)); return; }
       }
+      if (onShowSelectionHistory) onShowSelectionHistory(lineRange, selectedRevision, selectedPath);
+      else if (repoId && selectedPath) void useAppStore.getState().openHistoryForLineRange(repoId, selectedPath, lineRange, selectedRevision);
     }
     setContextMenu(undefined);
   };
@@ -746,6 +754,45 @@ export function UnifiedDiffView({
     },
   });
 
+  const openSearch = useCallback(() => {
+    searchTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    previousCollapsed.current = collapsed;
+    setSearchOpen(true);
+    queueMicrotask(() => { searchInput.current?.focus(); searchInput.current?.select(); });
+  }, [collapsed]);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false); setSearchQuery(''); setSearchIndex(0);
+    setCollapsed(previousCollapsed.current);
+    searchTrigger.current?.focus();
+  }, []);
+  const navigateSearch = useCallback((direction: -1 | 1) => {
+    if (!searchMatches.length) return;
+    setSearchIndex((index) => (index + direction + searchMatches.length) % searchMatches.length);
+  }, [searchMatches.length]);
+  useEffect(() => {
+    if (!searchQuery || !searchMatches.length) return;
+    const match = searchMatches[selectedSearchIndex];
+    virtualizer.scrollToIndex(match.rowIndex, { align: 'center' });
+    const pane = scrollRef.current?.querySelector<HTMLElement>(`.unified-diff-pane.${match.side}`);
+    const horizontal = pane ?? scrollRef.current;
+    if (horizontal) {
+      const left = Math.max(0, match.start * 8 - horizontal.clientWidth / 2);
+      horizontal.scrollLeft = left;
+      horizontalOffset.current = horizontal.scrollLeft;
+      if (pane) scrollRef.current?.querySelectorAll<HTMLElement>('.unified-diff-pane').forEach((peer) => { peer.scrollLeft = left; });
+    }
+  }, [searchMatches, selectedSearchIndex, searchQuery, virtualizer]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      const container = containerRef.current;
+      if (!container || event.defaultPrevented || event.isComposing || document.querySelector('[role="menu"]')) return;
+      if (!container.contains(document.activeElement) && !container.matches(':hover')) return;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); }
+      else if (searchOpen && event.key === 'Escape') { event.preventDefault(); closeSearch(); }
+      else if (searchOpen && (event.target === searchInput.current && event.key === 'Enter' || event.key === 'F3')) { event.preventDefault(); navigateSearch(event.shiftKey ? -1 : 1); }
+    };
+    window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
+  }, [closeSearch, navigateSearch, openSearch, searchOpen]);
   const goToChange = useCallback((index: number) => {
     if (!changeRanges.length) return;
     const target = ((index % changeRanges.length) + changeRanges.length) % changeRanges.length;
@@ -766,13 +813,15 @@ export function UnifiedDiffView({
 
   useEffect(() => {
     setActiveChangeIndex(-1);
-    setExpandedFolds({});
-  }, [content, path]);
+    horizontalOffset.current = 0;
+    scrollRef.current?.querySelectorAll<HTMLElement>('.unified-diff-pane').forEach((pane) => { pane.scrollLeft = 0; });
+    historyRequest.current += 1; setExpandedFolds({}); setSearchQuery(''); setSearchIndex(0); setHistoryError('');
+  }, [content, path, repoId, oldRevision, newRevision]);
 
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(([entry]) => setView(entry.contentRect.width < splitBreakpoint ? 'inline' : 'split'));
+    const observer = new ResizeObserver(([entry]) => setAutoView(entry.contentRect.width < splitBreakpoint ? 'inline' : 'split'));
     observer.observe(element);
     return () => observer.disconnect();
   }, [splitBreakpoint]);
@@ -800,16 +849,29 @@ export function UnifiedDiffView({
     }).catch(() => { if (active) setHighlighted(undefined); });
     return () => { active = false; };
   }, [content.length, language, parsed, path, theme]);
-  useEffect(() => { virtualizer.measure(); }, [view, virtualizer]);
+  useEffect(() => {
+    virtualizer.measure();
+    if (view === 'split') {
+      const left = horizontalOffset.current;
+      scrollRef.current?.querySelectorAll<HTMLElement>('.unified-diff-pane').forEach((pane) => { pane.scrollLeft = left; });
+    }
+  }, [view, virtualizer]);
+  useEffect(() => () => { historyRequest.current += 1; }, []);
 
-  return <section ref={containerRef} className={`unified-diff ${view} ${className}`} aria-label={t('File differences')} onContextMenu={handleContextMenu}>
+  return <section ref={containerRef} tabIndex={-1} className={`unified-diff ${view} ${className}`} aria-label={t('File differences')} onContextMenu={handleContextMenu} onMouseDownCapture={(event) => {
+    if (event.button !== 2) return;
+    const selection = window.getSelection();
+    // WebKit may select the clicked word before contextmenu. Keep only the
+    // user's existing selection so an unselected line still copies in full.
+    contextSelection.current = selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode) ? selection.toString() : '';
+  }}>
     <div className="diff-toolbar">
       <div className="diff-toolbar-left">
         <button
           type="button"
           className="diff-toolbar-btn"
           title={view === 'split' ? t('Inline view') : t('Split view')}
-          onClick={() => setView((prev) => prev === 'split' ? 'inline' : 'split')}
+          onClick={() => setManualView(view === 'split' ? 'inline' : 'split')}
         >
           <Codicon name={view === 'split' ? 'list-flat' : 'split-horizontal'} />
           <span>{view === 'split' ? t('Inline view') : t('Split view')}</span>
@@ -828,12 +890,13 @@ export function UnifiedDiffView({
         </button>
       </div>
       <div className="diff-toolbar-right">
+        <IconButton title={t('Find in file')} aria-label={t('Find in file')} onClick={openSearch}><Codicon name="search" /></IconButton>
         {changeRanges.length > 0 ? (
           <span className="diff-change-count">
             {activeChangeIndex >= 0 ? `${activeChangeIndex + 1} / ${changeRanges.length}` : `${changeRanges.length} ${t('changes')}`}
           </span>
         ) : (
-          <span className="diff-change-count">{t('No changes')}</span>
+          <span className="diff-change-count">{t(parsed.rows.some((row) => row.kind === 'meta') ? 'Metadata changes' : 'No changes')}</span>
         )}
         <button
           type="button"
@@ -859,11 +922,14 @@ export function UnifiedDiffView({
         </button>
       </div>
     </div>
+    <FileSearchWidget placeholder={t('Find in file')} query={searchQuery} isOpen={searchOpen} inputRef={searchInput} onChange={(query) => { setSearchQuery(query); setSearchIndex(0); }} onClose={closeSearch} count={{ current: searchMatches.length ? selectedSearchIndex + 1 : 0, total: searchMatches.length }} onNavigate={navigateSearch} />
+    {historyError && <div className="diff-history-error" role="alert">{historyError}</div>}
     <div ref={scrollRef} className="unified-diff-scroll">
       <div className="unified-diff-virtual" style={{ height: virtualizer.getTotalSize() }}>
         {view === 'split' ? (
           <div className="unified-diff-split-container">
-            <div className="unified-diff-pane old">
+            <div className="unified-diff-pane old" onScroll={syncHorizontalScroll}>
+              <div aria-hidden="true" style={{ width: splitContentWidth, minWidth: '100%', height: 1, pointerEvents: 'none', fontSize: 'calc(12px * var(--versiondock-ui-font-scale, 1))' }} />
               {virtualizer.getVirtualItems().map((virtualRow) => {
                 const row = rows[virtualRow.index];
                 if (row.kind === 'meta') return null;
@@ -883,18 +949,19 @@ export function UnifiedDiffView({
                   ref={virtualizer.measureElement}
                   data-index={virtualRow.index}
                   className="unified-diff-virtual-row"
-                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  style={{ transform: `translateY(${virtualRow.start}px)`, width: splitContentWidth, fontSize: 'calc(12px * var(--versiondock-ui-font-scale, 1))' }}
                 >
                   <DiffCodeCell
                     side="old"
                     cell={row.oldCell}
                     peer={peerRow.kind === 'split' && peerRow.newCell.kind === 'addition' ? peerRow.newCell : undefined}
-                    tokens={highlighted?.get(row.oldCell)}
+                    tokens={highlighted?.get(row.oldCell)} search={searchHighlights.get(row.oldCell)}
                   />
                 </div>;
               })}
             </div>
-            <div className="unified-diff-pane new">
+            <div className="unified-diff-pane new" onScroll={syncHorizontalScroll}>
+              <div aria-hidden="true" style={{ width: splitContentWidth, minWidth: '100%', height: 1, pointerEvents: 'none', fontSize: 'calc(12px * var(--versiondock-ui-font-scale, 1))' }} />
               {virtualizer.getVirtualItems().map((virtualRow) => {
                 const row = rows[virtualRow.index];
                 if (row.kind === 'meta') return null;
@@ -912,19 +979,20 @@ export function UnifiedDiffView({
                   key={`new-${virtualRow.key}`}
                   data-index={virtualRow.index}
                   className="unified-diff-virtual-row"
-                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  style={{ transform: `translateY(${virtualRow.start}px)`, width: splitContentWidth, fontSize: 'calc(12px * var(--versiondock-ui-font-scale, 1))' }}
                 >
                   <DiffCodeCell
                     side="new"
                     cell={row.newCell}
                     peer={peerRow.kind === 'split' && peerRow.oldCell.kind === 'deletion' ? peerRow.oldCell : undefined}
-                    tokens={highlighted?.get(row.newCell)}
+                    tokens={highlighted?.get(row.newCell)} search={searchHighlights.get(row.newCell)}
                   />
                 </div>;
               })}
             </div>
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const row = rows[virtualRow.index];
+              if (row.kind === 'meta') return <div key={`meta-${virtualRow.key}`} ref={virtualizer.measureElement} data-index={virtualRow.index} className="unified-diff-virtual-row split-center-meta-overlay" style={{ transform: `translateY(${virtualRow.start}px)` }}>{renderRow(row, highlighted, handleExpandFold, searchHighlights)}</div>;
               if (row.kind !== 'fold') return null;
               return <div
                 key={`center-fold-${virtualRow.key}`}
@@ -944,7 +1012,7 @@ export function UnifiedDiffView({
               data-index={virtualRow.index}
               className="unified-diff-virtual-row"
               style={{ transform: `translateY(${virtualRow.start}px)` }}
-            >{renderRow(row, highlighted, handleExpandFold)}</div>;
+            >{renderRow(row, highlighted, handleExpandFold, searchHighlights)}</div>;
           })
         )}
       </div>
@@ -954,7 +1022,7 @@ export function UnifiedDiffView({
         x={contextMenu.x}
         y={contextMenu.y}
         items={[
-          { id: 'copy', label: t('Copy'), icon: 'copy' },
+          { id: 'copy', label: t('Copy'), icon: 'copy', disabled: !contextMenu.selectionText },
           ...(contextMenu.lineRange && (onShowSelectionHistory || (repoId && (path || oldPath || (parsed.oldLabel && parsed.oldLabel !== '/dev/null'))))
             ? [{
                 id: 'selection-history',
@@ -965,7 +1033,7 @@ export function UnifiedDiffView({
               } as const]
             : []),
         ]}
-        onSelect={handleSelectContextMenu}
+        onSelect={(id) => { void handleSelectContextMenu(id); }}
         onClose={() => setContextMenu(undefined)}
       />
     )}
