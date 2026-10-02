@@ -172,7 +172,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'remotes': case 'remoteOperation': return 'remote';
     case 'providerAccounts': case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGithubSave': case 'providerGitlabSave': case 'providerGiteeSave': case 'providerRemove': case 'providerRepositories': case 'providerNamespaces': case 'publishRepository': return 'remote';
     case 'gitIdentity': case 'gitProfileOperation': return 'identity';
-    case 'svnAccount': case 'svnAccountOperation': case 'svnOperation': return 'svnAccount';
+    case 'svnIgnoreEntries': case 'svnAccount': case 'svnAccountOperation': case 'svnOperation': return 'svnAccount';
     case 'fileHistory': case 'fileRevisionContent': return 'fileHistory';
     default: return 'system';
   }

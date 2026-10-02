@@ -4809,45 +4809,53 @@ button.danger:not(:disabled):hover,
 }
 
 .statusbar-item.branch-status-item {
+  --branch-sync-foreground: #4dd0e1;
+  --branch-pull-foreground: #64b5f6;
+  --branch-push-foreground: #81c784;
+  --branch-dirty-foreground: #ce93d8;
   color: var(--versiondock-text);
   background: transparent;
 }
-
-.statusbar-item.branch-status-item.has-behind {
-  color: var(--versiondock-accent);
+:root[data-theme="light"] .branch-status-item,
+:root[data-theme="light2026"] .branch-status-item {
+  --branch-sync-foreground: #00838f;
+  --branch-pull-foreground: #1565c0;
+  --branch-push-foreground: #2e7d32;
+  --branch-dirty-foreground: #6a1b9a;
 }
-
-.statusbar-item.branch-status-item.has-ahead {
-  color: var(--versiondock-success);
-}
-
-.statusbar-item.branch-status-item.needs-sync {
-  color: var(--versiondock-info);
-}
-
+.statusbar-item.branch-status-item.has-behind { color: var(--branch-pull-foreground); }
+.statusbar-item.branch-status-item.has-ahead { color: var(--branch-push-foreground); }
+.statusbar-item.branch-status-item.needs-sync { color: var(--branch-sync-foreground); }
+.statusbar-item.branch-status-item.has-dirty { color: var(--branch-dirty-foreground); }
 .statusbar-item.branch-status-item:hover,
-.statusbar-item.branch-status-item.active {
-  background: transparent !important;
+.statusbar-item.branch-status-item.active { background: var(--versiondock-hover); }
+.statusbar-item.branch-status-item .statusbar-counter,
+.statusbar-item.branch-status-item .statusbar-dirty-dot { color: inherit; }
+
+.statusbar-item.branch-status-item:is(:hover, .active) .statusbar-counter,
+.statusbar-item.branch-status-item:is(:hover, .active) .statusbar-dirty-dot { color: inherit; }
+
+.branch-status-tooltip {
+  position: fixed;
+  z-index: 1200;
+  padding: 10px 12px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
   color: var(--versiondock-text);
+  background: var(--versiondock-surface-alt);
+  border: 1px solid var(--versiondock-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px #0005;
+  font-size: 12px;
+  pointer-events: none;
 }
-
-.statusbar-item.branch-status-item.has-behind:hover,
-.statusbar-item.branch-status-item.has-behind.active {
-  background: transparent !important;
-  color: var(--versiondock-accent) !important;
-}
-
-.statusbar-item.branch-status-item.has-ahead:hover,
-.statusbar-item.branch-status-item.has-ahead.active {
-  background: transparent !important;
-  color: var(--versiondock-success) !important;
-}
-
-.statusbar-item.branch-status-item.needs-sync:hover,
-.statusbar-item.branch-status-item.needs-sync.active {
-  background: transparent !important;
-  color: var(--versiondock-info) !important;
-}
+.branch-status-tooltip p { margin: 8px 0; }
+.branch-status-tooltip table { margin-top: 10px; border-collapse: collapse; }
+.branch-status-tooltip th, .branch-status-tooltip td { padding: 5px 10px; text-align: left; border-bottom: 1px solid var(--versiondock-border-soft); }
+.branch-status-tooltip th:first-child, .branch-status-tooltip td:first-child { padding-left: 0; }
+.branch-status-tooltip th:nth-child(n+3), .branch-status-tooltip td:nth-child(n+3) { text-align: center; }
+.branch-status-tooltip em { color: var(--versiondock-muted); }
 
 /* Repository groups use one dense language across every commit-panel tab. */
 .repo-change-group:not(.changelist-group),
@@ -5002,6 +5010,96 @@ button.danger:not(:disabled):hover,
   font-weight: 700;
   text-align: center;
 }
+
+.dialog-multi-choices .choice-item.selected { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); }
+.dialog-multi-choices .choice-item:focus-visible { outline-color: var(--versiondock-muted); }
+
+.branch-quick-menu {
+  width: min(360px, calc(100vw - 16px));
+  min-width: 0 !important;
+}
+.branch-quick-menu .statusbar-menu-item { min-height: 24px; padding: 3px 10px; font-size: 12px; gap: 6px; }
+.branch-quick-menu .statusbar-menu-item-title { font-size: 12px; flex: 0 1 auto; }
+.branch-quick-menu .statusbar-menu-item-desc { font-size: 11px; margin-top: 0; flex: 1 1 0; }
+.branch-quick-menu .statusbar-menu-item-text { flex-direction: row; align-items: center; gap: 5px; }
+.branch-quick-menu .statusbar-menu-item-text:has(> .statusbar-menu-item-detail),
+.branch-quick-menu .statusbar-menu-item-text:has(> .statusbar-repo-op-label) { flex-wrap: wrap; }
+.branch-quick-menu .statusbar-menu-item-detail { width: 100%; color: var(--versiondock-muted); font-size: 11px; margin-top: 0; }
+.branch-quick-menu .statusbar-menu-section { padding: 2px 0; }
+.branch-quick-menu .statusbar-menu-section:has(> .statusbar-menu-group-header) { border-top: 1px solid var(--versiondock-border-soft); }
+.branch-quick-menu .statusbar-menu-group-header {
+  padding: 7px 10px 3px;
+  color: var(--versiondock-muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.branch-quick-menu .warning-section { background: transparent; border: 0; }
+.branch-quick-menu .warning-section .statusbar-menu-item-text { flex-direction: column; align-items: flex-start; gap: 0; }
+.branch-quick-menu .statusbar-badge,
+.branch-quick-menu .statusbar-active-repo-badge { padding: 0; font-weight: 400; border-radius: 0; background: transparent !important; }
+.branch-menu-toolbar {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--versiondock-border-soft);
+}
+.branch-menu-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  color: var(--versiondock-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+.branch-menu-heading > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.branch-menu-heading > .icon-button { margin-left: -3px; }
+.branch-menu-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 4px 0 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--versiondock-border);
+  border-radius: 4px;
+  background: var(--versiondock-surface);
+  transition: border-color .12s ease;
+}
+.branch-menu-search:focus-within { border-color: var(--versiondock-selection-border); }
+.branch-menu-search-icon { flex: 0 0 auto; color: var(--versiondock-muted); font-size: 13px; }
+.branch-menu-search input {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--versiondock-text);
+  font: inherit;
+  font-size: 12px;
+}
+.branch-menu-search input:focus-visible { outline: none; }
+.branch-menu-search input::placeholder { color: var(--versiondock-muted); }
+.branch-menu-clear-hidden { visibility: hidden; pointer-events: none; }
+.branch-quick-menu .statusbar-menu-item.keyboard-selected,
+.branch-quick-menu .statusbar-menu-item.selected,
+.branch-quick-menu .statusbar-menu-item:focus-visible { background: var(--versiondock-selection-background); outline: none; }
+.branch-quick-menu .statusbar-menu-item.active-ref { background: transparent; font-weight: 500; }
+.branch-quick-menu .statusbar-menu-item.active-ref:is(:hover, .selected, .keyboard-selected) { background: var(--versiondock-selection-background); }
+.branch-quick-menu .statusbar-badge,
+.branch-quick-menu .statusbar-active-repo-badge { color: var(--versiondock-muted); background: var(--versiondock-hover); }
 
 /* ===== 状态栏 Popover 菜单通用浮层 ===== */
 .statusbar-popover, .statusbar-submenu {

@@ -113,6 +113,7 @@ const renderStatusBar = () => {
         selectedProfileId: null,
       };
     }
+    if (command.type === 'branches' || command.type === 'tags') return [];
     return true;
   });
 
@@ -124,6 +125,8 @@ const renderStatusBar = () => {
     selectedRepoId: 'repo1',
     notifications: [],
     operations: {},
+    branchesByRepo: {},
+    tagsByRepo: {},
   });
 
   const result = render(
@@ -159,7 +162,7 @@ describe('StatusBar', () => {
     expect(requests.find(({ command }) => command.type === 'gitIdentity')?.options?.showProgress).toBe(false);
   });
 
-  it('shows branch activity only for the selected repository', () => {
+  it('shows foreground VCS activity across the current workspace', () => {
     renderStatusBar();
     const current = snapshot();
     current.repositories.push({
@@ -174,8 +177,10 @@ describe('StatusBar', () => {
     };
     act(() => useAppStore.setState({ snapshot: current, selectedRepoId: 'repo2', operations: { branchRepo1: operation } }));
     const branchButton = screen.getByText('main').closest('button')!;
+    expect(branchButton.querySelector('.codicon-modifier-spin')).toBeInTheDocument();
+    act(() => useAppStore.setState({ operations: { branchRepo1: { ...operation, context: { ...operation.context, workspaceId: 'other' } } } }));
     expect(branchButton.querySelector('.codicon-modifier-spin')).not.toBeInTheDocument();
-    act(() => useAppStore.setState({ selectedRepoId: 'repo1' }));
+    act(() => useAppStore.setState({ selectedRepoId: 'repo1', operations: { branchRepo1: operation } }));
     expect(branchButton.querySelector('.codicon-modifier-spin')).toBeInTheDocument();
   });
 

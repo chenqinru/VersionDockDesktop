@@ -154,7 +154,7 @@ describe('BranchStatusBarItem dirty state contract', () => {
     render(<BranchStatusBarItem />);
 
     const button = screen.getByRole('button');
-    const tooltip = button.getAttribute('title') ?? '';
+    const tooltip = button.getAttribute('aria-label') ?? '';
     expect(tooltip).toContain('repo-a: v1.5.0');
     expect(tooltip).toContain('repo-b: 3c4d5e6');
     expect(tooltip).not.toContain('HEAD (detached at');

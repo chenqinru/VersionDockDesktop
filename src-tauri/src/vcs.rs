@@ -1505,10 +1505,84 @@ pub async fn ignore_rules(
             Ok(IgnoreRules {
                 directory,
                 source: "svn:ignore".into(),
-                patterns: content.lines().map(str::to_string).collect(),
+                patterns: content
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect(),
             })
         }
     }
+}
+
+pub async fn svn_ignore_entries(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<IgnoreRules>, DesktopError> {
+    if repo.kind != VcsKind::Svn {
+        return Err(DesktopError::new(
+            "UNSUPPORTED_OPERATION",
+            "This operation requires an SVN working copy",
+            false,
+        ));
+    }
+    let raw = svn(
+        vec![
+            "propget".into(),
+            "svn:ignore".into(),
+            "--xml".into(),
+            "-R".into(),
+            "--".into(),
+            ".".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let root = Path::new(&repo.root_path);
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut entries = Vec::new();
+    for target in document
+        .descendants()
+        .filter(|node| node.has_tag_name("target"))
+    {
+        let path = Path::new(target.attribute("path").unwrap_or("."));
+        let path = if path.is_absolute() {
+            let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            canonical_path
+                .strip_prefix(&canonical_root)
+                .map_err(|error| DesktopError::new("INVALID_PATH", error.to_string(), false))?
+                .to_path_buf()
+        } else {
+            path.to_path_buf()
+        };
+        let directory = relative_path(root, &path.to_string_lossy(), false)?;
+        let patterns = target
+            .children()
+            .find(|node| {
+                node.has_tag_name("property") && node.attribute("name") == Some("svn:ignore")
+            })
+            .and_then(|node| node.text())
+            .unwrap_or("")
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if !patterns.is_empty() {
+            entries.push(IgnoreRules {
+                directory,
+                source: "svn:ignore".into(),
+                patterns,
+            });
+        }
+    }
+    entries.sort_by(|a, b| a.directory.cmp(&b.directory));
+    Ok(entries)
 }
 
 pub async fn update_ignore_rules(
@@ -6675,7 +6749,7 @@ pub async fn branches(
         return svn_branches(repo, token).await;
     }
     let format = format!(
-        "%(refname:short){FIELD}%(refname){FIELD}%(HEAD){FIELD}%(upstream:short){FIELD}%(upstream:track){FIELD}%(contents:subject){FIELD}%(committerdate:relative){RECORD}"
+        "%(refname:short){FIELD}%(refname){FIELD}%(HEAD){FIELD}%(upstream:short){FIELD}%(upstream:track){FIELD}%(contents:subject){FIELD}%(committerdate:iso-strict){RECORD}"
     );
     let raw = git(
         vec![
@@ -10361,6 +10435,29 @@ pub async fn svn_operation(
     }
     let root = Path::new(&repo.root_path);
     let args = match operation {
+        SvnOperation::RemoveIgnoreEntries { entries } => {
+            // Called under the repository write lock. Re-read properties so
+            // deleting chosen entries preserves any unrelated ignore patterns.
+            for entry in &entries {
+                relative_path(root, &entry.directory, false)?;
+            }
+            for entry in entries {
+                let Some(current) = svn_ignore_entries(repo, token)
+                    .await?
+                    .into_iter()
+                    .find(|group| group.directory == entry.directory)
+                else {
+                    continue;
+                };
+                let remaining = current
+                    .patterns
+                    .into_iter()
+                    .filter(|pattern| !entry.patterns.contains(pattern))
+                    .collect::<Vec<_>>();
+                update_ignore_rules(repo, &entry.directory, &remaining, token).await?;
+            }
+            return Ok(());
+        }
         SvnOperation::Cleanup {
             break_locks,
             remove_unversioned,

@@ -323,6 +323,10 @@ pub enum BridgeCommand {
         repo_id: String,
         directory: String,
     },
+    SvnIgnoreEntries {
+        workspace_id: String,
+        repo_id: String,
+    },
     UpdateIgnoreRules {
         workspace_id: String,
         repo_id: String,
@@ -1312,6 +1316,9 @@ pub struct SvnNativeCredential {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SvnOperation {
+    RemoveIgnoreEntries {
+        entries: Vec<IgnoreRules>,
+    },
     Cleanup {
         break_locks: bool,
         remove_unversioned: bool,

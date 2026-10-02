@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore, type AppNotificationAction } from '../../store/appStore';
 import { useI18n } from '../../i18n';
 import { promptDialog, confirmDialog, choiceDialog, multiChoiceDialog, currentDialog } from '../dialogService';
-import type { RepositoryStatus, BranchCompareResult } from '../../bindings/generated';
+import type { RepositoryStatus, BranchCompareResult, BranchInfo, TagInfo, SvnAccountState, IgnoreRules } from '../../bindings/generated';
 import { useBridge } from '../../platform/context';
 import { resolveSubmoduleOperationTarget } from './submoduleTarget';
 import { isBranchProtected, sanitizeBranchName } from '../../history/branchProtection';
@@ -17,7 +17,10 @@ import {
   isAbortableVcsOperation,
   getAbortOperationLabels,
 } from './branchRef';
-import { IgnoreRulesPanel } from '../IgnoreRulesPanel';
+import { BranchQuickMenu } from './BranchQuickMenu';
+import { commonRepositoryRefs, deriveBranchStatus, relativeBranchDate } from './branchStatus';
+import { BRANCH_MENU_WIDTH, positionBranchSubmenu } from './branchMenuPosition';
+import { isPrimaryBranch } from '../branchColor';
 
 const RECENT_BRANCHES_KEY = 'versiondock:recent_branches';
 
@@ -49,14 +52,14 @@ function recordRecentBranch(repoId: string, branchName: string) {
 
 interface BranchMenuPopoverProps {
   anchorRect: DOMRect | null;
+  placement?: 'anchor' | 'bottomLeft';
   onClose: () => void;
   initialRepoId?: string;
   repoOnly?: boolean;
   directBranch?: { repoId: string; branchName: string; isCurrent: boolean };
-  onManageIgnore?: (repoId: string, directory?: string) => void;
 }
 
-export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly = false, directBranch, onManageIgnore }: BranchMenuPopoverProps) {
+export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly = false, directBranch, placement = 'anchor' }: BranchMenuPopoverProps) {
   const { t } = useI18n();
   const bridge = useBridge();
   const snapshot = useAppStore((state) => state.snapshot);
@@ -67,6 +70,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const abortRepositoryOperation = useAppStore((state) => state.abortRepositoryOperation);
   const submoduleOperation = useAppStore((state) => state.submoduleOperation);
   const svnOperation = useAppStore((state) => state.svnOperation);
+  const openConflicts = useAppStore((state) => state.openConflicts);
   const setActiveTab = useAppStore((state) => state.setActiveTab);
   const backToHistory = useAppStore((state) => state.backToHistory);
   const openBranchComparison = useAppStore((state) => state.openBranchComparison);
@@ -83,10 +87,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const bootstrap = useAppStore((state) => state.bootstrap);
   const initializeRepository = useAppStore((state) => state.initializeRepository);
   const initializeAvailable = bootstrap?.capabilities?.availability?.initializeRepository?.available ?? bootstrap?.tools?.git ?? false;
-
-  // 忽略规则面板状态（包含 repoId 与相对目录）
-  const [ignoreManagerTarget, setIgnoreManagerTarget] = useState<{ repoId: string; directory: string } | null>(null);
-  const ignoreManagerRepoId = ignoreManagerTarget?.repoId ?? null;
 
   // 辅助函数：选取指定仓库的目标远端
   const pickRemote = async (repoId: string, title: string): Promise<string | null> => {
@@ -122,10 +122,10 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     const targetRepoId = initialRepoId ?? (repoOnly && snapshot?.repositories.length === 1 ? snapshot.repositories[0].meta.id : null);
     if (!targetRepoId || !anchorRect) return null;
     return {
-      left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - 288)),
+      left: placement !== 'bottomLeft' ? Math.max(8, Math.min(anchorRect.left, window.innerWidth - BRANCH_MENU_WIDTH - 8)) : 8,
       top: anchorRect.bottom + 4,
       centerY: anchorRect.top + anchorRect.height / 2,
-      maxHeight: Math.max(160, window.innerHeight - 20),
+      maxHeight: Math.max(0, Math.min(440, window.innerHeight - 40)),
     };
   });
 
@@ -142,16 +142,15 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     isCurrent: boolean;
   } | null>(null);
   const [actionMenuPos, setActionMenuPos] = useState<{ left: number; top: number; centerY: number; maxHeight: number } | null>(() => directBranch && anchorRect ? {
-    left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - 288)),
+    left: placement !== 'bottomLeft' ? Math.max(8, Math.min(anchorRect.left, window.innerWidth - BRANCH_MENU_WIDTH - 8)) : 8,
     top: anchorRect.bottom + 4,
     centerY: anchorRect.bottom + 4,
-    maxHeight: Math.max(160, window.innerHeight - 20),
+    maxHeight: Math.max(0, Math.min(440, window.innerHeight - 40)),
   } : null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const actionMenuRef = useRef<HTMLDivElement>(null);
-  const ignorePanelRef = useRef<HTMLDivElement>(null);
 
   // 监听二级子菜单真实高度，使其正中心精确对齐被点击的一级条目中心
   useLayoutEffect(() => {
@@ -159,9 +158,9 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
       const h = submenuRef.current.offsetHeight;
       const minTop = 10;
       const maxBottom = window.innerHeight - 30; // 底部状态栏 28px + 2px 安全距离
-      let nextTop = repoOnly && anchorRect ? anchorRect.bottom + 4 : submenuPos.centerY - h / 2;
+      let nextTop = repoOnly && placement === 'bottomLeft' ? maxBottom - h : (repoOnly || directBranch) && anchorRect ? anchorRect.bottom + 4 : submenuPos.centerY - h / 2;
       if (nextTop + h > maxBottom) {
-        nextTop = repoOnly && anchorRect ? anchorRect.top - h - 4 : maxBottom - h;
+        nextTop = placement !== 'bottomLeft' && anchorRect ? anchorRect.top - h - 4 : maxBottom - h;
       }
       if (nextTop < minTop) {
         nextTop = minTop;
@@ -170,7 +169,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
         setSubmenuPos((prev) => (prev ? { ...prev, top: nextTop } : null));
       }
     }
-  }, [submenuPos, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, anchorRect, repoOnly]);
+  }, [submenuPos, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, anchorRect, repoOnly, placement, directBranch]);
 
   // 监听三级动作子菜单真实高度，使其正中心精确对齐被点击的二级分支条目中心
   useLayoutEffect(() => {
@@ -191,6 +190,51 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     }
   }, [actionMenuPos, activeBranchAction, activeTagAction, anchorRect, directBranch]);
 
+  const backFromAction = useCallback(() => {
+    setActiveBranchAction(null);
+    setActiveTagAction(null);
+    setActionMenuPos(null);
+    if (directBranch) {
+      setActiveSubmenuRepoId(directBranch.repoId);
+      if (anchorRect) setSubmenuPos({
+        left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - BRANCH_MENU_WIDTH - 8)),
+        top: anchorRect.bottom + 4, centerY: anchorRect.bottom + 4,
+        maxHeight: Math.max(0, Math.min(440, window.innerHeight - 40)),
+      });
+    }
+  }, [directBranch, anchorRect]);
+  const backFromSubmenu = useCallback(() => {
+    if (repoOnly || directBranch) { onClose(); return; }
+    setActiveSubmenuRepoId(null);
+    setActiveCommonBranch(null);
+    setActiveCommonTag(null);
+    setSubmenuPos(null);
+  }, [repoOnly, directBranch, onClose]);
+
+  useEffect(() => {
+    const adjust = () => {
+      const maxHeight = Math.max(0, Math.min(440, window.innerHeight - 40));
+      const update = (element: HTMLDivElement | null, setPosition: typeof setSubmenuPos, anchored: boolean) => {
+        if (!element) return;
+        const height = element.offsetHeight;
+        const width = element.offsetWidth;
+        setPosition((previous) => {
+          if (!previous) return previous;
+          const left = Math.max(8, Math.min(previous.left, window.innerWidth - width - 8));
+          const top = Math.max(10, Math.min(anchored ? window.innerHeight - 30 - height : previous.centerY - height / 2, window.innerHeight - 30 - height));
+          return Math.abs(previous.left - left) > 1 || Math.abs(previous.top - top) > 1 || previous.maxHeight !== maxHeight ? { ...previous, left, top, maxHeight } : previous;
+        });
+      };
+      update(submenuRef.current, setSubmenuPos, repoOnly && placement === 'bottomLeft');
+      update(actionMenuRef.current, setActionMenuPos, false);
+    };
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(adjust) : undefined;
+    if (submenuRef.current) observer?.observe(submenuRef.current);
+    if (actionMenuRef.current) observer?.observe(actionMenuRef.current);
+    window.addEventListener('resize', adjust);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', adjust); };
+  }, [activeSubmenuRepoId, activeCommonBranch, activeCommonTag, activeBranchAction, activeTagAction, repoOnly, placement]);
+
   // 监听点击外部和 Escape 关闭
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -199,107 +243,51 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
         popoverRef.current?.contains(target) ||
         submenuRef.current?.contains(target) ||
         actionMenuRef.current?.contains(target) ||
-        ignorePanelRef.current?.contains(target) ||
         (target instanceof Element && Boolean(target.closest('.dialog-backdrop, .app-dialog')))
       ) {
         return;
       }
-      // 当全局对话框打开或忽略规则管理面板处于激活显示状态时，不触发菜单外部点击关闭
-      if (currentDialog() || ignoreManagerRepoId) {
+      // 全局对话框打开时，不触发菜单外部点击关闭
+      if (currentDialog()) {
         return;
       }
       onClose();
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      // 全局对话框打开或忽略规则面板激活时，由其自身的键盘处理逻辑负责响应，菜单不抢先关闭
-      if (currentDialog() || ignoreManagerRepoId) {
+      // 全局对话框打开时，由其自身处理键盘事件，菜单不抢先关闭
+      if (currentDialog()) {
         return;
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (directBranch || (repoOnly && !activeBranchAction && !activeTagAction)) {
-          onClose();
-        } else if (activeBranchAction || activeTagAction) {
-          setActiveBranchAction(null);
-          setActiveTagAction(null);
-          setActionMenuPos(null);
-        } else if (activeSubmenuRepoId || activeCommonBranch || activeCommonTag) {
-          setActiveSubmenuRepoId(null);
-          setActiveCommonBranch(null);
-          setActiveCommonTag(null);
-          setSubmenuPos(null);
-        } else {
-          onClose();
-        }
+        if (activeBranchAction || activeTagAction) backFromAction();
+        else if (activeSubmenuRepoId || activeCommonBranch || activeCommonTag) backFromSubmenu();
+        else onClose();
       }
     };
 
+    const handleBlur = () => { if (!currentDialog()) onClose(); };
+    window.addEventListener('blur', handleBlur);
     document.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
+      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, repoOnly, directBranch, ignoreManagerRepoId]);
+  }, [onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, repoOnly, directBranch, backFromAction, backFromSubmenu]);
 
   const repositories = useMemo(() => snapshot?.repositories ?? [], [snapshot?.repositories]);
   const gitRepos = useMemo(() => repositories.filter((r) => r.meta.kind === 'git'), [repositories]);
   const conflictRepos = useMemo(() => repositories.filter((r) => r.conflicts > 0), [repositories]);
   const operationRepos = useMemo(() => repositories.filter((r) => isAbortableVcsOperation(r.operation)), [repositories]);
 
-  // 分支分歧判定（对齐插件与 BranchStatusBarItem）
-  const nonWorktreeRepos = useMemo(() => repositories.filter((r) => !r.meta.isWorktree), [repositories]);
-  const targetRepos = nonWorktreeRepos.length > 0 ? nonWorktreeRepos : repositories;
-  const targetGitRepos = useMemo(() => targetRepos.filter((r) => r.meta.kind === 'git'), [targetRepos]);
-  const topLevelGitRepos = useMemo(() => targetGitRepos.filter((r) => !r.meta.isSubmodule), [targetGitRepos]);
-  const topLevelEffectiveNames = useMemo(
-    () => Array.from(new Set(topLevelGitRepos.map((r) => getRepoEffectiveRef(r, branchesByRepo)))),
-    [topLevelGitRepos, branchesByRepo]
+  const status = useMemo(() => deriveBranchStatus(repositories, branchesByRepo, selectedRepoId, t), [repositories, branchesByRepo, selectedRepoId, t]);
+  const showDivergedWarning = status.branchesDiverged && !bootstrap?.state.settings?.suppressDivergedWarning;
+  const { commonLocalBranches, commonRemoteBranches, commonTags } = useMemo(
+    () => commonRepositoryRefs(repositories, branchesByRepo, tagsByRepo), [repositories, branchesByRepo, tagsByRepo],
   );
-  const branchesDiverged = topLevelGitRepos.length > 1 && topLevelEffectiveNames.length > 1;
-  const suppressDivergedWarning = bootstrap?.state.settings?.suppressDivergedWarning ?? false;
-  const showDivergedWarning = branchesDiverged && !suppressDivergedWarning;
-
-  // 计算公共分支与公共 Tag
-  const { commonLocalBranches, commonRemoteBranches, commonTags } = useMemo(() => {
-    if (gitRepos.length === 0) {
-      return { commonLocalBranches: [], commonRemoteBranches: [], commonTags: [] };
-    }
-
-    const localBranchMap: Record<string, number> = {};
-    const remoteBranchMap: Record<string, number> = {};
-    const tagMap: Record<string, number> = {};
-
-    gitRepos.forEach((repo) => {
-      const branches = branchesByRepo[repo.meta.id] ?? [];
-      const tags = tagsByRepo[repo.meta.id] ?? [];
-
-      branches.forEach((b) => {
-        if (b.remote) {
-          remoteBranchMap[b.name] = (remoteBranchMap[b.name] ?? 0) + 1;
-        } else {
-          localBranchMap[b.name] = (localBranchMap[b.name] ?? 0) + 1;
-        }
-      });
-
-      tags.forEach((t) => {
-        tagMap[t.name] = (tagMap[t.name] ?? 0) + 1;
-      });
-    });
-
-    const totalGit = gitRepos.length;
-    const commonLocal = Object.keys(localBranchMap).filter((name) => localBranchMap[name] === totalGit);
-    const commonRemote = Object.keys(remoteBranchMap).filter((name) => remoteBranchMap[name] === totalGit);
-    const commonT = Object.keys(tagMap).filter((name) => tagMap[name] === totalGit);
-
-    return {
-      commonLocalBranches: commonLocal,
-      commonRemoteBranches: commonRemote,
-      commonTags: commonT,
-    };
-  }, [branchesByRepo, gitRepos, tagsByRepo]);
-
   // 全局动作：更新全部仓库（遵循设置中的 rebase/merge/prompt 策略）
   const handleUpdateAll = async () => {
     onClose();
@@ -312,6 +300,76 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
       void Promise.allSettled(gitRepos.map((r) => loadRemotes(r.meta.id)));
     }
   }, [gitRepos, loadRemotes]);
+
+  const repoIds = repositories.map((r) => r.meta.id).join('\n');
+  const workspaceId = snapshot?.workspace.id;
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    void Promise.allSettled(repoIds.split('\n').filter(Boolean).map(async (repoId) => {
+      const results = await Promise.allSettled([
+        bridge.request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false }),
+        bridge.request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false }),
+      ]);
+      if (cancelled || useAppStore.getState().snapshot?.workspace.id !== workspaceId) return;
+      const [branches, tags] = results;
+      useAppStore.setState((state) => ({
+        ...(branches.status === 'fulfilled' ? { branchesByRepo: { ...state.branchesByRepo, [repoId]: branches.value }, ...(state.selectedRepoId === repoId ? { branches: branches.value } : {}) } : {}),
+        ...(tags.status === 'fulfilled' ? { tagsByRepo: { ...state.tagsByRepo, [repoId]: tags.value }, ...(state.selectedRepoId === repoId ? { tags: tags.value } : {}) } : {}),
+      }));
+      for (const result of results) if (result.status === 'rejected') addNotification({ type: 'warning', title: t('Branch error'), message: { raw: result.reason instanceof Error ? result.reason.message : String(result.reason) }, workspaceId });
+    }));
+    return () => { cancelled = true; };
+  }, [repoIds, workspaceId, bridge, addNotification, t]);
+
+  const pickSvnFile = async (repo: RepositoryStatus, title: string, conflictsOnly = false) => {
+    const candidates = new Map(repo.files.filter((f) => conflictsOnly ? f.conflicted || f.status === 'conflicted' : !['untracked', 'deleted', 'ignored'].includes(f.status)).map((f) => [f.path, f.status]));
+    const selected = useAppStore.getState().selectedFile;
+    if (!conflictsOnly && selected?.repoId === repo.meta.id) candidates.set(selected.path, t('Active editor'));
+    const path = await choiceDialog({ title, message: t('Select an SVN file…'), choices: [
+      ...[...candidates].sort(([a], [b]) => a.localeCompare(b)).map(([path, status]) => ({ id: path, label: path, description: status, icon: 'file' })),
+      ...(!conflictsOnly ? [{ id: '__custom__', label: t('Enter file path relative to repository root:'), icon: 'edit' }] : []),
+    ] });
+    if (path !== '__custom__') return path;
+    return promptDialog({ title, message: t('Enter file path relative to repository root:'), inputLabel: t('File Path') });
+  };
+
+  const handleManageSvnIgnore = async (repo: RepositoryStatus) => {
+    onClose();
+    const wid = snapshot?.workspace.id;
+    if (!wid) return;
+    const current = () => useAppStore.getState().snapshot?.workspace.id === wid;
+    try {
+      const groups = await bridge.request<IgnoreRules[]>({ type: 'svnIgnoreEntries', payload: { workspace_id: wid, repo_id: repo.meta.id } }, { showProgress: false });
+      if (!current()) return;
+      const action = await choiceDialog({ title: t('Manage SVN Ignore...'), message: t('Choose an SVN ignore action'), choices: [
+        { id: 'add', label: t('Add SVN Ignore...'), icon: 'add' },
+        ...(groups.some((group) => group.patterns.length) ? [{ id: 'remove', label: t('Remove SVN Ignore Entries...'), icon: 'trash' }] : []),
+      ] });
+      if (!action || !current()) return;
+      if (action === 'add') {
+        const paths = [...new Set(repo.files.filter((file) => file.status === 'untracked').map((file) => file.path))].sort();
+        let path: string | null = '__custom__';
+        if (paths.length) path = await choiceDialog({ title: t('Add SVN Ignore...'), message: t('Select an unversioned file or folder to ignore'), choices: [
+          ...paths.map((path) => ({ id: path, label: path, icon: 'file' })),
+          { id: '__custom__', label: t('Enter custom SVN ignore path...'), icon: 'edit' },
+        ] });
+        if (path === '__custom__') path = await promptDialog({ title: t('Add SVN Ignore...'), message: t('Enter a path relative to the repository root'), inputLabel: t('File Path') });
+        if (!path?.trim() || !current()) return;
+        await bridge.request({ type: 'addIgnore', payload: { workspace_id: wid, repo_id: repo.meta.id, relative_path: path.trim() } });
+      } else {
+        const entries = groups.flatMap((group) => group.patterns.map((pattern) => ({ id: JSON.stringify([group.directory, pattern]), label: pattern, description: group.directory || '.', icon: 'exclude' })));
+        const chosen = await multiChoiceDialog({ title: t('Remove SVN Ignore Entries...'), message: t('Select SVN ignore entries to remove'), choices: entries, initialSelected: [] });
+        if (!chosen?.length || !current()) return;
+        if (!await confirmDialog({ title: t('Remove SVN Ignore Entries...'), message: t('VersionDock [{0}]: Remove selected SVN ignore entries?', repo.meta.name), confirmLabel: t('Remove'), danger: true }) || !current()) return;
+        const selected = new Set(chosen);
+        await svnOperation(repo.meta.id, { type: 'removeIgnoreEntries', entries: groups.map((group) => ({ ...group, patterns: group.patterns.filter((pattern) => selected.has(JSON.stringify([group.directory, pattern]))) })).filter((group) => group.patterns.length) });
+      }
+      if (current()) await refresh(true);
+    } catch (error) {
+      if (current()) addNotification({ type: 'error', title: t('Manage SVN Ignore...'), message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId: wid });
+    }
+  };
 
   // 全局动作：Fetch All
   const handleFetchAll = async () => {
@@ -581,29 +639,8 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     await refresh(true);
   };
 
-  // 展开仓库二级菜单
-  // 通用子菜单自适应定位算法（使展开的菜单垂直中心完美对齐点击条目，底边绝不超出状态栏）
-  const calculateMenuPos = (
-    itemRect: DOMRect,
-    parentRect: DOMRect | null,
-    targetMaxHeight = 440
-  ): { left: number; top: number; centerY: number; maxHeight: number } => {
-    const minTop = 10;
-    const maxBottom = window.innerHeight - 30; // 底部状态栏高度为 28px，预留 2px 安全间隙
-    const left = parentRect ? parentRect.right + 4 : itemRect.right + 4;
-    const centerY = itemRect.top + itemRect.height / 2;
-
-    const estimatedHeight = Math.min(targetMaxHeight, 260);
-    let initialTop = centerY - estimatedHeight / 2;
-    if (initialTop + estimatedHeight > maxBottom) {
-      initialTop = maxBottom - estimatedHeight;
-    }
-    if (initialTop < minTop) {
-      initialTop = minTop;
-    }
-    const maxHeight = Math.min(targetMaxHeight, maxBottom - minTop);
-    return { left, top: initialTop, centerY, maxHeight };
-  };
+  const calculateMenuPos = (item: DOMRect, parent: DOMRect | null) =>
+    positionBranchSubmenu(item, parent, window.innerWidth, window.innerHeight, false);
 
   // 展开仓库二级菜单（中心对齐点击项，底边严格不超出状态栏）
   const handleOpenRepoSubmenu = (repo: RepositoryStatus, event: React.MouseEvent<HTMLElement>) => {
@@ -615,7 +652,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     setActionMenuPos(null);
 
     const itemRect = event.currentTarget.getBoundingClientRect();
-    const pos = calculateMenuPos(itemRect, popoverRef.current?.getBoundingClientRect() ?? null, 440);
+    const pos = calculateMenuPos(itemRect, popoverRef.current?.getBoundingClientRect() ?? null);
     setSubmenuPos(pos);
   };
 
@@ -633,7 +670,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     setActionMenuPos(null);
 
     const itemRect = event.currentTarget.getBoundingClientRect();
-    const pos = calculateMenuPos(itemRect, popoverRef.current?.getBoundingClientRect() ?? null, 440);
+    const pos = calculateMenuPos(itemRect, popoverRef.current?.getBoundingClientRect() ?? null);
     setSubmenuPos(pos);
   };
 
@@ -647,7 +684,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     setActionMenuPos(null);
 
     const itemRect = event.currentTarget.getBoundingClientRect();
-    const pos = calculateMenuPos(itemRect, popoverRef.current?.getBoundingClientRect() ?? null, 440);
+    const pos = calculateMenuPos(itemRect, popoverRef.current?.getBoundingClientRect() ?? null);
     setSubmenuPos(pos);
   };
 
@@ -663,7 +700,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     setActiveTagAction(null);
 
     const itemRect = event.currentTarget.getBoundingClientRect();
-    const pos = calculateMenuPos(itemRect, submenuRef.current?.getBoundingClientRect() ?? null, 440);
+    const pos = calculateMenuPos(itemRect, submenuRef.current?.getBoundingClientRect() ?? null);
     setActionMenuPos(pos);
   };
 
@@ -678,7 +715,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     setActiveBranchAction(null);
 
     const itemRect = event.currentTarget.getBoundingClientRect();
-    const pos = calculateMenuPos(itemRect, submenuRef.current?.getBoundingClientRect() ?? null, 440);
+    const pos = calculateMenuPos(itemRect, submenuRef.current?.getBoundingClientRect() ?? null);
     setActionMenuPos(pos);
   };
 
@@ -688,26 +725,16 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const activeSubmodulePath = activeSubmoduleTarget?.path;
   const activeRepoBranches = activeSubmenuRepoId ? branchesByRepo[activeSubmenuRepoId] ?? [] : [];
   const activeRepoTags = activeSubmenuRepoId ? tagsByRepo[activeSubmenuRepoId] ?? [] : [];
-  const currentRepoBranch =
-    activeSubmenuRepo?.branch ??
-    repositories.find((r) => r.meta.id === activeBranchAction?.repoId)?.branch ??
-    'HEAD';
+  const actionRepo = repositories.find((r) => r.meta.id === (activeBranchAction?.repoId ?? activeTagAction?.repoId)) ?? activeSubmenuRepo;
+  const currentRepoBranch = actionRepo ? getRepoEffectiveRef(actionRepo, branchesByRepo) : 'HEAD';
+  const actionBranches = actionRepo ? branchesByRepo[actionRepo.meta.id] ?? [] : [];
+  const selectedActionBranch = actionBranches.find((b) => b.name === activeBranchAction?.branchName && !b.remote);
+  const actionBranchHasUnpushed = selectedActionBranch ? selectedActionBranch.current ? !selectedActionBranch.upstream || selectedActionBranch.ahead > 0
+    : !actionBranches.some((b) => b.remote && b.name.slice(b.name.indexOf('/') + 1) === selectedActionBranch.name) || selectedActionBranch.ahead > 0 : true;
+  const commonBranchIsCurrent = activeCommonBranch && !activeCommonBranch.isRemote && gitRepos.some((r) => r.branch === activeCommonBranch.name || branchesByRepo[r.meta.id]?.some((b) => b.current && b.name === activeCommonBranch.name));
 
-  const currentCommonBranchName = useMemo(() => {
-    const headNames = gitRepos.map((r) => r.branch).filter(Boolean);
-    if (headNames.length > 0 && headNames.every((h) => h === headNames[0])) {
-      return headNames[0]!;
-    }
-    return 'HEAD';
-  }, [gitRepos]);
-
-  const popoverStyle: React.CSSProperties = {
-    position: 'fixed',
-    bottom: 28,
-    left: anchorRect ? Math.max(8, anchorRect.left) : 8,
-    maxHeight: 440,
-    zIndex: 1000,
-  };
+  const currentCommonBranchName = [...new Set(gitRepos.map((r) => getRepoEffectiveRef(r, branchesByRepo)))].join(', ') || 'HEAD';
+  const popoverStyle: React.CSSProperties = { position: 'fixed', bottom: 28, ...(placement === 'bottomLeft' ? { left: 8 } : { left: Math.max(8, Math.min(anchorRect?.left ?? 8, window.innerWidth - BRANCH_MENU_WIDTH - 8)) }), maxHeight: 'min(440px, calc(100vh - 40px))', zIndex: 1000 };
 
   const totalAhead = useMemo(() => gitRepos.reduce((sum, r) => sum + (r.ahead ?? 0), 0), [gitRepos]);
   const hasBehind = useMemo(() => repositories.some((r) => (r.behind ?? 0) > 0), [repositories]);
@@ -726,16 +753,9 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   return (
     <>
       {/* ──────────────── 1. 一级主菜单面板 ──────────────── */}
-      {!repoOnly && (
-        <div
-          ref={popoverRef}
-          className="statusbar-popover branch-menu-popover"
-          style={{
-            ...popoverStyle,
-            ...(ignoreManagerRepoId ? { display: 'none' } : {}),
-          }}
-        >
-        <div className="statusbar-popover-content">
+      {!repoOnly && !directBranch && (
+        <BranchQuickMenu ref={popoverRef} title={t('VersionDock: Git/SVN Menu')} active={!submenuPos && !actionMenuPos}
+          className="statusbar-popover branch-menu-popover" onSearch={() => { backFromAction(); backFromSubmenu(); }} style={popoverStyle}>
           {/* 冲突处理 */}
           {(conflictRepos.length > 0 || operationRepos.length > 0) && (
             <div className="statusbar-menu-section warning-section">
@@ -744,7 +764,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                   className="statusbar-menu-item danger"
                   onClick={() => {
                     onClose();
-                    setActiveTab('changes');
+                    openConflicts();
                   }}
                 >
                   <Codicon name="git-merge" />
@@ -984,7 +1004,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 {gitRepos.length === 1 ? t('LOCAL BRANCHES') : t('COMMON LOCAL BRANCHES')}
               </div>
               {commonLocalBranches.map((branch) => {
-                const isHead = repositories.every((r) => r.branch === branch);
+                const isHead = gitRepos.some((r) => r.branch === branch || branchesByRepo[r.meta.id]?.some((b) => b.current && b.name === branch));
                 const isSelected = activeCommonBranch?.name === branch && !activeCommonBranch?.isRemote;
                 return (
                   <button
@@ -993,7 +1013,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                     className={`statusbar-menu-item has-submenu ${isHead ? 'active-ref' : ''} ${isSelected ? 'selected' : ''}`}
                     onClick={(e) => handleOpenCommonBranchSubmenu(branch, false, e)}
                   >
-                    <Codicon name={isHead ? 'check' : 'git-branch'} />
+                    <Codicon name={isHead ? 'check' : isPrimaryBranch(branch) ? 'star' : 'git-branch'} />
                     <div className="statusbar-menu-item-text">
                       <span className="statusbar-menu-item-title">{branch}</span>
                     </div>
@@ -1056,24 +1076,15 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
               })}
             </div>
           )}
-        </div>
-      </div>
+        </BranchQuickMenu>
       )}
 
       {/* ──────────────── 2. 二级菜单面板（仓库分支列表 / 公共分支动作 / 公共标签动作） ──────────────── */}
-      {submenuPos && !ignoreManagerRepoId && (activeSubmenuRepo || activeCommonBranch || activeCommonTag) && (
-        <div
-          ref={submenuRef}
-          className="statusbar-submenu"
-          style={{
-            position: 'fixed',
-            top: submenuPos.top,
-            left: submenuPos.left,
-            maxHeight: submenuPos.maxHeight,
-            zIndex: 1001,
-          }}
-        >
-          <div className="statusbar-popover-content">
+      {submenuPos && (activeSubmenuRepo || activeCommonBranch || activeCommonTag) && (
+        <BranchQuickMenu key={activeSubmenuRepoId ?? activeCommonBranch?.name ?? activeCommonTag} ref={submenuRef}
+          title={activeSubmenuRepo ? activeSubmenuRepo.meta.kind === 'svn' ? `VersionDock — SVN: ${activeSubmenuRepo.meta.name}` : t('{0} — Branches', activeSubmenuRepo.meta.name) : activeCommonBranch?.name ?? activeCommonTag ?? ''}
+          active={!actionMenuPos} onSearch={backFromAction} onBack={repoOnly ? undefined : backFromSubmenu}
+          style={{ position: 'fixed', top: submenuPos.top, left: submenuPos.left, maxHeight: submenuPos.maxHeight, zIndex: 1001 }}>
             {/* 情况 A：具体仓库的分支/标签列表 */}
             {activeSubmenuRepo && (
               <>
@@ -1221,7 +1232,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                             className="statusbar-menu-item"
                             onClick={() => {
                               onClose();
-                              setActiveTab('changes');
+                              openConflicts();
                             }}
                           >
                             <Codicon name="git-merge" />
@@ -1258,30 +1269,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                             className="statusbar-menu-item"
                             onClick={async () => {
                               onClose();
-                              const conflictedFiles = (activeSubmenuRepo.files ?? []).filter(
-                                (f) => f.status === 'conflicted'
-                              );
-                              let targetPath: string | null = null;
-                              if (conflictedFiles.length === 1) {
-                                targetPath = conflictedFiles[0].path;
-                              } else if (conflictedFiles.length > 1) {
-                                const picked = await choiceDialog({
-                                  title: t('Mark Resolved (Working)…'),
-                                  message: t('Select a conflicted file:'),
-                                  choices: conflictedFiles.map((f) => ({
-                                    id: f.path,
-                                    label: f.path,
-                                    icon: 'file',
-                                  })),
-                                });
-                                targetPath = picked ?? null;
-                              } else {
-                                targetPath = await promptDialog({
-                                  title: t('Mark Resolved (Working)…'),
-                                  message: t('Enter file path relative to repository root:'),
-                                  inputLabel: t('File Path'),
-                                });
-                              }
+                              const targetPath = await pickSvnFile(activeSubmenuRepo, t('Mark Resolved (Working)…'), true);
                               if (targetPath?.trim()) {
                                 await svnOperation(activeSubmenuRepo.meta.id, {
                                   type: 'resolveWorking',
@@ -1323,17 +1311,13 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item"
                         onClick={async () => {
                           onClose();
-                          const filePath = await promptDialog({
-                            title: t('SVN Lock'),
-                            message: t('Enter file path relative to repository root:'),
-                            inputLabel: t('File Path'),
-                          });
+                          const filePath = await pickSvnFile(activeSubmenuRepo, t('SVN Lock'));
                           if (!filePath?.trim()) return;
                           const message = await promptDialog({
                             title: t('SVN Lock'),
-                            message: filePath.trim(),
+                            message: t('Optional lock message'),
                             inputLabel: t('Lock message'),
-                            initialValue: t('Locked from VersionDock'),
+                            initialValue: '',
                           });
                           if (message !== null) {
                             await svnOperation(activeSubmenuRepo.meta.id, {
@@ -1355,11 +1339,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item"
                         onClick={async () => {
                           onClose();
-                          const filePath = await promptDialog({
-                            title: t('SVN Unlock'),
-                            message: t('Enter file path relative to repository root:'),
-                            inputLabel: t('File Path'),
-                          });
+                          const filePath = await pickSvnFile(activeSubmenuRepo, t('SVN Unlock'));
                           if (filePath?.trim()) {
                             await svnOperation(activeSubmenuRepo.meta.id, {
                               type: 'unlock',
@@ -1377,21 +1357,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                       <button
                         type="button"
                         className="statusbar-menu-item"
-                        onClick={async () => {
-                          const directory = await promptDialog({
-                            title: t('Manage SVN Ignore...'),
-                            message: t('Enter directory path relative to repository root (leave empty for root):'),
-                            inputLabel: t('Directory Path'),
-                            initialValue: '',
-                          });
-                          if (directory === null) return;
-                          const cleanDir = directory.trim().replace(/^[/\\]+/, '').replace(/[/\\]+$/, '');
-                          if (onManageIgnore) {
-                            onManageIgnore(activeSubmenuRepo.meta.id, cleanDir);
-                          } else {
-                            setIgnoreManagerTarget({ repoId: activeSubmenuRepo.meta.id, directory: cleanDir });
-                          }
-                        }}
+                        onClick={() => void handleManageSvnIgnore(activeSubmenuRepo)}
                       >
                         <Codicon name="exclude" />
                         <span>{t('Manage SVN Ignore...')}</span>
@@ -1404,27 +1370,13 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item"
                         onClick={async () => {
                           onClose();
-                          const fromUrl = await promptDialog({
-                            title: t('SVN Relocate'),
-                            message: t('Old repository root URL:'),
-                            inputLabel: t('From URL'),
-                            initialValue: '',
-                          });
-                          if (!fromUrl?.trim()) return;
-                          const toUrl = await promptDialog({
-                            title: t('SVN Relocate'),
-                            message: t('New repository root URL:'),
-                            inputLabel: t('To URL'),
-                            initialValue: fromUrl.trim(),
-                          });
-                          if (toUrl?.trim()) {
-                            await svnOperation(activeSubmenuRepo.meta.id, {
-                              type: 'relocate',
-                              from_url: fromUrl.trim(),
-                              to_url: toUrl.trim(),
-                            });
-                            await refresh(true);
+                          const info = await bridge.request<SvnAccountState>({ type: 'svnAccount', payload: { workspace_id: snapshot!.workspace.id, repo_id: activeSubmenuRepo.meta.id } });
+                          const toUrl = await promptDialog({ title: t('SVN Relocate — {0}', activeSubmenuRepo.meta.name), message: t('Current: {0}. Enter the new SVN repository root URL', info.repositoryRoot), inputLabel: t('To URL'), initialValue: info.repositoryRoot });
+                          if (!toUrl?.trim() || toUrl.trim() === info.repositoryRoot) return;
+                          if (await confirmDialog({ title: t('SVN Relocate'), message: t('VersionDock [{0}]: Relocate SVN working copy from "{1}" to "{2}"?', activeSubmenuRepo.meta.name, info.repositoryRoot, toUrl.trim()), confirmLabel: t('Relocate') })) {
+                            await svnOperation(activeSubmenuRepo.meta.id, { type: 'relocate', from_url: info.repositoryRoot, to_url: toUrl.trim() });
                           }
+
                         }}
                       >
                         <Codicon name="link" />
@@ -1436,21 +1388,12 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item"
                         onClick={async () => {
                           onClose();
-                          const url = await promptDialog({
-                            title: t('SVN Switch'),
-                            message: t('Working copy target URL, for example ^/branches/release:'),
-                            inputLabel: t('URL'),
-                            initialValue: '^/trunk',
-                          });
-                          if (url?.trim()) {
-                            await svnOperation(activeSubmenuRepo.meta.id, {
-                              type: 'switch',
-                              url: url.trim(),
-                              revision: null,
-                              ignore_ancestry: false,
-                            });
-                            await refresh(true);
-                          }
+                          const name = await choiceDialog({ title: t('SVN Switch — {0}', activeSubmenuRepo.meta.name), message: t('Select a trunk, branch, or tag'), choices: [
+                            ...activeRepoBranches.map((branch) => ({ id: branch.name, label: branch.name, icon: 'git-branch' })),
+                            ...activeRepoTags.map((tag) => ({ id: `tags/${tag.name}`, label: tag.name, icon: 'tag' })),
+                          ] });
+                          if (name) await branchOperation({ type: 'checkout', name }, activeSubmenuRepo.meta.id);
+
                         }}
                       >
                         <Codicon name="git-branch" />
@@ -1462,36 +1405,9 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item"
                         onClick={async () => {
                           onClose();
-                          const sourceUrl = await promptDialog({
-                            title: t('Create SVN Branch'),
-                            message: t('Source repository URL:'),
-                            inputLabel: t('Source URL'),
-                            initialValue: '^/trunk',
-                          });
-                          if (!sourceUrl?.trim()) return;
-                          const destinationUrl = await promptDialog({
-                            title: t('Create SVN Branch'),
-                            message: t('Destination repository URL:'),
-                            inputLabel: t('Destination URL'),
-                            initialValue: '^/branches/',
-                          });
-                          if (!destinationUrl?.trim()) return;
-                          const copyMessage = await promptDialog({
-                            title: t('SVN Copy Commit'),
-                            message: `${sourceUrl.trim()}\n→ ${destinationUrl.trim()}`,
-                            inputLabel: t('Commit message'),
-                            initialValue: t('Create branch'),
-                          });
-                          if (copyMessage?.trim()) {
-                            await svnOperation(activeSubmenuRepo.meta.id, {
-                              type: 'copy',
-                              source_url: sourceUrl.trim(),
-                              destination_url: destinationUrl.trim(),
-                              revision: null,
-                              message: copyMessage.trim(),
-                            });
-                            await refresh(true);
-                          }
+                          const name = await promptDialog({ title: t('SVN Create Branch'), message: t('Branch name under /branches'), inputLabel: t('Branch Name') });
+                          if (name?.trim()) await branchOperation({ type: 'create', name: sanitizeBranchName(name.trim()), from: null, checkout: false }, activeSubmenuRepo.meta.id);
+
                         }}
                       >
                         <Codicon name="git-branch" />
@@ -1503,36 +1419,9 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item"
                         onClick={async () => {
                           onClose();
-                          const sourceUrl = await promptDialog({
-                            title: t('Create SVN Tag'),
-                            message: t('Source repository URL:'),
-                            inputLabel: t('Source URL'),
-                            initialValue: '^/trunk',
-                          });
-                          if (!sourceUrl?.trim()) return;
-                          const destinationUrl = await promptDialog({
-                            title: t('Create SVN Tag'),
-                            message: t('Destination repository URL:'),
-                            inputLabel: t('Destination URL'),
-                            initialValue: '^/tags/',
-                          });
-                          if (!destinationUrl?.trim()) return;
-                          const copyMessage = await promptDialog({
-                            title: t('SVN Copy Commit'),
-                            message: `${sourceUrl.trim()}\n→ ${destinationUrl.trim()}`,
-                            inputLabel: t('Commit message'),
-                            initialValue: t('Create tag'),
-                          });
-                          if (copyMessage?.trim()) {
-                            await svnOperation(activeSubmenuRepo.meta.id, {
-                              type: 'copy',
-                              source_url: sourceUrl.trim(),
-                              destination_url: destinationUrl.trim(),
-                              revision: null,
-                              message: copyMessage.trim(),
-                            });
-                            await refresh(true);
-                          }
+                          const name = await promptDialog({ title: t('SVN Create Tag'), message: t('Tag name under /tags'), inputLabel: t('Tag Name') });
+                          if (name?.trim()) await tagOperation({ type: 'create', name: name.trim(), revision: activeSubmenuRepo.revision || null }, activeSubmenuRepo.meta.id);
+
                         }}
                       >
                         <Codicon name="tag" />
@@ -1544,10 +1433,11 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
 
                 <div className="statusbar-menu-divider" />
 
+                {activeSubmenuRepo.meta.kind === 'git' && <>
                 {/* 近期分支列表 RECENT */}
                 {(() => {
                   const recentNames = getRecentBranches(activeSubmenuRepo.meta.id);
-                  const localBranches = activeRepoBranches.filter((b) => !b.remote);
+                  const localBranches = activeRepoBranches.filter((b) => !b.remote && b.name !== 'HEAD');
                   const validRecentBranches = recentNames
                     .map((name) => localBranches.find((b) => b.name === name))
                     .filter((b): b is NonNullable<typeof b> => Boolean(b && !b.current && b.name !== activeSubmenuRepo.branch));
@@ -1564,7 +1454,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         const ahead = b.ahead ?? 0;
                         const behind = b.behind ?? 0;
                         const commitDetail = b.lastCommitMessage
-                          ? `${b.lastCommitMessage}${b.lastCommitDate ? ` · ${b.lastCommitDate}` : ''}`
+                          ? `${b.lastCommitMessage}${b.lastCommitDate ? ` · ${relativeBranchDate(b.lastCommitDate, t)}` : ''}`
                           : undefined;
 
                         return (
@@ -1607,11 +1497,11 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 })()}
 
                 {/* 本地分支列表 LOCAL */}
-                {activeRepoBranches.filter((b) => !b.remote).length > 0 && (
+                {activeRepoBranches.filter((b) => !b.remote && b.name !== 'HEAD').length > 0 && (
                   <div className="statusbar-menu-section">
                     <div className="statusbar-menu-group-header">{t('LOCAL')}</div>
                     {activeRepoBranches
-                      .filter((b) => !b.remote)
+                      .filter((b) => !b.remote && b.name !== 'HEAD')
                       .map((b) => {
                         const isHead = b.current || b.name === activeSubmenuRepo.branch;
                         const isSelected =
@@ -1620,7 +1510,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         const ahead = b.ahead ?? (isHead ? activeSubmenuRepo.ahead ?? 0 : 0);
                         const behind = b.behind ?? (isHead ? activeSubmenuRepo.behind ?? 0 : 0);
                         const commitDetail = b.lastCommitMessage
-                          ? `${b.lastCommitMessage}${b.lastCommitDate ? ` · ${b.lastCommitDate}` : ''}`
+                          ? `${b.lastCommitMessage}${b.lastCommitDate ? ` · ${relativeBranchDate(b.lastCommitDate, t)}` : ''}`
                           : undefined;
 
                         return (
@@ -1638,7 +1528,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                               )
                             }
                           >
-                            <Codicon name={isHead ? 'check' : 'git-branch'} />
+                            <Codicon name={isHead ? 'check' : isPrimaryBranch(b.name) ? 'star' : 'git-branch'} />
                             <div className="statusbar-menu-item-text">
                               <span className="statusbar-menu-item-title">{b.name}</span>
                               {(ahead > 0 || behind > 0) && (
@@ -1663,17 +1553,17 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 )}
 
                 {/* 远程分支列表 REMOTE */}
-                {activeRepoBranches.filter((b) => b.remote).length > 0 && (
+                {activeRepoBranches.filter((b) => b.remote && !b.name.endsWith('/HEAD')).length > 0 && (
                   <div className="statusbar-menu-section">
                     <div className="statusbar-menu-group-header">{t('REMOTE')}</div>
                     {activeRepoBranches
-                      .filter((b) => b.remote)
+                      .filter((b) => b.remote && !b.name.endsWith('/HEAD'))
                       .map((b) => {
                         const isSelected =
                           activeBranchAction?.repoId === activeSubmenuRepo.meta.id &&
                           activeBranchAction?.branchName === b.name;
                         const commitDetail = b.lastCommitMessage
-                          ? `${b.lastCommitMessage}${b.lastCommitDate ? ` · ${b.lastCommitDate}` : ''}`
+                          ? `${b.lastCommitMessage}${b.lastCommitDate ? ` · ${relativeBranchDate(b.lastCommitDate, t)}` : ''}`
                           : undefined;
                         return (
                           <button
@@ -1690,7 +1580,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                               )
                             }
                           >
-                            <Codicon name="cloud" />
+                            <Codicon name={isPrimaryBranch(b.name.slice(b.name.indexOf('/') + 1)) ? 'star' : 'cloud'} />
                             <div className="statusbar-menu-item-text">
                               <span className="statusbar-menu-item-title">{b.name}</span>
                               {commitDetail && (
@@ -1739,6 +1629,8 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                     })}
                   </div>
                 )}
+
+                </>}
 
                 {/* Submodule 分组（对齐原版 showRepoBranchMenu） */}
                 {activeSubmenuRepo.meta.isSubmodule && activeSubmoduleParent && activeSubmodulePath && (
@@ -1968,7 +1860,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 )}
 
                 {/* 4. 非当前分支特有动作：比较、变基、合并 */}
-                {activeCommonBranch.name !== currentCommonBranchName && (
+                {!commonBranchIsCurrent && (
                   <>
                     <button
                       type="button"
@@ -2088,6 +1980,10 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                       <span>{t("Merge '{0}' into '{1}'", activeCommonBranch.name, currentCommonBranchName)}</span>
                     </button>
 
+
+                  </>
+                )}
+
                     {!activeCommonBranch.isRemote && (
                       <button
                         type="button"
@@ -2102,20 +1998,14 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                             });
                             return;
                           }
-                          const confirmed = await confirmDialog({
-                            title: t("Delete branch '{0}'?", activeCommonBranch.name),
-                            message: t("Delete branch '{0}' in all repos?", activeCommonBranch.name),
+                          const choice = await choiceDialog({
+                            title: t("Delete branch '{0}' in all repos?", activeCommonBranch.name),
+                            message: activeCommonBranch.name,
                             danger: true,
+                            choices: [{ id: 'delete', label: t('Delete'), icon: 'trash', danger: true }, { id: 'force', label: t('Force delete'), description: t('even if not merged'), icon: 'warning', danger: true }],
                           });
-                          if (confirmed) {
-                            await Promise.allSettled(
-                              gitRepos.map((r) =>
-                                branchOperation(
-                                  { type: 'delete', name: activeCommonBranch.name, force: false },
-                                  r.meta.id
-                                )
-                              )
-                            );
+                          if (choice) {
+                            await Promise.allSettled(gitRepos.map((r) => branchOperation({ type: 'delete', name: activeCommonBranch.name, force: choice === 'force' }, r.meta.id)));
                             await refresh(true);
                           }
                         }}
@@ -2124,8 +2014,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         <span>{t('Delete…')}</span>
                       </button>
                     )}
-                  </>
-                )}
 
                 {/* 5. 远程分支特有动作：Pull using Rebase / Pull using Merge */}
                 {activeCommonBranch.isRemote && (
@@ -2257,13 +2145,13 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                     await Promise.allSettled(
                       gitRepos.map(async (r) => {
                         if (deleteLocal) {
-                          await tagOperation({ type: 'delete', name: activeCommonTag }, r.meta.id).catch(() => {});
+                          await tagOperation({ type: 'delete', name: activeCommonTag }, r.meta.id);
                         }
                         if (deleteRemote) {
-                          await loadRemotes(r.meta.id).catch(() => {});
+                          await loadRemotes(r.meta.id);
                           const repoRemotes = useAppStore.getState().remotes[r.meta.id] ?? [];
                           for (const rem of repoRemotes) {
-                            await tagOperation({ type: 'delete', name: activeCommonTag, remote: rem.name }, r.meta.id).catch(() => {});
+                            await tagOperation({ type: 'delete', name: activeCommonTag, remote: rem.name }, r.meta.id);
                           }
                         }
                       })
@@ -2276,27 +2164,27 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 </button>
               </div>
             )}
-          </div>
-        </div>
+        </BranchQuickMenu>
       )}
 
       {/* ──────────────── 3. 三级菜单面板（具体分支 / Tag 的动作菜单） ──────────────── */}
-      {actionMenuPos && !ignoreManagerRepoId && (activeBranchAction || activeTagAction) && (
-        <div
-          ref={actionMenuRef}
-          className="statusbar-submenu"
-          style={{
-            position: 'fixed',
-            top: actionMenuPos.top,
-            left: actionMenuPos.left,
-            maxHeight: actionMenuPos.maxHeight,
-            zIndex: 1002,
-          }}
-        >
-          <div className="statusbar-popover-content">
+      {actionMenuPos && (activeBranchAction || activeTagAction) && (
+        <BranchQuickMenu key={activeBranchAction?.branchName ?? activeTagAction?.tagName} ref={actionMenuRef}
+          title={`${activeBranchAction?.branchName ?? activeTagAction?.tagName} — ${actionRepo?.meta.name ?? ''}`}
+          active onBack={backFromAction}
+          style={{ position: 'fixed', top: actionMenuPos.top, left: actionMenuPos.left, maxHeight: actionMenuPos.maxHeight, zIndex: 1002 }}>
             {/* 分支三级动作菜单（对齐原版 showSingleBranchActionMenu） */}
             {activeBranchAction && (
               <div className="statusbar-menu-section">
+                {actionRepo && isAbortableVcsOperation(actionRepo.operation) && <button type="button" className="statusbar-menu-item danger" onClick={async () => {
+                  onClose();
+                  const op = actionRepo.operation!;
+                  const labels = getAbortOperationLabels(op, actionRepo.meta.name, t);
+                  if (await confirmDialog({ title: labels.title, message: labels.confirmMessage, danger: true })) {
+                    await abortRepositoryOperation(actionRepo.meta.id, op);
+                    await refresh(true);
+                  }
+                }}><Codicon name="error" /><span>{getAbortOperationLabels(actionRepo.operation, actionRepo.meta.name, t).title}</span></button>}
                 {/* 检出 */}
                 <button
                   type="button"
@@ -2407,6 +2295,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                       <span>{t('Rename…')}</span>
                     </button>
 
+                    {actionBranchHasUnpushed && (
                     <button
                       type="button"
                       className="statusbar-menu-item"
@@ -2418,6 +2307,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                       <Codicon name="cloud-upload" />
                       <span>{t('Push')}</span>
                     </button>
+                    )}
                   </>
                 )}
 
@@ -2487,16 +2377,12 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                             });
                             return;
                           }
-                          const confirmed = await confirmDialog({
-                            title: t("Delete branch '{0}'?", activeBranchAction.branchName),
-                            message: t("Delete branch '{0}'?", activeBranchAction.branchName),
-                            danger: true,
+                          const choice = await choiceDialog({
+                            title: t("Delete branch '{0}'?", activeBranchAction.branchName), message: activeBranchAction.branchName, danger: true,
+                            choices: [{ id: 'delete', label: t('Delete'), icon: 'trash', danger: true }, { id: 'force', label: t('Force delete'), description: t('even if not merged'), icon: 'warning', danger: true }],
                           });
-                          if (confirmed) {
-                            await branchOperation(
-                              { type: 'delete', name: activeBranchAction.branchName, force: false },
-                              activeBranchAction.repoId
-                            );
+                          if (choice) {
+                            await branchOperation({ type: 'delete', name: activeBranchAction.branchName, force: choice === 'force' }, activeBranchAction.repoId);
                             await refresh(true);
                           }
                         }}
@@ -2649,23 +2535,9 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 </button>
               </div>
             )}
-          </div>
-        </div>
+        </BranchQuickMenu>
       )}
 
-      {ignoreManagerRepoId && (
-        <div ref={ignorePanelRef}>
-          <IgnoreRulesPanel
-            key={`${ignoreManagerTarget?.repoId ?? ''}:${ignoreManagerTarget?.directory ?? ''}`}
-            repoId={ignoreManagerTarget?.repoId ?? ''}
-            directory={ignoreManagerTarget?.directory ?? ''}
-            close={() => {
-              setIgnoreManagerTarget(null);
-              onClose();
-            }}
-          />
-        </div>
-      )}
     </>
   );
 }

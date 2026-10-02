@@ -1,0 +1,241 @@
+8 AXRadioButton 206 69 111 29 fixtures 关闭标签页  1
+7 AXButton 326 70 27 27 新建标签页 新建标签页 
+9 AXStaticText 125 112 101 16   VersionDock 提交
+8 AXButton 405 108 24 24 VersionDock：更新项目 VersionDock：更新项目 
+8 AXButton 431 108 24 24 VersionDock：刷新提交面板 VersionDock：刷新提交面板 
+8 AXButton 457 108 24 24 VersionDock：管理远端账号 (GitHub / GitLab / Gitee) VersionDock：管理远端账号 (GitHub / GitLab / Gitee) 
+8 AXButton 483 108 24 24 VersionDock：设置 VersionDock：设置 
+8 AXPopUpButton 509 108 24 24 更多操作... 更多操作... 
+9 AXRadioButton 115 138 54 28 更改 更改 0
+9 AXRadioButton 169 139 33 26 搁置 搁置 0
+9 AXRadioButton 202 139 33 26 暂存 暂存 0
+9 AXRadioButton 235 139 33 26 子模块 子模块 0
+9 AXRadioButton 268 138 55 28 工作树 工作树 0
+9 AXRadioButton 322 139 34 26 Subtree Subtree 0
+9 AXRadioButton 355 137 66 30 同步 同步 1
+8 AXCheckBox 124 174 11 11 alpha alpha 0
+8 AXButton 138 167 74 25 ALPHA  
+8 AXPopUpButton 215 167 90 25 feature/login  
+8 AXButton 511 169 20 21 抓取远程更改 抓取远程更改 
+8 AXStaticText 313 201 48 15   已是最新
+8 AXCheckBox 124 231 11 11 beta beta 0
+8 AXButton 138 224 63 25 BETA  
+8 AXPopUpButton 205 224 90 25 feature/login  
+8 AXButton 511 226 20 21 抓取远程更改 抓取远程更改 
+8 AXStaticText 313 258 48 15   已是最新
+9 AXButton 124 955 406 30 获取全部  
+8 AXTextField 576 114 217 15 搜索提交… 搜索提交… 
+7 AXPopUpButton 806 108 209 27 CH chenqinru  
+7 AXPopUpButton 1020 108 199 27 仓库…  
+7 AXPopUpButton 1225 108 225 27 分支 / 标签…  
+7 AXPopUpButton 1455 108 309 27 起始 → 截止  
+7 AXButton 1769 108 27 27 更多操作 更多操作 
+7 AXTextField 566 141 154 34 筛选分支和标签… 筛选分支和标签… 
+7 AXButton 728 141 31 34 折叠侧边栏 折叠侧边栏 
+7 AXCheckBox 540 179 219 20 ALPHA GIT  0
+7 AXCheckBox 540 199 219 20 ASSETS SVN  0
+7 AXCheckBox 540 219 219 20 BETA GIT  0
+7 AXButton 540 243 219 21 本地 3  
+7 AXCheckBox 540 265 219 22 trunk SVN HEAD  0
+7 AXCheckBox 540 287 219 22 feature/login GIT HEAD  0
+7 AXCheckBox 540 309 219 22 main GIT  0
+7 AXButton 540 331 219 21 ORIGIN 2  
+7 AXCheckBox 540 353 219 22 main GIT  0
+7 AXCheckBox 540 375 219 22 feature/login GIT  0
+7 AXButton 540 397 219 21 标签 1  
+7 AXCheckBox 540 419 219 22 v1.0 GIT  0
+8 AXButton 760 141 6 56  assets 
+8 AXButton 760 201 6 52  beta 
+8 AXButton 760 257 6 52  alpha 
+8 AXButton 760 141 664 28 HEADBASE Initialize SVN fixture CH chenqinru 2026/10/02 11:18  
+8 AXButton 760 169 664 51 Initialize layout CH chenqinru 2026/10/02 11:18  
+8 AXButton 760 197 664 79 origin & feature/loginv1.0 Improve login validation SQ Statusbar Q. 2026/10/02 11:18  
+8 AXButton 760 225 664 107 origin & main Initialize statusbar fixture SQ Statusbar Q. 2026/10/02 11:18  
+8 AXButton 760 253 664 135 origin & feature/loginv1.0 Improve login validation SQ Statusbar Q. 2026/10/02 11:18  
+8 AXButton 760 281 664 163 origin & main Initialize statusbar fixture SQ Statusbar Q. 2026/10/02 11:18  
+8 AXStaticText 1435 146 44 15   1 个文件
+7 AXButton 1702 143 20 21 全部展开 全部展开 
+7 AXButton 1724 143 20 21 全部折叠 全部折叠 
+7 AXButton 1755 143 20 21 树视图 树视图 
+7 AXButton 1777 143 20 21 平铺列表 平铺列表 
+7 AXButton 1425 167 380 22 ASSETS 1  
+7 AXButton 1425 189 380 22 tracked.txt A  
+7 AXStaticText 1452 785 48 14   ASSETS
+7 AXButton 1699 781 22 22 打开提交详情 打开提交详情 
+7 AXButton 1723 781 22 22 打开更改 打开更改 
+7 AXCheckBox 1747 781 22 22 默认展开提交信息 默认展开提交信息 0
+7 AXButton 1771 781 22 22 收起提交详情 收起提交详情 
+9 AXStaticText 1450 823 159 15   Initialize SVN fixture
+7 AXStaticText 1440 866 14 10   CH
+8 AXStaticText 1463 864 53 14   chenqinru
+7 AXStaticText 1521 864 6 13   ·
+8 AXStaticText 1532 864 91 14   2026/10/02 11:18
+7 AXStaticText 1628 864 6 13   ·
+8 AXStaticText 1653 865 13 12   r2
+8 AXStaticText 1457 892 27 12   BASE
+8 AXStaticText 1514 892 29 12   HEAD
+7 AXPopUpButton 119 994 129 21 存在未提交的更改 ────────── alpha: feature/login (Clean) assets: trunk (1 处更改) beta: feature/login (Clean) 存在未提交的更改 ────────── alpha: feature/login (Clean) assets: trunk (1 处更改) beta: feature/login (Clean) 
+8 AXStaticText 134 560 157 16   VersionDock：Git/SVN 菜单
+8 AXComboBox 163 586 276 28 筛选… 筛选… 
+10 AXStaticText 163 592 33 16   筛选…
+9 AXStaticText 124 632 343 24 获取全部 从远程仓库获取所有分支和标签  
+9 AXStaticText 124 656 343 24 更新项目… 拉取所有仓库  
+9 AXStaticText 124 680 343 24 推送… 将当前分支推送到远程  
+9 AXStaticText 124 704 343 24 提交 打开提交面板  
+9 AXStaticText 124 728 343 24 新建分支… 创建新分支  
+9 AXStaticText 124 752 343 24 日志 打开 Git 日志面板  
+10 AXStaticText 134 794 20 12   项目
+9 AXStaticText 124 809 343 24 alpha [Git] feature/login 当前激活  
+9 AXStaticText 124 833 343 24 assets [SVN] trunk  
+9 AXStaticText 124 857 343 24 beta [Git] feature/login  
+10 AXStaticText 134 893 58 12   公共本地分支
+9 AXStaticText 124 908 343 24 feature/login 当前  
+9 AXStaticText 124 932 343 24 main  
+10 AXStaticText 134 968 58 12   公共远程分支
+9 AXStaticText 124 983 343 24 origin/feature/login  
+9 AXStaticText 124 1007 343 24 origin/main  
+10 AXStaticText 134 1043 39 12   公共标签
+9 AXStaticText 124 1058 343 24 v1.0  
+7 AXPopUpButton 250 994 127 21 Git: Statusbar QA · 点击管理身份 Git: Statusbar QA · 点击管理身份 
+7 AXButton 1755 994 22 21 输出与日志 输出与日志 
+7 AXPopUpButton 1779 994 22 21 通知 通知 
+2 AXButton 128 77 16 16   
+2 AXButton 168 77 16 16   
+2 AXButton 148 77 16 16   
+4 AXMenuItem 0 1080 0 0 关于本机  
+4 AXMenuItem 0 1080 0 0 系统信息  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 系统设置…  
+4 AXMenuItem 0 1080 0 0 App Store…, 4项更新  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 最近使用的项目  
+6 AXMenuItem 0 1080 0 0 应用程序  
+6 AXMenuItem 0 1080 0 0 微信.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“微信.app”  
+6 AXMenuItem 0 1080 0 0 系统设置.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“系统设置.app”  
+6 AXMenuItem 0 1080 0 0 照片.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“照片.app”  
+6 AXMenuItem 0 1080 0 0 Antigravity.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Antigravity.app”  
+6 AXMenuItem 0 1080 0 0 AppPorts.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“AppPorts.app”  
+6 AXMenuItem 0 1080 0 0 ChatGPT.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“ChatGPT.app”  
+6 AXMenuItem 0 1080 0 0 Google Chrome.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Google Chrome.app”  
+6 AXMenuItem 0 1080 0 0 VersionDockCommitQA.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockCommitQA.app”  
+6 AXMenuItem 0 1080 0 0 VersionDockHistoryQA.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockHistoryQA.app”  
+6 AXMenuItem 0 1080 0 0 Visual Studio Code.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Visual Studio Code.app”  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 文稿  
+6 AXMenuItem 0 1080 0 0 club-management2  
+6 AXMenuItem 0 1080 0 0 在访达中显示“club-management2”  
+6 AXMenuItem 0 1080 0 0 docker-stack  
+6 AXMenuItem 0 1080 0 0 在访达中显示“docker-stack”  
+6 AXMenuItem 0 1080 0 0 k8s-nic  
+6 AXMenuItem 0 1080 0 0 在访达中显示“k8s-nic”  
+6 AXMenuItem 0 1080 0 0 nic  
+6 AXMenuItem 0 1080 0 0 在访达中显示“nic”  
+6 AXMenuItem 0 1080 0 0 social-pratice2  
+6 AXMenuItem 0 1080 0 0 在访达中显示“social-pratice2”  
+6 AXMenuItem 0 1080 0 0 StashPanel.test.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“StashPanel.test.tsx”  
+6 AXMenuItem 0 1080 0 0 SubtreePanel.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“SubtreePanel.tsx”  
+6 AXMenuItem 0 1080 0 0 TitleBar.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“TitleBar.tsx”  
+6 AXMenuItem 0 1080 0 0 tjhy  
+6 AXMenuItem 0 1080 0 0 在访达中显示“tjhy”  
+6 AXMenuItem 0 1080 0 0 VersionDockDesktop  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockDesktop”  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 服务器  
+6 AXMenuItem 0 1080 0 0 Macintosh HD  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 清除菜单  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 强制退出…  
+4 AXMenuItem 0 1080 0 0 强制退出“VersionDock History QA”  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 睡眠  
+4 AXMenuItem 0 1080 0 0 重新启动…  
+4 AXMenuItem 0 1080 0 0 重新启动  
+4 AXMenuItem 0 1080 0 0 关机…  
+4 AXMenuItem 0 1080 0 0 关机  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 锁定屏幕  
+4 AXMenuItem 0 1080 0 0 退出登录“陈沁如”…  
+4 AXMenuItem 0 1080 0 0 退出登录“陈沁如”  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 About VersionDock History QA  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Services  
+6 AXMenuItem 0 1080 0 0 No Services Apply  
+6 AXMenuItem 0 1080 0 0 Services Settings…  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Hide VersionDock History QA  
+4 AXMenuItem 0 1080 0 0 Hide Others  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Quit VersionDock History QA  
+4 AXMenuItem 0 1080 0 0 Quit and Keep Windows  
+4 AXMenuItem 0 1080 0 0 Close Window  
+4 AXMenuItem 0 1080 0 0 Close All  
+4 AXMenuItem 0 1080 0 0 Undo  
+4 AXMenuItem 0 1080 0 0 Redo  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Cut  
+4 AXMenuItem 0 1080 0 0 Copy  
+4 AXMenuItem 0 1080 0 0 Paste  
+4 AXMenuItem 0 1080 0 0 Select All  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 AutoFill  
+6 AXMenuItem 0 1080 0 0 Contact…  
+6 AXMenuItem 0 1080 0 0 Passwords…  
+4 AXMenuItem 0 1080 0 0 Start Dictation…  
+4 AXMenuItem 0 1080 0 0 Emoji & Symbols  
+4 AXMenuItem 0 1080 0 0 Toggle Full Screen  
+4 AXMenuItem 0 1080 0 0 Minimize  
+4 AXMenuItem 0 1080 0 0 Minimize All  
+4 AXMenuItem 0 1080 0 0 Zoom  
+4 AXMenuItem 0 1080 0 0 Zoom All  
+4 AXMenuItem 0 1080 0 0 Fill  
+4 AXMenuItem 0 1080 0 0 Center  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Move & Resize  
+6 AXMenuItem 0 1080 0 0 Halves  
+6 AXMenuItem 0 1080 0 0 Left  
+6 AXMenuItem 0 1080 0 0 Right  
+6 AXMenuItem 0 1080 0 0 Top  
+6 AXMenuItem 0 1080 0 0 Bottom  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Quarters  
+6 AXMenuItem 0 1080 0 0 Top Left  
+6 AXMenuItem 0 1080 0 0 Top Right  
+6 AXMenuItem 0 1080 0 0 Bottom Left  
+6 AXMenuItem 0 1080 0 0 Bottom Right  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Arrange  
+6 AXMenuItem 0 1080 0 0 Left & Right  
+6 AXMenuItem 0 1080 0 0 Left & Quarters  
+6 AXMenuItem 0 1080 0 0 Right & Left  
+6 AXMenuItem 0 1080 0 0 Right & Quarters  
+6 AXMenuItem 0 1080 0 0 Top & Bottom  
+6 AXMenuItem 0 1080 0 0 Top & Quarters  
+6 AXMenuItem 0 1080 0 0 Bottom & Top  
+6 AXMenuItem 0 1080 0 0 Bottom & Quarters  
+6 AXMenuItem 0 1080 0 0 Quarters  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Return to Previous Size  
+4 AXMenuItem 0 1080 0 0 Full Screen Tile  
+6 AXMenuItem 0 1080 0 0 Left of Screen  
+6 AXMenuItem 0 1080 0 0 Right of Screen  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Remove Window from Set  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Close Window  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0    

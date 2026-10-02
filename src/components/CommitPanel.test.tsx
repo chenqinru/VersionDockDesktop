@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommitPanel } from './CommitPanel';
 import { SubtreePanel } from './SubtreePanel';
@@ -105,6 +105,39 @@ describe('CommitPanel capabilities and file view', () => {
     fireEvent.click(screen.getByTitle('More Actions...'));
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
+  });
+
+  it('keeps repository expansion unchanged when browsing its branch menu', async () => {
+    const branches = ['main', 'topic'].map((name) => ({ name, current: name === 'main', remote: false, upstream: null, ahead: 0, behind: 0 }));
+    const menuBridge = new MockBridge((command) => command.type === 'branches' ? branches : []);
+    useAppStore.setState({ bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo', branchesByRepo: { repo: branches }, tagsByRepo: {} });
+    render(<BridgeContext.Provider value={menuBridge}><CommitPanel /></BridgeContext.Provider>);
+    const repositoryToggle = screen.getByRole('button', { name: 'Repository' });
+    expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(screen.getByTitle('Switch branch'));
+    const branchMenu = screen.getByRole('dialog', { name: 'Repository — Branches' });
+    await waitFor(() => expect(within(branchMenu).getByRole('option', { name: 'topic' })).toBeInTheDocument());
+    fireEvent.click(within(branchMenu).getByRole('option', { name: 'topic' }));
+    expect(screen.getByRole('dialog', { name: 'topic — Repository' })).toBeInTheDocument();
+    expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'topic — Repository' })).getByRole('button', { name: 'Back' }));
+    expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(within(branchMenu).getByText('LOCAL'));
+    expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.change(within(branchMenu).getByRole('combobox'), { target: { value: 'topic' } });
+    fireEvent.click(within(branchMenu).getByRole('button', { name: 'Clear search' }));
+    expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.pointerDown(document.body);
+    fireEvent.click(repositoryToggle);
+    expect(repositoryToggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByTitle('Switch branch'));
+    const reopenedMenu = screen.getByRole('dialog', { name: 'Repository — Branches' });
+    fireEvent.click(within(reopenedMenu).getByRole('option', { name: 'topic' }));
+    expect(repositoryToggle).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('shows a mixed expansion state after a repository is toggled manually', () => {

@@ -40,6 +40,7 @@ export function getRepoRefIcon(
   const currentBranch = bList.find((b) => b.current);
   if (currentBranch?.detachedTag) return 'tag';
   if (currentBranch?.detachedHash) return 'git-commit';
+  if (r.meta.kind === 'git' && (r.branch === 'HEAD' || r.branch.startsWith('HEAD ('))) return 'git-commit';
   return 'git-branch';
 }
 

@@ -3073,6 +3073,85 @@ async fn real_svn_advanced_working_copy_operations() {
     let repository = repo(&working_copy, VcsKind::Svn);
     let token = CancellationToken::new();
 
+    std::fs::create_dir(working_copy.join("nested")).unwrap();
+    command("svn", &["add", "nested"], &working_copy);
+    command(
+        "svn",
+        &["commit", "-m", "nested ignore directory"],
+        &working_copy,
+    );
+    vcs::update_ignore_rules(
+        &repository,
+        "",
+        &["*.tmp".into(), "keep.txt".into()],
+        &token,
+    )
+    .await
+    .unwrap();
+    vcs::update_ignore_rules(
+        &repository,
+        "nested",
+        &["cache".into(), "keep".into()],
+        &token,
+    )
+    .await
+    .unwrap();
+    let ignore_groups = vcs::svn_ignore_entries(&repository, &token).await.unwrap();
+    assert_eq!(ignore_groups.len(), 2);
+    assert!(ignore_groups
+        .iter()
+        .any(|group| group.directory.is_empty() && group.patterns.contains(&"*.tmp".into())));
+    assert!(ignore_groups
+        .iter()
+        .any(|group| group.directory == "nested" && group.patterns.contains(&"cache".into())));
+    vcs::svn_operation(
+        &repository,
+        SvnOperation::RemoveIgnoreEntries {
+            entries: vec![
+                crate::models::IgnoreRules {
+                    directory: "".into(),
+                    source: "svn:ignore".into(),
+                    patterns: vec!["*.tmp".into()],
+                },
+                crate::models::IgnoreRules {
+                    directory: "nested".into(),
+                    source: "svn:ignore".into(),
+                    patterns: vec!["cache".into()],
+                },
+            ],
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vcs::ignore_rules(&repository, "", &token)
+            .await
+            .unwrap()
+            .patterns,
+        ["keep.txt"]
+    );
+    assert_eq!(
+        vcs::ignore_rules(&repository, "nested", &token)
+            .await
+            .unwrap()
+            .patterns,
+        ["keep"]
+    );
+    assert!(vcs::svn_operation(
+        &repository,
+        SvnOperation::RemoveIgnoreEntries {
+            entries: vec![crate::models::IgnoreRules {
+                directory: "../outside".into(),
+                source: "svn:ignore".into(),
+                patterns: vec!["keep".into()]
+            },]
+        },
+        &token
+    )
+    .await
+    .is_err());
+
     vcs::svn_operation(
         &repository,
         SvnOperation::Cleanup {
@@ -5283,6 +5362,16 @@ async fn real_git_sidebar_branch_names_and_checkout_survive_tag_namespace_collis
     let repository = repo(path, VcsKind::Git);
     let token = CancellationToken::new();
     let branches = vcs::branches(&repository, &token).await.unwrap();
+    for branch in &branches {
+        let date = branch
+            .last_commit_date
+            .as_deref()
+            .expect("branch commit timestamp");
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(date).is_ok(),
+            "expected locale-independent timestamp, got {date}"
+        );
+    }
     assert!(branches
         .iter()
         .any(|branch| branch.name == "main" && branch.current && !branch.remote));

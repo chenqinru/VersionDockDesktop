@@ -646,6 +646,9 @@ fn sync_phase(action: &crate::models::SyncAction) -> (&'static str, &'static str
 
 fn svn_phase(operation: &crate::models::SvnOperation) -> (&'static str, &'static str) {
     match operation {
+        crate::models::SvnOperation::RemoveIgnoreEntries { .. } => {
+            ("svnIgnore", "Removing SVN ignore entries")
+        }
         crate::models::SvnOperation::Cleanup { .. } => ("svnCleanup", "Cleaning SVN working copy"),
         crate::models::SvnOperation::ResolveWorking { .. } => {
             ("svnResolve", "Resolving SVN conflicts")
@@ -2242,6 +2245,13 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             json(vcs::ignore_rules(&repo, &directory, token).await?)
+        }
+        BridgeCommand::SvnIgnoreEntries {
+            workspace_id,
+            repo_id,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            json(vcs::svn_ignore_entries(&repo, token).await?)
         }
         BridgeCommand::UpdateIgnoreRules {
             workspace_id,
