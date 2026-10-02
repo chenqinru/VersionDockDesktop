@@ -56,7 +56,7 @@ describe('working tree changes workspace', () => {
     });
 
     // 切换到未跟踪文件 new.txt
-    fireEvent.click(screen.getByText('new.txt'));
+    fireEvent.click(screen.getByRole('button', { name: 'new.txt' }));
 
     // 等待请求记录更新，确保只发起 1 次针对 new.txt 的请求，累计恰好 2 次请求（无重复加载）
     await waitFor(() => {
@@ -65,7 +65,7 @@ describe('working tree changes workspace', () => {
     });
 
     // 再次点击已经选中的 new.txt，不应发起重复的额外请求
-    fireEvent.click(screen.getByText('new.txt'));
+    fireEvent.click(screen.getByRole('button', { name: 'new.txt' }));
     expect(diffRequests).toHaveLength(2);
   });
 
@@ -104,7 +104,7 @@ describe('working tree changes workspace', () => {
     });
 
     // 切换到 new.txt
-    fireEvent.click(screen.getByText('new.txt'));
+    fireEvent.click(screen.getByRole('button', { name: 'new.txt' }));
 
     // 立即显示 loading，旧文件的差异内容被立刻卸载
     expect(screen.getByText('Loading diff...')).toBeInTheDocument();

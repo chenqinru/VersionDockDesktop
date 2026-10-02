@@ -3028,7 +3028,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         return !state.selectedCommitDetails[key] || state.selectedCommitLoading[key] || Boolean(state.selectedCommitError[key]);
       });
       if (hasUnfinishedCommit) return;
-      const files = buildCommitFileTargets(state.selectedCommits, state.selectedCommitDetails, state.snapshot?.repositories ?? []);
+      const files = buildCommitFileTargets(state.selectedCommits, state.selectedCommitDetails, state.snapshot?.repositories ?? [], state.historyQuery.path);
       if (!files.length) return;
       set({
         changes: { kind: 'commits', commits: state.selectedCommits, files },
@@ -3063,60 +3063,64 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
     },
 
-    loadChangesDiff: async (target) => withBusy(async () => {
-      const generation = ++changesDiffGeneration;
+    loadChangesDiff: async (target) => {
       const working = 'section' in target;
       const targetId = working
         ? `${target.repoId}\0${target.section}\0${target.path}`
         : `${target.repoId}\0${target.path}\0${target.fromRevision ?? ''}\0${target.toRevision ?? target.commitHash}`;
-      const controller = beginRequest('changes-diff');
-      set({
-        changesDiff: undefined,
-        changesDiffLoading: true,
-        changesDiffError: undefined,
-        changesDiffTarget: targetId,
-      });
-      try {
-        const diff = await bridge().request<DiffDocument>(
-          {
-            type: 'fileDiff',
-            payload: {
-              workspace_id: workspaceId(),
-              repo_id: target.repoId,
-              relative_path: target.path,
-              staged: working ? target.staged : false,
-              revision: working ? null : target.toRevision ? null : target.commitHash,
-              from_revision: working ? null : target.fromRevision ?? null,
-              to_revision: working ? null : target.toRevision ?? null,
+      const pending = requestControllers.get('changes-diff');
+      if (get().changesDiffLoading && get().changesDiffTarget === targetId && pending && !pending.signal.aborted) return;
+      return withBusy(async () => {
+        const generation = ++changesDiffGeneration;
+        const controller = beginRequest('changes-diff');
+        set({
+          changesDiff: undefined,
+          changesDiffLoading: true,
+          changesDiffError: undefined,
+          changesDiffTarget: targetId,
+        });
+        try {
+          const diff = await bridge().request<DiffDocument>(
+            {
+              type: 'fileDiff',
+              payload: {
+                workspace_id: workspaceId(),
+                repo_id: target.repoId,
+                relative_path: target.path,
+                staged: working ? target.staged : false,
+                revision: working ? null : target.toRevision ? null : target.commitHash,
+                from_revision: working ? null : target.fromRevision ?? null,
+                to_revision: working ? null : target.toRevision ?? null,
+              },
             },
-          },
-          { signal: controller.signal },
-        );
-        if (generation === changesDiffGeneration) {
-          set({
-            changesDiff: diff,
-            changesDiffLoading: false,
-            changesDiffError: undefined,
-            changesDiffTarget: targetId,
-          });
-        }
-      } catch (error) {
-        if (generation === changesDiffGeneration) {
-          if (!isAbortError(error)) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
+            { signal: controller.signal },
+          );
+          if (generation === changesDiffGeneration) {
             set({
-              changesDiff: undefined,
+              changesDiff: diff,
               changesDiffLoading: false,
-              changesDiffError: errorMsg,
+              changesDiffError: undefined,
               changesDiffTarget: targetId,
             });
-            publishError('Diff loading failed', error);
-          } else {
-            set({ changesDiffLoading: false });
+          }
+        } catch (error) {
+          if (generation === changesDiffGeneration) {
+            if (!isAbortError(error)) {
+              const errorMsg = error instanceof Error ? error.message : String(error);
+              set({
+                changesDiff: undefined,
+                changesDiffLoading: false,
+                changesDiffError: errorMsg,
+                changesDiffTarget: targetId,
+              });
+              publishError('Diff loading failed', error);
+            } else {
+              set({ changesDiffLoading: false });
+            }
           }
         }
-      }
-    }, `diff:${target.repoId}`),
+      }, `diff:${target.repoId}`);
+    },
 
     setCommitMessage: (commitMessage) => {
       if (get().transferringTabIds[get().snapshot?.workspace.id ?? '']) return;

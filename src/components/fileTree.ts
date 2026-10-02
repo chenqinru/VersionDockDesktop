@@ -1,15 +1,17 @@
 import type { FileChange } from '../bindings/generated';
 
-export interface FileTreeNode {
+interface TreeFile { path: string; isTruncated?: boolean; }
+
+export interface FileTreeNode<T extends TreeFile = FileChange> {
   name: string;
   path: string;
-  children: FileTreeNode[];
-  files: FileChange[];
-  file?: FileChange;
+  children: FileTreeNode<T>[];
+  files: T[];
+  file?: T;
 }
 
-export function buildFileTree(files: FileChange[]): FileTreeNode[] {
-  const root: FileTreeNode = { name: '', path: '', children: [], files: [] };
+export function buildFileTree<T extends TreeFile>(files: T[]): FileTreeNode<T>[] {
+  const root: FileTreeNode<T> = { name: '', path: '', children: [], files: [] };
   for (const file of files) {
     let parent = root;
     root.files.push(file);
@@ -23,7 +25,7 @@ export function buildFileTree(files: FileChange[]): FileTreeNode[] {
       parent = node;
     });
   }
-  const exposeTruncatedDirectory = (nodes: FileTreeNode[]) => {
+  const exposeTruncatedDirectory = (nodes: FileTreeNode<T>[]) => {
     for (const node of nodes) {
       if (node.file?.isTruncated && node.children.length > 0) {
         const marker = node.file;
@@ -34,12 +36,12 @@ export function buildFileTree(files: FileChange[]): FileTreeNode[] {
     }
   };
   exposeTruncatedDirectory(root.children);
-  const sort = (nodes: FileTreeNode[]) => nodes.sort((left, right) => Number(!!left.file) - Number(!!right.file) || left.name.localeCompare(right.name)).forEach((node) => sort(node.children));
+  const sort = (nodes: FileTreeNode<T>[]) => nodes.sort((left, right) => Number(!!left.file) - Number(!!right.file) || left.name.localeCompare(right.name)).forEach((node) => sort(node.children));
   sort(root.children);
   return collapseSingleChildDirectories(root.children);
 }
 
-function collapseSingleChildDirectories(nodes: FileTreeNode[]): FileTreeNode[] {
+function collapseSingleChildDirectories<T extends TreeFile>(nodes: FileTreeNode<T>[]): FileTreeNode<T>[] {
   return nodes.map((node) => {
     if (node.file) return node;
     const children = collapseSingleChildDirectories(node.children);

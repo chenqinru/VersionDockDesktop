@@ -3888,18 +3888,22 @@ button.conflict-action-item {
 
 .changes-workspace { height: 100%; display: flex; flex-direction: column; background: var(--versiondock-bg); }
 .changes-workspace > header { height: 38px; flex: 0 0 38px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border-bottom: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
-.changes-workspace > header button { height: 27px; display: flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--versiondock-border); }
-.changes-workspace > header button:hover { background: var(--versiondock-hover); }
+.changes-workspace > header button:not(.icon-button) { height: 27px; display: flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--versiondock-border); }
+.changes-workspace > header button:not(.icon-button):hover { background: var(--versiondock-hover); }
 .changes-workspace > header > span { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .changes-workspace > header > b { color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); white-space: nowrap; }
 .changes-columns { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(250px, 31%) minmax(0, 1fr); }
-.changes-files { min-width: 0; overflow: auto; border-right: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
+.changes-files { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--versiondock-border); background: var(--versiondock-surface); }
+.changes-files-toolbar { flex: 0 0 32px; display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--versiondock-border); }
+.changes-files-toolbar > span:first-child { flex: 1; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.changes-files-content { min-height: 0; flex: 1; overflow: auto; }
+.changes-directory-row > .codicon { flex: 0 0 15px; }
+.changes-directory-row > b { color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; }
 .changes-files section + section { border-top: 1px solid var(--versiondock-border); }
 .changes-files h3 { height: 27px; margin: 0; padding: 0 8px; display: flex; align-items: center; gap: 5px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); letter-spacing: .04em; text-transform: uppercase; }
 .changes-files h3 i { width: 7px; height: 7px; border-radius: 50%; }
 .changes-files h3 .codicon { margin-right: 1px; }
 .changes-files h3 b { margin-left: auto; min-width: 17px; padding: 0 4px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; text-align: center; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); line-height: 14px; }
-.changes-commit-group + .changes-commit-group { border-top: 1px solid var(--versiondock-border-soft); }
 .changes-commit-group h4 { min-width: 0; min-height: 25px; margin: 0; padding: 4px 8px 3px 17px; display: flex; align-items: center; gap: 5px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; }
 .changes-commit-group h4 code { flex: 0 0 auto; color: var(--versiondock-accent); font: calc(10px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }
 .changes-commit-group h4 span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3912,7 +3916,10 @@ button.conflict-action-item {
 .changes-file-row .change-status { width: 12px; text-align: center; color: var(--versiondock-muted); }
 .changes-file-row .change-status.added, .changes-file-row .added { color: var(--versiondock-success); }
 .changes-file-row .change-status.deleted, .changes-file-row .removed { color: var(--versiondock-danger); }
-.changes-preview { min-width: 0; min-height: 0; display: flex; overflow: hidden; background: var(--versiondock-bg); }
+.changes-preview { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--versiondock-bg); }
+.changes-preview-header { min-height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.changes-preview-header .diff-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changes-preview-revisions { flex: 0 0 auto; color: var(--versiondock-muted); font: calc(10px * var(--versiondock-ui-font-scale, 1)) var(--versiondock-code); }
 .changes-preview .code-view { height: 100%; }
 
 @media (max-width: 1120px) { .detail-slot { min-width: 300px; } .changes-columns { grid-template-columns: 230px minmax(0, 1fr); } }

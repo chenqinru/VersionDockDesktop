@@ -1,0 +1,237 @@
+8 AXRadioButton 206 69 111 29 fixtures 关闭标签页  1
+7 AXButton 326 70 27 27 新建标签页 新建标签页 
+9 AXStaticText 125 112 101 16   VersionDock 提交
+8 AXButton 379 108 24 24 VersionDock：全选 VersionDock：全选 
+8 AXButton 405 108 24 24 VersionDock：更新项目 VersionDock：更新项目 
+8 AXButton 431 108 24 24 VersionDock：刷新提交面板 VersionDock：刷新提交面板 
+8 AXButton 457 108 24 24 VersionDock：管理远端账号 (GitHub / GitLab / Gitee) VersionDock：管理远端账号 (GitHub / GitLab / Gitee) 
+8 AXButton 483 108 24 24 VersionDock：设置 VersionDock：设置 
+8 AXPopUpButton 509 108 24 24 更多操作... 更多操作... 
+9 AXRadioButton 115 137 87 30 更改 更改 1
+9 AXRadioButton 201 139 34 26 搁置 搁置 0
+9 AXRadioButton 234 139 34 26 暂存 暂存 0
+9 AXRadioButton 267 139 34 26 子模块 子模块 0
+9 AXRadioButton 300 138 55 28 工作树 工作树 0
+9 AXRadioButton 354 139 34 26 Subtree Subtree 0
+9 AXRadioButton 387 138 56 28 同步 同步 0
+8 AXCheckBox 124 174 11 11 git-review [Git] git-review [Git] 0
+8 AXButton 138 167 106 25 GIT-REVIEW  
+8 AXStaticText 251 173 18 12   GIT
+8 AXPopUpButton 280 167 50 25 main  
+8 AXButton 479 168 25 23 打开全部变更 打开全部变更 
+8 AXStaticText 510 173 8 13   0
+8 AXStaticText 517 173 4 13   /
+8 AXStaticText 520 173 6 13   1
+8 AXCheckBox 136 198 11 12 demo.txt demo.txt 0
+8 AXButton 154 193 307 22 demo.txt  
+8 AXButton 464 194 20 20 跳转到源文件 跳转到源文件 
+8 AXButton 486 194 20 20 回滚 回滚 
+8 AXStaticText 518 197 12 13   M
+8 AXCheckBox 124 222 11 11 svn-review [SVN] svn-review [SVN] 0
+8 AXButton 138 215 111 25 SVN-REVIEW  
+8 AXStaticText 257 221 20 12   SVN
+8 AXPopUpButton 288 215 48 25 SVN  
+8 AXButton 479 216 25 23 打开全部变更 打开全部变更 
+8 AXStaticText 510 221 8 13   0
+8 AXStaticText 517 221 4 13   /
+8 AXStaticText 520 221 6 13   1
+8 AXCheckBox 136 246 11 12 demo.txt demo.txt 0
+8 AXButton 154 241 315 22 demo.txt  
+8 AXButton 472 242 20 20 跳转到源文件 跳转到源文件 
+8 AXButton 494 242 20 20 回滚 回滚 
+8 AXStaticText 518 245 12 13   M
+8 AXStaticText 123 796 53 14   未选择文件
+9 AXCheckBox 123 822 14 16 跳过钩子 (--no-verify) 跳过钩子 (--no-verify) 0
+9 AXStaticText 139 823 113 14   跳过钩子 (--no-verify)
+8 AXButton 257 819 23 22 历史提交消息 历史提交消息 
+8 AXTextArea 123 847 408 52   
+10 AXStaticText 131 854 160 15   提交信息（Cmd+Enter 提交）
+8 AXButton 124 906 72 28 暂存  
+8 AXPopUpButton 196 906 25 28 保存选项 保存选项 
+8 AXButton 229 906 276 28 提交  
+8 AXPopUpButton 505 906 25 28 提交选项 提交选项 
+8 AXTextField 576 114 124 15 搜索提交… 搜索提交… 
+7 AXPopUpButton 713 108 130 27 作者…  
+7 AXPopUpButton 848 108 122 27 仓库…  
+7 AXPopUpButton 974 108 139 27 分支 / 标签…  
+7 AXPopUpButton 1118 108 191 27 起始 → 截止  
+8 AXStaticText 1340 114 35 15   历史：
+9 AXStaticText 1379 114 86 15   demo.txt：第 5-5 行
+8 AXButton 1474 115 13 13 清除历史筛选 清除历史筛选 
+7 AXButton 1499 108 27 27 清除全部筛选 清除全部筛选 
+7 AXButton 1529 108 27 27 更多操作 更多操作 
+7 AXTextField 566 141 154 34 筛选分支和标签… 筛选分支和标签… 
+7 AXButton 728 141 31 34 折叠侧边栏 折叠侧边栏 
+7 AXCheckBox 540 179 219 20 GIT-REVIEW GIT  0
+7 AXCheckBox 540 199 219 20 SVN-REVIEW SVN  0
+7 AXButton 540 223 219 21 本地 2  
+7 AXCheckBox 540 245 219 22 main GIT HEAD  0
+7 AXCheckBox 540 267 219 22 SVN SVN HEAD  0
+8 AXButton 760 141 6 56  git-review 
+8 AXButton 760 141 424 28 first edit demoCQ Changes Q. 2026/10/02 20:29  
+8 AXButton 760 169 424 51 base historyCQ Changes Q. 2026/10/02 20:29  
+8 AXStaticText 1195 146 44 15   1 个文件
+7 AXButton 1462 143 20 21 全部展开 全部展开 
+7 AXButton 1484 143 20 21 全部折叠 全部折叠 
+7 AXButton 1515 143 20 21 树视图 树视图 
+7 AXButton 1537 143 20 21 平铺列表 平铺列表 
+7 AXButton 1185 167 380 22 SVN-REVIEW 1  
+7 AXButton 1185 189 380 22 demo.txt M  
+7 AXStaticText 1212 734 78 14   SVN-REVIEW
+7 AXButton 1459 730 22 22 打开提交详情 打开提交详情 
+7 AXButton 1483 730 22 22 打开更改 打开更改 
+7 AXCheckBox 1507 730 22 22 默认展开提交信息 默认展开提交信息 0
+7 AXButton 1531 730 22 22 收起提交详情 收起提交详情 
+9 AXStaticText 1210 772 58 15   edit SVN
+7 AXStaticText 1200 815 14 10   CH
+8 AXStaticText 1223 813 53 14   chenqinru
+7 AXStaticText 1281 813 6 13   ·
+8 AXStaticText 1292 813 96 14   2026/10/02 20:29
+7 AXStaticText 1393 813 6 13   ·
+8 AXStaticText 1418 814 13 12   r2
+8 AXStaticText 1217 841 27 12   BASE
+8 AXStaticText 1274 841 29 12   HEAD
+7 AXPopUpButton 119 943 87 21 存在未提交的更改 ────────── git-review: main (1 处更改, 无上游分支) svn-review: SVN (1 处更改) 存在未提交的更改 ────────── git-review: main (1 处更改, 无上游分支) svn-review: SVN (1 处更改) 
+7 AXPopUpButton 207 943 122 21 Git: Changes QA · 点击管理账户与提交身份 Git: Changes QA · 点击管理账户与提交身份 
+7 AXButton 1515 943 22 21 输出与日志 输出与日志 
+7 AXPopUpButton 1539 943 22 21 通知 通知 
+2 AXButton 128 77 16 16   
+2 AXButton 168 77 16 16   
+2 AXButton 148 77 16 16   
+4 AXMenuItem 0 1080 0 0 关于本机  
+4 AXMenuItem 0 1080 0 0 系统信息  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 系统设置…  
+4 AXMenuItem 0 1080 0 0 App Store…, 4项更新  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 最近使用的项目  
+6 AXMenuItem 0 1080 0 0 应用程序  
+6 AXMenuItem 0 1080 0 0 微信.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“微信.app”  
+6 AXMenuItem 0 1080 0 0 系统设置.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“系统设置.app”  
+6 AXMenuItem 0 1080 0 0 照片.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“照片.app”  
+6 AXMenuItem 0 1080 0 0 Antigravity.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Antigravity.app”  
+6 AXMenuItem 0 1080 0 0 AppPorts.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“AppPorts.app”  
+6 AXMenuItem 0 1080 0 0 ChatGPT.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“ChatGPT.app”  
+6 AXMenuItem 0 1080 0 0 Google Chrome.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Google Chrome.app”  
+6 AXMenuItem 0 1080 0 0 VersionDockCommitQA.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockCommitQA.app”  
+6 AXMenuItem 0 1080 0 0 VersionDockHistoryQA.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockHistoryQA.app”  
+6 AXMenuItem 0 1080 0 0 Visual Studio Code.app  
+6 AXMenuItem 0 1080 0 0 在访达中显示“Visual Studio Code.app”  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 文稿  
+6 AXMenuItem 0 1080 0 0 BranchMenuPopover.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“BranchMenuPopover.tsx”  
+6 AXMenuItem 0 1080 0 0 club-management2  
+6 AXMenuItem 0 1080 0 0 在访达中显示“club-management2”  
+6 AXMenuItem 0 1080 0 0 docker-stack  
+6 AXMenuItem 0 1080 0 0 在访达中显示“docker-stack”  
+6 AXMenuItem 0 1080 0 0 k8s-nic  
+6 AXMenuItem 0 1080 0 0 在访达中显示“k8s-nic”  
+6 AXMenuItem 0 1080 0 0 nic  
+6 AXMenuItem 0 1080 0 0 在访达中显示“nic”  
+6 AXMenuItem 0 1080 0 0 social-pratice2  
+6 AXMenuItem 0 1080 0 0 在访达中显示“social-pratice2”  
+6 AXMenuItem 0 1080 0 0 SubtreePanel.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“SubtreePanel.tsx”  
+6 AXMenuItem 0 1080 0 0 TitleBar.tsx  
+6 AXMenuItem 0 1080 0 0 在访达中显示“TitleBar.tsx”  
+6 AXMenuItem 0 1080 0 0 tjhy  
+6 AXMenuItem 0 1080 0 0 在访达中显示“tjhy”  
+6 AXMenuItem 0 1080 0 0 VersionDockDesktop  
+6 AXMenuItem 0 1080 0 0 在访达中显示“VersionDockDesktop”  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 服务器  
+6 AXMenuItem 0 1080 0 0 Macintosh HD  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 清除菜单  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 强制退出…  
+4 AXMenuItem 0 1080 0 0 强制退出“VersionDock History QA”  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 睡眠  
+4 AXMenuItem 0 1080 0 0 重新启动…  
+4 AXMenuItem 0 1080 0 0 重新启动  
+4 AXMenuItem 0 1080 0 0 关机…  
+4 AXMenuItem 0 1080 0 0 关机  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 锁定屏幕  
+4 AXMenuItem 0 1080 0 0 退出登录“陈沁如”…  
+4 AXMenuItem 0 1080 0 0 退出登录“陈沁如”  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 About VersionDock History QA  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Services  
+6 AXMenuItem 0 1080 0 0 No Services Apply  
+6 AXMenuItem 0 1080 0 0 Services Settings…  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Hide VersionDock History QA  
+4 AXMenuItem 0 1080 0 0 Hide Others  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Quit VersionDock History QA  
+4 AXMenuItem 0 1080 0 0 Quit and Keep Windows  
+4 AXMenuItem 0 1080 0 0 Close Window  
+4 AXMenuItem 0 1080 0 0 Close All  
+4 AXMenuItem 0 1080 0 0 Undo  
+4 AXMenuItem 0 1080 0 0 Redo  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Cut  
+4 AXMenuItem 0 1080 0 0 Copy  
+4 AXMenuItem 0 1080 0 0 Paste  
+4 AXMenuItem 0 1080 0 0 Select All  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 AutoFill  
+6 AXMenuItem 0 1080 0 0 Contact…  
+6 AXMenuItem 0 1080 0 0 Passwords…  
+4 AXMenuItem 0 1080 0 0 Start Dictation…  
+4 AXMenuItem 0 1080 0 0 Emoji & Symbols  
+4 AXMenuItem 0 1080 0 0 Toggle Full Screen  
+4 AXMenuItem 0 1080 0 0 Minimize  
+4 AXMenuItem 0 1080 0 0 Minimize All  
+4 AXMenuItem 0 1080 0 0 Zoom  
+4 AXMenuItem 0 1080 0 0 Zoom All  
+4 AXMenuItem 0 1080 0 0 Fill  
+4 AXMenuItem 0 1080 0 0 Center  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Move & Resize  
+6 AXMenuItem 0 1080 0 0 Halves  
+6 AXMenuItem 0 1080 0 0 Left  
+6 AXMenuItem 0 1080 0 0 Right  
+6 AXMenuItem 0 1080 0 0 Top  
+6 AXMenuItem 0 1080 0 0 Bottom  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Quarters  
+6 AXMenuItem 0 1080 0 0 Top Left  
+6 AXMenuItem 0 1080 0 0 Top Right  
+6 AXMenuItem 0 1080 0 0 Bottom Left  
+6 AXMenuItem 0 1080 0 0 Bottom Right  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Arrange  
+6 AXMenuItem 0 1080 0 0 Left & Right  
+6 AXMenuItem 0 1080 0 0 Left & Quarters  
+6 AXMenuItem 0 1080 0 0 Right & Left  
+6 AXMenuItem 0 1080 0 0 Right & Quarters  
+6 AXMenuItem 0 1080 0 0 Top & Bottom  
+6 AXMenuItem 0 1080 0 0 Top & Quarters  
+6 AXMenuItem 0 1080 0 0 Bottom & Top  
+6 AXMenuItem 0 1080 0 0 Bottom & Quarters  
+6 AXMenuItem 0 1080 0 0 Quarters  
+6 AXMenuItem 0 1080 0 0   
+6 AXMenuItem 0 1080 0 0 Return to Previous Size  
+4 AXMenuItem 0 1080 0 0 Full Screen Tile  
+6 AXMenuItem 0 1080 0 0 Left of Screen  
+6 AXMenuItem 0 1080 0 0 Right of Screen  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Remove Window from Set  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0 Close Window  
+4 AXMenuItem 0 1080 0 0   
+4 AXMenuItem 0 1080 0 0    

@@ -6,7 +6,7 @@ import { useI18n } from '../i18n';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { FileIcon } from './FileIcon';
 import { DiffPlaceholder } from './DiffPlaceholder';
-import { commitComparisonBase } from '../history/commitDetails';
+import { resolveDiffRevisions } from '../history/diffRevisions';
 import { UnifiedDiffView } from './UnifiedDiffView';
 
 export function DiffWorkspace() {
@@ -37,12 +37,9 @@ export function DiffWorkspace() {
   if (!diff) return null;
   const fileName = diff.path.split('/').pop() ?? diff.path;
   const revisionLabel = file && !file.revision ? t(file.staged ? 'Index ↔ HEAD' : 'Working tree') : undefined;
-  const isWorking = file?.toRevision === 'WORKTREE' || file?.toRevision === 'WORKING' || (!file?.revision && !file?.toRevision);
   const commit = selectedCommits.find((item) => item.repoId === file?.repoId && item.hash === file?.revision);
   const kind = repo?.meta.kind ?? 'git';
-  const oldRevision = file?.fromRevision ?? (commit ? commitComparisonBase(commit, kind)
-    : file?.revision ? kind === 'svn' ? commitComparisonBase({ hash: file.revision, parents: [] }, kind) : `${file.revision}~1` : kind === 'svn' ? 'BASE' : file?.staged ? 'HEAD' : 'INDEX');
-  const newRevision = isWorking ? file?.staged && kind === 'git' ? 'INDEX' : kind === 'svn' ? 'WORKING' : 'WORKTREE' : (file?.toRevision ?? file?.revision);
+  const { oldRevision, newRevision } = resolveDiffRevisions(kind, file ?? {}, commit);
   const backLabel = comparisonTarget
     ? t('Back to compare')
     : diffReturnMode === 'commit-detail'
