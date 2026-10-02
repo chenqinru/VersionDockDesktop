@@ -3804,7 +3804,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
-    setHistoryFilter: (value) => set((state) => ({ historyFilter: value, historyQuery: { ...state.historyQuery, text: value || null } })),
+    setHistoryFilter: (value) => {
+      abortHistoryRequests();
+      set((state) => ({ historyFilter: value, historyQuery: { ...state.historyQuery, text: value || null }, historyLoading: false, historyTopologyLoading: false }));
+    },
     revealHistoryCommit: (repoId, hash) => {
       const wid = get().snapshot?.workspace.id;
       if (!wid) return;
@@ -3813,7 +3816,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     setHistoryQuery: (historyQuery) => {
       abortHistoryRequests();
-      set({ historyQuery, historyFilter: historyQuery.text ?? '', history: [], historyByRepo: {}, historyHasMore: false, historyTopology: [], historyTopologyByRepo: {} });
+      if (!historyQuery.path) { historyPathPreviousScope = undefined; historyPathPreviousQuery = undefined; }
+      set({ historyQuery, historyFilter: historyQuery.text ?? '', history: [], historyByRepo: {}, historyHasMore: false, historyTopology: [], historyTopologyByRepo: {}, historyLoading: false, historyTopologyLoading: false });
     },
     openHistoryForPath: async (repoId, path) => {
       abortHistoryRequests();
@@ -3822,8 +3826,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         historyPathPreviousQuery = get().historyQuery;
       }
       set((state) => ({
-        historyScope: { repoIds: [repoId], revisionsByRepo: state.historyScope.revisionsByRepo[repoId] ? { [repoId]: state.historyScope.revisionsByRepo[repoId] } : {} },
-        historyQuery: { ...state.historyQuery, path, lineRange: null },
+        historyScope: { repoIds: [repoId], revisionsByRepo: {} },
+        historyQuery: { ...state.historyQuery, path, lineRange: null, revision: null },
         selectedRepoId: repoId,
         mode: 'history',
       }));
@@ -3851,8 +3855,16 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     clearHistoryPath: async () => {
       abortHistoryRequests();
-      const { historyScope, historyQuery, historyFilter } = resetHistoryPathFilterState(get());
-      set({ historyScope, historyQuery, historyFilter });
+      const { historyScope, historyQuery } = get();
+      const revisionsByRepo = { ...historyScope.revisionsByRepo };
+      if (historyQuery.lineRange && historyQuery.revision) {
+        for (const [repoId, revision] of Object.entries(revisionsByRepo)) {
+          if (revision === historyQuery.revision) delete revisionsByRepo[repoId];
+        }
+      }
+      historyPathPreviousScope = undefined;
+      historyPathPreviousQuery = undefined;
+      set({ historyScope: { ...historyScope, revisionsByRepo }, historyQuery: { ...historyQuery, path: null, lineRange: null, revision: null } });
       await get().loadHistory(true);
     },
     setHistoryScope: (historyScope) => set({ historyScope }),

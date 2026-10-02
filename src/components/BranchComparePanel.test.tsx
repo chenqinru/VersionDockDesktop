@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BranchComparePanel } from './BranchComparePanel';
 import { useAppStore } from '../store/appStore';
 import type { BranchCompareResult, BranchInfo, CommitNode, RepositoryStatus, WorkspaceSnapshot } from '../bindings/generated';
@@ -75,10 +75,13 @@ const comparison: BranchCompareResult = {
   files: [],
 };
 
+beforeEach(() => useAppStore.setState({ history: [commit1, commit2] }));
+
 afterEach(() => {
   cleanup();
   useAppStore.setState({
     snapshot: undefined,
+    history: [],
     branchesByRepo: {},
     comparison: undefined,
   });
@@ -187,7 +190,7 @@ describe('BranchComparePanel', () => {
         'refs/heads/main',
         'feature',
         'targetOnly',
-        expect.objectContaining({ author: 'Bob' }),
+        expect.objectContaining({ author: 'bob@example.com' }),
         expect.any(AbortSignal)
       );
     });

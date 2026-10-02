@@ -5137,6 +5137,7 @@ async fn git_history(
         .filter(|value| !value.is_empty())
     {
         args.push(format!("--author={}", regex_literal(value)));
+        args.push("--regexp-ignore-case".into());
     }
     if let Some(value) = query
         .from_date

@@ -27,6 +27,7 @@ const originalLoadHistory = useAppStore.getState().loadHistory;
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   useAppStore.setState({ loadHistory: originalLoadHistory, historyHasMore: false });
   useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, historyOperation: originalHistoryOperation });
 });
@@ -50,8 +51,7 @@ describe('HistoryWorkspace capabilities', () => {
     render(<HistoryWorkspace />);
     fireEvent.click(screen.getByRole('button', { name: /Author/ }));
     expect(screen.getAllByText('Ada').length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
-    expect(screen.getAllByText(/Repo/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /^Repository/ })).not.toBeInTheDocument();
   });
 
   it('provides commit, branch, tag, and repository context menus', () => {
@@ -487,6 +487,34 @@ describe('HistoryWorkspace data helpers', () => {
       expect(useAppStore.getState().historyScope.repoIds).toEqual(['repo-2']);
       expect(useAppStore.getState().historyScope.revisionsByRepo).toEqual({ 'repo-2': 'refs/heads/feature/ui' });
     });
+  });
+
+  it('shows the tag icon and closes an already-selected All filter', () => {
+    useAppStore.setState({ bootstrap: bootstrap(false, false), snapshot, selectedRepoId: 'repo', tagsByRepo: { repo: [{ name: 'v1', hash: 'abc', date: '' }] } });
+    render(<HistoryWorkspace />);
+    fireEvent.click(screen.getByRole('button', { name: /^Branch \/ Tag/ }));
+    fireEvent.click(screen.getByRole('radio', { name: 'v1' }));
+    expect(screen.getAllByRole('button', { name: 'v1' })[0].querySelector('.codicon-tag')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'v1' })[0]);
+    fireEvent.click(screen.getByRole('radio', { name: 'All branches & tags' }));
+    expect(screen.queryByRole('dialog', { name: 'All branches & tags' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Branch \/ Tag/ }));
+    fireEvent.click(screen.getByRole('radio', { name: 'All branches & tags' }));
+    expect(screen.queryByRole('dialog', { name: 'All branches & tags' })).not.toBeInTheDocument();
+  });
+
+  it('clears every condition and cancels an unsubmitted search while file history is active', () => {
+    vi.useFakeTimers();
+    useAppStore.setState({ bootstrap: bootstrap(false, false), snapshot, selectedRepoId: 'repo', historyQuery: { text: null, author: 'Ada', fromDate: '2026-01-01', toDate: null, path: 'src/file.ts', revision: null, lineRange: { start: 2, end: 5 } }, historyFilter: '', historyScope: { repoIds: ['repo'], revisionsByRepo: {} } });
+    render(<HistoryWorkspace />);
+    expect(screen.getByText('file.ts:lines 2-5')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search commits…' }), { target: { value: 'pending' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all filters' }));
+    act(() => vi.advanceTimersByTime(250));
+    expect(screen.getByRole('textbox', { name: 'Search commits…' })).toHaveValue('');
+    expect(useAppStore.getState().historyQuery).toEqual({ text: null, author: null, fromDate: null, toDate: null, path: null, revision: null, lineRange: null });
+    expect(useAppStore.getState().historyScope).toEqual({ repoIds: null, revisionsByRepo: {} });
+    vi.useRealTimers();
   });
 
   it('selects all instances of a shared sidebar branch, clearing the previous repository filter', async () => {

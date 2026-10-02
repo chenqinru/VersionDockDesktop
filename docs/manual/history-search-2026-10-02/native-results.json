@@ -1,0 +1,14 @@
+{
+  "native": "macOS Tauri with Rust backend and real Git repositories",
+  "fixtureCommitCounts": {
+    "alpha": 110,
+    "beta": 15
+  },
+  "regexAndAuthor": true,
+  "dateRange": true,
+  "tagScope": true,
+  "lineHistory": true,
+  "hashSearch": true,
+  "compareSearch": true,
+  "minimumWidthFiltersVisible": true
+}

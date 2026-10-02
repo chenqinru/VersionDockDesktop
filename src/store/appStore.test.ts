@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, HistoryPage, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
 import { currentDialog, publishDialog } from '../components/dialogService';
 import { commitKey } from '../history/commitDetails';
@@ -2669,6 +2669,21 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().worktreeDiff).toMatchObject({ repoId: 'repo', source: 'repository', currentRef: 'main' });
   });
 
+  it('rejects an old search response as soon as the search condition changes', async () => {
+    const pending = deferred<HistoryPage>();
+    const workspace = snapshot('search-race', 1);
+    workspace.repositories = [repository('a', 'Alpha')];
+    const bridge = new MockBridge((command) => command.type === 'history' ? pending.promise : []);
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, history: [], historyFilter: '' });
+    const request = useAppStore.getState().loadHistory(true);
+    useAppStore.getState().setHistoryFilter('new search');
+    pending.resolve({ commits: [{ repoId: 'a', hash: 'old', shortHash: 'old', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'stale', refs: [] }], hasMore: false });
+    await request;
+    expect(useAppStore.getState().history).toEqual([]);
+    expect(useAppStore.getState().historyLoading).toBe(false);
+    expect(useAppStore.getState().historyQuery.text).toBe('new search');
+  });
+
   it('aggregates history from every repository without losing repository scope', async () => {
     const workspace = snapshot('workspace', 1);
     workspace.repositories = [repository('a', 'Alpha'), repository('b', 'Beta')];
@@ -3071,7 +3086,7 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().bootstrap?.capabilities.systemNotifications).toBe(false);
   });
 
-  it('sends every history condition to the backend and restores the previous scope after a path jump', async () => {
+  it('sends every history condition to the backend and clears only the file history condition', async () => {
     const requests: BridgeCommand[] = [];
     const bridge = new MockBridge((command) => {
       requests.push(command);
@@ -3086,8 +3101,8 @@ describe('appStore async lifecycle', () => {
     await useAppStore.getState().openHistoryForPath('b', 'src/file.ts');
     expect(requests.find((command) => command.type === 'history')).toMatchObject({ type: 'history', payload: { repo_id: 'b', query: { text: 'needle', author: 'Ada', fromDate: '2026-01-01', toDate: '2026-01-31', path: 'src/file.ts' } } });
     await useAppStore.getState().clearHistoryPath();
-    expect(useAppStore.getState().historyScope).toEqual({ repoIds: ['a'], revisionsByRepo: { a: 'refs/heads/main' } });
-    expect(useAppStore.getState().historyQuery.path).toBeNull();
+    expect(useAppStore.getState().historyScope).toEqual({ repoIds: ['b'], revisionsByRepo: {} });
+    expect(useAppStore.getState().historyQuery).toMatchObject({ path: null, author: 'Ada', text: 'needle' });
   });
   it('keeps per-repository facts when Update Project partially fails', async () => {
     const current = snapshot('workspace', 1); current.repositories = [repository('a', 'A'), repository('b', 'B')];

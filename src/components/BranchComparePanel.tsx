@@ -1,3 +1,4 @@
+import { buildHistoryAuthorOptions } from '../history/authors';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { CommitNode } from '../bindings/generated';
@@ -5,7 +6,7 @@ import { Codicon } from './Codicon';
 import { AuthorAvatar } from './AuthorAvatar';
 import { useI18n } from '../i18n';
 import { isOperationActive, useAppStore } from '../store/appStore';
-import { CommitSearch, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
+import { CommitSearch, DateFilter, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
 
 type CompareFilters = {
   search: string;
@@ -29,6 +30,7 @@ function ComparePane({
   emptyText,
   commits,
   renderCommits,
+  authors,
 }: {
   repoId: string;
   base: string;
@@ -38,51 +40,18 @@ function ComparePane({
   emptyText: string;
   commits: CommitNode[];
   renderCommits: (commits: CommitNode[]) => ReactNode;
+  authors: ReturnType<typeof buildHistoryAuthorOptions>;
 }) {
   const { t } = useI18n();
-  const repoHistory = useAppStore((state) => state.historyByRepo[repoId] ?? []);
   const compareBranchCommits = useAppStore((state) => state.compareBranchCommits);
   const [filters, setFilters] = useState<CompareFilters>(EMPTY_FILTERS);
+  const [searchReset, setSearchReset] = useState(0);
   const [filteredCommits, setFilteredCommits] = useState<CommitNode[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [menu, setMenu] = useState<'authors' | 'dates' | null>(null);
   const activeFilter = useRef<HTMLDivElement>(null);
-  const authors = useMemo(() => {
-    const counts = new Map<string, { count: number; email: string; repoId: string }>();
-    commits.forEach((commit) => {
-      const current = counts.get(commit.author);
-      counts.set(commit.author, {
-        count: (current?.count ?? 0) + 1,
-        email: current?.email || commit.email,
-        repoId,
-      });
-    });
-    repoHistory.forEach((commit) => {
-      if (!counts.has(commit.author)) {
-        counts.set(commit.author, {
-          count: 0,
-          email: commit.email,
-          repoId,
-        });
-      }
-    });
-    return [...counts.entries()]
-      .filter(([author]) => Boolean(author))
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([author, value]) => ({
-        id: author,
-        label: author,
-        sublabel: value.email,
-        count: value.count,
-        detail: String(value.count),
-        avatarName: author,
-        avatarEmail: value.email,
-        avatarRepoId: value.repoId,
-      }));
-  }, [commits, repoHistory, repoId]);
-
   const selectedAuthor = useMemo(
-    () => authors.find((item) => item.id === filters.author),
+    () => authors.find((item) => item.id === filters.author || item.label === filters.author || item.sublabel === filters.author),
     [authors, filters.author]
   );
 
@@ -94,8 +63,8 @@ function ComparePane({
     }
 
     const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setLoading(true);
+    queueMicrotask(() => { if (!controller.signal.aborted) setLoading(true); });
+    void (async () => {
       try {
         const result = await compareBranchCommits(
           repoId,
@@ -122,10 +91,9 @@ function ComparePane({
           setLoading(false);
         }
       }
-    }, 250);
+    })();
 
     return () => {
-      window.clearTimeout(timer);
       controller.abort();
     };
   }, [active, filters.search, filters.author, filters.from, filters.to, repoId, base, target, side, compareBranchCommits]);
@@ -138,10 +106,13 @@ function ComparePane({
       const target = event.target;
       if (!(target instanceof Node) || !activeFilter.current?.contains(target)) setMenu(null);
     };
+    const blur = () => setMenu(null);
+    window.addEventListener('blur', blur);
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(null); };
     document.addEventListener('pointerdown', close, true);
     document.addEventListener('keydown', escape);
     return () => {
+      window.removeEventListener('blur', blur);
       document.removeEventListener('pointerdown', close, true);
       document.removeEventListener('keydown', escape);
     };
@@ -149,7 +120,7 @@ function ComparePane({
 
   return <section className="compare-pane">
     <div className="history-filters compare-pane-filters">
-      <CommitSearch value={filters.search} onChange={(search) => setFilters((current) => ({ ...current, search }))} />
+      <CommitSearch key={searchReset} value={filters.search} onChange={(search) => setFilters((current) => ({ ...current, search }))} />
       <div ref={menu === 'authors' ? activeFilter : undefined} className="filter-anchor">
         <ToggleFilter
           icon="person"
@@ -159,22 +130,23 @@ function ComparePane({
                 name={selectedAuthor?.avatarName ?? filters.author}
                 email={selectedAuthor?.avatarEmail ?? ''}
                 repoId={selectedAuthor?.avatarRepoId ?? repoId}
-                size={16}
+                size={14}
               />
             ) : undefined
           }
-          label={filters.author || t('Author…')}
+          title={selectedAuthor ? `${selectedAuthor.label}${selectedAuthor.sublabel ? ` <${selectedAuthor.sublabel}>` : ''}` : t('Filter by author')}
+          label={selectedAuthor?.label || filters.author || t('Author…')}
           active={Boolean(filters.author)}
           open={menu === 'authors'}
           onClick={() => setMenu(menu === 'authors' ? null : 'authors')}
         />
-        {menu === 'authors' && <FilterPopover allLabel={t('All authors')} kind="author" values={authors} selected={filters.author} onSelect={(author) => { setFilters((current) => ({ ...current, author })); setMenu(null); }} onClear={() => setFilters((current) => ({ ...current, author: '' }))} />}
+        {menu === 'authors' && <FilterPopover allLabel={t('All authors')} kind="author" values={authors} selected={filters.author} onSelect={(author) => { setFilters((current) => ({ ...current, author })); setMenu(null); }} />}
       </div>
       <div ref={menu === 'dates' ? activeFilter : undefined} className="filter-anchor date-filter-anchor">
-        <ToggleFilter icon="calendar" label={filters.from || filters.to ? `${filters.from || '…'} → ${filters.to || '…'}` : t('From → To')} active={Boolean(filters.from || filters.to)} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} />
-        {menu === 'dates' && <DatePopover from={filters.from} to={filters.to} onChange={(from, to) => setFilters((current) => ({ ...current, from, to }))} onClear={() => setFilters((current) => ({ ...current, from: '', to: '' }))} />}
+        <DateFilter from={filters.from} to={filters.to} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} onClear={() => setFilters((current) => ({ ...current, from: '', to: '' }))} />
+        {menu === 'dates' && <DatePopover key={`${filters.from}:${filters.to}`} from={filters.from} to={filters.to} onChange={(from, to) => setFilters((current) => ({ ...current, from, to }))} onClose={() => setMenu(null)} />}
       </div>
-      {active && <IconButton type="button" className="history-clear-filters" title={t('Clear all filters')} aria-label={t('Clear all filters')} onClick={() => setFilters(EMPTY_FILTERS)}><Codicon name="clear-all" /></IconButton>}
+      {active && <IconButton type="button" className="history-clear-filters" title={t('Clear all filters')} aria-label={t('Clear all filters')} onClick={() => { setSearchReset((version) => version + 1); setFilters(EMPTY_FILTERS); setMenu(null); }}><Codicon name="clear-all" /></IconButton>}
     </div>
     <h3 title={title}>{title}</h3>
     <div className="compare-pane-list">
@@ -202,6 +174,8 @@ export function BranchComparePanel({
 }) {
   const branches = useAppStore((state) => state.branchesByRepo[repoId] ?? []);
   const comparison = useAppStore((state) => state.comparison);
+  const logHistory = useAppStore((state) => state.history);
+  const authors = useMemo(() => buildHistoryAuthorOptions(logHistory), [logHistory]);
   const compare = useAppStore((state) => state.compareBranches);
   const busy = useAppStore((state) => isOperationActive(state.operations, { repositoryId: repoId, domain: 'history' }));
   const repo = useAppStore((state) => state.snapshot?.repositories.find((item) => item.meta.id === repoId));
@@ -245,6 +219,7 @@ export function BranchComparePanel({
     {!activeComparison ? <div className="empty-state"><Codicon name={busy ? 'loading codicon-modifier-spin' : 'compare-changes'} />{t(busy ? 'Loading...' : 'Select two branches to compare')}</div> : <div ref={stack} className="compare-stack" style={topHeight ? { gridTemplateRows: `${topHeight}px 4px minmax(0, 1fr)` } : undefined}>
       <ComparePane
         repoId={repoId}
+        authors={authors}
         base={current}
         target={target}
         side="targetOnly"
@@ -256,6 +231,7 @@ export function BranchComparePanel({
       <div className="compare-splitter" role="separator" tabIndex={0} aria-label={t('Resize branch comparison')} aria-orientation="horizontal" aria-valuemin={110} aria-valuenow={Math.round(topHeight ?? 110)} onPointerDown={resize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTopHeight((value) => Math.max(110, (value ?? 110) + (event.key === 'ArrowDown' ? 10 : -10))); } }}><i /></div>
       <ComparePane
         repoId={repoId}
+        authors={authors}
         base={current}
         target={target}
         side="baseOnly"

@@ -28,6 +28,50 @@ fn available(program: &str) -> bool {
 }
 
 #[tokio::test]
+async fn real_git_history_author_email_filter_is_case_insensitive() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], root.path());
+    command("git", &["config", "user.name", "Ada"], root.path());
+    command(
+        "git",
+        &["config", "user.email", "Ada@Example.test"],
+        root.path(),
+    );
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "first identity"],
+        root.path(),
+    );
+    command(
+        "git",
+        &["config", "user.email", "other@example.test"],
+        root.path(),
+    );
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "second identity"],
+        root.path(),
+    );
+    let page = vcs::history(
+        &repo(root.path(), VcsKind::Git),
+        0,
+        100,
+        HistoryQuery {
+            author: Some("ada@example.test".into()),
+            ..Default::default()
+        },
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(page.commits.len(), 1);
+    assert_eq!(page.commits[0].message, "first identity");
+}
+
+#[tokio::test]
 async fn v5_init_clone_commit_messages_and_structured_history_are_real() {
     if !available("git") {
         return;
