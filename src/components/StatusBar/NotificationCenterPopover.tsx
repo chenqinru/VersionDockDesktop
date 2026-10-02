@@ -187,10 +187,12 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                 </div>
                 <div className="notification-item-body">
                   <div className="notification-item-row">
-                    <strong className="notification-item-title">{resolveNotificationText(item.title, t)}</strong>
-                    {workspaceName && (scope === 'all' || !activeTabId) && (
-                      <span className="notification-workspace-tag" title={workspaceName}>{workspaceName}</span>
-                    )}
+                    <div className="notification-item-heading">
+                      <strong className="notification-item-title">{resolveNotificationText(item.title, t)}</strong>
+                      {workspaceName && (scope === 'all' || !activeTabId) && (
+                        <span className="notification-workspace-tag" title={workspaceName}>{workspaceName}</span>
+                      )}
+                    </div>
                     <span className="notification-item-time">
                       {formatRelativeTime(item.timestamp, t, language)}
                     </span>
