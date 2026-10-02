@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryWorkspace } from './HistoryWorkspace';
 import { formatRefLabel } from '../history/refs';
@@ -23,9 +23,11 @@ const bootstrap = (compare: boolean, remoteManagement: boolean): BootstrapData =
   capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: false, compare, remoteManagement },
 });
 const originalHistoryOperation = useAppStore.getState().historyOperation;
+const originalLoadHistory = useAppStore.getState().loadHistory;
 
 afterEach(() => {
   cleanup();
+  useAppStore.setState({ loadHistory: originalLoadHistory, historyHasMore: false });
   useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, historyOperation: originalHistoryOperation });
 });
 
@@ -256,6 +258,29 @@ describe('HistoryWorkspace capabilities', () => {
     expect(screen.getByText('Loading commits…')).toBeInTheDocument();
     expect(document.querySelector('.ref-overflow')).toHaveTextContent('1');
     expect(document.querySelector('.ref-overflow')).not.toHaveTextContent('+1');
+  });
+
+  it('keeps paging feedback outside the scroller and prevents more requests while loading', () => {
+    const loadHistory = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({
+      bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo',
+      historyLoading: true, historyHasMore: true, loadHistory,
+      history: [{ repoId: 'repo', hash: 'abc', shortHash: 'abc', parents: [], author: 'Ada', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'Existing commit', refs: [] }],
+    });
+    render(<HistoryWorkspace />);
+    const scroller = document.querySelector('.commit-list')!;
+    const feedback = screen.getByRole('status', { name: 'Loading commits…' });
+    expect(screen.getByText('Existing commit')).toBeInTheDocument();
+    expect(scroller.parentElement).toContainElement(feedback);
+    expect(scroller).not.toContainElement(feedback);
+    fireEvent.scroll(scroller);
+    expect(loadHistory).not.toHaveBeenCalled();
+
+    act(() => useAppStore.setState({ historyLoading: false }));
+    expect(screen.queryByRole('status', { name: 'Loading commits…' })).not.toBeInTheDocument();
+    expect(screen.getByText('Existing commit')).toBeInTheDocument();
+    fireEvent.scroll(scroller);
+    expect(loadHistory).toHaveBeenCalledWith(false);
   });
 
   it('clamps legacy persisted sidebar widths as soon as the history view mounts', () => {

@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-01",
+  "component": "src/components/IconButton.tsx",
+  "migratedButtons": 162,
+  "migratedComponentFiles": 39,
+  "frontendTests": 525,
+  "testFiles": 51,
+  "checks": [
+    "native macOS row detail button hover is visibly distinct from row background",
+    "native macOS row changes button hover is visibly distinct from row background",
+    "detail button opens full commit details",
+    "changes button opens the selected commit file changes",
+    "lint rejects a raw icon-only button and accepts IconButton"
+  ],
+  "scope": "React icon operation buttons; OS minimize/maximize/close retain platform chrome behavior"
+}

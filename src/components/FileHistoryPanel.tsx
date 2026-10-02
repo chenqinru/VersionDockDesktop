@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
 import type { DiffDocument, FileHistoryEntry, FileHistoryPage, FileRevisionDocument } from '../bindings/generated';
 import { useBridge } from '../platform/context';
@@ -109,8 +110,8 @@ export function FileHistoryPanel() {
         <Codicon name="history" />
         <strong>{t('File history')}</strong>
         <span className="file-history-path" title={target.path}>{target.path}</span>
-        <button aria-label={t('Show in commit history')} title={t('Show in commit history')} onClick={() => { close(); void openHistoryForPath(target.repoId, target.path); }}><Codicon name="git-commit" /></button>
-        <button aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></button>
+        <IconButton aria-label={t('Show in commit history')} title={t('Show in commit history')} onClick={() => { close(); void openHistoryForPath(target.repoId, target.path); }}><Codicon name="git-commit" /></IconButton>
+        <IconButton aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></IconButton>
       </header>
       <div className="file-history-layout">
         <aside>{entries.map((entry) => <button className={selected?.revision === entry.revision ? 'active' : ''} key={`${entry.revision}:${entry.path}`} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, entry }); }} onClick={() => choose(entry)}><b>{entry.revision.slice(0, 10)}</b><span>{entry.message}</span><small>{entry.author} · {entry.date}</small></button>)}{cursor && <button className="load-more" disabled={loading} onClick={() => void loadMore()}>{t('Load more')}</button>}</aside>

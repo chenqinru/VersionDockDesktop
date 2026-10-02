@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { buildSavedChangeTree, type TreeDir } from './savedChangeTree';
 import { useState, useEffect, useMemo } from 'react';
 import { Codicon } from './Codicon';
@@ -153,7 +154,7 @@ function FileRow({
             flexShrink: 0,
           }}
         >
-          <button
+          <IconButton
             type="button"
             style={{
               background: 'transparent',
@@ -173,7 +174,7 @@ function FileRow({
             }}
           >
             <Codicon name="desktop-download" />
-          </button>
+          </IconButton>
         </div>
       ) : (
         <span
@@ -382,9 +383,11 @@ function ShelfRow({
         onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}
         title={fullMessage}
       >
-        <button
+        <IconButton
           type="button"
           style={rowStyle.chevronBtn}
+          title={expanded ? t('Collapse') : t('Expand')}
+          aria-expanded={expanded}
           onClick={(e) => {
             e.stopPropagation();
             onManualExpansionChange();
@@ -395,7 +398,7 @@ function ShelfRow({
             name={expanded ? 'chevron-down' : 'chevron-right'}
             style={{ fontSize: '11px' }}
           />
-        </button>
+        </IconButton>
         <Codicon name="archive" style={{ fontSize: '13px', flexShrink: 0 }} />
         <div style={rowStyle.info}>
           <span style={rowStyle.name}>
@@ -417,7 +420,7 @@ function ShelfRow({
         </div>
         {hovered && (
           <div style={rowStyle.actions}>
-            <button
+            <IconButton
               type="button"
               style={rowStyle.btn}
               title={t('Apply and delete')}
@@ -427,8 +430,8 @@ function ShelfRow({
               }}
             >
               <Codicon name="desktop-download" />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               type="button"
               style={rowStyle.btn}
               title={t('Apply and keep')}
@@ -438,8 +441,8 @@ function ShelfRow({
               }}
             >
               <Codicon name="arrow-down" />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               type="button"
               style={{
                 ...rowStyle.btn,
@@ -452,7 +455,7 @@ function ShelfRow({
               }}
             >
               <Codicon name="trash" />
-            </button>
+            </IconButton>
           </div>
         )}
       </div>

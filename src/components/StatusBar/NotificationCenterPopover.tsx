@@ -1,3 +1,4 @@
+import { IconButton } from '../IconButton';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Codicon } from '../Codicon';
 import { resolveNotificationText, useAppStore, type AppNotification } from '../../store/appStore';
@@ -115,28 +116,28 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
           {displayUnreadCount > 0 && <span className="notification-badge">{displayUnreadCount}</span>}
         </div>
         <div className="notification-header-actions">
-          <button type="button" className="notification-action-btn" title={t('Close')} aria-label={t('Close')} onClick={onClose}>
+          <IconButton type="button" className="notification-action-btn" title={t('Close')} aria-label={t('Close')} onClick={onClose}>
             <Codicon name="chevron-down" />
-          </button>
+          </IconButton>
           {displayUnreadCount > 0 && (
-            <button
+            <IconButton
               type="button"
               className="notification-action-btn"
               title={scope === 'current' && hasMultipleTabs ? t('Mark current as read') : t('Mark all as read')}
               onClick={() => markAllNotificationsAsRead(scope === 'current' && hasMultipleTabs ? (currentWorkspaceId ?? undefined) : undefined)}
             >
               <Codicon name="check-all" />
-            </button>
+            </IconButton>
           )}
           {displayNotifications.length > 0 && (
-            <button
+            <IconButton
               type="button"
               className="notification-action-btn"
               title={scope === 'current' && hasMultipleTabs ? t('Clear current') : t('Clear all')}
               onClick={() => clearNotifications(scope === 'current' && hasMultipleTabs ? (currentWorkspaceId ?? undefined) : undefined)}
             >
               <Codicon name="clear-all" />
-            </button>
+            </IconButton>
           )}
         </div>
       </div>
@@ -199,7 +200,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                   {item.progress && <progress className="notification-center-progress" aria-label={resolveNotificationText(item.title, t)} max={100} value={item.progressValue} />}
 
                 </div>
-                {!item.progress && <button
+                {!item.progress && <IconButton
                   type="button"
                   className="notification-item-dismiss"
                   title={t('Dismiss')}
@@ -210,7 +211,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                   }}
                 >
                   <Codicon name="close" />
-                </button>}
+                </IconButton>}
                 {item.actions.length > 0 && <div className="notification-item-actions">
                     {item.actions.map((action, actionIndex) => (
                       <button

@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
@@ -61,10 +62,10 @@ export function DiffWorkspace() {
         <span className="diff-line-count">{diff.lineCount} {t('Lines')}</span>
         {repo && file && <>
           <i className="diff-header-divider" />
-          <button className="diff-header-action" aria-label={t('File history')} title={t('File history')} onClick={() => openFileHistory(repo.meta.id, file.path)}><Codicon name="history" /></button>
-          {externalEditor && <button className="diff-header-action" aria-label={t('Open in external editor')} title={t('Open in external editor')} onClick={() => void systemOpen(repo.meta.id, file.path, false, true)}><Codicon name="code" /></button>}
-          <button className="diff-header-action" aria-label={t('Open')} title={t('Open')} onClick={() => void systemOpen(repo.meta.id, file.path, false)}><Codicon name="go-to-file" /></button>
-          <button className="diff-header-action" aria-label={t('Reveal')} title={t('Reveal')} onClick={() => void systemOpen(repo.meta.id, file.path, true)}><Codicon name="folder-opened" /></button>
+          <IconButton className="diff-header-action" aria-label={t('File history')} title={t('File history')} onClick={() => openFileHistory(repo.meta.id, file.path)}><Codicon name="history" /></IconButton>
+          {externalEditor && <IconButton className="diff-header-action" aria-label={t('Open in external editor')} title={t('Open in external editor')} onClick={() => void systemOpen(repo.meta.id, file.path, false, true)}><Codicon name="code" /></IconButton>}
+          <IconButton className="diff-header-action" aria-label={t('Open')} title={t('Open')} onClick={() => void systemOpen(repo.meta.id, file.path, false)}><Codicon name="go-to-file" /></IconButton>
+          <IconButton className="diff-header-action" aria-label={t('Reveal')} title={t('Reveal')} onClick={() => void systemOpen(repo.meta.id, file.path, true)}><Codicon name="folder-opened" /></IconButton>
         </>}
       </div>
     </header>

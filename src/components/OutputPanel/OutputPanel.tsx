@@ -1,3 +1,4 @@
+import { IconButton } from '../IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useI18n } from '../../i18n';
@@ -342,7 +343,7 @@ export function OutputPanel() {
               aria-label={t('Filter output…')}
             />
             {searchQuery && (
-              <button
+              <IconButton
                 type="button"
                 className="output-search-clear"
                 onClick={() => setSearchQuery('')}
@@ -350,12 +351,12 @@ export function OutputPanel() {
                 aria-label={t('Clear filter')}
               >
                 <Codicon name="close" />
-              </button>
+              </IconButton>
             )}
           </div>
 
           <div className="output-actions">
-            <button
+            <IconButton
               type="button"
               className={`output-btn ${autoScroll ? 'active' : ''}`}
               onClick={() => setAutoScroll(!autoScroll)}
@@ -363,9 +364,9 @@ export function OutputPanel() {
               aria-label={t('Toggle auto scroll')}
             >
               <Codicon name={autoScroll ? 'lock' : 'unlock'} />
-            </button>
+            </IconButton>
 
-            <button
+            <IconButton
               type="button"
               className="output-btn"
               onClick={() => void handleCopyLogs()}
@@ -373,9 +374,9 @@ export function OutputPanel() {
               aria-label={t('Copy logs')}
             >
               <Codicon name={copied ? 'check' : 'copy'} />
-            </button>
+            </IconButton>
 
-            <button
+            <IconButton
               type="button"
               className="output-btn"
               onClick={() => void handleExportLogs()}
@@ -383,9 +384,9 @@ export function OutputPanel() {
               aria-label={t('Export logs')}
             >
               <Codicon name="desktop-download" />
-            </button>
+            </IconButton>
 
-            <button
+            <IconButton
               type="button"
               className="output-btn"
               onClick={() => void clearLogs()}
@@ -393,9 +394,9 @@ export function OutputPanel() {
               aria-label={t('Clear output')}
             >
               <Codicon name="clear-all" />
-            </button>
+            </IconButton>
 
-            <button
+            <IconButton
               type="button"
               className="output-btn"
               onClick={() => void openLogFolder()}
@@ -403,9 +404,9 @@ export function OutputPanel() {
               aria-label={t('Open log folder')}
             >
               <Codicon name="folder-opened" />
-            </button>
+            </IconButton>
 
-            <button
+            <IconButton
               type="button"
               className="output-btn close"
               onClick={() => setLogPanelOpen(false)}
@@ -413,7 +414,7 @@ export function OutputPanel() {
               aria-label={t('Close output panel')}
             >
               <Codicon name="close" />
-            </button>
+            </IconButton>
           </div>
         </div>
       </header>

@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useMemo, useState } from 'react';
 import type { CommitFile } from '../bindings/generated';
 import { useAppStore } from '../store/appStore';
@@ -184,18 +185,18 @@ export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree'
         <div><i style={{ background: repoColor }} /><strong>{repoName}</strong><span>{t('{0} vs Working Tree', baseLabel)}</span></div>
         <small>{t('{0} compared with {1}', baseLabel, value.currentRef)}</small>
       </div>
-      <button type="button" title={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} aria-label={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} onClick={close}><Codicon name="arrow-left" /></button>
+      <IconButton type="button" title={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} aria-label={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} onClick={close}><Codicon name="arrow-left" /></IconButton>
     </header>
     <div className="branch-working-toolbar">
       <span>{files.length === 1 ? t('{0} file', files.length) : t('{0} files', files.length)}</span>
       <i />
       {viewMode === 'tree' && <div className="branch-working-expand-actions">
-        <button type="button" title={t('Expand all')} onClick={() => setCollapsed(new Set())}><Codicon name="expand-all" /></button>
-        <button type="button" title={t('Collapse all')} onClick={() => setCollapsed(new Set(collectDirectories(tree)))}><Codicon name="collapse-all" /></button>
+        <IconButton type="button" title={t('Expand all')} onClick={() => setCollapsed(new Set())}><Codicon name="expand-all" /></IconButton>
+        <IconButton type="button" title={t('Collapse all')} onClick={() => setCollapsed(new Set(collectDirectories(tree)))}><Codicon name="collapse-all" /></IconButton>
       </div>}
       <div className="branch-working-view-toggle">
-        <button type="button" className={viewMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => setViewMode('tree')}><Codicon name="list-tree" /></button>
-        <button type="button" className={viewMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setViewMode('list')}><Codicon name="list-flat" /></button>
+        <IconButton type="button" className={viewMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => setViewMode('tree')}><Codicon name="list-tree" /></IconButton>
+        <IconButton type="button" className={viewMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setViewMode('list')}><Codicon name="list-flat" /></IconButton>
       </div>
     </div>
     <div className="branch-working-files">

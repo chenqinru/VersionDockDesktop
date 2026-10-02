@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useChangeRowHighlight } from './changeRowHighlight';
 import React, { useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -94,7 +95,7 @@ function VscodeFileRow({
         {hovered && (
           <div className="file-actions" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             {!isSvn && (staged ? (
-              <button
+              <IconButton
                 type="button"
                 className="file-action-btn"
                 title={t('Unstage Changes')}
@@ -114,9 +115,9 @@ function VscodeFileRow({
                 }}
               >
                 <Codicon name="remove" style={{ fontSize: 12 }} />
-              </button>
+              </IconButton>
             ) : (
-              <button
+              <IconButton
                 type="button"
                 className="file-action-btn"
                 title={t('Stage Changes')}
@@ -136,10 +137,10 @@ function VscodeFileRow({
                 }}
               >
                 <Codicon name="add" style={{ fontSize: 12 }} />
-              </button>
+              </IconButton>
             ))}
             {canAddToSvn && (
-              <button
+              <IconButton
                 type="button"
                 className="file-action-btn"
                 title={file.isTruncated ? t('Add directory recursively to SVN') : t('Add to SVN')}
@@ -159,10 +160,10 @@ function VscodeFileRow({
                 }}
               >
                 <Codicon name="add" style={{ fontSize: 12 }} />
-              </button>
+              </IconButton>
             )}
             {!staged && !file.isTruncated && (
-              <button
+              <IconButton
                 type="button"
                 className="file-action-btn"
                 title={t('Discard Changes')}
@@ -182,7 +183,7 @@ function VscodeFileRow({
                 }}
               >
                 <Codicon name="discard" style={{ fontSize: 12 }} />
-              </button>
+              </IconButton>
             )}
           </div>
         )}
@@ -581,7 +582,7 @@ function VscodeRepoSection({
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', flexShrink: 0 }}>
           {hovered && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <button
+              <IconButton
                 type="button"
                 title={staged ? t('Open Staged Changes') : t('Open Changes')}
                 onClick={(e) => {
@@ -599,9 +600,9 @@ function VscodeRepoSection({
                 }}
               >
                 <Codicon name="diff-multiple" />
-              </button>
+              </IconButton>
               {!isSvn && (staged ? (
-                <button
+                <IconButton
                   type="button"
                   title={t('Unstage all in repository')}
                   onClick={(e) => {
@@ -619,9 +620,9 @@ function VscodeRepoSection({
                   }}
                 >
                   <Codicon name="remove" />
-                </button>
+                </IconButton>
               ) : (
-                <button
+                <IconButton
                   type="button"
                   title={t('Stage all in repository')}
                   onClick={(e) => {
@@ -639,10 +640,10 @@ function VscodeRepoSection({
                   }}
                 >
                   <Codicon name="add" />
-                </button>
+                </IconButton>
               ))}
               {canAddToSvn && (
-                <button
+                <IconButton
                   type="button"
                   title={t('Add to SVN')}
                   onClick={(e) => {
@@ -660,10 +661,10 @@ function VscodeRepoSection({
                   }}
                 >
                   <Codicon name="add" />
-                </button>
+                </IconButton>
               )}
               {!staged && (
-                <button
+                <IconButton
                   type="button"
                   title={t('Rollback All')}
                   onClick={(e) => {
@@ -681,7 +682,7 @@ function VscodeRepoSection({
                   }}
                 >
                   <Codicon name="discard" />
-                </button>
+                </IconButton>
               )}
             </div>
           )}
@@ -820,7 +821,7 @@ export function VscodeChangesView({
             </span>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
               {stagedHovered && isSingleRepo && singleRepo && totalStaged > 0 && (
-                <button
+                <IconButton
                   type="button"
                   title={t('Open Staged Changes')}
                   onClick={(e) => {
@@ -838,10 +839,10 @@ export function VscodeChangesView({
                   }}
                 >
                   <Codicon name="diff-multiple" />
-                </button>
+                </IconButton>
               )}
               {stagedHovered && totalStaged > 0 && (
-                <button
+                <IconButton
                   type="button"
                   title={t('Unstage All')}
                   onClick={(e) => {
@@ -859,7 +860,7 @@ export function VscodeChangesView({
                   }}
                 >
                   <Codicon name="remove" />
-                </button>
+                </IconButton>
               )}
               <span className="count-badge">{totalStaged}</span>
             </div>
@@ -921,7 +922,7 @@ export function VscodeChangesView({
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
             {unstagedHovered && isSingleRepo && singleRepo && totalUnstaged > 0 && (
-              <button
+              <IconButton
                 type="button"
                 title={t('Open Changes')}
                 onClick={(e) => {
@@ -939,10 +940,10 @@ export function VscodeChangesView({
                 }}
               >
                 <Codicon name="diff-multiple" />
-              </button>
+              </IconButton>
             )}
             {unstagedHovered && totalUnstaged > 0 && (
-              <button
+              <IconButton
                 type="button"
                 title={t('Rollback All')}
                 onClick={(e) => {
@@ -960,10 +961,10 @@ export function VscodeChangesView({
                 }}
               >
                 <Codicon name="discard" />
-              </button>
+              </IconButton>
             )}
             {unstagedHovered && canStageAll && (
-              <button
+              <IconButton
                 type="button"
                 title={stageAllTitle}
                 onClick={(e) => {
@@ -981,7 +982,7 @@ export function VscodeChangesView({
                 }}
               >
                 <Codicon name="add" />
-              </button>
+              </IconButton>
             )}
             <span className="count-badge">{totalUnstaged}</span>
           </div>

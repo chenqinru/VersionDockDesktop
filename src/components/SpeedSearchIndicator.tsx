@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useI18n } from '../i18n';
 
 export function SpeedSearchIndicator({
@@ -19,8 +20,8 @@ export function SpeedSearchIndicator({
     <span className="codicon codicon-search" />
     <span>{query}</span>
     {count !== undefined && <span className="speed-search-count">{count.total > 0 ? `${count.current}/${count.total}` : '0/0'}</span>}
-    {onPrev && <button aria-label={t('Previous match')} title={t('Previous match')} onClick={onPrev}><span className="codicon codicon-arrow-up" /></button>}
-    {onNext && <button aria-label={t('Next match')} title={t('Next match')} onClick={onNext}><span className="codicon codicon-arrow-down" /></button>}
-    <button aria-label={t('Clear Speed Search')} title={t('Clear Speed Search')} onClick={onClear}><span className="codicon codicon-close" /></button>
+    {onPrev && <IconButton aria-label={t('Previous match')} title={t('Previous match')} onClick={onPrev}><span className="codicon codicon-arrow-up" /></IconButton>}
+    {onNext && <IconButton aria-label={t('Next match')} title={t('Next match')} onClick={onNext}><span className="codicon codicon-arrow-down" /></IconButton>}
+    <IconButton aria-label={t('Clear Speed Search')} title={t('Clear Speed Search')} onClick={onClear}><span className="codicon codicon-close" /></IconButton>
   </div>;
 }

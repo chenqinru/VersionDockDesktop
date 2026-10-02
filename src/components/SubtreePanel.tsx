@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { RepositoryGroup } from './RepositoryGroup';
@@ -251,7 +252,7 @@ function SubtreeRow({
             </span>
           ) : (
             <>
-              <button
+              <IconButton
                 data-action-btn=""
                 style={row.btn}
                 title={t('Pull Subtree')}
@@ -262,8 +263,8 @@ function SubtreeRow({
                 }}
               >
                 <Codicon name="cloud-download" />
-              </button>
-              <button
+              </IconButton>
+              <IconButton
                 data-action-btn=""
                 style={row.btn}
                 title={t('More')}
@@ -274,7 +275,7 @@ function SubtreeRow({
                 }}
               >
                 <Codicon name="ellipsis" />
-              </button>
+              </IconButton>
             </>
           )}
         </div>
@@ -333,22 +334,22 @@ function RepoSection({
     <div className="subtree-repo-section" style={css.repoSection}>
       <RepositoryGroup name={meta.name} color={projectColor} extras={summary && <span style={css.repoStatus}>{summary}</span>} actions={multiRepo ? (
           <div style={css.headerActions}>
-            <button
+            <IconButton
               data-action-btn=""
               style={css.headerBtn}
               title={t('Add Subtree from Repository')}
               onClick={() => onAdd?.(meta.id)}
             >
               <Codicon name="add" style={{ fontSize: '12px' }} />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               data-action-btn=""
               style={css.headerBtn}
               title={t('Register Existing Directory')}
               onClick={() => onRegister?.(meta.id)}
             >
               <Codicon name="list-tree" style={{ fontSize: '12px' }} />
-            </button>
+            </IconButton>
           </div>
       ) : undefined}>
 

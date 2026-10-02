@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import { ChangeRowActions, ChangeFolderActions } from './ChangeRowActions';
 import { ChangeRowHighlightContext, useChangeRowHighlight } from './changeRowHighlight';
@@ -479,7 +480,7 @@ function RepoSubGroup({
         )}
         <div className="repo-actions">
           {files.length > 0 && (
-            <button
+            <IconButton
               className="repo-open-changes"
               style={{
                 opacity: hovered ? 1 : 0,
@@ -499,7 +500,7 @@ function RepoSubGroup({
               }}
             >
               <Codicon name="diff-multiple" />
-            </button>
+            </IconButton>
           )}
           {totalFiles > 0 && (
             <span className={`count-badge ${selectedCount > 0 ? 'selected' : ''}`}>

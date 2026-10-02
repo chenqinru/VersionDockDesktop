@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useCallback, useEffect, useState } from 'react';
 import type { GitIdentityState, SvnAccountState } from '../bindings/generated';
 import { useBridge } from '../platform/context';
@@ -47,14 +48,14 @@ export function IdentityPanel({ repoId, close }: { repoId: string; close: () => 
             <strong>{repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}</strong>
             <span className="modal-repo-badge">{repo.meta.name}</span>
           </div>
-          <button
+          <IconButton
             type="button"
             className="modal-close-btn"
             title={t('Close')}
             onClick={close}
           >
             <Codicon name="close" />
-          </button>
+          </IconButton>
         </header>
 
         <div className="modal-body identity-body">
@@ -297,7 +298,7 @@ function GitIdentity({
                     {profile.userName} &lt;{profile.email}&gt;
                   </span>
                 </div>
-                <button
+                <IconButton
                   type="button"
                   className="profile-delete-btn danger"
                   title={t('Delete')}
@@ -321,7 +322,7 @@ function GitIdentity({
                   }
                 >
                   <Codicon name="trash" />
-                </button>
+                </IconButton>
               </article>
             ))}
           </div>

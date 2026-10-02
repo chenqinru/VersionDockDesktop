@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RepositoryStatus, SubmoduleEntry } from '../bindings/generated';
 import { useI18n } from '../i18n';
@@ -148,8 +149,8 @@ function SubmoduleRow({ repo, entry, busy, highlighted }: { repo: RepositoryStat
       <div className="submodule-row-actions">
         {busy ? <Codicon name="loading~spin" /> : <>
           {primaryAction && <button className={`primary ${entry.syncStatus === 'conflict' ? 'conflict' : ''}`} title={primaryAction.title} onClick={() => primaryAction.id === 'merge' ? openConflict() : run(primaryAction.id)}><Codicon name={primaryAction.icon} /><span>{primaryAction.label}</span></button>}
-          {entry.initialized && hovered && <span className="submodule-hover-actions"><button title={t('Reveal in Explorer')} onClick={reveal}><Codicon name="folder-opened" /></button><button title={t('Update from Remote')} onClick={() => run('updateRemote')}><Codicon name="cloud-download" /></button>
-          <button title={t('Open in New Window')} onClick={openInNewWindow}><Codicon name="link-external" /></button></span>}
+          {entry.initialized && hovered && <span className="submodule-hover-actions"><IconButton title={t('Reveal in Explorer')} onClick={reveal}><Codicon name="folder-opened" /></IconButton><IconButton title={t('Update from Remote')} onClick={() => run('updateRemote')}><Codicon name="cloud-download" /></IconButton>
+          <IconButton title={t('Open in New Window')} onClick={openInNewWindow}><Codicon name="link-external" /></IconButton></span>}
         </>}
       </div>
     </div>
@@ -210,8 +211,8 @@ export function SubmodulePanel({ repos, highlight, active = true }: { repos: Rep
               {uninitialized > 0 && <span className="submodule-status uninitialized">{t('{0} uninit', uninitialized)}</span>}
             </button>
             {outOfSync > 0 && <button className="submodule-status outOfSync" disabled={busy} title={t('Align all submodules with parent commits (git submodule update --recursive)')} onClick={() => void operate(repo.meta.id, { type: 'updateAll', init: true, recursive: true, remote: false })}>{t('{0} out of sync', outOfSync)}</button>}
-            {allItems.length > 0 && <button data-action-btn="" disabled={busy} title={t('Align all submodules with parent commits (git submodule update --init --recursive)')} onClick={() => void operate(repo.meta.id, { type: 'updateAll', init: true, recursive: true, remote: false })}><Codicon name={busy ? 'loading~spin' : 'arrow-swap'} /></button>}
-            <button data-action-btn="" disabled={busy} title={t('Add Submodule to {0}', repo.meta.name)} onClick={() => void add(repo)}><Codicon name="add" /></button>
+            {allItems.length > 0 && <IconButton data-action-btn="" disabled={busy} title={t('Align all submodules with parent commits (git submodule update --init --recursive)')} onClick={() => void operate(repo.meta.id, { type: 'updateAll', init: true, recursive: true, remote: false })}><Codicon name={busy ? 'loading~spin' : 'arrow-swap'} /></IconButton>}
+            <IconButton data-action-btn="" disabled={busy} title={t('Add Submodule to {0}', repo.meta.name)} onClick={() => void add(repo)}><Codicon name="add" /></IconButton>
           </header>
           {!collapsed && <div className="submodule-repo-body">
             {error && <div className="sync-empty" style={{ color: 'var(--vscode-errorForeground, #f48771)', justifyContent: 'flex-start', padding: '6px 12px' }}><Codicon name="error" /> {error}</div>}

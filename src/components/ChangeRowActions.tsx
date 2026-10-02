@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
@@ -29,10 +30,10 @@ export function ChangeRowActions({ repo, file, onOpenFile, onRollback, onResolve
     if (conflict) void store.openMerge(conflict);
   };
   return <span className="change-row-actions" onClick={(event) => event.stopPropagation()}>
-    {file.conflicted && <button type="button" className="conflict-resolve-action" title={t('Resolve Conflicts')} aria-label={`${t('Resolve Conflicts')}: ${file.path}`} onClick={resolve}><Codicon name="git-merge" /></button>}
-    <button type="button" title={t('Jump to Source')} onClick={() => onOpenFile ? onOpenFile() : void useAppStore.getState().systemOpen(repo.meta.id, file.path, false)}><Codicon name="go-to-file" /></button>
-    {!file.isTruncated && <button type="button" title={t('Rollback')} onClick={() => void rollback()}><Codicon name="discard" /></button>}
-    {repo.meta.kind === 'svn' && file.status === 'untracked' && !file.staged && <button type="button" title={t(file.isTruncated ? 'Add directory recursively to SVN' : 'Add to SVN')} onClick={() => onStage ? onStage() : void useAppStore.getState().stage(repo.meta.id, [file.path], Boolean(file.isTruncated))}><Codicon name="add" /></button>}
+    {file.conflicted && <IconButton type="button" className="conflict-resolve-action" title={t('Resolve Conflicts')} aria-label={`${t('Resolve Conflicts')}: ${file.path}`} onClick={resolve}><Codicon name="git-merge" /></IconButton>}
+    <IconButton type="button" title={t('Jump to Source')} onClick={() => onOpenFile ? onOpenFile() : void useAppStore.getState().systemOpen(repo.meta.id, file.path, false)}><Codicon name="go-to-file" /></IconButton>
+    {!file.isTruncated && <IconButton type="button" title={t('Rollback')} onClick={() => void rollback()}><Codicon name="discard" /></IconButton>}
+    {repo.meta.kind === 'svn' && file.status === 'untracked' && !file.staged && <IconButton type="button" title={t(file.isTruncated ? 'Add directory recursively to SVN' : 'Add to SVN')} onClick={() => onStage ? onStage() : void useAppStore.getState().stage(repo.meta.id, [file.path], Boolean(file.isTruncated))}><Codicon name="add" /></IconButton>}
   </span>;
 }
 
@@ -48,5 +49,5 @@ export function ChangeFolderActions({ repo, files }: { repo: RepositoryStatus; f
     await useAppStore.getState().discard(repo.meta.id, paths);
     useAppStore.getState().setCommitSelection(repo.meta.id, paths, false);
   };
-  return <span className="change-row-actions" onClick={(event) => event.stopPropagation()}><button type="button" title={t('Rollback all files in folder')} onClick={() => void rollback()}><Codicon name="discard" /></button></span>;
+  return <span className="change-row-actions" onClick={(event) => event.stopPropagation()}><IconButton type="button" title={t('Rollback all files in folder')} onClick={() => void rollback()}><Codicon name="discard" /></IconButton></span>;
 }

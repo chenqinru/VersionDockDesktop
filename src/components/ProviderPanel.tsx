@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type {
@@ -382,9 +383,9 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
               )}
             </strong>
           </div>
-          <button type="button" className="modal-close-btn" onClick={close} title={t('Close')} aria-label={t('Close')}>
+          <IconButton type="button" className="modal-close-btn" onClick={close} title={t('Close')} aria-label={t('Close')}>
             <Codicon name="close" />
-          </button>
+          </IconButton>
         </header>
 
         <div className="provider-body">
@@ -801,14 +802,14 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
                             if (e.key === 'Enter') void saveGithubToken();
                           }}
                         />
-                        <button
+                        <IconButton
                           type="button"
                           style={{ position: 'absolute', right: 8, background: 'transparent', border: 'none', color: 'var(--versiondock-muted)', cursor: 'pointer' }}
                           onClick={() => setShowGhPassword(!showGhPassword)}
                           title={showGhPassword ? 'Hide' : 'Show'}
                         >
                           <Codicon name={showGhPassword ? 'eye-closed' : 'eye'} />
-                        </button>
+                        </IconButton>
                       </div>
                       <span className="provider-field-hint">
                         {t('GitHub Personal Access Token requires the repo and read:org scopes.')}
@@ -886,14 +887,14 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
                           placeholder="glpat-..."
                           onChange={(e) => setGlPat(e.target.value)}
                         />
-                        <button
+                        <IconButton
                           type="button"
                           style={{ position: 'absolute', right: 8, background: 'transparent', border: 'none', color: 'var(--versiondock-muted)', cursor: 'pointer' }}
                           onClick={() => setShowGlPassword(!showGlPassword)}
                           title={showGlPassword ? 'Hide' : 'Show'}
                         >
                           <Codicon name={showGlPassword ? 'eye-closed' : 'eye'} />
-                        </button>
+                        </IconButton>
                       </div>
                       <span className="provider-field-hint">
                         {t('GitLab Personal Access Token requires the api scope.')}
@@ -953,14 +954,14 @@ export function ProviderPanel({ mode, repoId, close, onClone }: ProviderPanelPro
                           placeholder={t('Personal Access Token')}
                           onChange={(e) => setGtPat(e.target.value)}
                         />
-                        <button
+                        <IconButton
                           type="button"
                           style={{ position: 'absolute', right: 8, background: 'transparent', border: 'none', color: 'var(--versiondock-muted)', cursor: 'pointer' }}
                           onClick={() => setShowGtPassword(!showGtPassword)}
                           title={showGtPassword ? t('Hide') : t('Show')}
                         >
                           <Codicon name={showGtPassword ? 'eye-closed' : 'eye'} />
-                        </button>
+                        </IconButton>
                       </div>
                       <span className="provider-field-hint">
                         {t('Gitee Personal Access Token requires the projects and user_info scopes.')}

@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   CatFileFilterMode,
@@ -112,7 +113,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             <Codicon name="settings-gear" />
             <span id="settings-title">{t('Settings')}</span>
           </div>
-          <button
+          <IconButton
             ref={closeButton}
             type="button"
             className="settings-close-btn"
@@ -121,7 +122,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             onClick={onClose}
           >
             <Codicon name="close" />
-          </button>
+          </IconButton>
         </header>
 
         <div className="settings-layout">
@@ -139,7 +140,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 aria-label={t('Search settings...')}
               />
               {searchQuery && (
-                <button
+                <IconButton
                   type="button"
                   className="settings-search-clear"
                   aria-label={t('Clear')}
@@ -149,7 +150,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   }}
                 >
                   <Codicon name="close" />
-                </button>
+                </IconButton>
               )}
             </div>
 
@@ -938,7 +939,7 @@ function SettingNumber({
 
       {/* 现代 macOS 风格自定义数字调节步进器 */}
       <div className="settings-custom-stepper">
-        <button
+        <IconButton
           type="button"
           className="settings-stepper-btn"
           disabled={value <= min}
@@ -946,7 +947,7 @@ function SettingNumber({
           onClick={() => handleStep(-step)}
         >
           <Codicon name="remove" />
-        </button>
+        </IconButton>
 
         <div className="settings-stepper-input-wrapper">
           <input
@@ -971,7 +972,7 @@ function SettingNumber({
           {suffix && <span className="settings-stepper-suffix">{suffix}</span>}
         </div>
 
-        <button
+        <IconButton
           type="button"
           className="settings-stepper-btn"
           disabled={value >= max}
@@ -979,7 +980,7 @@ function SettingNumber({
           onClick={() => handleStep(step)}
         >
           <Codicon name="add" />
-        </button>
+        </IconButton>
       </div>
     </div>
   );
@@ -1044,7 +1045,7 @@ function IgnoredFoldersSetting({
               <span key={folder} className="settings-tag-chip" title={folder}>
                 <Codicon name="folder" className="settings-tag-icon" />
                 <span className="settings-tag-text">{folder}</span>
-                <button
+                <IconButton
                   type="button"
                   className="settings-tag-remove-btn"
                   aria-label={`${t('Remove')} ${folder}`}
@@ -1052,7 +1053,7 @@ function IgnoredFoldersSetting({
                   onClick={() => handleRemove(folder)}
                 >
                   <Codicon name="close" />
-                </button>
+                </IconButton>
               </span>
             ))
           )}
@@ -1138,7 +1139,7 @@ function SettingProtectedBranches({
               <span key={branch} className="settings-tag-chip" title={branch}>
                 <Codicon name="git-branch" className="settings-tag-icon" />
                 <span className="settings-tag-text">{branch}</span>
-                <button
+                <IconButton
                   type="button"
                   className="settings-tag-remove-btn"
                   aria-label={`${t('Remove')} ${branch}`}
@@ -1146,7 +1147,7 @@ function SettingProtectedBranches({
                   onClick={() => handleRemove(branch)}
                 >
                   <Codicon name="close" />
-                </button>
+                </IconButton>
               </span>
             ))
           )}

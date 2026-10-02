@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import React, { useMemo, useState } from 'react';
 import { ChangelistGroup, type ChangelistRepoGroup, type ExpansionCommand } from './ChangelistGroup';
@@ -219,7 +220,7 @@ export function ChangelistView({
               <RepositoryBranchBadge repo={singleRepoStatus} className="branch-chip" />
             </button>
           </div>
-          {onManageRepo && <div className="repo-actions"><button type="button" title={t('Git Identity')} onClick={(event) => { event.stopPropagation(); onManageRepo(singleRepoStatus.meta.id); }}><Codicon name="account" /></button></div>}
+          {onManageRepo && <div className="repo-actions"><IconButton type="button" title={t('Git Identity')} onClick={(event) => { event.stopPropagation(); onManageRepo(singleRepoStatus.meta.id); }}><Codicon name="account" /></IconButton></div>}
           {branchMenuAnchor && (
             <BranchMenuPopover
               anchorRect={branchMenuAnchor}

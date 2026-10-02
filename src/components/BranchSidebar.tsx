@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
@@ -98,9 +99,9 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           <Codicon name="filter" />
           <input aria-label={t('Filter branches and tags')} value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
         </div>
-        <button className="branch-sidebar-collapse" title={t('Collapse sidebar')} aria-label={t('Collapse sidebar')} onClick={onCollapse}>
+        <IconButton className="branch-sidebar-collapse" title={t('Collapse sidebar')} aria-label={t('Collapse sidebar')} onClick={onCollapse}>
           <Codicon name="layout-sidebar-left" />
-        </button>
+        </IconButton>
       </div>
 
       {loading && <div className="branch-loading" role="status" aria-live="polite">

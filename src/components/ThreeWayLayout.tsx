@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HighlighterCore, ThemeRegistrationRaw } from 'shiki/core';
 import { useShiki } from '../utils/useShiki';
@@ -471,7 +472,7 @@ function BlockActionBar({ side, kind, selected, resettable, disabled, onAccept, 
     </span>
   );
   const resetAction = resettable ? (
-    <button
+    <IconButton
       type="button"
       className="versiondock-block-action-button versiondock-block-action-button--reset"
       style={styles.blockActionButton('reset')}
@@ -481,7 +482,7 @@ function BlockActionBar({ side, kind, selected, resettable, disabled, onAccept, 
       aria-label={resetLabel}
     >
       <Codicon name="discard" style={styles.blockActionResetIcon} />
-    </button>
+    </IconButton>
   ) : null;
 
   return (

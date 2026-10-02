@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useRef } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
@@ -61,14 +62,14 @@ export function SubmoduleDiffModal({
         <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))' }}>
           <Codicon name="repo-clone" style={{ fontSize: 16 }} />
           <strong style={{ fontSize: 13, flex: 1 }}>{t('Submodule Pointer Diff')}</strong>
-          <button
+          <IconButton
             type="button"
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', padding: 4 }}
             onClick={onClose}
             title={t('Close')}
           >
             <Codicon name="close" />
-          </button>
+          </IconButton>
         </header>
 
         <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>

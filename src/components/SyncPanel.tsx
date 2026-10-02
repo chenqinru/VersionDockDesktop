@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BranchInfo, CommitDetail, IncomingCommit, RepositoryStatus, RevisionChanges, UnpushedCommit, UnpushedOperation } from '../bindings/generated';
 import { useI18n } from '../i18n';
@@ -225,8 +226,8 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
         </span>
       </div>
       <span className="sync-row-actions">
-        {item.kind === 'outgoing' && item.isHead && <button type="button" title={t('Undo Commit')} onClick={(event) => { event.stopPropagation(); void rewrite('undoHead'); }}><Codicon name="arrow-left" /></button>}
-        <button type="button" title={t('Open in Log')} onClick={(event) => { event.stopPropagation(); openLog(); }}><Codicon name="go-to-file" /></button>
+        {item.kind === 'outgoing' && item.isHead && <IconButton type="button" title={t('Undo Commit')} onClick={(event) => { event.stopPropagation(); void rewrite('undoHead'); }}><Codicon name="arrow-left" /></IconButton>}
+        <IconButton type="button" title={t('Open in Log')} onClick={(event) => { event.stopPropagation(); openLog(); }}><Codicon name="go-to-file" /></IconButton>
       </span>
     </div>
     {expanded && <div className="sync-commit-detail">
@@ -454,8 +455,8 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
       </div>
       <div className="sync-repo-actions">
       {busy && <span className="sync-header-busy"><Codicon name="loading~spin" /></span>}
-      <button className={`sync-header-action ${hovered ? 'visible' : ''}`} title={t('Fetch remote changes')} onClick={(event) => { event.stopPropagation(); void fetchRepo(); }}><Codicon name="cloud-download" /></button>
-      {outgoing.length + incoming.length > 0 && <button className={`sync-header-action ${hovered || displayMode === 'changes' ? 'visible' : ''}`} title={displayMode === 'commits' ? t('Show aggregated changes') : t('Show commit list')} onClick={() => void toggleDisplayMode()}><Codicon name={displayMode === 'commits' ? 'diff-multiple' : 'list-unordered'} /></button>}
+      <IconButton className={`sync-header-action ${hovered ? 'visible' : ''}`} title={t('Fetch remote changes')} onClick={(event) => { event.stopPropagation(); void fetchRepo(); }}><Codicon name="cloud-download" /></IconButton>
+      {outgoing.length + incoming.length > 0 && <IconButton className={`sync-header-action ${hovered || displayMode === 'changes' ? 'visible' : ''}`} title={displayMode === 'commits' ? t('Show aggregated changes') : t('Show commit list')} onClick={() => void toggleDisplayMode()}><Codicon name={displayMode === 'commits' ? 'diff-multiple' : 'list-unordered'} /></IconButton>}
       {outgoingCount > 0 && <button className={`sync-direction-pill outgoing ${outgoingActive ? 'active' : ''}`} onClick={() => onToggleFilter('outgoing')}><Codicon name="arrow-up" />{outgoingCount}</button>}
       {incomingCount > 0 && <button className={`sync-direction-pill incoming ${incomingActive ? 'active' : ''}`} onClick={() => onToggleFilter('incoming')}><Codicon name="arrow-down" />{incomingCount}</button>}
       {outgoingCount === 0 && incomingCount === 0 && unpublished && <span className="sync-publish-badge"><Codicon name="cloud-upload" />{t('Unpublished')}</span>}
@@ -720,7 +721,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
           const ahead = Math.max(repo.ahead, outgoing[repo.meta.id]?.length ?? 0);
           const behind = Math.max(repo.behind, incoming[repo.meta.id]?.length ?? 0);
           return <span className="sync-selected-pill" style={{ color, borderColor: 'var(--versiondock-selection-border)', background: 'var(--versiondock-selection-background)' }} key={repo.meta.id}>
-            <button title={t('Remove {0}', repo.meta.name)} onClick={() => toggleChecked(repo.meta.id)}><Codicon name="close" /></button>
+            <IconButton title={t('Remove {0}', repo.meta.name)} onClick={() => toggleChecked(repo.meta.id)}><Codicon name="close" /></IconButton>
             <span>{repo.meta.name.toLocaleLowerCase()}</span>
             {outgoingActive(repo.meta.id) && ahead > 0 && <small><Codicon name="arrow-up" />{ahead}</small>}
             {incomingActive(repo.meta.id) && behind > 0 && <small className="incoming"><Codicon name="arrow-down" />{behind}</small>}
@@ -729,7 +730,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
       </div>}
       <div className="sync-primary-split">
         <button className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} onClick={() => void runAction(() => pullableRepos.length || pushableRepos.length ? syncSelected() : fetchAll())}><Codicon name={mainAction.icon} />{mainAction.label}</button>
-        {footerItems.length > 0 && <button className={`sync-primary-more ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} title={t('More Actions')} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu({ x: Math.max(6, rect.right - 190), y: rect.top }); }}><Codicon name="chevron-down" /></button>}
+        {footerItems.length > 0 && <IconButton className={`sync-primary-more ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} title={t('More Actions')} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu({ x: Math.max(6, rect.right - 190), y: rect.top }); }}><Codicon name="chevron-down" /></IconButton>}
       </div>
       {footerMenu && <ContextMenu x={footerMenu.x} y={footerMenu.y} items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}
     </footer>

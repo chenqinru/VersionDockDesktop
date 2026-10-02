@@ -1,3 +1,4 @@
+import { IconButton } from '../IconButton';
 import { Codicon } from '../Codicon';
 import { useAppStore } from '../../store/appStore';
 import { useI18n } from '../../i18n';
@@ -17,7 +18,7 @@ export function LogStatusBarItem() {
     : `${t('Output and Logs')} · ${shortcut}`;
 
   return (
-    <button
+    <IconButton
       type="button"
       className={`statusbar-item log-status-item ${logPanelOpen ? 'active' : ''} ${unreadErrorCount > 0 ? 'has-errors' : ''}`}
       title={tooltip}
@@ -33,6 +34,6 @@ export function LogStatusBarItem() {
           </span>
         )}
       </div>
-    </button>
+    </IconButton>
   );
 }

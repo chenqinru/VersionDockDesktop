@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useI18n } from '../i18n';
 import type { RefObject } from 'react';
 import { Codicon } from './Codicon';
@@ -16,8 +17,8 @@ export function FileSearchWidget({ query, isOpen, inputRef, onChange, onClose, c
   return <div className="detail-file-search" role="search" aria-label={t('Speed Search')}>
     <input ref={inputRef} aria-label={t('Search files...')} placeholder={t('Search files...')} value={query} onChange={(event) => onChange(event.target.value)} />
     <span className="speed-search-count">{count.current}/{count.total}</span>
-    <button type="button" title={t('Previous match')} aria-label={t('Previous match')} onClick={() => onNavigate(-1)}><Codicon name="arrow-up" /></button>
-    <button type="button" title={t('Next match')} aria-label={t('Next match')} onClick={() => onNavigate(1)}><Codicon name="arrow-down" /></button>
-    <button type="button" title={t('Clear Speed Search')} aria-label={t('Clear Speed Search')} onClick={onClose}><Codicon name="close" /></button>
+    <IconButton type="button" title={t('Previous match')} aria-label={t('Previous match')} onClick={() => onNavigate(-1)}><Codicon name="arrow-up" /></IconButton>
+    <IconButton type="button" title={t('Next match')} aria-label={t('Next match')} onClick={() => onNavigate(1)}><Codicon name="arrow-down" /></IconButton>
+    <IconButton type="button" title={t('Clear Speed Search')} aria-label={t('Clear Speed Search')} onClick={onClose}><Codicon name="close" /></IconButton>
   </div>;
 }

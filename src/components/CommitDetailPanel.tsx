@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
@@ -766,7 +767,7 @@ function CommitMessage({
           {subject}
         </strong>
         {canExpand ? (
-          <button
+          <IconButton
             type="button"
             title={expanded ? t('Click to collapse') : t('Click to expand')}
             aria-expanded={expanded}
@@ -776,7 +777,7 @@ function CommitMessage({
             }}
           >
             <Codicon name={expanded ? 'chevron-up' : 'chevron-down'} />
-          </button>
+          </IconButton>
         ) : (
           <span className="detail-message-expand-placeholder" aria-hidden="true" />
         )}
@@ -1327,13 +1328,13 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           <span className="detail-files-spacer" />
           {fileMode === 'tree' && (
             <>
-              <button type="button" title={t('Expand all')} onClick={() => { setAllTreeExpanded(true); setCollapsedDirs({}); }}><Codicon name="expand-all" /></button>
-              <button type="button" title={t('Collapse all')} onClick={() => { setAllTreeExpanded(false); setCollapsedDirs({}); }}><Codicon name="collapse-all" /></button>
+              <IconButton type="button" title={t('Expand all')} onClick={() => { setAllTreeExpanded(true); setCollapsedDirs({}); }}><Codicon name="expand-all" /></IconButton>
+              <IconButton type="button" title={t('Collapse all')} onClick={() => { setAllTreeExpanded(false); setCollapsedDirs({}); }}><Codicon name="collapse-all" /></IconButton>
               <i className="detail-view-divider" />
             </>
           )}
-          <button type="button" className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-tree" /></button>
-          <button type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('Flat list')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-flat" /></button>
+          <IconButton type="button" className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-tree" /></IconButton>
+          <IconButton type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('Flat list')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-flat" /></IconButton>
         </div>
         <FileSearchWidget query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length }} onNavigate={handleNavigateMatch} />
         <div className="detail-files" ref={fileListRef}>
@@ -1517,10 +1518,10 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
             {selectedCommits.length > 1 ? t('Aggregated commit selection') : repoMap.get(selectedPrimary?.repoId ?? '')?.meta.name}
           </span>
           <div className="detail-actions">
-            <button type="button" title={t('Open Commit Detail')} onClick={openCommitDetail}><Codicon name="open-preview" /></button>
-            <button type="button" title={t('Open Changes')} disabled={!canOpenChanges} onClick={openChanges}><Codicon name="diff-multiple" /></button>
-            <button type="button" title={messagesExpandedByDefault ? t('Collapse commit messages by default') : t('Expand commit messages by default')} aria-pressed={messagesExpandedByDefault} onClick={toggleAllMessages}><Codicon name={messagesExpandedByDefault ? 'collapse-all' : 'expand-all'} /></button>
-            <button type="button" title={t('Collapse commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></button>
+            <IconButton type="button" title={t('Open Commit Detail')} onClick={openCommitDetail}><Codicon name="open-preview" /></IconButton>
+            <IconButton type="button" title={t('Open Changes')} disabled={!canOpenChanges} onClick={openChanges}><Codicon name="diff-multiple" /></IconButton>
+            <IconButton type="button" title={messagesExpandedByDefault ? t('Collapse commit messages by default') : t('Expand commit messages by default')} aria-pressed={messagesExpandedByDefault} onClick={toggleAllMessages}><Codicon name={messagesExpandedByDefault ? 'collapse-all' : 'expand-all'} /></IconButton>
+            <IconButton type="button" title={t('Collapse commit detail')} onClick={onCollapse}><Codicon name="layout-sidebar-right" /></IconButton>
           </div>
         </header>
         {selectedCommits.length > 1 ? (

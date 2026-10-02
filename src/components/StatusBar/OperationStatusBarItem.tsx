@@ -1,3 +1,4 @@
+import { IconButton } from '../IconButton';
 import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../i18n';
 import { useBridge } from '../../platform/context';
@@ -45,7 +46,7 @@ export function OperationStatusBarItem() {
       )}
       {activeOperations.length > 1 && <b className="statusbar-operation-count">+{activeOperations.length - 1}</b>}
       {cancellable && (
-        <button
+        <IconButton
           type="button"
           className="statusbar-operation-cancel"
           aria-label={t('Cancel')}
@@ -53,7 +54,7 @@ export function OperationStatusBarItem() {
           onClick={() => void bridge.cancelOperation(operation.operationId)}
         >
           <Codicon name="close" />
-        </button>
+        </IconButton>
       )}
     </div>
   );

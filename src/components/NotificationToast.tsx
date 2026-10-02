@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { resolveNotificationText, useAppStore, type AppNotification } from '../store/appStore';
@@ -49,13 +50,13 @@ function ToastItem({
           <Codicon name={notification.type === 'error' ? 'error' : notification.type === 'warning' ? 'warning' : 'info'} />
         </div>
         <div className="toast-message" title={resolveNotificationText(notification.title, t)}>{resolveNotificationText(notification.message, t)}{notification.progressMessage && <> {resolveNotificationText(notification.progressMessage, t)}</>}</div>
-        {!notification.progress && <button
+        {!notification.progress && <IconButton
           type="button"
           className="toast-close"
           aria-label={t('Close')}
           title={t('Close')}
           onClick={onClose}
-        ><Codicon name="close" /></button>}
+        ><Codicon name="close" /></IconButton>}
       </div>
       {notification.actions.length > 0 && (
         <div className="toast-details-row">

@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import React, { useMemo, useState } from 'react';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
@@ -256,7 +257,7 @@ export function SyncFileList({ files, loading, viewMode, onViewModeChange, onOpe
         <span style={styles.filesTitle}>{loading ? '' : formatFileCount(visibleFiles.length, t)}</span>
         <div style={styles.filesHeaderActions}>
           <div style={styles.expandBtns}>
-            <button
+            <IconButton
               data-action-btn=""
               type="button"
               style={styles.toolbarButton(false, !canToggleFolders)}
@@ -268,8 +269,8 @@ export function SyncFileList({ files, loading, viewMode, onViewModeChange, onOpe
               }}
             >
               <Codicon name="expand-all" style={{ fontSize: '13px' }} />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               data-action-btn=""
               type="button"
               style={styles.toolbarButton(false, !canToggleFolders)}
@@ -278,27 +279,29 @@ export function SyncFileList({ files, loading, viewMode, onViewModeChange, onOpe
               onClick={collapseAllFolders}
             >
               <Codicon name="collapse-all" style={{ fontSize: '13px' }} />
-            </button>
+            </IconButton>
           </div>
           <div style={styles.viewToggle}>
-            <button
+            <IconButton
               data-action-btn=""
               type="button"
               style={styles.toolbarButton(viewMode === 'tree', false)}
+              aria-pressed={viewMode === 'tree'}
               title={t('Tree view')}
               onClick={() => onViewModeChange('tree')}
             >
               <Codicon name="list-tree" style={{ fontSize: '13px' }} />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               data-action-btn=""
               type="button"
               style={styles.toolbarButton(viewMode === 'flat', false)}
+              aria-pressed={viewMode === 'flat'}
               title={t('Flat list')}
               onClick={() => onViewModeChange('flat')}
             >
               <Codicon name="list-flat" style={{ fontSize: '13px' }} />
-            </button>
+            </IconButton>
           </div>
         </div>
       </div>}

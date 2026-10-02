@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
@@ -35,8 +36,8 @@ export function ChangelistManager({ repoId, close }: { repoId: string; close: ()
   }, [close]);
   const create = async () => { if (!name.trim()) return; await operate(repoId, { type: 'create', name: name.trim() }); setName(''); };
   return <div ref={popover} className="changelist-popover" onClick={(event) => event.stopPropagation()}>
-    <header><strong>{t('Changelists')}</strong><button onClick={close}><Codicon name="close" /></button></header>
-    <div className="changelist-create"><input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void create(); }} placeholder={t('Changelist name')} /><button disabled={!name.trim()} onClick={() => void create()}><Codicon name="add" /></button></div>
+    <header><strong>{t('Changelists')}</strong><IconButton title={t('Close')} onClick={close}><Codicon name="close" /></IconButton></header>
+    <div className="changelist-create"><input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void create(); }} placeholder={t('Changelist name')} /><IconButton title={t('New Changelist')} disabled={!name.trim()} onClick={() => void create()}><Codicon name="add" /></IconButton></div>
     {entries.map((entry) => (
       <div className="changelist-manage-row" key={entry.id} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, entry }); }}>
         <Codicon name="list-unordered" />
@@ -44,12 +45,12 @@ export function ChangelistManager({ repoId, close }: { repoId: string; close: ()
           <strong>{entry.name}</strong>
           <small style={{ marginLeft: 6 }}>{entry.files.length} {t('file')}</small>
         </span>
-        <button title={t('Rename')} onClick={() => void promptDialog({ title: t('Rename'), message: entry.name, inputLabel: t('Changelist name'), initialValue: entry.name }).then((value) => { if (value && value !== entry.name) return operate(repoId, { type: 'rename', changelist_id: entry.id, name: value }); })}>
+        <IconButton title={t('Rename')} onClick={() => void promptDialog({ title: t('Rename'), message: entry.name, inputLabel: t('Changelist name'), initialValue: entry.name }).then((value) => { if (value && value !== entry.name) return operate(repoId, { type: 'rename', changelist_id: entry.id, name: value }); })}>
           <Codicon name="edit" />
-        </button>
-        <button title={t('Delete')} onClick={() => void confirmDialog({ title: t('Delete'), message: `${t('Delete changelist {0}?', entry.name)}\n${entry.files.length} ${t('file')}`, danger: true }).then((confirmed) => { if (confirmed) return operate(repoId, { type: 'delete', changelist_id: entry.id }); })}>
+        </IconButton>
+        <IconButton title={t('Delete')} onClick={() => void confirmDialog({ title: t('Delete'), message: `${t('Delete changelist {0}?', entry.name)}\n${entry.files.length} ${t('file')}`, danger: true }).then((confirmed) => { if (confirmed) return operate(repoId, { type: 'delete', changelist_id: entry.id }); })}>
           <Codicon name="trash" />
-        </button>
+        </IconButton>
       </div>
     ))}
     {context && (

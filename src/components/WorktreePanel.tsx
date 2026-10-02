@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import React, { useEffect, useState } from 'react';
 import { Codicon } from './Codicon';
 import { RepositoryGroup } from './RepositoryGroup';
@@ -171,57 +172,57 @@ function WorktreeRow({
         {hovered && !entry.isMain && (
           <div style={row.actions}>
             {!entry.isInWorkspace && onAddToWorkspace && (
-              <button
+              <IconButton
                 data-action-btn=""
                 style={row.btn}
                 title={t('Add Folder to Workspace')}
                 onClick={(e) => { e.stopPropagation(); onAddToWorkspace(entry.path); }}
               >
                 <Codicon name="add" />
-              </button>
+              </IconButton>
             )}
             {onOpenInExplorer && (
-              <button
+              <IconButton
                 data-action-btn=""
                 style={row.btn}
                 title={t('Open Worktree')}
                 onClick={(e) => { e.stopPropagation(); onOpenInExplorer(repoId, entry.path); }}
               >
                 <Codicon name="folder-opened" />
-              </button>
+              </IconButton>
             )}
             {entry.isLocked ? (
               onUnlock && (
-                <button
+                <IconButton
                   data-action-btn=""
                   style={row.btn}
                   title={t('Unlock worktree')}
                   onClick={(e) => { e.stopPropagation(); onUnlock(repoId, entry.path); }}
                 >
                   <Codicon name="unlock" />
-                </button>
+                </IconButton>
               )
             ) : (
               onLock && (
-                <button
+                <IconButton
                   data-action-btn=""
                   style={row.btn}
                   title={t('Lock worktree')}
                   onClick={(e) => { e.stopPropagation(); onLock(repoId, entry.path); }}
                 >
                   <Codicon name="lock" />
-                </button>
+                </IconButton>
               )
             )}
             {onDelete && (
-              <button
+              <IconButton
                 data-action-btn=""
                 style={{ ...row.btn, color: 'var(--vscode-errorForeground, var(--versiondock-danger))' }}
                 title={t('Remove worktree')}
                 onClick={(e) => { e.stopPropagation(); onDelete(repoId, entry.path, false); }}
               >
                 <Codicon name="trash" />
-              </button>
+              </IconButton>
             )}
           </div>
         )}
@@ -288,24 +289,24 @@ function RepoSection({
       <RepositoryGroup name={repo.repoName} color={projectColor} actions={multiRepo ? (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '2px' }}>
             {hasPrunable && onPrune && (
-              <button
+              <IconButton
                 data-action-btn=""
                 style={css.headerBtn}
                 title={t('Prune stale worktrees')}
                 onClick={() => onPrune(repo.repoId)}
               >
                 <Codicon name="git-compare" style={{ fontSize: '12px' }} />
-              </button>
+              </IconButton>
             )}
             {!repo.isLinkedWorktree && onRequestCreate && (
-              <button
+              <IconButton
                 data-action-btn=""
                 style={css.headerBtn}
                 title={t('Add worktree')}
                 onClick={() => onRequestCreate(repo.repoId)}
               >
                 <Codicon name="add" style={{ fontSize: '12px' }} />
-              </button>
+              </IconButton>
             )}
           </div>
       ) : undefined}>

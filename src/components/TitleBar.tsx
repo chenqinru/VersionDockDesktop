@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { ProjectIcon } from './ProjectIcon';
@@ -888,7 +889,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                         className="titlebar-tab-icon"
                       />
                       <span className="titlebar-tab-title">{tab.name}</span>
-                      <button
+                      <IconButton
                         type="button"
                         className="titlebar-tab-close"
                         disabled={startupTab?.id === tab.id || Boolean(transferringTabIds[tab.id])}
@@ -900,7 +901,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                         }}
                       >
                         <Codicon name="close" />
-                      </button>
+                      </IconButton>
                     </div>
                   </Fragment>
                 );
@@ -921,7 +922,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                 />
               )}
             </div>
-            <button
+            <IconButton
               ref={addAnchorRef}
               type="button"
               className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null || remoteInsertionActive ? 'drag-hidden' : ''}`}
@@ -933,7 +934,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
               onClick={toggleNewTabMenu}
             >
               <Codicon name="plus" />
-            </button>
+            </IconButton>
           </div>
         )}
         {tabs.length === 0 && (
@@ -1086,7 +1087,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                           </div>
                         )}
                       </button>
-                      <button
+                      <IconButton
                         type="button"
                         className="workspace-menu-item-open-window"
                         aria-label={t('Open in New Window')}
@@ -1099,7 +1100,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                         }}
                       >
                         <Codicon name="window" />
-                      </button>
+                      </IconButton>
                     </div>
                   );
                 })}

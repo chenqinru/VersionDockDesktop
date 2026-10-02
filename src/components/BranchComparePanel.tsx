@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { CommitNode } from '../bindings/generated';
 import { Codicon } from './Codicon';
@@ -173,7 +174,7 @@ function ComparePane({
         <ToggleFilter icon="calendar" label={filters.from || filters.to ? `${filters.from || '…'} → ${filters.to || '…'}` : t('From → To')} active={Boolean(filters.from || filters.to)} open={menu === 'dates'} onClick={() => setMenu(menu === 'dates' ? null : 'dates')} />
         {menu === 'dates' && <DatePopover from={filters.from} to={filters.to} onChange={(from, to) => setFilters((current) => ({ ...current, from, to }))} onClear={() => setFilters((current) => ({ ...current, from: '', to: '' }))} />}
       </div>
-      {active && <button type="button" className="history-clear-filters" title={t('Clear all filters')} aria-label={t('Clear all filters')} onClick={() => setFilters(EMPTY_FILTERS)}><Codicon name="clear-all" /></button>}
+      {active && <IconButton type="button" className="history-clear-filters" title={t('Clear all filters')} aria-label={t('Clear all filters')} onClick={() => setFilters(EMPTY_FILTERS)}><Codicon name="clear-all" /></IconButton>}
     </div>
     <h3 title={title}>{title}</h3>
     <div className="compare-pane-list">
@@ -239,7 +240,7 @@ export function BranchComparePanel({
       <strong>{t('Compare')}</strong>
       {repo && <span className="compare-repo-badge"><i style={{ background: repo.meta.color }} /><span>{repo.meta.name}</span></span>}
       <span className="compare-title" title={`${baseLabel} → ${targetLabel}`}>{t('{0} vs {1}', baseLabel, targetLabel)}</span>
-      <button aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></button>
+      <IconButton aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></IconButton>
     </header>
     {!activeComparison ? <div className="empty-state"><Codicon name={busy ? 'loading codicon-modifier-spin' : 'compare-changes'} />{t(busy ? 'Loading...' : 'Select two branches to compare')}</div> : <div ref={stack} className="compare-stack" style={topHeight ? { gridTemplateRows: `${topHeight}px 4px minmax(0, 1fr)` } : undefined}>
       <ComparePane

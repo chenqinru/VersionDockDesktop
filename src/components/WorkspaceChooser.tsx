@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useState, useMemo } from 'react';
 import { Codicon } from './Codicon';
 import { ProjectIcon } from './ProjectIcon';
@@ -136,9 +137,9 @@ export function WorkspaceChooser() {
                   className="recent-search-input"
                 />
                 {filterText && (
-                  <button type="button" className="recent-search-clear" onClick={() => setFilterText('')}>
+                  <IconButton type="button" className="recent-search-clear" title={t('Clear')} onClick={() => setFilterText('')}>
                     <Codicon name="close" />
-                  </button>
+                  </IconButton>
                 )}
               </div>
             )}
@@ -185,7 +186,7 @@ export function WorkspaceChooser() {
                       </div>
                     </button>
                     <div className="recent-card-actions">
-                      <button
+                      <IconButton
                         type="button"
                         className="recent-card-action-btn"
                         title={t('Open in New Window')}
@@ -197,8 +198,8 @@ export function WorkspaceChooser() {
                         }}
                       >
                         <Codicon name="window" />
-                      </button>
-                      <button
+                      </IconButton>
+                      <IconButton
                         type="button"
                         className="recent-card-action-btn remove"
                         title={t('Remove from recent')}
@@ -209,7 +210,7 @@ export function WorkspaceChooser() {
                         }}
                       >
                         <Codicon name="close" />
-                      </button>
+                      </IconButton>
                     </div>
                   </div>
                 ))}

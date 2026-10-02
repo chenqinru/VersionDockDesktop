@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { buildSavedChangeTree, type TreeDir } from './savedChangeTree';
 import { useState, useEffect, useMemo } from 'react';
 import { Codicon } from './Codicon';
@@ -350,9 +351,11 @@ function StashRow({
         onClick={() => { onManualExpansionChange(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}
         title={fullMessage}
       >
-        <button
+        <IconButton
           type="button"
           style={rowStyle.chevronBtn}
+          title={expanded ? t('Collapse') : t('Expand')}
+          aria-expanded={expanded}
           onClick={(e) => {
             e.stopPropagation();
             onManualExpansionChange();
@@ -363,7 +366,7 @@ function StashRow({
             name={expanded ? 'chevron-down' : 'chevron-right'}
             style={{ fontSize: '11px' }}
           />
-        </button>
+        </IconButton>
         <Codicon name="save" style={{ fontSize: '13px', flexShrink: 0 }} />
         <div style={rowStyle.info}>
           <span style={rowStyle.name}>
@@ -387,7 +390,7 @@ function StashRow({
         </div>
         {hovered && (
           <div style={rowStyle.actions}>
-            <button
+            <IconButton
               type="button"
               style={{ ...rowStyle.btn, opacity: busy ? 0.4 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
               disabled={busy}
@@ -399,8 +402,8 @@ function StashRow({
               }}
             >
               <Codicon name="desktop-download" />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               type="button"
               style={{ ...rowStyle.btn, opacity: busy ? 0.4 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
               disabled={busy}
@@ -412,8 +415,8 @@ function StashRow({
               }}
             >
               <Codicon name="arrow-down" />
-            </button>
-            <button
+            </IconButton>
+            <IconButton
               type="button"
               style={{
                 ...rowStyle.btn,
@@ -430,7 +433,7 @@ function StashRow({
               }}
             >
               <Codicon name="trash" />
-            </button>
+            </IconButton>
           </div>
         )}
       </div>

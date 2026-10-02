@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
@@ -143,14 +144,14 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
             <strong>{t('Manage Remotes')}</strong>
             {repo && <span className="modal-repo-badge">{repo.meta.name}</span>}
           </div>
-          <button
+          <IconButton
             type="button"
             className="modal-close-btn"
             title={t('Close')}
             onClick={close}
           >
             <Codicon name="close" />
-          </button>
+          </IconButton>
         </header>
 
         <div className="modal-body remote-manager-body">
@@ -238,46 +239,46 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
                     </div>
 
                     <div className="remote-item-actions">
-                      <button
+                      <IconButton
                         type="button"
                         className="remote-action-icon-btn"
                         title={t('Rename')}
                         onClick={() => handleRename(remote)}
                       >
                         <Codicon name="edit" />
-                      </button>
-                      <button
+                      </IconButton>
+                      <IconButton
                         type="button"
                         className="remote-action-icon-btn"
                         title={t('Set fetch URL')}
                         onClick={() => handleSetFetchUrl(remote)}
                       >
                         <Codicon name="link" />
-                      </button>
-                      <button
+                      </IconButton>
+                      <IconButton
                         type="button"
                         className="remote-action-icon-btn"
                         title={t('Set push URL')}
                         onClick={() => handleSetPushUrl(remote)}
                       >
                         <Codicon name="cloud-upload" />
-                      </button>
-                      <button
+                      </IconButton>
+                      <IconButton
                         type="button"
                         className="remote-action-icon-btn"
                         title={t('Prune')}
                         onClick={() => handlePrune(remote)}
                       >
                         <Codicon name="refresh" />
-                      </button>
-                      <button
+                      </IconButton>
+                      <IconButton
                         type="button"
                         className="remote-action-icon-btn danger"
                         title={t('Delete')}
                         onClick={() => handleDelete(remote)}
                       >
                         <Codicon name="trash" />
-                      </button>
+                      </IconButton>
                     </div>
                   </article>
                 ))}

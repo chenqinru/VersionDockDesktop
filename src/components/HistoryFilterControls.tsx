@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
@@ -61,7 +62,7 @@ export function CommitSearch({ value, onChange, onSubmit, onClear }: {
       }}
       placeholder={t('Search commits…')}
     />
-    {value && <button type="button" aria-label={t('Clear')} onClick={clear}><Codicon name="close" /></button>}
+    {value && <IconButton type="button" aria-label={t('Clear')} onClick={clear}><Codicon name="close" /></IconButton>}
   </label>;
 }
 
@@ -348,11 +349,11 @@ export function DatePopover({ from, to, onChange, onClear }: {
   return <div ref={popoverRef} className={`date-popover filter-popover ${dual ? 'dual' : 'single'}`} style={{ '--date-popover-offset': `${horizontalOffset}px` } as CSSProperties}>
     <header><strong>{t('Date range')}</strong><button type="button" disabled={!from && !to} onClick={onClear}>{t('Clear')}</button></header>
     {dual ? <div className="calendar-panes">
-      <div className="calendar-pane"><div className="calendar-nav"><button type="button" title={t('Previous month')} onClick={() => setLeft(shiftMonth(left, -1))}><Codicon name="chevron-left" /></button><strong>{formatYearMonth(left.year, left.month, language)}</strong><button type="button" title={t('Next month')} onClick={() => setLeft(shiftMonth(left, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...left} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
+      <div className="calendar-pane"><div className="calendar-nav"><IconButton type="button" title={t('Previous month')} onClick={() => setLeft(shiftMonth(left, -1))}><Codicon name="chevron-left" /></IconButton><strong>{formatYearMonth(left.year, left.month, language)}</strong><IconButton type="button" title={t('Next month')} onClick={() => setLeft(shiftMonth(left, 1))}><Codicon name="chevron-right" /></IconButton></div><CalendarMonth {...left} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
       <i className="calendar-divider" />
-      <div className="calendar-pane"><div className="calendar-nav"><button type="button" title={t('Previous month')} onClick={() => setRight(shiftMonth(right, -1))}><Codicon name="chevron-left" /></button><strong>{formatYearMonth(right.year, right.month, language)}</strong><button type="button" title={t('Next month')} onClick={() => setRight(shiftMonth(right, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...right} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
+      <div className="calendar-pane"><div className="calendar-nav"><IconButton type="button" title={t('Previous month')} onClick={() => setRight(shiftMonth(right, -1))}><Codicon name="chevron-left" /></IconButton><strong>{formatYearMonth(right.year, right.month, language)}</strong><IconButton type="button" title={t('Next month')} onClick={() => setRight(shiftMonth(right, 1))}><Codicon name="chevron-right" /></IconButton></div><CalendarMonth {...right} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
     </div> : <div className="calendar-panes single-calendar">
-      <div className="calendar-pane"><div className="calendar-nav"><button type="button" title={t('Previous month')} onClick={() => setSingle(shiftMonth(single, -1))}><Codicon name="chevron-left" /></button><strong>{formatYearMonth(single.year, single.month, language)}</strong><button type="button" title={t('Next month')} onClick={() => setSingle(shiftMonth(single, 1))}><Codicon name="chevron-right" /></button></div><CalendarMonth {...single} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
+      <div className="calendar-pane"><div className="calendar-nav"><IconButton type="button" title={t('Previous month')} onClick={() => setSingle(shiftMonth(single, -1))}><Codicon name="chevron-left" /></IconButton><strong>{formatYearMonth(single.year, single.month, language)}</strong><IconButton type="button" title={t('Next month')} onClick={() => setSingle(shiftMonth(single, 1))}><Codicon name="chevron-right" /></IconButton></div><CalendarMonth {...single} from={fromDate} to={toDate} hovered={hovered} onDay={choose} onHover={setHovered} weekdays={weekdays} /></div>
     </div>}
   </div>;
 }

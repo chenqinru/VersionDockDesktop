@@ -1,3 +1,4 @@
+import { IconButton } from '../IconButton';
 import { useEffect, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore } from '../../store/appStore';
@@ -42,7 +43,7 @@ export function NotificationStatusBarItem() {
 
   return (
     <>
-      <button
+      <IconButton
         ref={anchorRef}
         type="button"
         className={`statusbar-item notification-status-item ${open ? 'active' : ''} ${unreadCount > 0 ? 'has-unread' : ''}`}
@@ -56,7 +57,7 @@ export function NotificationStatusBarItem() {
           <Codicon name={unreadCount > 0 ? 'bell-dot' : 'bell'} />
           {unreadCount > 0 && <span className="notification-status-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
         </div>
-      </button>
+      </IconButton>
 
       {open && (
         <NotificationCenterPopover

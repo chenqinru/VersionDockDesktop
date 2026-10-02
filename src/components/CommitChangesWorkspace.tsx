@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
@@ -107,9 +108,9 @@ export function CommitChangesWorkspace() {
       <button onClick={back}><Codicon name="arrow-left" />{t('Back to history')}</button>
       <span title={title}><Codicon name="diff-multiple" />{title}</span>
       <b>{changes.files.length} {t('files')}</b>
-      {selected && externalEditor && <button title={t('Open in external editor')} onClick={() => void systemOpen(selected.repoId, selected.path, false, true)}><Codicon name="code" /></button>}
-      {selected && <button title={t('Open')} onClick={() => void systemOpen(selected.repoId, selected.path, false)}><Codicon name="go-to-file" /></button>}
-      {selected && <button title={t('Reveal')} onClick={() => void systemOpen(selected.repoId, selected.path, true)}><Codicon name="folder-opened" /></button>}
+      {selected && externalEditor && <IconButton title={t('Open in external editor')} onClick={() => void systemOpen(selected.repoId, selected.path, false, true)}><Codicon name="code" /></IconButton>}
+      {selected && <IconButton title={t('Open')} onClick={() => void systemOpen(selected.repoId, selected.path, false)}><Codicon name="go-to-file" /></IconButton>}
+      {selected && <IconButton title={t('Reveal')} onClick={() => void systemOpen(selected.repoId, selected.path, true)}><Codicon name="folder-opened" /></IconButton>}
     </header>
     <div className="changes-columns">
       <aside className="changes-files">

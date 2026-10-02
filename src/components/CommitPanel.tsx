@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -147,7 +148,7 @@ function TreeRow({ node, depth, expanded, toggleExpanded, showDirectory, repo, s
     const selectable = node.files.filter((file) => !file.isTruncated);
     const selectedCount = selectable.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
     const allSelected = selectable.length > 0 && selectedCount === selectable.length;
-    return <div className={`directory-row ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={toggleExpanded} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectable.length} onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={(event) => { event.stopPropagation(); toggleExpanded(); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><span className="change-row-actions" onClick={(event) => event.stopPropagation()}><button type="button" title={t('Rollback all files in folder')} onClick={() => onRollback(node.files)}><Codicon name="discard" /></button></span><b>{node.files.length}</b></div>;
+    return <div className={`directory-row ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={toggleExpanded} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectable.length} onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={(event) => { event.stopPropagation(); toggleExpanded(); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><span className="change-row-actions" onClick={(event) => event.stopPropagation()}><IconButton type="button" title={t('Rollback all files in folder')} onClick={() => onRollback(node.files)}><Codicon name="discard" /></IconButton></span><b>{node.files.length}</b></div>;
   }
   const key = `${repo.meta.id}\0${node.file.path}`;
   const pathParts = node.file.path.split('/');
@@ -267,7 +268,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
         )}
         <div className="repo-actions">
           {repo.files.length > 0 && (
-            <button
+            <IconButton
               className="repo-open-changes"
               style={{
                 opacity: hovered ? 1 : 0,
@@ -287,7 +288,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
               }}
             >
               <Codicon name="diff-multiple" />
-            </button>
+            </IconButton>
           )}
           {repo.files.length > 0 && (
             <span className={`count-badge ${selectedCount > 0 ? 'selected' : ''}`}>
@@ -1643,7 +1644,7 @@ export function CommitPanel() {
     <span />
     {hasConflictOrOperation && (
       <div className="view-options panel-view-options conflict-action-wrapper" style={{ position: 'relative' }}>
-        <button
+        <IconButton
           ref={conflictButtonRef}
           type="button"
           className={totalConflicts > 0 ? 'conflict-warning-button pulsing' : 'conflict-warning-button'}
@@ -1677,7 +1678,7 @@ export function CommitPanel() {
           ) : (
             <Codicon name="play" style={{ color: 'var(--vscode-testing-iconPassed, #73c991)' }} />
           )}
-        </button>
+        </IconButton>
         {conflictMenuOpen && (
           <div
             ref={conflictMenuRef}
@@ -1778,7 +1779,7 @@ export function CommitPanel() {
       </div>
     )}
     {canSelectAll && currentTabHasSelectable && (
-      <button
+      <IconButton
         className="panel-selection-action"
         disabled={workspaceBusy || Boolean(toolbarAction)}
         title={currentTabIsAllSelected ? t('VersionDock: Invert Selection') : t('VersionDock: Select All')}
@@ -1792,11 +1793,11 @@ export function CommitPanel() {
         }}
       >
         {currentTabIsAllSelected ? <InvertSelectionIcon /> : <SelectAllIcon />}
-      </button>
+      </IconButton>
     )}
-    <button disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Update Project')} aria-label={t('VersionDock: Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></button>
-    <button disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Refresh Commit Panel')} aria-label={t('VersionDock: Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></button>
-    <button
+    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Update Project')} aria-label={t('VersionDock: Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></IconButton>
+    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Refresh Commit Panel')} aria-label={t('VersionDock: Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></IconButton>
+    <IconButton
       title={t('VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)')}
       aria-label={t('VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)')}
       onClick={() => {
@@ -1806,10 +1807,10 @@ export function CommitPanel() {
       }}
     >
       <Codicon name="account" />
-    </button>
-    <button className={settings ? 'selected' : ''} title={t('VersionDock: Settings')} aria-label={t('VersionDock: Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></button>
+    </IconButton>
+    <IconButton className={settings ? 'selected' : ''} title={t('VersionDock: Settings')} aria-label={t('VersionDock: Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></IconButton>
     <div ref={viewMenuRef} className="view-options panel-view-options">
-      <button title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu('expand'); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></button>
+      <IconButton title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu('expand'); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></IconButton>
       {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
         <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('expand')} onFocus={() => setViewSubmenu('expand')}>
           <button type="button" role="menuitem" className={viewSubmenu === 'expand' ? 'active' : ''} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
@@ -2056,7 +2057,7 @@ export function CommitPanel() {
                       alignItems: 'center',
                     }}
                   >
-                    <button
+                    <IconButton
                       title={t('Remove {0}', repo.meta.name)}
                       onClick={() => {
                         if (changesDisplayMode === 'vscode') {
@@ -2071,7 +2072,7 @@ export function CommitPanel() {
                       }}
                     >
                       <Codicon name="close" />
-                    </button>
+                    </IconButton>
                     {repo.meta.name}
                     <b>{count}</b>
                     {repoCanAmend && (
@@ -2097,7 +2098,7 @@ export function CommitPanel() {
             </label>
           )}
           <div className="commit-option-actions">
-            <button
+            <IconButton
               type="button"
               disabled={!repos.length || workspaceBusy || historyLoading}
               aria-label={t('Commit message history')}
@@ -2108,7 +2109,7 @@ export function CommitPanel() {
               }}
             >
               <Codicon name="history" />
-            </button>
+            </IconButton>
           </div>
         </div>
         {mergeMessageSuggestion && <div className="merge-message-suggestion" role="status"><span>{t('Merge message suggestion')}: {mergeMessageSuggestion}</span><button type="button" onClick={applyMergeMessageSuggestion}>{t('Use Merge Message')}</button><button type="button" onClick={dismissMergeMessageSuggestion}>{t('Ignore')}</button></div>}
@@ -2152,8 +2153,8 @@ export function CommitPanel() {
           }
         }} />
         <div className="commit-actions">
-          {showGitActions && <div ref={saveMenuRef} className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</button><button disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }}><Codicon name="chevron-down" /></button>{saveMenu && <div className="split-menu">{orderedSaveActions.map((action) => <button key={action} disabled={saveBusy} onClick={() => { void doSave(action); setSaveMenu(false); }}><Codicon name={action === 'shelf' ? 'archive' : 'save'} />{t(action === 'shelf' ? 'Shelve changes' : 'Stash changes')}</button>)}</div>}</div>}
-          <div ref={commitMenuRef} className="split-button commit-action"><button title={commitDisabledReason} disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable) || (primaryCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(primaryCommitAction === 'commitAndPush')}><Codicon name={primaryCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(primaryCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button>{showGitActions && <button disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></button>}{commitMenu && <div className="split-menu right">{orderedCommitActions.map((push) => <button key={String(push)} disabled={commitBusy || Boolean(commitUnavailable) || (push && Boolean(pushUnavailable))} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : push && pushUnavailable ? capabilityReason(pushUnavailable.capabilities, 'syncPush') : undefined} onClick={() => { void doCommit(push); setCommitMenu(false); }}><Codicon name={push ? 'cloud-upload' : 'check'} />{t(push ? 'Commit & Push' : 'Commit')}</button>)}</div>}</div>
+          {showGitActions && <div ref={saveMenuRef} className="split-button save-action"><button disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</button><IconButton title={t('Save options')} aria-haspopup="menu" aria-expanded={saveMenu} disabled={!message.trim() || !commitTargets.length || saveBusy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }}><Codicon name="chevron-down" /></IconButton>{saveMenu && <div className="split-menu">{orderedSaveActions.map((action) => <button key={action} disabled={saveBusy} onClick={() => { void doSave(action); setSaveMenu(false); }}><Codicon name={action === 'shelf' ? 'archive' : 'save'} />{t(action === 'shelf' ? 'Shelve changes' : 'Stash changes')}</button>)}</div>}</div>}
+          <div ref={commitMenuRef} className="split-button commit-action"><button title={commitDisabledReason} disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable) || (primaryCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(primaryCommitAction === 'commitAndPush')}><Codicon name={primaryCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(primaryCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</button>{showGitActions && <IconButton title={t('Commit options')} aria-haspopup="menu" aria-expanded={commitMenu} disabled={!message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }}><Codicon name="chevron-down" /></IconButton>}{commitMenu && <div className="split-menu right">{orderedCommitActions.map((push) => <button key={String(push)} disabled={commitBusy || Boolean(commitUnavailable) || (push && Boolean(pushUnavailable))} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : push && pushUnavailable ? capabilityReason(pushUnavailable.capabilities, 'syncPush') : undefined} onClick={() => { void doCommit(push); setCommitMenu(false); }}><Codicon name={push ? 'cloud-upload' : 'check'} />{t(push ? 'Commit & Push' : 'Commit')}</button>)}</div>}</div>
         </div>
       </div>
       </div>
@@ -2204,7 +2205,7 @@ export function CommitPanel() {
         />
       )}
       {historyOpen && <div className="commit-history-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false); }}><section ref={historyDialog} className="commit-history-modal" role="dialog" aria-modal="true" aria-label={t('Commit message history')}>
-        <header className="commit-history-header"><Codicon name="history" /><strong>{t('Commit message history')}</strong><button type="button" aria-label={t('Cancel')} title={t('Cancel')} onClick={() => setHistoryOpen(false)}><Codicon name="close" /></button></header>
+        <header className="commit-history-header"><Codicon name="history" /><strong>{t('Commit message history')}</strong><IconButton type="button" aria-label={t('Cancel')} title={t('Cancel')} onClick={() => setHistoryOpen(false)}><Codicon name="close" /></IconButton></header>
         <div className="commit-history-subtitle">{t('Select a previous commit message to use.')}</div>
         <div className="commit-history-list">{historyLoading && historyMessages.length === 0 ? <div className="commit-history-empty"><Codicon name="loading codicon-modifier-spin" /><span>{t('Loading…')}</span></div> : historyMessages.length ? historyMessages.map((item) => {
           const [subject, ...bodyLines] = item.message.split('\n');

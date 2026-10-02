@@ -3409,6 +3409,15 @@ button.conflict-action-item {
   border-color: var(--versiondock-selection-border);
   background-color: var(--versiondock-selection-background);
 }
+/* Commit-panel checkboxes retain their original blue selection across tabs. */
+.commit-panel .selection-checkbox {
+  border-color: color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border));
+}
+.commit-panel .selection-checkbox.selected {
+  border-color: var(--versiondock-accent-bg);
+  background-color: var(--versiondock-accent-bg);
+}
+.commit-panel input[type="checkbox"] { accent-color: var(--versiondock-accent-bg); }
 .selection-checkbox.disabled { opacity: .3; pointer-events: none; }
 .selection-checkbox input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: default; }
 .selection-checkbox .codicon { position: relative; pointer-events: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 11px; font-weight: 700; }
@@ -3464,6 +3473,10 @@ button.conflict-action-item {
 .count-badge.selected {
   background: var(--versiondock-selection-background);
   color: var(--versiondock-selection-foreground);
+}
+.commit-panel .count-badge.selected {
+  background: var(--versiondock-badge-background, #0078d4);
+  color: var(--versiondock-badge-foreground, #ffffff);
 }
 .status-mark {
   font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
@@ -3616,7 +3629,15 @@ button.conflict-action-item {
 .branch-sidebar-sticky-header { position: sticky; top: 0; z-index: 4; background: var(--versiondock-surface); }
 .branch-sidebar-header { height: 35px; display: flex; align-items: stretch; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); }
 .branch-loading { height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--versiondock-loading-foreground); background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.history-loading { position: sticky; z-index: 5; top: 0; height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--versiondock-loading-foreground); background: color-mix(in srgb, var(--versiondock-surface) 92%, transparent); border-bottom: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+/* Keep background paging feedback anchored to the visible log frame. */
+.commit-list-frame { position: relative; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.commit-list-content { position: relative; }
+.history-loading { position: absolute; z-index: 21; bottom: 8px; left: 50%; transform: translateX(-50%); min-height: 26px; max-width: calc(100% - 16px); padding: 0 10px; display: flex; align-items: center; gap: 6px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, .28); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); white-space: nowrap; pointer-events: none; }
+.history-loading > .codicon { color: var(--versiondock-loading-foreground); font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); flex-shrink: 0; }
+.history-loading-progress { position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: var(--versiondock-loading-background); overflow: hidden; pointer-events: none; z-index: 20; }
+.history-loading-progress > i { display: block; height: 100%; width: 34%; background: var(--versiondock-loading-foreground); border-radius: 999px; animation: history-indeterminate-progress 1.1s cubic-bezier(.4, 0, .2, 1) infinite; }
+@keyframes history-indeterminate-progress { from { transform: translateX(-110%); } to { transform: translateX(305%); } }
+@media (prefers-reduced-motion: reduce) { .history-loading-progress > i { animation: none; margin-left: 33%; } }
 .branch-search { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; padding: 0 8px; background: var(--versiondock-input); color: var(--versiondock-muted); }
 .branch-search > .codicon { flex: 0 0 auto; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
 .branch-search input { min-width: 0; flex: 1; width: 100%; height: 100%; padding: 0 6px 0 0; border: 0; outline: 0; background: transparent; color: var(--versiondock-text); }
@@ -3936,7 +3957,7 @@ button.conflict-action-item {
 .compare-pane-filters .date-filter-anchor { width: 215px; min-width: 140px; max-width: 225px; flex: 0 1 215px; }
 .compare-pane > h3 { min-width: 0; height: 28px; flex: 0 0 28px; margin: 0; padding: 0 8px; display: flex; align-items: center; overflow: hidden; color: var(--versiondock-warning, #d7ba7d); background: color-mix(in srgb, var(--versiondock-warning, #d7ba7d) 18%, var(--versiondock-bg)); border-bottom: 1px solid var(--versiondock-border-soft); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .compare-pane-list { min-height: 0; flex: 1; overflow: hidden; }
-.compare-pane-list > .commit-list { height: 100%; }
+.compare-pane-list > .commit-list-frame { height: 100%; }
 .compare-empty { height: 100%; padding: 16px 8px; display: grid; place-items: center; color: var(--versiondock-muted); text-align: center; }
 .compare-splitter { position: relative; cursor: row-resize; background: var(--versiondock-border); }
 .compare-splitter:hover { background: var(--versiondock-accent); }
@@ -7613,3 +7634,45 @@ button.notification-item-action-btn:focus-visible {
 .detail-file-search input { width: 140px; min-width: 0; padding: 2px 6px; font-size: 12px; }
 .detail-file-search button { display: flex; align-items: center; justify-content: center; min-height: 0; padding: 2px; background: transparent; border: none; opacity: .75; }
 .detail-file-search button:hover { background: var(--versiondock-hover); opacity: 1; }
+
+/* Shared icon actions: the hover is distinct even on an already hovered row.
+   Important feedback rules also cover legacy caller inline backgrounds. */
+:root {
+  --versiondock-icon-hover-background: color-mix(in srgb, var(--versiondock-text) 18%, var(--versiondock-bg));
+  --versiondock-icon-pressed-background: color-mix(in srgb, var(--versiondock-text) 26%, var(--versiondock-bg));
+}
+:where(.icon-button) {
+  width: var(--versiondock-icon-button-size, 22px);
+  height: var(--versiondock-icon-button-size, 22px);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+}
+/* Override the global native-button inheritance without changing caller layout. */
+.icon-button { color: var(--versiondock-muted); }
+.icon-button:not(:disabled):is(:hover, :focus-visible),
+.icon-button:not(:disabled):is(.selected, .active, [aria-pressed="true"], [aria-expanded="true"]) {
+  background: var(--versiondock-icon-hover-background) !important;
+  color: var(--versiondock-selection-foreground) !important;
+}
+.icon-button:not(:disabled):active {
+  background: var(--versiondock-icon-pressed-background) !important;
+  color: var(--versiondock-selection-foreground) !important;
+}
+.icon-button:focus-visible {
+  outline: 1px solid var(--versiondock-selection-border);
+  outline-offset: -1px;
+}
+.icon-button:disabled {
+  cursor: default;
+  background: transparent !important;
+  opacity: .45 !important;
+}
+
+.commit-row-actions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }

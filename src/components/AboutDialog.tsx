@@ -1,3 +1,4 @@
+import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
@@ -151,7 +152,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
               </div>
             </div>
           </div>
-          <button
+          <IconButton
             ref={closeButtonRef}
             type="button"
             className="about-close-btn"
@@ -160,7 +161,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
             onClick={onClose}
           >
             <Codicon name="close" />
-          </button>
+          </IconButton>
         </header>
 
         <nav className="about-tabs" role="tablist">
