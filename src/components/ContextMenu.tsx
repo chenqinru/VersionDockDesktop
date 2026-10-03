@@ -22,6 +22,8 @@ interface Props {
   x: number;
   y: number;
   header?: string;
+  anchorRect?: Pick<DOMRect, 'top' | 'bottom' | 'left' | 'right'>;
+  placement?: 'above' | 'below';
   variant?: 'gitLog' | 'branchSidebar';
   preserveSelection?: boolean;
   items: ContextMenuEntry[];
@@ -29,9 +31,9 @@ interface Props {
   onClose: () => void;
 }
 
-export function ContextMenu({ x, y, header, variant, preserveSelection = false, items, onSelect, onClose }: Props) {
+export function ContextMenu({ x, y, header, anchorRect, placement = 'below', variant, preserveSelection = false, items, onSelect, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number; maxHeight?: number } | null>(null);
 
   useLayoutEffect(() => {
     const sel = window.getSelection();
@@ -47,14 +49,29 @@ export function ContextMenu({ x, y, header, variant, preserveSelection = false, 
     const margin = 6;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const posX = x + w > vw - margin ? Math.max(margin, vw - w - margin) : Math.max(margin, x);
-    const posY = y + h > vh - margin ? Math.max(margin, vh - h - margin) : Math.max(margin, y);
-    setPos({ x: posX, y: posY });
-  }, [x, y, header, preserveSelection]);
+    if (anchorRect) {
+      const gap = 4;
+      const above = Math.max(0, anchorRect.top - gap - margin);
+      const below = Math.max(0, vh - anchorRect.bottom - gap - margin);
+      const preferAbove = placement === 'above';
+      const openAbove = preferAbove ? above >= h || above >= below : !(below >= h || below >= above);
+      const space = openAbove ? above : below;
+      setPos({
+        x: Math.max(margin, Math.min(anchorRect.right - w, vw - w - margin)),
+        y: openAbove ? Math.max(margin, anchorRect.top - gap - Math.min(h, space)) : anchorRect.bottom + gap,
+        maxHeight: space,
+      });
+    } else {
+      const posX = x + w > vw - margin ? Math.max(margin, vw - w - margin) : Math.max(margin, x);
+      const posY = y + h > vh - margin ? Math.max(margin, vh - h - margin) : Math.max(margin, y);
+      setPos({ x: posX, y: posY });
+    }
+  }, [x, y, header, preserveSelection, anchorRect, placement, items]);
 
   useEffect(() => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     const handler = (e: MouseEvent) => {
+      if (anchorRect && e.clientX >= anchorRect.left && e.clientX <= anchorRect.right && e.clientY >= anchorRect.top && e.clientY <= anchorRect.bottom) return;
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     const keyHandler = (e: KeyboardEvent) => {
@@ -81,15 +98,17 @@ export function ContextMenu({ x, y, header, variant, preserveSelection = false, 
     document.addEventListener('visibilitychange', visibilityHandler);
     window.addEventListener('blur', blurHandler);
     window.addEventListener('pagehide', blurHandler);
+    if (anchorRect) window.addEventListener('resize', blurHandler);
     return () => {
       document.removeEventListener('mousedown', handler, true);
       document.removeEventListener('keydown', keyHandler);
       document.removeEventListener('visibilitychange', visibilityHandler);
       window.removeEventListener('blur', blurHandler);
       window.removeEventListener('pagehide', blurHandler);
+      if (anchorRect) window.removeEventListener('resize', blurHandler);
       trigger?.focus();
     };
-  }, [onClose]);
+  }, [onClose, anchorRect]);
 
   const style: React.CSSProperties = {
     position: 'fixed',
@@ -98,6 +117,9 @@ export function ContextMenu({ x, y, header, variant, preserveSelection = false, 
     zIndex: 99999,
     visibility: pos ? 'visible' : 'hidden',
     pointerEvents: pos ? 'auto' : 'none',
+    maxHeight: pos?.maxHeight,
+    overflowY: anchorRect ? 'auto' : undefined,
+    boxSizing: anchorRect ? 'border-box' : undefined,
     userSelect: 'none',
     WebkitUserSelect: 'none',
   };

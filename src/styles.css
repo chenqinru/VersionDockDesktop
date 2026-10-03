@@ -3210,11 +3210,28 @@ button.conflict-action-item {
 .split-button > button { height: 28px; display: flex; align-items: center; justify-content: center; gap: 5px; }
 .split-button > button:first-child { min-width: 72px; padding: 0 9px; }
 .split-button > button:nth-child(2) { width: 25px; padding: 0; border-left: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
-.save-action { color: var(--versiondock-text); background: var(--versiondock-surface-alt); }
-.commit-action { min-width: 0; flex: 1; color: white; background: var(--versiondock-accent-bg); border-color: transparent; }
+.action-split {
+  --split-background: var(--versiondock-surface-alt);
+  --split-foreground: var(--versiondock-text);
+  --split-hover-background: var(--versiondock-hover);
+  color: var(--split-foreground);
+  background: var(--split-background);
+}
+.action-split > button { background: transparent; color: inherit; border-radius: 0; }
+.action-split > button:not(:disabled):is(:hover, :focus-visible, :active) { background: transparent; color: inherit; }
+.action-split:has(> button:not(:disabled)):is(:hover, :focus-within),
+.action-split:has(> .split-button-more[aria-expanded="true"]) { background: var(--split-hover-background); }
+.action-split > .split-button-more { flex: 0 0 auto; }
+.action-split > button:focus-visible { outline: 1px solid var(--versiondock-selection-border); outline-offset: -2px; }
+.action-split:has(> button:first-child:disabled) { opacity: .4; }
+.action-split > button:disabled { opacity: 1; }
+.commit-action {
+  --split-background: var(--versiondock-accent-bg);
+  --split-foreground: var(--vscode-button-foreground, #fff);
+  --split-hover-background: var(--vscode-button-hoverBackground);
+  min-width: 0; flex: 1; border-color: transparent;
+}
 .commit-action > button:first-child { flex: 1; }
-.split-button:has(> button:first-child:disabled) { opacity: .4; }
-.split-button button:disabled { opacity: 1; }
 .split-menu { position: absolute; z-index: 130; left: 0; bottom: 34px; min-width: 165px; padding: 3px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 18px #0008; }
 .split-menu.right { left: auto; right: 0; }
 .split-menu button { width: 100%; height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 7px; text-align: left; }
@@ -6666,61 +6683,27 @@ button.notification-item-action-btn:focus-visible {
 .sync-selected-pill > span { min-width: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sync-selected-pill > small { display: inline-flex; align-items: center; gap: 1px; padding: 0 3px; border-radius: 7px; font-size: 9px; background: color-mix(in srgb, currentColor 16%, transparent); }
 .sync-selected-pill > small.incoming { color: var(--versiondock-info); }
-.sync-primary-split { width: 100%; display: flex; overflow: hidden; border-radius: 4px; border: 1px solid var(--vscode-button-border, transparent); }
-.sync-primary-action,
-.sync-primary-more {
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--vscode-button-foreground, #fff) !important;
-  background: var(--vscode-button-background, var(--versiondock-accent-bg));
-  border: 0;
-  cursor: pointer;
-  transition: background-color 80ms ease, transform 60ms ease, filter 60ms ease;
+.sync-primary-split {
+  --split-background: var(--vscode-button-background, var(--versiondock-accent-bg));
+  --split-foreground: var(--vscode-button-foreground, #fff);
+  --split-hover-background: var(--vscode-button-hoverBackground);
+  width: 100%; display: flex; overflow: hidden; border-radius: 4px;
+  border: 1px solid var(--vscode-button-border, transparent);
+}
+.sync-primary-action, .sync-primary-more {
+  height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0;
 }
 .sync-primary-action { flex: 1; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; }
-.sync-primary-more { width: 28px; flex: 0 0 28px; border-left: 1px solid color-mix(in srgb, white 24%, transparent); }
-
-.sync-primary-action.pull,
-.sync-primary-more.pull {
-  background: color-mix(in srgb, var(--versiondock-info, #1f6feb) 85%, #0d419d 15%);
-  color: #fff !important;
+.sync-primary-split > .sync-primary-more { width: 28px; flex: 0 0 28px; padding: 0; border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent); }
+.sync-primary-split.pull {
+  --split-background: color-mix(in srgb, var(--versiondock-info, #1f6feb) 85%, #0d419d 15%);
+  --split-foreground: #fff;
+  --split-hover-background: color-mix(in srgb, var(--split-background) 90%, #fff 10%);
 }
-.sync-primary-action.push,
-.sync-primary-more.push {
-  background: color-mix(in srgb, var(--versiondock-success, #238636) 75%, #196c2e 25%);
-  color: #fff !important;
-}
-
-.sync-primary-action:not(:disabled):hover,
-.sync-primary-more:not(:disabled):hover {
-  background: var(--vscode-button-hoverBackground, color-mix(in srgb, #fff 10%, var(--versiondock-accent-bg))) !important;
-  color: var(--vscode-button-foreground, #fff) !important;
-  opacity: 1 !important;
-}
-
-.sync-primary-action.pull:not(:disabled):hover,
-.sync-primary-more.pull:not(:disabled):hover {
-  background: color-mix(in srgb, var(--versiondock-info, #1f6feb) 85%, #0d419d 15%) !important;
-  filter: brightness(1.08);
-  color: #fff !important;
-  opacity: 1 !important;
-}
-
-.sync-primary-action.push:not(:disabled):hover,
-.sync-primary-more.push:not(:disabled):hover {
-  background: color-mix(in srgb, var(--versiondock-success, #238636) 75%, #196c2e 25%) !important;
-  filter: brightness(1.08);
-  color: #fff !important;
-  opacity: 1 !important;
-}
-
-.sync-primary-action:not(:disabled):active,
-.sync-primary-more:not(:disabled):active {
-  filter: brightness(0.9) !important;
-  transform: translateY(1px) scale(0.995);
+.sync-primary-split.push {
+  --split-background: color-mix(in srgb, var(--versiondock-success, #238636) 75%, #196c2e 25%);
+  --split-foreground: #fff;
+  --split-hover-background: color-mix(in srgb, var(--split-background) 90%, #fff 10%);
 }
 .repository-group-main > .repository-count { flex: 0 0 auto; min-width: 18px; height: 16px; padding: 0 5px; color: var(--versiondock-badge-foreground, #fff); background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; }
 .submodule-row { min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--versiondock-border-soft); }
@@ -6751,7 +6734,7 @@ button.notification-item-action-btn:focus-visible {
 .submodule-row-actions > button.primary { padding: 2px 8px; height: 22px; font-size: 11px; color: var(--versiondock-button-foreground, #fff); background: var(--versiondock-accent-bg); }
 .submodule-row-actions > button.primary.conflict { color: #000; background: var(--versiondock-warning); }
 .submodule-diff-summary { margin: 7px 0 0 21px; padding: 8px; max-height: 180px; overflow: auto; color: var(--versiondock-muted); background: var(--versiondock-bg); border: 1px solid var(--versiondock-border); border-radius: 4px; font: 11px/1.45 var(--versiondock-code); white-space: pre-wrap; }
-.sync-panel button:disabled,
+.sync-panel button:disabled:not(.action-split > button),
 .submodule-panel button:disabled { opacity: .45; cursor: default; }
 @media (max-width: 720px) {
   .submodule-row-actions button.primary > span { display: none; }
@@ -7308,7 +7291,7 @@ button.notification-item-action-btn:focus-visible {
 .commit-panel {
   --vscode-toolbar-hoverBackground: color-mix(in srgb, var(--versiondock-text) 12%, transparent);
 }
-.commit-panel button:where(:not(.sync-direction-pill):not(:disabled)):is(:hover, :focus-visible) {
+.commit-panel button:where(:not(.sync-direction-pill):not(.action-split > button):not(:disabled)):is(:hover, :focus-visible) {
   background: var(--panel-button-hover, var(--vscode-toolbar-hoverBackground, var(--versiondock-hover))) !important;
 }
 .commit-panel button:where(:not(.sync-primary-action):not(.sync-primary-more):not(.sync-direction-pill):not(.commit-tabs button):not(.split-button > button)):is(:hover, :focus-visible) {
@@ -7326,19 +7309,8 @@ button.notification-item-action-btn:focus-visible {
   border-radius: 0;
 }
 .commit-form textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--versiondock-muted)); opacity: 1; }
-.commit-panel .commit-action > button,
-.commit-panel .sync-primary-action,
-.commit-panel .sync-primary-more,
 .commit-panel button.primary {
   --panel-button-hover: var(--vscode-button-hoverBackground);
-}
-.commit-panel .sync-primary-action.push,
-.commit-panel .sync-primary-more.push {
-  --panel-button-hover: color-mix(in srgb, var(--versiondock-success) 75%, #fff 25%);
-}
-.commit-panel .sync-primary-action.pull,
-.commit-panel .sync-primary-more.pull {
-  --panel-button-hover: color-mix(in srgb, var(--versiondock-info) 75%, #fff 25%);
 }
 .commit-panel button.danger { --panel-button-hover: color-mix(in srgb, var(--versiondock-danger) 80%, #fff 20%); }
 .repository-group-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; margin-left: auto; }
@@ -7379,12 +7351,12 @@ button.notification-item-action-btn:focus-visible {
 }
 /* Override the global native-button inheritance without changing caller layout. */
 .icon-button { color: var(--versiondock-muted); }
-.icon-button:not(:disabled):is(:hover, :focus-visible),
-.icon-button:not(:disabled):is(.selected, .active, [aria-pressed="true"], [aria-expanded="true"]) {
+.icon-button:not(.split-button-more):not(:disabled):is(:hover, :focus-visible),
+.icon-button:not(.split-button-more):not(:disabled):is(.selected, .active, [aria-pressed="true"], [aria-expanded="true"]) {
   background: var(--versiondock-icon-hover-background) !important;
   color: var(--versiondock-selection-foreground) !important;
 }
-.icon-button:not(:disabled):active {
+.icon-button:not(.split-button-more):not(:disabled):active {
   background: var(--versiondock-icon-pressed-background) !important;
   color: var(--versiondock-selection-foreground) !important;
 }
@@ -7392,7 +7364,7 @@ button.notification-item-action-btn:focus-visible {
   outline: 1px solid var(--versiondock-selection-border);
   outline-offset: -1px;
 }
-.icon-button:disabled {
+.icon-button:not(.split-button-more):disabled {
   cursor: default;
   background: transparent !important;
   opacity: .45 !important;

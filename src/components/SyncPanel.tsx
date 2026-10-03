@@ -1,3 +1,4 @@
+import { SplitButtonMore } from './SplitButtonMore';
 import { generateHistoricalMessage, useAiStore } from '../ai/aiStore';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -552,7 +553,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
   const speedSearch = useSpeedSearch('sync', active);
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const [filters, setFilters] = useState<Record<string, DirectionFilter>>({});
-  const [footerMenu, setFooterMenu] = useState<{ x: number; y: number }>();
+  const [footerMenu, setFooterMenu] = useState<DOMRect>();
   const [collapsedRepoIds, setCollapsedRepoIds] = useState<Set<string>>(() => new Set());
   const lastExpansionSequence = useRef(0);
   const lastSelectionSequence = useRef(0);
@@ -732,11 +733,11 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
           </span>;
         })}
       </div>}
-      <div className="sync-primary-split">
+      <div className={`sync-primary-split action-split ${mainAction.tone}`}>
         <button className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} onClick={() => void runAction(() => pullableRepos.length || pushableRepos.length ? syncSelected() : fetchAll())}><Codicon name={mainAction.icon} />{mainAction.label}</button>
-        {footerItems.length > 0 && <IconButton className={`sync-primary-more ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} title={t('More Actions')} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu({ x: Math.max(6, rect.right - 190), y: rect.top }); }}><Codicon name="chevron-down" /></IconButton>}
+        {footerItems.length > 0 && <SplitButtonMore className="sync-primary-more" disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} title={t('More Actions')} aria-expanded={Boolean(footerMenu)} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu(current => current ? undefined : rect); }} />}
       </div>
-      {footerMenu && <ContextMenu x={footerMenu.x} y={footerMenu.y} items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}
+      {footerMenu && <ContextMenu x={footerMenu.left} y={footerMenu.top} anchorRect={footerMenu} placement="above" items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}
     </footer>
   </div>;
 }
