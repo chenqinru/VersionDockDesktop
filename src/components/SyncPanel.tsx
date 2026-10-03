@@ -216,7 +216,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
     else if (id === 'drop') void rewrite('drop');
   };
 
-  return <div className={`sync-timeline-card ${selected ? 'selected' : ''}`}>
+  return <div data-density-card="" className={`sync-timeline-card ${selected ? 'selected' : ''}`}>
     <div data-sync-commit-row="" className="sync-timeline-row" role="button" tabIndex={0} onClick={(event) => { if (event.ctrlKey || event.metaKey) onSelected(key, true); else { onClearSelection(); void toggle(); } }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClearSelection(); void toggle(); } }} onContextMenu={(event) => { event.preventDefault(); if (!selected) onSelected(key, false); setContext({ x: event.clientX, y: event.clientY }); }}>
       <div className="sync-commit-left">
         <span className={`sync-direction-icon ${item.kind}`} title={t(item.kind === 'incoming' ? 'Incoming' : 'Outgoing')}><Codicon name={item.kind === 'incoming' ? 'arrow-down' : 'arrow-up'} /></span>
@@ -235,7 +235,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
         <IconButton type="button" title={t('Open in Log')} onClick={(event) => { event.stopPropagation(); openLog(); }}><Codicon name="go-to-file" /></IconButton>
       </span>
     </div>
-    {expanded && <div className="sync-commit-detail">
+    {expanded && <div data-density-card-body="" className="sync-commit-detail">
       {detailError && !currentDetail ? <div className="sync-detail-error" role="alert"><span>{detailError}</span><button type="button" onClick={() => setDetailRetry((current) => current + 1)}>{t('Retry')}</button></div>
         : isMerge && !loading && currentDetail && currentDetail.files.length === 0
         ? <div className="sync-merge-empty"><Codicon name="info" />{t('No changes relative to first parent')}</div>

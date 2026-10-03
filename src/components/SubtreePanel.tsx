@@ -211,8 +211,8 @@ function SubtreeRow({
   const contextItems = useMemo(() => getRowContextMenuItems(t), [t]);
 
   return (
-    <div style={row.root}>
-      <div
+    <div data-density-card="" style={row.root}>
+      <div data-density-row=""
         style={{
           ...row.header,
           background: hovered ? 'var(--vscode-list-hoverBackground, var(--versiondock-hover))' : 'transparent',
@@ -331,7 +331,7 @@ function RepoSection({
   const projectColor = readableAccentColor(meta.color || '#20b2aa');
 
   return (
-    <div className="subtree-repo-section" style={css.repoSection}>
+    <div data-density-repository="" className="subtree-repo-section" style={css.repoSection}>
       <RepositoryGroup name={meta.name} color={projectColor} extras={summary && <span style={css.repoStatus}>{summary}</span>} actions={multiRepo ? (
           <div style={css.headerActions}>
             <IconButton

@@ -141,8 +141,8 @@ function WorktreeRow({
   const branchClr = entry.isDetached ? headColor() : branchColor(branchLabel);
 
   return (
-    <div style={row.root}>
-      <div
+    <div data-density-card="" style={row.root}>
+      <div data-density-row=""
         style={{ ...row.header, background: hovered ? 'var(--vscode-list-hoverBackground, var(--versiondock-hover))' : 'transparent' }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -285,7 +285,7 @@ function RepoSection({
   const projectColor = readableAccentColor(repo.repoColor || '#4EC9B0');
 
   return (
-    <div style={css.repoSection}>
+    <div data-density-repository="" style={css.repoSection}>
       <RepositoryGroup name={repo.repoName} color={projectColor} actions={multiRepo ? (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '2px' }}>
             {hasPrunable && onPrune && (

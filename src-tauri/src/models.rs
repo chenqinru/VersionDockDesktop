@@ -1627,6 +1627,9 @@ pub struct DesktopSettings {
     pub theme: ThemePreference,
     pub language: LanguagePreference,
     pub ui_font_size: UiFontSizePreference,
+    #[serde(default)]
+    #[specta(optional)]
+    pub layout_density: LayoutDensity,
     pub changes_display_mode: ChangesDisplayMode,
     pub default_commit_action: DefaultCommitAction,
     pub default_save_action: DefaultSaveAction,
@@ -1747,6 +1750,7 @@ impl Default for DesktopSettings {
             theme: ThemePreference::System,
             language: LanguagePreference::System,
             ui_font_size: UiFontSizePreference::Standard,
+            layout_density: LayoutDensity::Comfortable,
             file_icon_theme: FileIconThemePreference::Material,
             changes_display_mode: ChangesDisplayMode::Simplified,
             default_commit_action: DefaultCommitAction::Commit,
@@ -2023,6 +2027,14 @@ pub enum LanguagePreference {
     System,
     ZhCn,
     En,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LayoutDensity {
+    #[default]
+    Comfortable,
+    Compact,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]

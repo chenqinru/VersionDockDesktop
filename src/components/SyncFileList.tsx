@@ -163,6 +163,7 @@ function SyncFileRow({ file, depth, onOpenFile, potentialConflicts }: {
 
   return (
     <div
+      data-density-row=""
       style={styles.fileRow(depth, hovered)}
       title={potentialConflict ? `${file.path} (${t('Potential conflict: this file has local uncommitted modifications')})` : file.path}
       onClick={() => onOpenFile(file)}
@@ -204,7 +205,7 @@ function SyncFileTreeNode({ node, depth, collapsed, onToggle, onOpenFile, potent
   const open = !collapsed[node.path];
   return (
     <div>
-      <div style={styles.dirRow(depth)} onClick={() => onToggle(node.path)} title={node.path}>
+      <div data-density-row="" style={styles.dirRow(depth)} onClick={() => onToggle(node.path)} title={node.path}>
         <Codicon name={open ? 'chevron-down' : 'chevron-right'} style={styles.folderChevron} />
         <FileIcon name={node.name} folder open={open} />
         <span style={styles.folderName}>{node.name}</span>

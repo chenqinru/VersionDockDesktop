@@ -1,8 +1,9 @@
+import { useLayoutDensity } from './layoutDensity';
 import { AiComposerWorkspace } from './components/AiComposerWorkspace';
 import { AiCodeReviewWorkspace } from './components/AiCodeReviewWorkspace';
 import { aiWorkspaceChanged } from './ai/aiStore';
 import { useEffectiveTheme } from './theme/useEffectiveTheme';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { WorkspaceChooser } from './components/WorkspaceChooser';
 import { CommitPanel } from './components/CommitPanel';
@@ -78,6 +79,7 @@ export function App() {
   useEffectiveTheme();
   const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
   const languagePreference = bootstrap?.state.settings?.language ?? bootstrap?.state.language ?? 'system';
+  const layoutDensity = useLayoutDensity();
   const uiFontSize = bootstrap?.state.settings?.uiFontSize ?? bootstrap?.state.uiFontSize ?? 'standard';
   const language = resolveLanguage(languagePreference);
   const t = useMemo(() => createTranslator(language, pluginMessages), [language, pluginMessages]);
@@ -119,6 +121,10 @@ export function App() {
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, [bootstrap?.state.settings?.autoFetchOnFocus, ready, sync]);
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.density = layoutDensity;
+  }, [layoutDensity]);
 
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');

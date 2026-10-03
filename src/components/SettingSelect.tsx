@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 
 export function SettingSelect({
@@ -18,6 +18,7 @@ export function SettingSelect({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{ above: boolean; maxHeight: number }>({ above: false, maxHeight: 220 });
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | globalThis.MouseEvent) => {
@@ -28,6 +29,28 @@ export function SettingSelect({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const dropdown = dropdownRef.current;
+    const menu = dropdown?.querySelector<HTMLElement>('[role="listbox"]');
+    if (!dropdown || !menu) return;
+    const rect = dropdown.getBoundingClientRect();
+    let top = 6;
+    let bottom = window.innerHeight - 6;
+    for (let parent = dropdown.parentElement; parent; parent = parent.parentElement) {
+      if (/(auto|scroll|hidden)/.test(getComputedStyle(parent).overflowY)) {
+        const bounds = parent.getBoundingClientRect();
+        top = Math.max(top, bounds.top);
+        bottom = Math.min(bottom, bounds.bottom);
+      }
+    }
+    const above = Math.max(0, rect.top - top - 4);
+    const below = Math.max(0, bottom - rect.bottom - 4);
+    const height = Math.min(220, menu.scrollHeight || menu.offsetHeight);
+    const openAbove = below < height && above > below;
+    setMenuPosition({ above: openAbove, maxHeight: Math.min(220, openAbove ? above : below) });
+  }, [isOpen, options]);
 
   const selectedOption = options.find(([k]) => k === value);
   const selectedText = selectedOption ? selectedOption[1] : value;
@@ -79,7 +102,7 @@ export function SettingSelect({
         </button>
 
         {isOpen && (
-          <div className="settings-custom-select-menu" role="listbox" aria-label={label} onKeyDown={(event) => {
+          <div className="settings-custom-select-menu" data-placement={menuPosition.above ? 'above' : 'below'} style={{ maxHeight: menuPosition.maxHeight }} role="listbox" aria-label={label} onKeyDown={(event) => {
             if (event.key === 'Escape') { event.stopPropagation(); setIsOpen(false); dropdownRef.current?.querySelector<HTMLButtonElement>('button')?.focus(); }
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
               event.preventDefault();

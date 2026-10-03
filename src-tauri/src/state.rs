@@ -1061,6 +1061,47 @@ mod tests {
             .is_err());
     }
 
+    #[tokio::test]
+    async fn layout_density_defaults_for_existing_settings_and_survives_restart() {
+        use crate::models::LayoutDensity;
+        let root = tempdir().unwrap();
+        let initial = AppState::load(root.path().to_path_buf());
+        let mut legacy = serde_json::to_value(initial.app.read().await.clone()).unwrap();
+        legacy["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("layoutDensity");
+        std::fs::write(
+            root.path().join("state.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+        let state = AppState::load(root.path().to_path_buf());
+        assert_eq!(
+            state.app.read().await.settings.layout_density,
+            LayoutDensity::Comfortable
+        );
+        let before_layout = serde_json::to_value(&state.app.read().await.layout).unwrap();
+        let mut incoming = state.app.read().await.settings.clone();
+        incoming.layout_density = LayoutDensity::Compact;
+        let result = state
+            .update_settings(incoming, Some(&["layoutDensity".into()]))
+            .await
+            .unwrap();
+        assert!(!result.effects.rescan_workspace);
+        assert!(!result.effects.reload_history);
+        assert!(!result.effects.restart_auto_refresh);
+        let restarted = AppState::load(root.path().to_path_buf());
+        assert_eq!(
+            restarted.app.read().await.settings.layout_density,
+            LayoutDensity::Compact
+        );
+        assert_eq!(
+            serde_json::to_value(&restarted.app.read().await.layout).unwrap(),
+            before_layout
+        );
+    }
+
     #[test]
     fn migrates_legacy_state_and_normalizes_settings() {
         let legacy = br##"{

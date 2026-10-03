@@ -1,3 +1,4 @@
+import { useLayoutDensity, historyDensityMetrics } from '../layoutDensity';
 import { AiCommitComposerIcon } from './AiCommitComposerIcon';
 import { generateHistoricalMessage, openCommitExplanation, useAiStore } from '../ai/aiStore';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
@@ -181,6 +182,7 @@ function CommitList({
   onLoadMore?: () => void;
   singleRepository?: boolean;
 }) {
+  const density = historyDensityMetrics(useLayoutDensity());
   const { t } = useI18n();
   const parent = useRef<HTMLDivElement>(null);
   const repos = useAppStore((state) => state.snapshot?.repositories ?? []);
@@ -226,13 +228,15 @@ function CommitList({
   }, [commits, repoMap]);
   const multiRepo = !singleRepository && repos.length > 1;
   const anyExpanded = expandedRepoIds.size > 0;
-  const labelColWidth = multiRepo ? (anyExpanded ? 110 : 8) : 0;
+  const labelColWidth = multiRepo ? (anyExpanded ? 110 + density.stripInset : density.stripWidth + density.stripInset + density.labelGap) : 0;
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: commits.length,
     getScrollElement: () => parent.current,
     estimateSize: () => COMMIT_ROW_HEIGHT,
+    paddingStart: density.padding,
+    paddingEnd: density.padding,
     overscan: 14,
   });
   useEffect(() => {
@@ -307,7 +311,7 @@ function CommitList({
   const maxVisibleRefs = refsSpace < 80 ? 0 : refsSpace < 170 ? 1 : 2;
   const virtualItems = virtualizer.getVirtualItems();
   const scrollTop = virtualizer.scrollOffset ?? 0;
-  const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: index * COMMIT_ROW_HEIGHT }));
+  const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: density.padding + index * COMMIT_ROW_HEIGHT }));
   const contextSelection = (commit: CommitNode): CommitNode[] => selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
   const commitMenuRefs = (commit: CommitNode) => {
     const svn = repoKindById[commit.repoId] === 'svn';
@@ -522,11 +526,11 @@ function CommitList({
   return <div className="commit-list-frame"><div className="commit-list" ref={parent} onClick={() => { setContext(undefined); setPopover(undefined); }} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) { if (onLoadMore) onLoadMore(); else void loadHistory(false); } }}>
     <div className="commit-list-content" style={{ height: virtualizer.getTotalSize() }}>
       {multiRepo && repoBlocks.map((block) => {
-        const blockTopPx = block.start * COMMIT_ROW_HEIGHT;
+        const blockTopPx = density.padding + block.start * COMMIT_ROW_HEIGHT;
         const blockHeightPx = block.count * COMMIT_ROW_HEIGHT;
         const leadingGap = block.start > 0 ? BLOCK_GAP : 0;
         const top = blockTopPx + leadingGap;
-        const height = Math.max(0, blockHeightPx - leadingGap);
+        const height = Math.max(0, blockHeightPx - leadingGap - density.blockTrailingGap);
         const expanded = expandedRepoIds.has(block.repoId);
         const nameOffset = Math.min(Math.max(scrollTop - top, 0), Math.max(0, height - COMMIT_ROW_HEIGHT));
         return <button key={`${block.repoId}:${block.start}`} className={`repo-strip ${expanded ? 'expanded' : ''}`} style={{ top, height, '--repo-color': block.color, '--repo-name-offset': `${nameOffset}px` } as React.CSSProperties} onClick={() => onToggleRepoName(block.repoId)} title={block.name}><span className="repo-strip-bar" />{expanded && <strong>{block.name}</strong>}</button>;
@@ -835,7 +839,7 @@ export function HistoryWorkspace() {
         <MoreMenu open={moreOpen} onToggle={() => setMoreOpen((value) => !value)} onFetch={() => void fetchAndRefresh()} expanded={expandedRepoIds.size > 0 && expandedRepoIds.size === new Set(allHistory.map((commit) => commit.repoId)).size} onToggleExpanded={toggleRepoNames} showRepoNames={snapshotRepos.length > 1} />
       </div>
     </div>}
-    <div className="history-columns">
+    <div className={`history-columns${compareTarget ? ' compare-layout' : ''}`}>
       <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <IconButton className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></IconButton> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} refRepoIds={historyScope.repoIds} onRefFilter={selectSidebarRef} onCompare={openBranchComparison} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
       {!branchSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize branch sidebar')} aria-orientation="vertical" aria-valuemin={120} aria-valuemax={400} aria-valuenow={branchWidth} onPointerDown={resizeBranches} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('branches', Math.min(400, Math.max(120, branchWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />}
       <div className="log-pane">{compareTarget ? <BranchComparePanel

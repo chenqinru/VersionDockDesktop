@@ -611,7 +611,7 @@ export interface AppStore {
 const emptyState: AppStateSnapshot = {
   schemaVersion: 7,
   settings: {
-    theme: 'system', language: 'system', uiFontSize: 'standard', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
+    theme: 'system', language: 'system', uiFontSize: 'standard', layoutDensity: 'comfortable', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
     promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, autoFetchOnFocus: true, resetViewLocationsOnStartup: false,
     notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 4,
     ignoredFolders: ['.git', '.svn', '.hg', 'node_modules', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', 'target'],

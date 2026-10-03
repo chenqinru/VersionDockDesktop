@@ -1,0 +1,31 @@
+{
+  "passed": 26,
+  "checks": [
+    "comfortable-final density",
+    "comfortable-final .detail-file-row rendered",
+    "comfortable-final .detail-file-row inset and radius",
+    "comfortable-final .sync-commit-detail [data-density-row] rendered",
+    "comfortable-final .sync-commit-detail [data-density-row] inset and radius",
+    "compact-final density",
+    "compact-final .detail-file-row rendered",
+    "compact-final .detail-file-row inset and radius",
+    "compact-final .sync-commit-detail [data-density-row] rendered",
+    "compact-final .sync-commit-detail [data-density-row] inset and radius",
+    "final-dark-comfortable density",
+    "final-dark-comfortable .detail-file-row rendered",
+    "final-dark-comfortable .detail-file-row inset and radius",
+    "final-dark-comfortable .sync-commit-detail [data-density-row] rendered",
+    "final-dark-comfortable .sync-commit-detail [data-density-row] inset and radius",
+    "final-dark-compact density",
+    "final-dark-compact .detail-file-row rendered",
+    "final-dark-compact .detail-file-row inset and radius",
+    "final-dark-compact .sync-commit-detail [data-density-row] rendered",
+    "final-dark-compact .sync-commit-detail [data-density-row] inset and radius",
+    "collapsed branch gap",
+    "collapsed detail gap",
+    "active tab keeps selected hover background",
+    "changes file rows stay full inset width",
+    "comparison adds top breathing room",
+    "split action corner radius"
+  ]
+}

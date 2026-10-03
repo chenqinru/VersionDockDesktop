@@ -1,0 +1,133 @@
+/* Desktop translation of VersionDock's shared density rules. Compact uses the
+   existing workbench geometry; comfortable changes surfaces without row gaps. */
+:root[data-density="comfortable"] {
+  --density-card-radius: 8px;
+  --density-row-radius: 5px;
+  --density-inset: 6px;
+}
+
+/* Commit tabs, lists and input live in separate cards. */
+[data-density="comfortable"] .commit-panel { padding: 0 6px 1px; gap: 6px; box-sizing: border-box; border-right: 0; }
+[data-density="comfortable"] .commit-panel > .panel-toolbar { margin-inline: -6px; }
+[data-density="comfortable"] .commit-tabs { flex: 0 0 auto; height: auto; margin: 0; padding: 3px; gap: 2px; min-height: 34px; border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); }
+[data-density="comfortable"] .commit-tabs > button { border-radius: 6px; border: 1px solid transparent; }
+[data-density="comfortable"] .commit-tabs > button.active { --panel-button-hover: color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent); background: var(--panel-button-hover); border-color: color-mix(in srgb, var(--vscode-focusBorder) 32%, transparent); box-shadow: 0 1px 2px rgba(0, 0, 0, .1); }
+[data-density="comfortable"] .commit-tab-content { gap: 6px; }
+[data-density="comfortable"] .changes-scroll { padding-block: 4px 6px; border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); background: var(--versiondock-surface); }
+[data-density="comfortable"] .commit-form { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); }
+[data-density="comfortable"] .commit-form textarea { border-radius: 6px; }
+[data-density="comfortable"] .commit-form .ai-input-surface { --ai-input-radius: 6px; }
+[data-density="comfortable"] .commit-form .ai-generation-track { rx: 5.5px; ry: 5.5px; }
+[data-density="comfortable"] .split-menu { border-radius: 6px; }
+[data-density="comfortable"] .split-menu > button { border-radius: 4px; }
+[data-density="comfortable"] .commit-panel .action-split { border-radius: 6px; }
+[data-density="comfortable"] .commit-panel .action-split > button:first-child { border-radius: 5px 0 0 5px; }
+[data-density="comfortable"] .commit-panel .action-split > button:last-child { border-radius: 0 5px 5px 0; }
+[data-density="comfortable"] .commit-panel .action-split > button:only-child { border-radius: 5px; }
+
+/* Repository headers keep their project color; row selections remain neutral. */
+[data-density="comfortable"] :is(.repo-change-group, .repo-sub-group, .repository-group, .submodule-repo, .stash-repo, .subtree-repo-section) { margin-top: 6px; border-bottom: 0; }
+[data-density="comfortable"] :is(.repo-change-group, .repo-sub-group, .repository-group, .submodule-repo, .stash-repo, .subtree-repo-section):first-child { margin-top: 4px; }
+[data-density="comfortable"] :is(.repo-heading, .repository-group-header) { width: auto; margin: 0 6px; height: 28px; min-height: 28px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--repo-color, #888) 38%, transparent); background: color-mix(in srgb, var(--repo-color, #888) 12%, transparent); box-sizing: border-box; }
+[data-density="comfortable"] :is(.repo-heading, .repository-group-header):hover { background: color-mix(in srgb, var(--repo-color, #888) 20%, transparent); border-color: color-mix(in srgb, var(--repo-color, #888) 55%, transparent); }
+[data-density="comfortable"] :is(.file-row, .directory-row, .file-item, .folder-item, .sync-timeline-row) { margin-inline: var(--density-inset); width: auto; border-radius: var(--density-row-radius); box-sizing: border-box; }
+[data-density="comfortable"] :is(.vscode-section-header, .changelist-heading) { margin: 4px 6px 2px; height: 28px !important; min-height: 28px; border-radius: 6px; border: 1px solid var(--versiondock-border); border-left: 3px solid var(--versiondock-selection-border); box-sizing: border-box; }
+[data-density="comfortable"] .vscode-section { border-bottom: 0 !important; }
+[data-density="comfortable"] :is(.sync-repo-body, .stash-list, .submodule-repo-body) { padding-bottom: 6px; }
+
+/* Saved changes and auxiliary tabs use the same inset card boundaries. */
+[data-density="comfortable"] .commit-tab-content:not(.changes-tab-content):not(.sync-tab-content) { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); background: var(--versiondock-surface); padding-block: 4px 6px; box-sizing: border-box; }
+[data-density="comfortable"] .sync-panel { gap: 6px; }
+[data-density="comfortable"] .sync-repository-list { padding-block: 4px 6px; border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); }
+[data-density="comfortable"] .sync-footer { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); }
+
+/* Workbench panels and the resizers separating them. */
+[data-density="comfortable"] .main-workspace { padding-bottom: 6px; }
+[data-density="comfortable"] .resize-handle { width: 6px; flex-basis: 6px; margin-inline: 0; border-radius: 3px; }
+[data-density="comfortable"] .history-columns { padding: 0 6px 0 0; gap: 0; box-sizing: border-box; }
+[data-density="comfortable"] .history-columns.compare-layout { padding-top: 6px; }
+[data-density="comfortable"] .inner-resize-handle { width: 6px; flex-basis: 6px; margin: 0; border: 0; border-radius: 3px; }
+[data-density="comfortable"] :is(.branch-slot, .detail-slot) { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); overflow: hidden; box-sizing: border-box; }
+[data-density="comfortable"] .branch-sidebar { border: 0; }
+[data-density="comfortable"] .branch-sidebar-sticky-header { border-bottom: 1px solid var(--versiondock-border); border-radius: 7px 7px 0 0; }
+[data-density="comfortable"] .branch-slot-collapsed { margin-right: 6px; }
+[data-density="comfortable"] .detail-slot-collapsed { margin-left: 6px; }
+[data-density="comfortable"] :is(.branch-sidebar-expand, .detail-sidebar-expand) { width: 22px; height: 22px; margin-inline: 2px; border-radius: 3px; }
+[data-density="comfortable"] .branch-search { padding: 0 0 0 7px; gap: 4px; border: 1px solid var(--versiondock-border); border-radius: 6px; height: 26px; }
+[data-density="comfortable"] .branch-search input { height: 26px; padding-left: 0; border: 0; background: transparent; border-radius: 6px; }
+[data-density="comfortable"] .branch-sidebar-collapse { width: 26px; height: 26px; border: 0; border-radius: 6px; }
+[data-density="comfortable"] .branch-repo-list { padding: 0 0 3px; }
+[data-density="comfortable"] .branch-section-title { margin: 3px 6px 1px; height: auto; min-height: 23px; border: 0; border-radius: 4px; background: color-mix(in srgb, var(--versiondock-text) 4%, transparent); }
+[data-density="comfortable"] .branch-section-toggle { height: auto; min-height: 23px; padding: 2px 8px; border-radius: 4px; box-sizing: border-box; }
+[data-density="comfortable"] .branch-section-title:hover { background: color-mix(in srgb, var(--versiondock-text) 9%, transparent); }
+[data-density="comfortable"] :is(.branch-ref-row, .branch-repo-row) { width: auto; margin-inline: var(--density-inset); min-height: 22px; padding-top: 1px; padding-bottom: 1px; border-radius: 4px; box-sizing: border-box; }
+[data-density="comfortable"] .branch-ref-row { padding-left: 10px; padding-right: 6px; }
+[data-density="comfortable"] .branch-repo-row { padding-inline: 6px; }
+[data-density="comfortable"] .branch-ref-row.head { border-left: 0; position: relative; }
+[data-density="comfortable"] .branch-ref-row.head::before { content: ''; position: absolute; left: 3px; top: 4px; bottom: 4px; width: 3px; border-radius: 2px; background: var(--versiondock-accent); }
+[data-density="comfortable"] .branch-head-badge { border-radius: 3px; }
+[data-density="comfortable"] .log-pane { border-right: 0; }
+[data-density="comfortable"] .commit-list-frame { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); box-sizing: border-box; }
+[data-density="comfortable"] .commit-row { left: 4px; right: 4px; border-radius: var(--density-row-radius); }
+[data-density="comfortable"] .repo-strip { left: 4px; width: 4px; border-radius: 999px; }
+[data-density="comfortable"] .repo-strip.expanded { width: 110px; border-radius: 6px; border-left: 1px solid color-mix(in srgb, var(--repo-color) 35%, transparent); }
+[data-density="comfortable"] .repo-strip-bar { width: 4px; min-width: 4px; flex-basis: 4px; border-radius: 999px; }
+
+/* Search controls and their menus. Portals inherit density from the document. */
+[data-density="comfortable"] .history-filters { padding: 6px; border-bottom: 0; }
+[data-density="comfortable"] .history-filters :is(.filter-button, .history-path-chip, .more-button, .history-clear-filters) { border-radius: 6px; }
+[data-density="comfortable"] :is(.filter-popover, .history-more .more-menu) { border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .28); }
+
+/* File lists and commit details retain their operations and selected state. */
+[data-density="comfortable"] :is(.detail-files-title, .changes-files-toolbar) { padding: 5px 10px 6px; min-height: 32px; flex-basis: auto; height: auto; border-bottom: 0; position: relative; }
+[data-density="comfortable"] :is(.detail-files-title, .changes-files-toolbar)::after { content: ''; position: absolute; left: 6px; right: 6px; bottom: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
+[data-density="comfortable"] :is(.detail-file-row, .detail-root-label, .detail-tree-dir > button, .changes-file-row, .changes-directory-row) { width: calc(100% - 12px); margin-inline: var(--density-inset); border-radius: var(--density-row-radius); min-height: 22px; box-sizing: border-box; }
+[data-density="comfortable"] .detail-info-resize { height: 6px; flex-basis: 6px; position: relative; border-top: 0; }
+[data-density="comfortable"] .detail-info-resize::after { content: ''; position: absolute; left: 6px; right: 6px; top: 50%; transform: translateY(-50%); height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
+[data-density="comfortable"] .detail-info-resize:hover::after { background: var(--versiondock-selection-border); opacity: 1; }
+[data-density="comfortable"] .detail-summary { padding: 10px 12px 14px; gap: 6px; }
+[data-density="comfortable"] .detail-message-card { margin: 0 0 7px; border-radius: var(--density-card-radius); }
+[data-density="comfortable"] .detail-author-meta { margin: 2px 0 7px; gap: 8px; }
+[data-density="comfortable"] .detail-hash { padding: 1px 5px; border-radius: 4px; }
+[data-density="comfortable"] :is(.changes-files, .changes-preview) { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); overflow: hidden; }
+[data-density="comfortable"] .changes-columns { padding: 6px; gap: 6px; }
+[data-density="comfortable"] :is(.diff-workspace, .commit-detail-workspace, .changes-workspace, .ai-composer-page, .review-shell) { margin: 0 6px 0 0; height: 100%; border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); overflow: hidden; box-sizing: border-box; }
+
+/* Older saved-change views use inline layout styles. Restrict overrides to
+   explicit row/card semantics rather than every nested div or button. */
+[data-density="comfortable"] [data-density-row] { margin-inline: var(--density-inset) !important; width: auto !important; border-radius: var(--density-row-radius); box-sizing: border-box; }
+[data-density="comfortable"] [data-density-card] { position: relative; border-bottom: 0 !important; }
+[data-density="comfortable"] [data-density-card]::after { content: ''; position: absolute; left: 6px; right: 6px; bottom: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
+[data-density="comfortable"] [data-density-repository] { margin-top: 6px; border-bottom: 0 !important; }
+[data-density="comfortable"] [data-density-repository]:first-child { margin-top: 4px; }
+[data-density="comfortable"] [data-density-section] { margin: 4px 6px 2px; border-left: 3px solid var(--versiondock-selection-border); }
+[data-density="comfortable"] .branch-sidebar-header { height: auto; min-height: 32px; gap: 4px; padding: 5px 6px 1px; border-bottom: 0; }
+[data-density="comfortable"] .inner-resize-handle::after { content: ''; position: absolute; top: 4px; bottom: 4px; left: 2px; width: 2px; border-radius: 2px; background: transparent; }
+[data-density="comfortable"] .inner-resize-handle:hover::after { background: var(--versiondock-selection-border); }
+[data-density="comfortable"] .compare-workspace { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); box-sizing: border-box; overflow: hidden; }
+[data-density="comfortable"] .commit-tabs > button { padding: 3px 7px; }
+[data-density="comfortable"] .commit-tabs > button.active { padding-inline: 9px; }
+[data-density="comfortable"] .detail-refs > [data-ref-badge] { height: 19px !important; line-height: 17px !important; border-radius: 4px !important; padding-inline: 7px !important; font-size: 11px !important; }
+[data-density="comfortable"] .merge-parent-group { position: relative; margin-top: 2px; padding-top: 4px; border-top: 0; }
+[data-density="comfortable"] .merge-parent-group::before { content: ''; position: absolute; left: 6px; right: 6px; top: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
+[data-density="comfortable"] :is(.repo-change-group, .repo-sub-group):has(.file-row, .file-item, .sync-timeline-row) { position: relative; padding-bottom: 7px; }
+[data-density="comfortable"] :is(.repo-change-group, .repo-sub-group):has(.file-row, .file-item, .sync-timeline-row)::after { content: ''; position: absolute; left: 6px; right: 6px; bottom: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
+[data-density="comfortable"] :is(.branch-working-file-row, .branch-working-directory-row, .merge-parent-row) { width: calc(100% - 12px); margin-inline: var(--density-inset); border-radius: var(--density-row-radius); }
+[data-density="comfortable"] :is(.filter-options label, .history-more .more-menu > button) { width: auto; margin: 1px 4px; border-radius: 4px; }
+[data-density="comfortable"] .history-filters .commit-search { border-radius: 6px; }
+[data-density="comfortable"] .repo-strip strong { left: 4px; }
+[data-density="comfortable"] [data-density-card-body] { position: relative; border-top: 0 !important; }
+[data-density="comfortable"] [data-density-card-body]::before { content: ''; position: absolute; left: 6px; right: 6px; top: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
+
+/* Keep feedback on the inset row, while card dividers span the common 6px edges. */
+[data-density="comfortable"] .sync-timeline-card.selected { background: transparent; }
+[data-density="comfortable"] .sync-timeline-card.selected > .sync-timeline-row { background: var(--versiondock-selected); }
+[data-density="comfortable"] .submodule-row { padding: 0; }
+[data-density="comfortable"] .submodule-row-main { min-height: 42px; padding: 6px 10px; }
+[data-density="comfortable"] .submodule-row:is(:hover, .selected, .context-active) { background: transparent; }
+[data-density="comfortable"] .submodule-row:hover > .submodule-row-main { background: var(--versiondock-hover); }
+[data-density="comfortable"] .submodule-row.selected > .submodule-row-main { background: var(--versiondock-selection-background); }
+[data-density="comfortable"] .submodule-row.context-active > .submodule-row-main { background: var(--vscode-list-inactiveSelectionBackground); }
+[data-density="comfortable"] :is(.vscode-section-header, .changelist-heading) { padding-block: 0; }
+[data-density="comfortable"] :is(.file-row, .directory-row, .file-item, .folder-item, .sync-timeline-row, .branch-ref-row, .branch-repo-row, .commit-row, .detail-file-row, .detail-root-label, .detail-tree-dir > button, .changes-file-row, .changes-directory-row, [data-density-row], .filter-options label, .history-more .more-menu > button) { transition: background .12s ease, color .12s ease; }
+[data-density="comfortable"] :is(.repo-heading, .repository-group-header, .vscode-section-header, .changelist-heading, .filter-button, .history-path-chip) { transition: background .12s ease, border-color .12s ease; }

@@ -862,6 +862,7 @@ export type DesktopSettings = {
 	theme: ThemePreference,
 	language: LanguagePreference,
 	uiFontSize: UiFontSizePreference,
+	layoutDensity?: LayoutDensity,
 	changesDisplayMode: ChangesDisplayMode,
 	defaultCommitAction: DefaultCommitAction,
 	defaultSaveAction: DefaultSaveAction,
@@ -1070,6 +1071,8 @@ export type LargeFileInfo = {
 	sizeBytes: number | null,
 	sizeFormatted: string,
 };
+
+export type LayoutDensity = "comfortable" | "compact";
 
 export type LayoutState = {
 	panelSizes: PanelSizes,

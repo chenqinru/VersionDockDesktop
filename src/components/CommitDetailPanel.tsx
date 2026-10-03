@@ -1,5 +1,5 @@
 import { AiExplanation } from './AiExplanation';
-import { openCommitExplanation, useAiStore } from '../ai/aiStore';
+import { useAiStore } from '../ai/aiStore';
 import { AiCommitComposerIcon } from './AiCommitComposerIcon';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -1527,7 +1527,6 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
             {selectedCommits.length > 1 ? t('Aggregated commit selection') : repoMap.get(selectedPrimary?.repoId ?? '')?.meta.name}
           </span>
           <div className="detail-actions">
-            <IconButton title={t('AI Explain')} onClick={() => void openCommitExplanation(selectedCommits)}><Codicon name="sparkle" /></IconButton>
             <IconButton type="button" title={t('Open Commit Detail')} onClick={openCommitDetail}><Codicon name="open-preview" /></IconButton>
             <IconButton type="button" title={t('Open Changes')} disabled={!canOpenChanges} onClick={openChanges}><Codicon name="diff-multiple" /></IconButton>
             <IconButton type="button" title={messagesExpandedByDefault ? t('Collapse commit messages by default') : t('Expand commit messages by default')} aria-pressed={messagesExpandedByDefault} onClick={toggleAllMessages}><Codicon name={messagesExpandedByDefault ? 'collapse-all' : 'expand-all'} /></IconButton>

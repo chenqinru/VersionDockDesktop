@@ -47,6 +47,20 @@ afterEach(() => {
 });
 
 describe('SettingsPanel', () => {
+  it('changes layout density immediately and persists it from settings search', async () => {
+    const { commands } = renderPanel();
+    const select = screen.getByRole('combobox', { name: 'Layout density' });
+    expect(select).toHaveValue('comfortable');
+    fireEvent.change(select, { target: { value: 'compact' } });
+    await vi.waitFor(() => expect(commands.some(command => command.type === 'updateSettings' && command.payload.settings.layoutDensity === 'compact')).toBe(true));
+    expect(useAppStore.getState().bootstrap?.state.settings?.layoutDensity).toBe('compact');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'comfortable' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Layout density' }), { target: { value: 'comfortable' } });
+    await vi.waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.layoutDensity).toBe('comfortable'));
+    const update = commands.filter(command => command.type === 'updateSettings').at(-1);
+    expect(update?.type === 'updateSettings' && update.payload.changed_fields).toEqual(['layoutDensity']);
+  });
+
   it('changes theme, language, and file view immediately', () => {
     renderPanel();
 

@@ -111,7 +111,7 @@ function FileRow({
   const paddingLeft = BASE_PAD + depth * LEVEL_PAD;
 
   return (
-    <div
+    <div data-density-row=""
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -201,7 +201,7 @@ function TreeDirNode({
 
   return (
     <div>
-      <div
+      <div data-density-row=""
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -333,9 +333,9 @@ function StashRow({
   const branchColorHex = branchName ? branchColor(branchName) : '#11b0ff';
 
   return (
-    <div style={rowStyle.root}>
+    <div data-density-card="" style={rowStyle.root}>
       {/* Header */}
-      <div
+      <div data-density-row=""
         style={{
           ...rowStyle.header,
           background: hovered
@@ -440,7 +440,7 @@ function StashRow({
 
       {/* Expanded body: file list (flat or tree) */}
       {expanded && (
-        <div style={rowStyle.fileList}>
+        <div data-density-card-body="" style={rowStyle.fileList}>
           {files.length === 0 ? (
             <div style={rowStyle.emptyFiles}>{t('No files')}</div>
           ) : viewMode === 'tree' && treeNodes ? (
@@ -596,7 +596,7 @@ export function StashPanel({ active = true,
           const isRepoBusy = operatingRepos.has(repo.meta.id);
 
           return (
-            <section key={repo.meta.id} style={css.repoSection} className="stash-repo">
+            <section data-density-repository="" key={repo.meta.id} style={css.repoSection} className="stash-repo">
               {/* Repository Header - Always shown to match design */}
               <RepositoryGroup expansion={expansion} onToggle={onManualExpansionChange} name={repo.meta.name} color={projectColor} extras={worktreeBranch && <BranchRefBadge label={worktreeBranch} kind="worktree" color={branchColor(worktreeBranch)} />}>
 

@@ -33,6 +33,19 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
+  it('switches edge padding while keeping graph rows contiguous and preserving selection', () => {
+    const data = bootstrap(true, true);
+    data.state.settings = { layoutDensity: 'comfortable' } as any;
+    const commits = Array.from({ length: 3 }, (_, index) => ({ repoId: 'repo', hash: `c${index}`, shortHash: `c${index}`, parents: index < 2 ? [`c${index + 1}`] : [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: `density ${index}`, refs: [] }));
+    useAppStore.setState({ bootstrap: data, snapshot, selectedRepoId: 'repo', history: commits, selectedCommits: [commits[1]] });
+    const { container } = render(<HistoryWorkspace />);
+    const positions = () => Array.from(container.querySelectorAll<HTMLElement>('.commit-row')).map(row => row.style.transform);
+    expect(positions()).toEqual(['translateY(4px)', 'translateY(32px)', 'translateY(60px)']);
+    act(() => useAppStore.setState({ bootstrap: { ...data, state: { ...data.state, settings: { ...data.state.settings!, layoutDensity: 'compact' } } } }));
+    expect(positions()).toEqual(['translateY(0px)', 'translateY(28px)', 'translateY(56px)']);
+    expect(useAppStore.getState().selectedCommits).toEqual([commits[1]]);
+  });
+
   it('keeps history operation buttons out of the top filter bar', () => {
     useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo' });
     render(<HistoryWorkspace />);

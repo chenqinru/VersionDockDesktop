@@ -125,8 +125,8 @@ function SubmoduleRow({ repo, entry, busy, highlighted }: { repo: RepositoryStat
         ? { id: 'update', icon: 'arrow-swap', label: t('Align'), title: t('Align submodule with recorded parent commit') }
         : undefined;
 
-  return <div ref={rowRef} className={`submodule-row ${highlighted ? 'selected' : context ? 'context-active' : ''}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY }); }}>
-    <div className="submodule-row-main">
+  return <div data-density-card="" ref={rowRef} className={`submodule-row ${highlighted ? 'selected' : context ? 'context-active' : ''}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY }); }}>
+    <div data-density-row="" className="submodule-row-main">
       <Codicon name={entry.initialized ? 'repo' : 'repo-clone'} />
       <div className="submodule-info">
         <div className="submodule-title-line">

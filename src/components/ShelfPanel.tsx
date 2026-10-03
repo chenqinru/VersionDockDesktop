@@ -97,7 +97,7 @@ function FileRow({
   const paddingLeft = BASE_PAD + depth * LEVEL_PAD;
 
   return (
-    <div
+    <div data-density-row=""
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -232,7 +232,7 @@ function TreeDirNode({
 
   return (
     <div>
-      <div
+      <div data-density-row=""
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -365,9 +365,9 @@ function ShelfRow({
   const branchColorHex = branchName ? branchColor(branchName) : '#6aaed0';
 
   return (
-    <div style={rowStyle.root}>
+    <div data-density-card="" style={rowStyle.root}>
       {/* Header */}
-      <div
+      <div data-density-row=""
         style={{
           ...rowStyle.header,
           background: hovered
@@ -462,7 +462,7 @@ function ShelfRow({
 
       {/* Expanded body: file list (flat or tree) */}
       {expanded && (
-        <div style={rowStyle.fileList}>
+        <div data-density-card-body="" style={rowStyle.fileList}>
           {viewMode === 'tree' && treeNodes
             ? treeNodes.map((node) =>
                 node.kind === 'dir' ? (
@@ -670,7 +670,7 @@ export function ShelfPanel({ active = true,
           const worktreeBranch = repo.meta.isWorktree ? repo.branch : undefined;
           const error = loadErrors[`shelves:${repo.meta.id}`];
           return (
-            <section key={repo.meta.id} style={css.repoSection}>
+            <section data-density-repository="" key={repo.meta.id} style={css.repoSection}>
               <RepositoryGroup expansion={expansion} onToggle={onManualExpansionChange} name={repo.meta.name} color={projectColor} extras={worktreeBranch && <BranchRefBadge label={worktreeBranch} kind="worktree" color={branchColor(worktreeBranch)} />}>
 
 

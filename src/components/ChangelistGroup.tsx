@@ -196,7 +196,7 @@ export function ChangelistGroup({
   return (
     <section className="repo-change-group changelist-group">
       <div
-        className="repo-heading changelist-heading"
+        className="repo-heading changelist-heading" data-density-section=""
         onClick={(event) => { if (!(event.target as HTMLElement).closest('button, input, label')) setLocalExpanded({ sequence: expansion.sequence, expanded: !expanded }); }}
         onContextMenu={(e) => {
           e.preventDefault();

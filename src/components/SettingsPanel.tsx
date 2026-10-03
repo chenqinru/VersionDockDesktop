@@ -1,3 +1,4 @@
+import { LayoutDensitySetting } from './LayoutDensitySetting';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber } from './SettingsControls';
 import { AiSettings } from './AiSettings';
@@ -219,7 +220,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     <SettingsCard title={t('File icon theme')} description={t('Choose the file icon theme')}>
                       <FileIconThemePreviewSelector value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} />
                     </SettingsCard>
-                    <SettingsCard title={t('Language and font size')}>
+                    <SettingsCard title={t('Interface')}>
                       <SettingSelect
                         label={t('Language')}
                         description={t('Choose the application language')}
@@ -244,6 +245,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(value) => void setUiFontSize(value as UiFontSizePreference)}
                       />
+                      <LayoutDensitySetting />
                     </SettingsCard>
                   </SettingsSection>
                 )}
@@ -1356,6 +1358,10 @@ function SearchResults({
         onChange={(val) => void setUiFontSize(val as UiFontSizePreference)}
       />,
     );
+  }
+
+  if ([t('Layout density'), t('Comfortable'), t('Compact'), t('Comfortable uses rounded cards and inset rows; compact maximizes working space.'), 'layout', 'density', 'comfortable', 'compact'].some(match)) {
+    appearanceItems.push(<LayoutDensitySetting key="density" />);
   }
 
   // 2. 更改与提交匹配项

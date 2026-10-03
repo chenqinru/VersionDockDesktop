@@ -1452,6 +1452,9 @@ body.is-tab-drop-target * {
   gap: 1px;
 }
 
+/* Keep options inside scrollable settings panes at either edge. */
+.settings-custom-select-menu[data-placement="above"] { top: auto; bottom: calc(100% + 4px); }
+
 .settings-custom-select-option {
   display: flex;
   align-items: center;
@@ -3001,7 +3004,7 @@ button.conflict-action-item {
 .commit-tabs { flex: 0 0 29px; height: 29px; display: flex; align-items: center; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border-soft); box-sizing: border-box; }
 .commit-tabs::-webkit-scrollbar { display: none; }
 .commit-tabs button { min-width: 0; flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-start; gap: 0; padding: 5px 10px; white-space: nowrap; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 17px; border: none; border-bottom: 2px solid transparent; background: transparent; outline: none; cursor: pointer; box-sizing: border-box; transition: color .1s, border-color .1s; }
-.commit-tabs button.active { padding: 5px 12px; color: var(--versiondock-selection-foreground); font-weight: 600; border-bottom: 2px solid var(--versiondock-selection-border); }
+.commit-tabs button.active { --panel-button-hover: transparent; padding: 5px 12px; color: var(--versiondock-selection-foreground); font-weight: 600; border-bottom: 2px solid var(--vscode-focusBorder); }
 .commit-tabs button:not(.active):hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
 .commit-tabs button.active:hover { background: transparent; }
 .commit-slot .commit-tabs button:not(:disabled):hover { background: var(--vscode-toolbar-hoverBackground, var(--versiondock-hover)); color: var(--versiondock-text); }
@@ -4534,22 +4537,22 @@ button.danger:not(:disabled):hover,
 .branch-status-tooltip th:nth-child(n+3), .branch-status-tooltip td:nth-child(n+3) { text-align: center; }
 .branch-status-tooltip em { color: var(--versiondock-muted); }
 
-/* Repository groups use one dense language across every commit-panel tab. */
-.repo-change-group:not(.changelist-group),
-.submodule-repo,
-.subtree-repo-section {
+/* Preserve the original flush headers only in compact layout. */
+:root:not([data-density="comfortable"]) .repo-change-group:not(.changelist-group),
+:root:not([data-density="comfortable"]) .submodule-repo,
+:root:not([data-density="comfortable"]) .subtree-repo-section {
   margin: 0;
   overflow: visible;
   border: 0 !important;
   border-radius: 0;
 }
 
-.changelist-repo-subgroups .repo-sub-group {
+:root:not([data-density="comfortable"]) .changelist-repo-subgroups .repo-sub-group {
   margin: 0 !important;
 }
 
-.repo-heading:not(.changelist-heading),
-.repository-group-header {
+:root:not([data-density="comfortable"]) .repo-heading:not(.changelist-heading),
+:root:not([data-density="comfortable"]) .repository-group-header {
   width: 100%;
   height: 26px !important;
   min-height: 26px !important;
@@ -4562,7 +4565,7 @@ button.danger:not(:disabled):hover,
   background: color-mix(in srgb, var(--repo-color, #888) 15%, transparent) !important;
 }
 .commit-slot .repo-heading, .commit-slot .repository-group-header { cursor: pointer; }
-.commit-slot .repo-heading:hover, .commit-slot .repository-group-header:hover {
+:root:not([data-density="comfortable"]) .commit-slot .repo-heading:hover, :root:not([data-density="comfortable"]) .commit-slot .repository-group-header:hover {
   background: color-mix(in srgb, var(--repo-color, #888) 22%, transparent) !important;
 }
 
