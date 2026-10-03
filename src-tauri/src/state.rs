@@ -40,6 +40,15 @@ pub async fn with_operation_reporter<F: std::future::Future>(
 }
 
 pub fn emit_current_operation(status: OperationStatus, phase: &str, message: &str) {
+    emit_current_operation_progress(status, phase, message, None, None);
+}
+pub(crate) fn emit_current_operation_progress(
+    status: OperationStatus,
+    phase: &str,
+    message: &str,
+    completed: Option<u32>,
+    total: Option<u32>,
+) {
     let _ = CURRENT_OPERATION.try_with(|reporter| {
         let _ = reporter.app.emit(
             "versiondock://event",
@@ -51,8 +60,8 @@ pub fn emit_current_operation(status: OperationStatus, phase: &str, message: &st
                 message: message.into(),
                 started_at: reporter.started_at.clone(),
                 cancellable: true,
-                completed: None,
-                total: None,
+                completed,
+                total,
                 result: None,
                 error: None,
             },

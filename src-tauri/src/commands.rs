@@ -394,7 +394,9 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
         | BridgeCommand::DeletePaths { .. }
         | BridgeCommand::AddIgnore { .. }
         | BridgeCommand::UpdateIgnoreRules { .. } => vec![RefreshScope::Status, RefreshScope::Diff],
-        BridgeCommand::Commit { .. } | BridgeCommand::BatchCommit { .. } => vec![
+        BridgeCommand::AiComposerApply { .. }
+        | BridgeCommand::Commit { .. }
+        | BridgeCommand::BatchCommit { .. } => vec![
             RefreshScope::Status,
             RefreshScope::Refs,
             RefreshScope::History,
@@ -551,6 +553,8 @@ async fn runtime_capabilities() -> RuntimeCapabilities {
 
 fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
     match command {
+        BridgeCommand::AiComposerApply { .. } => ("aiCompose", "Applying AI commit plan"),
+        BridgeCommand::AiComposerPrepare { .. } => ("aiPrepare", "Preparing AI change units"),
         BridgeCommand::WorkspaceOpen { .. } | BridgeCommand::WorkspaceRefresh { .. } => {
             ("scanning", "Scanning workspace repositories")
         }
@@ -737,7 +741,17 @@ fn command_error_context(
             workspace_id,
             repo_id,
         } => (operation, Some(workspace_id.clone()), repo_id.clone(), None),
-        BridgeCommand::RepositoryStatus {
+        BridgeCommand::AiComposerApply {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::AiComposerPrepare {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::RepositoryStatus {
             workspace_id,
             repo_id,
         }
@@ -1157,13 +1171,7 @@ async fn dispatch(
             for key in ["shelf", "changelist"] {
                 availability.insert(key.into(), CapabilityStatus::available());
             }
-            availability.insert(
-                "ai".into(),
-                CapabilityStatus::unavailable(
-                    "OUT_OF_SCOPE",
-                    "AI capabilities are intentionally unavailable in VersionDock Desktop V4",
-                ),
-            );
+            availability.insert("ai".into(), CapabilityStatus::available());
             json(BootstrapData {
                 state: snapshot,
                 tools: tools.clone(),
@@ -1174,6 +1182,7 @@ async fn dispatch(
                     .ok()
                     .and_then(|mut launch| launch.take()),
                 capabilities: DesktopCapabilities {
+                    ai: true,
                     initialize_repository: tools.git,
                     clone_repository: tools.git,
                     stash: tools.git,
@@ -1190,10 +1199,75 @@ async fn dispatch(
                     secure_credentials: secure_credentials.status.available,
                     system_notifications: notifications_available,
                     availability,
-                    ..DesktopCapabilities::default()
                 },
                 runtime,
             })
+        }
+        BridgeCommand::AiRuntime => json(crate::ai::runtime(state).await),
+        BridgeCommand::AiSaveKey {
+            provider,
+            api_url,
+            key,
+        } => {
+            crate::ai::save_key(provider, api_url, key)?;
+            json(true)
+        }
+        BridgeCommand::AiPrompt {
+            task,
+            workspace_id,
+            repo_id,
+            scope,
+            action,
+            text,
+        } => {
+            json(crate::ai::prompt(state, task, workspace_id, repo_id, scope, action, text).await?)
+        }
+        BridgeCommand::AiGenerate { request } => {
+            json(crate::ai::generate(state, app, request, token).await?)
+        }
+        BridgeCommand::AiComposerPrepare {
+            workspace_id,
+            repo_id,
+            paths,
+            staged_only,
+            hashes,
+        } => json(
+            crate::ai::prepare(
+                state,
+                &workspace_id,
+                &repo_id,
+                paths,
+                staged_only,
+                hashes,
+                token,
+            )
+            .await?,
+        ),
+        BridgeCommand::AiComposerApply {
+            workspace_id,
+            repo_id,
+            session_id,
+            groups,
+            no_verify,
+        } => json(
+            crate::ai::apply(
+                state,
+                &workspace_id,
+                &repo_id,
+                &session_id,
+                groups,
+                no_verify,
+                token,
+            )
+            .await?,
+        ),
+        BridgeCommand::AiReviewLocate {
+            workspace_id,
+            anchor,
+        } => json(crate::ai::locate(state, &workspace_id, anchor, token).await?),
+        BridgeCommand::AiResetCliSession => {
+            crate::ai::reset_cli_session();
+            json(true)
         }
         BridgeCommand::RuntimeCapabilities => json(runtime_capabilities().await),
         BridgeCommand::SaveAppState { state: snapshot } => {
@@ -3849,7 +3923,7 @@ fn find_failed_submodule_descendant(
     None
 }
 
-async fn resolve_repo(
+pub(crate) async fn resolve_repo(
     state: &AppState,
     workspace_id: &str,
     repo_id: &str,

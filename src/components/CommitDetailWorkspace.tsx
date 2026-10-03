@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Codicon } from './Codicon';
 import { CommitDetailPanel } from './CommitDetailPanel';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 
 export function CommitDetailWorkspace() {
+  const [aiToolbar, setAiToolbar] = useState<HTMLDivElement | null>(null);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
   const back = useAppStore((state) => state.backToHistory);
@@ -22,8 +24,9 @@ export function CommitDetailWorkspace() {
         <Codicon name="git-commit" />
         <code>{revision}</code>
         <strong title={title}>{title}</strong>
+        <div ref={setAiToolbar} className="ai-explain-toolbar" />
       </header>
-      <CommitDetailPanel key={`${workspaceId}:${selectedCommits.map((commit) => `${commit.repoId}:${commit.hash}`).join('|')}`} variant="workspace" onCollapse={back} />
+      <CommitDetailPanel key={`${workspaceId}:${selectedCommits.map((commit) => `${commit.repoId}:${commit.hash}`).join('|')}`} variant="workspace" aiToolbar={aiToolbar} onCollapse={back} />
     </section>
   );
 }

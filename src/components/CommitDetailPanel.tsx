@@ -1,3 +1,6 @@
+import { AiExplanation } from './AiExplanation';
+import { openCommitExplanation, useAiStore } from '../ai/aiStore';
+import { AiCommitComposerIcon } from './AiCommitComposerIcon';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -788,12 +791,14 @@ function CommitMessage({
 }
 
 function ExtendedCommitSummary({
+  explanation,
   detail,
   selectedCommits,
   selectedDetails,
   loading,
   repoMap,
 }: {
+  explanation?: React.ReactNode;
   detail?: CommitDetail;
   selectedCommits: CommitNode[];
   selectedDetails: Record<string, CommitDetail>;
@@ -811,6 +816,7 @@ function ExtendedCommitSummary({
     const newest = selectedCommits[0];
     return (
       <section className="extended-commit-summary" aria-label={t('Aggregated commit selection')}>
+        {explanation}
         <div className="extended-detail-block">
           <h3>{t('Details')}</h3>
           <dl className="extended-detail-grid">
@@ -881,6 +887,7 @@ function ExtendedCommitSummary({
   const repo = repoMap.get(commit.repoId);
   return (
     <section className="extended-commit-summary" aria-label={t('Open Commit Detail')}>
+      {explanation}
       <div className="extended-detail-block">
         <h3>{t('Author')}</h3>
         <div className="extended-author">
@@ -921,7 +928,7 @@ function AuthorMeta({ commit }: { commit: CommitNode }) {
   );
 }
 
-export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onCollapse: () => void; variant?: 'sidebar' | 'workspace' }) {
+export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }: { onCollapse: () => void; variant?: 'sidebar' | 'workspace'; aiToolbar?: HTMLElement | null }) {
   const detail = useAppStore((state) => state.selectedCommit);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
@@ -1326,6 +1333,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
         <div className="detail-files-title">
           <strong>{t(targets.length === 1 ? '{0} file' : '{0} files', targets.length)}</strong>
           <span className="detail-files-spacer" />
+          {selectedCommits.length > 0 && selectedCommits.every((c) => c.repoId === selectedCommits[0].repoId && c.unpushed) && repoMap.get(selectedCommits[0].repoId)?.meta.kind === 'git' && <IconButton title={t('AI Reorganize Commits')} onClick={() => useAiStore.getState().openComposer({ repoId: selectedCommits[0].repoId, paths: [], stagedOnly: false, hashes: selectedCommits.map((c) => c.hash) })}><AiCommitComposerIcon /></IconButton>}
           {fileMode === 'tree' && (
             <>
               <IconButton type="button" title={t('Expand all')} onClick={() => { setAllTreeExpanded(true); setCollapsedDirs({}); }}><Codicon name="expand-all" /></IconButton>
@@ -1510,14 +1518,16 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar' }: { onColla
           })}
         </div>
       </section>
+
       {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={minInfoHeight} aria-valuemax={maxInfoHeight} aria-valuenow={Math.round(infoHeight ?? 220)} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setInfoHeight((value) => clampInfoHeight((value ?? 220) + (event.key === 'ArrowUp' ? 10 : -10))); } }}><i /></div>}
-      {workspaceView ? <ExtendedCommitSummary detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section ref={summaryRef} className="detail-summary" style={infoHeight !== undefined ? { flex: `0 0 ${infoHeight}px`, minHeight: 0, maxHeight: 'none' } : undefined}>
+      {workspaceView ? <ExtendedCommitSummary explanation={!loading && selectedCommits.length > 0 ? <AiExplanation commits={selectedCommits.map(c => ({ repoId: c.repoId, hash: c.hash }))} toolbar={aiToolbar} /> : undefined} detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section ref={summaryRef} className="detail-summary" style={infoHeight !== undefined ? { flex: `0 0 ${infoHeight}px`, minHeight: 0, maxHeight: 'none' } : undefined}>
         <header className="detail-toolbar">
           <span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}>
             <Codicon name={selectedCommits.length > 1 ? 'git-commit' : 'repo'} />
             {selectedCommits.length > 1 ? t('Aggregated commit selection') : repoMap.get(selectedPrimary?.repoId ?? '')?.meta.name}
           </span>
           <div className="detail-actions">
+            <IconButton title={t('AI Explain')} onClick={() => void openCommitExplanation(selectedCommits)}><Codicon name="sparkle" /></IconButton>
             <IconButton type="button" title={t('Open Commit Detail')} onClick={openCommitDetail}><Codicon name="open-preview" /></IconButton>
             <IconButton type="button" title={t('Open Changes')} disabled={!canOpenChanges} onClick={openChanges}><Codicon name="diff-multiple" /></IconButton>
             <IconButton type="button" title={messagesExpandedByDefault ? t('Collapse commit messages by default') : t('Expand commit messages by default')} aria-pressed={messagesExpandedByDefault} onClick={toggleAllMessages}><Codicon name={messagesExpandedByDefault ? 'collapse-all' : 'expand-all'} /></IconButton>

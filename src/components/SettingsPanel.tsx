@@ -1,3 +1,6 @@
+import { SettingSelect } from './SettingSelect';
+import { SettingsCard, SettingNumber } from './SettingsControls';
+import { AiSettings } from './AiSettings';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
@@ -29,6 +32,7 @@ interface SettingsPanelProps {
 
 const settingsCategories = [
   { id: 'settings-section-appearance-title', sectionId: 'settings-section-appearance', icon: 'color-mode', label: 'Appearance' },
+  { id: 'settings-section-ai-title', sectionId: 'settings-section-ai', icon: 'sparkle', label: 'AI' },
   { id: 'settings-section-changes-title', sectionId: 'settings-section-changes', icon: 'source-control', label: 'Changes and commit' },
   { id: 'settings-section-guard-title', sectionId: 'settings-section-guard', icon: 'shield', label: 'Commit & Safety Guard' },
   { id: 'settings-section-protection-title', sectionId: 'settings-section-protection', icon: 'lock', label: 'Branch & Push Protection' },
@@ -243,6 +247,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </SettingsCard>
                   </SettingsSection>
                 )}
+
+                {activeCategory === 'settings-section-ai-title' && <SettingsSection id="settings-section-ai" titleId="settings-section-ai-title" icon="sparkle" title={t('AI')}><AiSettings /></SettingsSection>}
 
                 {/* 2. 更改与提交 Changes and commit */}
                 {activeCategory === 'settings-section-changes-title' && (
@@ -762,229 +768,6 @@ function SettingsSection({
       </div>
       {children}
     </section>
-  );
-}
-
-function SettingsCard({
-  title,
-  description,
-  children,
-}: {
-  title?: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="settings-card">
-      {title && (
-        <div className="settings-card-header">
-          <span className="settings-card-title">{title}</span>
-          {description && <span className="settings-card-desc">{description}</span>}
-        </div>
-      )}
-      <div className="settings-card-body">{children}</div>
-    </div>
-  );
-}
-
-function SettingSelect({
-  label,
-  description,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  value: string;
-  options: Array<[string, string]>;
-  onChange: (value: string) => void;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent | globalThis.MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const selectedOption = options.find(([k]) => k === value);
-  const selectedText = selectedOption ? selectedOption[1] : value;
-
-  return (
-    <div className="settings-row">
-      <span className="settings-label">
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-
-      {/* 原生隐藏 select 保持测试与无障碍访问兼容 */}
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="settings-hidden-native-select"
-        tabIndex={-1}
-      >
-        {options.map(([key, text]) => (
-          <option key={key} value={key}>
-            {text}
-          </option>
-        ))}
-      </select>
-
-      {/* 现代 macOS 风格自定义下拉菜单 */}
-      <div className="settings-custom-select" ref={dropdownRef}>
-        <button
-          type="button"
-          className={`settings-custom-select-trigger ${isOpen ? 'open' : ''}`}
-          aria-haspopup="listbox"
-          aria-expanded={isOpen}
-          onClick={() => setIsOpen((prev) => !prev)}
-        >
-          <span className="settings-custom-select-val">{selectedText}</span>
-          <Codicon name={isOpen ? 'chevron-up' : 'chevron-down'} />
-        </button>
-
-        {isOpen && (
-          <div className="settings-custom-select-menu" role="listbox">
-            {options.map(([key, text]) => {
-              const isSelected = key === value;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  className={`settings-custom-select-option ${isSelected ? 'active' : ''}`}
-                  onClick={() => {
-                    onChange(key);
-                    setIsOpen(false);
-                  }}
-                >
-                  <span className="settings-custom-select-option-text">{text}</span>
-                  {isSelected && <Codicon name="check" />}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SettingNumber({
-  label,
-  description,
-  value,
-  min = 0,
-  max = Number.MAX_SAFE_INTEGER,
-  step = 1,
-  suffix,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  suffix?: string;
-  onChange: (value: number) => void;
-}) {
-  const { t } = useI18n();
-  const [draft, setDraft] = useState<string | null>(null);
-  const localText = draft ?? String(value);
-
-  const handleStep = (delta: number) => {
-    const next = Math.min(max, Math.max(min, value + delta));
-    onChange(next);
-  };
-
-  const handleBlur = () => {
-    const parsed = Number(localText);
-    if (isNaN(parsed)) {
-      setDraft(null);
-    } else {
-      const clamped = Math.min(max, Math.max(min, parsed));
-      setDraft(null);
-      if (clamped !== value) {
-        onChange(clamped);
-      }
-    }
-  };
-
-  return (
-    <div className="settings-row">
-      <span className="settings-label">
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-
-      {/* 原生隐藏 input 保持测试与无障碍访问兼容 */}
-      <input
-        aria-label={label}
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="settings-hidden-native-input"
-        tabIndex={-1}
-      />
-
-      {/* 现代 macOS 风格自定义数字调节步进器 */}
-      <div className="settings-custom-stepper">
-        <IconButton
-          type="button"
-          className="settings-stepper-btn"
-          disabled={value <= min}
-          aria-label={t('Decrease')}
-          onClick={() => handleStep(-step)}
-        >
-          <Codicon name="remove" />
-        </IconButton>
-
-        <div className="settings-stepper-input-wrapper">
-          <input
-            type="text"
-            inputMode="numeric"
-            className="settings-stepper-input"
-            value={localText}
-          onFocus={() => setDraft(String(value))}
-          onChange={(e) => setDraft(e.target.value)}
-            onBlur={handleBlur}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleBlur();
-              else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                handleStep(step);
-              } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                handleStep(-step);
-              }
-            }}
-          />
-          {suffix && <span className="settings-stepper-suffix">{suffix}</span>}
-        </div>
-
-        <IconButton
-          type="button"
-          className="settings-stepper-btn"
-          disabled={value >= max}
-          aria-label={t('Increase')}
-          onClick={() => handleStep(step)}
-        >
-          <Codicon name="add" />
-        </IconButton>
-      </div>
-    </div>
   );
 }
 
@@ -1532,6 +1315,7 @@ function SearchResults({
   const match = (text: string) => text.toLowerCase().includes(q);
 
   // 1. 外观匹配项
+  const aiMatches = ['AI','Agent CLI','API key','Model','AI prompts','commit-message','commit-explanation','code-review','commit-composer','merge-conflict'].some((label) => `${label} ${t(label)}`.toLowerCase().includes(query.toLowerCase()));
   const appearanceItems: ReactNode[] = [];
   if (match(t('Theme')) || match(t('Appearance')) || match(t('Choose the application color theme')) || match('dark') || match('light') || match('system') || match('2026') || match('github') || match('one dark') || match('onedark') || match('dracula') || match('nord') || match('classic')) {
     appearanceItems.push(<ThemePreviewSelector key="theme" value={theme} onChange={(val) => void setTheme(val)} />);
@@ -2095,6 +1879,7 @@ function SearchResults({
   }
 
   const sections: ReactNode[] = [];
+  if (aiMatches) sections.push(<AiSettings key="sec-ai" />);
   if (appearanceItems.length > 0) {
     sections.push(<SettingsCard key="sec-appearance" title={t('Appearance')}>{appearanceItems}</SettingsCard>);
   }

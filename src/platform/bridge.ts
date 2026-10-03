@@ -1,5 +1,5 @@
 import type {
-  BridgeCommand, DesktopError, OperationDomain,
+  AiEvent, BridgeCommand, DesktopError, OperationDomain,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
   WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
   LogEntry, LogLevel, LogChannel,
@@ -25,7 +25,7 @@ export interface WindowDragGeometry {
   sourceBounds: { x: number; y: number; width: number; height: number };
 }
 
-export type BridgeEvent = OperationEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
+export type BridgeEvent = AiEvent | OperationEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
 
 export interface VersionDockBridge {
   send(command: BridgeCommand): void;
@@ -159,7 +159,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'historyOperation': case 'createPatch': case 'savePatch': case 'branchCompare': case 'branchCompareCommits': return 'history';
     case 'branches': case 'branchOperation': case 'branchRecovery': case 'gitUnlockIndex': return 'branch';
     case 'tags': case 'tagOperation': return 'tag';
-    case 'commit': case 'batchCommit': case 'recentCommitMessages': case 'lastCommitMessage': return 'commit';
+    case 'aiComposerApply': case 'commit': case 'batchCommit': case 'recentCommitMessages': case 'lastCommitMessage': return 'commit';
     case 'sync': return 'sync';
     case 'conflicts': case 'conflictVersions': case 'conflictSave': case 'conflictAccept':
     case 'abortRepositoryOperation': case 'continueRepositoryOperation': case 'restoreConflicts': return 'conflict';
@@ -193,7 +193,7 @@ export const commandShowsProgressByDefault = (command: BridgeCommand): boolean =
     case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent':
     case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository':
     case 'stage': case 'unstage': case 'discard': case 'deletePaths': case 'addIgnore': case 'updateIgnoreRules':
-    case 'commit': case 'batchCommit': case 'sync': case 'branchOperation': case 'branchRecovery': case 'gitUnlockIndex': case 'tagOperation':
+    case 'aiComposerApply': case 'commit': case 'batchCommit': case 'sync': case 'branchOperation': case 'branchRecovery': case 'gitUnlockIndex': case 'tagOperation':
     case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'continueRepositoryOperation': case 'restoreConflicts':
     case 'stashOperation': case 'shelfOperation': case 'changelistOperation': case 'worktreeOperation':
     case 'subtreeOperation': case 'submoduleOperation': case 'unpushedOperation': case 'historyOperation':
@@ -285,7 +285,7 @@ export class TauriBridge implements VersionDockBridge {
 
   async initialize(): Promise<void> {
     const { listen } = await import('@tauri-apps/api/event');
-    this.unlisten = await listen<OperationEvent | WorkspaceEvent | RepositoryEvent>('versiondock://event', ({ payload }) => {
+    this.unlisten = await listen<BridgeEvent>('versiondock://event', ({ payload }) => {
       if ('operationId' in payload && payload.context.visibility === 'background') return;
       this.handlers.forEach((handler) => handler(payload));
     });

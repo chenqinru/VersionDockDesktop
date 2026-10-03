@@ -1,3 +1,4 @@
+import { generateHistoricalMessage, useAiStore } from '../ai/aiStore';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BranchInfo, CommitDetail, IncomingCommit, RepositoryStatus, RevisionChanges, UnpushedCommit, UnpushedOperation } from '../bindings/generated';
@@ -168,12 +169,12 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   const rewrite = async (action: 'revert' | 'drop' | 'squash' | 'undoHead' | 'editMessage') => {
     if (item.kind !== 'outgoing') return;
     if (action === 'editMessage') {
-      await editorDialog({ title: t('Edit Commit Message…'), message: commit.shortHash, inputLabel: t('Commit message'), initialValue: fullMessage, confirmLabel: t('Save'), submit: (message) => submitRewrite({ type: 'editMessage', hash: commit.hash, message }) });
+      await editorDialog({ title: t('Edit Commit Message…'), message: commit.shortHash, inputLabel: t('Commit message'), initialValue: fullMessage, generate: (signal, onMessage) => generateHistoricalMessage([{ repoId: repo.meta.id, hash: commit.hash }], signal, onMessage), confirmLabel: t('Save'), submit: (message) => submitRewrite({ type: 'editMessage', hash: commit.hash, message }) });
       return;
     }
     if (action === 'squash') {
       const outgoingCommits = sameKindSelection.filter((candidate): candidate is Extract<TimelineCommit, { kind: 'outgoing' }> => candidate.kind === 'outgoing');
-      await editorDialog({ title: t('Squash {0} commits…', outgoingCommits.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: outgoingCommits.map((candidate) => candidate.commit.fullMessage || candidate.commit.message).reverse().join('\n\n'), confirmLabel: t('Squash'), submit: (message) => submitRewrite({ type: 'squash', hashes: selectedHashes, message }) });
+      await editorDialog({ title: t('Squash {0} commits…', outgoingCommits.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: outgoingCommits.map((candidate) => candidate.commit.fullMessage || candidate.commit.message).reverse().join('\n\n'), generate: (signal, onMessage) => generateHistoricalMessage(selectedHashes.map((hash) => ({ repoId: repo.meta.id, hash })), signal, onMessage), confirmLabel: t('Squash'), submit: (message) => submitRewrite({ type: 'squash', hashes: selectedHashes, message }) });
       return;
     }
     if (!await confirmDialog({ title: action === 'drop' ? t('Drop {0} commits', selectedHashes.length) : action === 'revert' ? t('Revert {0} commits', selectedHashes.length) : t('Undo Commit'), message: sameKindSelection.map((candidate) => `${candidate.commit.shortHash} ${candidate.commit.message}`).join('\n') || `${commit.shortHash} ${commit.message}`, danger: action !== 'revert' })) return;
@@ -189,10 +190,12 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
         { id: 'log', label: t('View in Git Log'), icon: 'go-to-file', disabled: selectedHashes.length > 1 },
       ]
     : selectedHashes.length > 1 ? [
+        { id: 'ai-composer', label: t('Reorganize selected commits with AI'), icon: 'layers' },
         { id: 'squash', label: t('Squash {0} commits…', selectedHashes.length), icon: 'fold-down' },
         { id: 'revert', label: t('Revert {0} commits', selectedHashes.length), icon: 'discard' },
         { id: 'drop', label: t('Drop {0} commits', selectedHashes.length), icon: 'trash', danger: true },
       ] : [
+        ...(item.isHead ? [{ id: 'ai-composer', label: t('Reorganize selected commits with AI'), icon: 'layers' } as ContextMenuEntry] : []),
         { id: 'log', label: t('View in Git Log'), icon: 'go-to-file' },
         ...(item.isHead ? [{ id: 'edit', label: t('Edit Commit Message…'), icon: 'edit' } as ContextMenuEntry] : []),
         { id: 'revert', label: t('Revert Commit'), icon: 'discard' },
@@ -204,6 +207,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
     if (id === 'cherry') void cherryPick();
     else if (id === 'branch') void createBranch();
     else if (id === 'log') openLog();
+    else if (id === 'ai-composer') useAiStore.getState().openComposer({ repoId: repo.meta.id, paths: [], stagedOnly: false, hashes: selectedHashes });
     else if (id === 'edit') void rewrite('editMessage');
     else if (id === 'squash') void rewrite('squash');
     else if (id === 'revert') void rewrite('revert');

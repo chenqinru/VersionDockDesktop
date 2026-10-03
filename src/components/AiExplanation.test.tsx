@@ -1,0 +1,47 @@
+import { StrictMode } from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { AiExplanation } from './AiExplanation';
+import { aiRequest, aiWorkspaceChanged, explanationKey, useAiStore } from '../ai/aiStore';
+import { MockBridge } from '../platform/bridge';
+import { useAppStore } from '../store/appStore';
+import type { AiResult, CommitNode } from '../bindings/generated';
+import { openCommitExplanation } from '../ai/aiStore';
+const commits = [{ repoId: 'r', hash: 'abc' }];
+const initialize = () => useAppStore.setState({ snapshot: { workspace: { id:'w', name:'w', paths:['/tmp/audit'], lastOpenedAt:'', available:true }, repositories:[], generation:1, tools:{ git:true, svn:true, svnadmin:true } } });
+afterEach(() => { cleanup(); aiWorkspaceChanged(undefined); useAppStore.setState({ bridge: undefined, snapshot: undefined }); vi.restoreAllMocks(); });
+it('auto explanation survives StrictMode and cancels only after actual disposal', async () => {
+  initialize();
+  let resolve!: (value: AiResult) => void;
+  const promise = new Promise<AiResult>(done => { resolve = done; });
+  useAppStore.setState({ bridge: new MockBridge(() => promise) });
+  const key = explanationKey(commits);
+  const task = useAiStore.getState().generate(key, aiRequest('commit-explanation', { commits }));
+  const view = render(<StrictMode><AiExplanation commits={commits} /></StrictMode>);
+  await Promise.resolve();
+  expect(useAiStore.getState().runs[key].running).toBe(true);
+  expect(screen.getByText('Read commit')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Stop/ }));
+  expect(screen.getByText('Partial output was kept')).toBeInTheDocument();
+  view.unmount();
+  resolve({ text:'late', provider:'test', model:'test', promptSource:'builtin', inputTruncated:false, durationMs:1, fileCount:1, repositoryCount:1, review:null, resolutions:[], groups:[] });
+  expect(await task).toBeUndefined();
+});
+it('does not explain a different commit if selection changes during detail loading', async () => {
+  initialize();
+  const original = { repoId:'r', hash:'abc' } as CommitNode;
+  const newer = { repoId:'r', hash:'def' } as CommitNode;
+  let finish!: () => void;
+  const select = vi.spyOn(useAppStore.getState(), 'selectCommit').mockImplementation(async () => {
+    useAppStore.setState({ selectedCommits:[original] });
+    await new Promise<void>(resolve => { finish = resolve; });
+  });
+  useAppStore.setState({ selectedCommits:[], mode:'history' });
+  const open = openCommitExplanation([original]);
+  await waitFor(() => expect(select).toHaveBeenCalled());
+  useAppStore.setState({ selectedCommits:[newer] });
+  finish();
+  await open;
+  expect(useAppStore.getState().mode).toBe('history');
+  expect(useAiStore.getState().runs).toEqual({});
+});

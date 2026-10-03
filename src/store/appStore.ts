@@ -22,7 +22,7 @@ import { createTranslator, resolveLanguage } from '../i18n';
 import { mergeEditorIdentity, type MergeResolution, type NonConflictScope } from '../components/mergeEditorModel';
 import type { Resolution, NormalEdits, NonConflictingSelections, NonConflictingChangeScope } from '../components/mergeEngine';
 
-export type WorkspaceMode = 'history' | 'commit-detail' | 'diff' | 'changes' | 'conflicts' | 'merge';
+export type WorkspaceMode = 'ai-review' | 'ai-composer' | 'history' | 'commit-detail' | 'diff' | 'changes' | 'conflicts' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
 export type DiffRange = { fromRevision: string; toRevision: string };
 export type RepositoryCheckoutOutcome = { succeeded: boolean; authenticationRequired: boolean };
@@ -278,6 +278,7 @@ export interface WorkspaceSessionState {
   mode: WorkspaceMode;
   diffReturnMode?: WorkspaceMode;
   diff?: DiffDocument;
+  diffReveal?: { line: number; side: 'old' | 'new' };
   changesDiff?: DiffDocument;
   changesDiffLoading?: boolean;
   changesDiffError?: string;
@@ -385,6 +386,7 @@ export interface AppStore {
   mode: WorkspaceMode;
   diffReturnMode?: WorkspaceMode;
   diff?: DiffDocument;
+  diffReveal?: { line: number; side: 'old' | 'new' };
   changesDiff?: DiffDocument;
   changesDiffLoading?: boolean;
   changesDiffError?: string;
@@ -2994,7 +2996,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const generation = ++diffRequestGeneration;
       const controller = beginRequest('diff');
       const diff = await bridge().request<DiffDocument>({ type: 'fileDiff', payload: { workspace_id: workspaceId(), repo_id: repoId, relative_path: path, staged, revision: revision ?? null, from_revision: range?.fromRevision ?? null, to_revision: range?.toRevision ?? null } }, { signal: controller.signal });
-      if (generation === diffRequestGeneration) set({ selectedFile: { repoId, path, staged, revision, fromRevision: range?.fromRevision, toRevision: range?.toRevision }, diff, mode: 'diff', diffReturnMode });
+      if (generation === diffRequestGeneration) set({ diffReveal: undefined, selectedFile: { repoId, path, staged, revision, fromRevision: range?.fromRevision, toRevision: range?.toRevision }, diff, mode: 'diff', diffReturnMode });
     }, `diff:${repoId}`),
     openStashDiff: async (repoId, reference, path) => withBusy(async () => {
       const currentMode = get().mode;

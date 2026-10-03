@@ -6,7 +6,9 @@ export interface ContextMenuItem {
   id: string;
   label: string;
   icon: string;
+  iconNode?: React.ReactNode;
   danger?: boolean;
+  accent?: boolean;
   disabled?: boolean;
   disabledReason?: string;
   separator?: false;
@@ -120,12 +122,12 @@ export function ContextMenu({ x, y, header, variant, preserveSelection = false, 
             role="menuitem"
             disabled={it.disabled}
             title={it.disabled ? it.disabledReason : undefined}
-            style={{ ...styles.item(!!it.danger, !!it.disabled), ...(variant ? styles.gitLogItem(!!it.disabled) : {}) }}
+            style={{ ...styles.item(!!it.danger, !!it.disabled), ...(variant ? styles.gitLogItem(!!it.disabled) : {}), ...(it.accent && !it.disabled ? { color: 'var(--vscode-textLink-foreground)', fontWeight: 600 } : {}) }}
             onClick={(event) => { if (!it.disabled) { onSelect(it.id, event.currentTarget.getBoundingClientRect()); onClose(); } }}
             onMouseEnter={(e) => { if (!it.disabled) e.currentTarget.style.background = 'var(--vscode-list-hoverBackground, var(--versiondock-hover))'; }}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
-            <Codicon name={it.icon} style={styles.icon} />
+            {it.iconNode ? <span style={styles.icon}>{it.iconNode}</span> : <Codicon name={it.icon} style={styles.icon} />}
             <span>{it.label}</span>
           </button>
         );

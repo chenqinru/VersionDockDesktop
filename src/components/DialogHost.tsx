@@ -1,4 +1,6 @@
+import { AiGenerationBorder } from './AiGenerationBorder';
 import { useEffect, useRef, useState } from 'react';
+import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
 import { currentDialog, dialogListeners, publishDialog, type DialogRequest } from './dialogService';
 import { useI18n } from '../i18n';
@@ -9,6 +11,8 @@ export function DialogHost() {
   const [selectedChoiceIds, setSelectedChoiceIds] = useState<string[]>([]);
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const generation = useRef<AbortController>();
   const dialog = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement>();
   const { t } = useI18n();
@@ -16,17 +20,19 @@ export function DialogHost() {
   useEffect(() => {
     const listener = (next: DialogRequest | undefined) => {
       if (next && document.activeElement instanceof HTMLElement) returnFocus.current = document.activeElement;
+      generation.current?.abort(); generation.current = undefined; setGenerating(false);
       setRequest(next);
       setValue(next?.initialValue ?? '');
       setSelectedChoiceIds(next?.initialSelected ?? (next?.choices ?? []).map((c) => c.id));
       setSubmitError(''); setSubmitting(false);
     };
     dialogListeners.add(listener);
-    return () => { dialogListeners.delete(listener); };
+    return () => { generation.current?.abort(); generation.current = undefined; dialogListeners.delete(listener); };
   }, []);
 
   if (!request) return null;
   const finish = (result: boolean | string | string[] | null) => {
+    generation.current?.abort(); generation.current = undefined;
     const resolver = request.resolve;
     publishDialog(undefined);
     resolver(result);
@@ -43,7 +49,16 @@ export function DialogHost() {
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
+  const generate = async () => {
+    if (generating) { generation.current?.abort(); return; }
+    if (!request.generate) return;
+    const control = new AbortController(); const previous = value; generation.current = control; setGenerating(true); setValue(''); setSubmitError('');
+    try { const text = await request.generate(control.signal, (text) => { if (!control.signal.aborted && generation.current === control) setValue(text); }); if (!control.signal.aborted && generation.current === control) setValue(text); }
+    catch (error) { if (generation.current === control) { setValue(previous); if (!control.signal.aborted) setSubmitError(String(error)); } }
+    finally { if (generation.current === control) { if (control.signal.aborted) setValue(previous); generation.current = undefined; setGenerating(false); } }
+  };
   const submit = async () => {
+    if (generating) return;
     if (request.kind === 'multiChoice') {
       finish(selectedChoiceIds);
       return;
@@ -69,7 +84,7 @@ export function DialogHost() {
       <p>{request.message}</p>
       {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus aria-label={request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
       {request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
-      {request.kind === 'editor' && <label><span>{request.inputLabel}</span><textarea autoFocus className="dialog-editor" value={value} onChange={(event) => setValue(event.target.value)} /></label>}
+      {request.kind === 'editor' && <label><span>{request.inputLabel}</span><div className="ai-input-surface"><AiGenerationBorder active={generating} /><textarea readOnly={generating} autoFocus className={`dialog-editor${generating ? ' ai-input-generating' : ''}`} value={value} onChange={(event) => setValue(event.target.value)} /></div></label>}
       {submitError && <p className="dialog-error" role="alert">{submitError}</p>}
       {request.kind === 'choice' && <div className="dialog-choices">{request.choices?.map((choice) => <button key={choice.id} className={choice.danger ? 'danger-choice' : ''} onClick={() => finish(choice.id)}>{choice.icon && <Codicon name={choice.icon} />}<span><strong>{choice.label}</strong>{choice.description && <small>{choice.description}</small>}</span></button>)}</div>}
       {request.kind === 'multiChoice' && (
@@ -98,7 +113,7 @@ export function DialogHost() {
           })}
         </div>
       )}
-      <footer><button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || request.kind === 'editor') && !request.allowEmpty && !value.trim())} onClick={() => void submit()}>{request.confirmLabel ?? t('Confirm')}</button>}</footer>
+      <footer>{request.generate && <IconButton className="ai-generate" title={t(generating ? 'Stop generating' : 'Generate commit message with AI')} disabled={submitting} onClick={() => void generate()}><Codicon name={generating ? 'stop-circle' : 'sparkle'} /></IconButton>}<button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={generating || submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || request.kind === 'editor') && !request.allowEmpty && !value.trim())} onClick={() => void submit()}>{request.confirmLabel ?? t('Confirm')}</button>}</footer>
     </section>
   </div>;
 }

@@ -531,6 +531,7 @@ function renderRow(
 
 export interface UnifiedDiffViewProps {
   content: string;
+  reveal?: { line: number; side: DiffSide };
   path?: string;
   oldPath?: string;
   language?: string;
@@ -553,6 +554,7 @@ export function UnifiedDiffView({
   oldRevision,
   newRevision,
   onShowSelectionHistory,
+  reveal,
 }: UnifiedDiffViewProps) {
   const { t } = useI18n();
   const bridge = useContext(BridgeContext);
@@ -794,6 +796,11 @@ export function UnifiedDiffView({
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, [closeSearch, navigateSearch, openSearch, searchOpen]);
+  useEffect(() => {
+    if (!reveal) return;
+    const index = rows.findIndex((row) => row.kind === 'split' ? row[reveal.side === 'old' ? 'oldCell' : 'newCell'].lineNumber === reveal.line : row.kind === 'inline' && (reveal.side === 'old' ? row.oldNumber : row.newNumber) === reveal.line);
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+  }, [reveal, rows, virtualizer]);
   const goToChange = useCallback((index: number) => {
     if (!changeRanges.length) return;
     const target = ((index % changeRanges.length) + changeRanges.length) % changeRanges.length;

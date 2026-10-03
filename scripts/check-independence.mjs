@@ -33,7 +33,6 @@ async function walk(dirPath) {
     if ((name === 'package.json' || name === 'package-lock.json') && /"file:[^"]+"/.test(source)) {
       failures.push(`${shown}: contains a file: dependency`);
     }
-    if (/src\/(ai|aiCodeReview|aiCommit|aiMerge)/i.test(source)) failures.push(`${shown}: contains an AI source dependency`);
   }
 }
 

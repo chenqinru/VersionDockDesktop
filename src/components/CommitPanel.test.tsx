@@ -28,6 +28,16 @@ const originalStage = useAppStore.getState().stage;
 afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
 describe('CommitPanel capabilities and file view', () => {
+  it('keeps only review, split and message history in the commit options', () => {
+    useAppStore.setState({ bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo' });
+    const { container } = renderPanel();
+    const actions = within(container.querySelector('.commit-option-actions') as HTMLElement);
+    expect(actions.getAllByRole('button')).toHaveLength(3);
+    expect(actions.getByRole('button', { name: 'Review selected changes with AI' })).toBeInTheDocument();
+    expect(actions.getByRole('button', { name: 'Commit message history' })).toBeInTheDocument();
+    expect(actions.queryByRole('button', { name: 'Edit AI prompt' })).not.toBeInTheDocument();
+  });
+
   it('compacts single-child directory chains while preserving file paths', () => {
     const tree = buildFileTree([
       { path: 'src/components/App.tsx', status: 'modified', staged: false, unstaged: true, conflicted: false },

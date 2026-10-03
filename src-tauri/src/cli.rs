@@ -103,6 +103,19 @@ pub async fn run_with_env(
     unreachable!("Git index-lock retry loop always returns")
 }
 
+// Isolated Git indexes and ref/object-only commands do not use the current worktree index.
+// Keep normal process handling, but avoid waiting on or cleaning a different client's index lock.
+pub(crate) async fn run_with_isolated_git_index(
+    args: &[String],
+    cwd: &Path,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    env: &[(String, String)],
+) -> Result<CommandOutput, DesktopError> {
+    run_once("git", args, cwd, stdin, timeout, cancellation, env).await
+}
+
 async fn run_once(
     program: &str,
     args: &[String],

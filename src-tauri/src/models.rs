@@ -141,6 +141,42 @@ pub enum BridgeCommand {
         #[serde(default)]
         changed_fields: Option<Vec<String>>,
     },
+    AiRuntime,
+    AiSaveKey {
+        provider: String,
+        api_url: String,
+        key: Option<String>,
+    },
+    AiPrompt {
+        task: crate::ai::models::AiTask,
+        workspace_id: Option<String>,
+        repo_id: Option<String>,
+        scope: String,
+        action: String,
+        text: Option<String>,
+    },
+    AiGenerate {
+        request: crate::ai::models::AiRequest,
+    },
+    AiComposerPrepare {
+        workspace_id: String,
+        repo_id: String,
+        paths: Vec<String>,
+        staged_only: bool,
+        hashes: Vec<String>,
+    },
+    AiComposerApply {
+        workspace_id: String,
+        repo_id: String,
+        session_id: String,
+        groups: Vec<crate::ai::models::AiGroup>,
+        no_verify: bool,
+    },
+    AiReviewLocate {
+        workspace_id: String,
+        anchor: crate::ai::models::AiAnchor,
+    },
+    AiResetCliSession,
     UpdateLayout {
         layout: LayoutState,
     },
@@ -1584,6 +1620,10 @@ fn default_schema_version() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettings {
+    #[serde(default)]
+    #[specta(optional)]
+    pub ai_config: crate::ai::models::AiConfig,
+
     pub theme: ThemePreference,
     pub language: LanguagePreference,
     pub ui_font_size: UiFontSizePreference,
@@ -1703,6 +1743,7 @@ fn default_branch_clean_character() -> String {
 impl Default for DesktopSettings {
     fn default() -> Self {
         Self {
+            ai_config: crate::ai::models::AiConfig::default(),
             theme: ThemePreference::System,
             language: LanguagePreference::System,
             ui_font_size: UiFontSizePreference::Standard,
@@ -1775,6 +1816,7 @@ impl Default for DesktopSettings {
 
 impl DesktopSettings {
     pub fn normalize(mut self) -> Self {
+        self.ai_config = self.ai_config.normalize();
         self.repository_scan_depth = self.repository_scan_depth.min(10);
         self.maximum_graph_commits = self.maximum_graph_commits.clamp(100, 10_000);
         self.auto_refresh_interval = self.auto_refresh_interval.min(86_400);

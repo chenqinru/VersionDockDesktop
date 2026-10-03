@@ -1,0 +1,26 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it } from 'vitest';
+import { AiSettings } from './AiSettings';
+import { MockBridge } from '../platform/bridge';
+import { useAppStore } from '../store/appStore';
+import type { AiConfig, AiRuntime, BootstrapData } from '../bindings/generated';
+const config: AiConfig = { executionMode:'provider', provider:'openai', apiProtocol:'chat-completions', apiUrl:'', model:'audit', maxInputTokens:128000, maxOutputTokens:128000, cliProvider:'codex', cliModel:'', cliTimeoutSeconds:300, cliExecutablePaths:{} };
+const data = (provider: string) => ({ state:{ settings:{ aiConfig:{ ...config, provider } } } } as BootstrapData);
+afterEach(() => { cleanup(); useAppStore.setState({ bootstrap:undefined, bridge:undefined }); });
+it('rejects old provider detection and keeps key drafts tied to their provider', async () => {
+  const completions: Array<(value: AiRuntime) => void> = [];
+  const bridge = new MockBridge(() => new Promise<AiRuntime>(resolve => completions.push(resolve)));
+  useAppStore.setState({ bridge, bootstrap:data('openai') });
+  render(<AiSettings />);
+  await waitFor(() => expect(completions).toHaveLength(1));
+  fireEvent.change(screen.getByPlaceholderText('Enter API key'), { target:{ value:'synthetic-key-draft' } });
+  useAppStore.setState({ bootstrap:data('claude') });
+  await waitFor(() => expect(completions).toHaveLength(2));
+  expect(screen.getByPlaceholderText('Enter API key')).toHaveValue('');
+  completions[1]({ available:true, configured:true, provider:'claude', keySaved:false, message:'current provider', version:null });
+  expect(await screen.findByText('current provider')).toBeInTheDocument();
+  completions[0]({ available:true, configured:true, provider:'openai', keySaved:true, message:'old provider', version:null });
+  await Promise.resolve();
+  expect(screen.queryByText('old provider')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name:'Remove key' })).toBeDisabled();
+});

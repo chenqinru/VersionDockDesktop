@@ -9,6 +9,28 @@ afterEach(() => {
 });
 
 describe('DialogHost editor', () => {
+  it('uses the shared border during historical message generation and restores the draft when stopped', async () => {
+    render(<DialogHost />);
+    let abort!: () => void;
+    await act(async () => { void editorDialog({
+      title: 'Edit Commit Message', message: 'repo', inputLabel: 'Commit message', initialValue: 'original draft', submit: async () => true,
+      generate: (signal, onMessage) => new Promise<string>((_resolve, reject) => {
+        onMessage('partial output');
+        abort = () => reject(new DOMException('Stopped', 'AbortError'));
+        signal.addEventListener('abort', abort, { once: true });
+      }),
+    }); });
+    fireEvent.click(screen.getByTitle('Generate commit message with AI'));
+    const editor = screen.getByRole('textbox');
+    expect(editor).toHaveAttribute('readonly');
+    expect(editor.closest('.ai-input-surface')?.querySelector('.ai-generation-border')).not.toBeNull();
+    expect(editor).toHaveValue('partial output');
+    fireEvent.click(screen.getByTitle('Stop generating'));
+    await waitFor(() => expect(editor).toHaveValue('original draft'));
+    expect(editor).not.toHaveAttribute('readonly');
+    expect(editor.closest('.ai-input-surface')?.querySelector('.ai-generation-border')).toBeNull();
+  });
+
   it('keeps a multiline commit message after submit failure and supports Cmd/Ctrl+Enter', async () => {
     const submit = vi.fn().mockRejectedValueOnce(new Error('rewrite failed')).mockResolvedValueOnce(true);
     render(<DialogHost />);

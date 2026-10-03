@@ -14,6 +14,7 @@ export type DialogRequest = {
   choices?: Array<{ id: string; label: string; description?: string; icon?: string; danger?: boolean }>;
   items?: Array<{ id: string; label: string; description?: string }>;
   submit?: (value: string) => Promise<boolean>;
+  generate?: (signal: AbortSignal, onMessage: (text: string) => void) => Promise<string>;
   resolve: (value: boolean | string | string[] | null) => void;
 };
 

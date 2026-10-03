@@ -1,4 +1,5 @@
 import { IconButton } from './IconButton';
+import { WorkspaceHeader } from './WorkspaceHeader';
 import { useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
@@ -12,6 +13,7 @@ import { UnifiedDiffView } from './UnifiedDiffView';
 export function DiffWorkspace() {
   const systemOpen = useAppStore((state) => state.systemOpen);
   const openFileHistory = useAppStore((state) => state.openFileHistory);
+  const reveal = useAppStore((state) => state.diffReveal);
   const diff = useAppStore((state) => state.diff);
   const back = useAppStore((state) => state.backToHistory);
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
@@ -40,7 +42,7 @@ export function DiffWorkspace() {
   const commit = selectedCommits.find((item) => item.repoId === file?.repoId && item.hash === file?.revision);
   const kind = repo?.meta.kind ?? 'git';
   const { oldRevision, newRevision } = resolveDiffRevisions(kind, file ?? {}, commit);
-  const backLabel = comparisonTarget
+  const backLabel = diffReturnMode === 'ai-review' ? t('Back to AI review') : comparisonTarget
     ? t('Back to compare')
     : diffReturnMode === 'commit-detail'
       ? t('Back to commit details')
@@ -48,13 +50,7 @@ export function DiffWorkspace() {
         ? t('Back to changes')
         : t('Back to history');
   return <section className="diff-workspace">
-    <header className="diff-header">
-      <button className="diff-back-button" onClick={back}><Codicon name="arrow-left" /><span>{backLabel}</span></button>
-      <div className="diff-file-heading" title={diff.path}>
-        <FileIcon name={fileName} />
-        <span className="diff-file-path">{diff.path}</span>
-        {revisionLabel && <em>{revisionLabel}</em>}
-      </div>
+    <WorkspaceHeader className="diff-header" backLabel={backLabel} onBack={back} actions={
       <div className="diff-header-actions">
         <span className="diff-line-count">{diff.lineCount} {t('Lines')}</span>
         {repo && file && <>
@@ -65,7 +61,13 @@ export function DiffWorkspace() {
           <IconButton className="diff-header-action" aria-label={t('Reveal')} title={t('Reveal')} onClick={() => void systemOpen(repo.meta.id, file.path, true)}><Codicon name="folder-opened" /></IconButton>
         </>}
       </div>
-    </header>
+    }>
+      <div className="diff-file-heading" title={diff.path}>
+        <FileIcon name={fileName} />
+        <span className="diff-file-path">{diff.path}</span>
+        {revisionLabel && <em>{revisionLabel}</em>}
+      </div>
+    </WorkspaceHeader>
     <div
       className="diff-content-context"
       onMouseUp={syncSelection}
@@ -86,7 +88,7 @@ export function DiffWorkspace() {
         setContext({ x: event.clientX, y: event.clientY, selection });
       }}
     >
-      {diff.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : !diff.content ? <DiffPlaceholder kind="empty" path={diff.path} /> : <UnifiedDiffView repoId={file?.repoId ?? comparisonTarget?.repoId ?? repo?.meta.id} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} />}
+      {diff.truncated ? <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} /> : diff.binary ? <DiffPlaceholder kind="binary" path={diff.path} /> : !diff.content ? <DiffPlaceholder kind="empty" path={diff.path} /> : <UnifiedDiffView reveal={diffReturnMode === 'ai-review' ? reveal : undefined} repoId={file?.repoId ?? comparisonTarget?.repoId ?? repo?.meta.id} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} />}
     </div>
     {context && <ContextMenu
       preserveSelection

@@ -1,3 +1,5 @@
+import { AiCommitComposerIcon } from './AiCommitComposerIcon';
+import { generateHistoricalMessage, openCommitExplanation, useAiStore } from '../ai/aiStore';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { formatHistoryDate as formatDate } from '../history/dates';
 import { buildHistoryAuthorOptions } from '../history/authors';
@@ -331,14 +333,17 @@ function CommitList({
       const allUnpushed = selection.every((item) => item.unpushed);
       const containsMerge = selection.some((item) => item.parents.length > 1);
       return [
+        { id: 'ai-explain', label: t('AI Explain'), icon: 'sparkle-filled' },
+        { separator: true },
         { id: 'patch-multi', label: t('Create Patch...'), icon: 'diff' },
         ...(git ? [{ id: 'cherry-pick-multi', label: t('Cherry-Pick All'), icon: 'git-commit', disabled: containsMerge, disabledReason: containsMerge ? t('Merge commits require selecting a mainline parent and cannot be cherry-picked here.') : undefined } as ContextMenuEntry, { separator: true } as ContextMenuEntry, { id: 'reset-multi', label: t('Reset Current Branch to Here'), icon: 'history', disabled: true } as ContextMenuEntry, { id: 'revert-multi', label: t('Revert Commits'), icon: 'discard' } as ContextMenuEntry] : []),
-        ...(allUnpushed ? [{ separator: true } as ContextMenuEntry, { id: 'drop-multi', label: t('Drop Commits'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'squash-multi', label: t('Squash {0} Commits...', selection.length), icon: 'fold-down', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
+        ...(allUnpushed ? [{ separator: true } as ContextMenuEntry, ...(git ? [{ id: 'ai-composer', label: t('AI Reorganize Commits'), icon: 'layers', iconNode: <AiCommitComposerIcon />, accent: true, disabled: !rewriteAvailable } as ContextMenuEntry] : []), { id: 'drop-multi', label: t('Drop Commits'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'squash-multi', label: t('Squash {0} Commits...', selection.length), icon: 'fold-down', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
       ];
     }
     const { hasTags, checkoutTarget, branchOptionsTarget } = commitMenuRefs(commit);
     const items: ContextMenuEntry[] = [
       { id: 'copy', label: t('Copy Revision Number'), icon: 'copy' },
+      { id: 'ai-explain', label: t('AI Explain'), icon: 'sparkle-filled' },
       { separator: true },
       { id: 'branch', label: t('New Branch...'), icon: 'git-branch' },
       { id: hasTags ? 'manage-tags' : 'tag', label: t(hasTags ? 'Manage Tags...' : 'New Tag...'), icon: 'tag' },
@@ -361,7 +366,7 @@ function CommitList({
       || (Boolean(repository?.revision) && (commit.hash === repository?.revision || commit.shortHash === repository?.revision || commit.hash.startsWith(repository?.revision ?? '')));
     if (commit.unpushed) items.push(
       { separator: true },
-      ...(isHead ? [{ id: 'edit', label: t('Edit Commit Message'), icon: 'edit', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
+      ...(isHead ? [{ id: 'ai-composer', label: t('AI Reorganize Commits'), icon: 'layers', iconNode: <AiCommitComposerIcon />, accent: true, disabled: !rewriteAvailable } as ContextMenuEntry, { id: 'edit', label: t('Edit Commit Message'), icon: 'edit', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry, { id: 'undo', label: t('Undo Commit'), icon: 'arrow-left', disabled: !rewriteAvailable, disabledReason: rewriteReason } as ContextMenuEntry] : []),
       ...(isHead ? [{ separator: true } as ContextMenuEntry] : []),
       { id: 'drop', label: t('Drop Commit'), icon: 'trash', danger: true, disabled: !rewriteAvailable, disabledReason: rewriteReason },
     );
@@ -377,6 +382,11 @@ function CommitList({
       return;
     }
     const selection = contextSelection(commit);
+    if (id === 'ai-explain') {
+      const explanationSelection = selected.has(commitKey(commit.repoId, commit.hash)) ? selectedCommits : [commit];
+      await openCommitExplanation(explanationSelection);
+      return;
+    }
     const index = new Map(commits.map((item, position) => [commitKey(item.repoId, item.hash), position]));
     const oldestFirst = [...selection].sort((left, right) => (index.get(commitKey(right.repoId, right.hash)) ?? 0) - (index.get(commitKey(left.repoId, left.hash)) ?? 0));
     const newestFirst = [...selection].sort((left, right) => (index.get(commitKey(left.repoId, left.hash)) ?? 0) - (index.get(commitKey(right.repoId, right.hash)) ?? 0));
@@ -486,10 +496,11 @@ function CommitList({
         await historyOperation(commit.repoId, { type: 'reset', revision: commit.hash, mode, expectedBranch, expectedHead });
       }
     }
+    if (id === 'ai-composer') useAiStore.getState().openComposer({ repoId: commit.repoId, paths: [], stagedOnly: false, hashes: newestFirst.map((c) => c.hash) });
     if (id === 'edit') {
       const detail = await useAppStore.getState().loadCommitDetail(commit);
       const name = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
-      await editorDialog({ title: t('Edit Commit Message'), message: `${name} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, confirmLabel: t('Save'), submit: async (message) => {
+      await editorDialog({ title: t('Edit Commit Message'), message: `${name} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, generate: (signal, onMessage) => generateHistoricalMessage([{ repoId: commit.repoId, hash: commit.hash }], signal, onMessage), confirmLabel: t('Save'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message });
         if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed')); }
         return true;
@@ -499,7 +510,7 @@ function CommitList({
     if (id === 'drop' && await confirmDialog({ title: t('Drop Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('This rewrites local history and may require force push.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: [commit.hash] });
     if (id === 'drop-multi' && await confirmDialog({ title: t('Drop Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: newestFirst.map((item) => item.hash) });
     if (id === 'squash-multi') {
-      await editorDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n'), items: oldestFirst.map((item) => ({ id: item.shortHash, label: item.message, description: item.author })), confirmLabel: t('Squash'), submit: async (message) => {
+      await editorDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n'), generate: (signal, onMessage) => generateHistoricalMessage(newestFirst.map((c) => ({ repoId: c.repoId, hash: c.hash })), signal, onMessage), items: oldestFirst.map((item) => ({ id: item.shortHash, label: item.message, description: item.author })), confirmLabel: t('Squash'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'squash', hashes: newestFirst.map((item) => item.hash), message });
         if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed')); }
         return true;

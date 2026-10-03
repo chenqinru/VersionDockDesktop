@@ -5,6 +5,7 @@
     clippy::too_many_arguments
 )]
 
+mod ai;
 mod changelist;
 mod cli;
 mod commands;

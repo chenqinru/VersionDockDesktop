@@ -1,4 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { expandAiResolutionLines, inferAiAcceptedSides, normalEditsEqual, previewDelay } from '../ai/mergePreview';
+import { aiRequest, useAiStore } from '../ai/aiStore';
+import { IconButton } from './IconButton';
+import { AiPromptEditor } from './AiSettings';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { isOperationActive, useAppStore } from '../store/appStore';
@@ -11,6 +15,7 @@ import {
   type NonConflictingSelections,
   toMergeConflictFile,
   getMergeToolbarCounts,
+  getEffectiveConflictBlocks,
   buildBaseNormalEdits,
   buildNormalEditsForNonConflictingScope,
   buildNonConflictingSelectionsForScope,
@@ -40,6 +45,15 @@ export function MergeWorkspace() {
   const identity = mergeEditorIdentity(workspaceId, mergeTarget?.repoId, merge?.path, merge?.fingerprint);
   const initialDraft = storedDraft?.identity === identity ? storedDraft : undefined;
 
+  const aiRunKey = `merge:${identity}`;
+
+  const aiRun = useAiStore((s) => s.runs[aiRunKey]);
+  const [aiStatus, setAiStatus] = useState<{ phase: 'idle' | 'analyzing' | 'typing' | 'completed'; current: number; total: number; provider?: string; model?: string }>({ phase: 'idle', current: 0, total: 0 });
+  const [aiDraft, setAiDraft] = useState<import('./ThreeWayLayout').AiMergeDraft | null>(null);
+  const aiTransaction = useRef<{ control: AbortController; snapshot: NonNullable<typeof storedDraft>; result: string }>();
+  const aiBusy = aiStatus.phase === 'analyzing' || aiStatus.phase === 'typing';
+  const editingBusy = busy || aiBusy;
+  const [aiPrompt, setAiPrompt] = useState(false);
   const [resolutions, setResolutions] = useState<Record<number, Resolution>>(initialDraft?.resolutions ?? {});
   const [normalEdits, setNormalEdits] = useState<NormalEdits>(initialDraft?.normalEdits ?? {});
   const [nonConflictingSelections, setNonConflictingSelections] = useState<NonConflictingSelections>(initialDraft?.nonConflictingSelections ?? {});
@@ -55,6 +69,19 @@ export function MergeWorkspace() {
     });
   }, [merge, identity, resolutions, normalEdits, nonConflictingSelections, appliedNonConflictingScope, currentConflictIndex, syncScrollEnabled, setDraft]);
 
+  useEffect(() => () => {
+    useAiStore.getState().cancel(aiRunKey);
+    const transaction = aiTransaction.current;
+    transaction?.control.abort();
+    aiTransaction.current = undefined;
+    const state = useAppStore.getState();
+    if (transaction && state.mergeEditorDraft?.identity === transaction.snapshot.identity) {
+      state.setMergeEditorDraft(transaction.snapshot);
+      state.setMergeResult(transaction.result);
+    }
+    if (transaction) useAppStore.setState(current => ({ sessions: Object.fromEntries(Object.entries(current.sessions).map(([id, session]) => [id, session.mergeEditorDraft?.identity === transaction.snapshot.identity ? { ...session, mergeEditorDraft: transaction.snapshot, mergeResult: transaction.result } : session])) }));
+  }, [aiRunKey]);
+
   // 初始化或切换冲突文件时重置状态
   const [lastIdentity, setLastIdentity] = useState(identity);
   if (merge && identity !== lastIdentity) {
@@ -68,6 +95,8 @@ export function MergeWorkspace() {
     setNonConflictingSelections(initialDraft?.nonConflictingSelections ?? {});
     setAppliedNonConflictingScope(initialDraft?.appliedNonConflictingScope ?? null);
     setCurrentConflictIndex(initialDraft?.currentConflictIndex ?? 0);
+    setAiStatus({ phase: 'idle', current: 0, total: 0 });
+    setAiDraft(null);
   }
 
   // 工具栏计数统计
@@ -204,6 +233,8 @@ export function MergeWorkspace() {
   // 底部全部重置
   const resetAll = useCallback(() => {
     if (!file) return;
+    setAiStatus({ phase: 'idle', current: 0, total: 0 });
+    setAiDraft(null);
     const initialRes: Record<number, Resolution> = {};
     file.conflicts.forEach((c) => {
       initialRes[c.index] = 'unresolved';
@@ -236,7 +267,93 @@ export function MergeWorkspace() {
   if (!merge || !file) return null;
 
   const fileName = merge.path.split('/').pop() ?? merge.path;
-  const canApplyNonConflicting = toolbarCounts.nonConflictingCount > 0;
+  const restoreAiSnapshot = () => {
+    const transaction = aiTransaction.current;
+    if (!transaction) return;
+    transaction.control.abort();
+    aiTransaction.current = undefined;
+    setResolutions(transaction.snapshot.resolutions);
+    setNormalEdits(transaction.snapshot.normalEdits);
+    setNonConflictingSelections(transaction.snapshot.nonConflictingSelections);
+    setAppliedNonConflictingScope(transaction.snapshot.appliedNonConflictingScope);
+    setCurrentConflictIndex(transaction.snapshot.currentConflictIndex);
+    setResult(transaction.result);
+    setDraft(transaction.snapshot);
+    setAiDraft(null);
+    setAiStatus({ phase: 'idle', current: 0, total: 0 });
+  };
+  const resolveWithAi = async () => {
+    if (aiBusy) { useAiStore.getState().cancel(aiRunKey); restoreAiSnapshot(); return; }
+    if (!mergeTarget || !unresolvedConflictIndexes.length) return;
+    const snapshot = structuredClone(useAppStore.getState().mergeEditorDraft ?? { identity, fingerprint: merge.fingerprint, resolutions, normalEdits, nonConflictingSelections, appliedNonConflictingScope, currentConflictIndex, syncScrollEnabled });
+    const transaction = { control: new AbortController(), snapshot, result: useAppStore.getState().mergeResult };
+    aiTransaction.current = transaction;
+    const active = () => aiTransaction.current === transaction && !transaction.control.signal.aborted && identity === mergeEditorIdentity(useAppStore.getState().snapshot?.workspace.id, useAppStore.getState().mergeTarget?.repoId ?? useAppStore.getState().selectedFile?.repoId, useAppStore.getState().merge?.path, useAppStore.getState().merge?.fingerprint);
+    setAiStatus({ phase: 'analyzing', current: 0, total: unresolvedConflictIndexes.length });
+    const result = await useAiStore.getState().generate(aiRunKey, aiRequest('merge-conflict', { repoId: mergeTarget.repoId, path: merge.path, conflictIndexes: unresolvedConflictIndexes, workspaceId: workspaceId ?? '' }));
+    if (!active()) return;
+    if (useAppStore.getState().mergeResult !== transaction.result) {
+      transaction.control.abort(); aiTransaction.current = undefined; setAiStatus({ phase: 'idle', current: 0, total: 0 }); return;
+    }
+    if (!result) { restoreAiSnapshot(); return; }
+    try {
+      const effective = getEffectiveConflictBlocks(file);
+      const replacements = [...result.resolutions].sort((a, b) => a.index - b.index);
+      const next = { ...snapshot.resolutions };
+      let edits = snapshot.normalEdits;
+      setAiStatus({ phase: 'typing', current: 0, total: replacements.length, provider: result.provider, model: result.model });
+      if (nonConflictingSelectionChoices?.all && nonConflictingChoices?.all && Object.keys(snapshot.nonConflictingSelections).length === 0 && (Object.keys(snapshot.normalEdits).length === 0 || normalEditsEqual(snapshot.normalEdits, nonConflictingChoices.base))) {
+        const selections: NonConflictingSelections = {};
+        for (const index of Object.keys(nonConflictingSelectionChoices.all).map(Number).sort((a, b) => a - b)) {
+          if (!active()) return;
+          selections[index] = nonConflictingSelectionChoices.all[index];
+          edits = buildNormalEditsForNonConflictingSelections(file, selections) ?? edits;
+          setNormalEdits(edits);
+          setNonConflictingSelections({ ...selections });
+          setResult(buildContentFromResolutions(file, next, edits));
+          await previewDelay(80, transaction.control.signal);
+        }
+        setAppliedNonConflictingScope('all');
+      }
+      for (const [position, resolution] of replacements.entries()) {
+        if (!active()) return;
+        const marker = file.conflicts.find(block => block.index === resolution.index);
+        const conflict = effective.find(block => block.index === resolution.index);
+        if (!marker || !conflict) throw new Error('Conflict no longer available');
+        const lines = expandAiResolutionLines(marker, conflict, resolution.lines);
+        const text = lines.join('\n');
+        setCurrentConflictIndex(resolution.index);
+        setAiStatus({ phase: 'typing', current: position + 1, total: replacements.length, provider: result.provider, model: result.model });
+        const frames = Math.max(1, Math.floor(Math.min(6000, Math.max(1100, text.length * 11)) / 16));
+        const step = Math.max(1, Math.ceil(text.length / frames));
+        if (!text) { setAiDraft({ index: resolution.index, content: '' }); await previewDelay(220, transaction.control.signal); }
+        for (let cursor = step; cursor < text.length + step; cursor += step) {
+          if (!active()) return;
+          setAiDraft({ index: resolution.index, content: text.slice(0, cursor) });
+          await previewDelay(16, transaction.control.signal);
+        }
+        if (!active()) return;
+        next[resolution.index] = { type: 'custom', lines, acceptedSides: inferAiAcceptedSides(conflict, lines), resolvedByAi: true };
+        setResolutions({ ...next });
+        setResult(buildContentFromResolutions(file, next, edits));
+        setAiDraft(null);
+        await previewDelay(140, transaction.control.signal);
+      }
+      if (!active()) return;
+      aiTransaction.current = undefined;
+      setAiStatus({ phase: 'completed', current: replacements.length, total: replacements.length, provider: result.provider, model: result.model });
+    } catch {
+      if (active()) {
+        restoreAiSnapshot();
+        useAiStore.setState(state => ({ runs: { ...state.runs, [aiRunKey]: { ...state.runs[aiRunKey], error: t('AI preview failed. The original draft was restored.') } } }));
+      }
+    }
+  };
+  const aiStatusMessage = aiStatus.phase === 'analyzing' ? t('AI is analyzing {0} conflicts…', aiStatus.total)
+    : aiStatus.phase === 'typing' ? t('AI is writing conflict {0} of {1}…', aiStatus.current, aiStatus.total)
+      : t('AI resolved {0} conflicts. Review the result before applying.', aiStatus.total);
+  const aiResultStatus = aiStatus.phase === 'analyzing' ? t('AI analyzing') : aiStatus.phase === 'typing' ? t('AI writing {0}/{1}', aiStatus.current, aiStatus.total) : aiStatus.phase === 'completed' ? t('AI complete') : undefined;
+  const canApplyNonConflicting = toolbarCounts.nonConflictingCount > 0 && !editingBusy;
   const canCancelNonConflicting = canApplyNonConflicting && Boolean(nonConflictingChoices?.base);
 
   return (
@@ -289,10 +406,17 @@ export function MergeWorkspace() {
           <span>{t('Back to conflicts')}</span>
         </button>
         <FileIcon name={fileName} />
-        <span style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {merge.path}
         </span>
+        {!merge.binary && <button type="button" className="ai-generate ai-explain-button" data-busy={aiBusy} disabled={busy || !unresolvedConflictIndexes.length && !aiBusy} onClick={() => void resolveWithAi()} title={t(aiBusy ? 'Stop AI conflict resolution' : 'Resolve all remaining conflicts with AI')}>
+          <Codicon name={aiBusy ? 'stop-circle' : 'sparkle-filled'} />{t(aiBusy ? 'Stop AI' : unresolvedConflictIndexes.length ? 'Resolve {0} conflicts with AI' : 'AI resolved', unresolvedConflictIndexes.length)}
+        </button>}
+        {!merge.binary && <IconButton title={t('Edit AI prompt')} disabled={aiBusy} onClick={() => setAiPrompt(true)}><Codicon name="edit" /></IconButton>}
       </div>
+
+      {aiRun?.error && <div role="alert" className="ai-error">{aiRun.error}</div>}
+      {aiPrompt && <AiPromptEditor task="merge-conflict" onClose={() => setAiPrompt(false)} />}
 
       {/* 二进制冲突提示 */}
       {merge.binary ? (
@@ -301,9 +425,9 @@ export function MergeWorkspace() {
           <strong>{t('Binary conflict cannot be edited')}</strong>
           <span>{t('Choose which complete version to keep.')}</span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button disabled={busy} onClick={() => void handleAccept('mine')}>{t('Keep mine')}</button>
-            <button disabled={busy} onClick={() => void handleAccept('theirs')}>{t('Keep theirs')}</button>
-            <button disabled={busy} onClick={() => void handleAccept('working')}>{t('Keep working')}</button>
+            <button disabled={editingBusy} onClick={() => void handleAccept('mine')}>{t('Keep mine')}</button>
+            <button disabled={editingBusy} onClick={() => void handleAccept('theirs')}>{t('Keep theirs')}</button>
+            <button disabled={editingBusy} onClick={() => void handleAccept('working')}>{t('Keep working')}</button>
           </div>
         </div>
       ) : (
@@ -329,7 +453,7 @@ export function MergeWorkspace() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, height: '100%', flexShrink: 0 }}>
               <button
                 type="button"
-                disabled={!unresolvedConflictIndexes.some((index) => index < currentConflictIndex)}
+                disabled={aiBusy || !unresolvedConflictIndexes.some((index) => index < currentConflictIndex)}
                 onClick={goToPreviousUnresolved}
                 title={t('Previous Unresolved Conflict')}
                 style={{
@@ -355,7 +479,7 @@ export function MergeWorkspace() {
               </button>
               <button
                 type="button"
-                disabled={!unresolvedConflictIndexes.some((index) => index > currentConflictIndex)}
+                disabled={aiBusy || !unresolvedConflictIndexes.some((index) => index > currentConflictIndex)}
                 onClick={goToNextUnresolved}
                 title={t('Next Unresolved Conflict')}
                 style={{
@@ -482,6 +606,11 @@ export function MergeWorkspace() {
           </div>
 
           {/* 3 列三方连线合并主体 */}
+          {aiStatus.phase !== 'idle' && <div className="merge-ai-status" data-running={aiBusy} data-completed={aiStatus.phase === 'completed'} role="status" aria-live="polite">
+            <span className={aiBusy ? 'merge-ai-orbit' : undefined}><Codicon name={aiStatus.phase === 'completed' ? 'check' : 'sparkle'} /></span>
+            <span>{aiStatusMessage}</span>{(aiStatus.provider || aiStatus.model) && <small>{[aiStatus.provider, aiStatus.model].filter(Boolean).join(' · ')}</small>}
+            <i><i style={{ width: `${aiStatus.phase === 'analyzing' ? 18 : aiStatus.total ? aiStatus.current / aiStatus.total * 100 : 0}%` }} /></i>
+          </div>}
           <ThreeWayLayout
             file={file}
             resolutions={resolutions}
@@ -494,7 +623,11 @@ export function MergeWorkspace() {
             onSelectNonConflicting={handleSelectNonConflicting}
             currentConflictIndex={currentConflictIndex}
             syncScrollEnabled={syncScrollEnabled}
+            showCompletionNotice={aiStatus.phase === 'completed' && !unresolvedConflictIndexes.length}
             onApplyResolved={handleSaveAndReturn}
+            readOnly={editingBusy}
+            aiDraft={aiDraft}
+            resultStatusLabel={aiResultStatus}
           />
 
           {/* 底部操作栏 */}
@@ -514,7 +647,7 @@ export function MergeWorkspace() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
-                disabled={busy}
+                disabled={editingBusy}
                 onClick={() => acceptAllSide('ours')}
                 style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
@@ -522,7 +655,7 @@ export function MergeWorkspace() {
               </button>
               <button
                 type="button"
-                disabled={busy}
+                disabled={editingBusy}
                 onClick={() => acceptAllSide('theirs')}
                 style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
@@ -530,7 +663,7 @@ export function MergeWorkspace() {
               </button>
               <button
                 type="button"
-                disabled={busy}
+                disabled={editingBusy}
                 onClick={resetAll}
                 style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
@@ -540,7 +673,7 @@ export function MergeWorkspace() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
-                disabled={busy}
+                disabled={editingBusy}
                 onClick={openConflicts}
                 style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
@@ -550,7 +683,7 @@ export function MergeWorkspace() {
                 type="button"
                 aria-label={t('Save resolution')}
                 title={t('Save resolution')}
-                disabled={busy || unresolvedConflictIndexes.length > 0}
+                disabled={editingBusy || unresolvedConflictIndexes.length > 0}
                 onClick={() => void handleSaveAndReturn()}
                 style={{
                   padding: '6px 18px',
@@ -558,8 +691,8 @@ export function MergeWorkspace() {
                   border: '1px solid var(--vscode-button-border, transparent)',
                   background: 'var(--vscode-button-background, #0e639c)',
                   color: 'var(--vscode-button-foreground, #ffffff)',
-                  opacity: unresolvedConflictIndexes.length > 0 || busy ? 0.45 : 1,
-                  cursor: unresolvedConflictIndexes.length > 0 || busy ? 'default' : 'pointer',
+                  opacity: unresolvedConflictIndexes.length > 0 || editingBusy ? 0.45 : 1,
+                  cursor: unresolvedConflictIndexes.length > 0 || editingBusy ? 'default' : 'pointer',
                   fontSize: 12,
                   fontWeight: 600,
                 }}
