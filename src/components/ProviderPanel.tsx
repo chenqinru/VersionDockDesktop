@@ -14,7 +14,7 @@ import type {
 import { useBridge } from '../platform/context';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
-import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
+import { DialogSurface } from './DialogSurface';
 import { useAppStore } from '../store/appStore';
 import { isAbortError } from '../platform/bridge';
 
@@ -90,7 +90,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
     }
   }, [selectedProvider, visibility]);
 
-  const dialogRef = useDialogFocusTrap(true, close);
+  const dialogRef = useRef<HTMLElement>(null);
 
   const clearAvatarCache = () => {
     window.dispatchEvent(new Event('versiondock-avatar-cache-clear'));
@@ -368,20 +368,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
   };
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) close();
-      }}
-    >
-      <section
-        ref={dialogRef}
-        className="modal-panel provider-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('Remote Providers')}
-      >
+    <DialogSurface preserveStyle ref={dialogRef} className="modal-panel provider-panel" onClose={close} aria-label={t('Remote Providers')}>
         <header className="modal-header">
           <div className="modal-header-title">
             <Codicon name="cloud" />
@@ -1180,7 +1167,6 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
             )}
           </main>
         </div>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

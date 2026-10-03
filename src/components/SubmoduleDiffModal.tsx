@@ -1,8 +1,7 @@
 import { IconButton } from './IconButton';
-import { useRef } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
-import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
+import { DialogSurface } from './DialogSurface';
 import { useAppStore } from '../store/appStore';
 import type { FileChange, RepositoryStatus } from '../bindings/generated';
 
@@ -20,8 +19,6 @@ export function SubmoduleDiffModal({
   onRevealPanel,
 }: SubmoduleDiffModalProps) {
   const { t } = useI18n();
-  const dialogRef = useRef<HTMLElement>(null);
-  useDialogFocusTrap(true, onClose);
 
   const submodules = useAppStore((state) => state.submodules[repo.meta.id] ?? []);
   const submoduleOperation = useAppStore((state) => state.submoduleOperation);
@@ -44,24 +41,10 @@ export function SubmoduleDiffModal({
   };
 
   return (
-    <div
-      className="dialog-backdrop"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <section
-        ref={dialogRef}
-        className="app-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('Submodule Pointer Diff')}
-        style={{ width: 520, maxWidth: '90vw' }}
-      >
-        <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))' }}>
+    <DialogSurface className="app-dialog submodule-dialog" onClose={onClose} aria-label={t('Submodule Pointer Diff')}>
+        <header>
           <Codicon name="repo-clone" style={{ fontSize: 16 }} />
-          <strong style={{ fontSize: 13, flex: 1 }}>{t('Submodule Pointer Diff')}</strong>
+          <strong>{t('Submodule Pointer Diff')}</strong>
           <IconButton
             type="button"
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', padding: 4 }}
@@ -72,7 +55,7 @@ export function SubmoduleDiffModal({
           </IconButton>
         </header>
 
-        <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="submodule-dialog-body">
           <div style={{ fontSize: 12, opacity: 0.8, wordBreak: 'break-all' }}>
             <span style={{ fontWeight: 600 }}>{repo.meta.name}</span> / {file.path}
           </div>
@@ -140,7 +123,7 @@ export function SubmoduleDiffModal({
           )}
         </div>
 
-        <footer style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '12px 16px', borderTop: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))' }}>
+        <footer>
           <button
             type="button"
             onClick={() => {
@@ -162,7 +145,6 @@ export function SubmoduleDiffModal({
             {t('Align Submodule with Parent')}
           </button>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

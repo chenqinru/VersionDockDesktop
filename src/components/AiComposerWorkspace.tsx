@@ -1,3 +1,4 @@
+import { DialogSurface } from './DialogSurface';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComposerApplyResult, ComposerChangeUnit, ComposerCommitGroup, ComposerPreparedSource } from '../ai/viewTypes';
 import type { ComposerToHostMsg, HostToComposerMsg } from '../ai/viewTypes';
@@ -620,7 +621,12 @@ export function AiComposerWorkspace() {
         </div>
       </footer>
 
-      {confirming && <div style={styles.modalBackdrop} onClick={() => setConfirming(false)}><div style={styles.modal} onClick={event => event.stopPropagation()}><div style={styles.modalIcon}><AiCommitComposerIcon size={19} /></div><h2>{t('Apply this commit plan?')}</h2><p>{source?.mode === 'history' ? t('VersionDock will create a recovery reference before updating the branch.') : source?.vcsKind === 'svn' ? t('SVN groups are committed sequentially and cannot be rolled back atomically.') : t('VersionDock will create a recovery reference before updating the branch.')}</p><div style={styles.modalActions}><button style={styles.secondaryButton} onClick={() => setConfirming(false)}>{t('Keep reviewing')}</button><button className="composer-ai" style={styles.primaryButton} onClick={() => { setConfirming(false); send({ type: 'COMPOSER_APPLY', groups }); }}><span>{source?.mode === 'history' ? t('Confirm and reorganize commits') : t('Confirm and create commits')}</span></button></div></div></div>}
+      {confirming && <DialogSurface className="composer-confirm-dialog" onClose={() => setConfirming(false)} aria-labelledby="composer-confirm-title">
+        <header><span className="composer-confirm-icon"><AiCommitComposerIcon size={19} /></span><strong id="composer-confirm-title">{t('Apply this commit plan?')}</strong><IconButton title={t('Close')} onClick={() => setConfirming(false)}><Codicon name="close" /></IconButton></header>
+        <p>{source?.mode === 'history' ? t('VersionDock will create a recovery reference before updating the branch.') : source?.vcsKind === 'svn' ? t('SVN groups are committed sequentially and cannot be rolled back atomically.') : t('VersionDock will create a recovery reference before updating the branch.')}</p>
+        <footer><button onClick={() => setConfirming(false)}>{t('Keep reviewing')}</button><button className="primary" onClick={() => { setConfirming(false); send({ type: 'COMPOSER_APPLY', groups }); }}>{t(source?.mode === 'history' ? 'Confirm and reorganize commits' : 'Confirm and create commits')}</button></footer>
+      </DialogSurface>}
+
     </main>
   );
 }
@@ -666,7 +672,7 @@ const styles: Record<string, React.CSSProperties> = {
   dropHint: { marginTop: 8, padding: 14, textAlign: 'center', border: '1px dashed var(--vscode-panel-border)', color: 'var(--vscode-descriptionForeground)' }, addGroup: { display: 'flex', alignItems: 'center', gap: 6, marginLeft: -7, padding: '6px 9px', border: 'none', borderRadius: 4, background: 'var(--composer-add-group-background, transparent)', color: 'var(--vscode-textLink-foreground)', cursor: 'pointer' },
   footer: { flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, padding: '11px 18px', borderTop: '1px solid var(--vscode-panel-border)', background: 'var(--vscode-sideBar-background,var(--vscode-editor-background))' }, footerHint: { color: 'var(--vscode-descriptionForeground)', fontSize: 11 }, footerActions: { marginLeft: 'auto', display: 'flex', gap: 8 },
   secondaryButton: { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 4, border: '1px solid var(--vscode-button-border,var(--vscode-panel-border))', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', cursor: 'pointer' }, primaryButton: { minHeight: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '6px 14px', borderRadius: 6, boxSizing: 'border-box', cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' },
-  modalBackdrop: { position: 'fixed', inset: 0, zIndex: 20, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.42)', padding: 20 }, modal: { width: 'min(460px,100%)', background: 'var(--vscode-editorWidget-background,var(--vscode-editor-background))', border: '1px solid var(--vscode-widget-border,var(--vscode-panel-border))', borderRadius: 8, padding: 24, boxShadow: '0 14px 44px rgba(0,0,0,.32)' }, modalIcon: { width: 36, height: 36, display: 'grid', placeItems: 'center', color: '#fff', background: 'linear-gradient(135deg,#7657ff,#2f8fff)', borderRadius: 8 }, modalActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 22 },
+
   completed: { flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 30, textAlign: 'center' }, completedMark: { width: 58, height: 58, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', background: 'linear-gradient(135deg,#7657ff,#2f8fff)', fontSize: 24 }, completedTitle: { margin: '8px 0 0', fontSize: 22 }, completedCopy: { margin: 0, color: 'var(--vscode-descriptionForeground)' }, hashList: { display: 'flex', flexDirection: 'column', gap: 5, padding: 12, color: 'var(--vscode-descriptionForeground)' }, recovery: { width: 'min(680px,100%)', display: 'flex', flexDirection: 'column', gap: 7, margin: '8px 0', padding: 13, textAlign: 'left', border: '1px solid var(--vscode-panel-border)', background: 'var(--vscode-textCodeBlock-background)' },
 };
 

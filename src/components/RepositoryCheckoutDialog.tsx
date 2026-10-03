@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import type { RemoteRepository } from '../bindings/generated';
 import { useI18n } from '../i18n';
-import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
+import { DialogSurface } from './DialogSurface';
+import { IconButton } from './IconButton';
 import { useBridge } from '../platform/context';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
@@ -50,7 +51,6 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
   const [password, setPassword] = useState('');
   const [validationError, setValidationError] = useState('');
   const inferredNameRef = useRef('');
-  const dialog = useDialogFocusTrap(true, close);
   const git = kind === 'git';
 
   const changeUrl = (value: string) => {
@@ -96,9 +96,8 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
     && (git || !showAuthentication || Boolean(username.trim() && password));
 
   return <>
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <section ref={dialog} className="app-dialog clone-dialog" role="dialog" aria-modal="true" aria-label={t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}>
-        <header><Codicon name={git ? 'repo-clone' : 'cloud-download'} /><strong>{t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}</strong></header>
+      <DialogSurface className="app-dialog clone-dialog" onClose={close} closeDisabled={busy} aria-label={t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}>
+        <header><Codicon name={git ? 'repo-clone' : 'cloud-download'} /><strong>{t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}</strong><IconButton title={t('Close')} disabled={busy} onClick={close}><Codicon name="close" /></IconButton></header>
         {git && <button type="button" onClick={() => setProviderOpen(true)}><Codicon name="cloud" />{t('Browse Remote Providers')}</button>}
         <label><span>{t(git ? 'Git URL' : 'SVN URL')}</span><input autoFocus value={url} placeholder={git ? 'https://github.com/user/repository.git' : 'https://svn.example.com/project/trunk'} onChange={(event) => changeUrl(event.target.value)} /></label>
         <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={parent} onChange={(event) => setParent(event.target.value)} /><button type="button" onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}>{t('Browse…')}</button></div></label>
@@ -113,8 +112,7 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
         </>}
         <label className="dialog-check"><input type="checkbox" checked={openInNewWindow} onChange={(event) => setOpenInNewWindow(event.target.checked)} />{t('Open in New Window')}</label>
         <footer><button type="button" onClick={close}>{t('Cancel')}</button><button type="button" className="primary" disabled={busy || !ready} onClick={() => void submit()}>{t(git ? 'Clone' : 'Checkout')}</button></footer>
-      </section>
-    </div>
+      </DialogSurface>
     {providerOpen && <ProviderPanel mode="browse" close={() => setProviderOpen(false)} onClone={(repository: RemoteRepository, accountId) => {
       setUrl(repository.cloneUrl);
       setTargetName(repository.name);

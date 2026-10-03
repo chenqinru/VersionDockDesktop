@@ -1,5 +1,7 @@
+import { DialogSurface } from './DialogSurface';
+import { confirmDialog } from './dialogService';
 import { IconButton } from './IconButton';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
@@ -57,22 +59,6 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   const [copiedDiag, setCopiedDiag] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    closeButtonRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
   const handleCheckUpdate = async () => {
     setChecking(true);
     setCheckResult(null);
@@ -104,7 +90,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
         await openExternalLink(GITHUB_RELEASES_URL);
       }
     } catch (error) {
-      alert(t('Update download failed: {0}', error instanceof Error ? error.message : String(error)));
+      void confirmDialog({ title: t('Software Update'), message: t('Update download failed: {0}', error instanceof Error ? error.message : String(error)) });
     } finally {
       setDownloading(false);
     }
@@ -127,20 +113,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   };
 
   return (
-    <div
-      className="about-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        className="about-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="about-dialog-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <DialogSurface className="about-modal" onClose={onClose} aria-labelledby="about-dialog-title">
         <header className="about-header">
           <div className="about-brand-header">
             <img src="/icons/versiondock-logo-dark.png" alt="VersionDock Logo" className="about-brand-logo" />
@@ -501,7 +474,6 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
             </div>
           )}
         </div>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

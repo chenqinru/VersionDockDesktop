@@ -1,3 +1,4 @@
+import { DialogSurface } from './DialogSurface';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber, SettingText } from './SettingsControls';
 import { useEffect, useRef, useState } from 'react';
@@ -162,11 +163,6 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
   const key = `${task}:${scope}:${repoId}:${snapshot?.workspace.id}`;
   const busy = saving || loaded !== key;
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    dialog.current?.querySelector<HTMLButtonElement>('button')?.focus();
-    return () => previous?.focus();
-  }, []);
-  useEffect(() => {
     let active = true;
     const control = new AbortController();
     void bridge
@@ -231,42 +227,7 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
     }
   };
   return (
-    <div
-      className="settings-backdrop ai-prompt-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !saving) onClose();
-      }}
-    >
-      <section
-        ref={dialog}
-        className="ai-prompt-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('Edit AI prompt')}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            if (!saving) onClose();
-          }
-          if (e.key === 'Tab') {
-            const controls = [
-              ...(dialog.current?.querySelectorAll<HTMLElement>(
-                'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])',
-              ) ?? []),
-            ];
-            const first = controls[0];
-            const last = controls.at(-1);
-            if (e.shiftKey && document.activeElement === first) {
-              e.preventDefault();
-              last?.focus();
-            } else if (!e.shiftKey && document.activeElement === last) {
-              e.preventDefault();
-              first?.focus();
-            }
-          }
-        }}
-      >
+    <DialogSurface ref={dialog} className="ai-prompt-dialog" onClose={onClose} closeDisabled={saving} aria-label={t('Edit AI prompt')}>
         <header>
           <strong>{t(task)}</strong>
           <IconButton title={t('Close')} disabled={saving} onClick={onClose}>
@@ -294,7 +255,7 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
           <button className="settings-action-btn" disabled={busy} onClick={() => void apply('reset')}>
             {t('Reset to default')}
           </button>
-          <div className="ai-prompt-footer-actions">
+          <div className="ai-prompt-footer-actions vd-dialog-footer-actions">
             <button className="settings-action-btn" disabled={saving} onClick={onClose}>
               {t('Cancel')}
             </button>
@@ -303,7 +264,6 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
             </button>
           </div>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

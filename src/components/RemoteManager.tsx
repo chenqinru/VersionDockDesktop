@@ -1,3 +1,4 @@
+import { DialogSurface } from './DialogSurface';
 import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -29,18 +30,6 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
     void load(repoId);
   }, [load, repoId]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        close();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [close]);
 
   const add = () => {
     if (!name.trim() || !url.trim()) return;
@@ -124,20 +113,8 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
   };
 
   return (
-    <div
-      className="modal-backdrop remote-manager-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) close();
-      }}
-    >
-      <section
-        ref={popover}
-        className="modal-panel remote-manager-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('Manage Remotes')}
-      >
+    <>
+    <DialogSurface preserveStyle ref={popover} className="modal-panel remote-manager-modal" onClose={close} aria-label={t('Manage Remotes')}>
         <header className="modal-header">
           <div className="modal-header-title">
             <Codicon name="remote-explorer" />
@@ -307,8 +284,8 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
             onClose={() => setContext(undefined)}
           />
         )}
-      </section>
+    </DialogSurface>
       {publishOpen && <ProviderPanel mode="publish" repoId={repoId} close={() => { setPublishOpen(false); void load(repoId); }} />}
-    </div>
+    </>
   );
 }

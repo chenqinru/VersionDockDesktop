@@ -4,6 +4,9 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  "Enter the new branch name:": "Enter the new branch name:",
+  "New Branch — Name": "New Branch — Name",
+  "Repositories": "Repositories",
   "Configure an AI API key in Settings": "Configure an AI API key in Settings",
   "Configure an AI model in Settings": "Configure an AI model in Settings",
   "Use an HTTP(S) API URL without embedded credentials": "Use an HTTP(S) API URL without embedded credentials",
@@ -204,11 +207,11 @@ const desktopEn: Messages = {
   "No protected branches configured": "No protected branches configured",
   "Font": "Font",
   "View application details, version information and release notes.": "View application details, version information and release notes.",
-  "commit-message": "commit-message",
-  "commit-explanation": "commit-explanation",
-  "code-review": "code-review",
-  "commit-composer": "commit-composer",
-  "merge-conflict": "merge-conflict",
+  "commit-message": "Commit message",
+  "commit-explanation": "Commit explanation",
+  "code-review": "Code review",
+  "commit-composer": "Commit composer",
+  "merge-conflict": "Merge conflict",
   "AI provider configured": "AI provider configured",
   "Configure the API endpoint, model and API key": "Configure the API endpoint, model and API key",
   "Agent CLI detected. Its own account must be signed in.": "Agent CLI detected. Its own account must be signed in.",
@@ -1129,6 +1132,9 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  "Enter the new branch name:": "输入新分支名称：",
+  "New Branch — Name": "新建分支 — 名称",
+  "Repositories": "仓库",
   "Configure an AI API key in Settings": "请在设置中配置 AI API 密钥",
   "Configure an AI model in Settings": "请在设置中配置 AI 模型",
   "Use an HTTP(S) API URL without embedded credentials": "请使用不含用户名和密码的 HTTP(S) API 地址",

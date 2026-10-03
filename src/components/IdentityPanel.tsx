@@ -1,3 +1,4 @@
+import { DialogSurface } from './DialogSurface';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useState } from 'react';
 import type { GitIdentityState, SvnAccountState } from '../bindings/generated';
@@ -14,35 +15,10 @@ export function IdentityPanel({ repoId, close }: { repoId: string; close: () => 
   const repo = snapshot?.repositories.find((item) => item.meta.id === repoId);
   const { t } = useI18n();
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        close();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [close]);
-
   if (!snapshot || !repo) return null;
 
   return (
-    <div
-      className="modal-backdrop identity-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) close();
-      }}
-    >
-      <section
-        className="modal-panel identity-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}
-      >
+    <DialogSurface className="modal-panel identity-panel" onClose={close} aria-label={repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}>
         <header className="modal-header">
           <div className="modal-header-title">
             <Codicon name="account" />
@@ -76,8 +52,7 @@ export function IdentityPanel({ repoId, close }: { repoId: string; close: () => 
             />
           )}
         </div>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }
 
@@ -187,7 +162,7 @@ function GitIdentity({
       <div className="identity-form-row">
         <label className="identity-label-block">
           <span className="field-title">{t('Profile')}</span>
-          <select
+          <div className="identity-select-wrap"><select
             aria-label={t('Profile')}
             className="identity-select"
             value={value.selectedProfileId ?? ''}
@@ -210,7 +185,7 @@ function GitIdentity({
                 {profile.label} ({profile.userName} &lt;{profile.email}&gt;)
               </option>
             ))}
-          </select>
+          </select><Codicon name="chevron-down" /></div>
         </label>
       </div>
 

@@ -3,6 +3,8 @@ import type { IgnoreRules } from '../bindings/generated';
 import { useBridge } from '../platform/context';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
+import { DialogSurface } from './DialogSurface';
+import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
 import { isAbortError } from '../platform/bridge';
 
@@ -29,21 +31,6 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
 
   const isLoading = loadedDirectory !== directory;
   const isRulesValid = !isLoading && Boolean(rules) && (rules?.directory ?? '') === directory;
-
-  useEffect(() => {
-    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        close();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      trigger?.focus();
-    };
-  }, [close]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -90,11 +77,11 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <section className="app-dialog ignore-dialog" role="dialog" aria-modal="true" aria-labelledby="ignore-rules-title">
+    <DialogSurface className="app-dialog ignore-dialog" onClose={close} closeDisabled={saving} aria-labelledby="ignore-rules-title">
         <header>
           <Codicon name="exclude" />
           <strong id="ignore-rules-title">{t('Manage Ignore Rules')}</strong>
+          <IconButton title={t('Close')} disabled={saving} onClick={close}><Codicon name="close" /></IconButton>
         </header>
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
           <label style={{ display: 'flex', flex: 1, gap: 6, alignItems: 'center', margin: 0 }}>
@@ -134,7 +121,6 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
           <button onClick={close}>{t('Close')}</button>
           <button className="primary" disabled={!isRulesValid || saving} onClick={() => void save()}>{t('Save')}</button>
         </footer>
-      </section>
-    </div>
+    </DialogSurface>
   );
 }

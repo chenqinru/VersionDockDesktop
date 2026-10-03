@@ -1,3 +1,4 @@
+import { DialogSurface } from './DialogSurface';
 import { LayoutDensitySetting } from './LayoutDensitySetting';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber } from './SettingsControls';
@@ -80,11 +81,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -97,21 +94,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const isSearching = searchQuery.trim().length > 0;
 
   return (
-    <div
-      className="settings-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        className="settings-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        onClick={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => event.stopPropagation()}
-      >
+    <>
+    <DialogSurface preserveStyle backdropClassName="settings-backdrop" className="settings-modal" onClose={onClose} aria-labelledby="settings-title">
         {/* 顶部标题栏 */}
         <header className="settings-heading">
           <div className="settings-title">
@@ -743,9 +727,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             )}
           </div>
         </div>
-      </section>
+    </DialogSurface>
       {providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}
-    </div>
+    </>
   );
 }
 

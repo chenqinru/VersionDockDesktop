@@ -20,7 +20,8 @@ function mount({ empty = false, failDiff = false, root = false } = {}) {
     return null;
   });
   useAppStore.setState({ snapshot, fileHistoryTarget: { repoId: 'qa-repo', path: 'new-name.txt' }, openHistoryForLineRange: history });
-  return { ...render(<BridgeContext.Provider value={bridge}><FileHistoryPanel /></BridgeContext.Provider>), requests, history, recover: () => { failing = false; } };
+  const view = render(<BridgeContext.Provider value={bridge}><FileHistoryPanel /></BridgeContext.Provider>);
+  return { ...view, container: view.baseElement, requests, history, recover: () => { failing = false; } };
 }
 afterEach(() => { cleanup(); useAppStore.setState(original, true); });
 describe('file history dialog', () => {
@@ -73,7 +74,7 @@ describe('file history dialog', () => {
       if (command.type === 'fileRevisionContent' && command.payload.relative_path === 'first.txt') return new Promise((done) => { resolve = done; });
       return { revision: entry.revision, path: 'second.txt', content: 'second source', binary: false, truncated: false };
     });
-    useAppStore.setState({ snapshot, fileHistoryTarget: { repoId: 'qa-repo', path: 'first.txt' } }); const { container } = render(<BridgeContext.Provider value={bridge}><FileHistoryPanel /></BridgeContext.Provider>);
+    useAppStore.setState({ snapshot, fileHistoryTarget: { repoId: 'qa-repo', path: 'first.txt' } }); const { baseElement: container } = render(<BridgeContext.Provider value={bridge}><FileHistoryPanel /></BridgeContext.Provider>);
     await screen.findByText('edit old path'); act(() => useAppStore.setState({ fileHistoryTarget: { repoId: 'qa-repo', path: 'second.txt' } }));
     await waitFor(() => expect(container.querySelector('.source-code-view')).toHaveTextContent('second source'));
     await act(async () => resolve({ revision: entry.revision, path: 'first.txt', content: 'stale source', binary: false, truncated: false })); expect(container).not.toHaveTextContent('stale source');

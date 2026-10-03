@@ -3,7 +3,7 @@ import type { DiffDocument, FileHistoryEntry, FileHistoryPage, FileRevisionDocum
 import { useBridge } from '../platform/context';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
-import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
+import { DialogSurface } from './DialogSurface';
 import { formatHistoryDate } from '../history/dates';
 import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
@@ -27,7 +27,6 @@ function FileHistoryDialog({ workspaceId, repoId, path }: { workspaceId: string;
   const bridge = useBridge();
   const close = useAppStore((state) => state.closeFileHistory);
   const openHistoryForPath = useAppStore((state) => state.openHistoryForPath);
-  const dialog = useDialogFocusTrap(true, close);
   const { t } = useI18n();
   const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -87,8 +86,7 @@ function FileHistoryDialog({ workspaceId, repoId, path }: { workspaceId: string;
   };
   const resource = preview.diff ?? preview.document;
   const displayPath = selected?.path ?? path;
-  return <div className="file-history-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-    <section ref={dialog} className="file-history-panel" role="dialog" aria-modal="true" aria-label={t('File history')}>
+  return <DialogSurface className="file-history-panel" onClose={close} aria-label={t('File history')}>
       <header className="file-history-header">
         <Codicon name="history" /><strong>{t('File history')}</strong>
         <FileIcon name={displayPath.split('/').pop() ?? displayPath} />
@@ -117,6 +115,5 @@ function FileHistoryDialog({ workspaceId, repoId, path }: { workspaceId: string;
         </main>
       </div>
       {context && <ContextMenu x={context.x} y={context.y} items={[{ id: 'open', label: t('Open Revision'), icon: 'go-to-file' }, ...(context.entry.previousRevision ? [{ id: 'diff', label: t('Show Diff'), icon: 'diff' } as const] : []), { id: 'copy', label: t('Copy Revision Number'), icon: 'copy' }]} onSelect={(id) => { if (id === 'open' || id === 'diff') choose(context.entry, id === 'open' ? 'source' : 'diff'); if (id === 'copy') void navigator.clipboard?.writeText(context.entry.revision).catch(() => undefined); setContext(undefined); }} onClose={() => setContext(undefined)} />}
-    </section>
-  </div>;
+  </DialogSurface>;
 }
