@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore } from '../../store/appStore';
 import { useI18n } from '../../i18n';
@@ -6,6 +6,7 @@ import { ProfileMenuPopover } from './ProfileMenuPopover';
 import { ProfileStatusTooltip } from './ProfileStatusTooltip';
 import { gitAccountName, svnAccountName } from './profileStatus';
 import { useProfileStatus } from './useProfileStatus';
+import { useStatusTooltip } from './useStatusTooltip';
 
 export function ProfileStatusBarItem() {
   const { t } = useI18n();
@@ -18,18 +19,12 @@ export function ProfileStatusBarItem() {
   const data = useProfileStatus(snapshot?.workspace.id, repositories);
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const [hovering, setHovering] = useState(false);
-  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltip = useStatusTooltip(open);
   const anchorRef = useRef<HTMLButtonElement>(null);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
-  useEffect(() => {
-    if (!hovering || open) return;
-    hoverTimer.current = setTimeout(() => setShowTooltip(true), 500);
-    return () => clearTimeout(hoverTimer.current);
-  }, [hovering, open]);
-  const close = useCallback(() => { setOpen(false); anchorRef.current?.focus(); }, []);
+  const dismissTooltip = tooltip.dismiss;
+  const close = useCallback(() => { dismissTooltip(); setOpen(false); anchorRef.current?.focus(); }, [dismissTooltip]);
   const handleClick = () => {
-    clearTimeout(hoverTimer.current); setShowTooltip(false); setHovering(false);
+    tooltip.dismiss();
     if (!open && anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect());
     setOpen((prev) => !prev);
   };
@@ -39,13 +34,16 @@ export function ProfileStatusBarItem() {
   const label = `${identityText} · ${t('Click to manage accounts and identities')}`;
   return <>
     <button ref={anchorRef} type="button" className={`statusbar-item profile-status-item ${open ? 'active' : ''}`}
-      aria-label={label} aria-haspopup="dialog" aria-expanded={open} aria-describedby={showTooltip && !open ? 'profile-status-tooltip' : undefined}
-      onMouseEnter={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); setHovering(true); }}
-      onMouseLeave={(event) => { if (!(event.relatedTarget instanceof Element) || !event.relatedTarget.closest('#profile-status-tooltip')) { setHovering(false); setShowTooltip(false); } }}
-      onFocus={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); }} onClick={handleClick}>
+      aria-label={label} aria-haspopup="dialog" aria-expanded={open} aria-describedby={tooltip.visible ? 'profile-status-tooltip' : undefined}
+      onMouseEnter={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); tooltip.onMouseEnter(); }}
+      onMouseLeave={(event) => { if (!(event.relatedTarget instanceof Element) || !event.relatedTarget.closest('#profile-status-tooltip')) { tooltip.onLeave(); } }}
+      onPointerDown={tooltip.onPointerDown}
+      onFocus={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); tooltip.onFocus(); }}
+      onBlur={(event) => { if (!(event.relatedTarget instanceof Element) || !event.relatedTarget.closest('#profile-status-tooltip')) tooltip.onBlur(); }}
+      onKeyDown={tooltip.onKeyDown} onClick={handleClick}>
       <Codicon name="account" /><span className="statusbar-label">{identityText}</span>
     </button>
-    {showTooltip && !open && anchorRect && <ProfileStatusTooltip data={data} repo={currentRepo} repositories={repositories} anchor={anchorRect} onManage={handleClick} onLeave={() => { setHovering(false); setShowTooltip(false); }} />}
+    {tooltip.visible && anchorRect && <ProfileStatusTooltip data={data} repo={currentRepo} repositories={repositories} anchor={anchorRect} onManage={handleClick} onLeave={() => { tooltip.onLeave(); }} />}
     {open && <ProfileMenuPopover anchorRect={anchorRect} anchorRef={anchorRef} onClose={close} data={data} repositories={repositories} currentRepoId={currentRepo?.meta.id}
       onRepositoryChange={(repoId) => setSelection({ repoId, selectedRepoId })} />}
   </>;

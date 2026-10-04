@@ -7,21 +7,16 @@ import { getRepoEffectiveRef } from './branchRef';
 import { choiceDialog } from '../dialogService';
 import { BRANCH_STATUS_DOMAINS, deriveBranchStatus } from './branchStatus';
 import { BranchStatusTooltip } from './BranchStatusTooltip';
+import { useStatusTooltip } from './useStatusTooltip';
 
 export function BranchStatusBarItem() {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const [hovering, setHovering] = useState(false);
-  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltip = useStatusTooltip(open);
   const mounted = useRef(true);
   const waiting = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => {
-    if (!hovering || open) return;
-    const timer = setTimeout(() => setShowTooltip(true), 500);
-    return () => clearTimeout(timer);
-  }, [hovering, open]);
   const anchorRef = useRef<HTMLButtonElement>(null);
 
   const snapshot = useAppStore((state) => state.snapshot);
@@ -94,6 +89,7 @@ export function BranchStatusBarItem() {
   const isSingleSvn = repositories.length === 1 && repositories[0].meta.kind === 'svn';
 
   const handleClick = async () => {
+    tooltip.dismiss();
     if (open) {
       setOpen(false);
       return;
@@ -144,11 +140,13 @@ export function BranchStatusBarItem() {
         type="button"
         className={getStatusItemClasses()}
         aria-label={getTooltip()}
-        aria-describedby={showTooltip ? "branch-status-tooltip" : undefined}
-        onMouseEnter={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); setShowTooltip(false); setHovering(true); }}
-        onMouseLeave={() => { setHovering(false); setShowTooltip(false); }}
-        onFocus={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); setShowTooltip(false); setHovering(true); }}
-        onBlur={() => { setHovering(false); setShowTooltip(false); }}
+        aria-describedby={tooltip.visible ? "branch-status-tooltip" : undefined}
+        onMouseEnter={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); tooltip.onMouseEnter(); }}
+        onMouseLeave={tooltip.onLeave}
+        onPointerDown={tooltip.onPointerDown}
+        onFocus={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); tooltip.onFocus(); }}
+        onBlur={tooltip.onBlur}
+        onKeyDown={tooltip.onKeyDown}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={handleClick}
@@ -177,13 +175,13 @@ export function BranchStatusBarItem() {
         )}
       </button>
 
-      {showTooltip && !open && anchorRect && <BranchStatusTooltip repositories={status.targets} worktrees={status.worktrees} branches={branchesByRepo} selectedRepoId={selectedRepoId} anchor={anchorRect} messages={getStatusMessages()} />}
+      {tooltip.visible && anchorRect && <BranchStatusTooltip repositories={status.targets} worktrees={status.worktrees} branches={branchesByRepo} selectedRepoId={selectedRepoId} anchor={anchorRect} messages={getStatusMessages()} />}
 
       {open && (
         <BranchMenuPopover
           anchorRect={anchorRect}
           placement="bottomLeft"
-          onClose={() => setOpen(false)}
+          onClose={() => { tooltip.dismiss(); setOpen(false); }}
           initialRepoId={isSingleSvn ? repositories[0].meta.id : undefined}
           repoOnly={isSingleSvn}
 

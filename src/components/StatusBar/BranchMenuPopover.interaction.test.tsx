@@ -162,6 +162,31 @@ describe('branch status derivation and bounds', () => {
     expect(within(tooltip).getAllByText('(no upstream)')).toHaveLength(2);
     expect(within(tooltip).getByText('(Current)')).toBeInTheDocument();
   });
+  it.each([100, 500])('dismisses branch help on press after %s ms and cancels pending hover', (elapsed) => {
+    vi.useFakeTimers();
+    const bridge = new MockBridge(() => []);
+    render(<BridgeContext.Provider value={bridge}><BranchStatusBarItem /></BridgeContext.Provider>);
+    const anchor = screen.getByRole('button');
+    fireEvent.mouseEnter(anchor);
+    act(() => vi.advanceTimersByTime(elapsed));
+    expect(Boolean(screen.queryByRole('tooltip'))).toBe(elapsed === 500);
+    fireEvent.pointerDown(anchor);
+    fireEvent.focus(anchor);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(anchor).not.toHaveAttribute('aria-describedby');
+    act(() => vi.advanceTimersByTime(600));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.click(anchor);
+    expect(screen.getByRole('dialog', { name: 'VersionDock: Git/SVN Menu' })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    act(() => vi.advanceTimersByTime(600));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.mouseLeave(anchor);
+    fireEvent.mouseEnter(anchor);
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  });
+
   it('formats timestamps in the active UI language and handles recent or invalid values', () => {
     const t = (key: string, ...args: (string | number)[]) => key === '{0} minutes ago' ? `${args[0]} 分钟前` : key;
     expect(relativeBranchDate('2026-10-02T10:00:00Z', t, Date.parse('2026-10-02T10:15:00Z'))).toBe('15 分钟前');

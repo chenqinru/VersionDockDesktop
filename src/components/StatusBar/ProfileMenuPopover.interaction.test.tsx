@@ -152,6 +152,46 @@ describe('identity status menu', () => {
     fireEvent.click(anchor); fireEvent.click(await screen.findByText('Clear Avatar Cache')); expect(clear).toHaveBeenCalledOnce();
     window.removeEventListener('versiondock-avatar-cache-clear', clear);
   });
+  it('keeps the identity tooltip available when focusing its manage action', async () => {
+    setup();
+    const anchor = await screen.findByRole('button', { name: /Git: Local Dev/ });
+    fireEvent.mouseEnter(anchor);
+    const tooltip = await screen.findByRole('tooltip');
+    const manage = within(tooltip).getByRole('button', { name: 'Click to manage accounts and identities' });
+    fireEvent.blur(anchor, { relatedTarget: manage });
+    expect(tooltip).toBeInTheDocument();
+    fireEvent.click(manage);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it.each([100, 500])('dismisses identity help after %s ms and does not flash on focus return', async (elapsed) => {
+    setup();
+    const anchor = await screen.findByRole('button', { name: /Git: Local Dev/ });
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseEnter(anchor);
+      act(() => vi.advanceTimersByTime(elapsed));
+      expect(Boolean(screen.queryByRole('tooltip'))).toBe(elapsed === 500);
+      fireEvent.pointerDown(anchor);
+      fireEvent.focus(anchor);
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(600));
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      fireEvent.click(anchor);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(anchor).toHaveFocus();
+      act(() => vi.advanceTimersByTime(600));
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      fireEvent.mouseLeave(anchor);
+      fireEvent.mouseEnter(anchor);
+      act(() => vi.advanceTimersByTime(500));
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('supports profile management before repository discovery', async () => {
     useAppStore.setState({ snapshot: snapshot([]), selectedRepoId: undefined });
     const commands = setup(); fireEvent.click(await screen.findByRole('button', { name: /Git: Local Dev/ }));
