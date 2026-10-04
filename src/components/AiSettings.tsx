@@ -39,13 +39,13 @@ export function AiSettings() {
   const [error, setError] = useState('');
   const [prompt, setPrompt] = useState<AiTask>();
   const save = (patch: Partial<AiConfig>) => void update({ aiConfig: { ...config, ...patch } });
-  const check = async () => {
+  const check = async (refreshKey = false) => {
     if (!bridge) return;
     const epoch = ++detectionEpoch.current;
     setBusy(true);
     setError('');
     try {
-      const value = await bridge.request<AiRuntime>({ type: 'aiRuntime' });
+      const value = await bridge.request<AiRuntime>({ type: refreshKey ? 'aiRefreshKey' : 'aiRuntime' });
       if (epoch === detectionEpoch.current) setRuntimeState({ key: runtimeKey, value });
     } catch (e) {
       if (epoch === detectionEpoch.current) setError(aiErrorText(e));
@@ -62,7 +62,7 @@ export function AiSettings() {
       .then((value) => {
         if (active && epoch === detectionEpoch.current) setRuntimeState({ key: runtimeKey, value });
       })
-      .catch(() => {});
+      .catch(e => { if (active && epoch === detectionEpoch.current) setError(aiErrorText(e)); });
     return () => {
       active = false;
       control.abort();
@@ -123,6 +123,9 @@ export function AiSettings() {
           <div className="ai-settings-status" role="status">
             {runtime && <><Codicon name={runtime.available ? 'check' : 'info'} /><span>{t(runtime.message)}</span>{runtime.version && <small>{runtime.version}</small>}</>}
           </div>
+          {config.executionMode === 'provider' && <div className="settings-control-actions">
+            <button className="settings-action-btn" disabled={busy} onClick={() => void check(true)}>{t('Recheck key access')}</button>
+          </div>}
           {config.executionMode === 'agent-cli' && <div className="settings-control-actions">
             <button className="settings-action-btn" disabled={busy} onClick={() => void check()}>{t('Check CLI')}</button>
             {config.cliProvider === 'antigravity' && <button className="settings-action-btn" disabled={busy} onClick={() => void bridge?.request({ type: 'aiResetCliSession' }).catch(e => setError(aiErrorText(e)))}>{t('Reset Antigravity session')}</button>}

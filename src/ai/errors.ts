@@ -1,5 +1,6 @@
 import { t } from './i18n';
 const messages: Record<string, string> = {
+  AI_KEY_ACCESS_FAILED: 'Unable to read AI API key from system secure storage. Retry access in AI settings.',
   AI_KEY_REQUIRED: 'Configure an AI API key in Settings',
   AI_MODEL_REQUIRED: 'Configure an AI model in Settings',
   AI_URL_INVALID: 'Use an HTTP(S) API URL without embedded credentials',

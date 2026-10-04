@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
+import { act } from '@testing-library/react';
 import { AiSettings } from './AiSettings';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
@@ -23,4 +24,41 @@ it('rejects old provider detection and keeps key drafts tied to their provider',
   await Promise.resolve();
   expect(screen.queryByText('old provider')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name:'Remove key' })).toBeDisabled();
+});
+
+it('only retries secure storage when the user explicitly requests it', async () => {
+  const commands: string[] = [];
+  const bridge = new MockBridge(command => {
+    commands.push(command.type);
+    return { available:false, configured:false, provider:'openai', keySaved:false,
+      message:'Unable to read AI API key from system secure storage. Retry access in AI settings.', version:null };
+  });
+  useAppStore.setState({ bridge, bootstrap:data('openai') });
+  render(<AiSettings />);
+  await screen.findByText('Unable to read AI API key from system secure storage. Retry access in AI settings.');
+  expect(commands).toEqual(['aiRuntime']);
+  const previous = useAppStore.getState().bootstrap!;
+  act(() => useAppStore.setState({ bootstrap:{ ...previous, state:{ ...previous.state, settings:{ ...previous.state.settings!, aiConfig:{ ...previous.state.settings!.aiConfig!, model:'another-model' } } } } }));
+  await waitFor(() => expect(commands).toEqual(['aiRuntime','aiRuntime']));
+  fireEvent.click(screen.getByRole('button', { name:'Recheck key access' }));
+  await waitFor(() => expect(commands).toEqual(['aiRuntime','aiRuntime','aiRefreshKey']));
+});
+
+it('uses the updated cached credential after saving without forcing another keychain read', async () => {
+  const commands: string[] = [];
+  let saved = false;
+  const bridge = new MockBridge(command => {
+    commands.push(command.type);
+    if (command.type === 'aiSaveKey') { saved = true; return true; }
+    return { available:saved, configured:saved, provider:'openai', keySaved:saved,
+      message:saved ? 'AI provider configured' : 'Configure the API endpoint, model and API key', version:null };
+  });
+  useAppStore.setState({ bridge, bootstrap:data('openai') });
+  render(<AiSettings />);
+  await screen.findByText('Configure the API endpoint, model and API key');
+  fireEvent.change(screen.getByPlaceholderText('Enter API key'), { target:{ value:'synthetic-key' } });
+  fireEvent.click(screen.getByRole('button', { name:'Save key' }));
+  await screen.findByText('AI provider configured');
+  expect(commands).toEqual(['aiRuntime','aiSaveKey','aiRuntime']);
+  expect(screen.getByPlaceholderText('Key saved in system secure storage')).toHaveValue('');
 });

@@ -1228,13 +1228,14 @@ async fn dispatch(
                 runtime,
             })
         }
-        BridgeCommand::AiRuntime => json(crate::ai::runtime(state).await),
+        BridgeCommand::AiRuntime => json(crate::ai::runtime(state, false).await),
+        BridgeCommand::AiRefreshKey => json(crate::ai::runtime(state, true).await),
         BridgeCommand::AiSaveKey {
             provider,
             api_url,
             key,
         } => {
-            crate::ai::save_key(provider, api_url, key)?;
+            crate::ai::save_key(provider, api_url, key).await?;
             json(true)
         }
         BridgeCommand::AiPrompt {

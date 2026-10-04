@@ -142,6 +142,7 @@ pub enum BridgeCommand {
         changed_fields: Option<Vec<String>>,
     },
     AiRuntime,
+    AiRefreshKey,
     AiSaveKey {
         provider: String,
         api_url: String,

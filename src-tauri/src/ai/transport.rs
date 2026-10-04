@@ -315,41 +315,6 @@ pub fn secure_reference(config: &AiConfig) -> String {
             .unwrap_or_default()
     )))
 }
-pub fn key(config: &AiConfig) -> String {
-    keyring::Entry::new("com.versiondock.desktop.ai", &secure_reference(config))
-        .ok()
-        .and_then(|e| e.get_password().ok())
-        .unwrap_or_default()
-}
-pub fn save_key(
-    provider: String,
-    api_url: String,
-    value: Option<String>,
-) -> Result<(), DesktopError> {
-    let config = AiConfig {
-        provider,
-        api_url,
-        ..Default::default()
-    }
-    .normalize();
-    let entry = keyring::Entry::new("com.versiondock.desktop.ai", &secure_reference(&config))
-        .map_err(|_| {
-            error(
-                "SECURE_STORAGE_FAILED",
-                "Unable to access system secure storage",
-            )
-        })?;
-    match value {
-        Some(value) if !value.trim().is_empty() => entry.set_password(value.trim()),
-        _ => entry.delete_credential(),
-    }
-    .map_err(|_| {
-        error(
-            "SECURE_STORAGE_FAILED",
-            "Unable to update AI API key in system secure storage",
-        )
-    })
-}
 #[cfg(test)]
 mod tests {
     use super::*;

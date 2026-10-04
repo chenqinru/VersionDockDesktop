@@ -242,7 +242,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 } } | { type: "updateSettings"; payload: {
 	settings: DesktopSettings,
 	changed_fields?: string[] | null,
-} } | { type: "aiRuntime" } | { type: "aiSaveKey"; payload: {
+} } | { type: "aiRuntime" } | { type: "aiRefreshKey" } | { type: "aiSaveKey"; payload: {
 	provider: string,
 	api_url: string,
 	key: string | null,

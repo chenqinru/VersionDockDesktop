@@ -1,6 +1,7 @@
 mod agent_cli;
 mod composer;
 mod context;
+mod credentials;
 mod diff_context;
 pub mod models;
 mod prompts;
@@ -28,13 +29,29 @@ fn emit(app: &AppHandle, id: &str, phase: &str, delta: &str) {
         },
     );
 }
-pub async fn runtime(state: &AppState) -> AiRuntime {
+pub async fn runtime(state: &AppState, refresh_key: bool) -> AiRuntime {
     agent_cli::initialize(&state.config_dir);
     let c = state.app.read().await.settings.ai_config.clone();
     if c.execution_mode == "agent-cli" {
         return agent_cli::runtime(&c).await;
     }
-    let saved = !transport::key(&c).is_empty();
+    let saved = match credentials::key(&c, refresh_key).await {
+        Ok(value) => !value.is_empty(),
+        Err(error) => {
+            return AiRuntime {
+                configured: false,
+                key_saved: false,
+                provider: c.provider,
+                available: false,
+                message: if error.code == "AI_KEY_ACCESS_FAILED" {
+                    error.message
+                } else {
+                    "Configure the API endpoint, model and API key".into()
+                },
+                version: None,
+            }
+        }
+    };
     let available = saved && !c.model.is_empty() && transport::endpoint(&c).is_ok();
     AiRuntime {
         configured: available,
@@ -50,8 +67,12 @@ pub async fn runtime(state: &AppState) -> AiRuntime {
         version: None,
     }
 }
-pub fn save_key(provider: String, url: String, key: Option<String>) -> Result<(), DesktopError> {
-    transport::save_key(provider, url, key)
+pub async fn save_key(
+    provider: String,
+    url: String,
+    key: Option<String>,
+) -> Result<(), DesktopError> {
+    credentials::save_key(provider, url, key).await
 }
 pub fn reset_cli_session() {
     agent_cli::reset_sessions();
@@ -267,7 +288,7 @@ pub async fn generate(
     let key = if config.execution_mode == "agent-cli" {
         String::new()
     } else {
-        transport::key(&config)
+        credentials::key(&config, false).await?
     };
     emit(
         app,
