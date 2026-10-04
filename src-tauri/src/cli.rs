@@ -263,8 +263,21 @@ async fn run_once(
     if !status.success() {
         let stderr = redact(&String::from_utf8_lossy(&result.stderr));
         let (code, hint) = classify_failure(program, &stderr);
+        // `git config --get` uses exit 1 with no output for an absent key.
+        // Preserve the result for callers' fallback logic without logging it as
+        // an operational failure. Malformed config and other failures stay errors.
+        let missing_config = is_git_program(program)
+            && args.first().is_some_and(|argument| argument == "config")
+            && args.iter().any(|argument| argument == "--get")
+            && result.exit_code == Some(1)
+            && result.stdout.is_empty()
+            && result.stderr.is_empty();
         crate::logger::log_entry_with_cwd(
-            crate::logger::LogLevel::Error,
+            if missing_config {
+                crate::logger::LogLevel::Debug
+            } else {
+                crate::logger::LogLevel::Error
+            },
             channel,
             &formatted_cmd,
             Some(stderr.clone()),
@@ -917,6 +930,126 @@ mod tests {
                 "Ada".into()
             ]
         ));
+    }
+
+    #[tokio::test]
+    async fn missing_git_config_logs_debug_and_preserves_global_fallback_and_real_errors() {
+        use crate::logger::{LogLevel, LogManager};
+        fn latest_level(logger: &LogManager, cwd: &Path, args: &[String]) -> LogLevel {
+            logger
+                .get_entries(None, None, None)
+                .into_iter()
+                .rev()
+                .find(|entry| {
+                    entry.cwd.as_deref() == cwd.to_str()
+                        && entry.message == format_command_for_log("git", args)
+                })
+                .expect("the real command must have a log entry")
+                .level
+        }
+        let root = tempfile::tempdir().unwrap();
+        let logger = crate::logger::get_logger()
+            .unwrap_or_else(|| crate::logger::init_global_logger(root.path().join("logs")));
+        let token = CancellationToken::new();
+        let init = run(
+            "git",
+            &["init".into()],
+            root.path(),
+            None,
+            DEFAULT_TIMEOUT,
+            &token,
+        )
+        .await
+        .unwrap();
+        assert_eq!(init.exit_code, Some(0));
+        let global = root.path().join("global.gitconfig");
+        std::fs::write(
+            &global,
+            "[user]\nname = Global User\nemail = global@example.test\n",
+        )
+        .unwrap();
+        let env = vec![
+            (
+                "GIT_CONFIG_GLOBAL".into(),
+                global.to_string_lossy().into_owned(),
+            ),
+            ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+        ];
+        for (key, value) in [
+            ("user.name", "Global User"),
+            ("user.email", "global@example.test"),
+        ] {
+            let args = vec![
+                "config".into(),
+                "--local".into(),
+                "--get".into(),
+                key.into(),
+            ];
+            let missing = run_with_env(
+                "git",
+                &args,
+                root.path(),
+                None,
+                DEFAULT_TIMEOUT,
+                &token,
+                &env,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(missing.exit_code, Some(1));
+            assert_eq!(latest_level(&logger, root.path(), &args), LogLevel::Debug);
+            let args = vec![
+                "config".into(),
+                "--global".into(),
+                "--get".into(),
+                key.into(),
+            ];
+            let fallback = run_with_env(
+                "git",
+                &args,
+                root.path(),
+                None,
+                DEFAULT_TIMEOUT,
+                &token,
+                &env,
+            )
+            .await
+            .unwrap();
+            assert_eq!(fallback.stdout_text().trim(), value);
+        }
+        let missing_ref = vec![
+            "show-ref".into(),
+            "--verify".into(),
+            "--quiet".into(),
+            "refs/heads/not-present".into(),
+        ];
+        let error = run(
+            "git",
+            &missing_ref,
+            root.path(),
+            None,
+            DEFAULT_TIMEOUT,
+            &token,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.exit_code, Some(1));
+        assert_eq!(
+            latest_level(&logger, root.path(), &missing_ref),
+            LogLevel::Error
+        );
+        std::fs::write(root.path().join(".git/config"), "[broken\n").unwrap();
+        let args = vec![
+            "config".into(),
+            "--local".into(),
+            "--get".into(),
+            "user.name".into(),
+        ];
+        let error = run("git", &args, root.path(), None, DEFAULT_TIMEOUT, &token)
+            .await
+            .unwrap_err();
+        assert!(!error.stderr.unwrap_or_default().is_empty());
+        assert_eq!(latest_level(&logger, root.path(), &args), LogLevel::Error);
     }
 
     #[cfg(unix)]

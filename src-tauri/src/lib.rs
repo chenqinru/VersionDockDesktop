@@ -136,6 +136,9 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running VersionDock Desktop");
+    if let Some(logger) = logger::get_logger() {
+        let _ = logger.flush();
+    }
 }
 
 #[cfg(test)]

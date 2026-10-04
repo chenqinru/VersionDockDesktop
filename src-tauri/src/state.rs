@@ -39,6 +39,18 @@ pub async fn with_operation_reporter<F: std::future::Future>(
     CURRENT_OPERATION.scope(reporter, future).await
 }
 
+pub(crate) fn current_log_context() -> Option<crate::logger::LogContext> {
+    CURRENT_OPERATION
+        .try_with(|reporter| crate::logger::LogContext {
+            workspace_id: reporter.context.workspace_id.clone(),
+            repository_id: reporter.context.repository_id.clone(),
+            operation_id: Some(reporter.operation_id.clone()),
+            workspace_name: None,
+            repository_name: None,
+        })
+        .ok()
+}
+
 pub fn emit_current_operation(status: OperationStatus, phase: &str, message: &str) {
     emit_current_operation_progress(status, phase, message, None, None);
 }

@@ -6464,6 +6464,10 @@ button.notification-item-action-btn:focus-visible {
 
 .output-log-project {
   flex-shrink: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   color: var(--versiondock-accent);
   user-select: none;
@@ -6485,6 +6489,7 @@ button.notification-item-action-btn:focus-visible {
 
 .output-log-duration {
   flex-shrink: 0;
+  white-space: nowrap;
   color: var(--versiondock-muted);
   font-size: 11px;
 }
@@ -6494,17 +6499,30 @@ button.notification-item-action-btn:focus-visible {
   font-size: 10px;
   padding: 0 3px;
   border-radius: 2px;
+  background: var(--versiondock-hover);
+  color: var(--versiondock-muted);
+}
+
+.output-log-row.error .output-log-exit-code {
   background: var(--versiondock-danger, #f85149);
   color: #ffffff;
+}
+
+.output-log-row.warn .output-log-exit-code {
+  background: var(--versiondock-warning, #d29922);
+  color: var(--versiondock-surface);
 }
 
 .output-log-details-toggle {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  width: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
   border: none;
   background: transparent;
-  color: var(--versiondock-accent);
+  color: var(--versiondock-muted);
   font-size: 11px;
   cursor: pointer;
   padding: 0 4px;
@@ -6521,7 +6539,7 @@ button.notification-item-action-btn:focus-visible {
   border-radius: 3px;
   background: var(--versiondock-surface-alt);
   border: 1px solid var(--versiondock-border-soft);
-  color: var(--versiondock-danger, #f85149);
+  color: var(--versiondock-text);
   font-size: 11px;
   max-height: 160px;
   overflow: auto;
@@ -7640,3 +7658,14 @@ button.notification-item-action-btn:focus-visible {
 @keyframes merge-ai-orbit { to { transform:rotate(360deg); } }
 .merge-ai-orbit { display:inline-flex; animation:merge-ai-orbit 1.2s linear infinite; }
 @media (prefers-reduced-motion:reduce) { .merge-ai-orbit { animation:none; } }
+
+.output-dropdown-item { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; font-family: inherit; }
+.output-dropdown-item:focus-visible { outline: 1px solid var(--versiondock-focus-border, var(--versiondock-accent)); background: var(--versiondock-hover); }
+.output-log-list.virtual { display: block; }
+.output-log-row { box-sizing: border-box; }
+.output-log-row.error .output-log-details-box { color: var(--versiondock-danger, #f85149); }
+.output-log-row.warn .output-log-details-box { color: var(--versiondock-warning, #d29922); }
+.output-log-row.debug .output-log-details-box,
+.output-log-row.trace .output-log-details-box { color: var(--versiondock-muted); }
+.output-error-banner { display: flex; align-items: center; gap: 6px; padding: 4px 10px; color: var(--versiondock-warning, #d29922); font-size: 12px; }
+.output-storage-error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

@@ -1,3 +1,4 @@
+import { mergeLogEntries } from '../logs/entries';
 import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
 import { SettingsWriter } from '../services/settingsWriter';
 import { create } from 'zustand';
@@ -244,7 +245,8 @@ export function isPathInDir(childPath: string, parentDir: string): boolean {
   return c === p || c.startsWith(`${p}/`);
 }
 
-export function isLogEntryInWorkspace(entry: LogEntry, workspacePaths: string[]): boolean {
+export function isLogEntryInWorkspace(entry: LogEntry, workspacePaths: string[], workspaceId?: string | null): boolean {
+  if (entry.context?.workspaceId && workspaceId) return entry.context.workspaceId === workspaceId;
   if (!entry.cwd) {
     return true;
   }
@@ -258,15 +260,15 @@ export function calculateWorkspaceUnreadErrors(
   lastReadTimestamps: Record<string, number>,
   fallbackPaths?: string[],
 ): number {
-  const lastRead = (workspaceId ? lastReadTimestamps[workspaceId] : undefined) ?? 0;
+  const lastRead = lastReadTimestamps[workspaceId ?? '__global__'] ?? 0;
   const currentTab = tabs.find((t) => t.id === workspaceId);
   const paths = currentTab ? currentTab.paths : (fallbackPaths ?? []);
   return entries.filter((entry) => {
     if (entry.level !== 'error') return false;
     const ts = new Date(entry.timestamp).getTime();
     if (ts <= lastRead) return false;
-    if (paths.length === 0) return true;
-    return isLogEntryInWorkspace(entry, paths);
+    if (paths.length === 0 && !entry.context?.workspaceId) return true;
+    return isLogEntryInWorkspace(entry, paths, workspaceId);
   }).length;
 }
 
@@ -587,6 +589,8 @@ export interface AppStore {
   logPanelOpen: boolean;
   logPanelHeight: number;
   logEntries: LogEntry[];
+  logError: string | null;
+  logStorageError: string | null;
   activeLogChannel: LogChannel | 'all';
   activeLogLevel: LogLevel | 'all';
   activeLogProject: string;
@@ -1314,6 +1318,49 @@ function queueBranchRecoveryDialog(task: () => Promise<void>): Promise<void> {
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
+  let logSession = 0;
+  let logGeneration = 0;
+  let logTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingLogs: LogEntry[] = [];
+  let clearLogPromise: Promise<void> | undefined;
+  const commitLogs = (entries: LogEntry[]) => set((state) => {
+    const merged = mergeLogEntries(state.logEntries, entries);
+    let logStorageError = state.logStorageError;
+    for (const entry of entries) {
+      if (entry.channel !== 'core') continue;
+      if (entry.message === 'Log file writing failed; logs remain available in memory.') logStorageError = entry.details || entry.message;
+      if (entry.message === 'Log file writing resumed.') logStorageError = null;
+    }
+    return {
+      logEntries: merged, logStorageError,
+      lastReadLogTimestamps: state.logPanelOpen
+        ? { ...state.lastReadLogTimestamps, [state.activeTabId ?? '__global__']: Date.now() }
+        : state.lastReadLogTimestamps,
+      unreadErrorCount: state.logPanelOpen ? 0 : calculateWorkspaceUnreadErrors(
+        merged, state.activeTabId, state.tabs, state.lastReadLogTimestamps, state.snapshot?.workspace.paths,
+      ),
+    };
+  });
+  const flushLogs = () => {
+    if (logTimer) clearTimeout(logTimer);
+    logTimer = undefined;
+    const entries = pendingLogs;
+    pendingLogs = [];
+    if (entries.length) commitLogs(entries);
+  };
+  const resetLogSession = () => {
+    logSession++;
+    logGeneration++;
+    if (logTimer) clearTimeout(logTimer);
+    logTimer = undefined;
+    pendingLogs = [];
+    clearLogPromise = undefined;
+  };
+  const enqueueLog = (entry: LogEntry) => {
+    pendingLogs.push(entry);
+    if (pendingLogs.length >= 128) flushLogs();
+    else if (!logTimer) logTimer = setTimeout(flushLogs, 40);
+  };
   // Shelve/Stash temporarily empties the working tree. Never publish that
   // intermediate status or prune the user's commit selections against it.
   const workingTreeUpdates = new Map<string, { depth: number; epoch: number }>();
@@ -2216,6 +2263,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     logPanelOpen: false,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
     logEntries: [],
+    logError: null,
+    logStorageError: null,
     activeLogChannel: 'all',
     activeLogLevel: 'info',
     logSearchQuery: '',
@@ -2247,8 +2296,11 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     initialize: async (value) => {
+      resetLogSession();
+      const owner = logSession;
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
       currentWindowLabel = await value.getWindowLabel().catch(() => currentWindowLabel);
+      if (owner !== logSession) return;
       set({ bridge: value });
       const refreshRuntimeOnFocus = () => void get().refreshRuntimeCapabilities();
       const refreshRuntimeOnVisibility = () => {
@@ -2297,8 +2349,11 @@ export const useAppStore = create<AppStore>((set, get) => {
         window.removeEventListener('focus', refreshRuntimeOnFocus);
         document.removeEventListener('visibilitychange', refreshRuntimeOnVisibility);
       });
-      void value.onLogEntry((entry) => get().addLogEntry(entry)).then((dispose) => bridgeSubscriptions.push(dispose));
-      void get().loadLogs();
+      void value.onLogEntry((entry) => { if (owner === logSession) enqueueLog(entry); }).then((dispose) => {
+        if (owner !== logSession) { dispose(); return; }
+        bridgeSubscriptions.push(dispose);
+        return get().loadLogs();
+      }).catch(() => { if (owner === logSession) set({ logError: 'Unable to load logs.' }); });
       const progressTimers = new Map<string, number>();
       const progressMessages = new Map<string, NotificationText>();
       bridgeSubscriptions.push(() => {
@@ -2425,6 +2480,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     dispose: () => {
+      resetLogSession();
       settingsWriter = undefined;
       workingTreeLifecycle++;
       workingTreeUpdates.clear();
@@ -5844,8 +5900,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     toggleLogPanel: () => {
       const next = !get().logPanelOpen;
       const activeTabId = get().activeTabId;
-      const nextTimestamps = next && activeTabId
-        ? { ...get().lastReadLogTimestamps, [activeTabId]: Date.now() }
+      const nextTimestamps = next
+        ? { ...get().lastReadLogTimestamps, [activeTabId ?? '__global__']: Date.now() }
         : get().lastReadLogTimestamps;
       set({
         logPanelOpen: next,
@@ -5855,8 +5911,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     setLogPanelOpen: (open) => {
       const activeTabId = get().activeTabId;
-      const nextTimestamps = open && activeTabId
-        ? { ...get().lastReadLogTimestamps, [activeTabId]: Date.now() }
+      const nextTimestamps = open
+        ? { ...get().lastReadLogTimestamps, [activeTabId ?? '__global__']: Date.now() }
         : get().lastReadLogTimestamps;
       set({
         logPanelOpen: open,
@@ -5874,32 +5930,39 @@ export const useAppStore = create<AppStore>((set, get) => {
     setLogSearchQuery: (query) => set({ logSearchQuery: query }),
     setLogAutoScroll: (autoScroll) => set({ logAutoScroll: autoScroll }),
     clearLogs: async () => {
-      await bridge().clearLogs();
-      set({ logEntries: [], unreadErrorCount: 0 });
-    },
-    addLogEntry: (entry) => set((state) => {
-      const nextEntries = [...state.logEntries, entry];
-      if (nextEntries.length > 3000) nextEntries.shift();
-      let unreadErrorCount = state.unreadErrorCount;
-      if (entry.level === 'error') {
-        if (state.logPanelOpen) {
-          unreadErrorCount = 0;
-        } else {
-          const currentTab = state.tabs.find((t) => t.id === state.activeTabId);
-          const paths = currentTab ? currentTab.paths : (state.snapshot?.workspace.paths ?? []);
-          if (paths.length === 0 || isLogEntryInWorkspace(entry, paths)) {
-            unreadErrorCount += 1;
-          }
+      if (clearLogPromise) return clearLogPromise;
+      flushLogs();
+      const previous = get().logEntries;
+      const owner = logSession;
+      const generation = ++logGeneration;
+      set({ logEntries: [], unreadErrorCount: 0, logError: null });
+      const request = bridge().clearLogs().catch((error: unknown) => {
+        if (owner === logSession && generation === logGeneration) {
+          flushLogs();
+          commitLogs(previous);
+          set({ logError: 'Unable to clear logs.' });
         }
-      }
-      return { logEntries: nextEntries, unreadErrorCount };
-    }),
+        throw error;
+      }).finally(() => { if (owner === logSession) clearLogPromise = undefined; });
+      clearLogPromise = request;
+      return request;
+    },
+    addLogEntry: (entry) => { flushLogs(); commitLogs([entry]); },
     loadLogs: async () => {
+      const owner = logSession;
+      const generation = logGeneration;
+      const value = bridge();
       try {
-        const logs = await bridge().getLogs();
-        set({ logEntries: logs });
+        if (clearLogPromise) await clearLogPromise;
+        if (owner !== logSession || generation !== logGeneration) return;
+        const [logs, storageError] = await Promise.all([value.getLogs(), value.getLogStorageStatus()]);
+        if (owner !== logSession || generation !== logGeneration) return;
+        // Apply the historical snapshot first; live records take precedence.
+        set({ logEntries: mergeLogEntries(logs, get().logEntries), logStorageError: storageError, logError: null });
+        flushLogs();
+        commitLogs([]);
       } catch {
-        /* ignore bridge logs load failure */
+        if (owner === logSession && generation === logGeneration) set({ logError: 'Unable to load logs.' });
       }
     },
     openLogFolder: async () => {
@@ -5910,9 +5973,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     resetUnreadErrors: () => {
       const activeTabId = get().activeTabId;
-      const nextTimestamps = activeTabId
-        ? { ...get().lastReadLogTimestamps, [activeTabId]: Date.now() }
-        : get().lastReadLogTimestamps;
+      const nextTimestamps = { ...get().lastReadLogTimestamps, [activeTabId ?? '__global__']: Date.now() };
       set({ unreadErrorCount: 0, lastReadLogTimestamps: nextTimestamps });
     },
   };

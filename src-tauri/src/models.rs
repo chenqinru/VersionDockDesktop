@@ -720,9 +720,16 @@ pub enum BridgeCommand {
         limit: Option<u32>,
     },
     LogClear,
+    LogFormat {
+        entries: Vec<crate::logger::LogEntry>,
+    },
+    LogStorageStatus,
     LogOpenFolder,
     LogExport {
         target_path: String,
+        #[serde(default)]
+        #[specta(optional)]
+        entries: Option<Vec<crate::logger::LogEntry>>,
     },
     LogClientPush {
         level: crate::logger::LogLevel,

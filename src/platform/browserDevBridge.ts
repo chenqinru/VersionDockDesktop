@@ -1,3 +1,4 @@
+import { formatDemoLogs, logLevelPriority } from '../logs/entries';
 import { createOperationRequestEvent } from './bridge';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
@@ -436,13 +437,15 @@ export class BrowserDevBridge implements VersionDockBridge {
   async getLogs(channel?: LogChannel, level?: LogLevel, limit?: number): Promise<LogEntry[]> {
     return this.logs.filter((entry) => {
       if (channel && entry.channel !== channel) return false;
-      if (level && entry.level !== level) return false;
+      if (level && logLevelPriority(entry.level) < logLevelPriority(level)) return false;
       return true;
     }).slice(-(limit ?? 3000));
   }
   async clearLogs(): Promise<void> {
     this.logs = [];
   }
+  async formatLogs(entries: LogEntry[]): Promise<string> { return formatDemoLogs(entries); }
+  async getLogStorageStatus(): Promise<string | null> { return null; }
   async openLogFolder(): Promise<void> {
     console.info('[BrowserDevBridge] openLogFolder called');
   }

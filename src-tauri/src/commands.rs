@@ -123,30 +123,55 @@ pub async fn bridge_request(
                 | BridgeCommand::BatchCommit { .. }
                 | BridgeCommand::Conflicts { .. }
         );
-    let mut result = state::with_operation_reporter(reporter, async {
-        if !waits_for_coordinator {
-            state::emit_current_operation(OperationStatus::Running, phase, message);
-        }
-        match validate_request_context(&context, &error_context) {
-            Ok(()) => {
-                // `dispatch` contains every command branch, so its debug-build future is larger
-                // than Tokio's default worker stack. Keep it on the heap or Bootstrap can abort
-                // the process with a stack overflow before the first window finishes loading.
-                Box::pin(dispatch(
-                    command.clone(),
-                    &app,
-                    &window,
-                    &state,
-                    &token,
-                    &request_id,
-                    &context,
-                    &started_at,
-                ))
+    let log_context = crate::logger::LogContext {
+        workspace_id: context.workspace_id.clone(),
+        repository_id: context.repository_id.clone(),
+        operation_id: Some(request_id.clone()),
+        workspace_name: match &context.workspace_id {
+            Some(id) => state
+                .workspace(id)
                 .await
+                .ok()
+                .map(|workspace| workspace.name),
+            None => None,
+        },
+        repository_name: match (&context.workspace_id, &context.repository_id) {
+            (Some(workspace), Some(repository)) => state
+                .cached_repositories(workspace)
+                .await
+                .into_iter()
+                .find(|repo| &repo.id == repository)
+                .map(|repo| repo.name),
+            _ => None,
+        },
+    };
+    let mut result = crate::logger::with_log_context(
+        log_context,
+        state::with_operation_reporter(reporter, async {
+            if !waits_for_coordinator {
+                state::emit_current_operation(OperationStatus::Running, phase, message);
             }
-            Err(error) => Err(error),
-        }
-    })
+            match validate_request_context(&context, &error_context) {
+                Ok(()) => {
+                    // `dispatch` contains every command branch, so its debug-build future is larger
+                    // than Tokio's default worker stack. Keep it on the heap or Bootstrap can abort
+                    // the process with a stack overflow before the first window finishes loading.
+                    Box::pin(dispatch(
+                        command.clone(),
+                        &app,
+                        &window,
+                        &state,
+                        &token,
+                        &request_id,
+                        &context,
+                        &started_at,
+                    ))
+                    .await
+                }
+                Err(error) => Err(error),
+            }
+        }),
+    )
     .await;
     if let Err(error) = &mut result {
         error
@@ -2853,6 +2878,17 @@ async fn dispatch(
                 let settings = state.app.read().await.settings.clone();
                 if needs_worker {
                     let request = crate::update_worker::UpdateRequest {
+                        log_context: Some(crate::logger::LogContext {
+                            workspace_id: Some(workspace_id.clone()),
+                            repository_id: Some(repo.id.clone()),
+                            operation_id: Some(operation_id.into()),
+                            repository_name: Some(repo.name.clone()),
+                            workspace_name: state
+                                .workspace(&workspace_id)
+                                .await
+                                .ok()
+                                .map(|workspace| workspace.name),
+                        }),
                         config_dir: state.config_dir.clone(),
                         repo,
                         action,
@@ -3797,14 +3833,33 @@ async fn dispatch(
             }
             json(true)
         }
+        BridgeCommand::LogFormat { entries } => json(crate::logger::format_entries(&entries)),
+        BridgeCommand::LogStorageStatus => {
+            json(crate::logger::get_logger().and_then(|logger| logger.storage_error()))
+        }
         BridgeCommand::LogOpenFolder => {
             if let Some(logger) = crate::logger::get_logger() {
                 let path = logger.log_dir().to_path_buf();
-                let _ = app.opener().open_path(path.to_string_lossy(), None::<&str>);
+                app.opener()
+                    .open_path(path.to_string_lossy(), None::<&str>)
+                    .map_err(|error| {
+                        DesktopError::new("LOG_OPEN_FOLDER_FAILED", error.to_string(), true)
+                    })?;
             }
             json(true)
         }
-        BridgeCommand::LogExport { target_path } => {
+        BridgeCommand::LogExport {
+            target_path,
+            entries,
+        } => {
+            if let Some(entries) = entries {
+                std::fs::write(
+                    Path::new(&target_path),
+                    crate::logger::format_entries(&entries),
+                )
+                .map_err(|error| DesktopError::new("LOG_EXPORT_FAILED", error.to_string(), true))?;
+                return json(true);
+            }
             if let Some(logger) = crate::logger::get_logger() {
                 logger
                     .export_to_file(Path::new(&target_path))

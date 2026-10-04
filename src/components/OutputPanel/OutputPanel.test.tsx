@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LogEntry } from '../../bindings/generated';
 import { I18nContext, createTranslator } from '../../i18n';
 import { MockBridge } from '../../platform/bridge';
@@ -62,6 +62,8 @@ describe('OutputPanel & LogStatusBarItem', () => {
     bridge = new MockBridge(() => Promise.resolve());
     useAppStore.setState({
       ready: true,
+      activeLogProject: 'all',
+      logError: null, logStorageError: null,
       logPanelOpen: true,
       logPanelHeight: 240,
       logEntries: sampleLogs,
@@ -267,5 +269,90 @@ describe('OutputPanel & LogStatusBarItem', () => {
     // Project A 未读错误应该增加为 1
     expect(useAppStore.getState().unreadErrorCount).toBe(1);
   });
+  it('supports keyboard filtering, Escape, and focus return', () => {
+    renderWithProviders(<OutputPanel />, bridge);
+    const trigger = screen.getByLabelText('Filter by level');
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('option', { name: 'All Levels' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(screen.getByRole('option', { name: 'Errors Only' })).toHaveFocus();
+    fireEvent.click(document.activeElement!);
+    expect(trigger).toHaveFocus();
+    expect(useAppStore.getState().activeLogLevel).toBe('error');
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('pauses follow mode when reading upwards and follows when enabled again', () => {
+    renderWithProviders(<OutputPanel />, bridge);
+    const body = screen.getByRole('log');
+    fireEvent.wheel(body, { deltaY: -20 });
+    expect(useAppStore.getState().logAutoScroll).toBe(false);
+    fireEvent.click(screen.getByLabelText('Toggle auto scroll'));
+    expect(useAppStore.getState().logAutoScroll).toBe(true);
+  });
+
+  it('continues following when the 3000-record buffer changes without growing', () => {
+    const entries = Array.from({ length: 3000 }, (_, index) => ({ ...sampleLogs[0], id: `entry-${index}` }));
+    useAppStore.setState({ logEntries: entries });
+    const { container } = renderWithProviders(<OutputPanel />, bridge);
+    const body = screen.getByRole('log');
+    Object.defineProperty(body, 'scrollHeight', { value: 10000, configurable: true });
+    act(() => useAppStore.setState({ logEntries: [...entries.slice(1), { ...sampleLogs[0], id: 'new-last' }] }));
+    expect(body.scrollTop).toBe(10000);
+    expect(container.querySelectorAll('.output-log-row').length).toBeLessThan(100);
+  });
+
+  it('uses the shared formatter and surfaces copy failures locally', async () => {
+    const formatter = vi.spyOn(bridge, 'formatLogs').mockResolvedValue('canonical logs');
+    const write = vi.fn().mockRejectedValue(new Error('permission denied'));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: write } });
+    renderWithProviders(<OutputPanel />, bridge);
+    await act(async () => fireEvent.click(screen.getByLabelText('Copy logs')));
+    expect(formatter).toHaveBeenCalledWith(sampleLogs);
+    expect(write).toHaveBeenCalledWith('canonical logs');
+    expect(screen.getByText('Unable to copy logs.')).toBeInTheDocument();
+  });
+
+  it('starts clipboard writing during the click before native formatting resolves', async () => {
+    let resolve!: (text: string) => void;
+    const formatting = new Promise<string>((done) => { resolve = done; });
+    vi.spyOn(bridge, 'formatLogs').mockReturnValue(formatting);
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
+    vi.stubGlobal('ClipboardItem', class {
+      constructor(public values: Record<string, Promise<Blob>>) {}
+    });
+    try {
+      renderWithProviders(<OutputPanel />, bridge);
+      fireEvent.click(screen.getByLabelText('Copy logs'));
+      expect(write).toHaveBeenCalledOnce();
+      await act(async () => resolve('canonical output'));
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('exports only visible records through the native save dialog and handles cancellation', async () => {
+    const save = vi.spyOn(bridge, 'saveFileDialog').mockResolvedValue('/tmp/visible.log');
+    const exportLogs = vi.spyOn(bridge, 'exportLogs').mockResolvedValue(true);
+    useAppStore.setState({ activeLogLevel: 'error' });
+    renderWithProviders(<OutputPanel />, bridge);
+    await act(async () => fireEvent.click(screen.getByLabelText('Export logs')));
+    expect(exportLogs).toHaveBeenCalledWith('/tmp/visible.log', [sampleLogs[2]]);
+    save.mockResolvedValue(null);
+    exportLogs.mockClear();
+    await act(async () => fireEvent.click(screen.getByLabelText('Export logs')));
+    expect(exportLogs).not.toHaveBeenCalled();
+  });
+
+  it('searches captured sources after the originating project is closed', () => {
+    useAppStore.setState({ tabs: [], logEntries: [{ ...sampleLogs[0], context: { workspaceId: 'closed', workspaceName: 'Closed Project', repositoryId: 'repo', repositoryName: 'Original repository', operationId: 'operation-42' } }] });
+    renderWithProviders(<OutputPanel />, bridge);
+    fireEvent.change(screen.getByPlaceholderText('Filter output…'), { target: { value: '  Original repository  ' } });
+    expect(screen.getByText('[Closed Project]')).toBeInTheDocument();
+    expect(screen.getByText('[Original repository]')).toBeInTheDocument();
+  });
+
 });
 

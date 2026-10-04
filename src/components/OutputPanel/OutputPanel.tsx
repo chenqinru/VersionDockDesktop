@@ -1,9 +1,13 @@
 import { IconButton } from '../IconButton';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useI18n } from '../../i18n';
 import { isLogEntryInWorkspace, useAppStore } from '../../store/appStore';
 import { useResizable } from '../../hooks/useResizable';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useBridge } from '../../platform/context';
+import { OutputDropdown } from './OutputDropdown';
+import { logLevelPriority } from '../../logs/entries';
 import type { LogChannel, LogLevel } from '../../bindings/generated';
 
 const LOG_CHANNELS: Array<{ id: LogChannel | 'all'; label: string }> = [
@@ -22,20 +26,10 @@ const LOG_LEVELS: Array<{ id: LogLevel | 'all'; label: string }> = [
   { id: 'debug', label: 'Debug' },
 ];
 
-function levelPriority(level: LogLevel): number {
-  switch (level) {
-    case 'error': return 4;
-    case 'warn': return 3;
-    case 'info': return 2;
-    case 'debug': return 1;
-    case 'trace': return 0;
-    default: return 2;
-  }
-}
-
 function formatTime(isoString: string): string {
   try {
     const date = new Date(isoString);
+    if (!Number.isFinite(date.getTime())) return isoString;
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
@@ -49,80 +43,16 @@ function formatTime(isoString: string): string {
   }
 }
 
-function OutputDropdown<T extends string>({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-  className = '',
-}: {
-  value: T;
-  options: Array<{ id: T; label: string }>;
-  onChange: (val: T) => void;
-  ariaLabel: string;
-  className?: string;
-}) {
-  const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const selectedOption = options.find((opt) => opt.id === value) ?? options[0];
-
-  useEffect(() => {
-    if (!open) return;
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [open]);
-
-  return (
-    <div ref={containerRef} className={`output-dropdown-container ${className} ${open ? 'open' : ''}`}>
-      <button
-        type="button"
-        className={`output-dropdown-trigger ${open ? 'active' : ''}`}
-        onClick={() => setOpen((prev) => !prev)}
-        aria-label={ariaLabel}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      >
-        <span className="output-dropdown-label">{t(selectedOption.label)}</span>
-        <Codicon name={open ? 'chevron-up' : 'chevron-down'} />
-      </button>
-
-      {open && (
-        <div className="output-dropdown-menu" role="listbox" aria-label={ariaLabel}>
-          {options.map((opt) => {
-            const isSelected = opt.id === value;
-            return (
-              <div
-                key={opt.id}
-                role="option"
-                aria-selected={isSelected}
-                className={`output-dropdown-item ${isSelected ? 'selected' : ''}`}
-                onClick={() => {
-                  onChange(opt.id);
-                  setOpen(false);
-                }}
-              >
-                <span className="output-dropdown-item-text">{t(opt.label)}</span>
-                {isSelected && <Codicon name="check" className="output-dropdown-check" />}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function OutputPanel() {
   const { t } = useI18n();
+  const bridge = useBridge();
   const logPanelOpen = useAppStore((state) => state.logPanelOpen);
   const logPanelHeight = useAppStore((state) => state.logPanelHeight);
+  const logError = useAppStore((state) => state.logError);
+  const storageError = useAppStore((state) => state.logStorageError);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
   const logEntries = useAppStore((state) => state.logEntries);
   const activeChannel = useAppStore((state) => state.activeLogChannel);
   const activeLevel = useAppStore((state) => state.activeLogLevel);
@@ -145,6 +75,14 @@ export function OutputPanel() {
   const [copied, setCopied] = useState(false);
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(() => new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const retained = new Set(logEntries.map((entry) => entry.id));
+    setExpandedDetails((previous) => {
+      const next = new Set([...previous].filter((id) => retained.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [logEntries]);
 
   const resize = useResizable(
     logPanelHeight,
@@ -181,13 +119,14 @@ export function OutputPanel() {
   const selectedPaths = useMemo(() => selectedTab ? selectedTab.paths : [], [selectedTab]);
 
   const filteredEntries = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
     return logEntries.filter((entry) => {
       if (activeProject === 'current') {
-        if (currentPaths.length > 0 && !isLogEntryInWorkspace(entry, currentPaths)) {
+        if (currentPaths.length > 0 && !isLogEntryInWorkspace(entry, currentPaths, currentTab?.id ?? snapshot?.workspace.id)) {
           return false;
         }
       } else if (activeProject !== 'all') {
-        if (selectedPaths.length > 0 && !isLogEntryInWorkspace(entry, selectedPaths)) {
+        if (selectedPaths.length > 0 && !isLogEntryInWorkspace(entry, selectedPaths, selectedTab?.id)) {
           return false;
         }
       }
@@ -195,80 +134,102 @@ export function OutputPanel() {
         return false;
       }
       if (activeLevel !== 'all') {
-        const threshold = levelPriority(activeLevel);
-        if (levelPriority(entry.level) < threshold) {
+        const threshold = logLevelPriority(activeLevel);
+        if (logLevelPriority(entry.level) < threshold) {
           return false;
         }
       }
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const msgMatch = entry.message.toLowerCase().includes(q);
-        const detailsMatch = entry.details?.toLowerCase().includes(q);
-        if (!msgMatch && !detailsMatch) {
-          return false;
-        }
+      if (query) {
+        const fields = [entry.message, entry.details, entry.cwd, ...Object.values(entry.context ?? {})];
+        if (!fields.some((field) => field?.toLowerCase().includes(query))) return false;
       }
       return true;
     });
-  }, [logEntries, activeProject, currentPaths, selectedPaths, activeChannel, activeLevel, searchQuery]);
+  }, [logEntries, activeProject, currentPaths, selectedPaths, activeChannel, activeLevel, searchQuery, currentTab?.id, snapshot?.workspace.id, selectedTab?.id]);
 
-  useEffect(() => {
-    if (!logPanelOpen || !autoScroll || !scrollContainerRef.current) return;
-    const el = scrollContainerRef.current;
-    el.scrollTop = el.scrollHeight;
-  }, [filteredEntries.length, logPanelOpen, autoScroll]);
-
-  const handleCopyLogs = async () => {
-    const text = filteredEntries
-      .map((entry) => {
-        let line = `[${formatTime(entry.timestamp)}] [${entry.level.toUpperCase()}] [${entry.channel.toUpperCase()}] ${entry.message}`;
-        if (entry.durationMs !== null && entry.durationMs !== undefined) {
-          line += ` (${entry.durationMs}ms)`;
+  const virtual = filteredEntries.length > 100;
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: virtual ? filteredEntries.length : 0,
+    getScrollElement: () => scrollContainerRef.current,
+    getItemKey: (index) => filteredEntries[index].id,
+    estimateSize: () => 26,
+    measureElement: (element) => element.getBoundingClientRect().height || 26,
+    gap: 2,
+    overscan: 10,
+    enabled: virtual && logPanelOpen,
+    initialRect: { width: 800, height: logPanelHeight - 44 },
+    observeElementRect: (instance, callback) => {
+      const element = instance.scrollElement;
+      if (!element) return;
+      const update = () => callback({ width: element.offsetWidth || 800, height: element.offsetHeight || logPanelHeight - 44 });
+      update();
+      if (!window.ResizeObserver) return;
+      const observer = new ResizeObserver(update);
+      observer.observe(element);
+      return () => observer.disconnect();
+    },
+  });
+  const lastId = filteredEntries.at(-1)?.id;
+  const totalHeight = virtualizer.getTotalSize();
+  const readerAnchor = useRef<{ id: string; offset: number }>();
+  const lastScrollTop = useRef(0);
+  useLayoutEffect(() => {
+    const element = scrollContainerRef.current;
+    if (!logPanelOpen || !element) return;
+    if (autoScroll) {
+      // Variable row heights may change after measurement; follow the real bottom.
+      element.scrollTop = element.scrollHeight;
+      readerAnchor.current = undefined;
+    } else if (readerAnchor.current) {
+      const anchor = readerAnchor.current;
+      const index = filteredEntries.findIndex((entry) => entry.id === anchor.id);
+      if (index >= 0) {
+        if (virtual) {
+          const position = virtualizer.getOffsetForIndex(index, 'start');
+          if (position) element.scrollTop = position[0] + anchor.offset;
+        } else {
+          const row = element.querySelector<HTMLElement>(`[data-log-id="${CSS.escape(anchor.id)}"]`);
+          if (row) element.scrollTop = row.offsetTop - element.offsetTop + anchor.offset;
         }
-        if (entry.exitCode !== null && entry.exitCode !== undefined) {
-          line += ` [exit ${entry.exitCode}]`;
-        }
-        if (entry.details) {
-          line += `\n${entry.details}`;
-        }
-        return line;
-      })
-      .join('\n');
-
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // 忽略复制异常
+      }
     }
-  };
+    lastScrollTop.current = element.scrollTop;
+  }, [lastId, logPanelOpen, autoScroll, totalHeight, filteredEntries, virtual, virtualizer]);
 
-  const handleExportLogs = async () => {
-    const text = filteredEntries
-      .map((entry) => {
-        let line = `[${formatTime(entry.timestamp)}] [${entry.level.toUpperCase()}] [${entry.channel.toUpperCase()}] ${entry.message}`;
-        if (entry.durationMs !== null && entry.durationMs !== undefined) {
-          line += ` (${entry.durationMs}ms)`;
-        }
-        if (entry.exitCode !== null && entry.exitCode !== undefined) {
-          line += ` [exit ${entry.exitCode}]`;
-        }
-        if (entry.details) {
-          line += `\n${entry.details}`;
-        }
-        return line;
-      })
-      .join('\n');
-
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `versiondock-logs-${new Date().toISOString().slice(0, 10)}.log`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const rememberAnchor = () => {
+    const element = scrollContainerRef.current;
+    if (!element) return;
+    const item = virtualizer.getVirtualItems().find((item) => item.end > element.scrollTop);
+    if (virtual && item) readerAnchor.current = { id: filteredEntries[item.index].id, offset: element.scrollTop - item.start };
   };
+  const runAction = async (action: () => Promise<unknown>, failure: string) => {
+    setActionError(null);
+    try { await action(); } catch { setActionError(failure); }
+  };
+  const handleCopyLogs = () => runAction(async () => {
+    const text = bridge.formatLogs(filteredEntries);
+    // WebKit requires clipboard.write during the click, before the native request resolves.
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': text.then((value) => new Blob([value], { type: 'text/plain' })),
+      })]);
+    } else {
+      await navigator.clipboard.writeText(await text);
+    }
+    setCopied(true);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(false), 2000);
+  }, 'Unable to copy logs.');
+  const handleExportLogs = () => runAction(async () => {
+    const path = await bridge.saveFileDialog({
+      title: t('Export logs'),
+      defaultPath: `versiondock-logs-${new Date().toISOString().slice(0, 10)}.log`,
+      filters: [{ name: t('Output and Logs'), extensions: ['log'] }],
+    });
+    if (!path) return;
+    if (!await bridge.exportLogs(path, filteredEntries)) throw new Error('Log export failed');
+  }, 'Unable to export logs.');
 
   const toggleDetails = (id: string) => {
     setExpandedDetails((prev) => {
@@ -297,6 +258,11 @@ export function OutputPanel() {
         aria-valuemax={600}
         aria-valuenow={logPanelHeight}
         onPointerDown={resize}
+        onKeyDown={(event) => {
+          if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          setLogPanelHeight(event.key === 'Home' ? 120 : event.key === 'End' ? 600 : logPanelHeight + (event.key === 'ArrowUp' ? 20 : -20));
+        }}
         title={t('Drag to resize output panel')}
       />
 
@@ -389,7 +355,7 @@ export function OutputPanel() {
             <IconButton
               type="button"
               className="output-btn"
-              onClick={() => void clearLogs()}
+              onClick={() => void runAction(clearLogs, 'Unable to clear logs.')}
               title={t('Clear output')}
               aria-label={t('Clear output')}
             >
@@ -399,7 +365,7 @@ export function OutputPanel() {
             <IconButton
               type="button"
               className="output-btn"
-              onClick={() => void openLogFolder()}
+              onClick={() => void runAction(openLogFolder, 'Unable to open log folder.')}
               title={t('Open log folder on disk')}
               aria-label={t('Open log folder')}
             >
@@ -419,11 +385,27 @@ export function OutputPanel() {
         </div>
       </header>
 
+      {(actionError || logError || storageError) && <div className="output-error-banner" role="status">
+        <Codicon name="warning" />
+        <span>{actionError ? t(actionError) : logError ? t(logError) : t('Log files are unavailable. Logs remain available in this window.')}</span>
+        {storageError && <span className="output-storage-error" title={storageError}>{storageError}</span>}
+      </div>}
       <div
         ref={scrollContainerRef}
         className="output-panel-body"
         role="log"
-        aria-live="polite"
+        aria-live="off"
+        tabIndex={0}
+        onWheel={(event) => { if (event.deltaY < 0) { rememberAnchor(); setAutoScroll(false); } }}
+        onKeyDown={(event) => {
+          if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) { rememberAnchor(); setAutoScroll(false); }
+        }}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          if (autoScroll && element.scrollTop < lastScrollTop.current && element.scrollHeight - element.clientHeight - element.scrollTop > 8) setAutoScroll(false);
+          if (!autoScroll) rememberAnchor();
+          lastScrollTop.current = element.scrollTop;
+        }}
       >
         {filteredEntries.length === 0 ? (
           <div className="output-empty">
@@ -431,19 +413,24 @@ export function OutputPanel() {
             <span>{searchQuery ? t('No output matching filter.') : t('No log output recorded yet.')}</span>
           </div>
         ) : (
-          <div className="output-log-list">
-            {filteredEntries.map((entry) => {
+          <div className={`output-log-list ${virtual ? 'virtual' : ''}`} style={virtual ? { height: totalHeight, position: 'relative' } : undefined}>
+            {(virtual ? virtualizer.getVirtualItems().map((item) => ({ entry: filteredEntries[item.index], item })) : filteredEntries.map((entry) => ({ entry, item: undefined }))).map(({ entry, item }) => {
               const hasDetails = Boolean(entry.details);
               const isExpanded = expandedDetails.has(entry.id);
               return (
-                <div key={entry.id} className={`output-log-row ${entry.level}`}>
+                <div key={entry.id} data-log-id={entry.id} data-index={item?.index}
+                  ref={item ? virtualizer.measureElement : undefined}
+                  style={item ? { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start}px)` } : undefined}
+                  className={`output-log-row ${entry.level}`}>
                   <span className="output-log-time">{formatTime(entry.timestamp)}</span>
                   <span className={`output-log-level ${entry.level}`}>{entry.level.toUpperCase()}</span>
                   <span className="output-log-channel">[{entry.channel.toUpperCase()}]</span>
-                  {activeProject === 'all' && entry.cwd && (() => {
-                    const matchedTab = tabs.find((tab) => isLogEntryInWorkspace(entry, tab.paths));
-                    return matchedTab ? <span className="output-log-project">[{matchedTab.name}]</span> : null;
+                  {activeProject === 'all' && (() => {
+                    const matchedTab = entry.cwd || entry.context?.workspaceId ? tabs.find((tab) => isLogEntryInWorkspace(entry, tab.paths, tab.id)) : undefined;
+                    const name = entry.context?.workspaceName ?? matchedTab?.name ?? entry.context?.workspaceId;
+                    return name ? <span className="output-log-project" title={entry.cwd ?? undefined}>[{name}]</span> : null;
                   })()}
+                  {entry.context?.repositoryName && <span className="output-log-project" title={entry.cwd ?? undefined}>[{entry.context.repositoryName}]</span>}
                   <span className="output-log-msg">{entry.message}</span>
                   {entry.durationMs !== null && entry.durationMs !== undefined && (
                     <span className="output-log-duration">{entry.durationMs}ms</span>
@@ -452,15 +439,16 @@ export function OutputPanel() {
                     <span className="output-log-exit-code">exit {entry.exitCode}</span>
                   )}
                   {hasDetails && (
-                    <button
+                    <IconButton
                       type="button"
+                      aria-expanded={isExpanded}
                       className="output-log-details-toggle"
                       onClick={() => toggleDetails(entry.id)}
                       title={isExpanded ? t('Collapse details') : t('Expand details')}
                     >
                       <Codicon name={isExpanded ? 'chevron-down' : 'chevron-right'} />
                       <span>{t('Details')}</span>
-                    </button>
+                    </IconButton>
                   )}
                   {hasDetails && isExpanded && (
                     <div className="output-log-details-box">

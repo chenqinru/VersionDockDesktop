@@ -1,3 +1,4 @@
+import { formatDemoLogs, logLevelPriority, mergeLogEntries } from '../logs/entries';
 import type {
   AiEvent, BridgeCommand, DesktopError, OperationDomain,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
@@ -64,8 +65,10 @@ export interface VersionDockBridge {
   onLogEntry(handler: (entry: LogEntry) => void): Promise<() => void>;
   getLogs(channel?: LogChannel, level?: LogLevel, limit?: number): Promise<LogEntry[]>;
   clearLogs(): Promise<void>;
+  formatLogs(entries: LogEntry[]): Promise<string>;
+  getLogStorageStatus(): Promise<string | null>;
   openLogFolder(): Promise<void>;
-  exportLogs(targetPath: string): Promise<boolean>;
+  exportLogs(targetPath: string, entries?: LogEntry[]): Promise<boolean>;
   pushClientLog(level: LogLevel, channel: LogChannel, message: string, details?: string): Promise<void>;
   window: {
     startDragging(): Promise<void>;
@@ -579,14 +582,21 @@ export class TauriBridge implements VersionDockBridge {
   async clearLogs(): Promise<void> {
     await this.request({ type: 'logClear' }, { showProgress: false });
   }
+  async formatLogs(entries: LogEntry[]): Promise<string> {
+    return this.request({ type: 'logFormat', payload: { entries } }, { showProgress: false });
+  }
+  async getLogStorageStatus(): Promise<string | null> {
+    return this.request({ type: 'logStorageStatus' }, { showProgress: false });
+  }
   async openLogFolder(): Promise<void> {
     await this.request({ type: 'logOpenFolder' }, { showProgress: false });
   }
-  async exportLogs(targetPath: string): Promise<boolean> {
+  async exportLogs(targetPath: string, entries?: LogEntry[]): Promise<boolean> {
     return this.request<boolean>({
       type: 'logExport',
       payload: {
         target_path: targetPath,
+        entries: entries ?? null,
       },
     }, { showProgress: false });
   }
@@ -604,6 +614,8 @@ export class TauriBridge implements VersionDockBridge {
 }
 
 export class MockBridge implements VersionDockBridge {
+  private logHandlers = new Set<(entry: LogEntry) => void>();
+  private logs: LogEntry[] = [];
   private state: unknown;
   private handlers = new Set<(event: BridgeEvent) => void>();
   constructor(private readonly responder: (command: BridgeCommand, options?: RequestOptions) => unknown | Promise<unknown>) {}
@@ -671,23 +683,23 @@ export class MockBridge implements VersionDockBridge {
   async onTabDragState(): Promise<() => void> {
     return Promise.resolve(() => undefined);
   }
-  async onLogEntry(): Promise<() => void> {
-    return Promise.resolve(() => undefined);
+  async onLogEntry(handler: (entry: LogEntry) => void): Promise<() => void> {
+    this.logHandlers.add(handler);
+    return () => { this.logHandlers.delete(handler); };
   }
-  async getLogs(): Promise<LogEntry[]> {
-    return Promise.resolve([]);
+  async getLogs(channel?: LogChannel, level?: LogLevel, limit = 3000): Promise<LogEntry[]> {
+    return this.logs.filter((entry) => (!channel || entry.channel === channel) && (!level || logLevelPriority(entry.level) >= logLevelPriority(level))).slice(-limit);
   }
-  async clearLogs(): Promise<void> {
-    return Promise.resolve();
-  }
-  async openLogFolder(): Promise<void> {
-    return Promise.resolve();
-  }
-  async exportLogs(): Promise<boolean> {
-    return Promise.resolve(true);
-  }
-  async pushClientLog(): Promise<void> {
-    return Promise.resolve();
+  async clearLogs(): Promise<void> { this.logs = []; }
+  async formatLogs(entries: LogEntry[]): Promise<string> { return formatDemoLogs(entries); }
+  async getLogStorageStatus(): Promise<string | null> { return null; }
+  async openLogFolder(): Promise<void> { return; }
+  exportLogs: VersionDockBridge['exportLogs'] = async () => true;
+  async pushClientLog(level: LogLevel, channel: LogChannel, message: string, details?: string): Promise<void> {
+    const entry: LogEntry = { id: crypto.randomUUID(), timestamp: new Date().toISOString(), level, channel, message,
+      details: details ?? null, durationMs: null, exitCode: null, cwd: null };
+    this.logs = mergeLogEntries(this.logs, [entry]);
+    this.logHandlers.forEach((handler) => handler(entry));
   }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined, show: async () => undefined,

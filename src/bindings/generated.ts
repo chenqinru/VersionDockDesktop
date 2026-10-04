@@ -696,8 +696,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	channel: LogChannel | null,
 	level: LogLevel | null,
 	limit: number | null,
-} } | { type: "logClear" } | { type: "logOpenFolder" } | { type: "logExport"; payload: {
+} } | { type: "logClear" } | { type: "logFormat"; payload: {
+	entries: LogEntry[],
+} } | { type: "logStorageStatus" } | { type: "logOpenFolder" } | { type: "logExport"; payload: {
 	target_path: string,
+	entries?: LogEntry[] | null,
 } } | { type: "logClientPush"; payload: {
 	level: LogLevel,
 	channel: LogChannel,
@@ -1091,6 +1094,14 @@ export type LineRange = {
 
 export type LogChannel = "git" | "svn" | "core" | "ui";
 
+export type LogContext = {
+	workspaceId: string | null,
+	repositoryId: string | null,
+	operationId: string | null,
+	workspaceName: string | null,
+	repositoryName: string | null,
+};
+
 export type LogEntry = {
 	id: string,
 	timestamp: string,
@@ -1101,6 +1112,7 @@ export type LogEntry = {
 	durationMs: number | null,
 	exitCode: number | null,
 	cwd: string | null,
+	context?: LogContext | null,
 };
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";

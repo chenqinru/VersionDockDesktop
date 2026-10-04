@@ -6090,6 +6090,7 @@ async fn real_git_detached_update_restores_after_parent_is_killed_and_supports_c
                 &working,
             );
             let request = crate::update_worker::UpdateRequest {
+                log_context: None,
                 config_dir: root.path().join("config"),
                 repo: repo(&working, VcsKind::Git),
                 action: SyncAction::Pull,
