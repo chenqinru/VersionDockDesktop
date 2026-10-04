@@ -1,3 +1,4 @@
+import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { IconButton } from '../IconButton';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Codicon } from '../Codicon';
@@ -102,6 +103,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
   };
 
   return (
+    <StatusBarPopoverPortal>
     <div
       ref={popoverRef}
       className="statusbar-popover notification-center-popover"
@@ -236,5 +238,6 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
         )}
       </div>
     </div>
+    </StatusBarPopoverPortal>
   );
 }

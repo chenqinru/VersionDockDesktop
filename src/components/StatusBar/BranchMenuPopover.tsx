@@ -1,3 +1,4 @@
+import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore, type AppNotificationAction } from '../../store/appStore';
@@ -751,7 +752,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const isMixedWorkspace = useMemo(() => isMixedRepoWorkspace(repositories), [repositories]);
 
   return (
-    <>
+    <StatusBarPopoverPortal>
       {/* ──────────────── 1. 一级主菜单面板 ──────────────── */}
       {!repoOnly && !directBranch && (
         <StatusBarQuickMenu ref={popoverRef} title={t('VersionDock: Git/SVN Menu')} active={!submenuPos && !actionMenuPos}
@@ -2538,6 +2539,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
         </StatusBarQuickMenu>
       )}
 
-    </>
+    </StatusBarPopoverPortal>
   );
 }

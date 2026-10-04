@@ -1,6 +1,4 @@
 import { AiExplanation } from './AiExplanation';
-import { useAiStore } from '../ai/aiStore';
-import { AiCommitComposerIcon } from './AiCommitComposerIcon';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -1333,7 +1331,6 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
         <div className="detail-files-title">
           <strong>{t(targets.length === 1 ? '{0} file' : '{0} files', targets.length)}</strong>
           <span className="detail-files-spacer" />
-          {selectedCommits.length > 0 && selectedCommits.every((c) => c.repoId === selectedCommits[0].repoId && c.unpushed) && repoMap.get(selectedCommits[0].repoId)?.meta.kind === 'git' && <IconButton title={t('AI Reorganize Commits')} onClick={() => useAiStore.getState().openComposer({ repoId: selectedCommits[0].repoId, paths: [], stagedOnly: false, hashes: selectedCommits.map((c) => c.hash) })}><AiCommitComposerIcon /></IconButton>}
           {fileMode === 'tree' && (
             <>
               <IconButton type="button" title={t('Expand all')} onClick={() => { setAllTreeExpanded(true); setCollapsedDirs({}); }}><Codicon name="expand-all" /></IconButton>

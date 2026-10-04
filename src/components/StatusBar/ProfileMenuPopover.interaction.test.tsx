@@ -108,6 +108,7 @@ describe('identity status menu', () => {
     fireEvent.change(within(menu).getByRole('combobox'), { target: { value: '/test/beta' } });
     fireEvent.click(within(menu).getByText('beta'));
     expect(screen.getByRole('dialog', { name: 'VersionDock — Accounts & Identities: beta (2/2)' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'VersionDock — Accounts & Identities: beta (2/2)' }).parentElement).toBe(document.body);
     expect(useAppStore.getState().selectedRepoId).toBe('alpha');
   });
   it('toggles from the anchor and closes on external click and blur', async () => {

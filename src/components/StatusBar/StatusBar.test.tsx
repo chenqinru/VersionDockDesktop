@@ -268,12 +268,15 @@ describe('StatusBar', () => {
     expect(screen.getByText('Push')).toBeInTheDocument();
     expect(screen.getByText("Don't show again")).toBeInTheDocument();
     expect(screen.getByText('Push').closest('button')?.querySelector('.codicon-arrow-right')).toBeNull();
-    expect(container.querySelector('.notification-severity-icon.warning')).not.toBeNull();
+    const center = screen.getByRole('dialog', { name: 'Notifications' });
+    expect(center.parentElement).toBe(document.body);
+    expect(center.closest('.app-statusbar')).toBeNull();
+    expect(center.querySelector('.notification-severity-icon.warning')).not.toBeNull();
 
     // 再次点击铃铛应关闭通知中心，pointerdown 不应被误判为外部点击后重新打开。
     fireEvent.pointerDown(bellBtn);
     fireEvent.click(bellBtn);
-    expect(container.querySelector('.notification-center-popover')).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Notifications' })).not.toBeInTheDocument();
     expect(bellBtn).toHaveAttribute('aria-expanded', 'false');
 
     // 重新打开后继续验证通知操作。

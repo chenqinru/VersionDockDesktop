@@ -1,3 +1,4 @@
+import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import type { GitProfile, GitProfileOperation, RemoteProviderKind, RepositoryStatus, SvnAccountOperation } from '../../bindings/generated';
 import { useAppStore } from '../../store/appStore';
@@ -187,7 +188,7 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
   const width = Math.min(360, window.innerWidth - 16);
   const mainStyle = { position: 'fixed' as const, bottom: 28, left: Math.max(8, Math.min(anchorRect?.left ?? 120, window.innerWidth - width - 8)), maxHeight: Math.min(440, window.innerHeight - 40), zIndex: 1000 };
   const activeLabel = customProfile?.label ?? t(profileId === LOCAL_PROFILE_ID ? 'Local' : 'Global');
-  return <>
+  return <StatusBarPopoverPortal>
     <StatusBarQuickMenu key={`${repoId}:${page}`} ref={popoverRef} title={rootTitle} active={!profileId && !provider && !busy} className="profile-menu-popover" style={mainStyle} onSearch={back} onBack={page === 'repositories' ? () => setPage('identity') : undefined}>
       {data.loading ? <div className="statusbar-popover-loading"><Codicon name="loading codicon-modifier-spin" />{t('Loading files...')}</div> : page === 'repositories' ? repositoryItems : <>
         {repo?.meta.kind === 'svn' ? svnItems : gitItems}
@@ -202,5 +203,5 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
       {customProfile && <div className="statusbar-menu-section"><ProfileMenuItem busy={busy} label={t('Edit…')} icon="edit" onClick={() => { void editProfile(customProfile); }} /><ProfileMenuItem busy={busy} label={t('Delete')} icon="trash" onClick={() => { void deleteProfile(); }} description={t('Remove "{0}"', customProfile.label)} /></div>}
     </StatusBarQuickMenu>}
     {provider && <ProviderPanel mode="manage" initialProvider={provider} close={() => { setProvider(undefined); data.reload(); }} />}
-  </>;
+  </StatusBarPopoverPortal>;
 }

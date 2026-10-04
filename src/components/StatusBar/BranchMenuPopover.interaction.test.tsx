@@ -43,11 +43,13 @@ describe('branch menu interactions', () => {
     renderMenu();
     const root = screen.getByRole('dialog', { name: 'VersionDock: Git/SVN Menu' });
     expect(root.style.left).toBe('8px');
+    expect(root.parentElement).toBe(document.body);
     fireEvent.change(within(root).getByRole('combobox'), { target: { value: 'alpha' } });
     expect(within(root).queryByText('Fetch All')).not.toBeInTheDocument();
     fireEvent.keyDown(within(root).getByRole('combobox'), { key: 'ArrowDown' });
     fireEvent.keyDown(within(root).getByRole('combobox'), { key: 'Enter' });
     const sub = screen.getByRole('dialog', { name: 'alpha — Branches' });
+    expect(sub.parentElement).toBe(document.body);
     fireEvent.change(within(sub).getByRole('combobox'), { target: { value: 'login validation' } });
     expect(within(sub).getAllByText('Improve login validation · ' + relativeBranchDate('2026-09-01T00:00:00Z')).length).toBeGreaterThan(0);
     fireEvent.change(within(sub).getByRole('combobox'), { target: { value: 'zz-no-match' } });
