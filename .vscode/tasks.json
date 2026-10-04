@@ -4,6 +4,15 @@
     {
       "label": "dev",
       "type": "shell",
+      "command": "npm run tauri:dev",
+      "isBackground": true,
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:stable",
+      "type": "shell",
       "command": "npm run tauri:dev -- --stable",
       "isBackground": true,
       "group": "build",
