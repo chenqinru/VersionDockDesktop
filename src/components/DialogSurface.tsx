@@ -7,12 +7,13 @@ type Props = HTMLAttributes<HTMLElement> & {
   closeDisabled?: boolean;
   backdropClassName?: string;
   preserveStyle?: boolean;
+  size?: 'small' | 'medium' | 'large';
   style?: CSSProperties;
 };
 
-/** Common modal surface; callers keep their content, size and operation state. */
+/** Shared modal sizing and behavior; tool windows can retain their own layout. */
 export const DialogSurface = forwardRef<HTMLElement, Props>(function DialogSurface({
-  onClose, closeDisabled = false, backdropClassName = '', preserveStyle = false, className = '', children, ...props
+  onClose, closeDisabled = false, backdropClassName = '', preserveStyle = false, size, className = '', children, ...props
 }, forwardedRef) {
   const closeRef = useRef(onClose);
   const disabledRef = useRef(closeDisabled);
@@ -34,6 +35,6 @@ export const DialogSurface = forwardRef<HTMLElement, Props>(function DialogSurfa
   }, [dialog]);
   return createPortal(<div className={`vd-dialog-backdrop ${backdropClassName}`} style={{ zIndex: layer }} role="presentation"
     onClick={event => { if (event.target === event.currentTarget && !disabledRef.current) closeRef.current(); }}>
-    <section {...props} ref={dialog} className={`${preserveStyle ? '' : 'vd-dialog'} ${className}`.trim()} role="dialog" aria-modal="true">{children}</section>
+    <section {...props} ref={dialog} data-dialog-size={size} className={`${preserveStyle ? '' : 'vd-dialog'} ${className}`.trim()} role="dialog" aria-modal="true">{children}</section>
   </div>, document.body);
 });

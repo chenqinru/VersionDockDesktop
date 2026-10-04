@@ -4128,10 +4128,6 @@ button.danger:not(:disabled):hover,
 }
 
 /* ──────────────── Identity Panel ──────────────── */
-.identity-panel {
-  width: min(640px, calc(100vw - 48px));
-}
-
 .identity-content {
   display: flex;
   flex-direction: column;
@@ -5296,7 +5292,6 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .about-modal {
-  width: min(560px, calc(100vw - 32px));
   max-height: min(680px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
@@ -7491,7 +7486,7 @@ button.notification-item-action-btn:focus-visible {
   .settings-text-control { width: 100%; max-width: none; }
 }
 .ai-prompt-backdrop { z-index: 1500; }
-.ai-prompt-dialog { width: min(800px,90vw); height: min(700px,85vh); display: flex; flex-direction: column; gap: 10px; padding: 15px; background: var(--versiondock-surface); border: 1px solid var(--versiondock-border); border-radius: 6px; }
+.ai-prompt-dialog { display: flex; flex-direction: column; gap: 10px; padding: 15px; background: var(--versiondock-surface); border: 1px solid var(--versiondock-border); border-radius: 6px; }
 .ai-prompt-dialog header, .ai-prompt-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
 .ai-prompt-dialog footer { flex-wrap: wrap; }
 .ai-prompt-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }

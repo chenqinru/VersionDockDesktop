@@ -77,7 +77,7 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
   };
 
   return (
-    <DialogSurface className="app-dialog ignore-dialog" onClose={close} closeDisabled={saving} aria-labelledby="ignore-rules-title">
+    <DialogSurface size="medium" className="app-dialog ignore-dialog" onClose={close} closeDisabled={saving} aria-labelledby="ignore-rules-title">
         <header>
           <Codicon name="exclude" />
           <strong id="ignore-rules-title">{t('Manage Ignore Rules')}</strong>

@@ -18,7 +18,7 @@ export function IdentityPanel({ repoId, close }: { repoId: string; close: () => 
   if (!snapshot || !repo) return null;
 
   return (
-    <DialogSurface className="modal-panel identity-panel" onClose={close} aria-label={repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}>
+    <DialogSurface size="medium" className="modal-panel identity-panel" onClose={close} aria-label={repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}>
         <header className="modal-header">
           <div className="modal-header-title">
             <Codicon name="account" />

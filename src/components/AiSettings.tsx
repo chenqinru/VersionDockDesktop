@@ -223,7 +223,7 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
     }
   };
   return (
-    <DialogSurface ref={dialog} className="ai-prompt-dialog" onClose={onClose} closeDisabled={saving} aria-label={t('Edit AI prompt')}>
+    <DialogSurface ref={dialog} size="large" className="ai-prompt-dialog" onClose={onClose} closeDisabled={saving} aria-label={t('Edit AI prompt')}>
         <header>
           <strong>{t(task)}</strong>
           <IconButton title={t('Close')} disabled={saving} onClick={onClose}>

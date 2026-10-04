@@ -113,7 +113,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   };
 
   return (
-    <DialogSurface className="about-modal" onClose={onClose} aria-labelledby="about-dialog-title">
+    <DialogSurface size="medium" className="about-modal" onClose={onClose} aria-labelledby="about-dialog-title">
         <header className="about-header">
           <div className="about-brand-header">
             <img src="/icons/versiondock-logo-dark.png" alt="VersionDock Logo" className="about-brand-logo" />

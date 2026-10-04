@@ -78,7 +78,7 @@ export function DialogHost() {
       finish(request.allowEmpty ? result : result || null);
     } else finish(true);
   };
-  return <DialogSurface ref={dialog} className="app-dialog" onClose={() => finish(false)} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
+  return <DialogSurface ref={dialog} size={request.kind === 'editor' || request.items?.length ? 'medium' : 'small'} className="app-dialog" onClose={() => finish(false)} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
       <header><Codicon name={request.danger ? 'warning' : request.kind === 'prompt' ? 'edit' : request.kind === 'editor' ? 'git-commit' : 'question'} /><strong id="app-dialog-title">{request.title}</strong><IconButton title={t('Close')} disabled={submitting} onClick={() => finish(false)}><Codicon name="close" /></IconButton></header>
       <p>{request.message}</p>
       {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus aria-label={request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}

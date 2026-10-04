@@ -4,6 +4,9 @@
   --dialog-shadow: 0 18px 54px rgba(0, 0, 0, .24), 0 4px 12px rgba(0, 0, 0, .12);
   --dialog-radius: 12px;
   --dialog-input-border: color-mix(in srgb, var(--versiondock-text) 18%, var(--versiondock-border));
+  --dialog-width-small: 420px;
+  --dialog-width-medium: 580px;
+  --dialog-width-large: 720px;
 }
 :root[data-theme="light"], :root[data-theme="light2026"] {
   --dialog-overlay: rgba(24, 30, 38, .12);
@@ -16,19 +19,22 @@
 }
 .vd-dialog-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; box-sizing: border-box; animation: vd-dialog-fade .12s ease-out; }
 .vd-dialog {
-  width: min(480px, calc(100vw - 48px)); max-height: calc(100vh - 48px); min-width: 0;
-  box-sizing: border-box; padding: 24px; overflow: auto;
+  --dialog-width: var(--dialog-width-small);
+  width: min(var(--dialog-width), calc(100vw - 48px)); max-height: calc(100vh - 48px); min-width: 0;
+  box-sizing: border-box; padding: 20px; overflow: auto;
   color: var(--versiondock-text); background: var(--versiondock-surface);
   border: 1px solid color-mix(in srgb, var(--versiondock-text) 13%, var(--versiondock-border));
   border-radius: var(--dialog-radius); box-shadow: var(--dialog-shadow);
   font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
   animation: vd-dialog-enter .16s cubic-bezier(.2,.7,.2,1);
 }
-.vd-dialog > header { min-height: 28px; display: flex; align-items: center; gap: 10px; padding: 0; margin-bottom: 18px; background: transparent; border: 0; }
-.vd-dialog > header > strong { flex: 1; min-width: 0; font-size: calc(15px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1.4; }
+.vd-dialog[data-dialog-size="medium"] { --dialog-width: var(--dialog-width-medium); }
+.vd-dialog[data-dialog-size="large"] { --dialog-width: var(--dialog-width-large); }
+.vd-dialog > header { min-height: 28px; display: flex; align-items: center; gap: 10px; padding: 0; margin-bottom: 14px; background: transparent; border: 0; }
+.vd-dialog > header > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: calc(15px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1.4; }
 .vd-dialog > header > .codicon { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; font-size: 17px; color: var(--versiondock-muted); background: var(--versiondock-hover); border-radius: 9px; }
 .vd-dialog > header > .codicon-warning { color: var(--versiondock-warning); background: color-mix(in srgb, var(--versiondock-warning) 12%, transparent); }
-.vd-dialog > p { color: var(--versiondock-muted); font-size: inherit; line-height: 1.65; margin: 0 0 18px; }
+.vd-dialog > p { color: var(--versiondock-muted); font-size: inherit; line-height: 1.65; margin: 0 0 14px; overflow-wrap: anywhere; }
 .vd-dialog label { gap: 8px; font-size: inherit; }
 .vd-dialog label > span { color: var(--versiondock-text); font-weight: 500; }
 .vd-dialog :is(input, textarea):where(:not([type="checkbox"]):not([type="radio"])) {
@@ -41,7 +47,7 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--versiondock-text) 7%, transparent);
 }
 .vd-dialog button:focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
-.vd-dialog > footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 24px; padding: 0; border: 0; }
+.vd-dialog > footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding: 0; border: 0; }
 .vd-dialog > footer > button, .vd-dialog .vd-dialog-footer-actions > button { min-height: 32px; padding: 6px 14px; border: 1px solid var(--versiondock-border); border-radius: 7px; background: var(--versiondock-surface-alt); color: var(--versiondock-text); font-size: inherit; }
 .vd-dialog > footer > button:not(:disabled):hover, .vd-dialog .vd-dialog-footer-actions > button:not(:disabled):hover { background: var(--versiondock-hover); }
 .vd-dialog > footer > button.primary, .vd-dialog .vd-dialog-footer-actions > button.primary { color: var(--vscode-button-foreground); background: var(--versiondock-accent-bg); border-color: transparent; }
@@ -51,18 +57,19 @@
 .vd-dialog .dialog-error { margin: 12px 0 0; color: var(--versiondock-danger); }
 .vd-dialog .dialog-choices { gap: 5px; }
 .vd-dialog .dialog-choices > button { min-height: 46px; padding: 9px 10px; border-radius: 7px; font-size: inherit; }
+.vd-dialog .dialog-choices > button > span { min-width: 0; overflow-wrap: anywhere; }
 .vd-dialog .dialog-choices small { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.5; }
 .vd-dialog .ai-input-surface { --ai-input-radius: 7px; --ai-marquee-radius: 6.5px; }
-.vd-dialog.clone-dialog { gap: 14px; }
+.vd-dialog.clone-dialog { --dialog-width: 480px; gap: 14px; }
 .vd-dialog.clone-dialog > header { margin-bottom: 4px; }
 .vd-dialog.clone-dialog > footer { margin-top: 10px; }
-.vd-dialog.ignore-dialog { width: min(620px, calc(100vw - 48px)); }
 .vd-dialog.ignore-dialog textarea { min-height: 220px; max-height: 45vh; resize: vertical; font-family: var(--versiondock-code); }
 .vd-dialog .dialog-editor { min-height: 190px; max-height: 45vh; width: 100%; box-sizing: border-box; resize: vertical; }
-.vd-dialog.identity-panel { padding: 0; width: min(640px, calc(100vw - 48px)); overflow: hidden; }
-.vd-dialog.identity-panel > .modal-header { min-height: 56px; height: auto; flex-basis: auto; padding: 12px 20px; margin-bottom: 0; border-bottom: 1px solid var(--versiondock-border-soft); }
+.vd-dialog.identity-panel { padding: 0; overflow: hidden; }
+.vd-dialog.identity-panel > .modal-header { min-height: 52px; height: auto; flex-basis: auto; padding: 10px 16px; margin-bottom: 0; border-bottom: 1px solid var(--versiondock-border-soft); }
 .vd-dialog .modal-header-title { font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }
-.vd-dialog.identity-panel .modal-body { padding: 20px; }
+.vd-dialog.identity-panel .modal-body { padding: 16px; }
+.vd-dialog.identity-panel .effective-name { overflow-wrap: anywhere; }
 .vd-dialog.identity-panel .identity-inputs-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .vd-dialog.identity-panel .identity-inputs-grid input { min-width: 0; width: 100%; box-sizing: border-box; }
 .vd-dialog.identity-panel .identity-inputs-grid > button { grid-column: 1 / -1; justify-self: end; }
@@ -70,11 +77,11 @@
 .vd-dialog.identity-panel .identity-select-wrap { position: relative; min-width: 0; }
 .vd-dialog.identity-panel .identity-select-wrap select { width: 100%; padding-right: 30px; }
 .vd-dialog.identity-panel .identity-select-wrap > .codicon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--versiondock-muted); pointer-events: none; }
-.vd-dialog.ai-prompt-dialog { width: min(800px, calc(100vw - 48px)); height: min(700px, calc(100vh - 48px)); gap: 14px; display: flex; flex-direction: column; overflow: hidden; }
+.vd-dialog.ai-prompt-dialog { height: min(560px, calc(100vh - 48px)); gap: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .vd-dialog.ai-prompt-dialog > header { flex-shrink: 0; margin-bottom: 0; }
 .vd-dialog.ai-prompt-dialog > footer { margin-top: 4px; flex-shrink: 0; justify-content: space-between; }
 .vd-dialog.ai-prompt-dialog textarea { flex: 1; min-height: 100px; font-family: var(--versiondock-code); resize: none; }
-.vd-dialog.about-modal { width: min(580px, calc(100vw - 48px)); padding: 0; overflow: hidden; }
+.vd-dialog.about-modal { --dialog-width: 520px; padding: 0; overflow: hidden; }
 .vd-dialog.about-modal > .about-header { min-height: 68px; padding: 18px 22px; margin-bottom: 0; border-bottom: 1px solid var(--versiondock-border-soft); }
 .vd-dialog.about-modal .about-brand-logo { width: 36px; height: 36px; }
 .vd-dialog.about-modal .about-brand-text h2 { font-size: 16px; }
@@ -82,7 +89,7 @@
 .vd-dialog.file-history-panel > .file-history-header { margin: 0; padding: 0 16px; border-bottom: 1px solid var(--versiondock-border-soft); gap: 8px; }
 .vd-dialog.file-history-panel > .file-history-header > .codicon { background: transparent; width: 18px; height: 18px; flex-basis: 18px; font-size: 14px; }
 .vd-dialog.file-history-panel > .file-history-header > strong { flex: 0 0 auto; font-size: inherit; }
-.vd-dialog.submodule-dialog { width: min(560px, calc(100vw - 48px)); }
+.vd-dialog.submodule-dialog { --dialog-width: 560px; }
 .submodule-dialog-body { display: flex; flex-direction: column; gap: 14px; }
 .vd-dialog.composer-confirm-dialog > header > .composer-confirm-icon { width: 32px; height: 32px; display: grid; place-items: center; background: var(--versiondock-hover); border-radius: 9px; color: var(--versiondock-muted); }
 @keyframes vd-dialog-fade { from { opacity: 0; } to { opacity: 1; } }

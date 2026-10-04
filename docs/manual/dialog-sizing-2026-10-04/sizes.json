@@ -1,0 +1,157 @@
+[
+  {
+    "case": "compact-confirm-size",
+    "dialogs": [
+      {
+        "class": "vd-dialog app-dialog",
+        "width": 420,
+        "height": 157,
+        "viewport": [
+          1200,
+          800
+        ],
+        "padding": "20px"
+      }
+    ]
+  },
+  {
+    "case": "compact-prompt-size",
+    "dialogs": [
+      {
+        "class": "vd-dialog app-dialog",
+        "width": 420,
+        "height": 230,
+        "viewport": [
+          1200,
+          800
+        ],
+        "padding": "20px"
+      }
+    ]
+  },
+  {
+    "case": "compact-identity-size",
+    "dialogs": [
+      {
+        "class": "vd-dialog modal-panel identity-panel",
+        "width": 580,
+        "height": 425,
+        "viewport": [
+          1200,
+          800
+        ],
+        "padding": "0px"
+      }
+    ]
+  },
+  {
+    "case": "compact-settings-size",
+    "dialogs": [
+      {
+        "class": "settings-modal",
+        "width": 860,
+        "height": 640,
+        "viewport": [
+          1200,
+          800
+        ],
+        "padding": "0px"
+      }
+    ]
+  },
+  {
+    "case": "compact-ai-prompt-size",
+    "dialogs": [
+      {
+        "class": "settings-modal",
+        "width": 860,
+        "height": 640,
+        "viewport": [
+          1200,
+          800
+        ],
+        "padding": "0px"
+      },
+      {
+        "class": "vd-dialog ai-prompt-dialog",
+        "width": 720,
+        "height": 560,
+        "viewport": [
+          1200,
+          800
+        ],
+        "padding": "20px"
+      }
+    ]
+  },
+  {
+    "case": "compact-ai-prompt-800-size",
+    "dialogs": [
+      {
+        "class": "settings-modal",
+        "width": 768,
+        "height": 640,
+        "viewport": [
+          800,
+          720
+        ],
+        "padding": "0px"
+      },
+      {
+        "class": "vd-dialog ai-prompt-dialog",
+        "width": 720,
+        "height": 560,
+        "viewport": [
+          800,
+          720
+        ],
+        "padding": "20px"
+      }
+    ]
+  },
+  {
+    "case": "compact-parent-settings-after-escape",
+    "dialogs": [
+      {
+        "class": "settings-modal",
+        "width": 768,
+        "height": 640,
+        "viewport": [
+          800,
+          720
+        ],
+        "padding": "0px"
+      }
+    ]
+  },
+  {
+    "case": "compact-wrap-confirm-size",
+    "dialogs": [
+      {
+        "class": "vd-dialog app-dialog",
+        "width": 420,
+        "height": 195,
+        "viewport": [
+          800,
+          720
+        ],
+        "padding": "20px"
+      }
+    ]
+  },
+  {
+    "case": "compact-final-about-size",
+    "dialogs": [
+      {
+        "class": "vd-dialog about-modal",
+        "width": 520,
+        "height": 488,
+        "viewport": [
+          800,
+          720
+        ],
+        "padding": "0px"
+      }
+    ]
+  }
+]
