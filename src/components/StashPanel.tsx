@@ -1,3 +1,4 @@
+import { changeStatusColor, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { buildSavedChangeTree, type TreeDir } from './savedChangeTree';
 import { useState, useEffect, useMemo } from 'react';
@@ -17,24 +18,6 @@ import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 export type StashItem = StashEntry;
 
 export type ExpansionCommand = { sequence: number; expanded: boolean };
-
-const STATUS_COLORS: Record<string, string> = {
-  modified: 'var(--vscode-gitDecoration-modifiedResourceForeground, var(--versiondock-warning, #e2c08d))',
-  added: 'var(--vscode-gitDecoration-addedResourceForeground, var(--versiondock-success, #73c991))',
-  deleted: 'var(--vscode-gitDecoration-deletedResourceForeground, var(--versiondock-danger, #c74e39))',
-  renamed: 'var(--vscode-gitDecoration-renamedResourceForeground, #73c991)',
-  untracked: 'var(--vscode-gitDecoration-untrackedResourceForeground, var(--versiondock-success, #73c991))',
-  conflicted: 'var(--vscode-gitDecoration-conflictingResourceForeground, var(--versiondock-danger, #e51400))',
-};
-
-const STATUS_LETTERS: Record<string, string> = {
-  modified: 'M',
-  added: 'A',
-  deleted: 'D',
-  renamed: 'R',
-  untracked: 'U',
-  conflicted: 'C',
-};
 
 const BASE_PAD = 20;
 const LEVEL_PAD = 20;
@@ -105,9 +88,8 @@ function FileRow({
   const dir = file.path.includes('/')
     ? file.path.split('/').slice(0, -1).join('/')
     : '';
-  const color =
-    STATUS_COLORS[file.status] ?? 'var(--versiondock-foreground, var(--vscode-foreground, #ccc))';
-  const letter = STATUS_LETTERS[file.status] ?? 'M';
+  const color = changeStatusColor(file.status);
+  const letter = changeStatusLetter(file.status);
   const paddingLeft = BASE_PAD + depth * LEVEL_PAD;
 
   return (

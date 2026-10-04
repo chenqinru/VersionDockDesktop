@@ -21,8 +21,8 @@ const css = `
   :root[data-theme='light'] .ai-composer-page, :root[data-theme='light2026'] .ai-composer-page {
     --composer-code-background: color-mix(in srgb, var(--vscode-editor-foreground) 7%, var(--vscode-editor-background));
     --composer-code-border: color-mix(in srgb, var(--vscode-editor-foreground) 18%, var(--vscode-editor-background));
-    --composer-diff-add-background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #1a7f37) 14%, var(--composer-code-background));
-    --composer-diff-remove-background: color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #cf222e) 13%, var(--composer-code-background));
+    --composer-diff-add-background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground) 14%, var(--composer-code-background));
+    --composer-diff-remove-background: color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground) 13%, var(--composer-code-background));
     --composer-hunk-header-background: color-mix(in srgb, var(--vscode-editor-foreground) 3%, var(--composer-code-background));
     --composer-hunk-location-background: color-mix(in srgb, var(--vscode-textLink-foreground, #0969da) 11%, var(--vscode-editor-background));
     --composer-hunk-location-border: color-mix(in srgb, var(--vscode-textLink-foreground, #0969da) 34%, var(--vscode-editor-background));
@@ -36,8 +36,8 @@ const css = `
   :root:not([data-theme='light']):not([data-theme='light2026']) .ai-composer-page {
     --composer-code-background: color-mix(in srgb, var(--vscode-editor-foreground) 9%, var(--vscode-editor-background));
     --composer-code-border: color-mix(in srgb, var(--vscode-editor-foreground) 20%, var(--vscode-editor-background));
-    --composer-diff-add-background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #3fb950) 17%, var(--composer-code-background));
-    --composer-diff-remove-background: color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #f85149) 16%, var(--composer-code-background));
+    --composer-diff-add-background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground) 17%, var(--composer-code-background));
+    --composer-diff-remove-background: color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground) 16%, var(--composer-code-background));
     --composer-hunk-header-background: color-mix(in srgb, var(--vscode-editor-foreground) 5%, var(--composer-code-background));
     --composer-hunk-location-background: color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 16%, var(--vscode-editor-background));
     --composer-hunk-location-border: color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 42%, var(--vscode-editor-background));
@@ -651,8 +651,8 @@ const styles: Record<string, React.CSSProperties> = {
   filePath: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
   hunkCount: { flexShrink: 0, padding: '2px 7px', borderRadius: 4, color: 'var(--composer-hunk-badge-foreground, var(--versiondock-badge-foreground))', background: 'var(--composer-hunk-badge-background, var(--versiondock-badge-background))', border: '1px solid var(--composer-hunk-badge-border, color-mix(in srgb, var(--versiondock-badge-foreground) 26%, transparent))', fontSize: 10, lineHeight: 1.25, fontWeight: 700, whiteSpace: 'nowrap' },
   changeStats: { marginLeft: 'auto', display: 'flex', gap: 7, fontSize: 11, fontFamily: 'var(--vscode-editor-font-family)' },
-  changeAdded: { color: 'var(--vscode-gitDecoration-addedResourceForeground, #3fb950)', fontStyle: 'normal', fontWeight: 700 },
-  changeRemoved: { color: 'var(--vscode-gitDecoration-deletedResourceForeground, #f85149)', fontStyle: 'normal', fontWeight: 700 },
+  changeAdded: { color: 'var(--vscode-gitDecoration-addedResourceForeground)', fontStyle: 'normal', fontWeight: 700 },
+  changeRemoved: { color: 'var(--vscode-gitDecoration-deletedResourceForeground)', fontStyle: 'normal', fontWeight: 700 },
   atomic: { flexShrink: 0, padding: '2px 7px', borderRadius: 4, color: 'var(--composer-atomic-foreground, var(--versiondock-badge-foreground))', background: 'var(--composer-atomic-background, color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 76%, var(--versiondock-badge-background)))', border: '1px solid var(--composer-atomic-border, color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 78%, transparent))', fontSize: 10, lineHeight: 1.25, fontWeight: 700, whiteSpace: 'nowrap' },
   hunks: { borderTop: '1px solid var(--composer-code-border, var(--vscode-panel-border))', background: 'var(--composer-code-background, color-mix(in srgb, var(--vscode-textCodeBlock-background) 78%, transparent))' },
   hunk: { borderBottom: '1px solid var(--vscode-panel-border)' },

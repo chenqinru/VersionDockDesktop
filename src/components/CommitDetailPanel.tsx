@@ -1,3 +1,4 @@
+import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { AiExplanation } from './AiExplanation';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -22,11 +23,6 @@ type DetailTreeNode = { name: string; path: string; key: string; children: Detai
 function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date);
-}
-
-function statusClass(status: string): string {
-  const value = status.replace(/\d+$/, '').slice(0, 1).toUpperCase();
-  return value === 'A' || value === 'C' ? 'added' : value === 'D' ? 'deleted' : value === 'R' ? 'renamed' : 'modified';
 }
 
 function HighlightText({ text, query }: { text: string; query?: string }) {
@@ -311,7 +307,7 @@ function DetailTreeNodeView({
         data-detail-repo-id={file.repoId}
         data-detail-path={file.path}
         data-detail-from-revision={file.fromRevision ?? ''}
-        className={`detail-file-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
+        className={`detail-file-row status-${changeStatus(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
         style={{ paddingLeft: 18 + depth * 14 }}
         title={`${file.path}\n${t('Click to open diff')}`}
         onClick={() => openTarget(file, openDiff, onOpeningDiff)}
@@ -328,7 +324,7 @@ function DetailTreeNodeView({
             {file.removed !== null && <b className="removed">-{file.removed}</b>}
           </span>
         )}
-        <em>{file.status.replace(/\d+$/, '').slice(0, 1).toUpperCase()}</em>
+        <em>{changeStatusLetter(file.status)}</em>
       </button>
     );
   }
@@ -412,7 +408,7 @@ function DetailFlatFileRow({
       data-detail-path={file.path}
       data-detail-from-revision={file.fromRevision ?? ''}
       key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
-      className={`detail-file-row detail-list-row status-${statusClass(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
+      className={`detail-file-row detail-list-row status-${changeStatus(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
       title={`${file.path}\n${t('Click to open diff')}`}
       onClick={() => openTarget(file, openDiff, onOpeningDiff)}
       onContextMenu={(event) => onFileContextMenu?.(event, file)}
@@ -430,7 +426,7 @@ function DetailFlatFileRow({
           {file.removed !== null && <b className="removed">-{file.removed}</b>}
         </span>
       )}
-      <em>{file.status.replace(/\d+$/, '').slice(0, 1).toUpperCase()}</em>
+      <em>{changeStatusLetter(file.status)}</em>
     </button>
   );
 }

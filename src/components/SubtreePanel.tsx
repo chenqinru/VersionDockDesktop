@@ -698,8 +698,8 @@ const css = {
     padding: '1px 5px',
     borderRadius: '3px',
     fontSize: '10px',
-    color: 'var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-charts-yellow, #e2c08d))',
-    background: 'color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-charts-yellow, #e2c08d)) 16%, transparent)',
+    color: 'var(--vscode-gitDecoration-modifiedResourceForeground)',
+    background: 'color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground) 16%, transparent)',
   } as React.CSSProperties,
   headerActions: {
     marginLeft: 'auto',
@@ -795,9 +795,9 @@ const row = {
   } as React.CSSProperties,
   statusBadge: (tone: 'loading' | 'updated' | 'clean' | 'error'): React.CSSProperties => {
     const color = tone === 'updated'
-      ? 'var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-charts-yellow, #e2c08d))'
+      ? 'var(--vscode-gitDecoration-modifiedResourceForeground)'
       : tone === 'clean'
-        ? 'var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-charts-green, var(--versiondock-success)))'
+        ? 'var(--vscode-gitDecoration-addedResourceForeground)'
         : tone === 'error'
           ? 'var(--vscode-errorForeground, var(--versiondock-danger))'
           : 'var(--versiondock-loading-foreground)';

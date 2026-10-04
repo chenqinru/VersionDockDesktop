@@ -502,6 +502,12 @@ pub enum BridgeCommand {
         repo_id: String,
         revisions: Vec<String>,
     },
+    SavePatches {
+        workspace_id: String,
+        repo_id: String,
+        revisions: Vec<String>,
+        directory: String,
+    },
     SavePatch {
         workspace_id: String,
         repo_id: String,
@@ -1161,10 +1167,24 @@ pub enum ChangelistOperation {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorktreeOperation {
-    Create { branch: String, new_branch: bool },
-    Remove { path: String, force: bool },
-    Lock { path: String },
-    Unlock { path: String },
+    Create {
+        path: String,
+        branch: String,
+        new_branch: bool,
+        commitish: Option<String>,
+        no_track: bool,
+    },
+    Remove {
+        path: String,
+        force: bool,
+    },
+    Lock {
+        path: String,
+        reason: Option<String>,
+    },
+    Unlock {
+        path: String,
+    },
     Prune,
 }
 

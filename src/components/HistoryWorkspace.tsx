@@ -406,6 +406,28 @@ function CommitList({
     }
     if (id === 'patch' || id === 'patch-multi') {
       const hashes = selection.map((item) => item.hash);
+      const patchWorkspaceId = useAppStore.getState().snapshot!.workspace.id;
+      const multi = id === 'patch-multi' || selection.length > 1;
+      const activeBridge = useAppStore.getState().bridge;
+      if (multi && activeBridge && '__TAURI_INTERNALS__' in window) {
+        const directory = await activeBridge.selectDirectory(t('Save patches here'));
+        if (!directory) return;
+        try {
+          await activeBridge.request({ type: 'savePatches', payload: { workspace_id: patchWorkspaceId, repo_id: commit.repoId, revisions: hashes, directory } });
+          useAppStore.getState().addNotification({ type: 'success', title: t('Patch created'), message: { key: 'VersionDock [{0}]: {1} patches saved to {2}', args: [repoName, hashes.length, directory] }, workspaceId: patchWorkspaceId });
+        } catch (error) {
+          useAppStore.getState().addNotification({ type: 'error', title: t('Create patch failed'), message: { raw: String(error) }, workspaceId: patchWorkspaceId });
+        }
+        return;
+      }
+      if (multi) {
+        for (const hash of hashes) {
+          const patch = await createPatch(commit.repoId, [hash]);
+          const url = URL.createObjectURL(new Blob([patch.content], { type: 'text/x-patch;charset=utf-8' }));
+          const link = document.createElement('a'); link.href = url; link.download = `${hash.slice(0, 7)}.patch`; link.click(); URL.revokeObjectURL(url);
+        }
+        return;
+      }
       const defaultName = selection.length === 1 ? `${selection[0].shortHash || selection[0].hash.slice(0, 7)}.patch` : `versiondock-${selection.length}-commits.patch`;
       const b = useAppStore.getState().bridge;
       let savePath: string | null = null;

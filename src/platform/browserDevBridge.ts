@@ -618,6 +618,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'unpushedOperation': return true;
       case 'createPatch': return { fileName: `versiondock-${command.payload.revisions.length}.patch`, content: 'From browser demo\n' };
       case 'savePatch': return command.payload.path;
+      case 'savePatches': return command.payload.revisions.map(hash => `${command.payload.directory}/${hash.slice(0,7)}.patch`);
       case 'stage': this.updateFiles(command.payload.repo_id, command.payload.paths, true); return true;
       case 'unstage': this.updateFiles(command.payload.repo_id, command.payload.paths, false); return true;
       case 'deletePaths': this.repositories = this.repositories.map((repo) => repo.meta.id === command.payload.repo_id ? { ...repo, files: repo.files.filter((file) => !command.payload.paths.includes(file.path)) } : repo); return true;

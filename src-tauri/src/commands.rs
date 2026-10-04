@@ -112,6 +112,7 @@ pub async fn bridge_request(
     );
     let reporter = OperationReporter {
         app: app.clone(),
+        window_label: window.label().to_owned(),
         operation_id: request_id.clone(),
         context: context.clone(),
         started_at: started_at.clone(),
@@ -841,6 +842,11 @@ fn command_error_context(
             ..
         }
         | BridgeCommand::SavePatch {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::SavePatches {
             workspace_id,
             repo_id,
             ..
@@ -2848,7 +2854,7 @@ async fn dispatch(
                 match commit_result {
                     Ok(revision) => {
                         let push_result = if push && repo.kind == VcsKind::Git {
-                            with_write(state, &repo_id, token, async {
+                            with_write_coordinated(state, &repo_id, token, false, async {
                                 emit_operation_phase(
                                     app,
                                     operation_id,
@@ -2869,15 +2875,16 @@ async fn dispatch(
                                     token,
                                 )
                                 .await?;
-                                Box::pin(vcs::sync(
+                                push_with_recovery(
+                                    state,
                                     &repo,
-                                    crate::models::SyncAction::Push,
                                     None,
                                     None,
                                     false,
                                     &settings,
+                                    push_approvals,
                                     token,
-                                ))
+                                )
                                 .await
                             })
                             .await
@@ -2990,79 +2997,100 @@ async fn dispatch(
             let (phase, message) = sync_phase(&action);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let needs_worker = crate::update_worker::needs_worker(&repo, &action);
-            let value = with_write_coordinated(state, &repo_id, token, !needs_worker, async {
-                emit_operation_phase(
-                    app,
-                    operation_id,
-                    request_context,
-                    started_at,
-                    phase,
-                    message,
-                    None,
-                    None,
-                );
-                if repo.kind == VcsKind::Git
-                    && matches!(
-                        action,
-                        crate::models::SyncAction::Push | crate::models::SyncAction::PushTags
-                    )
-                {
-                    crate::protection::enforce_push(
-                        state,
+            let value = with_write_coordinated(
+                state,
+                &repo_id,
+                token,
+                !needs_worker && !matches!(action, crate::models::SyncAction::Push),
+                async {
+                    emit_operation_phase(
+                        app,
+                        operation_id,
+                        request_context,
+                        started_at,
+                        phase,
+                        message,
+                        None,
+                        None,
+                    );
+                    if repo.kind == VcsKind::Git
+                        && matches!(
+                            action,
+                            crate::models::SyncAction::Push | crate::models::SyncAction::PushTags
+                        )
+                    {
+                        crate::protection::enforce_push(
+                            state,
+                            &repo,
+                            branch.as_deref(),
+                            force.unwrap_or(false),
+                            push_approvals,
+                            token,
+                        )
+                        .await?;
+                    }
+                    let settings = state.app.read().await.settings.clone();
+                    if repo.kind == VcsKind::Git
+                        && matches!(action, crate::models::SyncAction::Push)
+                    {
+                        return push_with_recovery(
+                            state,
+                            &repo,
+                            remote,
+                            branch,
+                            force.unwrap_or(false),
+                            &settings,
+                            push_approvals,
+                            token,
+                        )
+                        .await;
+                    }
+                    if needs_worker {
+                        let request = crate::update_worker::UpdateRequest {
+                            log_context: Some(crate::logger::LogContext {
+                                workspace_id: Some(workspace_id.clone()),
+                                repository_id: Some(repo.id.clone()),
+                                operation_id: Some(operation_id.into()),
+                                repository_name: Some(repo.name.clone()),
+                                workspace_name: state
+                                    .workspace(&workspace_id)
+                                    .await
+                                    .ok()
+                                    .map(|workspace| workspace.name),
+                            }),
+                            config_dir: state.config_dir.clone(),
+                            repo: repo.clone(),
+                            action,
+                            remote,
+                            branch,
+                            force: force.unwrap_or(false),
+                            settings,
+                        };
+                        let executable = std::env::current_exe().map_err(|error| {
+                            DesktopError::new("UPDATE_WORKER_FAILED", error.to_string(), true)
+                        })?;
+                        let (child, directory) = tokio::task::spawn_blocking(move || {
+                            crate::update_worker::launch(&executable, &request, &[])
+                        })
+                        .await
+                        .map_err(|error| {
+                            DesktopError::new("UPDATE_WORKER_FAILED", error.to_string(), true)
+                        })??;
+                        return crate::update_worker::wait(child, directory, token).await;
+                    }
+                    Box::pin(vcs::sync_with_worktree_backup(
+                        &state.config_dir,
                         &repo,
-                        branch.as_deref(),
-                        force.unwrap_or(false),
-                        push_approvals,
-                        token,
-                    )
-                    .await?;
-                }
-                let settings = state.app.read().await.settings.clone();
-                if needs_worker {
-                    let request = crate::update_worker::UpdateRequest {
-                        log_context: Some(crate::logger::LogContext {
-                            workspace_id: Some(workspace_id.clone()),
-                            repository_id: Some(repo.id.clone()),
-                            operation_id: Some(operation_id.into()),
-                            repository_name: Some(repo.name.clone()),
-                            workspace_name: state
-                                .workspace(&workspace_id)
-                                .await
-                                .ok()
-                                .map(|workspace| workspace.name),
-                        }),
-                        config_dir: state.config_dir.clone(),
-                        repo: repo.clone(),
                         action,
                         remote,
                         branch,
-                        force: force.unwrap_or(false),
-                        settings,
-                    };
-                    let executable = std::env::current_exe().map_err(|error| {
-                        DesktopError::new("UPDATE_WORKER_FAILED", error.to_string(), true)
-                    })?;
-                    let (child, directory) = tokio::task::spawn_blocking(move || {
-                        crate::update_worker::launch(&executable, &request, &[])
-                    })
+                        force.unwrap_or(false),
+                        &settings,
+                        token,
+                    ))
                     .await
-                    .map_err(|error| {
-                        DesktopError::new("UPDATE_WORKER_FAILED", error.to_string(), true)
-                    })??;
-                    return crate::update_worker::wait(child, directory, token).await;
-                }
-                Box::pin(vcs::sync_with_worktree_backup(
-                    &state.config_dir,
-                    &repo,
-                    action,
-                    remote,
-                    branch,
-                    force.unwrap_or(false),
-                    &settings,
-                    token,
-                ))
-                .await
-            })
+                },
+            )
             .await?;
             if refresh_protection {
                 let settings = state.app.read().await.settings.clone();
@@ -3195,6 +3223,16 @@ async fn dispatch(
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
             json(vcs::create_patch(&repo, &revisions, token).await?)
+        }
+        BridgeCommand::SavePatches {
+            workspace_id,
+            repo_id,
+            revisions,
+            directory,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::save_patches(&repo, &revisions, &directory, token).await?)
         }
         BridgeCommand::SavePatch {
             workspace_id,
@@ -3399,7 +3437,14 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             with_write(state, &repo_id, token, async {
-                shelf::operate(&state.config_dir, &repo, operation, token).await
+                shelf::operate_in_workspace(
+                    &state.config_dir,
+                    &workspace_id,
+                    &repo,
+                    operation,
+                    token,
+                )
+                .await
             })
             .await?;
             json(true)
@@ -3409,8 +3454,17 @@ async fn dispatch(
             repo_id,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let _permit = state.acquire_read(token).await?;
-            json(changelist::list(&state.config_dir, &workspace_id, &repo).await?)
+            let values = with_write_coordinated(state, &repo_id, token, false, async {
+                let status = match repo.kind {
+                    VcsKind::Git => workspace::git_status(repo.clone(), token).await?,
+                    VcsKind::Svn => workspace::svn_status(repo.clone(), token).await?,
+                };
+                changelist::reconcile(&state.config_dir, &workspace_id, &repo, &status.files)
+                    .await?;
+                changelist::list(&state.config_dir, &workspace_id, &repo).await
+            })
+            .await?;
+            json(values)
         }
         BridgeCommand::ChangelistOperation {
             workspace_id,
@@ -3481,16 +3535,15 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
+            let mut linked = repo.clone();
+            linked.root_path = vcs::managed_worktree_path(&state.config_dir, &repo, &path, token)
+                .await?
+                .to_string_lossy()
+                .into_owned();
+            let mode = state.app.read().await.settings.cat_file_filter_mode.clone();
             json(
-                vcs::worktree_file_diff(
-                    &state.config_dir,
-                    &repo,
-                    &path,
-                    &base_ref,
-                    &relative_path,
-                    token,
-                )
-                .await?,
+                crate::diff_content::working_diff(&linked, &relative_path, &base_ref, &mode, token)
+                    .await?,
             )
         }
         BridgeCommand::BranchWorkingDiff {
@@ -3510,7 +3563,11 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::branch_working_file_diff(&repo, &base_ref, &relative_path, token).await?)
+            let mode = state.app.read().await.settings.cat_file_filter_mode.clone();
+            json(
+                crate::diff_content::working_diff(&repo, &relative_path, &base_ref, &mode, token)
+                    .await?,
+            )
         }
         BridgeCommand::Subtrees {
             workspace_id,
@@ -4208,6 +4265,206 @@ pub(crate) async fn resolve_repo(
         .await;
     }
     Ok(repo)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn push_with_recovery(
+    state: &AppState,
+    repo: &crate::models::RepositoryMeta,
+    remote: Option<String>,
+    branch: Option<String>,
+    force: bool,
+    settings: &crate::models::DesktopSettings,
+    approvals: &[crate::models::PushProtectionTarget],
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<crate::models::SyncResult, DesktopError> {
+    let initial = {
+        let _transaction =
+            crate::update_worker::repository_lock(&state.config_dir, &repo.id, token).await?;
+        let initial = vcs::sync(
+            repo,
+            crate::models::SyncAction::Push,
+            remote.clone(),
+            branch.clone(),
+            force,
+            settings,
+            token,
+        )
+        .await;
+        initial
+    };
+    let error = match initial {
+        Ok(result) => return Ok(result),
+        Err(error) => error,
+    };
+    let text = format!(
+        "{} {}",
+        error.message,
+        error.stderr.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    if !text.contains("non-fast-forward")
+        && !text.contains("[rejected]")
+        && !text.contains("fetch first")
+    {
+        return Err(error);
+    }
+    if settings.on_push_rejected == crate::models::OnPushRejectedAction::Error {
+        return Err(error);
+    }
+    let merge = settings.update_project_method == crate::models::UpdateProjectMethod::Merge;
+    let choice = if settings.on_push_rejected == crate::models::OnPushRejectedAction::RebaseAndRetry
+    {
+        if merge {
+            "merge".to_owned()
+        } else {
+            "rebase".to_owned()
+        }
+    } else {
+        let Some(response) = crate::interactions::ask(
+            repo,
+            crate::interactions::InteractionKind::PushRecovery,
+            &error.message,
+            remote.as_deref(),
+            branch.as_deref(),
+            merge,
+            token,
+        )
+        .await?
+        else {
+            return Err(error);
+        };
+        if response.choice == "force" {
+            crate::protection::enforce_push(
+                state,
+                repo,
+                branch.as_deref(),
+                true,
+                &response.push_approvals,
+                token,
+            )
+            .await?;
+            let _transaction =
+                crate::update_worker::repository_lock(&state.config_dir, &repo.id, token).await?;
+            return vcs::sync(
+                repo,
+                crate::models::SyncAction::Push,
+                remote,
+                branch,
+                true,
+                settings,
+                token,
+            )
+            .await;
+        }
+        response.choice
+    };
+    if !matches!(choice.as_str(), "merge" | "rebase") {
+        return Err(DesktopError::new(
+            "REQUEST_CANCELLED",
+            "Push recovery cancelled",
+            true,
+        ));
+    }
+    let mut recovery_settings = settings.clone();
+    recovery_settings.update_project_clean_working_tree =
+        crate::models::CleanWorkingTreeMethod::Stash;
+    let pull_branch = if let Some(remote) = remote.as_deref() {
+        let name = match branch.as_deref() {
+            Some(branch) => branch.to_owned(),
+            None => workspace::git_status(repo.clone(), token).await?.branch,
+        };
+        Some(
+            if name.starts_with(&format!("{remote}/")) || name.starts_with("refs/remotes/") {
+                name
+            } else {
+                format!("{remote}/{name}")
+            },
+        )
+    } else {
+        branch.clone()
+    };
+    let action = if choice == "merge" {
+        crate::models::SyncAction::Pull
+    } else {
+        crate::models::SyncAction::PullRebase
+    };
+    let result = if crate::update_worker::needs_worker(repo, &action) {
+        let request = crate::update_worker::UpdateRequest {
+            log_context: crate::state::current_log_context(),
+            config_dir: state.config_dir.clone(),
+            repo: repo.clone(),
+            action,
+            remote: remote.clone(),
+            branch: pull_branch,
+            force: false,
+            settings: recovery_settings.clone(),
+        };
+        let executable = std::env::current_exe()
+            .map_err(|e| DesktopError::new("UPDATE_WORKER_FAILED", e.to_string(), true))?;
+        #[cfg(test)]
+        let arguments = [
+            "--ignored",
+            "--exact",
+            "update_worker::tests::worker_entry",
+            "--nocapture",
+        ]
+        .as_slice();
+        #[cfg(not(test))]
+        let arguments = [].as_slice();
+        let (child, directory) = tokio::task::spawn_blocking(move || {
+            crate::update_worker::launch(&executable, &request, arguments)
+        })
+        .await
+        .map_err(|e| DesktopError::new("UPDATE_WORKER_FAILED", e.to_string(), true))??;
+        crate::update_worker::wait(child, directory, token).await?
+    } else {
+        let _transaction =
+            crate::update_worker::repository_lock(&state.config_dir, &repo.id, token).await?;
+        vcs::sync_with_worktree_backup(
+            &state.config_dir,
+            repo,
+            action,
+            remote.clone(),
+            pull_branch,
+            false,
+            &recovery_settings,
+            token,
+        )
+        .await?
+    };
+    let restored_status = workspace::git_status(repo.clone(), token).await?;
+    if result
+        .restore_warning
+        .as_ref()
+        .is_some_and(|warning| warning.conflicted)
+        || restored_status.conflicts > 0
+        || restored_status.operation.is_some()
+    {
+        let mut error = DesktopError::new(
+            "GIT_UPDATE_BLOCKED",
+            "Resolve conflicts before retrying the push",
+            true,
+        );
+        error.restore_warning = result.restore_warning;
+        return Err(error);
+    }
+    crate::protection::enforce_push(state, repo, branch.as_deref(), force, approvals, token)
+        .await?;
+    let _transaction =
+        crate::update_worker::repository_lock(&state.config_dir, &repo.id, token).await?;
+    let mut pushed = vcs::sync(
+        repo,
+        crate::models::SyncAction::Push,
+        remote,
+        branch,
+        force,
+        settings,
+        token,
+    )
+    .await?;
+    pushed.restore_warning = result.restore_warning;
+    Ok(pushed)
 }
 
 async fn with_write<T, F>(

@@ -207,6 +207,9 @@ describe('WorktreePanel', () => {
     fireEvent.click(screen.getByTitle('Add worktree'));
     await vi.waitFor(() => expect(currentDialog()?.kind).toBe('choice'));
     currentDialog()?.resolve('branch:1');
-    await vi.waitFor(() => expect(worktreeOperation).toHaveBeenCalledWith('repo-1', { type: 'create', branch: 'feature/ui', new_branch: false }));
+    await vi.waitFor(() => expect(currentDialog()?.kind).toBe('prompt'));
+    expect(currentDialog()?.initialValue).toContain('--feature-ui');
+    currentDialog()?.resolve('/tmp/custom-worktree');
+    await vi.waitFor(() => expect(worktreeOperation).toHaveBeenCalledWith('repo-1', { type: 'create', path: '/tmp/custom-worktree', branch: 'feature/ui', new_branch: false, commitish: null, no_track: false }));
   });
 });

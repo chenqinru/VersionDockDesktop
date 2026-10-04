@@ -398,6 +398,126 @@ pub async fn hydrate(config_dir: &Path, repo: &RepositoryMeta, token: &Cancellat
     }
 }
 
+static PROMPT_LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+static PROMPT_FAILURES: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
+fn auth_root(repo: &RepositoryMeta) -> String {
+    AUTH_ROOTS
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|roots| roots.get(&repo.root_path).cloned())
+        .unwrap_or_else(|| repo.root_path.clone())
+}
+
+pub(crate) async fn authentication_retry(
+    repo: &RepositoryMeta,
+    previous: Option<(String, String)>,
+    error: &DesktopError,
+    token: &CancellationToken,
+) -> Result<Option<(String, String)>, DesktopError> {
+    if !crate::interactions::available() {
+        return Ok(None);
+    }
+    let root = auth_root(repo);
+    let lock = PROMPT_LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| {
+            DesktopError::new("SVN_AUTH_FAILED", "Authentication state unavailable", true)
+        })?
+        .entry(root.clone())
+        .or_default()
+        .clone();
+    crate::state::emit_current_operation(
+        crate::models::OperationStatus::Running,
+        "awaitingAuthentication",
+        "Waiting for SVN authentication",
+    );
+    let _guard = tokio::select! { _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)), guard = lock.lock() => guard };
+    let cached = cached_auth(repo);
+    if cached.is_some() && cached != previous {
+        crate::state::emit_current_operation(
+            crate::models::OperationStatus::Running,
+            "retryingAuthentication",
+            "Retrying after SVN authentication",
+        );
+        return Ok(cached);
+    }
+    if PROMPT_FAILURES
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|times| times.get(&root).copied())
+        .is_some_and(|time| time.elapsed().as_secs() < 30)
+    {
+        return Ok(None);
+    }
+    let response = crate::interactions::ask(
+        repo,
+        crate::interactions::InteractionKind::SvnAuthentication,
+        &root,
+        None,
+        None,
+        false,
+        token,
+    )
+    .await?;
+    let Some(response) = response else {
+        return Err(error.clone());
+    };
+    if response.choice != "authenticate" {
+        return Err(DesktopError::new(
+            "REQUEST_CANCELLED",
+            "SVN authentication cancelled",
+            true,
+        ));
+    }
+    let (Some(username), Some(password)) = (response.username, response.password) else {
+        return Err(error.clone());
+    };
+    if username.trim().is_empty()
+        || username.contains(['\n', '\r', '\0'])
+        || password.contains(['\n', '\r', '\0'])
+    {
+        return Err(DesktopError::new(
+            "SVN_AUTH_FAILED",
+            "Invalid SVN credentials",
+            true,
+        ));
+    }
+    if !svn_password_stdin_available() {
+        return Err(DesktopError::new(
+            "SVN_PASSWORD_STDIN_UNAVAILABLE",
+            "This SVN client does not support secure password input",
+            false,
+        ));
+    }
+    AUTH_ROOTS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| error.clone())?
+        .insert(repo.root_path.clone(), root.clone());
+    let credentials = (username.trim().to_owned(), password);
+    SESSION_AUTH
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| error.clone())?
+        .insert(root, credentials.clone());
+    crate::state::emit_current_operation(
+        crate::models::OperationStatus::Running,
+        "retryingAuthentication",
+        "Retrying after SVN authentication",
+    );
+    Ok(Some(credentials))
+}
+
+pub(crate) fn remember_auth_failure(repo: &RepositoryMeta) {
+    if let Ok(mut times) = PROMPT_FAILURES.get_or_init(Default::default).lock() {
+        times.insert(auth_root(repo), std::time::Instant::now());
+    }
+}
+
 pub fn cached_auth(repo: &RepositoryMeta) -> Option<(String, String)> {
     let root = AUTH_ROOTS
         .get_or_init(Default::default)

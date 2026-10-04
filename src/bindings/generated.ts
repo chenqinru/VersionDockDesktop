@@ -512,6 +512,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	revisions: string[],
+} } | { type: "savePatches"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	revisions: string[],
+	directory: string,
 } } | { type: "savePatch"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -1072,6 +1077,17 @@ export type IncomingCommit = {
 export type InitializeRepositoryResult = {
 	snapshot: WorkspaceSnapshot,
 	repositoryId: string,
+};
+
+export type InteractionEvent = { type: "nativeInteractionRequest"; id: string; operationId: string; context: RequestContext; kind: InteractionKind; repoId: string; repoName: string; detail: string; remote: string | null; branch: string | null; preferMerge: boolean } | { type: "nativeInteractionClosed"; id: string };
+
+export type InteractionKind = "svnAuthentication" | "pushRecovery";
+
+export type InteractionResponse = {
+	choice: string,
+	username: string | null,
+	password: string | null,
+	pushApprovals?: PushProtectionTarget[],
 };
 
 export type InvalidFileNameInfo = {
@@ -1667,4 +1683,4 @@ export type WorktreeEntry = {
 	main: boolean,
 };
 
-export type WorktreeOperation = { type: "create"; branch: string; new_branch: boolean } | { type: "remove"; path: string; force: boolean } | { type: "lock"; path: string } | { type: "unlock"; path: string } | { type: "prune" };
+export type WorktreeOperation = { type: "create"; path: string; branch: string; new_branch: boolean; commitish: string | null; no_track: boolean } | { type: "remove"; path: string; force: boolean } | { type: "lock"; path: string; reason: string | null } | { type: "unlock"; path: string } | { type: "prune" };

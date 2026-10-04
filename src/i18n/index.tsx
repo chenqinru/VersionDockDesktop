@@ -4,6 +4,16 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  "Waiting for SVN authentication": "Waiting for SVN authentication",
+  "Retrying after SVN authentication": "Retrying after SVN authentication",
+
+  "New Worktree — Directory Path": "New Worktree — Directory Path",
+  "Path for the new worktree directory": "Path for the new worktree directory",
+  "Save patches here": "Save patches here",
+  "VersionDock [{0}]: {1} patches saved to {2}": "VersionDock [{0}]: {1} patches saved to {2}",
+  "SVN Authentication Required: {0}": "SVN Authentication Required: {0}",
+  "Push rejected": "Push rejected",
+  "The remote contains commits you do not have locally. Choose how to continue.": "The remote contains commits you do not have locally. Choose how to continue.",
   'Task progress': 'Task progress',
   'Processing': 'Processing',
   'Update stopped with conflicts or an unfinished version-control operation.': 'Update stopped with conflicts or an unfinished version-control operation.',
@@ -1217,6 +1227,16 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  "Waiting for SVN authentication": "等待 SVN 认证",
+  "Retrying after SVN authentication": "SVN 认证完成，正在重试",
+
+  "New Worktree — Directory Path": "新建 Worktree — 目录路径",
+  "Path for the new worktree directory": "新 Worktree 的目录路径",
+  "Save patches here": "将补丁保存到此处",
+  "VersionDock [{0}]: {1} patches saved to {2}": "VersionDock [{0}]：已将 {1} 个补丁保存到 {2}",
+  "SVN Authentication Required: {0}": "SVN 需要认证：{0}",
+  "Push rejected": "推送被拒绝",
+  "The remote contains commits you do not have locally. Choose how to continue.": "远端包含本地没有的提交，请选择继续方式。",
   'Task progress': '任务进度',
   'Processing': '处理中',
   'Update stopped with conflicts or an unfinished version-control operation.': '更新因冲突或未完成的版本控制操作而停止。',

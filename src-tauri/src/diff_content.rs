@@ -223,6 +223,32 @@ fn io_error(error: std::io::Error) -> DesktopError {
     DesktopError::new("DIFF_PREVIEW_FAILED", error.to_string(), true)
 }
 
+pub(crate) async fn working_diff(
+    repo: &RepositoryMeta,
+    path: &str,
+    base_ref: &str,
+    mode: &CatFileFilterMode,
+    token: &CancellationToken,
+) -> Result<DiffDocument, DesktopError> {
+    let original = vcs::branch_working_file_diff(repo, base_ref, path, token).await?;
+    if original.binary || original.truncated {
+        return Ok(original);
+    }
+    let old_path = patch_path(&original.content, "--- ", path);
+    let new_path = patch_path(&original.content, "+++ ", path);
+    let left = if original.content.contains("--- /dev/null") {
+        Vec::new()
+    } else {
+        blob(repo, &format!("{base_ref}:{old_path}"), mode, token).await?
+    };
+    let right = if original.content.contains("+++ /dev/null") {
+        Vec::new()
+    } else {
+        working(repo, &new_path).await?
+    };
+    compare(path, &left, &right, token).await
+}
+
 pub(crate) async fn file_diff(
     repo: &RepositoryMeta,
     path: &str,

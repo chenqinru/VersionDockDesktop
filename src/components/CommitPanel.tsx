@@ -1,3 +1,4 @@
+import { changeStatus } from '../theme/changeStatus';
 import { SplitButtonMore } from './SplitButtonMore';
 import { AiGenerationBorder } from './AiGenerationBorder';
 import { AiCommitActions, AiCommitGenerator } from './AiCommitActions';
@@ -157,7 +158,7 @@ function TreeRow({ node, depth, expanded, toggleExpanded, showDirectory, repo, s
   const key = `${repo.meta.id}\0${node.file.path}`;
   const pathParts = node.file.path.split('/');
   const fileName = pathParts.pop() ?? node.name;
-  return <div className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
+  return <div className={`file-row status-${changeStatus(node.file.status, node.file.conflicted)} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
     <SelectionCheckbox label={node.file.path} checked={selected.has(key)} disabled={node.file.isTruncated} onChange={() => setFiles(repo.meta.id, [node.file!.path], !selected.has(key))} />
     <button title={node.file.path} onClick={(event) => { event.stopPropagation(); onFile(node.file!); }}><FileIcon name={fileName} /><span className="file-name-group"><span className="file-name">{fileName}</span>{showDirectory && <small>{pathParts.join('/')}</small>}</span></button>
     <ChangeRowActions repo={repo} file={node.file} onOpenFile={() => onOpenFile(node.file!)} onRollback={() => onRollback([node.file!])} onResolve={() => onResolve(node.file!)} onStage={() => onStage(node.file!)} />
@@ -946,7 +947,9 @@ export function CommitPanel() {
       ? capabilityReason(pushUnavailable.capabilities, 'syncPush')
       : undefined;
   const settingsNoVerify = useAppStore((state) => state.bootstrap?.state.settings?.noVerify ?? false);
-  const [noVerify, setNoVerify] = useState(settingsNoVerify);
+  const [hookChoice, setHookChoice] = useState({ configured: settingsNoVerify, checked: settingsNoVerify });
+  if (hookChoice.configured !== settingsNoVerify) setHookChoice({ configured: settingsNoVerify, checked: settingsNoVerify });
+  const noVerify = hookChoice.configured === settingsNoVerify ? hookChoice.checked : settingsNoVerify;
   const setFiles = useCallback((repoId: string, paths: string[], value: boolean) => setCommitSelection(repoId, paths, value), [setCommitSelection]);
   const isVscode = changesDisplayMode === 'vscode';
   const changesTotalFiles = repos.reduce((sum, repo) => sum + repo.files.filter((file) => !file.isTruncated).length, 0);
@@ -2098,7 +2101,7 @@ export function CommitPanel() {
           {showAmend && singleAmendTarget && <label title={t('Amend last commit')}><SelectionCheckbox label={t('Amend last commit')} checked={amendRepos.has(singleAmendTarget.meta.id)} onChange={() => void toggleAmend(singleAmendTarget.meta.id)} />{t('Amend last commit')}</label>}
           {showGitActions && (
             <label title={t('Bypass Git pre-commit hooks')}>
-              <SelectionCheckbox label={t('Bypass hooks (--no-verify)')} checked={noVerify} onChange={() => setNoVerify((value) => !value)} />
+              <SelectionCheckbox label={t('Bypass hooks (--no-verify)')} checked={noVerify} onChange={() => setHookChoice({ configured: settingsNoVerify, checked: !noVerify })} />
               {t('Bypass hooks (--no-verify)')}
             </label>
           )}

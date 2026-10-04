@@ -3867,8 +3867,15 @@ async fn real_git_core_workflow() {
         worktree_storage.path(),
         &repository,
         crate::models::WorktreeOperation::Create {
+            path: worktree_storage
+                .path()
+                .join("linked")
+                .to_string_lossy()
+                .into_owned(),
             branch: "worktree/integration".into(),
             new_branch: true,
+            commitish: None,
+            no_track: false,
         },
         &token,
     )
@@ -3921,6 +3928,7 @@ async fn real_git_core_workflow() {
         &repository,
         crate::models::WorktreeOperation::Lock {
             path: linked.path.clone(),
+            reason: None,
         },
         &token,
     )
@@ -6853,4 +6861,508 @@ async fn settings_diff_preview_preserves_newlines_unicode_renames_and_worktree()
         .await
         .unwrap();
     assert!(absent.is_empty());
+}
+
+#[tokio::test]
+async fn parity_worktree_outside_app_storage_is_managed_by_git_membership() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(root.path());
+    let r = repo(&working, VcsKind::Git);
+    let storage = root.path().join("config");
+    let t = CancellationToken::new();
+    let external = root.path().join("external worktree");
+    command(
+        "git",
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "external",
+            external.to_str().unwrap(),
+        ],
+        &working,
+    );
+    vcs::worktree_operation(
+        &storage,
+        &r,
+        crate::models::WorktreeOperation::Lock {
+            path: external.to_string_lossy().into_owned(),
+            reason: Some("keep".into()),
+        },
+        &t,
+    )
+    .await
+    .unwrap();
+    let list = vcs::worktrees(&r, &t).await.unwrap();
+    assert!(list
+        .iter()
+        .any(|item| item.lock_reason.as_deref() == Some("keep")));
+    vcs::worktree_operation(
+        &storage,
+        &r,
+        crate::models::WorktreeOperation::Unlock {
+            path: external.to_string_lossy().into_owned(),
+        },
+        &t,
+    )
+    .await
+    .unwrap();
+    let unrelated = root.path().join("unrelated");
+    std::fs::create_dir(&unrelated).unwrap();
+    std::fs::write(unrelated.join("keep"), "safe").unwrap();
+    assert!(vcs::worktree_operation(
+        &storage,
+        &r,
+        crate::models::WorktreeOperation::Remove {
+            path: unrelated.to_string_lossy().into_owned(),
+            force: true
+        },
+        &t
+    )
+    .await
+    .is_err());
+    assert!(unrelated.join("keep").exists());
+    vcs::worktree_operation(
+        &storage,
+        &r,
+        crate::models::WorktreeOperation::Remove {
+            path: external.to_string_lossy().into_owned(),
+            force: false,
+        },
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(!external.exists());
+    let chosen = root.path().join("chosen directory");
+    vcs::worktree_operation(
+        &storage,
+        &r,
+        crate::models::WorktreeOperation::Create {
+            path: chosen.to_string_lossy().into_owned(),
+            branch: "chosen".into(),
+            new_branch: true,
+            commitish: Some("HEAD".into()),
+            no_track: true,
+        },
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(chosen.join(".git").is_file());
+}
+
+#[tokio::test]
+async fn parity_changelist_lifecycle_and_shelf_restore_recreate_original_group() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(root.path());
+    let r = repo(&working, VcsKind::Git);
+    let storage = root.path().join("config");
+    let t = CancellationToken::new();
+    let ws = "ws-0123456789abcdef";
+    crate::changelist::operate(
+        &storage,
+        ws,
+        &r,
+        crate::models::ChangelistOperation::Create {
+            name: "Original group".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let id = crate::changelist::list(&storage, ws, &r).await.unwrap()[0]
+        .id
+        .clone();
+    crate::changelist::operate(
+        &storage,
+        ws,
+        &r,
+        crate::models::ChangelistOperation::Assign {
+            changelist_id: Some(id.clone()),
+            paths: vec!["local.txt".into()],
+        },
+    )
+    .await
+    .unwrap();
+    std::fs::write(working.join("local.txt"), "saved change\n").unwrap();
+    shelf::operate_in_workspace(
+        &storage,
+        ws,
+        &r,
+        crate::models::ShelfOperation::Create {
+            name: "saved".into(),
+            paths: vec!["local.txt".into()],
+        },
+        &t,
+    )
+    .await
+    .unwrap();
+    let shelf_id = shelf::list(&storage, &r).await.unwrap()[0].id.clone();
+    let status = workspace::git_status(r.clone(), &t).await.unwrap();
+    crate::changelist::reconcile(&storage, ws, &r, &status.files)
+        .await
+        .unwrap();
+    assert!(crate::changelist::list(&storage, ws, &r).await.unwrap()[0]
+        .files
+        .is_empty());
+    crate::changelist::operate(
+        &storage,
+        ws,
+        &r,
+        crate::models::ChangelistOperation::Delete {
+            changelist_id: id.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    shelf::operate_in_workspace(
+        &storage,
+        ws,
+        &r,
+        crate::models::ShelfOperation::Apply {
+            shelf_id,
+            paths: None,
+        },
+        &t,
+    )
+    .await
+    .unwrap();
+    let groups = crate::changelist::list(&storage, ws, &r).await.unwrap();
+    assert_eq!(groups[0].id, id);
+    assert_eq!(groups[0].name, "Original group");
+    assert_eq!(groups[0].files, vec!["local.txt"]);
+    command("git", &["add", "."], &working);
+    command("git", &["commit", "-m", "saved"], &working);
+    let status = workspace::git_status(r.clone(), &t).await.unwrap();
+    crate::changelist::reconcile(&storage, ws, &r, &status.files)
+        .await
+        .unwrap();
+    std::fs::write(working.join("local.txt"), "new unrelated change\n").unwrap();
+    assert!(crate::changelist::list(&storage, ws, &r).await.unwrap()[0]
+        .files
+        .is_empty());
+}
+
+#[tokio::test]
+async fn parity_push_retry_respects_merge_and_rebase_on_the_selected_remote() {
+    if !available("git") {
+        return;
+    }
+    for merge in [true, false] {
+        let root = tempdir().unwrap();
+        let (origin, working) = update_parity_fixture(root.path());
+        let secondary = root.path().join("secondary.git");
+        command(
+            "git",
+            &[
+                "clone",
+                "--bare",
+                origin.to_str().unwrap(),
+                secondary.to_str().unwrap(),
+            ],
+            root.path(),
+        );
+        let upstream = root.path().join("upstream");
+        command(
+            "git",
+            &[
+                "clone",
+                "-b",
+                "main",
+                secondary.to_str().unwrap(),
+                upstream.to_str().unwrap(),
+            ],
+            root.path(),
+        );
+        command("git", &["config", "user.name", "QA"], &upstream);
+        command(
+            "git",
+            &["config", "user.email", "qa@example.test"],
+            &upstream,
+        );
+        std::fs::write(upstream.join("remote-only.txt"), "remote\n").unwrap();
+        command("git", &["add", "."], &upstream);
+        command("git", &["commit", "-m", "remote"], &upstream);
+        command("git", &["push"], &upstream);
+        std::fs::write(working.join("local-commit.txt"), "local\n").unwrap();
+        command("git", &["add", "."], &working);
+        command("git", &["commit", "-m", "local"], &working);
+        command(
+            "git",
+            &["remote", "add", "secondary", secondary.to_str().unwrap()],
+            &working,
+        );
+        let origin_before = command_output("git", &["rev-parse", "main"], &origin);
+        let state = crate::state::AppState::load(root.path().join("config"));
+        let mut settings = crate::models::DesktopSettings::default();
+        settings.protected_branches.clear();
+        settings.sync_protected_branches_from_github = false;
+        settings.on_push_rejected = crate::models::OnPushRejectedAction::RebaseAndRetry;
+        settings.update_project_method = if merge {
+            crate::models::UpdateProjectMethod::Merge
+        } else {
+            crate::models::UpdateProjectMethod::Rebase
+        };
+        *state.app.write().await = crate::models::AppStateSnapshot {
+            settings: settings.clone(),
+            ..Default::default()
+        };
+        let r = repo(&working, VcsKind::Git);
+        let t = CancellationToken::new();
+        crate::commands::push_with_recovery(
+            &state,
+            &r,
+            Some("secondary".into()),
+            None,
+            false,
+            &settings,
+            &[],
+            &t,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            command_output("git", &["rev-parse", "HEAD"], &working),
+            command_output("git", &["rev-parse", "main"], &secondary)
+        );
+        assert_eq!(
+            origin_before,
+            command_output("git", &["rev-parse", "main"], &origin)
+        );
+        let parents = command_output(
+            "git",
+            &["rev-list", "--parents", "-n", "1", "HEAD"],
+            &working,
+        )
+        .split_whitespace()
+        .count();
+        assert_eq!(parents, if merge { 3 } else { 2 });
+    }
+}
+
+#[tokio::test]
+async fn parity_working_comparisons_apply_configured_content_filters() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(root.path());
+    let t = CancellationToken::new();
+    let r = repo(&working, VcsKind::Git);
+    std::fs::write(working.join(".gitattributes"), "local.txt filter=display\n").unwrap();
+    command(
+        "git",
+        &["config", "filter.display.smudge", "sed s/base/converted/g"],
+        &working,
+    );
+    std::fs::write(working.join("local.txt"), "changed\n").unwrap();
+    let filtered = crate::diff_content::working_diff(
+        &r,
+        "local.txt",
+        "HEAD",
+        &crate::models::CatFileFilterMode::Filters,
+        &t,
+    )
+    .await
+    .unwrap();
+    let raw = crate::diff_content::working_diff(
+        &r,
+        "local.txt",
+        "HEAD",
+        &crate::models::CatFileFilterMode::None,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(filtered.content.contains("-converted"));
+    assert!(raw.content.contains("-base"));
+    assert_eq!(read_text(working.join("local.txt")), "changed\n");
+}
+
+#[tokio::test]
+async fn parity_svn_authentication_retries_only_the_original_command_and_honors_cancel() {
+    if !available("svnserve") || !available("svnadmin") {
+        return;
+    }
+    struct Server(std::process::Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    for choice in ["authenticate", "cancel"] {
+        let root = tempdir().unwrap();
+        let repository = root.path().join("repo");
+        command(
+            "svnadmin",
+            &["create", repository.to_str().unwrap()],
+            root.path(),
+        );
+        std::fs::write(repository.join("conf/svnserve.conf"),"[general]\nanon-access = none\nauth-access = write\npassword-db = passwd\nrealm = Parity test\n").unwrap();
+        std::fs::write(repository.join("conf/passwd"), "[users]\nalice = secret\n").unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let server = Server(
+            Command::new("svnserve")
+                .args([
+                    "--daemon",
+                    "--foreground",
+                    "--listen-host",
+                    "127.0.0.1",
+                    "--listen-port",
+                    &port.to_string(),
+                    "--root",
+                    root.path().to_str().unwrap(),
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        for _ in 0..100 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let url = format!("svn://127.0.0.1:{port}/repo");
+        let working = root.path().join("working");
+        command(
+            "svn",
+            &[
+                "checkout",
+                "--non-interactive",
+                "--no-auth-cache",
+                "--username",
+                "alice",
+                "--password",
+                "secret",
+                &url,
+                working.to_str().unwrap(),
+            ],
+            root.path(),
+        );
+        std::fs::write(working.join("added.txt"), "new\n").unwrap();
+        let r = repo(&working, VcsKind::Svn);
+        let t = CancellationToken::new();
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = count.clone();
+        let selected = choice.to_owned();
+        let result = crate::interactions::with_test_responder(
+            std::sync::Arc::new(move |kind| {
+                assert!(matches!(
+                    kind,
+                    crate::interactions::InteractionKind::SvnAuthentication
+                ));
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                crate::interactions::InteractionResponse {
+                    choice: selected.clone(),
+                    username: Some("alice".into()),
+                    password: Some("secret".into()),
+                    ..Default::default()
+                }
+            }),
+            vcs::commit(&r, "authenticated", false, &["added.txt".into()], &t),
+        )
+        .await;
+        assert_eq!(
+            count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "authentication result: {result:?}"
+        );
+        let revision = command_output(
+            "svnlook",
+            &["youngest", repository.to_str().unwrap()],
+            root.path(),
+        );
+        if choice == "authenticate" {
+            result.unwrap();
+            assert_eq!(revision.trim(), "1");
+        } else {
+            assert_eq!(result.unwrap_err().code, "REQUEST_CANCELLED");
+            assert_eq!(revision.trim(), "0");
+            assert_eq!(read_text(working.join("added.txt")), "new\n");
+        }
+        drop(server);
+    }
+}
+
+#[test]
+fn parity_svn_scan_depth_remains_four_when_git_scan_depth_changes() {
+    let root = tempdir().unwrap();
+    for path in [
+        "one/two/three/four/.svn",
+        "deep/one/two/three/four/.svn",
+        "git/deep/.git",
+    ] {
+        std::fs::create_dir_all(root.path().join(path)).unwrap();
+    }
+    let ws = workspace::descriptor(vec![root.path().to_string_lossy().into_owned()]).unwrap();
+    for depth in [0, 1, 10] {
+        let settings = crate::models::DesktopSettings {
+            repository_scan_depth: depth,
+            ..Default::default()
+        };
+        let list = workspace::scan(&ws, &settings).unwrap();
+        assert_eq!(list.iter().filter(|r| r.kind == VcsKind::Svn).count(), 1);
+        assert_eq!(list.iter().any(|r| r.kind == VcsKind::Git), depth >= 2);
+    }
+}
+
+#[tokio::test]
+async fn parity_multiple_patches_are_separate_and_apply_as_email_patches() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(root.path());
+    std::fs::write(working.join("first.txt"), "first\n").unwrap();
+    command("git", &["add", "."], &working);
+    command("git", &["commit", "-m", "first"], &working);
+    let first = command_output("git", &["rev-parse", "HEAD"], &working)
+        .trim()
+        .to_owned();
+    std::fs::write(working.join("binary.bin"), b"one\0two").unwrap();
+    command("git", &["add", "."], &working);
+    command("git", &["commit", "-m", "binary"], &working);
+    let second = command_output("git", &["rev-parse", "HEAD"], &working)
+        .trim()
+        .to_owned();
+    let export = root.path().join("patches");
+    std::fs::create_dir(&export).unwrap();
+    let t = CancellationToken::new();
+    let r = repo(&working, VcsKind::Git);
+    let paths = vcs::save_patches(
+        &r,
+        &[first.clone(), second.clone()],
+        export.to_str().unwrap(),
+        &t,
+    )
+    .await
+    .unwrap();
+    assert_eq!(paths.len(), 2);
+    assert!(export.join(format!("{}.patch", &first[..7])).is_file());
+    assert!(export.join(format!("{}.patch", &second[..7])).is_file());
+    let copy = root.path().join("apply");
+    command(
+        "git",
+        &["clone", working.to_str().unwrap(), copy.to_str().unwrap()],
+        root.path(),
+    );
+    command("git", &["config", "user.name", "QA"], &copy);
+    command("git", &["config", "user.email", "qa@example.test"], &copy);
+    command("git", &["reset", "--hard", &format!("{first}^")], &copy);
+    command("git", &["am", &paths[0], &paths[1]], &copy);
+    assert_eq!(
+        command_output("git", &["rev-parse", "HEAD^{tree}"], &working),
+        command_output("git", &["rev-parse", "HEAD^{tree}"], &copy)
+    );
 }

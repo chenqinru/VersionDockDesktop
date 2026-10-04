@@ -1,3 +1,4 @@
+import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import { ChangeRowActions, ChangeFolderActions } from './ChangeRowActions';
@@ -16,8 +17,7 @@ import { hasMixedRepositoryKinds } from './repoLabel';
 export type ExpansionCommand = { sequence: number; expanded: boolean };
 
 export function StatusMark({ file }: { file: FileChange }) {
-  const value = file.conflicted ? 'C' : file.status === 'untracked' ? 'U' : file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : file.status === 'renamed' ? 'R' : 'M';
-  return <span className={`status-mark status-${file.status}`}>{value}</span>;
+  return <span className={`status-mark status-${changeStatus(file.status, file.conflicted)}`}>{changeStatusLetter(file.status, file.conflicted)}</span>;
 }
 
 export function TreeNode({
@@ -98,7 +98,7 @@ export function TreeNode({
   const key = `${repo.meta.id}\0${node.file.path}`;
   return (
     <div
-      className={`file-row status-${node.file.status} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`}
+      className={`file-row status-${changeStatus(node.file.status, node.file.conflicted)} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`}
       style={{ paddingLeft: currentPad }}
       onClick={() => onFile(node.file!)}
       onContextMenu={(event) => onContext(event, node.file!)}
@@ -334,7 +334,7 @@ function SingleRepoFileList({
         const fileName = parts.pop();
         return (
           <div
-            className={`file-row status-${file.status} ${file.conflicted ? 'conflicted' : ''} ${highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path ? 'selected' : highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path ? 'context-active' : ''}`}
+            className={`file-row status-${changeStatus(file.status, file.conflicted)} ${file.conflicted ? 'conflicted' : ''} ${highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path ? 'selected' : highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path ? 'context-active' : ''}`}
             style={{ paddingLeft: basePad }}
             key={key}
             onClick={() => onFile(repo.meta.id, file)}

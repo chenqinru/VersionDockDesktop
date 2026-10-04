@@ -1,3 +1,4 @@
+import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { useMemo, useState } from 'react';
 import type { CommitFile } from '../bindings/generated';
@@ -75,18 +76,6 @@ function collectDirectories(nodes: TreeNode[]): string[] {
   return nodes.flatMap((node) => node.kind === 'directory' ? [node.path, ...collectDirectories(node.children)] : []);
 }
 
-function statusClass(status: string): string {
-  const value = status.replace(/\d+$/, '').slice(0, 1).toUpperCase();
-  if (value === 'A' || value === 'C') return 'added';
-  if (value === 'D') return 'deleted';
-  if (value === 'R') return 'renamed';
-  return 'modified';
-}
-
-function statusLetter(status: string): string {
-  return status.replace(/\d+$/, '').slice(0, 1).toUpperCase() || 'M';
-}
-
 function BranchWorkingFileRow({ file, depth, selected, select, openContext }: {
   file: CommitFile;
   depth: number;
@@ -98,7 +87,7 @@ function BranchWorkingFileRow({ file, depth, selected, select, openContext }: {
   const directory = depth === 0 && file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
   return <button
     type="button"
-    className={`branch-working-file-row status-${statusClass(file.status)} ${selected ? 'selected' : ''}`}
+    className={`branch-working-file-row status-${changeStatus(file.status)} ${selected ? 'selected' : ''}`}
     style={{ paddingLeft: 10 + depth * 18 }}
     title={file.path}
     onClick={() => select(file)}
@@ -113,7 +102,7 @@ function BranchWorkingFileRow({ file, depth, selected, select, openContext }: {
         {file.added !== null && <b className="added">+{file.added}</b>}
         {file.removed !== null && <b className="removed">-{file.removed}</b>}
       </span>}
-      <em>{statusLetter(file.status)}</em>
+      <em>{changeStatusLetter(file.status)}</em>
     </span>
   </button>;
 }

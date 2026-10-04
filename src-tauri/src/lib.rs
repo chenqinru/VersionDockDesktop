@@ -11,6 +11,7 @@ mod cli;
 mod commands;
 mod diff_content;
 mod identity;
+mod interactions;
 pub mod logger;
 mod models;
 mod protection;
@@ -134,6 +135,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::bridge_request,
             commands::bridge_cancel,
+            interactions::respond_native_interaction,
             commands::follow_tab_drag_preview
         ])
         .run(tauri::generate_context!())

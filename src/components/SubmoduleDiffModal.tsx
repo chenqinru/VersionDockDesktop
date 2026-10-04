@@ -86,7 +86,7 @@ export function SubmoduleDiffModal({
               <>
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <div style={{ opacity: 0.6, fontSize: 11, marginBottom: 4 }}>{t('Staged in Index')}</div>
-                  <div style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)', fontWeight: 600, color: 'var(--vscode-gitDecoration-stageModifiedResourceForeground, #89d185)' }}>
+                  <div style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)', fontWeight: 600, color: 'var(--vscode-gitDecoration-stageModifiedResourceForeground)' }}>
                     <Codicon name="git-commit" style={{ marginRight: 4, opacity: 0.7 }} />
                     {indexCommit.slice(0, 8)}
                   </div>

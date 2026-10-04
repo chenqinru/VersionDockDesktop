@@ -160,6 +160,107 @@ pub async fn operate(
     write_index(config_dir, workspace_id, &index).await
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShelfAssignment {
+    pub path: String,
+    pub changelist_id: String,
+    pub changelist_name: String,
+}
+
+pub async fn reconcile(
+    config_dir: &Path,
+    workspace_id: &str,
+    repo: &RepositoryMeta,
+    files: &[crate::models::FileChange],
+) -> Result<(), DesktopError> {
+    let _guard = storage_lock().lock().await;
+    let mut index = read_index(config_dir, workspace_id).await?;
+    let mut changed = migrate_legacy_repo(config_dir, repo, &mut index).await?;
+    let tracked = files
+        .iter()
+        .filter(|f| f.status != "untracked")
+        .map(|f| f.path.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    for entry in &mut index.changelists {
+        if let Some(paths) = entry.file_assignments.get_mut(&repo.id) {
+            let before = paths.len();
+            paths.retain(|path| tracked.contains(path.as_str()));
+            changed |= before != paths.len();
+            if paths.is_empty() {
+                entry.file_assignments.remove(&repo.id);
+            }
+        }
+    }
+    if changed {
+        write_index(config_dir, workspace_id, &index).await?;
+    }
+    Ok(())
+}
+
+pub async fn capture_assignments(
+    config_dir: &Path,
+    workspace_id: &str,
+    repo: &RepositoryMeta,
+    paths: &[String],
+) -> Result<Vec<ShelfAssignment>, DesktopError> {
+    Ok(list(config_dir, workspace_id, repo)
+        .await?
+        .into_iter()
+        .flat_map(|entry| {
+            entry
+                .files
+                .into_iter()
+                .filter(|path| paths.is_empty() || paths.contains(path))
+                .map(move |path| ShelfAssignment {
+                    path,
+                    changelist_id: entry.id.clone(),
+                    changelist_name: entry.name.clone(),
+                })
+        })
+        .collect())
+}
+
+pub async fn restore_assignments(
+    config_dir: &Path,
+    workspace_id: &str,
+    repo: &RepositoryMeta,
+    assignments: &[ShelfAssignment],
+) -> Result<(), DesktopError> {
+    let _guard = storage_lock().lock().await;
+    let mut index = read_index(config_dir, workspace_id).await?;
+    migrate_legacy_repo(config_dir, repo, &mut index).await?;
+    for assignment in assignments {
+        safe_relative(Path::new(&repo.root_path), &assignment.path, true)?;
+        validate_id(&assignment.changelist_id)?;
+        for entry in &mut index.changelists {
+            if let Some(paths) = entry.file_assignments.get_mut(&repo.id) {
+                paths.retain(|p| p != &assignment.path);
+            }
+        }
+        let position = index
+            .changelists
+            .iter()
+            .position(|entry| entry.id == assignment.changelist_id)
+            .unwrap_or_else(|| {
+                index.changelists.push(StoredChangelist {
+                    id: assignment.changelist_id.clone(),
+                    name: assignment.changelist_name.clone(),
+                    file_assignments: BTreeMap::new(),
+                });
+                index.changelists.len() - 1
+            });
+        let files = index.changelists[position]
+            .file_assignments
+            .entry(repo.id.clone())
+            .or_default();
+        files.push(assignment.path.clone());
+        files.sort();
+        files.dedup();
+    }
+    write_index(config_dir, workspace_id, &index).await
+}
+
 async fn migrate_legacy_repo(
     config_dir: &Path,
     repo: &RepositoryMeta,

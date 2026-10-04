@@ -384,14 +384,14 @@ fn walk(
             discover_submodules(current, 1, result, seen);
         }
     }
-    if current.join(".svn").is_dir() {
+    if depth <= 4 && current.join(".svn").is_dir() {
         let key = format!("{}::svn", current.display());
         if seen.insert(key) {
             result.push((current.to_path_buf(), VcsKind::Svn));
         }
         return Ok(());
     }
-    if depth >= max_depth {
+    if depth >= max_depth.max(4) {
         return Ok(());
     }
     let mut ignore_rules = inherited_ignore_rules.to_vec();
@@ -444,8 +444,7 @@ fn walk(
             .strip_prefix(root)
             .map(|suffix| suffix.components().count())
             .unwrap_or(depth + 1);
-        let has_git = child.join(".git").exists();
-        if next_depth <= max_depth || !has_git {
+        if next_depth <= max_depth.max(4) {
             walk(
                 root,
                 &child,
@@ -1500,7 +1499,7 @@ mod tests {
         assert_eq!(default_settings.repository_scan_depth, 1);
         let shallow = scan(&ws, &default_settings).unwrap();
         assert!(!shallow.iter().any(|repo| repo.name == "deep"));
-        assert!(!shallow.iter().any(|repo| repo.name == "three"));
+        assert!(shallow.iter().any(|repo| repo.name == "three"));
     }
 
     #[test]

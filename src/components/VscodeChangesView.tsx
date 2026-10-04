@@ -1,3 +1,4 @@
+import { changeStatus } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { useChangeRowHighlight } from './changeRowHighlight';
 import React, { useMemo, useState } from 'react';
@@ -68,7 +69,7 @@ function VscodeFileRow({
 
   return (
     <div
-      className={`file-item ${highlight}`}
+      className={`file-item status-${changeStatus(file.status, file.conflicted)} ${highlight}`}
       style={{
         paddingLeft: viewMode === 'tree' ? 14 + depth * 14 : 14,
         display: 'flex',

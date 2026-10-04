@@ -14,8 +14,8 @@ describe('parseUnifiedDiff', () => {
 
   it('renders colored vertical bars on deletion and addition line numbers', () => {
     const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
-    expect(styles).toMatch(/\.diff-code-cell\.deletion,\s*\.diff-inline-row\.deletion\s*\{[^}]*box-shadow:\s*inset\s+3\.5px\s+0\s+0\s+var\(--versiondock-danger\)/s);
-    expect(styles).toMatch(/\.diff-code-cell\.addition,\s*\.diff-inline-row\.addition\s*\{[^}]*box-shadow:\s*inset\s+3\.5px\s+0\s+0\s+var\(--versiondock-success\)/s);
+    expect(styles).toMatch(/\.diff-code-cell\.deletion,\s*\.diff-inline-row\.deletion\s*\{[^}]*box-shadow:\s*inset\s+3\.5px\s+0\s+0\s+var\(--versiondock-change-deleted\)/s);
+    expect(styles).toMatch(/\.diff-code-cell\.addition,\s*\.diff-inline-row\.addition\s*\{[^}]*box-shadow:\s*inset\s+3\.5px\s+0\s+0\s+var\(--versiondock-change-added\)/s);
   });
 
   it('aligns deletion and addition blocks with old and new line numbers', () => {

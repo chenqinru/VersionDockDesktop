@@ -144,7 +144,7 @@
 .popover-line time { color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .commit-popover > .commit-refs { max-width: 100%; }
 .commit-popover > small { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
-.commit-popover .added { margin-left: auto; color: var(--versiondock-success); }
+.commit-popover .added { margin-left: auto; color: var(--versiondock-change-added); }
 .commit-popover .removed { color: var(--vscode-gitDecoration-deletedResourceForeground, var(--versiondock-danger)); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 /* Preserve every filter at small desktop widths; popovers remain outside row flow. */

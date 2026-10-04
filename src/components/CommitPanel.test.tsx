@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommitPanel } from './CommitPanel';
 import { SubtreePanel } from './SubtreePanel';
@@ -1118,4 +1118,20 @@ describe('CommitPanel capabilities and file view', () => {
       expect(continueRepositoryOperation).toHaveBeenCalledWith('repo', 'rebase');
     });
   });
+});
+
+it('updates bypass hooks from settings without resetting a manual override on unrelated changes', async () => {
+  const { DEFAULT_SETTINGS } = await import('../settings/defaults');
+  const initial = bootstrap(false);
+  initial.state.settings = { ...DEFAULT_SETTINGS, noVerify: false };
+  useAppStore.setState({ bootstrap: initial, snapshot: gitSnapshot, selectedRepoId: 'repo' });
+  renderPanel();
+  const checkbox = screen.getByRole('checkbox', { name: 'Bypass hooks (--no-verify)' });
+  expect(checkbox).not.toBeChecked();
+  act(() => useAppStore.setState({ bootstrap: { ...initial, state: { ...initial.state, settings: { ...DEFAULT_SETTINGS, noVerify: true } } } }));
+  expect(checkbox).toBeChecked();
+  fireEvent.click(checkbox);
+  expect(checkbox).not.toBeChecked();
+  act(() => useAppStore.setState({ bootstrap: { ...initial, state: { ...initial.state, settings: { ...DEFAULT_SETTINGS, noVerify: true, theme: 'dark' } } } }));
+  expect(checkbox).not.toBeChecked();
 });

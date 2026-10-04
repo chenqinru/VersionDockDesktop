@@ -23,6 +23,7 @@ use crate::models::{
 #[derive(Clone)]
 pub struct OperationReporter {
     pub app: AppHandle,
+    pub window_label: String,
     pub operation_id: String,
     pub context: RequestContext,
     pub started_at: String,
@@ -30,6 +31,10 @@ pub struct OperationReporter {
 
 tokio::task_local! {
     static CURRENT_OPERATION: OperationReporter;
+}
+
+pub(crate) fn current_operation_reporter() -> Option<OperationReporter> {
+    CURRENT_OPERATION.try_with(Clone::clone).ok()
 }
 
 pub async fn with_operation_reporter<F: std::future::Future>(

@@ -1,4 +1,6 @@
 import { approveProtectedPush, needsProtectedPushApproval } from '../services/pushProtection';
+import { IDENTITY_CHANGED } from '../components/StatusBar/profileStatus';
+import { createNativeInteractionHandler } from '../services/nativeInteractions';
 import { formatDemoLogs, logLevelPriority, mergeLogEntries } from '../logs/entries';
 import type {
   AiEvent, BridgeCommand, DesktopError, OperationDomain,
@@ -171,7 +173,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
     case 'history': case 'historyTopology': case 'commitDetail': case 'commitMergeCommits':
     case 'commitMergeParentFiles': case 'unpushedCommits': case 'unpushedOperation':
-    case 'historyOperation': case 'createPatch': case 'savePatch': case 'branchCompare': case 'branchCompareCommits': return 'history';
+    case 'historyOperation': case 'createPatch': case 'savePatch': case 'savePatches': case 'branchCompare': case 'branchCompareCommits': return 'history';
     case 'branches': case 'branchOperation': case 'branchRecovery': case 'gitUnlockIndex': return 'branch';
     case 'tags': case 'tagOperation': return 'tag';
     case 'aiComposerApply': case 'commit': case 'batchCommit': case 'recentCommitMessages': case 'lastCommitMessage': return 'commit';
@@ -236,6 +238,11 @@ export class TauriBridge implements VersionDockBridge {
   private state: unknown;
   private handlers = new Set<(event: BridgeEvent) => void>();
   private unlisten?: () => void;
+  private unlistenInteractions?: () => void;
+  private nativeInteractions?: ReturnType<typeof createNativeInteractionHandler>;
+  private promptOperations = new Map<string, string>();
+  private authenticatedOperations = new Set<string>();
+  private operationTimers = new Map<string, { pause: () => void; resume: () => void }>();
   private windowSyncQueue: Promise<void> = Promise.resolve();
   private trackedRequests = new Set<string>();
   private contextGenerations = new Map<string, number>();
@@ -307,13 +314,36 @@ export class TauriBridge implements VersionDockBridge {
 
   async initialize(): Promise<void> {
     const { listen } = await import('@tauri-apps/api/event');
+    const { invoke } = await import('@tauri-apps/api/core');
+    this.nativeInteractions = createNativeInteractionHandler((id, response) => {
+      const operationId = this.promptOperations.get(id);
+      if (response.choice === 'authenticate' && operationId) this.authenticatedOperations.add(operationId);
+      return invoke('respond_native_interaction', { id, response });
+    }, (command, options) => this.request(command, options));
+    this.unlistenInteractions = await listen<import('../bindings/generated').InteractionEvent>('versiondock://interaction', ({ payload }) => {
+      if (payload.type === 'nativeInteractionRequest') {
+        this.promptOperations.set(payload.id, payload.operationId);
+        this.operationTimers.get(payload.operationId)?.pause();
+      } else {
+        const operationId = this.promptOperations.get(payload.id);
+        if (operationId) this.operationTimers.get(operationId)?.resume();
+        this.promptOperations.delete(payload.id);
+      }
+      this.nativeInteractions?.handle(payload);
+    });
     this.unlisten = await listen<BridgeEvent>('versiondock://event', ({ payload }) => {
+      if ('operationId' in payload) {
+        if (payload.phase === 'awaitingAuthentication') this.operationTimers.get(payload.operationId)?.pause();
+        else if (payload.phase === 'retryingAuthentication') this.operationTimers.get(payload.operationId)?.resume();
+      }
       if ('operationId' in payload && payload.context.visibility === 'background' && !this.trackedRequests.has(payload.operationId)) return;
       this.handlers.forEach((handler) => handler(payload));
     });
   }
 
   dispose(): void {
+    this.unlistenInteractions?.();
+    this.nativeInteractions?.dispose();
     this.unlisten?.();
     this.handlers.clear();
     this.trackedRequests.clear();
@@ -358,12 +388,17 @@ export class TauriBridge implements VersionDockBridge {
     void nativeResponse.then(
       (response) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error: response.error ?? undefined, result: response.result })),
       (error) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error })),
-    ).finally(() => this.trackedRequests.delete(id));
+    ).finally(() => {
+      this.trackedRequests.delete(id);
+      if (this.authenticatedOperations.delete(id)) window.dispatchEvent(new Event(IDENTITY_CHANGED));
+    });
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let abortHandler: (() => void) | undefined;
+    let remaining = timeoutMs;
+    let scheduledAt = Date.now();
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeout = setTimeout(() => {
+      const expire = () => {
         void invoke('bridge_cancel', { requestId: id }).catch(() => undefined);
         reject(new BridgeError({
           code: 'REQUEST_TIMEOUT',
@@ -373,7 +408,13 @@ export class TauriBridge implements VersionDockBridge {
           stderr: null,
           recoverable: true,
         }));
-      }, timeoutMs);
+      };
+      const schedule = () => { scheduledAt = Date.now(); timeout = setTimeout(expire, remaining); };
+      this.operationTimers.set(id, {
+        pause: () => { if (timeout) { clearTimeout(timeout); timeout = undefined; remaining = Math.max(1, remaining - (Date.now() - scheduledAt)); } },
+        resume: () => { if (!timeout) schedule(); },
+      });
+      schedule();
       abortHandler = () => {
         void invoke('bridge_cancel', { requestId: id }).catch(() => undefined);
         reject(new DOMException('Operation aborted', 'AbortError'));
@@ -403,6 +444,7 @@ export class TauriBridge implements VersionDockBridge {
         recoverable: false,
       });
     } finally {
+      this.operationTimers.delete(id);
       if (timeout) clearTimeout(timeout);
       if (abortHandler) options.signal?.removeEventListener('abort', abortHandler);
     }

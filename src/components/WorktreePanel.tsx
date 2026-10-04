@@ -408,7 +408,7 @@ export function WorktreePanel({ active = true,
   };
 
   const defaultLock = (repoId: string, worktreePath: string) => {
-    void worktreeOperation(repoId, { type: 'lock', path: worktreePath });
+    void worktreeOperation(repoId, { type: 'lock', path: worktreePath, reason: null });
   };
 
   const defaultUnlock = (repoId: string, worktreePath: string) => {
@@ -436,13 +436,20 @@ export function WorktreePanel({ active = true,
       ],
     });
     if (!selected) return;
-    if (selected === 'new') {
-      const branch = await promptDialog({ title: t('New Worktree — New Branch Name'), message: t('New branch name'), inputLabel: t('Branch name') });
-      if (branch?.trim()) void worktreeOperation(repoId, { type: 'create', branch: branch.trim(), new_branch: true });
-      return;
-    }
-    const branch = branchChoices.get(selected);
-    if (branch) void worktreeOperation(repoId, { type: 'create', branch: branch.name, new_branch: false });
+    const isNew = selected === 'new';
+    const branch = isNew
+      ? await promptDialog({ title: t('New Worktree — New Branch Name'), message: t('New branch name'), inputLabel: t('Branch name') })
+      : branchChoices.get(selected)?.name;
+    if (!branch?.trim()) return;
+    const repo = repos.find((repo) => repo.meta.id === repoId);
+    if (!repo) return;
+    const root = repo.meta.rootPath.replace(/[\\/]+$/, '');
+    const slash = Math.max(root.lastIndexOf('/'), root.lastIndexOf('\\'));
+    const directory = await promptDialog({
+      title: t('New Worktree — Directory Path'), message: t('Path for the new worktree directory'), inputLabel: t('Directory Path'),
+      initialValue: `${root.slice(0, slash + 1)}${root.slice(slash + 1)}--${branch.trim().replace(/\//g, '-')}`,
+    });
+    if (directory?.trim()) await worktreeOperation(repoId, { type: 'create', path: directory.trim(), branch: branch.trim(), new_branch: isNew, commitish: null, no_track: false });
   };
   const defaultCompare = (repoId: string, entry: NormalizedWorktreeEntry) => {
     void loadWorktreeDiff(repoId, entry.path, 'HEAD');

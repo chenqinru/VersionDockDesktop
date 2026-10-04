@@ -23,6 +23,8 @@ struct ShelfIndex {
 struct ShelfEntryInternal {
     id: String,
     #[serde(default)]
+    changelist_assignments: Vec<crate::changelist::ShelfAssignment>,
+    #[serde(default)]
     name: String,
     #[serde(alias = "date", default)]
     created_at: String,
@@ -68,6 +70,7 @@ impl From<ShelfEntry> for ShelfEntryInternal {
     fn from(entry: ShelfEntry) -> Self {
         ShelfEntryInternal {
             id: entry.id,
+            changelist_assignments: Vec::new(),
             name: entry.name,
             created_at: entry.created_at,
             branch: entry.branch,
@@ -109,6 +112,46 @@ pub async fn operate(
             apply(config_dir, repo, &shelf_id, paths.as_deref(), true, token).await
         }
         ShelfOperation::Drop { shelf_id } => drop_shelf(config_dir, repo, &shelf_id).await,
+    }
+}
+
+pub async fn operate_in_workspace(
+    config_dir: &Path,
+    workspace_id: &str,
+    repo: &RepositoryMeta,
+    operation: ShelfOperation,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    match operation {
+        ShelfOperation::Create { name, paths } => {
+            let assignments =
+                crate::changelist::capture_assignments(config_dir, workspace_id, repo, &paths)
+                    .await?;
+            create_with_assignments(config_dir, repo, &name, &paths, assignments, token).await?;
+            Ok(())
+        }
+        ShelfOperation::Apply { shelf_id, paths } => {
+            let index = read_index(config_dir, repo).await?;
+            let entry = index
+                .shelves
+                .iter()
+                .find(|entry| entry.id == shelf_id)
+                .ok_or_else(|| DesktopError::new("SHELF_NOT_FOUND", "Shelf not found", true))?;
+            let assignments = entry
+                .changelist_assignments
+                .iter()
+                .filter(|assignment| {
+                    paths
+                        .as_ref()
+                        .is_none_or(|paths| paths.is_empty() || paths.contains(&assignment.path))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            apply(config_dir, repo, &shelf_id, paths.as_deref(), true, token).await?;
+            crate::changelist::restore_assignments(config_dir, workspace_id, repo, &assignments)
+                .await
+        }
+        operation => operate(config_dir, repo, operation, token).await,
     }
 }
 
@@ -194,6 +237,17 @@ pub(crate) async fn create(
     repo: &RepositoryMeta,
     name: &str,
     paths: &[String],
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    create_with_assignments(config_dir, repo, name, paths, Vec::new(), token).await
+}
+
+async fn create_with_assignments(
+    config_dir: &Path,
+    repo: &RepositoryMeta,
+    name: &str,
+    paths: &[String],
+    assignments: Vec<crate::changelist::ShelfAssignment>,
     token: &CancellationToken,
 ) -> Result<String, DesktopError> {
     let name = name.trim();
@@ -352,17 +406,16 @@ pub(crate) async fn create(
             .await
             .map_err(storage_error)?;
         let mut index = read_index(config_dir, repo).await?;
-        index.shelves.insert(
-            0,
-            ShelfEntry {
-                id: id.clone(),
-                name: name.to_string(),
-                created_at: chrono::Utc::now().to_rfc3339(),
-                branch,
-                files,
-            }
-            .into(),
-        );
+        let mut entry: ShelfEntryInternal = ShelfEntry {
+            id: id.clone(),
+            name: name.to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            branch,
+            files,
+        }
+        .into();
+        entry.changelist_assignments = assignments;
+        index.shelves.insert(0, entry);
         write_index(config_dir, repo, &index).await
     }
     .await

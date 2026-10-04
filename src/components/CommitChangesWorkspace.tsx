@@ -1,3 +1,4 @@
+import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -24,11 +25,6 @@ function fileGroupKey(target: ChangeTarget): string {
 }
 
 const fileViewPreference = 'versiondock:changesFileView';
-
-function statusClass(status: string): string {
-  const value = status.slice(0, 1).toUpperCase();
-  return value === 'A' ? 'added' : value === 'D' ? 'deleted' : value === 'R' ? 'renamed' : 'modified';
-}
 
 export function CommitChangesWorkspace() {
   const changes = useAppStore((state) => state.changes);
@@ -108,12 +104,12 @@ export function CommitChangesWorkspace() {
     }
   };
 
-  const renderFile = (target: ChangeTarget, depth?: number) => <button key={targetKey(target)} title={target.path} aria-label={target.path} aria-current={targetKey(target) === currentSelectedKey ? 'true' : undefined} style={depth === undefined ? undefined : { paddingLeft: 28 + depth * 14 }} className={`changes-file-row ${targetKey(target) === currentSelectedKey ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => handleSelect(target)}>
+  const renderFile = (target: ChangeTarget, depth?: number) => <button key={targetKey(target)} title={target.path} aria-label={target.path} aria-current={targetKey(target) === currentSelectedKey ? 'true' : undefined} style={depth === undefined ? undefined : { paddingLeft: 28 + depth * 14 }} className={`changes-file-row status-${changeStatus(target.status)} ${targetKey(target) === currentSelectedKey ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => handleSelect(target)}>
     <FileIcon name={target.path.split('/').pop() ?? target.path} />
     <span className="changes-file-name" title={target.path}>{depth === undefined ? target.path : target.path.split('/').pop()}</span>
     {!isWorking(target) && target.added !== null && <em className="added">+{target.added}</em>}
     {!isWorking(target) && target.removed !== null && <em className="removed">-{target.removed}</em>}
-    <em className={`change-status ${statusClass(target.status)}`}>{target.status.slice(0, 1).toUpperCase()}</em>
+    <em className={`change-status ${changeStatus(target.status)}`}>{changeStatusLetter(target.status)}</em>
   </button>;
 
   const renderTree = (nodes: FileTreeNode<ChangeTarget>[], groupKey: string, depth = 0): React.ReactNode => nodes.map((node) => {

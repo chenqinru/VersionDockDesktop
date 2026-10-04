@@ -105,7 +105,7 @@ export type AppNotificationAction =
   | { type: 'openBranchComparison'; label: NotificationText; repoId: string; target: string }
   | { type: 'pushToRemote'; label: NotificationText; repoId: string }
   | { type: 'cancelOperation'; label: NotificationText; operationId: string }
-  | { type: 'recoverPush'; label: NotificationText; repoId: string; strategy: 'merge' | 'rebase' | 'force' }
+  | { type: 'recoverPush'; label: NotificationText; repoId: string; strategy: 'merge' | 'rebase' | 'force'; remote?: string | null; branch?: string | null }
   | { type: 'unlockIndex'; label: NotificationText; repoId: string }
   | { type: 'pruneBranches'; label: NotificationText; repoId: string; branches: string[] }
   | { type: 'openExternal'; label: NotificationText; url: string }
@@ -1525,7 +1525,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   const withBusy = async <T>(
     operation: () => Promise<T>,
     domain = 'workspace',
-    target?: { repositoryId?: string | null; target?: string | null; workspaceId?: string | null },
+    target?: { repositoryId?: string | null; target?: string | null; workspaceId?: string | null; remote?: string | null; branch?: string | null },
     options?: { rethrow?: boolean; notifyError?: boolean },
   ): Promise<T | undefined> => {
     const operationId = `client-${Date.now()}-${++localOperationSequence}`;
@@ -1564,7 +1564,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         const actions: AppNotificationAction[] = [];
         if (repoId && /\[rejected\]|non-fast-forward|fetch first|PUSH_REJECTED/i.test(`${msg} ${error instanceof BridgeError ? error.code : ''}`) && settings().onPushRejected !== 'error') {
           const merge = settings().updateProjectMethod === 'merge';
-          actions.push({ type: 'recoverPush', label: merge ? 'Merge & Push' : 'Rebase & Push', repoId, strategy: merge ? 'merge' : 'rebase' }, { type: 'recoverPush', label: 'Force Push', repoId, strategy: 'force' });
+          actions.push({ type: 'recoverPush', label: merge ? 'Merge & Push' : 'Rebase & Push', repoId, strategy: merge ? 'merge' : 'rebase', remote: target?.remote, branch: target?.branch }, { type: 'recoverPush', label: 'Force Push', repoId, strategy: 'force', remote: target?.remote, branch: target?.branch });
         } else if (repoId && /index\.lock|git index is busy/i.test(msg)) {
           actions.push({ type: 'unlockIndex', label: 'Unlock', repoId });
         } else if (/CONFLICT|could not apply|conflicts|冲突/i.test(msg)) {
@@ -3651,12 +3651,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             if (options.rethrow) throw error;
             return undefined;
           }
-          if (action === 'push' && settings().onPushRejected === 'rebaseAndRetry' && /\[rejected\]|non-fast-forward|fetch first|PUSH_REJECTED/i.test(`${errorText(error)} ${error instanceof BridgeError ? error.code : ''}`)) {
-            await get().sync(repoId, 'pullRebase', true, { rethrow: true, remote: options.remote, branch: options.branch, onOperationId: options.onOperationId }, wid);
-            result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null, force: options.force ?? false } }, { timeoutMs: 600_000, showProgress: options.showProgress ?? notify, onOperationId: options.onOperationId });
-          } else {
-            throw error;
-          }
+          throw error;
         }
         await notifyUpdateRestoreWarning(result.restoreWarning, wid, repoId);
         if (notify && action === 'fetch') {
@@ -3685,7 +3680,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           await Promise.all([get().loadUnpushedCommits(repoId, wid), get().loadIncomingCommits(repoId, wid)]);
         }
         return result.update ?? undefined;
-      }, `sync:${repoId}`, { workspaceId: wid }, { rethrow: options.rethrow, notifyError: action !== 'fetch' || notify || Boolean(options.rethrow) });
+      }, `sync:${repoId}`, { workspaceId: wid, repositoryId: repoId, remote: options.remote, branch: options.branch }, { rethrow: options.rethrow, notifyError: action !== 'fetch' || notify || Boolean(options.rethrow) });
     },
 
     updateProject: async (strategy) => {
@@ -5776,10 +5771,12 @@ export const useAppStore = create<AppStore>((set, get) => {
             const confirmed = await confirmDialog({ title: t('Force Push'), message: t('This may overwrite remote commits. Continue?'), confirmLabel: t('Force Push'), danger: true });
             if (!confirmed || get().snapshot?.workspace.id !== wid) return;
           } else {
-            await get().sync(action.repoId, action.strategy === 'merge' ? 'pull' : 'pullRebase', true, { rethrow: true }, wid);
+            const ref = action.branch ?? get().snapshot?.repositories.find((repo) => repo.meta.id === action.repoId)?.branch;
+            const branch = action.remote && ref && !ref.startsWith(`${action.remote}/`) && !ref.startsWith('refs/remotes/') ? `${action.remote}/${ref}` : ref;
+            await get().sync(action.repoId, action.strategy === 'merge' ? 'pull' : 'pullRebase', true, { rethrow: true, remote: action.remote ?? undefined, branch }, wid);
           }
           if (get().snapshot?.workspace.id !== wid) return;
-          await get().sync(action.repoId, 'push', true, { rethrow: true, force: action.strategy === 'force' }, wid);
+          await get().sync(action.repoId, 'push', true, { rethrow: true, force: action.strategy === 'force', remote: action.remote ?? undefined, branch: action.branch ?? undefined }, wid);
           return;
         }
         if (action.type === 'unlockIndex') {

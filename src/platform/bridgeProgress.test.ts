@@ -74,3 +74,20 @@ it('cancels a protected push confirmation before starting the native push', asyn
   expect(invoke.mock.calls[0][1].envelope.command.type).toBe('pushProtectionCheck');
   bridge.dispose(); publishDialog(undefined);
 });
+
+it('pauses silent queries queued behind shared SVN authentication and resumes their remaining timeout', async () => {
+  let resolve!: (value: ResponseEnvelope) => void;
+  invoke.mockImplementation((name) => name === 'bridge_cancel' ? Promise.resolve(true) : new Promise((done) => { resolve = done; }));
+  const bridge = new TauriBridge(); await bridge.initialize();
+  let id = '';
+  const pending = bridge.request(command, { showProgress: false, timeoutMs: 200, onOperationId: (value) => { id = value; } });
+  await vi.waitFor(() => expect(id).not.toBe(''));
+  const event: OperationEvent = { operationId: id, context: { domain: 'sync', generation: 1, visibility: 'background', workspaceId: 'workspace', repositoryId: 'repo', target: null }, status: 'running', phase: 'awaitingAuthentication', message: 'Waiting for SVN authentication', startedAt: '', cancellable: true, completed: null, total: null, error: null };
+  emit({ payload: event });
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(invoke).not.toHaveBeenCalledWith('bridge_cancel', expect.anything());
+  emit({ payload: { ...event, phase: 'retryingAuthentication' } });
+  await vi.advanceTimersByTimeAsync(50);
+  resolve({ requestId: id, result: true, error: null });
+  await expect(pending).resolves.toBe(true); bridge.dispose();
+});

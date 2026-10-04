@@ -280,8 +280,37 @@ async fn svn_with_timeout(
     timeout: Duration,
 ) -> Result<cli::CommandOutput, DesktopError> {
     let auth = crate::svn_account::cached_auth(repo);
+    let first = svn_once(&args, repo, auth.as_ref(), timeout, token).await;
+    match first {
+        Err(error) if error.code == "SVN_AUTH_FAILED" => {
+            let Some(credentials) =
+                crate::svn_account::authentication_retry(repo, auth, &error, token).await?
+            else {
+                return Err(error);
+            };
+            let retried = svn_once(&args, repo, Some(&credentials), timeout, token).await;
+            if retried
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.code == "SVN_AUTH_FAILED")
+            {
+                crate::svn_account::remember_auth_failure(repo);
+            }
+            retried
+        }
+        result => result,
+    }
+}
+
+async fn svn_once(
+    args: &[String],
+    repo: &RepositoryMeta,
+    auth: Option<&(String, String)>,
+    timeout: Duration,
+    token: &CancellationToken,
+) -> Result<cli::CommandOutput, DesktopError> {
     let mut safe = vec!["--non-interactive".into()];
-    if let Some((username, _)) = &auth {
+    if let Some((username, _)) = auth {
         safe.extend([
             "--username".into(),
             username.clone(),
@@ -289,13 +318,13 @@ async fn svn_with_timeout(
             "--no-auth-cache".into(),
         ]);
     }
-    safe.extend(args);
-    let auth_input = auth.as_ref().map(|(_, password)| format!("{password}\n"));
+    safe.extend_from_slice(args);
+    let input = auth.map(|(_, password)| format!("{password}\n"));
     cli::run(
         "svn",
         &safe,
         Path::new(&repo.root_path),
-        auth_input.as_ref().map(|value| value.as_bytes()),
+        input.as_ref().map(|value| value.as_bytes()),
         timeout,
         token,
     )
@@ -2328,27 +2357,21 @@ pub async fn commit_with_identity(
                     false,
                 ));
             }
-            let root = Path::new(&repo.root_path);
             let commit_targets = prepare_svn_commit(repo, paths, token).await?;
+            // Password and commit message must not compete for stdin.
+            let mut message_file = tempfile::NamedTempFile::new()
+                .map_err(|e| DesktopError::new("COMMIT_MESSAGE_FAILED", e.to_string(), true))?;
+            std::io::Write::write_all(&mut message_file, message.as_bytes())
+                .map_err(|e| DesktopError::new("COMMIT_MESSAGE_FAILED", e.to_string(), true))?;
             let mut args = vec![
                 "commit".into(),
                 "--file".into(),
-                "-".into(),
+                message_file.path().to_string_lossy().into_owned(),
                 "--depth".into(),
                 "empty".into(),
             ];
             args.extend(commit_targets);
-            let mut safe = vec!["--non-interactive".into()];
-            safe.extend(args);
-            let output = cli::run(
-                "svn",
-                &safe,
-                root,
-                Some(message.as_bytes()),
-                cli::NETWORK_TIMEOUT,
-                token,
-            )
-            .await?;
+            let output = svn_with_timeout(args, repo, token, cli::NETWORK_TIMEOUT).await?;
             refresh_svn_merge(repo, token).await;
             Ok(output.stdout_text())
         }
@@ -3707,15 +3730,19 @@ pub async fn sync(
     } else {
         None
     };
-    let operation = cli::run(
-        program,
-        &safe,
-        Path::new(&repo.root_path),
-        None,
-        cli::NETWORK_TIMEOUT,
-        token,
-    )
-    .await;
+    let operation = if program == "svn" {
+        svn_with_timeout(safe[1..].to_vec(), repo, token, cli::NETWORK_TIMEOUT).await
+    } else {
+        cli::run(
+            program,
+            &safe,
+            Path::new(&repo.root_path),
+            None,
+            cli::NETWORK_TIMEOUT,
+            token,
+        )
+        .await
+    };
     // Updating may be cancelled, but captured local changes must finish recovery.
     let recovery_token = CancellationToken::new();
     let output = match operation {
@@ -5581,8 +5608,9 @@ pub async fn create_patch(
             for revision in revisions.iter().rev() {
                 let output = git(
                     vec![
-                        "show".into(),
-                        "--format=email".into(),
+                        "format-patch".into(),
+                        "-1".into(),
+                        "--stdout".into(),
                         "--binary".into(),
                         "--no-ext-diff".into(),
                         revision.clone(),
@@ -5631,6 +5659,33 @@ pub async fn create_patch(
         file_name: format!("versiondock-{suffix}.patch"),
         content,
     })
+}
+
+pub async fn save_patches(
+    repo: &RepositoryMeta,
+    revisions: &[String],
+    directory: &str,
+    token: &CancellationToken,
+) -> Result<Vec<String>, DesktopError> {
+    if revisions.is_empty() {
+        return Err(DesktopError::new(
+            "EMPTY_COMMIT_SELECTION",
+            "Select at least one revision",
+            false,
+        ));
+    }
+    let folder = crate::state::canonical_directory(directory)?;
+    let mut files = Vec::new();
+    for revision in revisions {
+        let patch = create_patch(repo, std::slice::from_ref(revision), token).await?;
+        let name = format!("{}.patch", revision.chars().take(7).collect::<String>());
+        let target = safe_relative(&folder, &name, true)?;
+        tokio::fs::write(&target, patch.content.as_bytes())
+            .await
+            .map_err(|e| DesktopError::new("SAVE_PATCH_FAILED", e.to_string(), true))?;
+        files.push(target.to_string_lossy().into_owned());
+    }
+    Ok(files)
 }
 
 async fn ensure_clean_worktree(
@@ -11216,32 +11271,57 @@ pub async fn worktree_operation(
 ) -> Result<(), DesktopError> {
     ensure_git(repo)?;
     match operation {
-        WorktreeOperation::Create { branch, new_branch } => {
+        WorktreeOperation::Create {
+            path,
+            branch,
+            new_branch,
+            commitish,
+            no_track,
+        } => {
             validate_ref(&branch)?;
-            let encoded = hex::encode(Sha256::digest(branch.as_bytes()));
-            let target = config_dir
-                .join("worktrees")
-                .join(&repo.id)
-                .join(&encoded[..16]);
-            if target.exists() {
+            if let Some(revision) = &commitish {
+                validate_revision_or_ref(revision)?;
+            }
+            let target = PathBuf::from(&path);
+            if !target.is_absolute() || path.contains('\0') {
+                return Err(DesktopError::new(
+                    "INVALID_WORKTREE_PATH",
+                    "Choose an absolute worktree directory",
+                    false,
+                ));
+            }
+            if target.exists()
+                && (!target.is_dir()
+                    || std::fs::read_dir(&target)
+                        .map_err(|e| {
+                            DesktopError::new("WORKTREE_STORAGE_FAILED", e.to_string(), true)
+                        })?
+                        .next()
+                        .is_some())
+            {
                 return Err(DesktopError::new(
                     "WORKTREE_EXISTS",
-                    "Managed worktree already exists",
+                    "Worktree directory is not empty",
                     true,
                 ));
             }
             if let Some(parent) = target.parent() {
-                tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                    DesktopError::new("WORKTREE_STORAGE_FAILED", error.to_string(), true)
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    DesktopError::new("WORKTREE_STORAGE_FAILED", e.to_string(), true)
                 })?;
             }
             let mut args = vec!["worktree".into(), "add".into()];
             if new_branch {
                 args.extend(["-b".into(), branch.clone()]);
             }
+            if no_track {
+                args.push("--no-track".into());
+            }
             args.push(target.to_string_lossy().into_owned());
             if !new_branch {
                 args.push(branch);
+            } else if let Some(revision) = commitish {
+                args.push(revision);
             }
             git(args, repo, token).await?;
         }
@@ -11261,14 +11341,14 @@ pub async fn worktree_operation(
             args.push(entry.path);
             git(args, repo, token).await?;
         }
-        WorktreeOperation::Lock { path } => {
+        WorktreeOperation::Lock { path, reason } => {
             let entry = managed_worktree(config_dir, repo, &path, token).await?;
-            git(
-                vec!["worktree".into(), "lock".into(), entry.path],
-                repo,
-                token,
-            )
-            .await?;
+            let mut args = vec!["worktree".into(), "lock".into()];
+            if let Some(reason) = reason {
+                args.extend(["--reason".into(), reason]);
+            }
+            args.push(entry.path);
+            git(args, repo, token).await?;
         }
         WorktreeOperation::Unlock { path } => {
             let entry = managed_worktree(config_dir, repo, &path, token).await?;
@@ -11287,7 +11367,7 @@ pub async fn worktree_operation(
 }
 
 async fn managed_worktree(
-    config_dir: &Path,
+    _config_dir: &Path,
     repo: &RepositoryMeta,
     path: &str,
     token: &CancellationToken,
@@ -11299,27 +11379,23 @@ async fn managed_worktree(
             false,
         ));
     }
-    let managed_root = config_dir.join("worktrees").join(&repo.id);
-    let candidate = std::fs::canonicalize(path).map_err(|_| {
-        DesktopError::new(
-            "WORKTREE_NOT_FOUND",
-            "Worktree path is no longer available",
-            true,
-        )
-    })?;
-    let boundary = std::fs::canonicalize(&managed_root).unwrap_or(managed_root);
-    if !candidate.starts_with(&boundary) {
-        return Err(DesktopError::new(
-            "WORKTREE_OUTSIDE_MANAGED_ROOT",
-            "Only VersionDock-managed worktrees can be changed",
-            false,
-        ));
-    }
+    let candidate = std::fs::canonicalize(path).ok();
     worktrees(repo, token)
         .await?
         .into_iter()
-        .find(|entry| entry.path == path)
-        .ok_or_else(|| DesktopError::new("WORKTREE_NOT_FOUND", "Worktree not found", true))
+        .find(|entry| {
+            entry.path == path
+                || candidate.as_ref().is_some_and(|candidate| {
+                    std::fs::canonicalize(&entry.path).ok().as_ref() == Some(candidate)
+                })
+        })
+        .ok_or_else(|| {
+            DesktopError::new(
+                "WORKTREE_NOT_FOUND",
+                "Path is not a registered worktree of this repository",
+                true,
+            )
+        })
 }
 
 pub async fn managed_worktree_path(
@@ -11441,6 +11517,7 @@ pub async fn worktree_diff(
     })
 }
 
+#[cfg(test)]
 pub async fn worktree_file_diff(
     config_dir: &Path,
     repo: &RepositoryMeta,

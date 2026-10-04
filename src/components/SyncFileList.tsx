@@ -1,3 +1,4 @@
+import { changeStatusColor, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import React, { useMemo, useState } from 'react';
 import { useI18n } from '../i18n';
@@ -35,35 +36,6 @@ const TREE_LEVEL_PAD = 18;
 
 function formatFileCount(count: number, t: (key: string, ...args: Array<string | number>) => string): string {
   return count === 1 ? t('{0} file', count) : t('{0} files', count);
-}
-
-function normalizeStatus(status: string): string {
-  const code = status.charAt(0).toUpperCase();
-  if (code === 'A') return 'added';
-  if (code === 'D') return 'deleted';
-  if (code === 'R') return 'renamed';
-  if (code === 'C') return 'copied';
-  return 'modified';
-}
-
-function statusLetter(status: string): string {
-  const code = status.charAt(0).toUpperCase();
-  if (code === 'A' || code === 'D' || code === 'R' || code === 'C') return code;
-  return 'M';
-}
-
-function statusColor(status: string): string {
-  switch (normalizeStatus(status)) {
-    case 'added':
-    case 'copied':
-      return 'var(--vscode-gitDecoration-addedResourceForeground, var(--versiondock-success))';
-    case 'deleted':
-      return 'var(--vscode-gitDecoration-deletedResourceForeground, var(--versiondock-danger))';
-    case 'renamed':
-      return 'var(--vscode-gitDecoration-renamedResourceForeground, #73c991)';
-    default:
-      return 'var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d)';
-  }
 }
 
 function fileNameOf(path: string): string {
@@ -157,7 +129,7 @@ function SyncFileRow({ file, depth, onOpenFile, potentialConflicts }: {
   const [hovered, setHovered] = useState(false);
   const fileName = fileNameOf(file.path);
   const dir = directoryOf(file.path);
-  const color = statusColor(file.status);
+  const color = changeStatusColor(file.status);
   const { t } = useI18n();
   const potentialConflict = potentialConflicts?.has(file.path);
 
@@ -184,7 +156,7 @@ function SyncFileRow({ file, depth, onOpenFile, potentialConflicts }: {
             {typeof file.removed === 'number' && <span style={styles.removed}>-{file.removed}</span>}
           </span>
         ) : null}
-        <span style={styles.statusLetter(color)}>{statusLetter(file.status)}</span>
+        <span style={styles.statusLetter(color)}>{changeStatusLetter(file.status)}</span>
       </div>
     </div>
   );

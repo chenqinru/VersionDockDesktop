@@ -1,3 +1,4 @@
+import { changeStatusColor } from '../theme/changeStatus';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
@@ -954,7 +955,7 @@ function FileRowItem({
     >
       <span style={{ width: 14, height: 14, flexShrink: 0 }} />
       <FileIcon name={fileName} />
-      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flexShrink: 1 }}>
+      <span style={{ color: changeStatusColor('conflicted'), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flexShrink: 1 }}>
         <HighlightedText text={fileName} query={speedSearchQuery} />
       </span>
       {hasNonTextConflict(file) && (
@@ -984,11 +985,7 @@ function FileRowItem({
 function StatusCell({ status, first }: { status?: string | null; first?: boolean }) {
   const { t } = useI18n();
   const label = status === 'added' ? t('Conflict Added') : status === 'deleted' ? t('Conflict Deleted') : t('Conflict Modified');
-  const color = status === 'deleted'
-    ? 'var(--vscode-descriptionForeground)'
-    : status === 'added'
-      ? 'var(--vscode-gitDecoration-addedResourceForeground, #57a64a)'
-      : 'var(--vscode-gitDecoration-conflictingResourceForeground, #ff7b72)';
+  const color = changeStatusColor(status ?? 'conflicted');
 
   return (
     <span
