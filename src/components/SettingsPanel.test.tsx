@@ -247,3 +247,56 @@ it('uses the plugin scan-depth default in both category and search, preserving e
   fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'Repository scan depth' } });
   expect(screen.getByRole('spinbutton', { name: 'Repository scan depth' })).toHaveValue(1);
 });
+
+it('shows defaults, lists modified settings across categories and restores only one setting', async () => {
+  const { commands } = renderPanel();
+  const before = structuredClone(useAppStore.getState().bootstrap!.state.settings!);
+  fireEvent.click(screen.getByRole('link', { name:'Repository and history' }));
+  const row = screen.getByRole('spinbutton', { name:'Repository scan depth' }).closest('[data-setting]')!;
+  expect(row).toHaveAttribute('data-setting-modified','true'); expect(row).toHaveTextContent('Default: 1');
+  fireEvent.click(screen.getByRole('button', { name:/Modified settings \(/ }));
+  expect(screen.getByRole('button', { name:'Restore default: Repository scan depth' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name:'Restore default: Repository scan depth' }));
+  await waitFor(() => expect(useAppStore.getState().bootstrap!.state.settings!.repositoryScanDepth).toBe(1));
+  expect(screen.queryByRole('button', { name:'Restore default: Repository scan depth' })).not.toBeInTheDocument();
+  expect(useAppStore.getState().bootstrap!.state.settings!.ignoredFolders).toEqual(before.ignoredFolders);
+  expect(commands.find(command => command.type === 'updateSettings')?.type).toBe('updateSettings');
+});
+it('searches modified settings and returns to its editor without changing the value', async () => {
+  renderPanel(); fireEvent.click(screen.getByRole('button', { name:/Modified settings \(/ }));
+  fireEvent.change(screen.getByRole('textbox', { name:'Search settings...' }), { target:{ value:'scan' } });
+  expect(screen.queryByRole('button', { name:'Restore default: Notify on incoming commits' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name:'Edit setting: Repository scan depth' }));
+  expect(screen.getByRole('spinbutton', { name:'Repository scan depth' })).toHaveValue(4);
+  expect(screen.getByRole('button', { name:/Modified settings \(/ })).toHaveAttribute('aria-pressed','false');
+});
+it('clears a numeric edit draft when resetting to the default', async () => {
+  renderPanel(); fireEvent.click(screen.getByRole('link', { name:'Repository and history' }));
+  const row = screen.getByRole('spinbutton', { name:'Repository scan depth' }).closest('[data-setting]')!;
+  const visible = row.querySelector<HTMLInputElement>('.settings-stepper-input')!;
+  fireEvent.focus(visible); fireEvent.change(visible,{ target:{ value:'7' } });
+  fireEvent.click(screen.getByRole('button', { name:'Restore default: Repository scan depth' }));
+  await waitFor(() => expect(visible).toHaveValue('1'));
+});
+
+it('keeps only the centered title in the settings header', () => {
+  renderPanel();
+  expect(document.querySelector('.settings-heading .settings-title')?.textContent).toBe('Settings');
+  expect(document.querySelector('.settings-heading p')).toBeNull();
+});
+
+it('does not toggle a checkbox when its separate reset button is clicked', async () => {
+  renderPanel(); fireEvent.click(screen.getByRole('link', { name:'Refresh and startup' }));
+  const checkbox = screen.getByRole('checkbox', { name:'Notify on incoming commits' }); expect(checkbox).not.toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name:'Restore default: Notify on incoming commits' }));
+  await waitFor(() => expect(checkbox).toBeChecked());
+  expect(useAppStore.getState().bootstrap!.state.settings!.notifyUnpushedCommits).toBe(false);
+});
+it('keeps a modified value visible when restoring fails', async () => {
+  const { bridge } = renderPanel();
+  vi.spyOn(bridge,'request').mockRejectedValue(new Error('settings write failed'));
+  fireEvent.click(screen.getByRole('link', { name:'Repository and history' }));
+  fireEvent.click(screen.getByRole('button', { name:'Restore default: Repository scan depth' }));
+  await waitFor(() => expect(useAppStore.getState().bootstrap!.state.settings!.repositoryScanDepth).toBe(4));
+  expect(screen.getByRole('button', { name:'Restore default: Repository scan depth' })).toBeInTheDocument();
+});

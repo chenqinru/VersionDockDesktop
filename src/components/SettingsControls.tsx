@@ -2,22 +2,29 @@ import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react
 import { useI18n } from '../i18n';
 import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
+import { SettingLabel, SettingMetadata } from './SettingsMetadata';
+import { useSettingState } from '../settings/SettingsStateContext';
+import type { SettingPath } from '../settings/defaults';
 
 export function SettingsCard({
   title,
   description,
   children,
+  setting,
 }: {
+  setting?: SettingPath;
   title?: string;
   description?: string;
   children: ReactNode;
 }) {
+  const info = useSettingState(setting);
   return (
-    <div className="settings-card">
+    <div className="settings-card" data-setting={setting} data-setting-modified={info?.modified}>
       {title && (
         <div className="settings-card-header">
           <span className="settings-card-title">{title}</span>
           {description && <span className="settings-card-desc">{description}</span>}
+          <SettingMetadata setting={setting} label={title} />
         </div>
       )}
       <div className="settings-card-body">{children}</div>
@@ -27,6 +34,7 @@ export function SettingsCard({
 
 
 export function SettingNumber({
+  setting,
   label,
   description,
   value,
@@ -44,7 +52,9 @@ export function SettingNumber({
   step?: number;
   suffix?: string;
   onChange: (value: number) => void;
+  setting?: SettingPath;
 }) {
+  const info = useSettingState(setting);
   const { t } = useI18n();
   const [draft, setDraft] = useState<string | null>(null);
   const localText = draft ?? String(value);
@@ -68,11 +78,8 @@ export function SettingNumber({
   };
 
   return (
-    <div className="settings-row">
-      <span className="settings-label">
-        <strong>{label}</strong>
-        {description && <small>{description}</small>}
-      </span>
+    <div className="settings-row" data-setting={setting} data-setting-modified={info?.modified}>
+      <SettingLabel label={label} description={description} setting={setting} onBeforeRestore={() => setDraft(null)} />
 
       {/* 原生隐藏 input 保持测试与无障碍访问兼容 */}
       <input
@@ -137,15 +144,17 @@ export function SettingNumber({
 }
 
 export function SettingText({
+  setting,
   label,
   accessory,
   actions,
   ...input
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; accessory?: ReactNode; actions?: ReactNode }) {
+}: InputHTMLAttributes<HTMLInputElement> & { label: string; setting?: SettingPath; accessory?: ReactNode; actions?: ReactNode }) {
   const id = useId();
+  const info = useSettingState(setting);
   return (
-    <div className="settings-row settings-text-row">
-      <label className="settings-label" htmlFor={id}><strong>{label}</strong></label>
+    <div className="settings-row settings-text-row" data-setting={setting} data-setting-modified={info?.modified}>
+      <SettingLabel label={label} htmlFor={id} setting={setting} />
       <div className="settings-text-control">
         <div className="settings-text-input-group">
           <input {...input} id={id} className="settings-text-input" />
@@ -155,4 +164,18 @@ export function SettingText({
       </div>
     </div>
   );
+}
+
+export function SettingToggle({ label, description, checked, onChange, setting, disabled = false }: {
+  label: string; description: string; checked: boolean; onChange: (value: boolean) => void; setting?: SettingPath; disabled?: boolean;
+}) {
+  const id = useId();
+  const info = useSettingState(setting);
+  return <div className="settings-toggle settings-row" data-setting={setting} data-setting-modified={info?.modified}>
+    <SettingLabel label={label} description={description} setting={setting} htmlFor={id} />
+    <label className="settings-switch">
+      <input id={id} aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)} />
+      <span className="settings-switch-track"><span className="settings-switch-thumb" /></span>
+    </label>
+  </div>;
 }

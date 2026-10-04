@@ -1,12 +1,13 @@
 import { DialogSurface } from './DialogSurface';
 import { LayoutDensitySetting } from './LayoutDensitySetting';
 import { SettingSelect } from './SettingSelect';
-import { SettingsCard, SettingNumber } from './SettingsControls';
+import { SettingsCard, SettingNumber, SettingToggle } from './SettingsControls';
 import { AiSettings } from './AiSettings';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   CatFileFilterMode,
+  DesktopSettings,
   ChangesDisplayMode,
   CleanWorkingTreeMethod,
   DefaultCommitAction,
@@ -27,25 +28,15 @@ import { Codicon } from './Codicon';
 import { EditorIcon } from './EditorIcons';
 import { ThemePreviewSelector, FileIconThemePreviewSelector } from './AppearanceSelectors';
 import { ProviderPanel } from './ProviderPanel';
+import { DEFAULT_LAYOUT, defaultSettingPatch, effectiveSettings, isSettingModified, type SettingPath } from '../settings/defaults';
+import { settingsCategories, settingDefinitions } from '../settings/catalog';
+import { SettingsStateContext, useSettingState } from '../settings/SettingsStateContext';
+import { ModifiedSettings, SettingLabel, SettingSummary } from './SettingsMetadata';
 
 interface SettingsPanelProps {
   onClose: () => void;
 }
 
-const settingsCategories = [
-  { id: 'settings-section-appearance-title', sectionId: 'settings-section-appearance', icon: 'color-mode', label: 'Appearance' },
-  { id: 'settings-section-ai-title', sectionId: 'settings-section-ai', icon: 'sparkle', label: 'AI' },
-  { id: 'settings-section-changes-title', sectionId: 'settings-section-changes', icon: 'source-control', label: 'Changes and commit' },
-  { id: 'settings-section-guard-title', sectionId: 'settings-section-guard', icon: 'shield', label: 'Commit & Safety Guard' },
-  { id: 'settings-section-protection-title', sectionId: 'settings-section-protection', icon: 'lock', label: 'Branch & Push Protection' },
-  { id: 'settings-section-update-title', sectionId: 'settings-section-update', icon: 'cloud-download', label: 'Update Project & Submodules' },
-  { id: 'settings-section-diff-title', sectionId: 'settings-section-diff', icon: 'diff', label: 'Diff & Shelve' },
-  { id: 'settings-section-refresh-title', sectionId: 'settings-section-refresh', icon: 'sync', label: 'Refresh and startup' },
-  { id: 'settings-section-repository-title', sectionId: 'settings-section-repository', icon: 'repo', label: 'Repository and history' },
-  { id: 'settings-section-external-editor-title', sectionId: 'settings-section-external-editor', icon: 'terminal', label: 'External editor' },
-  { id: 'settings-section-accounts-title', sectionId: 'settings-section-accounts', icon: 'account', label: 'Accounts and privacy' },
-  { id: 'settings-section-about-title', sectionId: 'settings-section-about', icon: 'info', label: 'About and updates' },
-] as const;
 
 type SettingsCategoryId = typeof settingsCategories[number]['id'];
 
@@ -56,16 +47,21 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(settingsCategories[0].id);
   const [searchQuery, setSearchQuery] = useState('');
+  const [onlyModified, setOnlyModified] = useState(false);
+  const [inspectedSetting, setInspectedSetting] = useState<SettingPath>();
   const [providersOpen, setProvidersOpen] = useState(false);
 
-  const settings = useAppStore((state) => state.bootstrap?.state.settings);
+  const storedSettings = useAppStore((state) => state.bootstrap?.state.settings);
+  const settings = useMemo(() => effectiveSettings(storedSettings), [storedSettings]);
+  const storedLayout = useAppStore((state) => state.bootstrap?.state.layout);
+  const layout = useMemo(() => ({ ...DEFAULT_LAYOUT, ...storedLayout }), [storedLayout]);
+  const modified = settingDefinitions.filter(item => isSettingModified(item.path, settings, layout));
   const theme = settings?.theme ?? 'system';
   const language = settings?.language ?? 'system';
   const uiFontSize = settings?.uiFontSize ?? 'standard';
   const fileIconTheme = settings?.fileIconTheme ?? 'material';
   const fileViewMode = useAppStore((state) => (state.bootstrap?.state.layout?.fileViewMode ?? state.bootstrap?.state.fileViewMode) === 'list' ? 'list' : 'tree');
   const externalEditor = settings?.externalEditor;
-  const repositories = useAppStore((state) => state.allRepositories);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const openAbout = useAppStore((state) => state.openAbout);
   const setTheme = useAppStore((state) => state.setTheme);
@@ -78,6 +74,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   useEffect(() => {
     closeButton.current?.focus();
   }, []);
+  useEffect(() => {
+    if (!inspectedSetting) return;
+    const row = content.current?.querySelector<HTMLElement>(`[data-setting="${inspectedSetting}"]`);
+    row?.scrollIntoView?.({ block:'nearest' });
+    row?.querySelector<HTMLElement>('.settings-stepper-input, .settings-custom-select-trigger, .settings-text-input, .settings-tag-input, .editor-dropdown-trigger, input[type="checkbox"], [role="radio"][aria-checked="true"]')?.focus();
+  }, [inspectedSetting]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -91,10 +93,15 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const restore = async (path: SettingPath) => {
+    const state = useAppStore.getState();
+    if (path === 'layout.fileViewMode') await state.setFileViewMode(DEFAULT_LAYOUT.fileViewMode as 'tree' | 'list');
+    else await state.updateSettings(defaultSettingPatch(path, effectiveSettings(state.bootstrap?.state.settings)));
+  };
   const isSearching = searchQuery.trim().length > 0;
 
   return (
-    <>
+    <SettingsStateContext.Provider value={{ settings, layout, restore }}>
     <DialogSurface preserveStyle backdropClassName="settings-backdrop" className="settings-modal" onClose={onClose} aria-labelledby="settings-title">
         {/* 顶部标题栏 */}
         <header className="settings-heading">
@@ -125,7 +132,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 className="settings-search-input"
                 placeholder={t('Search settings...')}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setInspectedSetting(undefined); setSearchQuery(e.target.value); }}
                 aria-label={t('Search settings...')}
               />
               {searchQuery && (
@@ -143,20 +150,29 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               )}
             </div>
 
+            <button type="button" className={`settings-modified-filter ${onlyModified ? 'active' : ''}`} aria-pressed={onlyModified}
+              title={t('Show only values that differ from the current defaults.')}
+              onClick={() => setOnlyModified(value => !value)}>
+              <Codicon name="filter" /><span>{t('Modified settings ({0})', modified.length)}</span>
+            </button>
             <nav className="settings-nav" aria-label={t('Settings categories')}>
               {settingsCategories.map((category) => {
-                const isActive = !isSearching && activeCategory === category.id;
+                const isActive = !isSearching && !onlyModified && activeCategory === category.id;
+                const count = modified.filter(item => item.category === category.id).length;
                 return (
                   <a
                     key={category.id}
                     className={`settings-nav-item ${isActive ? 'active' : ''}`}
                     href={`#${category.id}`}
                     aria-current={isActive ? 'location' : undefined}
+                    aria-label={t(category.label)}
                     draggable={false}
                     onDragStart={(event) => event.preventDefault()}
                     onClick={(event) => {
                       event.preventDefault();
                       if (searchQuery) setSearchQuery('');
+                      setOnlyModified(false);
+                      setInspectedSetting(undefined);
                       setActiveCategory(category.id);
                     }}
                   >
@@ -164,6 +180,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       <Codicon name={category.icon} />
                     </span>
                     <span className="settings-nav-text">{t(category.label)}</span>
+                    {count > 0 && <span className="settings-category-modified-count" aria-hidden="true" title={t('{0} modified settings', count)}>{count}</span>}
                   </a>
                 );
               })}
@@ -172,9 +189,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
           {/* 右侧内容主视窗：纯正独立分类切换 */}
           <div ref={content} className="settings-content">
-            {isSearching ? (
+            {onlyModified ? <ModifiedSettings query={searchQuery} onEdit={(path) => {
+              const definition = settingDefinitions.find(item => item.path === path)!;
+              setOnlyModified(false); setInspectedSetting(path); setSearchQuery(''); setActiveCategory(definition.category);
+            }} /> : isSearching ? (
               <SearchResults
                 query={searchQuery}
+                focusSetting={inspectedSetting}
                 settings={settings}
                 theme={theme}
                 language={language}
@@ -198,14 +219,14 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {/* 1. 外观 Appearance */}
                 {activeCategory === 'settings-section-appearance-title' && (
                   <SettingsSection id="settings-section-appearance" titleId="settings-section-appearance-title" icon="color-mode" title={t('Appearance')}>
-                    <SettingsCard title={t('Theme')} description={t('Choose the application color theme')}>
+                    <SettingsCard setting="theme" title={t('Theme')} description={t('Choose the application color theme')}>
                       <ThemePreviewSelector value={theme} onChange={(val) => void setTheme(val)} />
                     </SettingsCard>
-                    <SettingsCard title={t('File icon theme')} description={t('Choose the file icon theme')}>
+                    <SettingsCard setting="fileIconTheme" title={t('File icon theme')} description={t('Choose the file icon theme')}>
                       <FileIconThemePreviewSelector value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} />
                     </SettingsCard>
                     <SettingsCard title={t('Interface')}>
-                      <SettingSelect
+                      <SettingSelect setting="language"
                         label={t('Language')}
                         description={t('Choose the application language')}
                         value={language}
@@ -216,7 +237,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(value) => void setLanguage(value as LanguagePreference)}
                       />
-                      <SettingSelect
+                      <SettingSelect setting="uiFontSize"
                         label={t('UI font size')}
                         description={t('Choose the application UI font size')}
                         value={uiFontSize}
@@ -234,13 +255,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </SettingsSection>
                 )}
 
-                {activeCategory === 'settings-section-ai-title' && <SettingsSection id="settings-section-ai" titleId="settings-section-ai-title" icon="sparkle" title={t('AI')}><AiSettings /></SettingsSection>}
+                {activeCategory === 'settings-section-ai-title' && <SettingsSection id="settings-section-ai" titleId="settings-section-ai-title" icon="sparkle" title={t('AI')}><AiSettings focusSetting={inspectedSetting} /></SettingsSection>}
 
                 {/* 2. 更改与提交 Changes and commit */}
                 {activeCategory === 'settings-section-changes-title' && (
                   <SettingsSection id="settings-section-changes" titleId="settings-section-changes-title" icon="source-control" title={t('Changes and commit')}>
                     <SettingsCard title={t('Changes display mode')}>
-                      <SettingSelect
+                      <SettingSelect setting="layout.fileViewMode"
                         label={t('File view')}
                         description={t('How changed files are grouped')}
                         value={fileViewMode}
@@ -250,7 +271,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(value) => void setFileViewMode(value as 'tree' | 'list')}
                       />
-                      <SettingSelect
+                      <SettingSelect setting="changesDisplayMode"
                         label={t('Changes display mode')}
                         description={t('How to display changed files in the Changes tab.')}
                         value={settings?.changesDisplayMode ?? 'simplified'}
@@ -261,7 +282,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(value) => void updateSettings({ changesDisplayMode: value as ChangesDisplayMode })}
                       />
-                      <SettingSelect
+                      <SettingSelect setting="defaultCommitAction"
                         label={t('Default commit action')}
                         description={t('Default action for the commit button.')}
                         value={settings?.defaultCommitAction ?? 'commit'}
@@ -271,7 +292,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(value) => void updateSettings({ defaultCommitAction: value as DefaultCommitAction })}
                       />
-                      <SettingSelect
+                      <SettingSelect setting="defaultSaveAction"
                         label={t('Default save action')}
                         description={t('Default action for the Save button.')}
                         value={settings?.defaultSaveAction ?? 'stash'}
@@ -284,13 +305,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </SettingsCard>
 
                     <SettingsCard title={t('Warnings and editor annotations')}>
-                      <SettingToggle
+                      <SettingToggle setting="promptBeforeAddingUntracked"
                         label={t('Prompt before adding untracked files')}
                         description={t('Show a prompt when new untracked files are detected.')}
                         checked={settings?.promptBeforeAddingUntracked ?? true}
                         onChange={(val) => void updateSettings({ promptBeforeAddingUntracked: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="suppressDivergedWarning"
                         label={t('Suppress diverged branch warning')}
                         description={t('Suppress the warning when branches have diverged.')}
                         checked={settings?.suppressDivergedWarning ?? false}
@@ -304,25 +325,25 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {activeCategory === 'settings-section-guard-title' && (
                   <SettingsSection id="settings-section-guard" titleId="settings-section-guard-title" icon="shield" title={t('Commit & Safety Guard')}>
                     <SettingsCard title={t('Commit & Safety Guard')}>
-                      <SettingToggle
+                      <SettingToggle setting="noVerify"
                         label={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
                         description={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
                         checked={settings?.noVerify ?? false}
                         onChange={(val) => void updateSettings({ noVerify: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="autoCommitResolvedMerge"
                         label={t('Auto-commit resolved merge')}
                         description={t('Automatically commit the merge when all conflicts in a repository are resolved (enabled by default).')}
                         checked={settings?.autoCommitResolvedMerge ?? true}
                         onChange={(val) => void updateSettings({ autoCommitResolvedMerge: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="warnOnLargeFiles"
                         label={t('Warn on large files')}
                         description={t('Warn before committing files larger than the specified size limit.')}
                         checked={settings?.warnOnLargeFiles ?? true}
                         onChange={(val) => void updateSettings({ warnOnLargeFiles: val })}
                       />
-                      <SettingNumber
+                      <SettingNumber setting="largeFileSizeLimitMb"
                         label={t('Large file size limit (MB)')}
                         description={t('Size threshold in megabytes for large file commit warning (default: 50MB).')}
                         value={settings?.largeFileSizeLimitMb ?? 50}
@@ -331,19 +352,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         suffix="MB"
                         onChange={(val) => void updateSettings({ largeFileSizeLimitMb: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="warnOnDetachedHead"
                         label={t('Warn on detached HEAD')}
                         description={t('Warn before committing in detached HEAD or during an ongoing rebase, offering to create a branch.')}
                         checked={settings?.warnOnDetachedHead ?? true}
                         onChange={(val) => void updateSettings({ warnOnDetachedHead: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="warnOnCrlf"
                         label={t('Warn on CRLF line separators')}
                         description={t('Warn if CRLF line separators are about to be committed in text files.')}
                         checked={settings?.warnOnCrlf ?? true}
                         onChange={(val) => void updateSettings({ warnOnCrlf: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="warnOnInvalidFileNames"
                         label={t('Warn on invalid file names')}
                         description={t('Warn when committing files with names that may cause issues on Windows or other operating systems (e.g. invalid characters or case collisions).')}
                         checked={settings?.warnOnInvalidFileNames ?? true}
@@ -361,19 +382,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         branches={settings?.protectedBranches ?? ['master', 'main']}
                         onChange={(branches) => void updateSettings({ protectedBranches: branches })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="syncProtectedBranchesFromGithub"
                         label={t('Sync protected branches from remote')}
                         description={t('Automatically sync branch protection rules from GitHub, GitLab, and Gitee for remote repositories.')}
                         checked={settings?.syncProtectedBranchesFromGithub ?? true}
                         onChange={(val) => void updateSettings({ syncProtectedBranchesFromGithub: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="showPushDialogForProtectedBranches"
                         label={t('Confirm before pushing to protected branches')}
                         description={t('Show confirmation dialog before pushing to protected branches.')}
                         checked={settings?.showPushDialogForProtectedBranches ?? true}
                         onChange={(val) => void updateSettings({ showPushDialogForProtectedBranches: val })}
                       />
-                      <SettingSelect
+                      <SettingSelect setting="onPushRejected"
                         label={t('On push rejected')}
                         description={t('Behavior when a push is rejected because the remote is ahead (non-fast-forward).')}
                         value={settings?.onPushRejected ?? 'prompt'}
@@ -384,19 +405,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(val) => void updateSettings({ onPushRejected: val as OnPushRejectedAction })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="useSafeForcePush"
                         label={t('Use safe force push (--force-with-lease)')}
                         description={t("Use '--force-with-lease' (safe force push) when force pushing from the extension, or '--force' when disabled.")}
                         checked={settings?.useSafeForcePush ?? true}
                         onChange={(val) => void updateSettings({ useSafeForcePush: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="cherryPickAddSuffix"
                         label={t('Add suffix when cherry-picking')}
                         description={t("Add 'cherry-picked from <hash>' suffix when cherry-picking commits (git cherry-pick -x).")}
                         checked={settings?.cherryPickAddSuffix ?? true}
                         onChange={(val) => void updateSettings({ cherryPickAddSuffix: val })}
                       />
-                      <SettingCharInput
+                      <SettingCharInput setting="branchCleanCharacter"
                         label={t('Branch clean character')}
                         description={t("Character to replace invalid characters and whitespace in Git branch names (e.g. '-').")}
                         value={settings?.branchCleanCharacter ?? '-'}
@@ -410,7 +431,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {activeCategory === 'settings-section-update-title' && (
                   <SettingsSection id="settings-section-update" titleId="settings-section-update-title" icon="cloud-download" title={t('Update Project & Submodules')}>
                     <SettingsCard title={t('Update Project & Submodules')}>
-                      <SettingSelect
+                      <SettingSelect setting="updateProjectMethod"
                         label={t('Update project method')}
                         description={t('Strategy used when updating projects from remote (Merge or Rebase).')}
                         value={settings?.updateProjectMethod ?? 'rebase'}
@@ -421,7 +442,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(val) => void updateSettings({ updateProjectMethod: val as UpdateProjectMethod })}
                       />
-                      <SettingSelect
+                      <SettingSelect setting="updateProjectCleanWorkingTree"
                         label={t('Clean working tree before update')}
                         description={t('How to clean and automatically restore uncommitted local changes during project update.')}
                         value={settings?.updateProjectCleanWorkingTree ?? 'shelve'}
@@ -431,13 +452,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(val) => void updateSettings({ updateProjectCleanWorkingTree: val as CleanWorkingTreeMethod })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="updateProjectShowNotification"
                         label={t('Show update notification')}
                         description={t('Show a notification with update details when new commits are received after project update.')}
                         checked={settings?.updateProjectShowNotification ?? true}
                         onChange={(val) => void updateSettings({ updateProjectShowNotification: val })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="cloneRecursiveSubmodules"
                         label={t('Recursively clone submodules')}
                         description={t("Recursively clone submodules when cloning a repository ('git clone --recurse-submodules').")}
                         checked={settings?.cloneRecursiveSubmodules ?? true}
@@ -451,7 +472,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {activeCategory === 'settings-section-diff-title' && (
                   <SettingsSection id="settings-section-diff" titleId="settings-section-diff-title" icon="diff" title={t('Diff & Shelve')}>
                     <SettingsCard title={t('Diff & Shelve')}>
-                      <SettingSelect
+                      <SettingSelect setting="shelveComparisonBase"
                         label={t('Shelve diff comparison base')}
                         description={t('Comparison base when viewing differences for shelved or stashed changes.')}
                         value={settings?.shelveComparisonBase ?? 'local'}
@@ -469,10 +490,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {activeCategory === 'settings-section-refresh-title' && (
                   <SettingsSection id="settings-section-refresh" titleId="settings-section-refresh-title" icon="sync" title={t('Refresh and startup')}>
                     <SettingsCard title={t('Refresh and startup')}>
-                      <SettingNumber label={t('Automatic fetch interval')} description={t('Fetch remote changes in the background at this interval; 0 disables it.')}
+                      <SettingNumber setting="autoFetchIntervalMinutes" label={t('Automatic fetch interval')} description={t('Fetch remote changes in the background at this interval; 0 disables it.')}
                         value={settings?.autoFetchIntervalMinutes ?? 15} min={0} max={1440} suffix={t('minutes')}
                         onChange={(value) => void updateSettings({ autoFetchIntervalMinutes: value })} />
-                      <SettingNumber
+                      <SettingNumber setting="autoRefreshInterval"
                         label={t('Auto-refresh interval')}
                         description={t('Auto-refresh interval in seconds; 0 disables it.')}
                         value={settings?.autoRefreshInterval ?? 0}
@@ -481,19 +502,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         suffix={t('seconds')}
                         onChange={(value) => void updateSettings({ autoRefreshInterval: value })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="fetchOnStartup"
                         label={t('Fetch on startup')}
                         description={t('Automatically fetch all remotes when the app starts.')}
                         checked={settings?.fetchOnStartup ?? false}
                         onChange={(value) => void updateSettings({ fetchOnStartup: value })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="autoFetchOnFocus"
                         label={t('Fetch when window regains focus')}
                         description={t('Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.')}
                         checked={settings?.autoFetchOnFocus ?? true}
                         onChange={(value) => void updateSettings({ autoFetchOnFocus: value })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="resetViewLocationsOnStartup"
                         label={t('Reset view locations on startup')}
                         description={t('Reset the saved workbench view positions when the app starts.')}
                         checked={settings?.resetViewLocationsOnStartup ?? false}
@@ -502,13 +523,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </SettingsCard>
 
                     <SettingsCard title={t('Notify on incoming commits')}>
-                      <SettingToggle
+                      <SettingToggle setting="notifyIncomingCommits"
                         label={t('Notify on incoming commits')}
                         description={t('Show a notification when incoming commits are available.')}
                         checked={settings?.notifyIncomingCommits ?? false}
                         onChange={(value) => void updateSettings({ notifyIncomingCommits: value })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="notifyUnpushedCommits"
                         label={t('Notify on unpushed commits')}
                         description={t('Show a notification when commits are ready to push.')}
                         checked={settings?.notifyUnpushedCommits ?? false}
@@ -522,7 +543,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {activeCategory === 'settings-section-repository-title' && (
                   <SettingsSection id="settings-section-repository" titleId="settings-section-repository-title" icon="repo" title={t('Repository and history')}>
                     <SettingsCard title={t('Repository')}>
-                      <SettingNumber
+                      <SettingNumber setting="repositoryScanDepth"
                         label={t('Repository scan depth')}
                         description={t('Maximum depth of workspace subfolders to scan for repositories.')}
                         value={settings?.repositoryScanDepth ?? 1}
@@ -530,7 +551,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         max={10}
                         onChange={(value) => void updateSettings({ repositoryScanDepth: value })}
                       />
-                      <SettingNumber
+                      <SettingNumber setting="maximumGraphCommits"
                         label={t('Maximum graph commits')}
                         description={t('Maximum commits to load in the history graph.')}
                         value={settings?.maximumGraphCommits ?? 1000}
@@ -545,7 +566,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </SettingsCard>
 
                     <SettingsCard title={t('Git Advanced')}>
-                      <SettingSelect
+                      <SettingSelect setting="catFileFilterMode"
                         label={t('Cat-file filter mode')}
                         description={t('Filter transformation mode applied when reading file content from Git revisions or stages.')}
                         value={settings?.catFileFilterMode ?? 'filters'}
@@ -556,7 +577,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(val) => void updateSettings({ catFileFilterMode: val as CatFileFilterMode })}
                       />
-                      <SettingSelect
+                      <SettingSelect setting="fetchTags"
                         label={t('Fetch tags')}
                         description={t('Policy for fetching tags when fetching branches from remote repositories.')}
                         value={settings?.fetchTags ?? 'auto'}
@@ -567,7 +588,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ]}
                         onChange={(val) => void updateSettings({ fetchTags: val as FetchTagsMode })}
                       />
-                      <SettingToggle
+                      <SettingToggle setting="excludeIgnoredDirectories"
                         label={t('Exclude ignored directories')}
                         description={t('Automatically exclude directories ignored by .gitignore when scanning and analyzing repositories.')}
                         checked={settings?.excludeIgnoredDirectories ?? true}
@@ -575,71 +596,18 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       />
                     </SettingsCard>
 
-                    <SettingsCard title={t('Visible repositories')} description={t('Hidden repositories remain scanned and can be restored here.')}>
-                      {repositories.length === 0 ? (
-                        <div className="settings-empty-hint">{t('No repositories found')}</div>
-                      ) : (
-                        <div className="settings-repo-list">
-                          {repositories.map((repo) => {
-                            const hidden = new Set(settings?.hiddenRepositoryIds ?? []);
-                            const isVisible = !hidden.has(repo.meta.id);
-                            const currentColor = settings?.projectColors?.[repo.meta.id] ?? repo.meta.color;
-
-                            return (
-                              <div key={repo.meta.id} className="settings-repo-row">
-                                <div className="settings-repo-info">
-                                  <span className="settings-repo-color-dot" style={{ backgroundColor: currentColor }} />
-                                  <Codicon name="repo" className="settings-repo-icon" />
-                                  <span className="settings-repo-name">{repo.meta.name}</span>
-                                </div>
-                                <div className="settings-repo-controls">
-                                  <label className="settings-color-picker-badge" title={t('Map workspace or repository names to graph colors.')}>
-                                    <input
-                                      aria-label={`${t('Project colors')}: ${repo.meta.name}`}
-                                      type="color"
-                                      value={currentColor}
-                                      onChange={(event) =>
-                                        void updateSettings({
-                                          projectColors: { ...(settings?.projectColors ?? {}), [repo.meta.id]: event.target.value },
-                                        })
-                                      }
-                                    />
-                                    <span className="settings-color-picker-preview" style={{ backgroundColor: currentColor }} />
-                                  </label>
-                                  <label className="settings-switch mini" title={t('Visible repository: {0}', repo.meta.name)}>
-                                    <input
-                                      aria-label={t('Visible repository: {0}', repo.meta.name)}
-                                      type="checkbox"
-                                      checked={isVisible}
-                                      onChange={(event) => {
-                                        const next = new Set(hidden);
-                                        if (event.target.checked) next.delete(repo.meta.id);
-                                        else next.add(repo.meta.id);
-                                        void updateSettings({ hiddenRepositoryIds: [...next] });
-                                      }}
-                                    />
-                                    <span className="settings-switch-track">
-                                      <span className="settings-switch-thumb" />
-                                    </span>
-                                  </label>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </SettingsCard>
+                    <RepositoryAppearanceSettings settings={settings} />
                   </SettingsSection>
                 )}
 
                 {activeCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="account" title={t('Accounts and privacy')}>
-                  <SettingsCard title={t('Status bar')}><SettingToggle label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
+                  <SettingsCard title={t('Status bar')}><SettingToggle setting="showProfileStatusBar" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
                     checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} /></SettingsCard>
                   <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub, GitLab, and Gitee accounts')}</button></SettingsCard>
                   <SettingsCard title={t('Author avatars')}>
-                    <SettingToggle label={t('Online author avatars')} description={t('Resolve remote provider addresses to author avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false, avatarCrossPlatformFallback: false } : {}) })} />
-                    <SettingToggle label={t('Search other connected platforms')} description={t('Try other connected platforms when this repository has no matching author avatar.')} checked={(settings?.onlineAvatarsEnabled ?? false) && (settings?.avatarCrossPlatformFallback ?? false)} onChange={(value) => void updateSettings({ avatarCrossPlatformFallback: value })} />
-                    <SettingToggle label={t('Use Gravatar for other emails')} description={t('Send only a SHA-256 email hash to Gravatar.')} checked={(settings?.onlineAvatarsEnabled ?? false) && (settings?.gravatarEnabled ?? false)} onChange={(value) => void updateSettings({ gravatarEnabled: value })} />
+                    <SettingToggle setting="onlineAvatarsEnabled" label={t('Online author avatars')} description={t('Resolve remote provider addresses to author avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false, avatarCrossPlatformFallback: false } : {}) })} />
+                    <SettingToggle setting="avatarCrossPlatformFallback" label={t('Search other connected platforms')} description={t('Try other connected platforms when this repository has no matching author avatar.')} disabled={!settings?.onlineAvatarsEnabled} checked={settings?.avatarCrossPlatformFallback ?? false} onChange={(value) => void updateSettings({ avatarCrossPlatformFallback: value })} />
+                    <SettingToggle setting="gravatarEnabled" label={t('Use Gravatar for other emails')} description={t('Send only a SHA-256 email hash to Gravatar.')} disabled={!settings?.onlineAvatarsEnabled} checked={settings?.gravatarEnabled ?? false} onChange={(value) => void updateSettings({ gravatarEnabled: value })} />
                   </SettingsCard>
                 </SettingsSection>}
 
@@ -657,7 +625,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {activeCategory === 'settings-section-about-title' && (
                   <SettingsSection id="settings-section-about" titleId="settings-section-about-title" icon="info" title={t('About and updates')}>
                     <SettingsCard title={t('About and updates')}>
-                      <SettingToggle
+                      <SettingToggle setting="autoCheckUpdates"
                         label={t('Check for updates automatically')}
                         description={t('Automatically check for new VersionDock releases on startup.')}
                         checked={settings?.autoCheckUpdates ?? true}
@@ -734,7 +702,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         </div>
     </DialogSurface>
       {providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}
-    </>
+    </SettingsStateContext.Provider>
   );
 }
 
@@ -762,6 +730,69 @@ function SettingsSection({
   );
 }
 
+function RepositoryAppearanceSettings({ settings }: { settings: DesktopSettings }) {
+  const { t } = useI18n();
+  const repositories = useAppStore(state => state.allRepositories);
+  const updateSettings = useAppStore(state => state.updateSettings);
+  return (
+<SettingsCard setting="hiddenRepositoryIds" title={t('Visible repositories')} description={t('Hidden repositories remain scanned and can be restored here.')}>
+                      <SettingSummary setting="projectColors" label={t('Project colors')} />
+                      {repositories.length === 0 ? (
+                        <div className="settings-empty-hint">{t('No repositories found')}</div>
+                      ) : (
+                        <div className="settings-repo-list">
+                          {repositories.map((repo) => {
+                            const hidden = new Set(settings?.hiddenRepositoryIds ?? []);
+                            const isVisible = !hidden.has(repo.meta.id);
+                            const currentColor = settings?.projectColors?.[repo.meta.id] ?? repo.meta.color;
+
+                            return (
+                              <div key={repo.meta.id} className="settings-repo-row">
+                                <div className="settings-repo-info">
+                                  <span className="settings-repo-color-dot" style={{ backgroundColor: currentColor }} />
+                                  <Codicon name="repo" className="settings-repo-icon" />
+                                  <span className="settings-repo-name">{repo.meta.name}</span>
+                                </div>
+                                <div className="settings-repo-controls">
+                                  <label className="settings-color-picker-badge" title={t('Map workspace or repository names to graph colors.')}>
+                                    <input
+                                      aria-label={`${t('Project colors')}: ${repo.meta.name}`}
+                                      type="color"
+                                      value={currentColor}
+                                      onChange={(event) =>
+                                        void updateSettings({
+                                          projectColors: { ...(settings?.projectColors ?? {}), [repo.meta.id]: event.target.value },
+                                        })
+                                      }
+                                    />
+                                    <span className="settings-color-picker-preview" style={{ backgroundColor: currentColor }} />
+                                  </label>
+                                  <label className="settings-switch mini" title={t('Visible repository: {0}', repo.meta.name)}>
+                                    <input
+                                      aria-label={t('Visible repository: {0}', repo.meta.name)}
+                                      type="checkbox"
+                                      checked={isVisible}
+                                      onChange={(event) => {
+                                        const next = new Set(hidden);
+                                        if (event.target.checked) next.delete(repo.meta.id);
+                                        else next.add(repo.meta.id);
+                                        void updateSettings({ hiddenRepositoryIds: [...next] });
+                                      }}
+                                    />
+                                    <span className="settings-switch-track">
+                                      <span className="settings-switch-thumb" />
+                                    </span>
+                                  </label>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </SettingsCard>
+  );
+}
+
 function IgnoredFoldersSetting({
   folders,
   onChange,
@@ -770,6 +801,7 @@ function IgnoredFoldersSetting({
   onChange: (folders: string[]) => void;
 }) {
   const { t } = useI18n();
+  const info = useSettingState('ignoredFolders');
   const [inputValue, setInputValue] = useState('');
 
   const handleAdd = (val?: string) => {
@@ -796,11 +828,8 @@ function IgnoredFoldersSetting({
   };
 
   return (
-    <div className="settings-row settings-row-block">
-      <span className="settings-label">
-        <strong>{t('Ignored folders')}</strong>
-        <small>{t('Folder names or workspace-relative paths skipped during repository scanning.')}</small>
-      </span>
+    <div className="settings-row settings-row-block" data-setting="ignoredFolders" data-setting-modified={info?.modified}>
+      <SettingLabel label={t('Ignored folders')} description={t('Folder names or workspace-relative paths skipped during repository scanning.')} setting="ignoredFolders" />
 
       {/* 原生隐藏 textarea 保持测试与 a11y 兼容 */}
       <textarea
@@ -880,6 +909,7 @@ function SettingProtectedBranches({
   onChange: (branches: string[]) => void;
 }) {
   const { t } = useI18n();
+  const info = useSettingState('protectedBranches');
   const [inputValue, setInputValue] = useState('');
 
   const handleAdd = () => {
@@ -895,16 +925,10 @@ function SettingProtectedBranches({
     onChange(branches.filter((b) => b !== branchToRemove));
   };
 
-  const handleReset = () => {
-    onChange(['master', 'main']);
-  };
 
   return (
-    <div className="settings-row settings-row-block">
-      <span className="settings-label">
-        <strong>{t('Protected branches')}</strong>
-        <small>{t('List of protected branch name patterns (e.g. master, main, release/*) that trigger warnings on push and force push.')}</small>
-      </span>
+    <div className="settings-row settings-row-block" data-setting="protectedBranches" data-setting-modified={info?.modified}>
+      <SettingLabel label={t('Protected branches')} description={t('List of protected branch name patterns (e.g. master, main, release/*) that trigger warnings on push and force push.')} setting="protectedBranches" />
 
       <div className="settings-tags-container">
         <div className="settings-tags-list">
@@ -959,16 +983,7 @@ function SettingProtectedBranches({
             <Codicon name="add" />
             <span>{t('Add branch pattern')}</span>
           </button>
-          <button
-            type="button"
-            className="settings-tag-add-btn"
-            style={{ marginLeft: 6 }}
-            onClick={handleReset}
-            title={t('Reset to defaults')}
-          >
-            <Codicon name="discard" />
-            <span>{t('Reset to defaults')}</span>
-          </button>
+
         </div>
       </div>
     </div>
@@ -976,6 +991,7 @@ function SettingProtectedBranches({
 }
 
 function SettingCharInput({
+  setting,
   label,
   description,
   value,
@@ -985,13 +1001,12 @@ function SettingCharInput({
   description: string;
   value: string;
   onChange: (value: string) => void;
+  setting?: SettingPath;
 }) {
+  const info = useSettingState(setting);
   return (
-    <div className="settings-row">
-      <span className="settings-label">
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
+    <div className="settings-row" data-setting={setting} data-setting-modified={info?.modified}>
+      <SettingLabel label={label} description={description} setting={setting} />
       <div className="settings-stepper-input-wrapper" style={{ width: 80 }}>
         <input
           type="text"
@@ -1009,37 +1024,6 @@ function SettingCharInput({
   );
 }
 
-function SettingToggle({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="settings-toggle settings-row">
-      <span className="settings-label">
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-      <span className="settings-switch">
-        <input
-          aria-label={label}
-          type="checkbox"
-          checked={checked}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        <span className="settings-switch-track">
-          <span className="settings-switch-thumb" />
-        </span>
-      </span>
-    </label>
-  );
-}
 
 interface EditorOption {
   id: string;
@@ -1081,8 +1065,9 @@ function ExternalEditorSettings({
     return match ? match.id : 'custom';
   }, [editor]);
 
-  const [activeOverrideMode, setActiveOverrideMode] = useState<string | null>(null);
-  const selectedMode = activeOverrideMode ?? detectedMode;
+  const [activeOverride, setActiveOverride] = useState<{ mode: string; owner: string } | null>(null);
+  const editorOwner = JSON.stringify(editor ?? null);
+  const selectedMode = activeOverride?.owner === editorOwner ? activeOverride.mode : detectedMode;
   const [customExecutable, setCustomExecutable] = useState(editor?.executable ?? '');
 
   useEffect(() => {
@@ -1097,7 +1082,7 @@ function ExternalEditorSettings({
 
   const handleSelect = (mode: string) => {
     setIsOpen(false);
-    setActiveOverrideMode(mode);
+    setActiveOverride({ mode, owner: editorOwner });
     if (mode === 'none') {
       save('', []);
     } else if (mode === 'custom') {
@@ -1142,7 +1127,7 @@ function ExternalEditorSettings({
 
   return (
     <SettingsSection id={id} titleId={titleId} icon="terminal" title={t('External editor')}>
-      <SettingsCard title={t('External editor')}>
+      <SettingsCard setting="externalEditor" title={t('External editor')}>
         <div className="settings-editor-dropdown-field">
           <label className="settings-label" id="external-editor-dropdown-label">
             <strong>{t('External editor')}</strong>
@@ -1258,11 +1243,8 @@ function ExternalEditorSettings({
 
 interface SearchResultsProps {
   query: string;
-  settings: ReturnType<typeof useAppStore.getState>['bootstrap'] extends infer B
-    ? B extends { state: { settings: infer S } }
-      ? S
-      : any
-    : any;
+  focusSetting?: SettingPath;
+  settings: DesktopSettings;
   theme: ThemePreference;
   language: LanguagePreference;
   uiFontSize: UiFontSizePreference;
@@ -1283,6 +1265,7 @@ interface SearchResultsProps {
 
 function SearchResults({
   query,
+  focusSetting,
   settings,
   theme,
   language,
@@ -1306,17 +1289,19 @@ function SearchResults({
   const match = (text: string) => text.toLowerCase().includes(q);
 
   // 1. 外观匹配项
-  const aiMatches = ['AI','Agent CLI','API key','Model','AI prompts','commit-message','commit-explanation','code-review','commit-composer','merge-conflict'].some((label) => `${label} ${t(label)}`.toLowerCase().includes(query.toLowerCase()));
+  const aiDefinitions = settingDefinitions.filter(item => item.category === 'settings-section-ai-title');
+  const aiMatches = ['AI','Agent CLI','API key','Model','AI prompts','commit-message','commit-explanation','code-review','commit-composer','merge-conflict', ...aiDefinitions.map(item => item.label)].some((label) => `${label} ${t(label)}`.toLowerCase().includes(query.toLowerCase()));
+  const aiFocus = focusSetting ?? aiDefinitions.find(item => t(item.label).toLowerCase().includes(q))?.path;
   const appearanceItems: ReactNode[] = [];
   if (match(t('Theme')) || match(t('Appearance')) || match(t('Choose the application color theme')) || match('dark') || match('light') || match('system') || match('2026') || match('github') || match('one dark') || match('onedark') || match('dracula') || match('nord') || match('classic')) {
-    appearanceItems.push(<ThemePreviewSelector key="theme" value={theme} onChange={(val) => void setTheme(val)} />);
+    appearanceItems.push(<SettingSummary key="theme" setting="theme" label={t('Theme')}><ThemePreviewSelector value={theme} onChange={(val) => void setTheme(val)} /></SettingSummary>);
   }
   if (match(t('File icon theme')) || match(t('Choose the file icon theme')) || match('icon') || match('material') || match('catppuccin') || match('seti') || match('codicon')) {
-    appearanceItems.push(<FileIconThemePreviewSelector key="file-icon-theme" value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} />);
+    appearanceItems.push(<SettingSummary key="file-icon-theme" setting="fileIconTheme" label={t('File icon theme')}><FileIconThemePreviewSelector value={fileIconTheme} onChange={(val) => void setFileIconTheme(val)} /></SettingSummary>);
   }
   if (match(t('Language')) || match(t('Simplified Chinese')) || match(t('English')) || match(t('Choose the application language')) || match('chinese') || match('english')) {
     appearanceItems.push(
-      <SettingSelect
+      <SettingSelect setting="language"
         key="lang"
         label={t('Language')}
         description={t('Choose the application language')}
@@ -1332,7 +1317,7 @@ function SearchResults({
   }
   if (match(t('UI font size')) || match(t('Font')) || match(t('Choose the application UI font size')) || match('size') || match('ui') || match('font')) {
     appearanceItems.push(
-      <SettingSelect
+      <SettingSelect setting="uiFontSize"
         key="font"
         label={t('UI font size')}
         description={t('Choose the application UI font size')}
@@ -1357,7 +1342,7 @@ function SearchResults({
   const changesItems: ReactNode[] = [];
   if (match(t('File view')) || match(t('Tree view')) || match(t('List view')) || match(t('How changed files are grouped'))) {
     changesItems.push(
-      <SettingSelect
+      <SettingSelect setting="layout.fileViewMode"
         key="file-view"
         label={t('File view')}
         description={t('How changed files are grouped')}
@@ -1372,7 +1357,7 @@ function SearchResults({
   }
   if (match(t('Changes display mode')) || match(t('Simplified')) || match(t('Changelists')) || match(t('How to display changed files in the Changes tab.'))) {
     changesItems.push(
-      <SettingSelect
+      <SettingSelect setting="changesDisplayMode"
         key="changes-mode"
         label={t('Changes display mode')}
         description={t('How to display changed files in the Changes tab.')}
@@ -1388,7 +1373,7 @@ function SearchResults({
   }
   if (match(t('Default commit action')) || match(t('Commit and push')) || match(t('Default action for the commit button.'))) {
     changesItems.push(
-      <SettingSelect
+      <SettingSelect setting="defaultCommitAction"
         key="commit-action"
         label={t('Default commit action')}
         description={t('Default action for the commit button.')}
@@ -1403,7 +1388,7 @@ function SearchResults({
   }
   if (match(t('Default save action')) || match(t('Shelve')) || match(t('Stash')) || match(t('Default action for the Save button.'))) {
     changesItems.push(
-      <SettingSelect
+      <SettingSelect setting="defaultSaveAction"
         key="save-action"
         label={t('Default save action')}
         description={t('Default action for the Save button.')}
@@ -1418,7 +1403,7 @@ function SearchResults({
   }
   if (match(t('Prompt before adding untracked files')) || match(t('Show a prompt when new untracked files are detected.')) || match(t('Warnings and editor annotations'))) {
     changesItems.push(
-      <SettingToggle
+      <SettingToggle setting="promptBeforeAddingUntracked"
         key="prompt-untracked"
         label={t('Prompt before adding untracked files')}
         description={t('Show a prompt when new untracked files are detected.')}
@@ -1429,7 +1414,7 @@ function SearchResults({
   }
   if (match(t('Suppress diverged branch warning')) || match(t('Suppress the warning when branches have diverged.'))) {
     changesItems.push(
-      <SettingToggle
+      <SettingToggle setting="suppressDivergedWarning"
         key="suppress-diverged"
         label={t('Suppress diverged branch warning')}
         description={t('Suppress the warning when branches have diverged.')}
@@ -1443,7 +1428,7 @@ function SearchResults({
   const guardItems: ReactNode[] = [];
   if (match(t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")) || match('no-verify') || match('noverify') || match('hook') || match('pre-commit')) {
     guardItems.push(
-      <SettingToggle
+      <SettingToggle setting="noVerify"
         key="no-verify"
         label={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
         description={t("Bypass Git pre-commit and commit-msg hooks by running 'git commit --no-verify'.")}
@@ -1454,7 +1439,7 @@ function SearchResults({
   }
   if (match(t('Auto-commit resolved merge')) || match(t('Automatically commit the merge when all conflicts in a repository are resolved (enabled by default).')) || match('merge') || match('conflict')) {
     guardItems.push(
-      <SettingToggle
+      <SettingToggle setting="autoCommitResolvedMerge"
         key="auto-commit-merge"
         label={t('Auto-commit resolved merge')}
         description={t('Automatically commit the merge when all conflicts in a repository are resolved (enabled by default).')}
@@ -1465,7 +1450,7 @@ function SearchResults({
   }
   if (match(t('Warn on large files')) || match(t('Warn before committing files larger than the specified size limit.')) || match('large file') || match('limit')) {
     guardItems.push(
-      <SettingToggle
+      <SettingToggle setting="warnOnLargeFiles"
         key="warn-large-files"
         label={t('Warn on large files')}
         description={t('Warn before committing files larger than the specified size limit.')}
@@ -1476,7 +1461,7 @@ function SearchResults({
   }
   if (match(t('Large file size limit (MB)')) || match(t('Size threshold in megabytes for large file commit warning (default: 50MB).')) || match('mb') || match('50mb') || match('threshold')) {
     guardItems.push(
-      <SettingNumber
+      <SettingNumber setting="largeFileSizeLimitMb"
         key="large-file-limit"
         label={t('Large file size limit (MB)')}
         description={t('Size threshold in megabytes for large file commit warning (default: 50MB).')}
@@ -1490,7 +1475,7 @@ function SearchResults({
   }
   if (match(t('Warn on detached HEAD')) || match(t('Warn before committing in detached HEAD or during an ongoing rebase, offering to create a branch.')) || match('detached') || match('head')) {
     guardItems.push(
-      <SettingToggle
+      <SettingToggle setting="warnOnDetachedHead"
         key="warn-detached"
         label={t('Warn on detached HEAD')}
         description={t('Warn before committing in detached HEAD or during an ongoing rebase, offering to create a branch.')}
@@ -1501,7 +1486,7 @@ function SearchResults({
   }
   if (match(t('Warn on CRLF line separators')) || match(t('Warn if CRLF line separators are about to be committed in text files.')) || match('crlf') || match('newline')) {
     guardItems.push(
-      <SettingToggle
+      <SettingToggle setting="warnOnCrlf"
         key="warn-crlf"
         label={t('Warn on CRLF line separators')}
         description={t('Warn if CRLF line separators are about to be committed in text files.')}
@@ -1512,7 +1497,7 @@ function SearchResults({
   }
   if (match(t('Warn on invalid file names')) || match(t('Warn when committing files with names that may cause issues on Windows or other operating systems (e.g. invalid characters or case collisions).')) || match('invalid') || match('filename')) {
     guardItems.push(
-      <SettingToggle
+      <SettingToggle setting="warnOnInvalidFileNames"
         key="warn-invalid-names"
         label={t('Warn on invalid file names')}
         description={t('Warn when committing files with names that may cause issues on Windows or other operating systems (e.g. invalid characters or case collisions).')}
@@ -1535,7 +1520,7 @@ function SearchResults({
   }
   if (match(t('Sync protected branches from remote')) || match(t('Automatically sync branch protection rules from GitHub, GitLab, and Gitee for remote repositories.')) || match('github') || match('gitlab')) {
     protectionItems.push(
-      <SettingToggle
+      <SettingToggle setting="syncProtectedBranchesFromGithub"
         key="sync-protected-branches"
         label={t('Sync protected branches from remote')}
         description={t('Automatically sync branch protection rules from GitHub, GitLab, and Gitee for remote repositories.')}
@@ -1546,7 +1531,7 @@ function SearchResults({
   }
   if (match(t('Confirm before pushing to protected branches')) || match(t('Show confirmation dialog before pushing to protected branches.')) || match('confirm push')) {
     protectionItems.push(
-      <SettingToggle
+      <SettingToggle setting="showPushDialogForProtectedBranches"
         key="confirm-push-protected"
         label={t('Confirm before pushing to protected branches')}
         description={t('Show confirmation dialog before pushing to protected branches.')}
@@ -1557,7 +1542,7 @@ function SearchResults({
   }
   if (match(t('On push rejected')) || match(t('Behavior when a push is rejected because the remote is ahead (non-fast-forward).')) || match('rejected') || match('non-fast-forward')) {
     protectionItems.push(
-      <SettingSelect
+      <SettingSelect setting="onPushRejected"
         key="push-rejected"
         label={t('On push rejected')}
         description={t('Behavior when a push is rejected because the remote is ahead (non-fast-forward).')}
@@ -1573,7 +1558,7 @@ function SearchResults({
   }
   if (match(t('Use safe force push (--force-with-lease)')) || match(t("Use '--force-with-lease' (safe force push) when force pushing from the extension, or '--force' when disabled.")) || match('force-with-lease') || match('force push')) {
     protectionItems.push(
-      <SettingToggle
+      <SettingToggle setting="useSafeForcePush"
         key="safe-force-push"
         label={t('Use safe force push (--force-with-lease)')}
         description={t("Use '--force-with-lease' (safe force push) when force pushing from the extension, or '--force' when disabled.")}
@@ -1584,7 +1569,7 @@ function SearchResults({
   }
   if (match(t('Add suffix when cherry-picking')) || match(t("Add 'cherry-picked from <hash>' suffix when cherry-picking commits (git cherry-pick -x).")) || match('cherry-pick') || match('-x')) {
     protectionItems.push(
-      <SettingToggle
+      <SettingToggle setting="cherryPickAddSuffix"
         key="cherry-pick-suffix"
         label={t('Add suffix when cherry-picking')}
         description={t("Add 'cherry-picked from <hash>' suffix when cherry-picking commits (git cherry-pick -x).")}
@@ -1595,7 +1580,7 @@ function SearchResults({
   }
   if (match(t('Branch clean character')) || match(t("Character to replace invalid characters and whitespace in Git branch names (e.g. '-').")) || match('sanitize') || match('character')) {
     protectionItems.push(
-      <SettingCharInput
+      <SettingCharInput setting="branchCleanCharacter"
         key="branch-clean-char"
         label={t('Branch clean character')}
         description={t("Character to replace invalid characters and whitespace in Git branch names (e.g. '-').")}
@@ -1609,7 +1594,7 @@ function SearchResults({
   const updateItems: ReactNode[] = [];
   if (match(t('Update project method')) || match(t('Strategy used when updating projects from remote (Merge or Rebase).')) || match('update project') || match('rebase') || match('merge')) {
     updateItems.push(
-      <SettingSelect
+      <SettingSelect setting="updateProjectMethod"
         key="update-project-method"
         label={t('Update project method')}
         description={t('Strategy used when updating projects from remote (Merge or Rebase).')}
@@ -1625,7 +1610,7 @@ function SearchResults({
   }
   if (match(t('Clean working tree before update')) || match(t('How to clean and automatically restore uncommitted local changes during project update.')) || match('clean working tree')) {
     updateItems.push(
-      <SettingSelect
+      <SettingSelect setting="updateProjectCleanWorkingTree"
         key="update-clean-working-tree"
         label={t('Clean working tree before update')}
         description={t('How to clean and automatically restore uncommitted local changes during project update.')}
@@ -1640,7 +1625,7 @@ function SearchResults({
   }
   if (match(t('Show update notification')) || match(t('Show a notification with update details when new commits are received after project update.')) || match('notification')) {
     updateItems.push(
-      <SettingToggle
+      <SettingToggle setting="updateProjectShowNotification"
         key="update-notification"
         label={t('Show update notification')}
         description={t('Show a notification with update details when new commits are received after project update.')}
@@ -1651,7 +1636,7 @@ function SearchResults({
   }
   if (match(t('Recursively clone submodules')) || match(t("Recursively clone submodules when cloning a repository ('git clone --recurse-submodules').")) || match('submodule') || match('recurse')) {
     updateItems.push(
-      <SettingToggle
+      <SettingToggle setting="cloneRecursiveSubmodules"
         key="clone-recursive-submodules"
         label={t('Recursively clone submodules')}
         description={t("Recursively clone submodules when cloning a repository ('git clone --recurse-submodules').")}
@@ -1665,7 +1650,7 @@ function SearchResults({
   const diffItems: ReactNode[] = [];
   if (match(t('Shelve diff comparison base')) || match(t('Comparison base when viewing differences for shelved or stashed changes.')) || match('comparison base') || match('shelve diff')) {
     diffItems.push(
-      <SettingSelect
+      <SettingSelect setting="shelveComparisonBase"
         key="shelve-comparison-base"
         label={t('Shelve diff comparison base')}
         description={t('Comparison base when viewing differences for shelved or stashed changes.')}
@@ -1681,15 +1666,26 @@ function SearchResults({
 
   // 7. 刷新与启动匹配项
   const refreshItems: ReactNode[] = [];
-  if (match(t('Automatic fetch interval')) || match('auto fetch')) refreshItems.push(<SettingNumber key="auto-fetch" label={t('Automatic fetch interval')}
+  if (match(t('Automatic fetch interval')) || match('auto fetch')) refreshItems.push(<SettingNumber setting="autoFetchIntervalMinutes" key="auto-fetch" label={t('Automatic fetch interval')}
     description={t('Fetch remote changes in the background at this interval; 0 disables it.')} value={settings?.autoFetchIntervalMinutes ?? 15}
     min={0} max={1440} suffix={t('minutes')} onChange={(value) => void updateSettings({ autoFetchIntervalMinutes: value })} />);
   const accountItems: ReactNode[] = [];
-  if (match(t('Show account and identity status bar')) || match(t('Show or hide the account and identity entry in the status bar.'))) accountItems.push(<SettingToggle key="show-profile" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
+  if (match(t('Show account and identity status bar')) || match(t('Show or hide the account and identity entry in the status bar.'))) accountItems.push(<SettingToggle setting="showProfileStatusBar" key="show-profile" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
     checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} />);
+  for (const item of [
+    { path:'onlineAvatarsEnabled', label:'Online author avatars', description:'Resolve remote provider addresses to author avatars.' },
+    { path:'avatarCrossPlatformFallback', label:'Search other connected platforms', description:'Try other connected platforms when this repository has no matching author avatar.' },
+    { path:'gravatarEnabled', label:'Use Gravatar for other emails', description:'Send only a SHA-256 email hash to Gravatar.' },
+  ] as const) {
+    if (match(t(item.label)) || match(t(item.description))) accountItems.push(<SettingToggle key={item.path} setting={item.path}
+      label={t(item.label)} description={t(item.description)} checked={settings[item.path] ?? false}
+      disabled={item.path !== 'onlineAvatarsEnabled' && !settings.onlineAvatarsEnabled}
+      onChange={value => void updateSettings({ [item.path]:value, ...(item.path === 'onlineAvatarsEnabled' && !value ? { gravatarEnabled:false, avatarCrossPlatformFallback:false } : {}) })} />);
+  }
+
   if (match(t('Auto-refresh interval')) || match(t('Auto-refresh interval in seconds; 0 disables it.')) || match(t('seconds'))) {
     refreshItems.push(
-      <SettingNumber
+      <SettingNumber setting="autoRefreshInterval"
         key="refresh-interval"
         label={t('Auto-refresh interval')}
         description={t('Auto-refresh interval in seconds; 0 disables it.')}
@@ -1703,7 +1699,7 @@ function SearchResults({
   }
   if (match(t('Fetch on startup')) || match(t('Automatically fetch all remotes when the app starts.'))) {
     refreshItems.push(
-      <SettingToggle
+      <SettingToggle setting="fetchOnStartup"
         key="fetch-startup"
         label={t('Fetch on startup')}
         description={t('Automatically fetch all remotes when the app starts.')}
@@ -1714,7 +1710,7 @@ function SearchResults({
   }
   if (match(t('Fetch when window regains focus')) || match(t('Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.'))) {
     refreshItems.push(
-      <SettingToggle
+      <SettingToggle setting="autoFetchOnFocus"
         key="fetch-focus"
         label={t('Fetch when window regains focus')}
         description={t('Automatically fetch remote changes in the background when this window regains focus, with a three-minute cooldown.')}
@@ -1725,7 +1721,7 @@ function SearchResults({
   }
   if (match(t('Reset view locations on startup')) || match(t('Reset the saved workbench view positions when the app starts.'))) {
     refreshItems.push(
-      <SettingToggle
+      <SettingToggle setting="resetViewLocationsOnStartup"
         key="reset-views"
         label={t('Reset view locations on startup')}
         description={t('Reset the saved workbench view positions when the app starts.')}
@@ -1736,7 +1732,7 @@ function SearchResults({
   }
   if (match(t('Notify on incoming commits')) || match(t('Show a notification when incoming commits are available.'))) {
     refreshItems.push(
-      <SettingToggle
+      <SettingToggle setting="notifyIncomingCommits"
         key="notify-incoming"
         label={t('Notify on incoming commits')}
         description={t('Show a notification when incoming commits are available.')}
@@ -1747,7 +1743,7 @@ function SearchResults({
   }
   if (match(t('Notify on unpushed commits')) || match(t('Show a notification when commits are ready to push.'))) {
     refreshItems.push(
-      <SettingToggle
+      <SettingToggle setting="notifyUnpushedCommits"
         key="notify-unpushed"
         label={t('Notify on unpushed commits')}
         description={t('Show a notification when commits are ready to push.')}
@@ -1761,7 +1757,7 @@ function SearchResults({
   const repoItems: ReactNode[] = [];
   if (match(t('Repository scan depth')) || match(t('Maximum depth of workspace subfolders to scan for repositories.'))) {
     repoItems.push(
-      <SettingNumber
+      <SettingNumber setting="repositoryScanDepth"
         key="scan-depth"
         label={t('Repository scan depth')}
         description={t('Maximum depth of workspace subfolders to scan for repositories.')}
@@ -1774,7 +1770,7 @@ function SearchResults({
   }
   if (match(t('Maximum graph commits')) || match(t('Maximum commits to load in the history graph.'))) {
     repoItems.push(
-      <SettingNumber
+      <SettingNumber setting="maximumGraphCommits"
         key="graph-commits"
         label={t('Maximum graph commits')}
         description={t('Maximum commits to load in the history graph.')}
@@ -1796,7 +1792,7 @@ function SearchResults({
   }
   if (match(t('Cat-file filter mode')) || match(t('Filter transformation mode applied when reading file content from Git revisions or stages.')) || match('cat-file') || match('filters') || match('textconv')) {
     repoItems.push(
-      <SettingSelect
+      <SettingSelect setting="catFileFilterMode"
         key="cat-file-filter"
         label={t('Cat-file filter mode')}
         description={t('Filter transformation mode applied when reading file content from Git revisions or stages.')}
@@ -1812,7 +1808,7 @@ function SearchResults({
   }
   if (match(t('Fetch tags')) || match(t('Policy for fetching tags when fetching branches from remote repositories.')) || match('tags') || match('--tags')) {
     repoItems.push(
-      <SettingSelect
+      <SettingSelect setting="fetchTags"
         key="fetch-tags"
         label={t('Fetch tags')}
         description={t('Policy for fetching tags when fetching branches from remote repositories.')}
@@ -1828,7 +1824,7 @@ function SearchResults({
   }
   if (match(t('Exclude ignored directories')) || match(t('Automatically exclude directories ignored by .gitignore when scanning and analyzing repositories.')) || match('.gitignore') || match('exclude')) {
     repoItems.push(
-      <SettingToggle
+      <SettingToggle setting="excludeIgnoredDirectories"
         key="exclude-ignored-dirs"
         label={t('Exclude ignored directories')}
         description={t('Automatically exclude directories ignored by .gitignore when scanning and analyzing repositories.')}
@@ -1845,7 +1841,7 @@ function SearchResults({
   const aboutItems: ReactNode[] = [];
   if (match(t('Check for updates automatically')) || match(t('Automatically check for new VersionDock releases on startup.')) || match(t('About and updates')) || match(t('View Release Notes')) || match(t('About VersionDock & Check Updates'))) {
     aboutItems.push(
-      <SettingToggle
+      <SettingToggle setting="autoCheckUpdates"
         key="auto-update"
         label={t('Check for updates automatically')}
         description={t('Automatically check for new VersionDock releases on startup.')}
@@ -1880,7 +1876,8 @@ function SearchResults({
   }
 
   const sections: ReactNode[] = [];
-  if (aiMatches) sections.push(<AiSettings key="sec-ai" />);
+  if (match(t('Project colors')) || match(t('Visible repositories'))) sections.push(<RepositoryAppearanceSettings key="repository-appearance" settings={settings} />);
+  if (aiMatches) sections.push(<AiSettings key="sec-ai" focusSetting={aiFocus} />);
   if (appearanceItems.length > 0) {
     sections.push(<SettingsCard key="sec-appearance" title={t('Appearance')}>{appearanceItems}</SettingsCard>);
   }

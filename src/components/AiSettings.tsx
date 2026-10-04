@@ -1,30 +1,19 @@
 import { DialogSurface } from './DialogSurface';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber, SettingText } from './SettingsControls';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AiConfig, AiRuntime, AiTask, AiPrompt } from '../bindings/generated';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { Codicon } from './Codicon';
 import { aiErrorText } from '../ai/errors';
 import { IconButton } from './IconButton';
+import { type SettingPath, effectiveAiConfig } from '../settings/defaults';
 
-const defaultAiConfig: AiConfig = {
-  executionMode: 'provider',
-  provider: 'openai',
-  apiProtocol: 'chat-completions',
-  apiUrl: '',
-  model: '',
-  maxInputTokens: 128000,
-  maxOutputTokens: 128000,
-  cliProvider: 'claude',
-  cliModel: '',
-  cliTimeoutSeconds: 300,
-  cliExecutablePaths: { claude: 'claude', codex: 'codex', antigravity: 'agy', opencode: 'opencode' },
-};
-export function AiSettings() {
+export function AiSettings({ focusSetting }: { focusSetting?: SettingPath } = {}) {
   const { t } = useI18n();
-  const config = useAppStore((s) => s.bootstrap?.state.settings?.aiConfig ?? defaultAiConfig);
+  const storedConfig = useAppStore((s) => s.bootstrap?.state.settings?.aiConfig);
+  const config = useMemo(() => effectiveAiConfig(storedConfig), [storedConfig]);
   const update = useAppStore((s) => s.updateSettings);
   const bridge = useAppStore((s) => s.bridge);
   const [secretState, setSecretState] = useState({ owner: '', text: '' });
@@ -38,6 +27,9 @@ export function AiSettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [prompt, setPrompt] = useState<AiTask>();
+  const inspectedCli = focusSetting?.startsWith('aiConfig.cliExecutablePaths.') ? focusSetting.split('.').at(-1)! : config.cliProvider;
+  const showCli = config.executionMode === 'agent-cli' || focusSetting?.startsWith('aiConfig.cli');
+  const showProvider = config.executionMode === 'provider' || Boolean(focusSetting && !focusSetting.startsWith('aiConfig.cli'));
   const save = (patch: Partial<AiConfig>) => void update({ aiConfig: { ...config, ...patch } });
   const check = async (refreshKey = false) => {
     if (!bridge) return;
@@ -78,7 +70,7 @@ export function AiSettings() {
         payload: { provider: config.provider, api_url: config.apiUrl, key: remove ? null : secret },
       });
       setSecret('');
-      if (JSON.stringify(useAppStore.getState().bootstrap?.state.settings?.aiConfig ?? defaultAiConfig) === runtimeKey) await check();
+      if (JSON.stringify(effectiveAiConfig(useAppStore.getState().bootstrap?.state.settings?.aiConfig)) === runtimeKey) await check();
     } catch (e) {
       setError(aiErrorText(e));
     } finally {
@@ -88,17 +80,17 @@ export function AiSettings() {
   return (
     <section className="ai-settings">
       <SettingsCard title={t('AI execution')}>
-        <SettingSelect label={t('Execution mode')} value={config.executionMode} options={[["provider", t('API provider')], ["agent-cli", t('Agent CLI')]]} onChange={executionMode => save({ executionMode })} />
-        {config.executionMode === 'provider' ? (
+        <SettingSelect setting="aiConfig.executionMode" label={t('Execution mode')} value={config.executionMode} options={[["provider", t('API provider')], ["agent-cli", t('Agent CLI')]]} onChange={executionMode => save({ executionMode })} />
+        {showProvider && (
           <>
-            <SettingSelect label={t('Provider')} value={config.provider} options={['openai', 'claude', 'gemini', 'custom'].map(p => [p, p === 'custom' ? t('Custom') : p === 'openai' ? 'OpenAI' : p === 'claude' ? 'Claude' : 'Gemini'])} onChange={provider => { setSecret(''); save({ provider, apiUrl: '', model: '' }); }} />
-            {['openai', 'custom'].includes(config.provider) && (
-              <SettingSelect label={t('API protocol')} value={config.apiProtocol} options={[["chat-completions", t('Chat Completions')], ["responses", t('Responses')]]} onChange={apiProtocol => save({ apiProtocol })} />
+            <SettingSelect setting="aiConfig.provider" label={t('Provider')} value={config.provider} options={['openai', 'claude', 'gemini', 'custom'].map(p => [p, p === 'custom' ? t('Custom') : p === 'openai' ? 'OpenAI' : p === 'claude' ? 'Claude' : 'Gemini'])} onChange={provider => { setSecret(''); save({ provider, apiUrl: '', model: '' }); }} />
+            {(['openai', 'custom'].includes(config.provider) || focusSetting === 'aiConfig.apiProtocol') && (
+              <SettingSelect setting="aiConfig.apiProtocol" label={t('API protocol')} value={config.apiProtocol} options={[["chat-completions", t('Chat Completions')], ["responses", t('Responses')]]} onChange={apiProtocol => save({ apiProtocol })} />
             )}
-            <SettingText label={t('API URL')} value={config.apiUrl} spellCheck={false}
+            <SettingText setting="aiConfig.apiUrl" label={t('API URL')} value={config.apiUrl} spellCheck={false}
               placeholder={config.provider === 'claude' ? 'https://api.anthropic.com/v1/messages' : config.provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions' : 'https://api.openai.com/v1'}
               onChange={e => save({ apiUrl: e.target.value })} />
-            <SettingText label={t('Model')} value={config.model} placeholder={t('Enter a model ID')} onChange={e => save({ model: e.target.value })} />
+            <SettingText setting="aiConfig.model" label={t('Model')} value={config.model} placeholder={t('Enter a model ID')} onChange={e => save({ model: e.target.value })} />
             <SettingText label={t('API key')} type="password" autoComplete="new-password" spellCheck={false} value={secret}
               placeholder={runtime?.keySaved ? t('Key saved in system secure storage') : t('Enter API key')}
               onChange={e => setSecret(e.target.value)}
@@ -107,16 +99,17 @@ export function AiSettings() {
                 <button className="settings-action-btn" disabled={busy || !runtime?.keySaved} onClick={() => void saveKey(true)}>{t('Remove key')}</button>
               </>} />
           </>
-        ) : (
+        )}
+        {showCli && (
           <>
-            <SettingSelect label={t('Agent CLI')} value={config.cliProvider} options={['claude', 'codex', 'antigravity', 'opencode'].map(p => [p, p])} onChange={cliProvider => save({ cliProvider })} />
-            <SettingText label={t('Executable path')} value={config.cliExecutablePaths[config.cliProvider] ?? ''}
-              onChange={e => save({ cliExecutablePaths: { ...config.cliExecutablePaths, [config.cliProvider]: e.target.value } })}
+            <SettingSelect setting="aiConfig.cliProvider" label={t('Agent CLI')} value={config.cliProvider} options={['claude', 'codex', 'antigravity', 'opencode'].map(p => [p, p])} onChange={cliProvider => save({ cliProvider })} />
+            <SettingText setting={`aiConfig.cliExecutablePaths.${inspectedCli as 'claude' | 'codex' | 'antigravity' | 'opencode'}`} label={t(focusSetting?.startsWith('aiConfig.cliExecutablePaths.') ? `${inspectedCli === 'claude' ? 'Claude' : inspectedCli === 'codex' ? 'Codex' : inspectedCli === 'antigravity' ? 'Antigravity' : 'OpenCode'} executable path` : 'Executable path')} value={config.cliExecutablePaths[inspectedCli] ?? ''}
+              onChange={e => save({ cliExecutablePaths: { ...config.cliExecutablePaths, [inspectedCli]: e.target.value } })}
               accessory={<IconButton title={t('Choose executable')} onClick={() => void bridge?.selectExecutable(t('Choose executable')).then(path => {
-                if (path) save({ cliExecutablePaths: { ...config.cliExecutablePaths, [config.cliProvider]: path } });
+                if (path) save({ cliExecutablePaths: { ...config.cliExecutablePaths, [inspectedCli]: path } });
               })}><Codicon name="folder-opened" /></IconButton>} />
-            <SettingText label={t('Model')} value={config.cliModel} placeholder={t('Use CLI default model')} onChange={e => save({ cliModel: e.target.value })} />
-            <SettingNumber label={t('Timeout (seconds)')} min={30} max={1800} value={config.cliTimeoutSeconds} onChange={cliTimeoutSeconds => save({ cliTimeoutSeconds })} />
+            <SettingText setting="aiConfig.cliModel" label={t('CLI model')} value={config.cliModel} placeholder={t('Use CLI default model')} onChange={e => save({ cliModel: e.target.value })} />
+            <SettingNumber setting="aiConfig.cliTimeoutSeconds" label={t('Timeout (seconds)')} min={30} max={1800} value={config.cliTimeoutSeconds} onChange={cliTimeoutSeconds => save({ cliTimeoutSeconds })} />
           </>
         )}
         <div className="settings-row ai-settings-runtime">
@@ -134,8 +127,8 @@ export function AiSettings() {
         {error && <div role="alert" className="ai-error ai-settings-error">{error}</div>}
       </SettingsCard>
       <SettingsCard title={t('Token limits')}>
-        <SettingNumber label={t('Maximum input tokens')} min={4096} value={config.maxInputTokens} step={1024} onChange={maxInputTokens => save({ maxInputTokens })} />
-        <SettingNumber label={t('Maximum output tokens')} min={1024} max={128000} value={config.maxOutputTokens} step={1024} onChange={maxOutputTokens => save({ maxOutputTokens })} />
+        <SettingNumber setting="aiConfig.maxInputTokens" label={t('Maximum input tokens')} min={4096} value={config.maxInputTokens} step={1024} onChange={maxInputTokens => save({ maxInputTokens })} />
+        <SettingNumber setting="aiConfig.maxOutputTokens" label={t('Maximum output tokens')} min={1024} max={128000} value={config.maxOutputTokens} step={1024} onChange={maxOutputTokens => save({ maxOutputTokens })} />
       </SettingsCard>
       <SettingsCard title={t('AI prompts')}>
         {(['commit-message', 'commit-explanation', 'code-review', 'commit-composer', 'merge-conflict'] as const).map(task => (

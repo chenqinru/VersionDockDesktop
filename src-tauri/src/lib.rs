@@ -157,5 +157,21 @@ mod binding_tests {
         std::fs::create_dir_all(target.parent().expect("binding parent"))
             .expect("binding directory");
         std::fs::write(target, output).expect("write generated bindings");
+        let defaults = serde_json::json!({
+            "settings": crate::models::DesktopSettings::default(),
+            "layout": crate::models::LayoutState::default(),
+        });
+        let target = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/settings/defaults.generated.json");
+        std::fs::create_dir_all(target.parent().expect("defaults parent"))
+            .expect("defaults directory");
+        std::fs::write(
+            target,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&defaults).expect("serialize defaults")
+            ),
+        )
+        .expect("write generated setting defaults");
     }
 }

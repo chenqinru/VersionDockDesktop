@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
+import { SettingLabel } from './SettingsMetadata';
+import { useSettingState } from '../settings/SettingsStateContext';
+import type { SettingPath } from '../settings/defaults';
 
 export function SettingSelect({
+  setting,
   label,
   description = '',
   value,
@@ -9,6 +13,7 @@ export function SettingSelect({
   onChange,
   disabled = false,
 }: {
+  setting?: SettingPath;
   label: string;
   description?: string;
   value: string;
@@ -16,6 +21,7 @@ export function SettingSelect({
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
+  const info = useSettingState(setting);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [menuPosition, setMenuPosition] = useState<{ above: boolean; maxHeight: number }>({ above: false, maxHeight: 220 });
@@ -56,11 +62,8 @@ export function SettingSelect({
   const selectedText = selectedOption ? selectedOption[1] : value;
 
   return (
-    <div className="settings-row">
-      <span className="settings-label">
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
+    <div className="settings-row" data-setting={setting} data-setting-modified={info?.modified}>
+      <SettingLabel label={label} description={description} setting={setting} />
 
       {/* 原生隐藏 select 保持测试与无障碍访问兼容 */}
       <select

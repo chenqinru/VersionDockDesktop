@@ -1089,6 +1089,7 @@ body.is-tab-drop-target * {
 }
 
 .settings-heading .settings-title {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1101,6 +1102,10 @@ body.is-tab-drop-target * {
 }
 
 .settings-heading .settings-title .codicon {
+  position: absolute;
+  right: calc(100% + 7px);
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--versiondock-accent);
   font-size: calc(14px * var(--versiondock-ui-font-scale, 1));
   display: inline-flex;
@@ -7669,3 +7674,21 @@ button.notification-item-action-btn:focus-visible {
 .output-log-row.trace .output-log-details-box { color: var(--versiondock-muted); }
 .output-error-banner { display: flex; align-items: center; gap: 6px; padding: 4px 10px; color: var(--versiondock-warning, #d29922); font-size: 12px; }
 .output-storage-error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Setting values and defaults share the application's neutral interaction colors. */
+.setting-metadata { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 3px; }
+.setting-default { color: var(--versiondock-muted); font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1)); max-width: min(100%, 320px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setting-modified-badge, .settings-category-modified-count { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px; background: var(--versiondock-surface-alt); color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); padding: 1px 5px; line-height: 16px; }
+.settings-category-modified-count { margin-left: auto; min-width: 16px; }
+.setting-reset { flex-shrink: 0; width: 22px; height: 22px; color: var(--versiondock-muted); }
+.settings-row[data-setting-modified="true"] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--versiondock-muted) 40%, transparent); }
+.settings-modified-filter { display: flex; align-items: center; gap: 7px; width: 100%; margin: 9px 0 3px; padding: 7px 10px; border: 1px solid var(--versiondock-border-soft); border-radius: 6px; background: transparent; color: var(--versiondock-muted); text-align: left; font: inherit; cursor: pointer; }
+.settings-modified-filter:hover, .settings-modified-filter[aria-pressed="true"] { background: var(--versiondock-surface-alt); color: var(--versiondock-text); }
+.settings-modified-filter:focus-visible { outline: 1px solid var(--versiondock-muted); outline-offset: 2px; }
+.setting-summary { display: flex; flex-direction: column; gap: 9px; padding: 10px 14px; }
+.settings-modified-results { display: flex; flex-direction: column; gap: 14px; }
+.setting-current-value { max-width: 44%; min-width: 0; overflow-wrap: anywhere; text-align: right; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-text); }
+.settings-switch:has(input:disabled) { opacity: .45; cursor: default; }
+@media (max-width: 900px) { .setting-current-value { max-width: 40%; } .setting-metadata { gap: 4px; } }
+.settings-modified-results .setting-current-value { margin-left: auto; }
+.setting-edit { flex-shrink: 0; color: var(--versiondock-muted); }

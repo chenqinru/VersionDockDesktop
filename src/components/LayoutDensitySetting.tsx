@@ -8,7 +8,7 @@ export function LayoutDensitySetting() {
   const { t } = useI18n();
   const value = useLayoutDensity();
   const update = useAppStore(state => state.updateSettings);
-  return <SettingSelect
+  return <SettingSelect setting="layoutDensity"
     label={t('Layout density')}
     description={t('Comfortable uses rounded cards and inset rows; compact maximizes working space.')}
     value={value}

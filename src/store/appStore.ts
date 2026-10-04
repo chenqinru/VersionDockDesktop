@@ -1,3 +1,4 @@
+import { DEFAULT_SETTINGS, DEFAULT_LAYOUT } from '../settings/defaults';
 import { mergeLogEntries } from '../logs/entries';
 import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
 import { SettingsWriter } from '../services/settingsWriter';
@@ -616,14 +617,8 @@ export interface AppStore {
 
 const emptyState: AppStateSnapshot = {
   schemaVersion: 7,
-  settings: {
-    theme: 'system', language: 'system', uiFontSize: 'standard', layoutDensity: 'comfortable', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
-    promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, autoFetchOnFocus: true, resetViewLocationsOnStartup: false,
-    notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 1,
-    ignoredFolders: ['.git', '.svn', '.hg', 'node_modules', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', 'target'],
-    maximumGraphCommits: 1000, projectColors: {}, externalEditor: null, onlineAvatarsEnabled: false, gravatarEnabled: false, avatarCrossPlatformFallback: false,
-  },
-  layout: { panelSizes: { commit: 360, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
+  settings: DEFAULT_SETTINGS,
+  layout: DEFAULT_LAYOUT,
   lastWorkspaceId: null, openWorkspaceIds: [], activeWorkspaceId: null, recentWorkspaces: [], commitSelections: {},
 };
 
