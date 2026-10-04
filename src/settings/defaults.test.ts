@@ -6,6 +6,7 @@ it('has one valid backend default for every editable setting', () => {
   expect(new Set(settingDefinitions.map(item => item.path)).size).toBe(settingDefinitions.length);
   for (const item of settingDefinitions) { expect(defaultSettingValue(item.path), item.path).not.toBeUndefined(); expect(isSettingModified(item.path, DEFAULT_SETTINGS, DEFAULT_LAYOUT), item.path).toBe(false); }
   expect(DEFAULT_SETTINGS.repositoryScanDepth).toBe(1); expect(DEFAULT_SETTINGS.aiConfig!.maxInputTokens).toBe(128000);
+  expect(DEFAULT_SETTINGS.ignoredFolders).toEqual(['node_modules']);
 });
 it('compares object and set-like settings independently of key or entry order', () => {
   const settings = effectiveSettings(); settings.ignoredFolders = [...settings.ignoredFolders].reverse(); settings.protectedBranches = [...settings.protectedBranches!].reverse();

@@ -1,4 +1,5 @@
 import { formatDemoLogs, logLevelPriority } from '../logs/entries';
+import { DEFAULT_SETTINGS } from '../settings/defaults';
 import { createOperationRequestEvent } from './bridge';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
@@ -304,7 +305,7 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 
 const initialState: AppStateSnapshot = {
   schemaVersion: 7, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace], commitSelections: {},
-  settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', layoutDensity: 'comfortable', fileIconTheme: 'material', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 1, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
+  settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', layoutDensity: 'comfortable', fileIconTheme: 'material', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 1, ignoredFolders: [...DEFAULT_SETTINGS.ignoredFolders], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
   layout: { panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
 };
 

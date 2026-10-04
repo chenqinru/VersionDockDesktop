@@ -21,15 +21,27 @@ use crate::{
 const COLORS: [&str; 8] = [
     "#4EC9B0", "#569CD6", "#DCDCAA", "#C586C0", "#F44747", "#4FC1FF", "#CE9178", "#B5CEA8",
 ];
-const SKIP: [&str; 11] = [
+// Match VersionDock's fallback repository discovery exclusions.
+const SKIP: [&str; 22] = [
     ".git",
-    ".svn",
     ".hg",
+    ".svn",
     "node_modules",
     "vendor",
     "dist",
     "build",
     "out",
+    "target",
+    ".gradle",
+    "venv",
+    ".venv",
+    "coverage",
+    ".cache",
+    "Pods",
+    "DerivedData",
+    ".output",
+    "temp",
+    "tmp",
     ".next",
     ".nuxt",
     ".turbo",
@@ -239,6 +251,7 @@ pub fn scan(
             settings.repository_scan_depth as usize,
             &settings.ignored_folders,
             settings.exclude_ignored_directories,
+            &[],
             &mut discovered,
             &mut seen,
         )?;
@@ -330,13 +343,27 @@ fn parse_gitignore_ignored_dirs(dir: &Path) -> Vec<String> {
             if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('!') {
                 return None;
             }
-            let pattern = trimmed.trim_start_matches('/').trim_end_matches('/');
-            if pattern.is_empty() || pattern.contains('*') || pattern.contains('/') {
+            let pattern = trimmed.replace('\\', "/");
+            let pattern = pattern.trim_matches('/');
+            if pattern.is_empty() {
                 return None;
             }
             Some(pattern.to_string())
         })
         .collect()
+}
+
+fn scan_ignore_matches(relative: &str, raw_pattern: &str) -> bool {
+    let normalized = raw_pattern.trim().replace('\\', "/");
+    let pattern = normalized.trim_matches('/');
+    if relative.is_empty() || pattern.is_empty() {
+        return false;
+    }
+    if pattern.contains('/') {
+        relative == pattern || relative.starts_with(&format!("{pattern}/"))
+    } else {
+        relative.split('/').any(|part| part == pattern)
+    }
 }
 
 fn walk(
@@ -346,6 +373,7 @@ fn walk(
     max_depth: usize,
     ignored_folders: &[String],
     exclude_ignored_directories: bool,
+    inherited_ignore_rules: &[(PathBuf, Vec<String>)],
     result: &mut Vec<(PathBuf, VcsKind)>,
     seen: &mut HashSet<String>,
 ) -> Result<(), DesktopError> {
@@ -366,11 +394,13 @@ fn walk(
     if depth >= max_depth {
         return Ok(());
     }
-    let local_ignored = if exclude_ignored_directories {
-        parse_gitignore_ignored_dirs(current)
-    } else {
-        Vec::new()
-    };
+    let mut ignore_rules = inherited_ignore_rules.to_vec();
+    if exclude_ignored_directories {
+        let local = parse_gitignore_ignored_dirs(current);
+        if !local.is_empty() {
+            ignore_rules.push((current.to_path_buf(), local));
+        }
+    }
     for entry in std::fs::read_dir(current)
         .map_err(|error| DesktopError::new("WORKSPACE_SCAN_FAILED", error.to_string(), true))?
     {
@@ -393,10 +423,19 @@ fn walk(
             .map(|path| path.to_string_lossy().replace('\\', "/"));
         if SKIP.contains(&name.as_str())
             || name.contains(".vd-staging-")
-            || ignored_folders
-                .iter()
-                .any(|ignored| ignored == &name || relative.as_ref() == Some(ignored))
-            || local_ignored.iter().any(|ignored| ignored == &name)
+            || ignored_folders.iter().any(|ignored| {
+                relative
+                    .as_ref()
+                    .is_some_and(|relative| scan_ignore_matches(relative, ignored))
+            })
+            || ignore_rules.iter().any(|(base, rules)| {
+                entry.path().strip_prefix(base).ok().is_some_and(|path| {
+                    let relative = path.to_string_lossy().replace('\\', "/");
+                    rules
+                        .iter()
+                        .any(|rule| scan_ignore_matches(&relative, rule))
+                })
+            })
         {
             continue;
         }
@@ -414,6 +453,7 @@ fn walk(
                 max_depth,
                 ignored_folders,
                 exclude_ignored_directories,
+                &ignore_rules,
                 result,
                 seen,
             )?;
@@ -1478,6 +1518,120 @@ mod tests {
         assert!(repos
             .iter()
             .any(|repo| repo.name == "deep" && repo.is_submodule));
+    }
+
+    #[test]
+    fn repository_scan_excludes_plugin_fixed_folders_but_allows_explicit_roots() {
+        let root = tempdir().unwrap();
+        // Reference fixtures taken from the plugin's FALLBACK_SCAN_SKIP_DIRS.
+        let excluded = [
+            ".git",
+            ".hg",
+            ".svn",
+            "node_modules",
+            "vendor",
+            "dist",
+            "build",
+            "out",
+            "target",
+            ".gradle",
+            "venv",
+            ".venv",
+            "coverage",
+            ".cache",
+            "Pods",
+            "DerivedData",
+            ".output",
+            "temp",
+            "tmp",
+            ".next",
+            ".nuxt",
+            ".turbo",
+        ];
+        for directory in excluded {
+            std::fs::create_dir_all(root.path().join(directory).join("nested/.git")).unwrap();
+        }
+        std::fs::create_dir_all(root.path().join("src/.git")).unwrap();
+        // A root-level .svn would intentionally turn this fixture into an SVN working copy.
+        std::fs::remove_dir_all(root.path().join(".svn")).unwrap();
+        let settings = DesktopSettings {
+            repository_scan_depth: 4,
+            ignored_folders: Vec::new(),
+            exclude_ignored_directories: false,
+            ..Default::default()
+        };
+        let ws = descriptor(vec![root.path().to_string_lossy().into_owned()]).unwrap();
+        let repos = scan(&ws, &settings).unwrap();
+        assert!(repos.iter().any(|repo| repo.name == "src"));
+        assert!(!repos.iter().any(|repo| repo.name == "nested"));
+        let explicit = root.path().join("target/nested");
+        let ws = descriptor(vec![explicit.to_string_lossy().into_owned()]).unwrap();
+        assert_eq!(scan(&ws, &settings).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn repository_scan_normalizes_custom_names_and_relative_paths_like_plugin() {
+        let root = tempdir().unwrap();
+        for path in [
+            "packages/hidden/nested",
+            "other/hidden",
+            "packages/secret/nested",
+            "packages/visible",
+            "other/secret",
+        ] {
+            std::fs::create_dir_all(root.path().join(path).join(".git")).unwrap();
+        }
+        let ws = descriptor(vec![root.path().to_string_lossy().into_owned()]).unwrap();
+        let settings = DesktopSettings {
+            repository_scan_depth: 4,
+            ignored_folders: vec![" /hidden/ ".into(), " /packages\\secret/ ".into()],
+            exclude_ignored_directories: false,
+            ..Default::default()
+        };
+        let repos = scan(&ws, &settings).unwrap();
+        assert_eq!(repos.len(), 2);
+        assert!(repos.iter().any(|repo| repo.name == "visible"));
+        assert!(repos
+            .iter()
+            .any(|repo| repo.name == "secret" && repo.root_path.ends_with("other/secret")));
+        assert!(!scan_ignore_matches("packages/secrets", "packages/secret"));
+        assert!(scan_ignore_matches(
+            "packages/secret/nested",
+            "/packages\\secret/"
+        ));
+        assert!(!scan_ignore_matches("", "hidden"));
+    }
+
+    #[test]
+    fn repository_scan_applies_root_and_nested_gitignore_paths_with_opt_out() {
+        let root = tempdir().unwrap();
+        for path in [
+            "packages/root-ignored/repository",
+            "packages/local-ignored/repository",
+            "packages/literal/repository",
+        ] {
+            std::fs::create_dir_all(root.path().join(path).join(".git")).unwrap();
+        }
+        std::fs::write(
+            root.path().join(".gitignore"),
+            "# comment\n/packages/root-ignored/\n!packages/literal/\n*.literal\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("packages/.gitignore"),
+            "local-ignored/repository/\n",
+        )
+        .unwrap();
+        let ws = descriptor(vec![root.path().to_string_lossy().into_owned()]).unwrap();
+        let mut settings = DesktopSettings {
+            repository_scan_depth: 4,
+            ..Default::default()
+        };
+        let repos = scan(&ws, &settings).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert!(repos[0].root_path.ends_with("packages/literal/repository"));
+        settings.exclude_ignored_directories = false;
+        assert_eq!(scan(&ws, &settings).unwrap().len(), 3);
     }
 
     #[test]

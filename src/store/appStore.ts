@@ -2118,7 +2118,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       for (const [repoId, scopes] of pending) {
         if (!repoId) continue;
-        if (!refreshSnapshot && (scopes.has('status') || scopes.has('index') || scopes.has('operation') || scopes.has('svnRevision'))) {
+        if (!refreshSnapshot && (scopes.has('status') || scopes.has('index') || scopes.has('operation') || scopes.has('svnRevision') || scopes.has('refs'))) {
           const status = await bridge().request<RepositoryStatus>(
             { type: 'repositoryStatus', payload: { workspace_id: workspaceId, repo_id: repoId } },
             { showProgress: false },

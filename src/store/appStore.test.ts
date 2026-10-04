@@ -3037,6 +3037,7 @@ describe('appStore async lifecycle', () => {
       const bridge = new MockBridge((command) => {
         requests.push(command);
         if (command.type === 'bootstrap') return bootstrap;
+        if (command.type === 'repositoryStatus') return repository('a', 'A');
         if (command.type === 'branches' || command.type === 'tags' || command.type === 'historyTopology' || command.type === 'unpushedCommits') return [];
         if (command.type === 'history') return { commits: [commit], hasMore: false };
         if (command.type === 'conflicts') return [{ repoId: 'a', repoName: 'A', repoColor: '#000', path: 'conflict.txt', kind: 'git', binary: false, conflictType: 'text', actions: ['mine'] }];
@@ -5280,4 +5281,40 @@ describe('scheduled background fetch', () => {
     try { await useAppStore.getState().initialize(bridge); const ws = { ...snapshot('disabled', 1), repositories: [repository('git', 'Git')] }; useAppStore.setState({ snapshot: ws, allRepositories: ws.repositories }); await vi.advanceTimersByTimeAsync(3_600_000); expect(fetch).not.toHaveBeenCalled(); }
     finally { useAppStore.getState().dispose(); vi.useRealTimers(); }
   });
+});
+
+it('external commit refs events clear committed files and refresh ahead without a manual workspace reload', async () => {
+  vi.useFakeTimers();
+  let subscriber: ((event: BridgeEvent) => void) | undefined;
+  const requests: Array<{ command: BridgeCommand; options?: RequestOptions }> = [];
+  const previous = { ...repository('external', 'External'), files: [{ path: 'file.txt', status: 'modified', staged: false, unstaged: true, conflicted: false, conflictType: null, conflictTypes: null, conflictStatus: null, submodule: false, isTruncated: false, truncationReason: null }] };
+  const updated = { ...repository('external', 'External'), revision: 'external-commit', ahead: 1 };
+  const commit: CommitNode = { repoId: 'external', hash: 'external-commit', shortHash: 'external', parents: [], author: 'External', email: '', authorDate: '', committerDate: '', message: 'external commit', refs: [], unpushed: true };
+  const bridge = new MockBridge((command, options) => {
+    requests.push({ command, options });
+    if (command.type === 'bootstrap') return bootstrap;
+    if (command.type === 'repositoryStatus') return updated;
+    if (command.type === 'history') return { commits: [commit], hasMore: false };
+    if (command.type === 'branches') return [{ name: 'main', current: true, remote: false, remoteName: null, upstream: 'origin/main', ahead: 1, behind: 0, detachedTag: null, detachedHash: null, lastCommitMessage: 'external commit', lastCommitDate: null }];
+    return [];
+  });
+  bridge.subscribe = (handler) => { subscriber = handler; return () => { subscriber = undefined; }; };
+  try {
+    await useAppStore.getState().initialize(bridge);
+    const current = { ...snapshot('external-workspace', 1), repositories: [previous] };
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, selectedRepoId: 'external', historyByRepo: { external: [] }, historyTopologyByRepo: { external: [] }, mode: 'history' });
+    requests.length = 0;
+    // Also accept old/race-coalesced refs-only events, not just the new richer native scopes.
+    subscriber?.({ workspaceId: current.workspace.id, repoId: 'external', generation: 1, source: 'watcher', scopes: ['refs', 'history'] });
+    await vi.advanceTimersByTimeAsync(301);
+    const state = useAppStore.getState();
+    expect(state.snapshot?.repositories[0]).toMatchObject({ revision: 'external-commit', ahead: 1, files: [] });
+    expect(state.branchesByRepo.external[0]).toMatchObject({ name: 'main', ahead: 1 });
+    expect(state.historyByRepo.external[0].hash).toBe('external-commit');
+    expect(state.mode).toBe('history');
+    expect(requests.find(({ command }) => command.type === 'repositoryStatus')?.options?.showProgress).toBe(false);
+    expect(requests.some(({ command }) => command.type === 'unpushedCommits')).toBe(true);
+    expect(requests.some(({ command }) => command.type === 'workspaceRefresh')).toBe(false);
+    expect(requests.some(({ command }) => command.type === 'sync')).toBe(false);
+  } finally { useAppStore.getState().dispose(); vi.useRealTimers(); }
 });

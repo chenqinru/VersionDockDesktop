@@ -626,6 +626,7 @@ impl AppState {
         repository_roots.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
         for root in &workspace.paths {
             let workspace_id = workspace.id.clone();
+            let watched_root = PathBuf::from(root);
             let last_emit = last_emit.clone();
             let app = app.clone();
             let ignored = settings.ignored_folders.clone();
@@ -635,60 +636,26 @@ impl AppState {
                     let Ok(event) = result else {
                         return;
                     };
-                    let is_ignored = event.paths.iter().all(|path| {
-                        if let Some(ext) = path.extension() {
-                            let ext_str = ext.to_string_lossy();
-                            if ext_str == "log"
-                                || ext_str == "tmp"
-                                || ext_str == "swp"
-                                || ext_str == "lock"
-                            {
-                                return true;
-                            }
-                        }
-                        path.components().any(|part| {
-                            let s = part.as_os_str().to_string_lossy();
-                            s == "logs"
-                                || s == "log"
-                                || s == "target"
-                                || s == "dist"
-                                || s == ".vite"
-                                || s.contains(".vd-staging-")
-                                || ignored.iter().any(|item| item == &s)
-                        })
-                    });
-                    if is_ignored {
+                    // Reads performed by our own status queries are not changes.
+                    if matches!(event.kind, notify::EventKind::Access(_)) {
+                        return;
+                    }
+                    let paths: Vec<_> = event
+                        .paths
+                        .into_iter()
+                        .filter(|path| !watcher_ignored_path(path, &watched_root, &ignored))
+                        .collect();
+                    if paths.is_empty() {
                         return;
                     }
 
-                    // 检查是否为内部 .git 瞬态文件（如 index.lock, COMMIT_EDITMSG 等）
-                    let is_pure_index_touch = event.paths.iter().all(|path| {
-                        let s = path.to_string_lossy().replace('\\', "/");
-                        s.ends_with("/.git/index")
-                            || s.ends_with("/.git/index.lock")
-                            || s.contains("/.git/logs/")
-                            || s.ends_with("/.git/COMMIT_EDITMSG")
-                    });
-                    if is_pure_index_touch {
-                        let key = "pure_git_index_touch";
-                        let Ok(mut last) = last_emit.lock() else {
-                            return;
-                        };
-                        if last.get(key).is_some_and(|instant| {
-                            instant.elapsed() < std::time::Duration::from_millis(2000)
-                        }) {
-                            return;
-                        }
-                        last.insert(key.to_string(), std::time::Instant::now());
-                    }
-
-                    let repository_id = event.paths.iter().find_map(|event_path| {
+                    let repository_id = paths.iter().find_map(|event_path| {
                         repository_roots
                             .iter()
                             .find(|(root, _)| event_path.starts_with(root))
                             .map(|(_, id)| id.clone())
                     });
-                    let scopes = watcher_scopes(&event.paths, repository_id.is_some());
+                    let scopes = watcher_scopes(&paths, repository_id.is_some());
                     let key = format!("{:?}:{:?}", repository_id, scopes);
                     let Ok(mut last) = last_emit.lock() else {
                         return;
@@ -767,6 +734,62 @@ impl AppState {
     }
 }
 
+fn watcher_ignored_path(path: &Path, workspace_root: &Path, ignored: &[String]) -> bool {
+    let Ok(relative) = path.strip_prefix(workspace_root) else {
+        return true;
+    };
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let name = component.as_os_str().to_string_lossy();
+        if name == ".git" {
+            let suffix = components
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            if suffix.ends_with(".lock") {
+                return true;
+            }
+            return !(suffix.is_empty()
+                || matches!(
+                    suffix.as_str(),
+                    "index"
+                        | "HEAD"
+                        | "packed-refs"
+                        | "config"
+                        | "FETCH_HEAD"
+                        | "ORIG_HEAD"
+                        | "shallow"
+                        | "MERGE_HEAD"
+                        | "MERGE_MSG"
+                        | "MERGE_MODE"
+                        | "CHERRY_PICK_HEAD"
+                        | "REVERT_HEAD"
+                )
+                || suffix == "refs"
+                || suffix.starts_with("refs/")
+                || suffix.starts_with("rebase-")
+                || suffix == "sequencer"
+                || suffix.starts_with("sequencer/"));
+        }
+        if name == ".svn" {
+            let suffix = components
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            return !matches!(suffix.as_str(), "" | "wc.db" | "wc.db-wal" | "entries");
+        }
+        // Ignore generated directories, not arbitrary tracked *.log/*.tmp/*.lock files.
+        if components.peek().is_some()
+            && (matches!(name.as_ref(), "target" | "dist" | ".vite")
+                || name.contains(".vd-staging-")
+                || ignored.iter().any(|item| item == &name))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn watcher_scopes(paths: &[PathBuf], repository_known: bool) -> Vec<RefreshScope> {
     if !repository_known {
         return vec![RefreshScope::WorkspaceSnapshot];
@@ -777,9 +800,16 @@ fn watcher_scopes(paths: &[PathBuf], repository_known: bool) -> Vec<RefreshScope
         value.ends_with("/.git/HEAD")
             || value.contains("/.git/refs/")
             || value.ends_with("/.git/packed-refs")
+            || value.ends_with("/.git/config")
+            || value.ends_with("/.git/FETCH_HEAD")
+            || value.ends_with("/.git/ORIG_HEAD")
+            || value.ends_with("/.git/shallow")
     }) {
         add_scope(&mut scopes, RefreshScope::Refs);
         add_scope(&mut scopes, RefreshScope::History);
+        add_scope(&mut scopes, RefreshScope::Status);
+        add_scope(&mut scopes, RefreshScope::Unpushed);
+        add_scope(&mut scopes, RefreshScope::Diff);
     }
     if paths.iter().any(|path| {
         let value = path.to_string_lossy().replace('\\', "/");
@@ -787,9 +817,11 @@ fn watcher_scopes(paths: &[PathBuf], repository_known: bool) -> Vec<RefreshScope
             || value.contains("/.git/MERGE_")
             || value.ends_with("/.git/CHERRY_PICK_HEAD")
             || value.ends_with("/.git/REVERT_HEAD")
+            || value.contains("/.git/sequencer")
     }) {
         add_scope(&mut scopes, RefreshScope::Operation);
         add_scope(&mut scopes, RefreshScope::Conflicts);
+        add_scope(&mut scopes, RefreshScope::Diff);
         add_scope(&mut scopes, RefreshScope::Status);
     }
     if paths.iter().any(|path| {
@@ -799,11 +831,20 @@ fn watcher_scopes(paths: &[PathBuf], repository_known: bool) -> Vec<RefreshScope
         add_scope(&mut scopes, RefreshScope::Index);
         add_scope(&mut scopes, RefreshScope::Status);
         add_scope(&mut scopes, RefreshScope::Conflicts);
+        add_scope(&mut scopes, RefreshScope::Diff);
     }
     if paths.iter().any(|path| {
         path.to_string_lossy()
             .replace('\\', "/")
             .ends_with("/.svn/wc.db")
+            || path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("/.svn/wc.db-wal")
+            || path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("/.svn/entries")
     }) {
         add_scope(&mut scopes, RefreshScope::Status);
         add_scope(&mut scopes, RefreshScope::Conflicts);
@@ -1012,6 +1053,7 @@ mod tests {
         let state = AppState::load(root.path().to_path_buf());
         let mut settings = state.app.read().await.settings.clone();
         assert_eq!(settings.repository_scan_depth, 1);
+        assert_eq!(settings.ignored_folders, vec!["node_modules"]);
         assert_eq!(settings.ai_config.max_input_tokens, 128_000);
         settings.repository_scan_depth = 4;
         settings.ai_config.max_input_tokens = 2_500_000;
@@ -1241,18 +1283,31 @@ mod tests {
     fn classifies_vcs_metadata_watcher_events() {
         assert_eq!(
             watcher_scopes(&[PathBuf::from("/repo/.git/HEAD")], true),
-            vec![RefreshScope::Refs, RefreshScope::History]
+            vec![
+                RefreshScope::Refs,
+                RefreshScope::History,
+                RefreshScope::Status,
+                RefreshScope::Unpushed,
+                RefreshScope::Diff
+            ]
         );
         assert_eq!(
             watcher_scopes(&[PathBuf::from("/repo/.git/refs/heads/main")], true),
-            vec![RefreshScope::Refs, RefreshScope::History]
+            vec![
+                RefreshScope::Refs,
+                RefreshScope::History,
+                RefreshScope::Status,
+                RefreshScope::Unpushed,
+                RefreshScope::Diff
+            ]
         );
         assert_eq!(
             watcher_scopes(&[PathBuf::from("/repo/.git/index")], true),
             vec![
                 RefreshScope::Index,
                 RefreshScope::Status,
-                RefreshScope::Conflicts
+                RefreshScope::Conflicts,
+                RefreshScope::Diff
             ]
         );
         assert_eq!(
@@ -1271,6 +1326,151 @@ mod tests {
             watcher_scopes(&[PathBuf::from("/workspace/new/.git")], false),
             vec![RefreshScope::WorkspaceSnapshot]
         );
+    }
+
+    #[test]
+    fn watcher_filter_keeps_vcs_state_and_real_files_under_default_ignored_directories() {
+        let ignored = DesktopSettings::default().ignored_folders;
+        let root = Path::new("/workspace/logs/project");
+        for suffix in [
+            ".git/HEAD",
+            ".git/index",
+            ".git/refs/heads/main",
+            ".git/refs/remotes/origin/main",
+            ".git/packed-refs",
+            ".git/FETCH_HEAD",
+            ".git/config",
+            ".git/rebase-merge/done",
+            ".svn/wc.db",
+            ".svn/wc.db-wal",
+            "src/tracked.log",
+            "Cargo.lock",
+            "src/tracked.tmp",
+        ] {
+            assert!(
+                !watcher_ignored_path(&root.join(suffix), root, &ignored),
+                "{suffix}"
+            );
+        }
+        for suffix in [
+            ".git/index.lock",
+            ".git/refs/heads/main.lock",
+            ".git/objects/ab/cd",
+            ".git/logs/HEAD",
+            ".git/COMMIT_EDITMSG",
+            ".svn/pristine/ab/cd",
+            "node_modules/pkg/file.js",
+            "target/debug/app",
+            "dist/bundle.js",
+            ".vite/deps/cache.js",
+        ] {
+            assert!(
+                watcher_ignored_path(&root.join(suffix), root, &ignored),
+                "{suffix}"
+            );
+        }
+        assert!(watcher_ignored_path(
+            Path::new("/other/repository/.git/HEAD"),
+            root,
+            &ignored
+        ));
+    }
+
+    #[tokio::test]
+    async fn real_watcher_detects_external_git_stage_commit_and_push() {
+        use std::process::Command;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let working = root.join("working");
+        let remote = root.join("remote.git");
+        std::fs::create_dir(&working).unwrap();
+        let run = |cwd: &Path, args: &[&str]| {
+            let result = Command::new(crate::cli::resolve_executable("git"))
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{:?}: {}",
+                args,
+                String::from_utf8_lossy(&result.stderr)
+            );
+        };
+        run(&root, &["init", "--bare", remote.to_str().unwrap()]);
+        run(&working, &["init", "-b", "main"]);
+        run(&working, &["config", "user.name", "Watcher QA"]);
+        run(&working, &["config", "user.email", "watcher@example.test"]);
+        std::fs::write(working.join("file.txt"), "base\n").unwrap();
+        run(&working, &["add", "."]);
+        run(&working, &["commit", "-m", "base"]);
+        run(
+            &working,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        run(&working, &["push", "-u", "origin", "main"]);
+        let ignored = DesktopSettings::default().ignored_folders;
+        let watched_root = working.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut watcher =
+            notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+                if let Ok(event) = result {
+                    if matches!(event.kind, notify::EventKind::Access(_)) {
+                        return;
+                    }
+                    for path in event.paths {
+                        if !watcher_ignored_path(&path, &watched_root, &ignored) {
+                            let _ = sender.send(watcher_scopes(&[path], true));
+                        }
+                    }
+                }
+            })
+            .unwrap();
+        watcher.watch(&working, RecursiveMode::Recursive).unwrap();
+        let wait_for = |expected: RefreshScope| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            loop {
+                let scopes = receiver
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("external Git change must reach the watcher");
+                if scopes.contains(&expected) {
+                    assert!(scopes.contains(&RefreshScope::Status));
+                    break;
+                }
+            }
+        };
+        std::fs::write(working.join("file.txt"), "external\n").unwrap();
+        run(&working, &["add", "file.txt"]);
+        wait_for(RefreshScope::Index);
+        // Let any initial platform watcher batch drain before the next operation.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        while receiver.try_recv().is_ok() {}
+        run(&working, &["commit", "-m", "external commit"]);
+        wait_for(RefreshScope::Unpushed);
+        let meta = RepositoryMeta {
+            id: "watcher-qa".into(),
+            name: "working".into(),
+            root_path: working.to_string_lossy().into_owned(),
+            color: "#ffffff".into(),
+            kind: crate::models::VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let status = crate::workspace::git_status(meta.clone(), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(status.files.is_empty());
+        assert_eq!(status.ahead, 1);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        while receiver.try_recv().is_ok() {}
+        run(&working, &["push"]);
+        wait_for(RefreshScope::Unpushed);
+        let status = crate::workspace::git_status(meta, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(status.ahead, 0);
     }
 
     #[tokio::test]

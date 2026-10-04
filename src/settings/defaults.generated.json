@@ -51,18 +51,7 @@
     "gravatarEnabled": false,
     "hiddenRepositoryIds": [],
     "ignoredFolders": [
-      ".git",
-      ".svn",
-      ".hg",
-      "node_modules",
-      "vendor",
-      "dist",
-      "build",
-      "out",
-      ".next",
-      ".nuxt",
-      ".turbo",
-      "target"
+      "node_modules"
     ],
     "language": "system",
     "largeFileSizeLimitMb": 50,
