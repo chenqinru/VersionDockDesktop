@@ -4,7 +4,7 @@ import { act } from '@testing-library/react';
 import { AiSettings } from './AiSettings';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
-import type { AiConfig, AiRuntime, BootstrapData } from '../bindings/generated';
+import type { AiConfig, AiRuntime, BootstrapData, BridgeCommand } from '../bindings/generated';
 const config: AiConfig = { executionMode:'provider', provider:'openai', apiProtocol:'chat-completions', apiUrl:'', model:'audit', maxInputTokens:128000, maxOutputTokens:128000, cliProvider:'codex', cliModel:'', cliTimeoutSeconds:300, cliExecutablePaths:{} };
 const data = (provider: string) => ({ state:{ settings:{ aiConfig:{ ...config, provider } } } } as BootstrapData);
 afterEach(() => { cleanup(); useAppStore.setState({ bootstrap:undefined, bridge:undefined }); });
@@ -61,4 +61,19 @@ it('uses the updated cached credential after saving without forcing another keyc
   await screen.findByText('AI provider configured');
   expect(commands).toEqual(['aiRuntime','aiSaveKey','aiRuntime']);
   expect(screen.getByPlaceholderText('Key saved in system secure storage')).toHaveValue('');
+});
+
+it('saves an input token budget above one million from the visible control', async () => {
+  const commands: BridgeCommand[] = [];
+  const bridge = new MockBridge(command => {
+    commands.push(command);
+    if (command.type === 'updateSettings') return { settings: command.payload.settings, effects: { rescanWorkspace:false, reloadHistory:false, restartAutoRefresh:false } };
+    return { available:true, configured:true, provider:'openai', keySaved:true, message:'AI provider configured', version:null };
+  });
+  useAppStore.setState({ bridge, bootstrap:data('openai') }); render(<AiSettings />);
+  const control = screen.getByRole('spinbutton', { name:'Maximum input tokens' });
+  const visible = control.closest('.settings-row')!.querySelector<HTMLInputElement>('.settings-stepper-input')!;
+  fireEvent.focus(visible); fireEvent.change(visible, { target:{ value:'2500000' } }); fireEvent.blur(visible);
+  await waitFor(() => expect(useAppStore.getState().bootstrap!.state.settings!.aiConfig!.maxInputTokens).toBe(2500000));
+  expect(commands.some(command => command.type === 'updateSettings' && command.payload.settings.aiConfig?.maxInputTokens === 2500000)).toBe(true);
 });

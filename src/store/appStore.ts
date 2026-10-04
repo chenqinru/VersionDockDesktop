@@ -619,7 +619,7 @@ const emptyState: AppStateSnapshot = {
   settings: {
     theme: 'system', language: 'system', uiFontSize: 'standard', layoutDensity: 'comfortable', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash',
     promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, autoFetchOnFocus: true, resetViewLocationsOnStartup: false,
-    notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 4,
+    notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 1,
     ignoredFolders: ['.git', '.svn', '.hg', 'node_modules', 'vendor', 'dist', 'build', 'out', '.next', '.nuxt', '.turbo', 'target'],
     maximumGraphCommits: 1000, projectColors: {}, externalEditor: null, onlineAvatarsEnabled: false, gravatarEnabled: false, avatarCrossPlatformFallback: false,
   },
@@ -629,6 +629,7 @@ const emptyState: AppStateSnapshot = {
 
 let watcherTimer: ReturnType<typeof setTimeout> | undefined;
 let autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let autoFetchTimer: ReturnType<typeof setInterval> | undefined;
 let workspaceRequestGeneration = 0;
 let watcherRefreshInFlight = false;
 let watcherRefreshQueued = false;
@@ -1660,7 +1661,33 @@ export const useAppStore = create<AppStore>((set, get) => {
     }
   };
 
+  let autoFetchController: AbortController | undefined;
+  const backgroundFetch = async () => {
+    const owner = bridge();
+    const wid = get().snapshot?.workspace.id;
+    if (!wid || autoFetchController || isOperationActive(get().operations, { workspaceId: wid })) return;
+    const repositories = get().allRepositories.length ? get().allRepositories : get().snapshot?.repositories ?? [];
+    const repos = repositories.filter((repo) => repo.meta.kind === 'git' && !repo.meta.isWorktree);
+    if (!repos.length) return;
+    const leaseName = `auto-fetch:${wid}`;
+    if (!claimSchedulerLease(leaseName, 60_000)) return;
+    const controller = new AbortController();
+    autoFetchController = controller;
+    const renewLease = setInterval(() => { claimSchedulerLease(leaseName, 60_000); }, 20_000);
+    const stopRenewal = () => clearInterval(renewLease);
+    controller.signal.addEventListener('abort', stopRenewal, { once: true });
+    try {
+      await Promise.allSettled(repos.map((repo) => owner.request({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: 'fetch', remote: null, branch: null, force: false } }, { showProgress: false, timeoutMs: 600_000, signal: controller.signal })));
+      if (!controller.signal.aborted && get().bridge === owner && get().snapshot?.workspace.id === wid) await get().refresh(true);
+    } catch (error) {
+      console.debug('Background fetch refresh skipped', error);
+    } finally { stopRenewal(); controller.signal.removeEventListener('abort', stopRenewal); if (autoFetchController === controller) autoFetchController = undefined; }
+  };
   const restartAutoRefresh = () => {
+    if (autoFetchTimer) clearInterval(autoFetchTimer);
+    autoFetchTimer = undefined;
+    const minutes = settings().autoFetchIntervalMinutes ?? 15;
+    if (minutes > 0) autoFetchTimer = setInterval(() => void backgroundFetch(), minutes * 60_000);
     if (autoRefreshTimer) clearInterval(autoRefreshTimer);
     autoRefreshTimer = undefined;
     const seconds = settings().autoRefreshInterval;
@@ -2491,6 +2518,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
       if (watcherTimer) clearTimeout(watcherTimer);
       if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      if (autoFetchTimer) clearInterval(autoFetchTimer);
+      autoFetchTimer = undefined;
+      autoFetchController?.abort();
+      autoFetchController = undefined;
       commitSelectionSaveTimers.forEach((timer) => clearTimeout(timer));
       commitSelectionSaveTimers.clear();
       watcherTimer = undefined;

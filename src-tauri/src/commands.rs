@@ -88,6 +88,7 @@ pub async fn bridge_request(
 ) -> Result<ResponseEnvelope, DesktopError> {
     let request_id = envelope.request_id.clone();
     let command = envelope.command;
+    let push_approvals = envelope.push_approvals;
     let (phase, message) = command_progress(&command);
     let error_context = command_error_context(&command);
     let context = envelope.context.clone();
@@ -165,6 +166,7 @@ pub async fn bridge_request(
                         &request_id,
                         &context,
                         &started_at,
+                        &push_approvals,
                     ))
                     .await
                 }
@@ -1067,6 +1069,7 @@ async fn dispatch(
     operation_id: &str,
     request_context: &crate::models::RequestContext,
     started_at: &str,
+    push_approvals: &[crate::models::PushProtectionTarget],
 ) -> Result<serde_json::Value, DesktopError> {
     match command {
         BridgeCommand::Bootstrap => {
@@ -1227,6 +1230,40 @@ async fn dispatch(
                 },
                 runtime,
             })
+        }
+        BridgeCommand::PushProtectionCheck {
+            workspace_id,
+            repo_ids,
+            branch,
+            force,
+        } => {
+            let mut targets = Vec::new();
+            for id in repo_ids {
+                let repo = resolve_repo(state, &workspace_id, &id).await?;
+                if repo.kind == VcsKind::Git {
+                    targets.push(
+                        crate::protection::target(
+                            state,
+                            &repo,
+                            branch.as_deref(),
+                            force,
+                            true,
+                            token,
+                        )
+                        .await?,
+                    );
+                }
+            }
+            json(targets)
+        }
+        BridgeCommand::BranchProtection {
+            workspace_id,
+            repo_id,
+            refresh,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let settings = state.app.read().await.settings.clone();
+            json(crate::protection::rules(state, &repo, &settings, refresh, token).await?)
         }
         BridgeCommand::AiRuntime => json(crate::ai::runtime(state, false).await),
         BridgeCommand::AiRefreshKey => json(crate::ai::runtime(state, true).await),
@@ -1586,25 +1623,41 @@ async fn dispatch(
             json(provider::github_begin(account_id, token).await?)
         }
         BridgeCommand::ProviderGithubComplete { flow_id } => {
-            json(provider::github_complete(&state.config_dir, &flow_id, token).await?)
+            let value = provider::github_complete(&state.config_dir, &flow_id, token).await?;
+            state.protection.clear();
+            json(value)
         }
         BridgeCommand::ProviderGithubSave {
             account_id,
             token: secret,
-        } => json(provider::github_save(&state.config_dir, account_id, &secret, token).await?),
+        } => {
+            let value =
+                provider::github_save(&state.config_dir, account_id, &secret, token).await?;
+            state.protection.clear();
+            json(value)
+        }
         BridgeCommand::ProviderGitlabSave {
             account_id,
             host,
             token: secret,
         } => {
-            json(provider::gitlab_save(&state.config_dir, account_id, &host, &secret, token).await?)
+            let value =
+                provider::gitlab_save(&state.config_dir, account_id, &host, &secret, token).await?;
+            state.protection.clear();
+            json(value)
         }
         BridgeCommand::ProviderGiteeSave {
             account_id,
             token: secret,
-        } => json(provider::gitee_save(&state.config_dir, account_id, &secret, token).await?),
+        } => {
+            let value = provider::gitee_save(&state.config_dir, account_id, &secret, token).await?;
+            state.protection.clear();
+            json(value)
+        }
         BridgeCommand::ProviderRemove { account_id } => {
-            json(provider::remove(&state.config_dir, &account_id)?)
+            let value = provider::remove(&state.config_dir, &account_id)?;
+            state.protection.clear();
+            json(value)
         }
         BridgeCommand::ProviderRepositories {
             account_id,
@@ -1664,6 +1717,10 @@ async fn dispatch(
             push,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            if push {
+                crate::protection::enforce_push(state, &repo, None, false, push_approvals, token)
+                    .await?;
+            }
             let branch = vcs::publish_preflight(&repo, token).await?;
             let created = provider::create_repository(
                 &state.config_dir,
@@ -1709,6 +1766,15 @@ async fn dispatch(
                         &account_id,
                         &created.clone_url,
                     )?;
+                    crate::protection::enforce_push(
+                        state,
+                        &repo,
+                        Some(&branch),
+                        false,
+                        push_approvals,
+                        token,
+                    )
+                    .await?;
                     vcs::push_published(&repo, &branch, &credentials, token).await?;
                     result.pushed = true;
                 }
@@ -2195,14 +2261,16 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
+            let mode = state.app.read().await.settings.cat_file_filter_mode.clone();
             json(
-                vcs::diff(
+                crate::diff_content::file_diff(
                     &repo,
                     &relative_path,
                     staged,
                     revision,
                     from_revision,
                     to_revision,
+                    &mode,
                     token,
                 )
                 .await?,
@@ -2216,7 +2284,18 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::stash_file_diff(&repo, &reference, &relative_path, token).await?)
+            let settings = state.app.read().await.settings.clone();
+            json(
+                crate::diff_content::stash_diff(
+                    &repo,
+                    &reference,
+                    &relative_path,
+                    &settings.shelve_comparison_base,
+                    &settings.cat_file_filter_mode,
+                    token,
+                )
+                .await?,
+            )
         }
         BridgeCommand::ShelfFileDiff {
             workspace_id,
@@ -2226,7 +2305,16 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(shelf::file_diff(&state.config_dir, &repo, &shelf_id, &relative_path).await?)
+            let document =
+                shelf::file_diff(&state.config_dir, &repo, &shelf_id, &relative_path).await?;
+            let base = state
+                .app
+                .read()
+                .await
+                .settings
+                .shelve_comparison_base
+                .clone();
+            json(crate::diff_content::shelf_diff(&repo, document, &base, token).await?)
         }
         BridgeCommand::Stage {
             workspace_id,
@@ -2560,6 +2648,22 @@ async fn dispatch(
             targets,
             push,
         } => {
+            if push {
+                for target in &targets {
+                    let repo = resolve_repo(state, &workspace_id, &target.repo_id).await?;
+                    if repo.kind == VcsKind::Git {
+                        crate::protection::enforce_push(
+                            state,
+                            &repo,
+                            None,
+                            false,
+                            push_approvals,
+                            token,
+                        )
+                        .await?;
+                    }
+                }
+            }
             let cached = state.cached_repositories(&workspace_id).await;
             let all_metas = if cached.is_empty() {
                 if let Ok(descriptor) = state.workspace(&workspace_id).await {
@@ -2700,6 +2804,17 @@ async fn dispatch(
                     None
                 };
                 let commit_result = with_write(state, &repo_id, token, async {
+                    if push && repo.kind == VcsKind::Git {
+                        crate::protection::enforce_push(
+                            state,
+                            &repo,
+                            None,
+                            false,
+                            push_approvals,
+                            token,
+                        )
+                        .await?;
+                    }
                     emit_operation_phase(
                         app,
                         operation_id,
@@ -2745,6 +2860,15 @@ async fn dispatch(
                                     Some(total),
                                 );
                                 let settings = state.app.read().await.settings.clone();
+                                crate::protection::enforce_push(
+                                    state,
+                                    &repo,
+                                    None,
+                                    false,
+                                    push_approvals,
+                                    token,
+                                )
+                                .await?;
                                 Box::pin(vcs::sync(
                                     &repo,
                                     crate::models::SyncAction::Push,
@@ -2862,6 +2986,7 @@ async fn dispatch(
             branch,
             force,
         } => {
+            let refresh_protection = matches!(action, crate::models::SyncAction::Fetch);
             let (phase, message) = sync_phase(&action);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let needs_worker = crate::update_worker::needs_worker(&repo, &action);
@@ -2876,6 +3001,22 @@ async fn dispatch(
                     None,
                     None,
                 );
+                if repo.kind == VcsKind::Git
+                    && matches!(
+                        action,
+                        crate::models::SyncAction::Push | crate::models::SyncAction::PushTags
+                    )
+                {
+                    crate::protection::enforce_push(
+                        state,
+                        &repo,
+                        branch.as_deref(),
+                        force.unwrap_or(false),
+                        push_approvals,
+                        token,
+                    )
+                    .await?;
+                }
                 let settings = state.app.read().await.settings.clone();
                 if needs_worker {
                     let request = crate::update_worker::UpdateRequest {
@@ -2891,7 +3032,7 @@ async fn dispatch(
                                 .map(|workspace| workspace.name),
                         }),
                         config_dir: state.config_dir.clone(),
-                        repo,
+                        repo: repo.clone(),
                         action,
                         remote,
                         branch,
@@ -2923,6 +3064,10 @@ async fn dispatch(
                 .await
             })
             .await?;
+            if refresh_protection {
+                let settings = state.app.read().await.settings.clone();
+                crate::protection::rules(state, &repo, &settings, true, token).await?;
+            }
             json(value)
         }
         BridgeCommand::History {
@@ -3090,6 +3235,23 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
+            let settings = state.app.read().await.settings.clone();
+            // Provider network access must not hold up the branch menu or its 12s read request.
+            if settings.sync_protected_branches_from_github && repo.kind == VcsKind::Git {
+                let owner = app.clone();
+                let repository = repo.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = owner.state::<AppState>();
+                    let _ = crate::protection::rules(
+                        &state,
+                        &repository,
+                        &settings,
+                        true,
+                        &tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await;
+                });
+            }
             json(vcs::branches(&repo, token).await?)
         }
         BridgeCommand::BranchOperation {
@@ -3099,7 +3261,16 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let result = with_write(state, &repo_id, token, async {
-                vcs::branch_operation(&repo, operation, token).await
+                {
+                    let settings = state.app.read().await.settings.clone();
+                    let patterns =
+                        if matches!(operation, crate::models::BranchOperation::Delete { .. }) {
+                            crate::protection::rules(state, &repo, &settings, true, token).await?
+                        } else {
+                            Vec::new()
+                        };
+                    vcs::branch_operation_with_protection(&repo, operation, &patterns, token).await
+                }
             })
             .await?;
             if repo.kind == crate::models::VcsKind::Svn {
@@ -3576,7 +3747,8 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
-            json(vcs::conflict_versions(&repo, &relative_path, token).await?)
+            let mode = state.app.read().await.settings.cat_file_filter_mode.clone();
+            json(vcs::conflict_versions_with_mode(&repo, &relative_path, &mode, token).await?)
         }
         BridgeCommand::ConflictSave {
             workspace_id,

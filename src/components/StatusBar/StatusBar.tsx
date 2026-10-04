@@ -9,6 +9,7 @@ import { useAppStore } from '../../store/appStore';
 
 export function StatusBar() {
   const ready = useAppStore((state) => state.ready);
+  const showProfile = useAppStore((state) => state.bootstrap?.state.settings?.showProfileStatusBar ?? true);
   const snapshot = useAppStore((state) => state.snapshot);
 
   const hasTasks = useTaskProgressStore((state) => state.open || Object.keys(state.tasks).length > 0);
@@ -21,7 +22,7 @@ export function StatusBar() {
     <footer className="app-statusbar" role="contentinfo">
       <div className="statusbar-left">
         {snapshot && <><BranchStatusBarItem key={snapshot.workspace.id} />
-        <ProfileStatusBarItem key={`profile:${snapshot.workspace.id}`} /></>}
+        {showProfile && <ProfileStatusBarItem key={`profile:${snapshot.workspace.id}`} />}</>}
       </div>
       <div className="statusbar-right">
         <OperationStatusBarItem />

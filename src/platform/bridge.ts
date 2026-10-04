@@ -1,3 +1,4 @@
+import { approveProtectedPush, needsProtectedPushApproval } from '../services/pushProtection';
 import { formatDemoLogs, logLevelPriority, mergeLogEntries } from '../logs/entries';
 import type {
   AiEvent, BridgeCommand, DesktopError, OperationDomain,
@@ -328,6 +329,7 @@ export class TauriBridge implements VersionDockBridge {
   }
 
   async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {
+    const pushApprovals = needsProtectedPushApproval(command) ? await approveProtectedPush(command, (command, options) => this.request(command, options), options) : [];
     const id = requestId();
     const inferred = commandIdentifiers(command);
     const contextBase = {
@@ -352,7 +354,7 @@ export class TauriBridge implements VersionDockBridge {
     this.handlers.forEach((handler) => handler({ type: 'operation-request', progressEvent: true, requestId: id, command, context }));
     // Report completion from the actual native promise, not the timeout/abort race:
     // the backend can still be restoring local changes after cancellation.
-    const nativeResponse = invoke<ResponseEnvelope>('bridge_request', { envelope: { requestId: id, context, command } });
+    const nativeResponse = invoke<ResponseEnvelope>('bridge_request', { envelope: { requestId: id, context, command, pushApprovals } });
     void nativeResponse.then(
       (response) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error: response.error ?? undefined, result: response.result })),
       (error) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error })),
@@ -621,6 +623,7 @@ export class MockBridge implements VersionDockBridge {
   constructor(private readonly responder: (command: BridgeCommand, options?: RequestOptions) => unknown | Promise<unknown>) {}
   send(command: BridgeCommand): void { void this.responder(command); }
   async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {
+    if (needsProtectedPushApproval(command)) await approveProtectedPush(command, (command, options) => this.request(command, options), options);
     const id = requestId();
     if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
     options.onOperationId?.(id);

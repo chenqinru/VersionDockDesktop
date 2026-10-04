@@ -1442,7 +1442,11 @@ mod tests {
         std::fs::create_dir_all(root.path().join("one/two/three/.svn")).unwrap();
         let path = root.path().to_string_lossy().into_owned();
         let ws = descriptor(vec![path]).unwrap();
-        let repos = scan(&ws, &DesktopSettings::default()).unwrap();
+        let settings = DesktopSettings {
+            repository_scan_depth: 4,
+            ..DesktopSettings::default()
+        };
+        let repos = scan(&ws, &settings).unwrap();
         assert!(repos
             .iter()
             .any(|repo| repo.name == "a" && repo.kind == VcsKind::Git));
@@ -1452,11 +1456,9 @@ mod tests {
         assert!(repos
             .iter()
             .any(|repo| repo.name == "deep" && !repo.is_submodule));
-        let settings = DesktopSettings {
-            repository_scan_depth: 1,
-            ..DesktopSettings::default()
-        };
-        let shallow = scan(&ws, &settings).unwrap();
+        let default_settings = DesktopSettings::default();
+        assert_eq!(default_settings.repository_scan_depth, 1);
+        let shallow = scan(&ws, &default_settings).unwrap();
         assert!(!shallow.iter().any(|repo| repo.name == "deep"));
         assert!(!shallow.iter().any(|repo| repo.name == "three"));
     }

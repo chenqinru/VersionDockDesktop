@@ -56,7 +56,7 @@ impl AiConfig {
         if !["claude", "codex", "antigravity", "opencode"].contains(&self.cli_provider.as_str()) {
             self.cli_provider = "claude".into();
         }
-        self.max_input_tokens = self.max_input_tokens.clamp(4_096, 1_000_000);
+        self.max_input_tokens = self.max_input_tokens.max(4_096);
         self.max_output_tokens = self.max_output_tokens.clamp(1_024, 128_000);
         self.cli_timeout_seconds = self.cli_timeout_seconds.clamp(30, 1_800);
         self.model = self.model.trim().into();

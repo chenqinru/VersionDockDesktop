@@ -6546,3 +6546,311 @@ async fn real_git_restore_warnings_preserve_actual_update_and_conflict_outcomes(
         }
     }
 }
+
+#[tokio::test]
+async fn settings_diff_filters_stash_shelf_and_protection_are_real() {
+    use crate::{
+        diff_content,
+        models::{CatFileFilterMode, DesktopSettings, ShelveComparisonBase},
+        protection,
+        state::AppState,
+    };
+    if !available("git") {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "Test"], root);
+    command("git", &["config", "user.email", "test@example.test"], root);
+    command(
+        "git",
+        &["config", "filter.fixture.clean", "sed s/VIEW/RAW/g"],
+        root,
+    );
+    command(
+        "git",
+        &["config", "filter.fixture.smudge", "sed s/RAW/VIEW/g"],
+        root,
+    );
+    command(
+        "git",
+        &["config", "diff.fixture.textconv", "sed s/VIEW/TEXT/g"],
+        root,
+    );
+    std::fs::write(
+        root.join(".gitattributes"),
+        "*.txt filter=fixture diff=fixture\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("file.txt"), "VIEW base\nunchanged\n").unwrap();
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "base"], root);
+    let r = repo(root, VcsKind::Git);
+    let t = CancellationToken::new();
+    std::fs::write(root.join("file.txt"), "VIEW saved\nunchanged\n").unwrap();
+    let filtered = diff_content::file_diff(
+        &r,
+        "file.txt",
+        false,
+        None,
+        None,
+        None,
+        &CatFileFilterMode::Filters,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(filtered.content.contains("-VIEW base"));
+    assert!(filtered.content.contains("+VIEW saved"));
+    let raw = diff_content::file_diff(
+        &r,
+        "file.txt",
+        false,
+        None,
+        None,
+        None,
+        &CatFileFilterMode::None,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(raw.content.contains("-RAW base"));
+    command("git", &["add", "file.txt"], root);
+    let converted = diff_content::file_diff(
+        &r,
+        "file.txt",
+        true,
+        None,
+        None,
+        None,
+        &CatFileFilterMode::Textconv,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(converted.content.contains("-TEXT base"));
+    assert!(converted.content.contains("+TEXT saved"));
+    command("git", &["stash", "push", "-u", "-m", "saved"], root);
+    std::fs::write(root.join("file.txt"), "VIEW current\nunchanged\n").unwrap();
+    let local = diff_content::stash_diff(
+        &r,
+        "stash@{0}",
+        "file.txt",
+        &ShelveComparisonBase::Local,
+        &CatFileFilterMode::Filters,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(local.content.contains("-VIEW current"));
+    assert!(local.content.contains("+VIEW saved"));
+    let parent = diff_content::stash_diff(
+        &r,
+        "stash@{0}",
+        "file.txt",
+        &ShelveComparisonBase::Parent,
+        &CatFileFilterMode::Filters,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(parent.content.contains("-VIEW base"));
+    command("git", &["config", "filter.fixture.smudge", "false"], root);
+    let fallback = diff_content::blob(&r, "HEAD:file.txt", &CatFileFilterMode::Filters, &t)
+        .await
+        .unwrap();
+    assert!(String::from_utf8_lossy(&fallback).contains("RAW base"));
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert_eq!(
+        diff_content::blob(&r, "HEAD:file.txt", &CatFileFilterMode::Filters, &cancelled)
+            .await
+            .unwrap_err()
+            .code,
+        "REQUEST_CANCELLED"
+    );
+    command(
+        "git",
+        &["config", "filter.fixture.smudge", "sed s/RAW/VIEW/g"],
+        root,
+    );
+    let config = tempdir().unwrap();
+    let id = shelf::create(config.path(), &r, "saved current", &["file.txt".into()], &t)
+        .await
+        .unwrap();
+    let patch = shelf::file_diff(config.path(), &r, &id, "file.txt")
+        .await
+        .unwrap();
+    let preview = diff_content::apply_preview(&patch.content, "VIEW now\nunchanged\n");
+    assert!(preview.contains("RAW current") || preview.contains("VIEW current"));
+    assert_eq!(
+        std::fs::read_to_string(root.join("file.txt")).unwrap(),
+        "VIEW base\nunchanged\n"
+    );
+    // Native enforcement handles local configuration, ordinary/force push and stale approvals.
+    let state = AppState::load(config.path().into());
+    {
+        let mut snapshot = state.app.write().await;
+        snapshot.settings = DesktopSettings::default();
+        snapshot.settings.sync_protected_branches_from_github = false;
+        snapshot.settings.protected_branches = vec!["main".into()];
+    }
+    let target = protection::target(&state, &r, None, false, false, &t)
+        .await
+        .unwrap();
+    assert!(target.requires_confirmation);
+    assert_eq!(
+        protection::enforce_push(&state, &r, None, false, &[], &t)
+            .await
+            .unwrap_err()
+            .code,
+        "PROTECTED_PUSH_CONFIRMATION_REQUIRED"
+    );
+    protection::enforce_push(&state, &r, None, false, std::slice::from_ref(&target), &t)
+        .await
+        .unwrap();
+    state
+        .app
+        .write()
+        .await
+        .settings
+        .protected_branches
+        .push("release/**".into());
+    assert!(
+        protection::enforce_push(&state, &r, None, false, &[target], &t)
+            .await
+            .is_err()
+    );
+    state
+        .app
+        .write()
+        .await
+        .settings
+        .show_push_dialog_for_protected_branches = false;
+    protection::enforce_push(&state, &r, None, false, &[], &t)
+        .await
+        .unwrap();
+    assert!(protection::enforce_push(&state, &r, None, true, &[], &t)
+        .await
+        .is_err());
+    let patterns = vec!["main".into()];
+    assert_eq!(
+        vcs::branch_operation_with_protection(
+            &r,
+            BranchOperation::Delete {
+                name: "main".into(),
+                force: true
+            },
+            &patterns,
+            &t
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "PROTECTED_BRANCH_DELETE"
+    );
+}
+
+#[tokio::test]
+async fn settings_diff_preview_preserves_newlines_unicode_renames_and_worktree() {
+    use crate::{
+        diff_content,
+        models::{CatFileFilterMode, ShelveComparisonBase},
+    };
+    if !available("git") {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let t = CancellationToken::new();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "Test"], root);
+    command("git", &["config", "user.email", "test@example.test"], root);
+    let old = "旧 文件.txt";
+    let new = "新 文件.txt";
+    let base = (0..30).map(|i| format!("line-{i}\n")).collect::<String>();
+    std::fs::write(root.join(old), &base).unwrap();
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "base"], root);
+    command("git", &["mv", old, new], root);
+    let changed = base.replace("line-15", "saved-15");
+    std::fs::write(root.join(new), &changed).unwrap();
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "rename"], root);
+    let r = repo(root, VcsKind::Git);
+    let diff = diff_content::file_diff(
+        &r,
+        new,
+        false,
+        Some(command_output("git", &["rev-parse", "HEAD"], root)),
+        None,
+        None,
+        &CatFileFilterMode::Filters,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(diff.content.contains("-line-15"), "{}", diff.content);
+    assert!(diff.content.contains("+saved-15"));
+    assert!(diff.content.contains(" line-0"));
+    std::fs::write(root.join(new), changed.replace("line-22", "shelved-22")).unwrap();
+    let config = tempdir().unwrap();
+    let id = shelf::create(config.path(), &r, "unicode", &[new.into()], &t)
+        .await
+        .unwrap();
+    let patch = shelf::file_diff(config.path(), &r, &id, new).await.unwrap();
+    let parent = diff_content::shelf_diff(&r, patch.clone(), &ShelveComparisonBase::Parent, &t)
+        .await
+        .unwrap();
+    assert!(parent.content.contains(" line-0"));
+    assert!(parent.content.contains("-line-22"));
+    let current = changed.replace("line-0", "current-0");
+    std::fs::write(root.join(new), &current).unwrap();
+    let local = diff_content::shelf_diff(&r, patch, &ShelveComparisonBase::Local, &t)
+        .await
+        .unwrap();
+    assert!(local.content.contains(" current-0"));
+    assert!(local.content.contains("+shelved-22"));
+    assert_eq!(std::fs::read_to_string(root.join(new)).unwrap(), current);
+    let doc = diff_content::compare("no-newline.txt", b"a\nb", b"a\nc", &t)
+        .await
+        .unwrap();
+    assert!(doc.content.contains("\\ No newline at end of file"));
+    assert!(doc.content.contains("+c"));
+    let identical = diff_content::compare("same.txt", b"same", b"same", &t)
+        .await
+        .unwrap();
+    assert!(identical.content.contains(" same"));
+    assert_eq!(identical.line_count, 1);
+    assert!(
+        diff_content::compare("binary.bin", b"a\0b", b"a\0c", &t)
+            .await
+            .unwrap()
+            .binary
+    );
+    let large = vec![b'\n'; 50_001];
+    assert!(
+        diff_content::compare("large.txt", &[], &large, &t)
+            .await
+            .unwrap()
+            .truncated
+    );
+    std::fs::write(root.join("new.txt"), "untracked-no-newline").unwrap();
+    command("git", &["stash", "push", "-u", "-m", "untracked"], root);
+    let untracked = diff_content::stash_diff(
+        &r,
+        "stash@{0}",
+        "new.txt",
+        &ShelveComparisonBase::Local,
+        &CatFileFilterMode::None,
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(untracked.content.contains("+untracked-no-newline"));
+    let absent = diff_content::blob(&r, "HEAD:deleted.txt", &CatFileFilterMode::None, &t)
+        .await
+        .unwrap();
+    assert!(absent.is_empty());
+}

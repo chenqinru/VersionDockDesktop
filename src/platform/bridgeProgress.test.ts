@@ -1,5 +1,6 @@
+import { currentDialog, publishDialog } from '../components/dialogService';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OperationEvent, ResponseEnvelope } from '../bindings/generated';
+import type { BridgeCommand, OperationEvent, ResponseEnvelope } from '../bindings/generated';
 import type { BridgeEvent } from './bridge';
 import { MockBridge, TauriBridge } from './bridge';
 
@@ -61,4 +62,15 @@ describe('native progress bridge contract', () => {
     emit({ payload: operation }); emit({ payload: { ...operation, operationId: 'untracked' } });
     expect(events.filter((event) => 'operationId' in event)).toEqual([operation]); bridge.dispose();
   });
+});
+
+it('cancels a protected push confirmation before starting the native push', async () => {
+  invoke.mockImplementation((_name, args) => Promise.resolve({ requestId: args.envelope.requestId, result: [{ repoId: 'repo', repoName: 'Repository', branch: 'main', force: false, requiresConfirmation: true, proof: 'proof' }], error: null }));
+  const bridge = new TauriBridge(); await bridge.initialize(); const controller = new AbortController();
+  const push: BridgeCommand = { type: 'sync', payload: { workspace_id: 'workspace', repo_id: 'repo', action: 'push', branch: null, remote: null, force: false } };
+  const pending = bridge.request(push, { signal: controller.signal }); const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  await vi.waitFor(() => expect(currentDialog()).toBeDefined()); controller.abort(); await rejected;
+  expect(currentDialog()).toBeUndefined(); expect(invoke).toHaveBeenCalledTimes(1);
+  expect(invoke.mock.calls[0][1].envelope.command.type).toBe('pushProtectionCheck');
+  bridge.dispose(); publishDialog(undefined);
 });

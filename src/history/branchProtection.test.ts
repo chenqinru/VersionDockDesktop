@@ -7,8 +7,8 @@ describe('branchProtection', () => {
     expect(isBranchProtected('master')).toBe(true);
     expect(isBranchProtected('origin/main')).toBe(true);
     expect(isBranchProtected('remotes/origin/master')).toBe(true);
-    expect(isBranchProtected('release/1.0')).toBe(true);
-    expect(isBranchProtected('origin/release/2.0.0')).toBe(true);
+    expect(isBranchProtected('release/1.0')).toBe(false);
+    expect(isBranchProtected('origin/release/2.0.0')).toBe(false);
 
     expect(isBranchProtected('feature/login')).toBe(false);
     expect(isBranchProtected('bugfix/issue-123')).toBe(false);

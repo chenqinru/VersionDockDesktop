@@ -304,7 +304,7 @@ const activeDetailFiles: Record<string, CommitFile[]> = browserDemoMode === 'mix
 
 const initialState: AppStateSnapshot = {
   schemaVersion: 7, lastWorkspaceId: workspace.id, recentWorkspaces: [workspace], commitSelections: {},
-  settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', layoutDensity: 'comfortable', fileIconTheme: 'material', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 4, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
+  settings: { theme: 'dark', language: 'zhCn', uiFontSize: 'standard', layoutDensity: 'comfortable', fileIconTheme: 'material', changesDisplayMode: 'simplified', defaultCommitAction: 'commit', defaultSaveAction: 'stash', promptBeforeAddingUntracked: true, suppressDivergedWarning: false, autoRefreshInterval: 0, fetchOnStartup: false, resetViewLocationsOnStartup: false, notifyIncomingCommits: true, notifyUnpushedCommits: true, repositoryScanDepth: 1, ignoredFolders: ['node_modules', 'target', 'dist'], maximumGraphCommits: 1000, projectColors: {}, externalEditor: null },
   layout: { panelSizes: { commit: 345, branches: 220, detail: 380 }, activeTab: 'changes', fileViewMode: 'tree', stashViewMode: 'tree', branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] },
 };
 
@@ -543,6 +543,8 @@ export class BrowserDevBridge implements VersionDockBridge {
         return { commits: filtered.slice(command.payload.skip, command.payload.skip + command.payload.limit), hasMore: false } satisfies HistoryPage;
       }
       case 'historyTopology': return (activeHistories[command.payload.repo_id] ?? []).slice(0, command.payload.limit ?? undefined).map(({ repoId, hash, parents, committerDate, refs }) => ({ repoId, hash, parents, committerDate, refs })) satisfies GraphCommitNode[];
+      case 'branchProtection': return this.state.settings?.protectedBranches ?? ['master', 'main'];
+      case 'pushProtectionCheck': return [];
       case 'branches': return this.branchValues[command.payload.repo_id] ?? [];
       case 'tags': return this.tagValues[command.payload.repo_id] ?? [];
       case 'commitDetail': return this.commitDetail(command.payload.repo_id, command.payload.revision);

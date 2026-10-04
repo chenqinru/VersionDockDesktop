@@ -234,7 +234,16 @@ export type BranchRecoveryResult = {
 
 export type BranchRecoveryStatus = "completed" | "conflicted" | "partialFailure";
 
-export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities" } | { type: "saveAppState"; payload: {
+export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities" } | { type: "pushProtectionCheck"; payload: {
+	workspace_id: string,
+	repo_ids: string[],
+	branch: string | null,
+	force: boolean,
+} } | { type: "branchProtection"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	refresh: boolean,
+} } | { type: "saveAppState"; payload: {
 	state: AppStateSnapshot,
 } } | { type: "saveCommitSelections"; payload: {
 	workspace_id: string,
@@ -875,6 +884,8 @@ export type DesktopSettings = {
 	autoRefreshInterval: number,
 	fetchOnStartup: boolean,
 	autoFetchOnFocus?: boolean,
+	autoFetchIntervalMinutes?: number,
+	showProfileStatusBar?: boolean,
 	resetViewLocationsOnStartup: boolean,
 	notifyIncomingCommits: boolean,
 	notifyUnpushedCommits: boolean,
@@ -1205,6 +1216,15 @@ export type PublishRepositoryResult = {
 	error: DesktopError | null,
 };
 
+export type PushProtectionTarget = {
+	repoId: string,
+	repoName: string,
+	branch: string,
+	force: boolean,
+	requiresConfirmation: boolean,
+	proof: string,
+};
+
 export type RecentCommitMessage = {
 	repoId: string,
 	revision: string,
@@ -1358,6 +1378,7 @@ export type RequestEnvelope = {
 	requestId: string,
 	context: RequestContext,
 	command: BridgeCommand,
+	pushApprovals?: PushProtectionTarget[],
 };
 
 export type ResponseEnvelope = {

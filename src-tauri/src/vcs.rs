@@ -2737,6 +2737,7 @@ pub async fn file_revision_content(
                 .await
                 {
                     Ok(output) => output.stdout,
+                    Err(error) if error.code == "REQUEST_CANCELLED" => return Err(error),
                     Err(_) => {
                         git(vec!["cat-file".into(), "-p".into(), spec], repo, token)
                             .await?
@@ -4344,6 +4345,9 @@ async fn git_push(
             extra_args.push("--force".into());
         }
     }
+    let explicit_branch = requested_branch
+        .as_ref()
+        .is_some_and(|value| !value.is_empty());
     let target_branch = if let Some(branch_name) = requested_branch {
         let clean = branch_name.trim_start_matches("refs/heads/").to_string();
         if !clean.is_empty() {
@@ -4398,6 +4402,26 @@ async fn git_push(
         return Ok(git(args, repo, token).await?.stdout_text());
     }
 
+    if has_upstream && explicit_branch {
+        let remote = git(
+            vec![
+                "config".into(),
+                "--get".into(),
+                format!("branch.{branch}.remote"),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text()
+        .trim()
+        .to_string();
+        validate_ref(&remote)?;
+        let mut args = vec!["push".into()];
+        args.extend(extra_args);
+        args.extend([remote, branch]);
+        return Ok(git(args, repo, token).await?.stdout_text());
+    }
     if has_upstream {
         let mut args = vec!["push".into()];
         args.extend(extra_args);
@@ -7583,29 +7607,25 @@ async fn svn_branches(
     Ok(branches)
 }
 
-pub fn is_branch_protected(name: &str) -> bool {
-    let normalized = name
-        .trim()
-        .trim_start_matches("refs/heads/")
-        .trim_start_matches("heads/");
-    let clean = if let Some(slash) = normalized.rfind('/') {
-        if normalized.starts_with("remotes/") || normalized.starts_with("origin/") {
-            &normalized[slash + 1..]
-        } else {
-            normalized
-        }
-    } else {
-        normalized
-    };
-    clean.eq_ignore_ascii_case("main")
-        || clean.eq_ignore_ascii_case("master")
-        || clean.to_ascii_lowercase().starts_with("release/")
-        || clean.to_ascii_lowercase().starts_with("release-")
-}
-
+#[cfg(test)]
 pub async fn branch_operation(
     repo: &RepositoryMeta,
+    operation: crate::models::BranchOperation,
+    token: &CancellationToken,
+) -> Result<crate::models::BranchOperationResult, DesktopError> {
+    branch_operation_with_protection(
+        repo,
+        operation,
+        &crate::models::DesktopSettings::default().protected_branches,
+        token,
+    )
+    .await
+}
+
+pub async fn branch_operation_with_protection(
+    repo: &RepositoryMeta,
     operation: BranchOperation,
+    patterns: &[String],
     token: &CancellationToken,
 ) -> Result<BranchOperationResult, DesktopError> {
     if repo.kind == VcsKind::Svn {
@@ -7780,7 +7800,7 @@ pub async fn branch_operation(
         }
         BranchOperation::Delete { name, force } => {
             validate_ref(&name)?;
-            if is_branch_protected(&name) {
+            if crate::protection::matches_branch(&name, patterns) {
                 return Err(DesktopError::new(
                     "PROTECTED_BRANCH_DELETE",
                     format!("Cannot delete protected branch '{name}'"),
@@ -11766,6 +11786,45 @@ pub async fn svn_incoming_status(
     "modified".to_string()
 }
 
+/// Apply the display policy without changing raw fingerprints or conflict write/accept logic.
+pub async fn conflict_versions_with_mode(
+    repo: &RepositoryMeta,
+    path: &str,
+    mode: &crate::models::CatFileFilterMode,
+    token: &CancellationToken,
+) -> Result<MergeVersions, DesktopError> {
+    let mut versions = conflict_versions(repo, path, token).await?;
+    if repo.kind != VcsKind::Git
+        || versions.binary
+        || *mode == crate::models::CatFileFilterMode::None
+    {
+        return Ok(versions);
+    }
+    let synthetic = versions.marker_content != versions.working;
+    let base =
+        crate::diff_content::blob(repo, &format!(":1:{}", versions.path), mode, token).await?;
+    let ours =
+        crate::diff_content::blob(repo, &format!(":2:{}", versions.path), mode, token).await?;
+    let theirs =
+        crate::diff_content::blob(repo, &format!(":3:{}", versions.path), mode, token).await?;
+    if [&base, &ours, &theirs]
+        .iter()
+        .any(|bytes| bytes.len() > DIFF_MAX_BYTES || bytes_are_binary(bytes))
+    {
+        versions.binary = true;
+        return Ok(versions);
+    }
+    versions.base = String::from_utf8_lossy(&base).into_owned();
+    versions.ours = String::from_utf8_lossy(&ours).into_owned();
+    versions.theirs = String::from_utf8_lossy(&theirs).into_owned();
+    if synthetic {
+        versions.marker_content =
+            synthetic_conflict_content(&versions.base, &versions.ours, &versions.theirs);
+        versions.conflicts = parse_conflict_blocks(&versions.marker_content);
+    }
+    Ok(versions)
+}
+
 pub async fn conflict_versions(
     repo: &RepositoryMeta,
     path: &str,
@@ -14058,4 +14117,20 @@ mod tests {
         set_svn_wc_revision_for_test(&repo.id, None);
         invalidate_svn_ref_caches(&repo.id);
     }
+}
+
+pub async fn current_branch_for_protection(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    if repo.kind != VcsKind::Git {
+        return Ok(String::new());
+    }
+    Ok(
+        git(vec!["branch".into(), "--show-current".into()], repo, token)
+            .await?
+            .stdout_text()
+            .trim()
+            .to_string(),
+    )
 }

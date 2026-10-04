@@ -7,7 +7,7 @@ import { promptDialog, confirmDialog, choiceDialog, multiChoiceDialog, currentDi
 import type { RepositoryStatus, BranchCompareResult, BranchInfo, TagInfo, SvnAccountState, IgnoreRules } from '../../bindings/generated';
 import { useBridge } from '../../platform/context';
 import { resolveSubmoduleOperationTarget } from './submoduleTarget';
-import { isBranchProtected, sanitizeBranchName } from '../../history/branchProtection';
+import { isRepositoryBranchProtected, sanitizeBranchName } from '../../history/branchProtection';
 import {
   getRepoCompareBase,
   getRepoEffectiveRef,
@@ -1991,7 +1991,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item danger"
                         onClick={async () => {
                           onClose();
-                          if (isBranchProtected(activeCommonBranch.name)) {
+                          if ((await Promise.all(gitRepos.map((r) => isRepositoryBranchProtected(r.meta.id, activeCommonBranch.name)))).some(Boolean)) {
                             await confirmDialog({
                               title: t('Protected branch'),
                               message: t('VersionDock: Protected branch "{0}" cannot be deleted.', activeCommonBranch.name),
@@ -2370,7 +2370,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                         className="statusbar-menu-item danger"
                         onClick={async () => {
                           onClose();
-                          if (isBranchProtected(activeBranchAction.branchName)) {
+                          if (await isRepositoryBranchProtected(activeBranchAction.repoId, activeBranchAction.branchName)) {
                             await confirmDialog({
                               title: t('Protected branch'),
                               message: t('VersionDock: Protected branch "{0}" cannot be deleted.', activeBranchAction.branchName),

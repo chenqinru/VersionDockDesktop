@@ -5,7 +5,7 @@
 
 import { useAppStore } from '../store/appStore';
 
-export const DEFAULT_PROTECTED_BRANCHES = ['master', 'main', 'release/*'];
+export const DEFAULT_PROTECTED_BRANCHES = ['master', 'main'];
 
 /**
  * Converts a glob-like pattern (e.g. "release/*", "main") into a RegExp.
@@ -28,7 +28,7 @@ export function globToRegExp(pattern: string): RegExp {
  * Checks whether a branch name matches any protected branch pattern.
  */
 export function isBranchProtected(branchName: string, customPatterns?: string[]): boolean {
-  const name = branchName.trim();
+  const name = branchName.trim().replace(/^refs\/heads\//, '');
   if (!name || name === 'HEAD') {
     return false;
   }
@@ -40,7 +40,8 @@ export function isBranchProtected(branchName: string, customPatterns?: string[])
   const slashIdx = withoutRemotesPrefix.indexOf('/');
   const normalized = slashIdx !== -1 ? withoutRemotesPrefix.slice(slashIdx + 1) : withoutRemotesPrefix;
 
-  for (const pattern of effectivePatterns) {
+  for (const value of effectivePatterns) {
+    const pattern = value.trim();
     if (!pattern) continue;
     if (pattern.includes('*') || pattern.includes('?')) {
       const rx = globToRegExp(pattern);
@@ -61,6 +62,18 @@ export function isBranchProtected(branchName: string, customPatterns?: string[])
   }
 
   return false;
+}
+
+
+/** Query the same repository rules used by native delete/push enforcement. */
+export async function isRepositoryBranchProtected(repoId: string, branchName: string): Promise<boolean> {
+  const state = useAppStore.getState();
+  const workspaceId = state.snapshot?.workspace.id;
+  if (!workspaceId || !state.bridge) return isBranchProtected(branchName);
+  const patterns = await state.bridge.request<string[]>({ type: 'branchProtection', payload: {
+    workspace_id: workspaceId, repo_id: repoId, refresh: true,
+  } }, { showProgress: false });
+  return isBranchProtected(branchName, Array.isArray(patterns) ? patterns : undefined);
 }
 
 /**

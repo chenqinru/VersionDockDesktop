@@ -83,6 +83,7 @@ pub(crate) fn emit_current_operation_progress(
 
 pub struct AppState {
     pub config_dir: PathBuf,
+    pub protection: crate::protection::ProtectionCache,
     pub app: RwLock<AppStateSnapshot>,
     pub application_session_id: String,
     pub launch_workspace_id: std::sync::Mutex<Option<String>>,
@@ -165,6 +166,7 @@ impl AppState {
         Self {
             config_dir,
             app: RwLock::new(app),
+            protection: crate::protection::ProtectionCache::default(),
             application_session_id: uuid::Uuid::new_v4().to_string(),
             launch_workspace_id: std::sync::Mutex::new(launch_workspace_id),
             cancellations: Mutex::new(HashMap::new()),
@@ -478,9 +480,16 @@ impl AppState {
                 || previous.exclude_ignored_directories != settings.exclude_ignored_directories,
             reload_history: previous.maximum_graph_commits != settings.maximum_graph_commits
                 || previous.hidden_repository_ids != settings.hidden_repository_ids,
-            restart_auto_refresh: previous.auto_refresh_interval != settings.auto_refresh_interval
+            restart_auto_refresh: previous.auto_fetch_interval_minutes
+                != settings.auto_fetch_interval_minutes
+                || previous.auto_refresh_interval != settings.auto_refresh_interval
                 || previous.fetch_on_startup != settings.fetch_on_startup,
         };
+        if previous.sync_protected_branches_from_github
+            != settings.sync_protected_branches_from_github
+        {
+            self.protection.clear();
+        }
         snapshot.settings = settings.clone();
         self.save_app_state_locked(snapshot).await?;
         Ok(crate::models::SettingsUpdateResult { settings, effects })
@@ -996,6 +1005,33 @@ fn io_error(error: std::io::Error) -> DesktopError {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn plugin_aligned_scan_default_and_large_input_budget_survive_restart() {
+        let root = tempdir().unwrap();
+        let state = AppState::load(root.path().to_path_buf());
+        let mut settings = state.app.read().await.settings.clone();
+        assert_eq!(settings.repository_scan_depth, 1);
+        assert_eq!(settings.ai_config.max_input_tokens, 128_000);
+        settings.repository_scan_depth = 4;
+        settings.ai_config.max_input_tokens = 2_500_000;
+        let result = state
+            .update_settings(
+                settings,
+                Some(&["repositoryScanDepth".into(), "aiConfig".into()]),
+            )
+            .await
+            .unwrap();
+        assert!(result.effects.rescan_workspace);
+        assert_eq!(result.settings.ai_config.max_input_tokens, 2_500_000);
+        let restored = AppState::load(root.path().to_path_buf());
+        let settings = restored.app.read().await.settings.clone();
+        assert_eq!(settings.repository_scan_depth, 4);
+        assert_eq!(settings.ai_config.max_input_tokens, 2_500_000);
+        let mut below_minimum = settings;
+        below_minimum.ai_config.max_input_tokens = 0;
+        assert_eq!(below_minimum.normalize().ai_config.max_input_tokens, 4_096);
+    }
 
     #[test]
     fn rejects_parent_and_absolute_paths() {

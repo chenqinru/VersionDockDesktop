@@ -141,21 +141,52 @@ pub async fn file_diff(
         .await
         .map_err(storage_error)?;
     let patch = String::from_utf8_lossy(&bytes);
-    let header_a = format!("diff --git a/{relative_path} b/{relative_path}");
-    let header_b = format!("diff --git \"a/{relative_path}\" \"b/{relative_path}\"");
-    let start = patch
-        .find(&header_a)
-        .or_else(|| patch.find(&header_b))
+    let header_a = format!("diff --git a/{relative_path} b/{relative_path}\n");
+    let header_b = format!(
+        "diff --git {} {}\n",
+        quote_patch_path(&format!("a/{relative_path}")),
+        quote_patch_path(&format!("b/{relative_path}"))
+    );
+    let boundaries: Vec<_> = patch
+        .match_indices("diff --git ")
+        .filter(|(offset, _)| *offset == 0 || patch.as_bytes()[offset - 1] == b'\n')
+        .map(|(offset, _)| offset)
+        .collect();
+    let content = boundaries
+        .iter()
+        .enumerate()
+        .find_map(|(index, start)| {
+            let section = &patch[*start..boundaries.get(index + 1).copied().unwrap_or(patch.len())];
+            let renamed = section
+                .lines()
+                .find_map(|line| line.strip_prefix("rename to "))
+                .map(crate::diff_content::decode_git_path);
+            (section.starts_with(&header_a)
+                || section.starts_with(&header_b)
+                || renamed.as_deref() == Some(relative_path))
+            .then(|| section.to_string())
+        })
         .ok_or_else(|| {
             DesktopError::new("SHELF_DIFF_NOT_FOUND", "Shelf diff section not found", true)
         })?;
-    let remainder = &patch[start..];
-    let end = remainder[1..]
-        .find("\ndiff --git ")
-        .map(|index| index + 1)
-        .unwrap_or(remainder.len());
-    let content = remainder[..end].to_string();
     crate::vcs::make_diff(relative_path, content.into_bytes())
+}
+
+fn quote_patch_path(path: &str) -> String {
+    let mut result = String::from("\"");
+    for byte in path.bytes() {
+        match byte {
+            b'\\' => result.push_str("\\\\"),
+            b'"' => result.push_str("\\\""),
+            b'\t' => result.push_str("\\t"),
+            b'\n' => result.push_str("\\n"),
+            b'\r' => result.push_str("\\r"),
+            32..=126 => result.push(byte as char),
+            byte => result.push_str(&format!("\\{byte:03o}")),
+        }
+    }
+    result.push('"');
+    result
 }
 
 pub(crate) async fn create(
@@ -220,7 +251,14 @@ pub(crate) async fn create(
     // Match the plugin's HEAD-to-worktree patch, not Git stash's index-based
     // handling of newly staged files subsequently deleted from the worktree.
     // Those files must stay absent when the shelf is restored.
-    let mut diff_args = vec!["diff".into(), "HEAD".into(), "--binary".into(), "--".into()];
+    let mut diff_args = vec![
+        "diff".into(),
+        "HEAD".into(),
+        "--no-ext-diff".into(),
+        "--no-textconv".into(),
+        "--binary".into(),
+        "--".into(),
+    ];
     diff_args.extend(safe_paths.clone());
     let tracked_patch = git(repo, diff_args, token).await?.stdout;
     let mut stash_args = vec![
@@ -276,6 +314,8 @@ pub(crate) async fn create(
             "stash".into(),
             "show".into(),
             "--patch".into(),
+            "--no-ext-diff".into(),
+            "--no-textconv".into(),
             "--binary".into(),
             "--only-untracked".into(),
             hash.clone(),

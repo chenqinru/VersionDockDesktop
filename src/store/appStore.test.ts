@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { BootstrapData, BridgeCommand, CommitDetail, CommitNode, HistoryPage, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, DesktopSettings, BridgeCommand, CommitDetail, CommitNode, HistoryPage, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
 import { currentDialog, publishDialog } from '../components/dialogService';
 import { commitKey } from '../history/commitDetails';
@@ -4940,7 +4940,7 @@ describe('appStore async lifecycle', () => {
     // 2. 现在先重试子模块
     await useAppStore.getState().retryBatchResult('repo-child', { reportId });
     expect(requests.filter((r) => r.type === 'batchCommit')).toHaveLength(1);
-    expect(requests[0].payload.targets[0].repoId).toBe('repo-child');
+    expect(requests.find((r) => r.type === 'batchCommit')!.payload.targets[0].repoId).toBe('repo-child');
 
     // 此时子模块已成功提交且已推送，report 中的子模块状态已更新为成功
     requests.length = 0;
@@ -4950,7 +4950,7 @@ describe('appStore async lifecycle', () => {
 
     // 此时子模块依赖已满足，父仓库重试应顺利放行
     expect(requests.filter((r) => r.type === 'batchCommit')).toHaveLength(1);
-    expect(requests[0].payload.targets[0].repoId).toBe('repo-parent');
+    expect(requests.find((r) => r.type === 'batchCommit')!.payload.targets[0].repoId).toBe('repo-parent');
   });
 
   it('persistCommitSelections maintains separate debounce timers per workspace and does not cancel adjacent workspace saves', async () => {
@@ -5244,5 +5244,40 @@ describe('appStore async lifecycle', () => {
     expect(conflictsRequested).toBe(true);
     expect(useAppStore.getState().conflicts).toHaveLength(1);
     expect(useAppStore.getState().conflicts[0].path).toBe('file.txt');
+  });
+});
+
+describe('scheduled background fetch', () => {
+  it('uses the configured interval, excludes SVN/worktrees, stays background and does not overlap', async () => {
+    vi.useFakeTimers();
+    const data = structuredClone(bootstrap); data.state.settings = { autoFetchIntervalMinutes: 1, autoRefreshInterval: 0, fetchOnStartup: false } as DesktopSettings;
+    const ws = { ...snapshot('auto-fetch', 1), repositories: [repository('git', 'Git'), { ...repository('svn', 'SVN'), meta: { ...repository('svn', 'SVN').meta, kind: 'svn' as const } }, { ...repository('tree', 'Tree'), meta: { ...repository('tree', 'Tree').meta, isWorktree: true } }] };
+    const fetches: Array<{ command: BridgeCommand; options: RequestOptions | undefined }> = [];
+    const gate = deferred<unknown>();
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'bootstrap') return data;
+      if (command.type === 'workspaceRefresh' || command.type === 'workspaceOpen') return ws;
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      if (command.type === 'sync') { fetches.push({ command, options }); return gate.promise; }
+      return [];
+    });
+    try {
+      await useAppStore.getState().initialize(bridge); useAppStore.setState({ snapshot: ws, allRepositories: ws.repositories });
+      await vi.advanceTimersByTimeAsync(59_999); expect(fetches).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1); expect(fetches).toHaveLength(1);
+      expect(fetches[0].command).toMatchObject({ type: 'sync', payload: { action: 'fetch', repo_id: 'git' } });
+      expect(fetches[0].options).toMatchObject({ showProgress: false, timeoutMs: 600_000 });
+      await vi.advanceTimersByTimeAsync(120_000); expect(fetches).toHaveLength(1);
+      const lease = JSON.parse(localStorage.getItem('versiondock:scheduler:auto-fetch:auto-fetch')!);
+      expect(lease.expiresAt).toBeGreaterThan(Date.now());
+      gate.resolve({ output: '', update: null }); await vi.advanceTimersByTimeAsync(0);
+      useAppStore.getState().dispose(); await vi.advanceTimersByTimeAsync(60_000); expect(fetches).toHaveLength(1);
+    } finally { gate.resolve(null); useAppStore.getState().dispose(); vi.useRealTimers(); }
+  });
+  it('disables scheduled fetch when interval is zero', async () => {
+    vi.useFakeTimers(); const data = structuredClone(bootstrap); data.state.settings = { autoFetchIntervalMinutes: 0, autoRefreshInterval: 0, fetchOnStartup: false } as DesktopSettings;
+    const fetch = vi.fn(); const bridge = new MockBridge((command) => { if (command.type === 'bootstrap') return data; if (command.type === 'sync') fetch(); return []; });
+    try { await useAppStore.getState().initialize(bridge); const ws = { ...snapshot('disabled', 1), repositories: [repository('git', 'Git')] }; useAppStore.setState({ snapshot: ws, allRepositories: ws.repositories }); await vi.advanceTimersByTimeAsync(3_600_000); expect(fetch).not.toHaveBeenCalled(); }
+    finally { useAppStore.getState().dispose(); vi.useRealTimers(); }
   });
 });

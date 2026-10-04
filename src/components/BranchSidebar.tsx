@@ -7,7 +7,7 @@ import { buildSidebarModel, sumBranchAheadBehind, type BranchInstance, type Side
 import type { RepositoryStatus } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { choiceDialog, confirmDialog } from './dialogService';
-import { isBranchProtected } from '../history/branchProtection';
+import { isRepositoryBranchProtected } from '../history/branchProtection';
 import { ProviderPanel } from './ProviderPanel';
 import { isPrimaryBranch, readableAccentColor } from './branchColor';
 
@@ -297,7 +297,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
           await sync(inst.repoId, 'push', true, { remote: remote ?? undefined });
         }
         if (id === 'delete') {
-          if (branch.vcsKind === 'git' && isBranchProtected(branch.name)) {
+          if (branch.vcsKind === 'git' && (await Promise.all(branch.instances.filter((item) => !item.branch.current).map((item) => isRepositoryBranchProtected(item.repoId, item.branch.name)))).some(Boolean)) {
             await confirmDialog({
               title: t('Protected branch'),
               message: t('VersionDock: Protected branch "{0}" cannot be deleted.', branch.name),

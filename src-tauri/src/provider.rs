@@ -1369,3 +1369,290 @@ mod tests {
         }
     }
 }
+
+/// Read protection rules from the repository's provider; reuse existing accounts and credentials.
+pub async fn protected_branches(
+    config_dir: &Path,
+    remote: &str,
+    cancel: &CancellationToken,
+) -> Result<Vec<String>, DesktopError> {
+    let Some(hostname) = remote_hostname(remote) else {
+        return Ok(Vec::new());
+    };
+    let candidates: Vec<_> = accounts(config_dir)
+        .into_iter()
+        .filter(|account| {
+            account_hostname(account).as_deref() == Some(hostname.as_str())
+                && protection_account_matches(account, remote)
+        })
+        .collect();
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut failure = None;
+    for account in &candidates {
+        match protected_branches_for_account(account, remote, cancel).await {
+            Ok(names) => return Ok(names),
+            Err(error) if error.code == "REQUEST_CANCELLED" => return Err(error),
+            Err(error) => failure = Some(error),
+        }
+    }
+    Err(failure.unwrap_or_else(|| {
+        DesktopError::new(
+            "PROVIDER_AUTH_REQUIRED",
+            "No account can read remote branch protection",
+            true,
+        )
+    }))
+}
+
+async fn protected_branches_for_account(
+    account: &RemoteProviderAccount,
+    remote: &str,
+    cancel: &CancellationToken,
+) -> Result<Vec<String>, DesktopError> {
+    let path = if remote.contains("://") {
+        url::Url::parse(remote)
+            .ok()
+            .map(|url| url.path().trim_matches('/').to_string())
+            .unwrap_or_default()
+    } else {
+        remote
+            .split_once(':')
+            .map(|(_, path)| path.trim_matches('/').to_string())
+            .unwrap_or_default()
+    };
+    let base = url::Url::parse(&account.host)
+        .ok()
+        .map(|url| url.path().trim_matches('/').to_string())
+        .unwrap_or_default();
+    let path = path.strip_suffix(".git").unwrap_or(&path);
+    let project = if !base.is_empty() {
+        path.strip_prefix(&format!("{base}/")).unwrap_or(path)
+    } else {
+        path
+    };
+    if project.is_empty() || project.split('/').count() < 2 {
+        return Ok(Vec::new());
+    }
+    let secret = token(account)?;
+    let endpoint = protection_endpoint(account, project)?;
+    read_protected_branches(account, &secret, &endpoint, cancel).await
+}
+
+fn protection_account_matches(account: &RemoteProviderAccount, remote: &str) -> bool {
+    let Ok(account_url) = url::Url::parse(&account.host) else {
+        return false;
+    };
+    if remote.starts_with("https://") || remote.starts_with("http://") {
+        let Ok(remote_url) = url::Url::parse(remote) else {
+            return false;
+        };
+        if remote_url.port_or_known_default() != account_url.port_or_known_default() {
+            return false;
+        }
+        let base = account_url.path().trim_end_matches('/');
+        if !base.is_empty() && base != "/" && !remote_url.path().starts_with(&format!("{base}/")) {
+            return false;
+        }
+    }
+    remote_hostname(remote).as_deref() == account_url.host_str()
+}
+
+fn protection_endpoint(
+    account: &RemoteProviderAccount,
+    project: &str,
+) -> Result<String, DesktopError> {
+    let encoded =
+        |text: &str| url::form_urlencoded::byte_serialize(text.as_bytes()).collect::<String>();
+    let project_path = project
+        .split('/')
+        .map(encoded)
+        .collect::<Vec<_>>()
+        .join("/");
+    Ok(match account.provider {
+        RemoteProviderKind::Github => format!("{GITHUB_API}/repos/{project_path}/branches"),
+        RemoteProviderKind::Gitlab => format!(
+            "{}/api/v4/projects/{}/protected_branches",
+            account.host.trim_end_matches('/'),
+            encoded(project)
+        ),
+        RemoteProviderKind::Gitee => format!("{GITEE_API}/repos/{project_path}/branches"),
+    })
+}
+
+async fn read_protected_branches(
+    account: &RemoteProviderAccount,
+    secret: &str,
+    endpoint: &str,
+    cancel: &CancellationToken,
+) -> Result<Vec<String>, DesktopError> {
+    let mut result = Vec::new();
+    for page in 1..=100 {
+        let protected = if account.provider == RemoteProviderKind::Github {
+            "protected=true&"
+        } else {
+            ""
+        };
+        let url = format!("{endpoint}?{protected}per_page=100&page={page}");
+        let value = send(
+            authenticated(
+                client()?.get(url).timeout(Duration::from_secs(10)),
+                account,
+                secret,
+            ),
+            "Branch protection",
+            cancel,
+        )
+        .await?;
+        let entries = value.as_array().ok_or_else(|| {
+            DesktopError::new(
+                "PROVIDER_RESPONSE_INVALID",
+                "Invalid protected branch response",
+                true,
+            )
+        })?;
+        result.extend(
+            entries
+                .iter()
+                .filter(|item| {
+                    account.provider != RemoteProviderKind::Gitee
+                        || item["protected"].as_bool().unwrap_or(false)
+                })
+                .filter_map(|item| item["name"].as_str())
+                .map(str::to_string),
+        );
+        if entries.len() < 100 {
+            result.sort();
+            result.dedup();
+            return Ok(result);
+        }
+    }
+    Err(DesktopError::new(
+        "PROVIDER_RESPONSE_TRUNCATED",
+        "Protected branch pagination limit reached",
+        true,
+    ))
+}
+
+#[cfg(test)]
+mod protection_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    fn account(provider: RemoteProviderKind) -> RemoteProviderAccount {
+        RemoteProviderAccount {
+            id: "fixture".into(),
+            provider,
+            host: "https://gitlab.example.test/base".into(),
+            login: "fixture".into(),
+            display_name: None,
+            secure_storage_ref: "never-read".into(),
+        }
+    }
+    #[test]
+    fn protection_endpoints_preserve_namespace_and_enterprise_path() {
+        assert_eq!(
+            protection_endpoint(&account(RemoteProviderKind::Github), "owner/repo").unwrap(),
+            "https://api.github.com/repos/owner/repo/branches"
+        );
+        assert_eq!(protection_endpoint(&account(RemoteProviderKind::Gitlab), "group/sub/repo").unwrap(), "https://gitlab.example.test/base/api/v4/projects/group%2Fsub%2Frepo/protected_branches");
+        assert_eq!(
+            protection_endpoint(&account(RemoteProviderKind::Gitee), "owner/repo").unwrap(),
+            "https://gitee.com/api/v5/repos/owner/repo/branches"
+        );
+    }
+    #[tokio::test]
+    async fn protection_pagination_auth_filter_empty_and_error_are_real_http() {
+        for provider in [
+            RemoteProviderKind::Github,
+            RemoteProviderKind::Gitlab,
+            RemoteProviderKind::Gitee,
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let provider_for_server = provider;
+            let server = std::thread::spawn(move || {
+                for page in 1..=2 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(10)))
+                        .unwrap();
+                    let mut bytes = [0u8; 8192];
+                    let n = stream.read(&mut bytes).unwrap();
+                    let request = String::from_utf8_lossy(&bytes[..n]);
+                    assert!(request.contains(&format!("page={page}")));
+                    assert!(request.to_lowercase().contains("synthetic-token"));
+                    if provider_for_server == RemoteProviderKind::Github {
+                        assert!(request.contains("protected=true"));
+                    }
+                    let body = if page == 1 {
+                        serde_json::to_string(&(0..100).map(|n| json!({ "name": format!("branch-{n}"), "protected": n % 2 == 0 })).collect::<Vec<_>>()).unwrap()
+                    } else {
+                        "[]".into()
+                    };
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .unwrap();
+                }
+            });
+            let result = read_protected_branches(
+                &account(provider),
+                "synthetic-token",
+                &format!("http://{address}/rules"),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                result.len(),
+                if provider == RemoteProviderKind::Gitee {
+                    50
+                } else {
+                    100
+                }
+            );
+            server.join().unwrap();
+        }
+        for (status, body, expected) in [(200, "[]", true), (403, "{}", false), (200, "{}", false)]
+        {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut bytes = [0u8; 8192];
+                let count = stream.read(&mut bytes).unwrap();
+                assert!(count > 0);
+                write!(stream, "HTTP/1.1 {status} Result\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let result = read_protected_branches(
+                &account(RemoteProviderKind::Gitlab),
+                "synthetic-token",
+                &format!("http://{address}/rules"),
+                &CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(result.is_ok(), expected);
+            if expected {
+                assert!(result.unwrap().is_empty());
+            }
+            server.join().unwrap();
+        }
+        let token = CancellationToken::new();
+        token.cancel();
+        assert_eq!(
+            read_protected_branches(
+                &account(RemoteProviderKind::Github),
+                "synthetic-token",
+                "http://127.0.0.1:1/rules",
+                &token
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "REQUEST_CANCELLED"
+        );
+    }
+}

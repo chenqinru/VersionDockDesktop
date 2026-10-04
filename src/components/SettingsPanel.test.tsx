@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppStateSnapshot, BootstrapData, BridgeCommand } from '../bindings/generated';
 import { I18nContext, createTranslator } from '../i18n';
@@ -222,4 +222,28 @@ describe('SettingsPanel', () => {
       expect(commands.some((c) => c.type === 'updateSettings')).toBe(true);
     });
   });
+});
+
+it('finds and persists automatic fetch and identity visibility through settings search', async () => {
+  const { commands } = renderPanel();
+  const search = screen.getByPlaceholderText('Search settings...');
+  fireEvent.change(search, { target: { value: 'Automatic fetch interval' } });
+  const interval = screen.getByRole('spinbutton', { name: 'Automatic fetch interval' });
+  expect(interval).toHaveValue(15); fireEvent.change(interval, { target: { value: '0' } }); fireEvent.blur(interval);
+  await waitFor(() => expect(commands.some(c => c.type === 'updateSettings' && c.payload.settings.autoFetchIntervalMinutes === 0)).toBe(true));
+  fireEvent.change(search, { target: { value: 'Show account and identity status bar' } });
+  const toggle = screen.getByRole('checkbox', { name: /Show account and identity status bar/ });
+  expect(toggle).toBeChecked(); fireEvent.click(toggle);
+  await waitFor(() => expect(commands.some(c => c.type === 'updateSettings' && c.payload.settings.showProfileStatusBar === false)).toBe(true));
+});
+
+it('uses the plugin scan-depth default in both category and search, preserving explicit values', () => {
+  renderPanel();
+  fireEvent.click(screen.getByRole('link', { name: 'Repository and history' }));
+  expect(screen.getByRole('spinbutton', { name: 'Repository scan depth' })).toHaveValue(4);
+  const bootstrap = useAppStore.getState().bootstrap!;
+  act(() => useAppStore.setState({ bootstrap: { ...bootstrap, state: { ...bootstrap.state, settings: undefined } } }));
+  expect(screen.getByRole('spinbutton', { name: 'Repository scan depth' })).toHaveValue(1);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'Repository scan depth' } });
+  expect(screen.getByRole('spinbutton', { name: 'Repository scan depth' })).toHaveValue(1);
 });

@@ -8,6 +8,20 @@ pub struct RequestEnvelope {
     pub request_id: String,
     pub context: RequestContext,
     pub command: BridgeCommand,
+    #[serde(default)]
+    #[specta(optional)]
+    pub push_approvals: Vec<PushProtectionTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PushProtectionTarget {
+    pub repo_id: String,
+    pub repo_name: String,
+    pub branch: String,
+    pub force: bool,
+    pub requires_confirmation: bool,
+    pub proof: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -129,6 +143,17 @@ impl ResponseEnvelope {
 pub enum BridgeCommand {
     Bootstrap,
     RuntimeCapabilities,
+    PushProtectionCheck {
+        workspace_id: String,
+        repo_ids: Vec<String>,
+        branch: Option<String>,
+        force: bool,
+    },
+    BranchProtection {
+        workspace_id: String,
+        repo_id: String,
+        refresh: bool,
+    },
     SaveAppState {
         state: AppStateSnapshot,
     },
@@ -1665,6 +1690,12 @@ pub struct DesktopSettings {
     #[serde(default = "default_true")]
     #[specta(optional)]
     pub auto_fetch_on_focus: bool,
+    #[serde(default = "default_auto_fetch_minutes")]
+    #[specta(optional)]
+    pub auto_fetch_interval_minutes: u32,
+    #[serde(default = "default_true")]
+    #[specta(optional)]
+    pub show_profile_status_bar: bool,
     pub reset_view_locations_on_startup: bool,
     pub notify_incoming_commits: bool,
     pub notify_unpushed_commits: bool,
@@ -1748,6 +1779,10 @@ pub struct DesktopSettings {
     pub exclude_ignored_directories: bool,
 }
 
+fn default_auto_fetch_minutes() -> u32 {
+    15
+}
+
 fn default_auto_check_updates() -> bool {
     true
 }
@@ -1785,6 +1820,8 @@ impl Default for DesktopSettings {
             auto_refresh_interval: 0,
             fetch_on_startup: false,
             auto_fetch_on_focus: true,
+            auto_fetch_interval_minutes: 15,
+            show_profile_status_bar: true,
             reset_view_locations_on_startup: false,
             notify_incoming_commits: true,
             notify_unpushed_commits: true,
@@ -1793,7 +1830,7 @@ impl Default for DesktopSettings {
             online_avatars_enabled: false,
             gravatar_enabled: false,
             avatar_cross_platform_fallback: false,
-            repository_scan_depth: 4,
+            repository_scan_depth: 1,
             ignored_folders: vec![
                 ".git".into(),
                 ".svn".into(),
@@ -1848,6 +1885,7 @@ impl DesktopSettings {
         self.ai_config = self.ai_config.normalize();
         self.repository_scan_depth = self.repository_scan_depth.min(10);
         self.maximum_graph_commits = self.maximum_graph_commits.clamp(100, 10_000);
+        self.auto_fetch_interval_minutes = self.auto_fetch_interval_minutes.min(1440);
         self.auto_refresh_interval = self.auto_refresh_interval.min(86_400);
         self.large_file_size_limit_mb = self.large_file_size_limit_mb.clamp(1, 1000);
         if self.branch_clean_character.len() > 1 {

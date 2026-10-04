@@ -363,7 +363,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       />
                       <SettingToggle
                         label={t('Sync protected branches from remote')}
-                        description={t('Automatically sync branch protection rules from GitHub and GitLab for remote repositories.')}
+                        description={t('Automatically sync branch protection rules from GitHub, GitLab, and Gitee for remote repositories.')}
                         checked={settings?.syncProtectedBranchesFromGithub ?? true}
                         onChange={(val) => void updateSettings({ syncProtectedBranchesFromGithub: val })}
                       />
@@ -469,6 +469,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {activeCategory === 'settings-section-refresh-title' && (
                   <SettingsSection id="settings-section-refresh" titleId="settings-section-refresh-title" icon="sync" title={t('Refresh and startup')}>
                     <SettingsCard title={t('Refresh and startup')}>
+                      <SettingNumber label={t('Automatic fetch interval')} description={t('Fetch remote changes in the background at this interval; 0 disables it.')}
+                        value={settings?.autoFetchIntervalMinutes ?? 15} min={0} max={1440} suffix={t('minutes')}
+                        onChange={(value) => void updateSettings({ autoFetchIntervalMinutes: value })} />
                       <SettingNumber
                         label={t('Auto-refresh interval')}
                         description={t('Auto-refresh interval in seconds; 0 disables it.')}
@@ -522,7 +525,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       <SettingNumber
                         label={t('Repository scan depth')}
                         description={t('Maximum depth of workspace subfolders to scan for repositories.')}
-                        value={settings?.repositoryScanDepth ?? 4}
+                        value={settings?.repositoryScanDepth ?? 1}
                         min={0}
                         max={10}
                         onChange={(value) => void updateSettings({ repositoryScanDepth: value })}
@@ -630,6 +633,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {activeCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="account" title={t('Accounts and privacy')}>
+                  <SettingsCard title={t('Status bar')}><SettingToggle label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
+                    checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} /></SettingsCard>
                   <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub, GitLab, and Gitee accounts')}</button></SettingsCard>
                   <SettingsCard title={t('Author avatars')}>
                     <SettingToggle label={t('Online author avatars')} description={t('Resolve remote provider addresses to author avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false, avatarCrossPlatformFallback: false } : {}) })} />
@@ -1528,12 +1533,12 @@ function SearchResults({
       />,
     );
   }
-  if (match(t('Sync protected branches from remote')) || match(t('Automatically sync branch protection rules from GitHub and GitLab for remote repositories.')) || match('github') || match('gitlab')) {
+  if (match(t('Sync protected branches from remote')) || match(t('Automatically sync branch protection rules from GitHub, GitLab, and Gitee for remote repositories.')) || match('github') || match('gitlab')) {
     protectionItems.push(
       <SettingToggle
         key="sync-protected-branches"
         label={t('Sync protected branches from remote')}
-        description={t('Automatically sync branch protection rules from GitHub and GitLab for remote repositories.')}
+        description={t('Automatically sync branch protection rules from GitHub, GitLab, and Gitee for remote repositories.')}
         checked={settings?.syncProtectedBranchesFromGithub ?? true}
         onChange={(val) => void updateSettings({ syncProtectedBranchesFromGithub: val })}
       />,
@@ -1676,6 +1681,12 @@ function SearchResults({
 
   // 7. 刷新与启动匹配项
   const refreshItems: ReactNode[] = [];
+  if (match(t('Automatic fetch interval')) || match('auto fetch')) refreshItems.push(<SettingNumber key="auto-fetch" label={t('Automatic fetch interval')}
+    description={t('Fetch remote changes in the background at this interval; 0 disables it.')} value={settings?.autoFetchIntervalMinutes ?? 15}
+    min={0} max={1440} suffix={t('minutes')} onChange={(value) => void updateSettings({ autoFetchIntervalMinutes: value })} />);
+  const accountItems: ReactNode[] = [];
+  if (match(t('Show account and identity status bar')) || match(t('Show or hide the account and identity entry in the status bar.'))) accountItems.push(<SettingToggle key="show-profile" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
+    checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} />);
   if (match(t('Auto-refresh interval')) || match(t('Auto-refresh interval in seconds; 0 disables it.')) || match(t('seconds'))) {
     refreshItems.push(
       <SettingNumber
@@ -1754,7 +1765,7 @@ function SearchResults({
         key="scan-depth"
         label={t('Repository scan depth')}
         description={t('Maximum depth of workspace subfolders to scan for repositories.')}
-        value={settings?.repositoryScanDepth ?? 4}
+        value={settings?.repositoryScanDepth ?? 1}
         min={0}
         max={10}
         onChange={(val) => void updateSettings({ repositoryScanDepth: val })}
@@ -1887,6 +1898,9 @@ function SearchResults({
   }
   if (diffItems.length > 0) {
     sections.push(<SettingsCard key="sec-diff" title={t('Diff & Shelve')}>{diffItems}</SettingsCard>);
+  }
+  if (accountItems.length > 0) {
+    sections.push(<SettingsCard key="sec-accounts" title={t('Accounts and privacy')}>{accountItems}</SettingsCard>);
   }
   if (refreshItems.length > 0) {
     sections.push(<SettingsCard key="sec-refresh" title={t('Refresh and startup')}>{refreshItems}</SettingsCard>);

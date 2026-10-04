@@ -93,7 +93,18 @@ pub async fn run_with_env(
         wait_for_git_index_lock(cwd, cancellation).await?;
     }
     for attempt in 0..=2 {
-        match run_once(program, args, cwd, stdin, timeout, cancellation, secret_env).await {
+        match run_once(
+            program,
+            args,
+            cwd,
+            stdin,
+            timeout,
+            cancellation,
+            secret_env,
+            false,
+        )
+        .await
+        {
             Err(error) if git_write && attempt < 2 && is_git_index_lock_error(&error) => {
                 wait_for_git_index_lock(cwd, cancellation).await?;
             }
@@ -113,7 +124,16 @@ pub(crate) async fn run_with_isolated_git_index(
     cancellation: &CancellationToken,
     env: &[(String, String)],
 ) -> Result<CommandOutput, DesktopError> {
-    run_once("git", args, cwd, stdin, timeout, cancellation, env).await
+    run_once("git", args, cwd, stdin, timeout, cancellation, env, false).await
+}
+
+/// `git diff --no-index` returns 1 for a successful comparison with differences.
+pub(crate) async fn compare_files(
+    args: &[String],
+    cwd: &Path,
+    token: &CancellationToken,
+) -> Result<CommandOutput, DesktopError> {
+    run_once("git", args, cwd, None, DEFAULT_TIMEOUT, token, &[], true).await
 }
 
 async fn run_once(
@@ -124,6 +144,7 @@ async fn run_once(
     timeout: Duration,
     cancellation: &CancellationToken,
     secret_env: &[(String, String)],
+    accept_diff_exit: bool,
 ) -> Result<CommandOutput, DesktopError> {
     let start_time = std::time::Instant::now();
     let channel = if program.contains("svn") {
@@ -260,7 +281,7 @@ async fn run_once(
         exit_code: status.code(),
     };
     let duration_ms = start_time.elapsed().as_millis() as u32;
-    if !status.success() {
+    if !status.success() && !(accept_diff_exit && status.code() == Some(1)) {
         let stderr = redact(&String::from_utf8_lossy(&result.stderr));
         let (code, hint) = classify_failure(program, &stderr);
         // `git config --get` uses exit 1 with no output for an absent key.
@@ -504,7 +525,7 @@ fn is_read_only_command(program: &str, args: &[String]) -> bool {
         match first_cmd {
             Some(
                 "status" | "rev-parse" | "check-ref-format" | "for-each-ref" | "rev-list" | "show"
-                | "diff" | "log",
+                | "diff" | "log" | "cat-file" | "ls-files" | "ls-tree",
             ) => true,
             Some("remote") => !args.iter().any(|arg| {
                 matches!(
