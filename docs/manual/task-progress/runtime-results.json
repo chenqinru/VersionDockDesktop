@@ -1,0 +1,239 @@
+{
+  "cancel-native-verification": {
+    "results": {
+      "task-group-a67dd435-27a8-406f-8424-ee1941dc029a": {
+        "id": "task-group-a67dd435-27a8-406f-8424-ee1941dc029a",
+        "title": "Update Project",
+        "workspaceId": "ws-1615af7c90d72838",
+        "workspaceName": "project-with-long-repository-name",
+        "status": "cancelled",
+        "message": "Cancelled",
+        "startedAt": 1791030815408,
+        "completed": 1,
+        "total": 3,
+        "cancellable": false,
+        "children": [
+          {
+            "repoId": "git-a7228fb7ed619f8d",
+            "repoName": "git-client-long-repository-name",
+            "status": "cancelled",
+            "message": "Cancelled"
+          },
+          {
+            "repoId": "git-b41ce87f4ea5017a",
+            "repoName": "git-second",
+            "status": "skipped",
+            "message": "Not started"
+          },
+          {
+            "repoId": "svn-fbae0599e46b44f8",
+            "repoName": "svn-client",
+            "status": "skipped",
+            "message": "Not started"
+          }
+        ],
+        "repoName": "git-client-long-repository-name",
+        "finishedAt": 1791030819076
+      }
+    },
+    "staged": "diff --git a/local.txt b/local.txt\nindex df967b9..19d9cc8 100644\n--- a/local.txt\n+++ b/local.txt\n@@ -1 +1 @@\n-base\n+staged\n",
+    "unstaged": "diff --git a/local.txt b/local.txt\nindex 19d9cc8..b8d041e 100644\n--- a/local.txt\n+++ b/local.txt\n@@ -1 +1 @@\n-staged\n+unstaged\n",
+    "stash": "",
+    "untracked": "untracked\n"
+  },
+  "svn2-cancel-verification": {
+    "tasks": {
+      "req-e394cb64-b649-4a3b-8f94-29babe3c2ebb-57": {
+        "id": "req-e394cb64-b649-4a3b-8f94-29babe3c2ebb-57",
+        "title": "Commit",
+        "workspaceId": "ws-1615af7c90d72838",
+        "workspaceName": "project-with-long-repository-name",
+        "repoName": "svn-client",
+        "status": "cancelled",
+        "message": "Cancelled",
+        "startedAt": 1791031106261,
+        "completed": null,
+        "total": null,
+        "cancellable": false,
+        "children": [],
+        "error": "Operation cancelled",
+        "finishedAt": 1791031107478
+      }
+    },
+    "revisionBefore": "3\n",
+    "revisionAfter": "3\n",
+    "status": "  L     .\nM       file.txt\n",
+    "content": "cancelled svn local change\n"
+  },
+  "update-native-verification": {
+    "task": {
+      "id": "task-group-3d29c214-7f37-4df2-9583-9a7db9bf49f0",
+      "title": "Update Project",
+      "workspaceId": "ws-1615af7c90d72838",
+      "workspaceName": "project-with-long-repository-name",
+      "status": "succeeded",
+      "message": "Completed",
+      "startedAt": 1791031250189,
+      "completed": 3,
+      "total": 3,
+      "cancellable": false,
+      "children": [
+        {
+          "repoId": "git-a7228fb7ed619f8d",
+          "repoName": "git-client-long-repository-name",
+          "status": "succeeded",
+          "message": "Completed"
+        },
+        {
+          "repoId": "git-b41ce87f4ea5017a",
+          "repoName": "git-second",
+          "status": "succeeded",
+          "message": "Completed"
+        },
+        {
+          "repoId": "svn-fbae0599e46b44f8",
+          "repoName": "svn-client",
+          "status": "succeeded",
+          "message": "Completed"
+        }
+      ],
+      "repoName": "svn-client",
+      "finishedAt": 1791031252670
+    },
+    "gitRemoteContent": "updated again for native progress\n",
+    "svnRemoteContent": "upstream SVN addition\n",
+    "localSvnContent": "cancelled svn local change\n"
+  },
+  "partial-native-verification": {
+    "task": {
+      "id": "task-group-7fd082da-e053-4757-8b4b-05512e3f9773",
+      "title": "Update Project",
+      "workspaceId": "ws-1615af7c90d72838",
+      "workspaceName": "project-with-long-repository-name",
+      "status": "partial",
+      "message": "Partially completed",
+      "startedAt": 1791031168114,
+      "completed": 3,
+      "total": 3,
+      "cancellable": false,
+      "children": [
+        {
+          "repoId": "git-a7228fb7ed619f8d",
+          "repoName": "git-client-long-repository-name",
+          "status": "succeeded",
+          "message": "Completed"
+        },
+        {
+          "repoId": "git-b41ce87f4ea5017a",
+          "repoName": "git-second",
+          "status": "succeeded",
+          "message": "Completed"
+        },
+        {
+          "repoId": "svn-fbae0599e46b44f8",
+          "repoName": "svn-client",
+          "status": "failed",
+          "message": "Failed",
+          "error": "svn: E155004: Run 'svn cleanup' to remove locks (type 'svn help cleanup' for details)"
+        }
+      ],
+      "repoName": "svn-client",
+      "error": "svn: E155004: Run 'svn cleanup' to remove locks (type 'svn help cleanup' for details)",
+      "finishedAt": 1791031170106
+    }
+  },
+  "keyboard-native-verification": {
+    "Tab0": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "icon-button",
+        "text": "",
+        "role": null
+      },
+      "popover": true
+    },
+    "Tab1": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "当前项目1",
+        "role": "tab"
+      },
+      "popover": true
+    },
+    "Right": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "全部项目2",
+        "role": "tab"
+      },
+      "popover": true
+    },
+    "Tab2": {
+      "focus": {
+        "tag": "ARTICLE",
+        "cls": "task-progress-row running",
+        "text": "更新项目执行中当前项目 · VersionDock QA正在准备操作1/3仓库3",
+        "role": null
+      },
+      "popover": true
+    },
+    "Down": {
+      "focus": {
+        "tag": "ARTICLE",
+        "cls": "task-progress-row running",
+        "text": "推送执行中另一个项目 · Release · long-repository-name-with-many-characters正在推送更改处理中",
+        "role": null
+      },
+      "popover": true
+    },
+    "Escape": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "statusbar-operation",
+        "text": "更新项目1/3+1",
+        "role": null
+      },
+      "popover": false
+    }
+  },
+  "native-git-commit-done": {
+    "tasks": {
+      "req-4581bee4-b205-4736-82d8-46eb06dc5008-99": {
+        "id": "req-4581bee4-b205-4736-82d8-46eb06dc5008-99",
+        "title": "Commit",
+        "workspaceId": "ws-1615af7c90d72838",
+        "workspaceName": "project-with-long-repository-name",
+        "repoName": "git-client-long-repository-name",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791030860780,
+        "completed": null,
+        "total": null,
+        "cancellable": false,
+        "children": [],
+        "finishedAt": 1791030861020
+      }
+    }
+  },
+  "native-svn-commit-done": {
+    "tasks": {
+      "req-c879f785-0d11-4358-b416-58c5b3e47bc7-111": {
+        "id": "req-c879f785-0d11-4358-b416-58c5b3e47bc7-111",
+        "title": "Commit",
+        "workspaceId": "ws-1615af7c90d72838",
+        "workspaceName": "project-with-long-repository-name",
+        "repoName": "svn-client",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791030898051,
+        "completed": null,
+        "total": null,
+        "cancellable": false,
+        "children": [],
+        "finishedAt": 1791030899030
+      }
+    }
+  }
+}

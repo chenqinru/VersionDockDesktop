@@ -1,0 +1,29 @@
+[
+  {
+    "method": "shelve",
+    "parentDisconnected": true,
+    "cancelled": false,
+    "restored": true,
+    "upstreamApplied": true,
+    "noRetainedStash": true,
+    "privateWorkerDirectoryCleaned": true
+  },
+  {
+    "method": "stash",
+    "parentDisconnected": true,
+    "cancelled": false,
+    "restored": true,
+    "upstreamApplied": true,
+    "noRetainedStash": true,
+    "privateWorkerDirectoryCleaned": true
+  },
+  {
+    "method": "stash",
+    "parentDisconnected": false,
+    "cancelled": true,
+    "restored": true,
+    "upstreamApplied": false,
+    "noRetainedStash": true,
+    "privateWorkerDirectoryCleaned": true
+  }
+]

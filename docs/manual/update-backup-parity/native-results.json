@@ -1,0 +1,157 @@
+{
+  "oldBackupOpen": {
+    "notifications": [],
+    "shelves": {
+      "git-e9061eefa1a4acf4": [
+        {
+          "branch": "main",
+          "createdAt": "2026-10-03T13:49:29.782274+00:00",
+          "files": [
+            {
+              "path": "tracked.txt",
+              "status": "modified"
+            },
+            {
+              "path": "new.txt",
+              "status": "untracked"
+            }
+          ],
+          "id": "shelf-117519ad932247d7816cdbbdb7c4851b",
+          "name": "Auto-shelved before update (interruption QA)"
+        }
+      ]
+    }
+  },
+  "operation": {
+    "workspace": {
+      "available": true,
+      "id": "ws-be4e752e4f9f6093",
+      "lastOpenedAt": "2026-10-03T14:30:07.860676+00:00",
+      "name": "warning-project",
+      "paths": [
+        "/private/tmp/versiondock-update-warning-qa/warning-project"
+      ]
+    },
+    "notifications": [
+      {
+        "id": "2ce76c51-ae44-4d06-ba51-cba7a38c0d4e",
+        "timestamp": 1791037811357,
+        "read": false,
+        "type": "info",
+        "urgent": false,
+        "title": {
+          "key": "VersionDock [{0}]: Updated {1} files in {2} commits.",
+          "args": [
+            "warning-project",
+            1,
+            1
+          ]
+        },
+        "message": {
+          "key": "VersionDock [{0}]: Updated {1} files in {2} commits.",
+          "args": [
+            "warning-project",
+            1,
+            1
+          ]
+        },
+        "workspaceId": "ws-be4e752e4f9f6093",
+        "actions": [
+          {
+            "type": "viewUpdateResults",
+            "label": "View update details",
+            "results": [
+              {
+                "afterRevision": "c271ed247a09b941f510d752f90232e348ccec43",
+                "afterStatus": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "beforeRevision": "3ec388db0955f21b9e60488d66233c9d322ab1ca",
+                "beforeStatus": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "repoId": "git-dc77645ad9f5614c",
+                "summary": {
+                  "commitCount": 1,
+                  "containsMerge": false,
+                  "detail": {
+                    "commits": [
+                      {
+                        "author": "QA",
+                        "authorDate": "2026-10-03T22:26:58+08:00",
+                        "committerDate": "2026-10-03T22:26:58+08:00",
+                        "email": "qa@example.test",
+                        "hash": "c271ed247a09b941f510d752f90232e348ccec43",
+                        "incoming": false,
+                        "message": "upstream addition",
+                        "parents": [
+                          "3ec388db0955f21b9e60488d66233c9d322ab1ca"
+                        ],
+                        "refs": [
+                          "HEAD -> main",
+                          "origin/main",
+                          "origin/HEAD"
+                        ],
+                        "repoId": "git-dc77645ad9f5614c",
+                        "shortHash": "c271ed2",
+                        "unpushed": false
+                      }
+                    ],
+                    "files": [
+                      {
+                        "added": 1,
+                        "path": "collision.txt",
+                        "removed": 0,
+                        "status": "A"
+                      }
+                    ]
+                  },
+                  "fileCount": 1,
+                  "kind": "fastForward"
+                },
+                "summaryError": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "50292e97-4d2f-4df8-9933-5f68d0b5abfc",
+        "timestamp": 1791037809764,
+        "read": false,
+        "type": "warning",
+        "title": "VersionDock",
+        "workspaceId": "ws-be4e752e4f9f6093",
+        "actions": [],
+        "message": {
+          "key": "VersionDock [{0}]: Conflicts detected while restoring stashed changes.",
+          "args": [
+            "warning-project"
+          ]
+        },
+        "details": "collision.txt already exists, no checkout"
+      }
+    ],
+    "tasks": {
+      "task-group-a2ef2938-4275-43db-8bb7-3da9915fb704": {
+        "id": "task-group-a2ef2938-4275-43db-8bb7-3da9915fb704",
+        "title": "Update Project",
+        "workspaceId": "ws-be4e752e4f9f6093",
+        "workspaceName": "warning-project",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791037809522,
+        "completed": 1,
+        "total": 1,
+        "cancellable": false,
+        "children": [
+          {
+            "repoId": "git-dc77645ad9f5614c",
+            "repoName": "warning-project",
+            "status": "succeeded",
+            "message": "Completed"
+          }
+        ],
+        "repoName": "warning-project",
+        "finishedAt": 1791037811357
+      }
+    }
+  },
+  "untrackedBackupContent": "local untracked file\n"
+}

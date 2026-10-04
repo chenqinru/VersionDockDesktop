@@ -6,6 +6,8 @@ import { MockBridge } from '../../platform/bridge';
 import type { RequestOptions } from '../../platform/bridge';
 import { BridgeContext } from '../../platform/context';
 import { useAppStore } from '../../store/appStore';
+import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '../../progress/taskProgressStore';
+import { createOperationRequestEvent } from '../../platform/bridge';
 import { StatusBar } from './StatusBar';
 
 const state = (): AppStateSnapshot => ({
@@ -142,6 +144,7 @@ const renderStatusBar = () => {
 
 afterEach(() => {
   cleanup();
+  resetTaskProgress();
   useAppStore.setState({ bridge: undefined, bootstrap: undefined, ready: false, snapshot: undefined, operations: {} });
   vi.restoreAllMocks();
 });
@@ -350,25 +353,21 @@ describe('StatusBar', () => {
     expect(screen.getByText('Project Two')).toBeInTheDocument();
   });
 
-  it('shows active operation progress in the status bar and supports cancellation', async () => {
-    const { bridge, container } = renderStatusBar();
+  it('shows task progress, opens details and supports cancellation', async () => {
+    const { bridge } = renderStatusBar();
     const cancelOperation = vi.fn(async () => true);
     bridge.cancelOperation = cancelOperation;
-    useAppStore.setState({
-      operations: {
-        fetch: {
-          operationId: 'fetch',
-          context: { generation: 1, domain: 'sync', visibility: 'foreground', workspaceId: 'ws1', repositoryId: 'repo1', target: null },
-          status: 'running', phase: 'sync', message: '', startedAt: '', cancellable: true,
-          completed: 2, total: 4, result: null, error: null,
-        },
-      },
+    configureTaskProgress(cancelOperation);
+    const event = createOperationRequestEvent({ type: 'sync', payload: { workspace_id: 'ws1', repo_id: 'repo1', action: 'push', remote: null, branch: null } }, {}, 'push');
+    act(() => {
+      useTaskProgressStore.getState().requested(event, { workspaceName: 'Workspace', repoName: 'Repo1' });
+      useTaskProgressStore.getState().operation({ operationId: 'push', context: event.context, status: 'running', phase: 'pushing', message: 'Pushing repository changes', startedAt: '', cancellable: true, completed: 2, total: 4, error: null });
     });
-
-    expect(await screen.findByText('Synchronizing repository')).toBeInTheDocument();
-    expect(container.querySelector('.statusbar-operation-progress')).toHaveAttribute('value', '2');
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(cancelOperation).toHaveBeenCalledWith('fetch');
+    expect(await screen.findByText('Push')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Task progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel task' }));
+    expect(cancelOperation).toHaveBeenCalledWith('push');
     expect(document.querySelector('.operation-strip')).toBeNull();
   });
 
@@ -376,25 +375,13 @@ describe('StatusBar', () => {
     vi.useFakeTimers();
     try {
       renderStatusBar();
-      act(() => {
-        useAppStore.setState({
-          operations: {
-            quick: {
-              operationId: 'quick',
-              context: { generation: 1, domain: 'sync', visibility: 'foreground', workspaceId: 'ws1', repositoryId: 'repo1', target: null },
-              status: 'running', phase: 'sync', message: '', startedAt: '', cancellable: true,
-              completed: null, total: null, result: null, error: null,
-            },
-          },
-        });
-      });
+      const event = createOperationRequestEvent({ type: 'sync', payload: { workspace_id: 'ws1', repo_id: 'repo1', action: 'push', remote: null, branch: null } }, {}, 'quick');
+      act(() => useTaskProgressStore.getState().requested(event, { workspaceName: 'Workspace' }));
       await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-      act(() => useAppStore.setState({ operations: {} }));
+      act(() => useTaskProgressStore.getState().settled({ type: 'operation-settled', progressEvent: true, requestId: 'quick' }));
       await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-
       expect(document.querySelector('.statusbar-operation')).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+    } finally { vi.useRealTimers(); }
   });
+
 });

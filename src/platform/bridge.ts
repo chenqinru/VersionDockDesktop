@@ -2,7 +2,7 @@ import type {
   AiEvent, BridgeCommand, DesktopError, OperationDomain,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
   WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
-  LogEntry, LogLevel, LogChannel,
+  LogEntry, LogLevel, LogChannel, UpdateRestoreWarning,
 } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
@@ -10,6 +10,7 @@ export interface RequestOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   showProgress?: boolean;
+  onOperationId?: (operationId: string) => void;
   context?: Partial<Omit<RequestContext, 'generation'>> & { generation?: number };
 }
 
@@ -25,7 +26,15 @@ export interface WindowDragGeometry {
   sourceBounds: { x: number; y: number; width: number; height: number };
 }
 
-export type BridgeEvent = AiEvent | OperationEvent | WorkspaceEvent | RepositoryEvent | { type: 'native-unavailable' };
+export interface OperationRequestEvent {
+  type: 'operation-request';
+  progressEvent: true;
+  requestId: string;
+  command: BridgeCommand;
+  context: RequestContext;
+}
+export interface OperationSettledEvent { progressEvent: true; type: 'operation-settled'; requestId: string; error?: unknown; result?: unknown }
+export type BridgeEvent = AiEvent | OperationEvent | WorkspaceEvent | RepositoryEvent | OperationRequestEvent | OperationSettledEvent | { type: 'native-unavailable' };
 
 export interface VersionDockBridge {
   send(command: BridgeCommand): void;
@@ -121,6 +130,7 @@ export class BridgeError extends Error implements DesktopError {
   repositoryId?: string | null;
   subject?: string | null;
   hint?: string | null;
+  restoreWarning?: UpdateRestoreWarning | null;
 
   constructor(error: DesktopError) {
     super(error.message);
@@ -135,6 +145,7 @@ export class BridgeError extends Error implements DesktopError {
     this.repositoryId = error.repositoryId;
     this.subject = error.subject;
     this.hint = error.hint;
+    this.restoreWarning = error.restoreWarning;
   }
 }
 
@@ -211,11 +222,18 @@ export function commandProgressVisibility(command: BridgeCommand, options: Reque
   return options.context?.visibility ?? 'foreground';
 }
 
+export function createOperationRequestEvent(command: BridgeCommand, options: RequestOptions, id: string): OperationRequestEvent {
+  return { type: 'operation-request', progressEvent: true, requestId: id, command, context: {
+    ...commandIdentifiers(command), domain: commandDomain(command), generation: 1, ...options.context, visibility: commandProgressVisibility(command, options),
+  } };
+}
+
 export class TauriBridge implements VersionDockBridge {
   private state: unknown;
   private handlers = new Set<(event: BridgeEvent) => void>();
   private unlisten?: () => void;
   private windowSyncQueue: Promise<void> = Promise.resolve();
+  private trackedRequests = new Set<string>();
   private contextGenerations = new Map<string, number>();
   private currentPlatform: 'macos' | 'windows' | 'linux' = (() => { const value = osPlatform(); return value === 'macos' || value === 'windows' ? value : 'linux'; })();
 
@@ -286,7 +304,7 @@ export class TauriBridge implements VersionDockBridge {
   async initialize(): Promise<void> {
     const { listen } = await import('@tauri-apps/api/event');
     this.unlisten = await listen<BridgeEvent>('versiondock://event', ({ payload }) => {
-      if ('operationId' in payload && payload.context.visibility === 'background') return;
+      if ('operationId' in payload && payload.context.visibility === 'background' && !this.trackedRequests.has(payload.operationId)) return;
       this.handlers.forEach((handler) => handler(payload));
     });
   }
@@ -294,6 +312,7 @@ export class TauriBridge implements VersionDockBridge {
   dispose(): void {
     this.unlisten?.();
     this.handlers.clear();
+    this.trackedRequests.clear();
   }
 
   send(command: BridgeCommand): void {
@@ -325,6 +344,17 @@ export class TauriBridge implements VersionDockBridge {
     const { invoke } = await import('@tauri-apps/api/core');
     if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
 
+    options.onOperationId?.(id);
+    if (options.onOperationId) this.trackedRequests.add(id);
+    this.handlers.forEach((handler) => handler({ type: 'operation-request', progressEvent: true, requestId: id, command, context }));
+    // Report completion from the actual native promise, not the timeout/abort race:
+    // the backend can still be restoring local changes after cancellation.
+    const nativeResponse = invoke<ResponseEnvelope>('bridge_request', { envelope: { requestId: id, context, command } });
+    void nativeResponse.then(
+      (response) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error: response.error ?? undefined, result: response.result })),
+      (error) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error })),
+    ).finally(() => this.trackedRequests.delete(id));
+
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let abortHandler: (() => void) | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -348,13 +378,7 @@ export class TauriBridge implements VersionDockBridge {
 
     try {
       const response = await Promise.race([
-        invoke<ResponseEnvelope>('bridge_request', {
-          envelope: {
-            requestId: id,
-            context,
-            command,
-          },
-        }),
+        nativeResponse,
         timeoutPromise,
       ]);
 
@@ -581,14 +605,25 @@ export class TauriBridge implements VersionDockBridge {
 
 export class MockBridge implements VersionDockBridge {
   private state: unknown;
+  private handlers = new Set<(event: BridgeEvent) => void>();
   constructor(private readonly responder: (command: BridgeCommand, options?: RequestOptions) => unknown | Promise<unknown>) {}
   send(command: BridgeCommand): void { void this.responder(command); }
-  async request<T>(command: BridgeCommand, options?: RequestOptions): Promise<T> { return this.responder(command, options) as Promise<T>; }
+  async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {
+    const id = requestId();
+    if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
+    options.onOperationId?.(id);
+    this.emit(createOperationRequestEvent(command, options, id));
+    let requestError: unknown, result: unknown;
+    try { result = await this.responder(command, options); return result as T; }
+    catch (error) { requestError = error; throw error; }
+    finally { this.emit({ type: 'operation-settled', progressEvent: true, requestId: id, error: requestError, result }); }
+  }
   async cancelOperation(): Promise<boolean> { return false; }
   subscribe(handler?: (event: BridgeEvent) => void): () => void {
-    void handler;
-    return () => undefined;
+    if (handler) this.handlers.add(handler);
+    return () => { if (handler) this.handlers.delete(handler); };
   }
+  emit(event: BridgeEvent): void { this.handlers.forEach((handler) => handler(event)); }
   getState<T>(): T | undefined { return this.state as T | undefined; }
   setState<T>(state: T): void { this.state = state; }
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }

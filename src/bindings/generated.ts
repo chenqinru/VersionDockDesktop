@@ -855,6 +855,7 @@ export type DesktopError = {
 	repositoryId?: string | null,
 	subject?: string | null,
 	hint?: string | null,
+	restoreWarning?: UpdateRestoreWarning | null,
 };
 
 export type DesktopSettings = {
@@ -1503,6 +1504,7 @@ export type SyncAction = "fetch" | "pull" | "pullRebase" | "pullFfOnly" | "push"
 export type SyncResult = {
 	output: string,
 	update: RepositoryUpdateResult | null,
+	restoreWarning?: UpdateRestoreWarning | null,
 };
 
 export type TagInfo = {
@@ -1550,6 +1552,14 @@ export type UpdateDetail = {
 export type UpdateKind = "noChanges" | "fastForward" | "updated";
 
 export type UpdateProjectMethod = "rebase" | "merge" | "prompt";
+
+export type UpdateRestoreWarning = {
+	shelf: boolean,
+	backupName: string,
+	backupId: string,
+	conflicted: boolean,
+	details: string,
+};
 
 export type UpdateSummary = {
 	kind: UpdateKind,

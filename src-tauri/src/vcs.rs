@@ -3294,6 +3294,7 @@ async fn pull_non_current_branch(
     let upstream = fields.next().unwrap_or_default().trim();
     if remote.is_empty() || upstream.is_empty() {
         return Ok(SyncResult {
+            restore_warning: None,
             output: format!("No remote tracking branch for {branch} — skipped"),
             update: None,
         });
@@ -3311,9 +3312,80 @@ async fn pull_non_current_branch(
     )
     .await?;
     Ok(SyncResult {
+        restore_warning: None,
         output: format!("pulled {branch}"),
         update: None,
     })
+}
+
+#[cfg(test)]
+mod update_restore_tests {
+    #[test]
+    fn restoration_warning_preserves_the_update_outcome() {
+        use super::finish_update_with_restore_warning;
+        use crate::models::{DesktopError, SyncResult, UpdateRestoreWarning};
+        let warning = |conflicted| {
+            Some(UpdateRestoreWarning {
+                shelf: true,
+                backup_name: "backup".into(),
+                backup_id: "id".into(),
+                conflicted,
+                details: "restore failed".into(),
+            })
+        };
+        let success = || {
+            Ok(SyncResult {
+                output: "updated".into(),
+                update: None,
+                restore_warning: None,
+            })
+        };
+        assert!(
+            finish_update_with_restore_warning(success(), warning(false))
+                .unwrap()
+                .restore_warning
+                .is_some()
+        );
+        let conflict = finish_update_with_restore_warning(success(), warning(true)).unwrap_err();
+        assert_eq!(conflict.code, "GIT_UPDATE_CONFLICT");
+        let failure = finish_update_with_restore_warning(
+            Err(DesktopError::new("GIT_PULL_FAILED", "network failed", true)),
+            warning(false),
+        )
+        .unwrap_err();
+        assert_eq!(failure.code, "GIT_PULL_FAILED");
+        assert!(failure.restore_warning.is_some());
+    }
+}
+
+fn finish_update_with_restore_warning(
+    result: Result<SyncResult, DesktopError>,
+    warning: Option<crate::models::UpdateRestoreWarning>,
+) -> Result<SyncResult, DesktopError> {
+    let Some(warning) = warning else {
+        return result;
+    };
+    match result {
+        Ok(mut value) if !warning.conflicted => {
+            // The plugin reports a restoration warning separately from a
+            // successful pull. Do not convert this case into Update failed.
+            value.restore_warning = Some(warning);
+            Ok(value)
+        }
+        Ok(_) => {
+            let mut error = DesktopError::new(
+                "GIT_UPDATE_CONFLICT",
+                "Update stopped with conflicts or an unfinished version-control operation.",
+                true,
+            );
+            error.restore_warning = Some(warning);
+            Err(error)
+        }
+        Err(mut error) => {
+            error.restore_warning = Some(warning);
+            Err(error)
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3327,17 +3399,14 @@ pub async fn sync_with_worktree_backup(
     settings: &crate::models::DesktopSettings,
     token: &CancellationToken,
 ) -> Result<SyncResult, DesktopError> {
-    let use_shelf = repo.kind == VcsKind::Git
-        && settings.update_project_clean_working_tree
-            == crate::models::CleanWorkingTreeMethod::Shelve
+    let captures_worktree = repo.kind == VcsKind::Git
         && matches!(
             action,
             SyncAction::Pull | SyncAction::PullRebase | SyncAction::PullFfOnly
         )
-        && branch.is_none()
         && !git_has_conflicts(repo, token).await
         && git_operation_name(Path::new(&repo.root_path)).is_none();
-    if !use_shelf {
+    if !captures_worktree {
         return sync(repo, action, remote, branch, force, settings, token).await;
     }
     if git(
@@ -3351,12 +3420,44 @@ pub async fn sync_with_worktree_backup(
     {
         return sync(repo, action, remote, branch, force, settings, token).await;
     }
+    if settings.update_project_clean_working_tree == crate::models::CleanWorkingTreeMethod::Stash {
+        let backup = create_auto_stash(repo, true, token).await?;
+        let result = sync(repo, action, remote, branch, force, settings, token).await;
+        let Some(backup) = backup else {
+            return result;
+        };
+        let recovery_token = CancellationToken::new();
+        let restore = restore_auto_stash(
+            repo,
+            &backup,
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.code == "REQUEST_CANCELLED"),
+            &recovery_token,
+        )
+        .await;
+        let warning = if let Err(error) = restore {
+            Some(crate::models::UpdateRestoreWarning {
+                shelf: false,
+                backup_name: String::new(),
+                backup_id: backup.hash,
+                conflicted: git_has_conflicts(repo, &recovery_token).await
+                    || git_operation_name(Path::new(&repo.root_path)).is_some(),
+                details: error.message,
+            })
+        } else {
+            None
+        };
+        return finish_update_with_restore_warning(result, warning);
+    }
     let before_status = status_fingerprint(repo, token).await?;
     let name = format!(
         "Auto-shelved before update ({})",
         chrono::Local::now().format("%H:%M:%S")
     );
-    let shelf_id = match crate::shelf::create(config_dir, repo, &name, &[], token).await {
+    let capture_token = CancellationToken::new();
+    let shelf_id = match crate::shelf::create(config_dir, repo, &name, &[], &capture_token).await {
         Ok(id) => id,
         Err(error) => {
             // Fall back to the existing stash path only if capture restored the
@@ -3364,7 +3465,20 @@ pub async fn sync_with_worktree_backup(
             if status_fingerprint(repo, token).await? != before_status {
                 return Err(error);
             }
-            return sync(repo, action, remote, branch, force, settings, token).await;
+            let mut fallback_settings = settings.clone();
+            fallback_settings.update_project_clean_working_tree =
+                crate::models::CleanWorkingTreeMethod::Stash;
+            return Box::pin(sync_with_worktree_backup(
+                config_dir,
+                repo,
+                action,
+                remote,
+                branch,
+                force,
+                &fallback_settings,
+                token,
+            ))
+            .await;
         }
     };
     let result = sync(repo, action, remote, branch, force, settings, token).await;
@@ -3373,20 +3487,23 @@ pub async fn sync_with_worktree_backup(
     let recovery_token = CancellationToken::new();
     let restore =
         crate::shelf::restore_after_update(config_dir, repo, &shelf_id, &recovery_token).await;
-    let conflicted = git_has_conflicts(repo, &recovery_token).await;
+    let conflicted = git_has_conflicts(repo, &recovery_token).await
+        || git_operation_name(Path::new(&repo.root_path)).is_some();
     if restore.is_err() || conflicted {
-        let cause = restore.err().or_else(|| result.as_ref().err().cloned());
-        let mut error = DesktopError::new(
-            "GIT_AUTO_SHELF_RESTORE_FAILED",
-            format!("Conflicts detected while restoring local changes. Shelve backup has been retained: \"{name}\" ({shelf_id})."),
-            true,
+        let details = restore
+            .err()
+            .map(|error| error.message)
+            .unwrap_or_else(|| "Conflicts detected while restoring local changes".into());
+        return finish_update_with_restore_warning(
+            result,
+            Some(crate::models::UpdateRestoreWarning {
+                shelf: true,
+                backup_name: name,
+                backup_id: shelf_id,
+                conflicted,
+                details,
+            }),
         );
-        error.subject = Some(format!("shelf:{shelf_id}"));
-        error.hint = Some(
-            "Open the Shelf panel and keep the backup until local changes are verified".into(),
-        );
-        error.stderr = cause.and_then(|error| error.stderr.or(Some(error.message)));
-        return Err(error);
     }
     crate::shelf::operate(
         config_dir,
@@ -3414,12 +3531,14 @@ pub async fn sync(
 ) -> Result<SyncResult, DesktopError> {
     if repo.kind == VcsKind::Git && matches!(action, SyncAction::PushTags) {
         return Ok(SyncResult {
+            restore_warning: None,
             output: git_push_tags(repo, remote, token).await?,
             update: None,
         });
     }
     if repo.kind == VcsKind::Git && matches!(action, SyncAction::Push) {
         return Ok(SyncResult {
+            restore_warning: None,
             output: git_push(
                 repo,
                 remote,
@@ -3516,6 +3635,7 @@ pub async fn sync(
         .is_ok();
         if !has_upstream {
             return Ok(SyncResult {
+                restore_warning: None,
                 output: "No remote tracking branch — skipped".into(),
                 update: Some(RepositoryUpdateResult {
                     repo_id: repo.id.clone(),
@@ -3595,11 +3715,13 @@ pub async fn sync(
         token,
     )
     .await;
+    // Updating may be cancelled, but captured local changes must finish recovery.
+    let recovery_token = CancellationToken::new();
     let output = match operation {
         Ok(output) => output.stdout_text(),
         Err(error) => {
             if let Some(auto_stash) = auto_stash.as_ref() {
-                if git_has_conflicts(repo, token).await
+                if git_has_conflicts(repo, &recovery_token).await
                     || git_operation_name(Path::new(&repo.root_path)).is_some()
                 {
                     return Err(pull_auto_stash_error(
@@ -3612,7 +3734,7 @@ pub async fn sync(
                         Some(error),
                     ));
                 }
-                restore_pull_auto_stash(repo, auto_stash, token)
+                restore_pull_auto_stash(repo, auto_stash, &recovery_token)
                     .await
                     .map_err(|restore_error| {
                         pull_auto_stash_error(
@@ -3630,8 +3752,10 @@ pub async fn sync(
         }
     };
     if let Some(auto_stash) = auto_stash.as_ref() {
-        if let Err(error) = restore_pull_auto_stash(repo, auto_stash, token).await {
-            let code = if git_has_conflicts(repo, token).await || git_has_conflict_error(&error) {
+        if let Err(error) = restore_pull_auto_stash(repo, auto_stash, &recovery_token).await {
+            let code = if git_has_conflicts(repo, &recovery_token).await
+                || git_has_conflict_error(&error)
+            {
                 "GIT_AUTO_STASH_CONFLICT"
             } else {
                 "GIT_AUTO_STASH_RESTORE_FAILED"
@@ -3649,6 +3773,7 @@ pub async fn sync(
     }
     if !captures_update {
         return Ok(SyncResult {
+            restore_warning: None,
             output,
             update: None,
         });
@@ -3670,6 +3795,7 @@ pub async fn sync(
         Err(error) => (None, Some(error)),
     };
     Ok(SyncResult {
+        restore_warning: None,
         output,
         update: Some(RepositoryUpdateResult {
             repo_id: repo.id.clone(),
@@ -3705,30 +3831,45 @@ async fn create_pull_auto_stash(
     repo: &RepositoryMeta,
     token: &CancellationToken,
 ) -> Result<Option<PullAutoStash>, DesktopError> {
-    let tracked_status = git(vec!["status".into(), "--porcelain=v1".into()], repo, token)
-        .await?
-        .stdout_text();
+    create_auto_stash(repo, false, token).await
+}
+
+async fn create_auto_stash(
+    repo: &RepositoryMeta,
+    include_untracked: bool,
+    token: &CancellationToken,
+) -> Result<Option<PullAutoStash>, DesktopError> {
+    let mut status_args = vec!["status".into(), "--porcelain=v1".into()];
+    if !include_untracked {
+        status_args.push("--untracked-files=no".into());
+    }
+    let tracked_status = git(status_args, repo, token).await?.stdout_text();
     if tracked_status.trim().is_empty() {
         return Ok(None);
     }
+    // Once Git starts capturing changes, finish identifying the recovery object
+    // even if the operation is cancelled in the meantime.
+    let capture_token = CancellationToken::new();
+    let token = &capture_token;
     let before = pull_stash_head(repo, token).await;
     let marker = format!(
         "versiondock-{}-{}",
         std::process::id(),
         chrono::Utc::now().timestamp_millis()
     );
-    git(
-        vec![
-            "stash".into(),
-            "push".into(),
-            "--include-untracked".into(),
-            "--message".into(),
-            format!("VersionDock automatic stash before update ({marker})"),
-        ],
-        repo,
-        token,
-    )
-    .await?;
+    let name = if include_untracked {
+        format!(
+            "Auto-stashed before update ({})",
+            chrono::Local::now().format("%H:%M:%S")
+        )
+    } else {
+        format!("VersionDock automatic stash before update ({marker})")
+    };
+    let mut args = vec!["stash".into(), "push".into(), "--message".into(), name];
+    if include_untracked {
+        args.push("--include-untracked".into());
+    }
+    git(args, repo, token).await?;
     let after = pull_stash_head(repo, token).await;
     let Some(hash) = after.filter(|hash| Some(hash) != before.as_ref()) else {
         // A dirty submodule may not create a superproject stash. Leave it in
@@ -3764,6 +3905,15 @@ async fn restore_pull_auto_stash(
     auto_stash: &PullAutoStash,
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
+    restore_auto_stash(repo, auto_stash, true, token).await
+}
+
+async fn restore_auto_stash(
+    repo: &RepositoryMeta,
+    auto_stash: &PullAutoStash,
+    restore_index: bool,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
     let reference = pull_auto_stash_ref(repo, &auto_stash.hash, token)
         .await?
         .ok_or_else(|| {
@@ -3776,12 +3926,12 @@ async fn restore_pull_auto_stash(
                 true,
             )
         })?;
-    git(
-        vec!["stash".into(), "pop".into(), "--index".into(), reference],
-        repo,
-        token,
-    )
-    .await?;
+    let mut args = vec!["stash".into(), "pop".into()];
+    if restore_index {
+        args.push("--index".into());
+    }
+    args.push(reference);
+    git(args, repo, token).await?;
     Ok(())
 }
 
@@ -3813,6 +3963,7 @@ fn pull_auto_stash_error(
         repository_id: None,
         subject: Some(format!("stash:{}", auto_stash.hash)),
         hint: Some("Open Conflicts, resolve the working copy, and keep the retained stash until the restored changes are verified".into()),
+        restore_warning: None,
     }
 }
 

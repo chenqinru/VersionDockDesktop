@@ -1,3 +1,4 @@
+import { createOperationRequestEvent } from './bridge';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, BridgeCommand, CommitDetail, CommitFile, CommitNode,
   MergeCommitSummary,
@@ -466,8 +467,17 @@ export class BrowserDevBridge implements VersionDockBridge {
 
   async request<T>(command: BridgeCommand, options: RequestOptions = {}): Promise<T> {
     if (options.signal?.aborted) throw new DOMException('Operation aborted', 'AbortError');
-    const value = await this.respond(command);
-    return structuredClone(value) as T;
+    const id = `browser-${crypto.randomUUID()}`;
+    options.onOperationId?.(id);
+    this.handlers.forEach((handler) => handler(createOperationRequestEvent(command, options, id)));
+    let requestError: unknown, result: unknown;
+    try {
+      result = await this.respond(command);
+      return structuredClone(result) as T;
+    } catch (error) {
+      requestError = error;
+      throw error;
+    } finally { this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error: requestError, result })); }
   }
 
   private snapshot(): WorkspaceSnapshot {

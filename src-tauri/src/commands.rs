@@ -2838,7 +2838,8 @@ async fn dispatch(
         } => {
             let (phase, message) = sync_phase(&action);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
-            let value = with_write(state, &repo_id, token, async {
+            let needs_worker = crate::update_worker::needs_worker(&repo, &action);
+            let value = with_write_coordinated(state, &repo_id, token, !needs_worker, async {
                 emit_operation_phase(
                     app,
                     operation_id,
@@ -2850,6 +2851,28 @@ async fn dispatch(
                     None,
                 );
                 let settings = state.app.read().await.settings.clone();
+                if needs_worker {
+                    let request = crate::update_worker::UpdateRequest {
+                        config_dir: state.config_dir.clone(),
+                        repo,
+                        action,
+                        remote,
+                        branch,
+                        force: force.unwrap_or(false),
+                        settings,
+                    };
+                    let executable = std::env::current_exe().map_err(|error| {
+                        DesktopError::new("UPDATE_WORKER_FAILED", error.to_string(), true)
+                    })?;
+                    let (child, directory) = tokio::task::spawn_blocking(move || {
+                        crate::update_worker::launch(&executable, &request, &[])
+                    })
+                    .await
+                    .map_err(|error| {
+                        DesktopError::new("UPDATE_WORKER_FAILED", error.to_string(), true)
+                    })??;
+                    return crate::update_worker::wait(child, directory, token).await;
+                }
                 Box::pin(vcs::sync_with_worktree_backup(
                     &state.config_dir,
                     &repo,
@@ -3968,6 +3991,19 @@ async fn with_write<T, F>(
 where
     F: std::future::Future<Output = Result<T, DesktopError>>,
 {
+    with_write_coordinated(state, repo_id, token, true, operation).await
+}
+
+async fn with_write_coordinated<T, F>(
+    state: &AppState,
+    repo_id: &str,
+    token: &tokio_util::sync::CancellationToken,
+    lock_transaction: bool,
+    operation: F,
+) -> Result<T, DesktopError>
+where
+    F: std::future::Future<Output = Result<T, DesktopError>>,
+{
     let lock = state.write_lock(repo_id).await;
     state::emit_current_operation(
         OperationStatus::Queued,
@@ -3979,6 +4015,13 @@ where
         guard = lock.lock_owned() => guard,
     };
     let _permit = state.acquire_write(token).await?;
+    // A source-watcher restart must not let the new UI write into a repository
+    // whose detached update worker is still updating or restoring local changes.
+    let _transaction = if lock_transaction {
+        Some(crate::update_worker::repository_lock(&state.config_dir, repo_id, token).await?)
+    } else {
+        None
+    };
     operation.await
 }
 

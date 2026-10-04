@@ -4,7 +4,7 @@
     {
       "label": "dev",
       "type": "shell",
-      "command": "npm run tauri:dev",
+      "command": "npm run tauri:dev -- --stable",
       "isBackground": true,
       "group": "build",
       "presentation": { "reveal": "always", "panel": "shared" },

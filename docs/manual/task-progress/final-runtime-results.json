@@ -1,0 +1,638 @@
+{
+  "manual-fetch-panel-open": {
+    "tasks": {
+      "req-d91464ab-b76d-43c6-87a2-d5e4c001b9b0-39": {
+        "id": "req-d91464ab-b76d-43c6-87a2-d5e4c001b9b0-39",
+        "title": "Fetch",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "repoName": "git",
+        "status": "running",
+        "message": "Fetching remote references",
+        "startedAt": 1791042140007,
+        "completed": null,
+        "total": null,
+        "cancellable": true,
+        "children": []
+      }
+    },
+    "rects": [
+      {
+        "class": "statusbar-operation",
+        "rect": {
+          "x": 1519.921875,
+          "y": 929,
+          "width": 118.078125,
+          "height": 21,
+          "top": 929,
+          "right": 1638,
+          "bottom": 950,
+          "left": 1519.921875
+        },
+        "color": "rgb(187, 190, 191)",
+        "background": "rgb(36, 37, 38)"
+      },
+      {
+        "class": "task-progress-track indeterminate",
+        "rect": {
+          "x": 1569,
+          "y": 938,
+          "width": 64,
+          "height": 3,
+          "top": 938,
+          "right": 1633,
+          "bottom": 941,
+          "left": 1569
+        },
+        "color": "rgb(187, 190, 191)",
+        "background": "rgb(36, 37, 38)"
+      },
+      {
+        "class": "task-progress-popover",
+        "rect": {
+          "x": 1278,
+          "y": 755,
+          "width": 360,
+          "height": 168,
+          "top": 755,
+          "right": 1638,
+          "bottom": 923,
+          "left": 1278
+        },
+        "color": "rgb(187, 190, 191)",
+        "background": "rgb(32, 33, 34)"
+      },
+      {
+        "class": "task-progress-track indeterminate",
+        "rect": {
+          "x": 1311,
+          "y": 909,
+          "width": 314,
+          "height": 3,
+          "top": 909,
+          "right": 1625,
+          "bottom": 912,
+          "left": 1311
+        },
+        "color": "rgb(187, 190, 191)",
+        "background": "rgb(36, 37, 38)"
+      }
+    ],
+    "error": null,
+    "workspace": {
+      "available": true,
+      "id": "ws-1db9ab746afb3835",
+      "lastOpenedAt": "2026-10-03T15:41:35.350091+00:00",
+      "name": "2 roots",
+      "paths": [
+        "/private/tmp/versiondock-final-progress-qa/fixtures/git",
+        "/private/tmp/versiondock-final-progress-qa/fixtures/svn"
+      ]
+    }
+  },
+  "manual-fetch-running-done": {
+    "tasks": {
+      "req-d91464ab-b76d-43c6-87a2-d5e4c001b9b0-39": {
+        "id": "req-d91464ab-b76d-43c6-87a2-d5e4c001b9b0-39",
+        "title": "Fetch",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "repoName": "git",
+        "status": "cancelled",
+        "message": "Cancelled",
+        "startedAt": 1791042140007,
+        "completed": null,
+        "total": null,
+        "cancellable": false,
+        "children": [],
+        "error": "Operation cancelled",
+        "finishedAt": 1791042390306
+      }
+    },
+    "rects": [
+      {
+        "class": "statusbar-operation",
+        "rect": {
+          "x": 621.953125,
+          "y": 578,
+          "width": 126.046875,
+          "height": 21,
+          "top": 578,
+          "right": 748,
+          "bottom": 599,
+          "left": 621.953125
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(232, 232, 232)"
+      },
+      {
+        "class": "task-progress-track",
+        "rect": {
+          "x": 703,
+          "y": 587,
+          "width": 40,
+          "height": 3,
+          "top": 587,
+          "right": 743,
+          "bottom": 590,
+          "left": 703
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(222, 222, 222)"
+      },
+      {
+        "class": "task-progress-popover",
+        "rect": {
+          "x": 388,
+          "y": 390,
+          "width": 360,
+          "height": 182,
+          "top": 390,
+          "right": 748,
+          "bottom": 572,
+          "left": 388
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(236, 236, 236)"
+      },
+      {
+        "class": "task-progress-track",
+        "rect": {
+          "x": 421,
+          "y": 536,
+          "width": 314,
+          "height": 3,
+          "top": 536,
+          "right": 735,
+          "bottom": 539,
+          "left": 421
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(222, 222, 222)"
+      }
+    ],
+    "error": null,
+    "workspace": {
+      "available": true,
+      "id": "ws-1db9ab746afb3835",
+      "lastOpenedAt": "2026-10-03T15:41:35.350091+00:00",
+      "name": "2 roots",
+      "paths": [
+        "/private/tmp/versiondock-final-progress-qa/fixtures/git",
+        "/private/tmp/versiondock-final-progress-qa/fixtures/svn"
+      ]
+    }
+  },
+  "update-native-final-done": {
+    "tasks": {
+      "task-group-3ad25542-1b3e-4c25-a8f1-af337bdf1bea": {
+        "id": "task-group-3ad25542-1b3e-4c25-a8f1-af337bdf1bea",
+        "title": "Update Project",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "status": "partial",
+        "message": "Partially completed",
+        "startedAt": 1791042545761,
+        "completed": 2,
+        "total": 2,
+        "cancellable": false,
+        "children": [
+          {
+            "repoId": "git-dae8949b9b432f87",
+            "repoName": "git",
+            "status": "failed",
+            "message": "Failed",
+            "error": "Request timed out after 45000ms"
+          },
+          {
+            "repoId": "svn-eac79c17c0cdeb56",
+            "repoName": "svn",
+            "status": "succeeded",
+            "message": "Completed"
+          }
+        ],
+        "repoName": "svn",
+        "error": "Request timed out after 45000ms",
+        "finishedAt": 1791042593210
+      }
+    },
+    "rects": [
+      {
+        "class": "statusbar-operation",
+        "rect": {
+          "x": 1416.3125,
+          "y": 929,
+          "width": 221.6875,
+          "height": 21,
+          "top": 929,
+          "right": 1638,
+          "bottom": 950,
+          "left": 1416.3125
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "class": "task-progress-track determinate",
+        "rect": {
+          "x": 1569,
+          "y": 938,
+          "width": 64,
+          "height": 3,
+          "top": 938,
+          "right": 1633,
+          "bottom": 941,
+          "left": 1569
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgb(222, 222, 222)"
+      }
+    ],
+    "error": null,
+    "workspace": {
+      "available": true,
+      "id": "ws-1db9ab746afb3835",
+      "lastOpenedAt": "2026-10-03T15:49:03.062651+00:00",
+      "name": "2 roots",
+      "paths": [
+        "/private/tmp/versiondock-final-progress-qa/fixtures/git",
+        "/private/tmp/versiondock-final-progress-qa/fixtures/svn"
+      ]
+    }
+  },
+  "native-success-update-done": {
+    "tasks": {
+      "task-group-a36a3c52-2810-4ddd-b8a1-5c2a91e4a63e": {
+        "id": "task-group-a36a3c52-2810-4ddd-b8a1-5c2a91e4a63e",
+        "title": "Update Project",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791042674043,
+        "completed": 2,
+        "total": 2,
+        "cancellable": false,
+        "children": [
+          {
+            "repoId": "git-dae8949b9b432f87",
+            "repoName": "git",
+            "status": "succeeded",
+            "message": "Completed"
+          },
+          {
+            "repoId": "svn-eac79c17c0cdeb56",
+            "repoName": "svn",
+            "status": "succeeded",
+            "message": "Completed"
+          }
+        ],
+        "repoName": "svn",
+        "finishedAt": 1791042677273
+      }
+    },
+    "rects": [
+      {
+        "class": "statusbar-operation",
+        "rect": {
+          "x": 1461.4375,
+          "y": 929,
+          "width": 176.5625,
+          "height": 21,
+          "top": 929,
+          "right": 1638,
+          "bottom": 950,
+          "left": 1461.4375
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "class": "task-progress-track determinate",
+        "rect": {
+          "x": 1569,
+          "y": 938,
+          "width": 64,
+          "height": 3,
+          "top": 938,
+          "right": 1633,
+          "bottom": 941,
+          "left": 1569
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgb(222, 222, 222)"
+      }
+    ],
+    "error": null,
+    "workspace": {
+      "available": true,
+      "id": "ws-1db9ab746afb3835",
+      "lastOpenedAt": "2026-10-03T15:49:03.062651+00:00",
+      "name": "2 roots",
+      "paths": [
+        "/private/tmp/versiondock-final-progress-qa/fixtures/git",
+        "/private/tmp/versiondock-final-progress-qa/fixtures/svn"
+      ]
+    }
+  },
+  "native-git-commit-done": {
+    "tasks": {
+      "task-group-a36a3c52-2810-4ddd-b8a1-5c2a91e4a63e": {
+        "id": "task-group-a36a3c52-2810-4ddd-b8a1-5c2a91e4a63e",
+        "title": "Update Project",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791042674043,
+        "completed": 2,
+        "total": 2,
+        "cancellable": false,
+        "children": [
+          {
+            "repoId": "git-dae8949b9b432f87",
+            "repoName": "git",
+            "status": "succeeded",
+            "message": "Completed"
+          },
+          {
+            "repoId": "svn-eac79c17c0cdeb56",
+            "repoName": "svn",
+            "status": "succeeded",
+            "message": "Completed"
+          }
+        ],
+        "repoName": "svn",
+        "finishedAt": 1791042677273
+      },
+      "req-97d2955c-27d1-405a-b324-c24b29458d2e-117": {
+        "id": "req-97d2955c-27d1-405a-b324-c24b29458d2e-117",
+        "title": "Commit",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "repoName": "git",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791042677504,
+        "completed": null,
+        "total": null,
+        "cancellable": false,
+        "children": [],
+        "finishedAt": 1791042677561
+      }
+    },
+    "rects": [
+      {
+        "class": "statusbar-operation",
+        "rect": {
+          "x": 1482.4375,
+          "y": 929,
+          "width": 155.5625,
+          "height": 21,
+          "top": 929,
+          "right": 1638,
+          "bottom": 950,
+          "left": 1482.4375
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "class": "task-progress-track",
+        "rect": {
+          "x": 1569,
+          "y": 938,
+          "width": 64,
+          "height": 3,
+          "top": 938,
+          "right": 1633,
+          "bottom": 941,
+          "left": 1569
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgb(222, 222, 222)"
+      }
+    ],
+    "error": null,
+    "workspace": {
+      "available": true,
+      "id": "ws-1db9ab746afb3835",
+      "lastOpenedAt": "2026-10-03T15:49:03.062651+00:00",
+      "name": "2 roots",
+      "paths": [
+        "/private/tmp/versiondock-final-progress-qa/fixtures/git",
+        "/private/tmp/versiondock-final-progress-qa/fixtures/svn"
+      ]
+    }
+  },
+  "native-svn-commit-done": {
+    "tasks": {
+      "task-group-a36a3c52-2810-4ddd-b8a1-5c2a91e4a63e": {
+        "id": "task-group-a36a3c52-2810-4ddd-b8a1-5c2a91e4a63e",
+        "title": "Update Project",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791042674043,
+        "completed": 2,
+        "total": 2,
+        "cancellable": false,
+        "children": [
+          {
+            "repoId": "git-dae8949b9b432f87",
+            "repoName": "git",
+            "status": "succeeded",
+            "message": "Completed"
+          },
+          {
+            "repoId": "svn-eac79c17c0cdeb56",
+            "repoName": "svn",
+            "status": "succeeded",
+            "message": "Completed"
+          }
+        ],
+        "repoName": "svn",
+        "finishedAt": 1791042677273
+      },
+      "req-97d2955c-27d1-405a-b324-c24b29458d2e-117": {
+        "id": "req-97d2955c-27d1-405a-b324-c24b29458d2e-117",
+        "title": "Commit",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "repoName": "git",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791042677504,
+        "completed": null,
+        "total": null,
+        "cancellable": false,
+        "children": [],
+        "finishedAt": 1791042677561
+      },
+      "req-9c559dd2-0f18-4077-8891-1b5ba1ffbb11-130": {
+        "id": "req-9c559dd2-0f18-4077-8891-1b5ba1ffbb11-130",
+        "title": "Commit",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "repoName": "svn",
+        "status": "succeeded",
+        "message": "Completed",
+        "startedAt": 1791042678025,
+        "completed": null,
+        "total": null,
+        "cancellable": false,
+        "children": [],
+        "finishedAt": 1791042679038
+      }
+    },
+    "rects": [
+      {
+        "class": "statusbar-operation",
+        "rect": {
+          "x": 1482.4375,
+          "y": 929,
+          "width": 155.5625,
+          "height": 21,
+          "top": 929,
+          "right": 1638,
+          "bottom": 950,
+          "left": 1482.4375
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "class": "task-progress-track",
+        "rect": {
+          "x": 1569,
+          "y": 938,
+          "width": 64,
+          "height": 3,
+          "top": 938,
+          "right": 1633,
+          "bottom": 941,
+          "left": 1569
+        },
+        "color": "rgb(97, 97, 97)",
+        "background": "rgb(222, 222, 222)"
+      }
+    ],
+    "error": null,
+    "workspace": {
+      "available": true,
+      "id": "ws-1db9ab746afb3835",
+      "lastOpenedAt": "2026-10-03T15:49:03.062651+00:00",
+      "name": "2 roots",
+      "paths": [
+        "/private/tmp/versiondock-final-progress-qa/fixtures/git",
+        "/private/tmp/versiondock-final-progress-qa/fixtures/svn"
+      ]
+    }
+  },
+  "native-cancel-update-done": {
+    "tasks": {
+      "task-group-4a9407b6-a782-4c72-a207-2043cae9707a": {
+        "id": "task-group-4a9407b6-a782-4c72-a207-2043cae9707a",
+        "title": "Update Project",
+        "workspaceId": "ws-1db9ab746afb3835",
+        "workspaceName": "2 roots",
+        "status": "cancelled",
+        "message": "Cancelled",
+        "startedAt": 1791042761900,
+        "completed": 1,
+        "total": 2,
+        "cancellable": false,
+        "children": [
+          {
+            "repoId": "git-dae8949b9b432f87",
+            "repoName": "git",
+            "status": "cancelled",
+            "message": "Cancelled"
+          },
+          {
+            "repoId": "svn-eac79c17c0cdeb56",
+            "repoName": "svn",
+            "status": "skipped",
+            "message": "Not started"
+          }
+        ],
+        "repoName": "git",
+        "finishedAt": 1791042765352
+      }
+    },
+    "rects": [
+      {
+        "class": "statusbar-operation",
+        "rect": {
+          "x": 1466.953125,
+          "y": 929,
+          "width": 171.046875,
+          "height": 21,
+          "top": 929,
+          "right": 1638,
+          "bottom": 950,
+          "left": 1466.953125
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(232, 232, 232)"
+      },
+      {
+        "class": "task-progress-track determinate",
+        "rect": {
+          "x": 1569,
+          "y": 938,
+          "width": 64,
+          "height": 3,
+          "top": 938,
+          "right": 1633,
+          "bottom": 941,
+          "left": 1569
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(222, 222, 222)"
+      },
+      {
+        "class": "task-progress-popover",
+        "rect": {
+          "x": 1278,
+          "y": 728,
+          "width": 360,
+          "height": 195,
+          "top": 728,
+          "right": 1638,
+          "bottom": 923,
+          "left": 1278
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(236, 236, 236)"
+      },
+      {
+        "class": "task-progress-track determinate",
+        "rect": {
+          "x": 1311,
+          "y": 878.5,
+          "width": 290,
+          "height": 3,
+          "top": 878.5,
+          "right": 1601,
+          "bottom": 881.5,
+          "left": 1311
+        },
+        "color": "rgb(51, 51, 51)",
+        "background": "rgb(222, 222, 222)"
+      }
+    ],
+    "error": null,
+    "workspace": {
+      "available": true,
+      "id": "ws-1db9ab746afb3835",
+      "lastOpenedAt": "2026-10-03T15:49:03.062651+00:00",
+      "name": "2 roots",
+      "paths": [
+        "/private/tmp/versiondock-final-progress-qa/fixtures/git",
+        "/private/tmp/versiondock-final-progress-qa/fixtures/svn"
+      ]
+    }
+  }
+}

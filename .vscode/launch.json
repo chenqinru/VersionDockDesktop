@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "VersionDock Desktop Dev: 启动当前源码",
+      "name": "VersionDock Desktop Dev: 稳定启动当前源码",
       "type": "node-terminal",
       "request": "launch",
-      "command": "npm run tauri:dev",
+      "command": "npm run tauri:dev -- --stable",
       "cwd": "${workspaceFolder}"
     },
     {

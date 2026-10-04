@@ -2724,11 +2724,11 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 .startup { flex: 1; display: flex; justify-content: center; align-items: center; gap: 8px; color: var(--versiondock-loading-foreground); }
 @keyframes toast-slide-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
 }
-.toast-container { position: fixed; z-index: 110; right: 7px; bottom: calc(var(--versiondock-statusbar-height) + 7px); display: flex; flex-direction: column; gap: 8px; pointer-events: none; max-height: calc(100vh - var(--versiondock-statusbar-height) - 32px); overflow-y: auto; }
-.toast { position: relative; flex-shrink: 0; pointer-events: auto; width: min(450px, calc(100vw - 14px)); min-height: 42px; padding: 10px 5px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); animation: toast-slide-in 0.18s ease-out; }
+.toast-container { position: fixed; z-index: 110; right: 7px; bottom: calc(var(--versiondock-statusbar-height) + 7px); display: flex; flex-direction: column; gap: 8px; pointer-events: none; width: min(450px, calc(100vw - 14px)); max-height: calc(100vh - var(--versiondock-statusbar-height) - 32px); overflow-x: hidden; overflow-y: auto; }
+.toast { position: relative; flex-shrink: 0; pointer-events: auto; width: 100%; min-width: 0; min-height: 42px; padding: 10px 5px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); animation: toast-slide-in 0.18s ease-out; }
 .toast-main-row { display: flex; align-items: flex-start; min-width: 0; }
 .notification-severity-icon { width: 26px; height: 26px; flex: 0 0 26px; margin-top: 1px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
 .notification-severity-icon.error { background: color-mix(in srgb, var(--versiondock-danger) 16%, transparent); color: var(--versiondock-danger); }
@@ -2740,8 +2740,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .toast-message { min-width: 0; flex: 1; font-size: var(--versiondock-ui-font-size, 13px); color: var(--versiondock-text); line-height: 22px; overflow-wrap: anywhere; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 .toast-details-row { display: flex; align-items: center; padding-left: 5px; gap: 4px; }
 .toast-source { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-muted); }
-.toast .toast-actions { flex: 0 1 auto; justify-content: flex-end; margin-top: 0; gap: 0; }
-.toast .toast-actions .notification-item-action-btn { height: auto; min-height: 28px; margin: 4px 5px; padding: 4px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-size: var(--versiondock-ui-font-size, 13px); font-weight: 400; line-height: 18px; }
+.toast .toast-actions { flex: 0 1 auto; min-width: 0; max-width: 100%; justify-content: flex-end; margin-top: 0; gap: 0; }
+.toast .toast-actions .notification-item-action-btn { height: auto; min-height: 28px; min-width: 0; max-width: calc(100% - 10px); margin: 4px 5px; padding: 4px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-size: var(--versiondock-ui-font-size, 13px); font-weight: 400; line-height: 18px; white-space: normal; overflow-wrap: anywhere; }
 .toast .toast-actions .notification-item-action-btn.secondary { border-color: var(--vscode-button-secondaryBorder); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .toast .toast-actions .notification-item-action-btn:hover:not(:disabled), .toast .toast-actions .notification-item-action-btn:focus-visible { background: var(--vscode-button-hoverBackground); color: var(--vscode-button-foreground); box-shadow: none; }
 .toast .toast-actions .notification-item-action-btn.secondary:hover:not(:disabled), .toast .toast-actions .notification-item-action-btn.secondary:focus-visible { background: var(--vscode-button-secondaryHoverBackground, var(--versiondock-hover)); color: var(--vscode-button-secondaryForeground); }
@@ -4390,84 +4390,55 @@ button.danger:not(:disabled):hover,
 .statusbar-left { overflow: hidden; }
 .statusbar-right { margin-left: auto; }
 
-.statusbar-operation {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: min(360px, 42vw);
-  height: 20px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 4px 0 6px;
-  color: var(--versiondock-loading-foreground);
-  border-radius: 3px;
-}
-
-.statusbar-operation > .codicon-loading {
-  flex: 0 0 auto;
-  color: var(--versiondock-loading-foreground);
-}
-
-.statusbar-operation-label {
-  min-width: 0;
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.statusbar-operation-progress {
-  appearance: none;
-  width: 64px;
-  height: 3px;
-  flex: 0 0 64px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 2px;
-  background: var(--versiondock-border);
-}
-
-.statusbar-operation-progress::-webkit-progress-bar {
-  background: var(--versiondock-border);
-}
-
-.statusbar-operation-progress::-webkit-progress-value {
-  background: var(--versiondock-accent);
-  border-radius: 2px;
-}
-
-.statusbar-operation-count {
-  flex: 0 0 auto;
-  color: var(--versiondock-muted);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.statusbar-operation-cancel {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  color: var(--versiondock-muted);
-}
-
-.statusbar-operation-cancel:hover {
-  color: var(--versiondock-text);
-  background: var(--versiondock-hover);
-}
-
-@media (max-width: 900px) {
-  .statusbar-operation { max-width: 220px; }
-  .statusbar-operation-progress { display: none; }
-  .statusbar-operation-label { max-width: 150px; }
-}
-
-@media (max-width: 680px) {
-  .statusbar-operation-label { max-width: 96px; }
-}
+/* Foreground task progress: compact status entry and independent details layer. */
+.statusbar-operation { flex: 0 1 auto; min-width: 0; max-width: 240px; height: 21px; display: inline-flex; align-items: center; gap: 5px; padding: 0 5px; color: var(--versiondock-loading-foreground); border-radius: 3px; font: inherit; }
+.statusbar-operation:hover, .statusbar-operation[aria-expanded="true"] { background: var(--versiondock-hover); color: var(--versiondock-text); }
+.statusbar-operation > .codicon { flex: 0 0 auto; font-size: 12px; }
+.statusbar-operation-label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar-operation-fraction, .statusbar-operation-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 10px; }
+.statusbar-operation-count { color: var(--versiondock-muted); padding: 0 3px; border-radius: 3px; background: var(--versiondock-hover); }
+.task-progress-track { position: relative; display: block; width: 64px; height: 3px; flex: 0 0 64px; overflow: hidden; border-radius: 2px; background: var(--versiondock-border-soft); }
+.task-progress-static { display: none; }
+.task-progress-fill { display: block; height: 100%; background: var(--versiondock-muted); border-radius: inherit; }
+.task-progress-track.indeterminate .task-progress-fill { width: 35%; animation: task-progress-flow 1.6s ease-in-out infinite; }
+.task-progress-track:not(.determinate):not(.indeterminate) .task-progress-fill { width: 0; }
+@keyframes task-progress-flow { from { transform: translateX(-100%); } to { transform: translateX(385%); } }
+.task-progress-popover { position: fixed; z-index: 1000; width: min(360px, calc(100vw - 16px)); display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; border: 1px solid var(--versiondock-border); border-radius: 6px; background: var(--versiondock-surface-alt); color: var(--versiondock-text); box-shadow: 0 6px 20px rgba(0,0,0,.25); outline: none; font-size: var(--versiondock-ui-font-size, 13px); }
+.task-progress-popover header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.task-progress-popover header strong { font-size: 12px; font-weight: 600; }
+.task-progress-popover .icon-button { width: 22px; height: 22px; padding: 0; color: var(--versiondock-muted); }
+.task-progress-popover nav { display: flex; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.task-progress-popover [role="tab"] { display: flex; flex: 1; align-items: center; justify-content: center; gap: 6px; height: 24px; padding: 0 5px; border-radius: 3px; color: var(--versiondock-muted); font-size: 11px; }
+.task-progress-popover [role="tab"][aria-selected="true"] { background: var(--versiondock-selection-background); color: var(--versiondock-text); }
+.task-progress-popover [role="tab"] span { font-size: 10px; font-variant-numeric: tabular-nums; }
+.task-progress-list { min-height: 0; max-height: 420px; overflow-y: auto; overscroll-behavior: contain; }
+.task-progress-row { padding: 10px 12px; border-bottom: 1px solid var(--versiondock-border-soft); outline: none; }
+.task-progress-row:last-child { border-bottom: 0; }
+.task-progress-row:focus-visible { background: var(--versiondock-selection-background); box-shadow: inset 0 0 0 1px var(--versiondock-border); }
+.task-progress-row-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.task-progress-row-heading > .codicon { color: var(--versiondock-muted); font-size: 14px; }
+.task-progress-row.failed .task-progress-row-heading > .codicon, .task-progress-row.timedOut .task-progress-row-heading > .codicon { color: var(--versiondock-danger); }
+.task-progress-row.partial .task-progress-row-heading > .codicon { color: var(--versiondock-warning); }
+.task-progress-row-heading strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.task-progress-status { color: var(--versiondock-muted); font-size: 10px; white-space: nowrap; }
+.task-progress-owner { margin: 4px 0 0 20px; color: var(--versiondock-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-progress-message { margin: 7px 0 0 20px; color: var(--versiondock-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.task-progress-row-meter { display: flex; align-items: center; gap: 8px; margin: 8px 0 0 20px; }
+.task-progress-row-meter .task-progress-track { flex: 1; width: auto; }
+.task-progress-row-meter > span:last-child:not(.task-progress-track) { color: var(--versiondock-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.task-progress-cancel-note { color: var(--versiondock-muted); margin: 4px 0 0 20px; font-size: 11px; line-height: 1.5; }
+.task-progress-expand { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0 16px; padding: 3px 4px; border-radius: 3px; color: var(--versiondock-muted); font-size: 11px; }
+.task-progress-children { margin: 5px 0 0 20px; padding: 0; list-style: none; border-left: 1px solid var(--versiondock-border-soft); }
+.task-progress-children li { padding: 5px 0 5px 9px; }
+.task-progress-children li > div { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; }
+.task-progress-children li > div > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-progress-children li > div > span:last-child { color: var(--versiondock-muted); flex: 0 0 auto; font-size: 10px; }
+.task-progress-children p { margin: 3px 0 0; color: var(--versiondock-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.task-progress-error, .task-progress-children pre { max-height: 100px; overflow: auto; margin: 6px 0 0 20px; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 var(--versiondock-code); color: var(--versiondock-danger); }
+.task-progress-log { margin: 5px 0 0 16px; padding: 3px 4px; border-radius: 3px; color: var(--versiondock-muted); font-size: 11px; }
+.task-progress-empty { padding: 26px 12px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--versiondock-muted); font-size: 12px; }
+@media (max-width: 900px) { .statusbar-operation { max-width: 190px; } .statusbar-operation .task-progress-track { width: 40px; flex-basis: 40px; } }
+@media (prefers-reduced-motion: reduce) { .task-progress-track.indeterminate { height: auto; background: transparent; } .task-progress-track.indeterminate .task-progress-fill { display: none; animation: none; } .task-progress-static { display: block; white-space: nowrap; color: var(--versiondock-muted); font-size: 10px; line-height: 1.4; } .statusbar-operation .codicon-loading, .task-progress-popover .codicon-loading { animation: none; } }
 
 .statusbar-item {
   display: flex;

@@ -1537,8 +1537,7 @@ async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
     std::fs::write(working.join("local.txt"), "unstaged\n").unwrap();
     std::fs::write(working.join("untracked.txt"), "untracked\n").unwrap();
 
-    vcs::sync_with_worktree_backup(
-        root.path(),
+    vcs::sync(
         &repo(&working, VcsKind::Git),
         SyncAction::Pull,
         None,
@@ -1562,6 +1561,124 @@ async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
     assert!(command_output("git", &["diff", "--", "local.txt"], &working).contains("+unstaged"));
     assert!(working.join("untracked.txt").is_file());
     assert!(command_output("git", &["stash", "list"], &working).is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn real_git_cancelled_update_restores_local_changes_before_returning() {
+    use std::os::unix::fs::PermissionsExt;
+    if !available("git") {
+        return;
+    }
+    for method in [
+        crate::models::CleanWorkingTreeMethod::Stash,
+        crate::models::CleanWorkingTreeMethod::Shelve,
+    ] {
+        let preserves_index = matches!(method, crate::models::CleanWorkingTreeMethod::Stash);
+        let root = tempdir().unwrap();
+        let remote = root.path().join("remote.git");
+        let working = root.path().join("working");
+        command(
+            "git",
+            &["init", "--bare", remote.to_str().unwrap()],
+            root.path(),
+        );
+        command(
+            "git",
+            &["init", "-b", "main", working.to_str().unwrap()],
+            root.path(),
+        );
+        command(
+            "git",
+            &["config", "user.name", "VersionDock Test"],
+            &working,
+        );
+        command(
+            "git",
+            &["config", "user.email", "test@example.test"],
+            &working,
+        );
+        std::fs::write(working.join("local.txt"), "base\n").unwrap();
+        command("git", &["add", "."], &working);
+        command("git", &["commit", "-m", "base"], &working);
+        command(
+            "git",
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+            &working,
+        );
+        command("git", &["push", "-u", "origin", "main"], &working);
+        std::fs::write(working.join("local.txt"), "staged\n").unwrap();
+        command("git", &["add", "local.txt"], &working);
+        std::fs::write(working.join("local.txt"), "unstaged\n").unwrap();
+        std::fs::write(working.join("untracked.txt"), "untracked\n").unwrap();
+
+        // Hold the real local transport after backup capture, then cancel it.
+        let marker = root.path().join("transport-started");
+        let transport = root.path().join("slow-upload-pack");
+        std::fs::write(
+            &transport,
+            format!(
+                "#!/bin/sh\ntouch '{}'\nsleep 10\nexec git-upload-pack \"$@\"\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&transport, std::fs::Permissions::from_mode(0o755)).unwrap();
+        command(
+            "git",
+            &[
+                "config",
+                "remote.origin.uploadpack",
+                transport.to_str().unwrap(),
+            ],
+            &working,
+        );
+        let token = CancellationToken::new();
+        let cancelling = token.clone();
+        let cancel = tokio::spawn(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                while !marker.exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("real fetch must start after capturing local changes");
+            cancelling.cancel();
+        });
+        let error = vcs::sync_with_worktree_backup(
+            root.path(),
+            &repo(&working, VcsKind::Git),
+            SyncAction::Pull,
+            None,
+            None,
+            false,
+            &crate::models::DesktopSettings {
+                update_project_clean_working_tree: method,
+                ..Default::default()
+            },
+            &token,
+        )
+        .await
+        .unwrap_err();
+        cancel.await.unwrap();
+        assert_eq!(error.code, "REQUEST_CANCELLED");
+        assert_eq!(read_text(working.join("local.txt")), "unstaged\n");
+        if preserves_index {
+            assert!(
+                command_output("git", &["diff", "--cached", "--", "local.txt"], &working)
+                    .contains("+staged")
+            );
+            assert!(
+                command_output("git", &["diff", "--", "local.txt"], &working).contains("+unstaged")
+            );
+        }
+        assert_eq!(read_text(working.join("untracked.txt")), "untracked\n");
+        assert!(command_output("git", &["stash", "list"], &working).is_empty());
+        assert!(shelf::list(root.path(), &repo(&working, VcsKind::Git))
+            .await
+            .unwrap()
+            .is_empty());
+    }
 }
 
 #[tokio::test]
@@ -1639,7 +1756,11 @@ async fn real_git_pull_auto_shelf_keeps_backup_when_restore_conflicts() {
     .await
     .unwrap_err();
 
-    assert_eq!(error.code, "GIT_AUTO_SHELF_RESTORE_FAILED");
+    assert_eq!(error.code, "GIT_UPDATE_CONFLICT");
+    assert!(error
+        .restore_warning
+        .as_ref()
+        .is_some_and(|warning| warning.shelf && warning.conflicted));
     assert!(!shelf::list(root.path(), &repo(&working, VcsKind::Git))
         .await
         .unwrap()
@@ -3713,7 +3834,9 @@ async fn real_git_core_workflow() {
     .unwrap();
     assert!(directory.path().join("shelf untracked.txt").exists());
     command("git", &["reset", "--hard", "HEAD"], directory.path());
-    std::fs::remove_file(directory.path().join("shelf untracked.txt")).unwrap();
+    // Plugin shelves apply with --3way, so the new path is staged and reset
+    // removes it along with the other restored changes.
+    assert!(!directory.path().join("shelf untracked.txt").exists());
     shelf::operate(
         shelf_storage.path(),
         &repository,
@@ -5789,4 +5912,636 @@ async fn real_svn_file_history_tracks_renames_directory_copies_and_target_status
     .await
     .unwrap();
     assert!(content.content.contains("two updated"));
+}
+
+fn update_parity_fixture(root: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let remote = root.join("remote.git");
+    let working = root.join("working");
+    command("git", &["init", "--bare", remote.to_str().unwrap()], root);
+    command(
+        "git",
+        &["init", "-b", "main", working.to_str().unwrap()],
+        root,
+    );
+    command(
+        "git",
+        &["config", "user.name", "VersionDock Test"],
+        &working,
+    );
+    command(
+        "git",
+        &["config", "user.email", "test@example.test"],
+        &working,
+    );
+    std::fs::write(working.join("local.txt"), "base\n").unwrap();
+    command("git", &["add", "."], &working);
+    command("git", &["commit", "-m", "base"], &working);
+    command(
+        "git",
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+        &working,
+    );
+    command("git", &["push", "-u", "origin", "main"], &working);
+    (remote, working)
+}
+
+#[tokio::test]
+async fn real_git_project_stash_matches_plugin_pop_semantics() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(root.path());
+    std::fs::write(working.join("local.txt"), "staged\n").unwrap();
+    command("git", &["add", "local.txt"], &working);
+    std::fs::write(working.join("local.txt"), "unstaged\n").unwrap();
+    std::fs::write(working.join("new.txt"), "untracked\n").unwrap();
+    vcs::sync_with_worktree_backup(
+        root.path(),
+        &repo(&working, VcsKind::Git),
+        SyncAction::Pull,
+        None,
+        None,
+        false,
+        &crate::models::DesktopSettings {
+            update_project_clean_working_tree: crate::models::CleanWorkingTreeMethod::Stash,
+            ..Default::default()
+        },
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read_text(working.join("local.txt")), "unstaged\n");
+    assert_eq!(read_text(working.join("new.txt")), "untracked\n");
+    assert!(command_output("git", &["diff", "--cached"], &working).is_empty());
+    assert!(command_output("git", &["status", "--porcelain"], &working).contains("?? new.txt"));
+    assert!(command_output("git", &["stash", "list"], &working).is_empty());
+}
+
+#[tokio::test]
+async fn real_git_update_shelf_does_not_resurrect_newly_staged_deleted_files() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(root.path());
+    std::fs::write(working.join("local.txt"), "local edits\n").unwrap();
+    std::fs::write(working.join("withdrawn.txt"), "withdrawn feature\n").unwrap();
+    command("git", &["add", "withdrawn.txt"], &working);
+    std::fs::remove_file(working.join("withdrawn.txt")).unwrap();
+    std::fs::write(working.join("new.txt"), "untracked\n").unwrap();
+    vcs::sync_with_worktree_backup(
+        root.path(),
+        &repo(&working, VcsKind::Git),
+        SyncAction::Pull,
+        None,
+        None,
+        false,
+        &Default::default(),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read_text(working.join("local.txt")), "local edits\n");
+    assert_eq!(read_text(working.join("new.txt")), "untracked\n");
+    assert!(!working.join("withdrawn.txt").exists());
+    assert!(command_output("git", &["stash", "list"], &working).is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "parent subprocess entry for detached update tests"]
+async fn detached_update_parent() {
+    let root =
+        std::path::PathBuf::from(std::env::var_os("VERSIONDOCK_DETACHED_TEST_ROOT").unwrap());
+    let request: crate::update_worker::UpdateRequest =
+        serde_json::from_slice(&std::fs::read(root.join("worker-request.json")).unwrap()).unwrap();
+    let (child, directory) = crate::update_worker::launch(
+        &std::env::current_exe().unwrap(),
+        &request,
+        &[
+            "--ignored",
+            "--exact",
+            "update_worker::tests::worker_entry",
+            "--nocapture",
+        ],
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("worker-directory"),
+        directory.to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    crate::update_worker::wait(child, directory, &CancellationToken::new())
+        .await
+        .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn real_git_detached_update_restores_after_parent_is_killed_and_supports_cancel() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    if !available("git") {
+        return;
+    }
+    for method in [
+        crate::models::CleanWorkingTreeMethod::Shelve,
+        crate::models::CleanWorkingTreeMethod::Stash,
+    ] {
+        for cancel in [false, true] {
+            let root = tempdir().unwrap();
+            let (remote, working) = update_parity_fixture(root.path());
+            let seed = root.path().join("seed");
+            command(
+                "git",
+                &[
+                    "clone",
+                    "-b",
+                    "main",
+                    remote.to_str().unwrap(),
+                    seed.to_str().unwrap(),
+                ],
+                root.path(),
+            );
+            command("git", &["config", "user.name", "VersionDock Test"], &seed);
+            command("git", &["config", "user.email", "test@example.test"], &seed);
+            std::fs::write(seed.join("upstream.txt"), "upstream change\n").unwrap();
+            command("git", &["add", "."], &seed);
+            command("git", &["commit", "-m", "upstream"], &seed);
+            command("git", &["push"], &seed);
+            std::fs::write(working.join("local.txt"), "staged\n").unwrap();
+            command("git", &["add", "local.txt"], &working);
+            std::fs::write(working.join("local.txt"), "unstaged\n").unwrap();
+            std::fs::write(working.join("new.txt"), "untracked\n").unwrap();
+            std::fs::write(working.join("new.bin"), [0, 255, 17, 99]).unwrap();
+            let marker = root.path().join("transport-started");
+            let release = root.path().join("transport-release");
+            let transport = root.path().join("gated-upload-pack");
+            std::fs::write(&transport, format!("#!/bin/sh\ntouch '{}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nexec git-upload-pack \"$@\"\n", marker.display(), release.display())).unwrap();
+            std::fs::set_permissions(&transport, std::fs::Permissions::from_mode(0o755)).unwrap();
+            command(
+                "git",
+                &[
+                    "config",
+                    "remote.origin.uploadpack",
+                    transport.to_str().unwrap(),
+                ],
+                &working,
+            );
+            let request = crate::update_worker::UpdateRequest {
+                config_dir: root.path().join("config"),
+                repo: repo(&working, VcsKind::Git),
+                action: SyncAction::Pull,
+                remote: None,
+                branch: None,
+                force: false,
+                settings: crate::models::DesktopSettings {
+                    update_project_clean_working_tree: method.clone(),
+                    ..Default::default()
+                },
+            };
+            std::fs::write(
+                root.path().join("worker-request.json"),
+                serde_json::to_vec(&request).unwrap(),
+            )
+            .unwrap();
+            let mut parent = if cancel {
+                None
+            } else {
+                Some(
+                    Command::new(std::env::current_exe().unwrap())
+                        .args([
+                            "--ignored",
+                            "--exact",
+                            "integration_tests::detached_update_parent",
+                            "--nocapture",
+                        ])
+                        .env("VERSIONDOCK_DETACHED_TEST_ROOT", root.path())
+                        .process_group(0)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap(),
+                )
+            };
+            let launched = if cancel {
+                Some(
+                    crate::update_worker::launch(
+                        &std::env::current_exe().unwrap(),
+                        &request,
+                        &[
+                            "--ignored",
+                            "--exact",
+                            "update_worker::tests::worker_entry",
+                            "--nocapture",
+                        ],
+                    )
+                    .unwrap(),
+                )
+            } else {
+                None
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(15), async {
+                while !marker.exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("worker must capture local changes and start the real Git transport");
+            assert!(!working.join("new.txt").exists());
+            // A restarted app must queue further writes until the independent recovery completes.
+            let queued_cancel = CancellationToken::new();
+            let waiting = crate::update_worker::repository_lock(
+                &request.config_dir,
+                &request.repo.id,
+                &queued_cancel,
+            );
+            tokio::pin!(waiting);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut waiting)
+                    .await
+                    .is_err()
+            );
+            queued_cancel.cancel();
+            assert_eq!(waiting.await.unwrap_err().code, "REQUEST_CANCELLED");
+            if let Some((child, directory)) = launched {
+                let token = CancellationToken::new();
+                token.cancel();
+                let error = tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    crate::update_worker::wait(child, directory, &token),
+                )
+                .await
+                .unwrap()
+                .unwrap_err();
+                assert_eq!(error.code, "REQUEST_CANCELLED");
+                assert!(!working.join("upstream.txt").exists());
+                if method == crate::models::CleanWorkingTreeMethod::Stash {
+                    assert!(
+                        command_output("git", &["diff", "--cached"], &working).contains("+staged")
+                    );
+                }
+            } else {
+                // Kill the whole UI process group, as a source watcher can do,
+                // rather than merely dropping one Rust task or one pipe.
+                let parent_group = parent.as_ref().unwrap().id() as i32;
+                assert_eq!(unsafe { libc::kill(-parent_group, libc::SIGKILL) }, 0);
+                parent.as_mut().unwrap().wait().unwrap();
+                std::fs::write(&release, "continue").unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(15), async {
+                    loop {
+                        if working.join("new.txt").exists()
+                            && working.join("upstream.txt").exists()
+                            && read_text(working.join("local.txt")) == "unstaged\n"
+                        {
+                            let _guard = crate::update_worker::repository_lock(
+                                &request.config_dir,
+                                &request.repo.id,
+                                &CancellationToken::new(),
+                            )
+                            .await
+                            .unwrap();
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                })
+                .await
+                .expect(
+                    "worker must finish the update and restoration after the parent was killed",
+                );
+            }
+            assert_eq!(read_text(working.join("local.txt")), "unstaged\n");
+            assert_eq!(read_text(working.join("new.txt")), "untracked\n");
+            assert_eq!(
+                std::fs::read(working.join("new.bin")).unwrap(),
+                [0, 255, 17, 99]
+            );
+            assert!(command_output("git", &["stash", "list"], &working).is_empty());
+            assert!(shelf::list(&request.config_dir, &request.repo)
+                .await
+                .unwrap()
+                .is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn real_git_ordinary_pull_keeps_untracked_collision_and_restores_tracked_changes() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (remote, working) = update_parity_fixture(root.path());
+    let seed = root.path().join("seed");
+    command(
+        "git",
+        &[
+            "clone",
+            "-b",
+            "main",
+            remote.to_str().unwrap(),
+            seed.to_str().unwrap(),
+        ],
+        root.path(),
+    );
+    command("git", &["config", "user.name", "VersionDock Test"], &seed);
+    command("git", &["config", "user.email", "test@example.test"], &seed);
+    std::fs::write(seed.join("collision.txt"), "upstream\n").unwrap();
+    command("git", &["add", "."], &seed);
+    command("git", &["commit", "-m", "upstream"], &seed);
+    command("git", &["push"], &seed);
+    std::fs::write(working.join("local.txt"), "staged\n").unwrap();
+    command("git", &["add", "local.txt"], &working);
+    std::fs::write(working.join("local.txt"), "unstaged\n").unwrap();
+    std::fs::write(working.join("collision.txt"), "local untracked\n").unwrap();
+    vcs::sync(
+        &repo(&working, VcsKind::Git),
+        SyncAction::Pull,
+        None,
+        None,
+        false,
+        &Default::default(),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        read_text(working.join("collision.txt")),
+        "local untracked\n"
+    );
+    assert_eq!(read_text(working.join("local.txt")), "unstaged\n");
+    assert!(command_output("git", &["diff", "--cached"], &working).contains("+staged"));
+    assert!(command_output("git", &["stash", "list"], &working).is_empty());
+}
+
+#[tokio::test]
+async fn real_git_shelf_storage_failure_restores_before_full_stash_fallback() {
+    if !available("git") {
+        return;
+    }
+    let root = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(root.path());
+    let config = root.path().join("config");
+    std::fs::create_dir(&config).unwrap();
+    std::fs::write(config.join("shelves"), "not a directory").unwrap();
+    std::fs::write(working.join("local.txt"), "local\n").unwrap();
+    std::fs::write(working.join("new.txt"), "untracked\n").unwrap();
+    vcs::sync_with_worktree_backup(
+        &config,
+        &repo(&working, VcsKind::Git),
+        SyncAction::Pull,
+        None,
+        None,
+        false,
+        &Default::default(),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read_text(working.join("local.txt")), "local\n");
+    assert_eq!(read_text(working.join("new.txt")), "untracked\n");
+    assert!(command_output("git", &["stash", "list"], &working).is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "subprocess fixture for real_git_interrupted_update_keeps_durable_backup"]
+async fn update_interruption_child() {
+    let root = std::path::PathBuf::from(
+        std::env::var("VERSIONDOCK_UPDATE_INTERRUPT_ROOT").expect("fixture root"),
+    );
+    let method = match std::env::var("VERSIONDOCK_UPDATE_INTERRUPT_METHOD")
+        .unwrap()
+        .as_str()
+    {
+        "stash" => crate::models::CleanWorkingTreeMethod::Stash,
+        _ => crate::models::CleanWorkingTreeMethod::Shelve,
+    };
+    vcs::sync_with_worktree_backup(
+        &root.join("config"),
+        &repo(&root.join("working"), VcsKind::Git),
+        SyncAction::Pull,
+        None,
+        None,
+        false,
+        &crate::models::DesktopSettings {
+            update_project_clean_working_tree: method,
+            ..Default::default()
+        },
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn real_git_interrupted_update_keeps_durable_backup() {
+    use std::os::unix::fs::PermissionsExt;
+    if !available("git") {
+        return;
+    }
+    for method in ["shelve", "stash"] {
+        let root = tempdir().unwrap();
+        let (_, working) = update_parity_fixture(root.path());
+        std::fs::write(working.join("local.txt"), "local before interruption\n").unwrap();
+        std::fs::write(working.join("new.txt"), "untracked before interruption\n").unwrap();
+        std::fs::write(working.join("new.bin"), [0, 255, 17, 99]).unwrap();
+        let marker = root.path().join("transport-pid");
+        let transport = root.path().join("slow-upload-pack");
+        std::fs::write(
+            &transport,
+            format!(
+                "#!/bin/sh\necho $$ > '{}'\nsleep 30\nexec git-upload-pack \"$@\"\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&transport, std::fs::Permissions::from_mode(0o755)).unwrap();
+        command(
+            "git",
+            &[
+                "config",
+                "remote.origin.uploadpack",
+                transport.to_str().unwrap(),
+            ],
+            &working,
+        );
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "integration_tests::update_interruption_child",
+                "--nocapture",
+            ])
+            .env("VERSIONDOCK_UPDATE_INTERRUPT_ROOT", root.path())
+            .env("VERSIONDOCK_UPDATE_INTERRUPT_METHOD", method)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = tokio::time::timeout(std::time::Duration::from_secs(8), async {
+            while !marker.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        child.kill().unwrap();
+        child.wait().unwrap();
+        if let Ok(pid) = read_text(&marker).trim().parse::<i32>() {
+            // CLI gives each spawned VCS process its own process group. Stop only
+            // the transport group belonging to this temporary fixture.
+            let group = unsafe { libc::getpgid(pid) };
+            if group > 0 && group != unsafe { libc::getpgrp() } {
+                unsafe {
+                    libc::kill(-group, libc::SIGTERM);
+                }
+            }
+        }
+        started.expect("real transport must start after durable backup capture");
+        assert!(!working.join("new.txt").exists());
+        let repository = repo(&working, VcsKind::Git);
+        let token = CancellationToken::new();
+        if method == "shelve" {
+            let values = shelf::list(&root.path().join("config"), &repository)
+                .await
+                .unwrap();
+            assert_eq!(values.len(), 1);
+            assert!(values[0].name.starts_with("Auto-shelved before update ("));
+            shelf::operate(
+                &root.path().join("config"),
+                &repository,
+                crate::models::ShelfOperation::Apply {
+                    shelf_id: values[0].id.clone(),
+                    paths: None,
+                },
+                &token,
+            )
+            .await
+            .unwrap();
+        } else {
+            let values = vcs::stashes(&repository, &token).await.unwrap();
+            assert_eq!(values.len(), 1);
+            assert!(values[0]
+                .message
+                .starts_with("Auto-stashed before update ("));
+            vcs::stash_operation(
+                &repository,
+                StashOperation::Pop {
+                    reference: values[0].reference.clone(),
+                    expected_hash: Some(values[0].hash.clone()),
+                },
+                &token,
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            read_text(working.join("local.txt")),
+            "local before interruption\n"
+        );
+        assert_eq!(
+            read_text(working.join("new.txt")),
+            "untracked before interruption\n"
+        );
+        assert_eq!(
+            std::fs::read(working.join("new.bin")).unwrap(),
+            [0, 255, 17, 99]
+        );
+    }
+}
+
+#[tokio::test]
+async fn real_git_restore_warnings_preserve_actual_update_and_conflict_outcomes() {
+    if !available("git") {
+        return;
+    }
+    for method in [
+        crate::models::CleanWorkingTreeMethod::Shelve,
+        crate::models::CleanWorkingTreeMethod::Stash,
+    ] {
+        let root = tempdir().unwrap();
+        let (remote, working) = update_parity_fixture(root.path());
+        let seed = root.path().join("seed");
+        command(
+            "git",
+            &[
+                "clone",
+                "-b",
+                "main",
+                remote.to_str().unwrap(),
+                seed.to_str().unwrap(),
+            ],
+            root.path(),
+        );
+        command("git", &["config", "user.name", "VersionDock Test"], &seed);
+        command("git", &["config", "user.email", "test@example.test"], &seed);
+        std::fs::write(seed.join("new.txt"), "upstream file\n").unwrap();
+        command("git", &["add", "."], &seed);
+        command("git", &["commit", "-m", "upstream"], &seed);
+        command("git", &["push"], &seed);
+        std::fs::write(working.join("new.txt"), "local untracked file\n").unwrap();
+        let uses_shelf = matches!(method, crate::models::CleanWorkingTreeMethod::Shelve);
+        let result = vcs::sync_with_worktree_backup(
+            root.path(),
+            &repo(&working, VcsKind::Git),
+            SyncAction::Pull,
+            None,
+            None,
+            false,
+            &crate::models::DesktopSettings {
+                update_project_clean_working_tree: method,
+                ..Default::default()
+            },
+            &CancellationToken::new(),
+        )
+        .await;
+        let warning = if uses_shelf {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, "GIT_UPDATE_CONFLICT");
+            let warning = error.restore_warning.unwrap();
+            assert!(warning.conflicted);
+            assert!(
+                !command_output("git", &["diff", "--name-only", "--diff-filter=U"], &working)
+                    .is_empty()
+            );
+            warning
+        } else {
+            let result = result.unwrap();
+            assert_eq!(result.update.unwrap().summary.unwrap().commit_count, 1);
+            assert_eq!(read_text(working.join("new.txt")), "upstream file\n");
+            let warning = result.restore_warning.unwrap();
+            assert!(!warning.conflicted);
+            warning
+        };
+        assert_eq!(warning.shelf, uses_shelf);
+        if uses_shelf {
+            let values = shelf::list(root.path(), &repo(&working, VcsKind::Git))
+                .await
+                .unwrap();
+            assert_eq!(values.len(), 1);
+            assert_eq!(values[0].id, warning.backup_id);
+            let diff = shelf::file_diff(
+                root.path(),
+                &repo(&working, VcsKind::Git),
+                &warning.backup_id,
+                "new.txt",
+            )
+            .await
+            .unwrap();
+            assert!(diff.content.contains("local untracked file"));
+        } else {
+            let values = vcs::stashes(&repo(&working, VcsKind::Git), &CancellationToken::new())
+                .await
+                .unwrap();
+            assert_eq!(values.len(), 1);
+            assert_eq!(values[0].hash, warning.backup_id);
+            assert_eq!(
+                command_output("git", &["show", "stash@{0}^3:new.txt"], &working),
+                "local untracked file"
+            );
+        }
+    }
 }

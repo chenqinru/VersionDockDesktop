@@ -288,6 +288,7 @@ async fn run_once(
             repository_id: None,
             subject: None,
             hint: hint.map(str::to_string),
+            restore_warning: None,
         });
     }
     let level = if is_read_only_command(program, args) {

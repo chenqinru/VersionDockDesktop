@@ -106,7 +106,7 @@ pub async fn operate(
             .await
             .map(|_| ()),
         ShelfOperation::Apply { shelf_id, paths } => {
-            apply(config_dir, repo, &shelf_id, paths.as_deref(), false, token).await
+            apply(config_dir, repo, &shelf_id, paths.as_deref(), true, token).await
         }
         ShelfOperation::Drop { shelf_id } => drop_shelf(config_dir, repo, &shelf_id).await,
     }
@@ -217,6 +217,12 @@ pub(crate) async fn create(
     };
 
     let marker = format!("versiondock-shelf-{}", uuid::Uuid::new_v4());
+    // Match the plugin's HEAD-to-worktree patch, not Git stash's index-based
+    // handling of newly staged files subsequently deleted from the worktree.
+    // Those files must stay absent when the shelf is restored.
+    let mut diff_args = vec!["diff".into(), "HEAD".into(), "--binary".into(), "--".into()];
+    diff_args.extend(safe_paths.clone());
+    let tracked_patch = git(repo, diff_args, token).await?.stdout;
     let mut stash_args = vec![
         "stash".into(),
         "push".into(),
@@ -264,14 +270,14 @@ pub(crate) async fn create(
             false,
         ));
     }
-    let patch = match git(
+    let untracked_patch = match git(
         repo,
         vec![
             "stash".into(),
             "show".into(),
             "--patch".into(),
             "--binary".into(),
-            "--include-untracked".into(),
+            "--only-untracked".into(),
             hash.clone(),
         ],
         token,
@@ -284,6 +290,8 @@ pub(crate) async fn create(
             return Err(error);
         }
     };
+    let mut patch = tracked_patch;
+    patch.extend(untracked_patch);
     if patch.is_empty() {
         restore_captured(repo, &hash, stash_ref, token).await?;
         return Err(DesktopError::new("SHELF_EMPTY", "Nothing to shelve", true));
@@ -291,12 +299,12 @@ pub(crate) async fn create(
 
     let id = format!("shelf-{}", uuid::Uuid::new_v4().simple());
     let directory = shelf_dir(config_dir, repo);
-    tokio::fs::create_dir_all(&directory)
-        .await
-        .map_err(storage_error)?;
     let patch_path = directory.join(format!("{id}.patch"));
     let temporary = directory.join(format!("{id}.patch.tmp"));
     if let Err(error) = async {
+        tokio::fs::create_dir_all(&directory)
+            .await
+            .map_err(storage_error)?;
         tokio::fs::write(&temporary, &patch)
             .await
             .map_err(storage_error)?;
@@ -377,7 +385,27 @@ async fn apply(
         }
     }
     args.push(patch.to_string_lossy().into_owned());
-    git(repo, args, token).await?;
+    if let Err(error) = git(repo, args.clone(), token).await {
+        if !three_way || token.is_cancelled() {
+            return Err(error);
+        }
+        let conflicts = git(
+            repo,
+            vec![
+                "diff".into(),
+                "--name-only".into(),
+                "--diff-filter=U".into(),
+                "-z".into(),
+            ],
+            token,
+        )
+        .await?;
+        if !conflicts.stdout.is_empty() {
+            return Err(error);
+        }
+        args.retain(|argument| argument != "--3way");
+        git(repo, args, token).await?;
+    }
     Ok(())
 }
 

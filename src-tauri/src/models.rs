@@ -903,6 +903,19 @@ pub struct HistoryQuery {
 pub struct SyncResult {
     pub output: String,
     pub update: Option<RepositoryUpdateResult>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub restore_warning: Option<UpdateRestoreWarning>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRestoreWarning {
+    pub shelf: bool,
+    pub backup_name: String,
+    pub backup_id: String,
+    pub conflicted: bool,
+    pub details: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1463,6 +1476,9 @@ pub struct DesktopError {
     pub subject: Option<String>,
     #[specta(optional)]
     pub hint: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub restore_warning: Option<UpdateRestoreWarning>,
 }
 
 impl DesktopError {
@@ -1479,6 +1495,7 @@ impl DesktopError {
             repository_id: None,
             subject: None,
             hint: None,
+            restore_warning: None,
         }
     }
 

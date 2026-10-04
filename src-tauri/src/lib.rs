@@ -17,6 +17,7 @@ mod shelf;
 mod state;
 mod svn_account;
 mod tab_drag;
+mod update_worker;
 mod vcs;
 mod workspace;
 
@@ -71,6 +72,9 @@ fn application_menu(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if update_worker::run_if_worker() {
+        return;
+    }
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
     let builder = builder.menu(application_menu);
