@@ -1448,7 +1448,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
 
                   return (
                     <div className="statusbar-menu-section">
-                      <div className="statusbar-menu-group-header">{t('RECENT')}</div>
                       {validRecentBranches.map((b) => {
                         const isSelected =
                           activeBranchAction?.repoId === activeSubmenuRepo.meta.id &&
@@ -1463,7 +1462,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           <button
                             key={`recent-${b.name}`}
                             type="button"
-                            className={`statusbar-menu-item has-submenu ${isSelected ? 'selected' : ''}`}
+                            className={`statusbar-menu-item branch-reference-row ${isSelected ? 'selected' : ''}`}
                             onClick={(e) =>
                               handleOpenBranchActionMenu(
                                 activeSubmenuRepo.meta.id,
@@ -1476,13 +1475,16 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           >
                             <Codicon name="history" />
                             <div className="statusbar-menu-item-text">
-                              <span className="statusbar-menu-item-title">{b.name}</span>
-                              {(ahead > 0 || behind > 0) && (
-                                <span className="statusbar-menu-item-desc">
-                                  {ahead > 0 && <span className="statusbar-push-label"> ↑{ahead}</span>}
-                                  {behind > 0 && <span className="statusbar-pull-label"> ↓{behind}</span>}
-                                </span>
-                              )}
+                              <div className="branch-reference-heading">
+                                <span className="statusbar-menu-item-title">{b.name}</span>
+                                {(b.ahead != null || b.behind != null) && (
+                                  <span className="statusbar-menu-item-desc">
+                                    <span>↑{ahead}</span>
+                                    <span>↓{behind}</span>
+                                  </span>
+                                )}
+                                <span className="branch-reference-category">{t('RECENT')}</span>
+                              </div>
                               {commitDetail && (
                                 <div className="statusbar-menu-item-detail">
                                   <Codicon name="git-commit" />
@@ -1490,7 +1492,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                                 </div>
                               )}
                             </div>
-                            <Codicon name="chevron-right" className="submenu-arrow" />
                           </button>
                         );
                       })}
@@ -1501,7 +1502,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 {/* 本地分支列表 LOCAL */}
                 {activeRepoBranches.filter((b) => !b.remote && b.name !== 'HEAD').length > 0 && (
                   <div className="statusbar-menu-section">
-                    <div className="statusbar-menu-group-header">{t('LOCAL')}</div>
                     {activeRepoBranches
                       .filter((b) => !b.remote && b.name !== 'HEAD')
                       .map((b) => {
@@ -1519,7 +1519,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           <button
                             key={b.name}
                             type="button"
-                            className={`statusbar-menu-item has-submenu ${isHead ? 'active-ref' : ''} ${isSelected ? 'selected' : ''}`}
+                            className={`statusbar-menu-item branch-reference-row ${isHead ? 'active-ref' : ''} ${isSelected ? 'selected' : ''}`}
                             onClick={(e) =>
                               handleOpenBranchActionMenu(
                                 activeSubmenuRepo.meta.id,
@@ -1532,13 +1532,17 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           >
                             <Codicon name={isHead ? 'check' : isPrimaryBranch(b.name) ? 'star' : 'git-branch'} />
                             <div className="statusbar-menu-item-text">
-                              <span className="statusbar-menu-item-title">{b.name}</span>
-                              {(ahead > 0 || behind > 0) && (
-                                <span className="statusbar-menu-item-desc">
-                                  {ahead > 0 && <span className="statusbar-push-label"> ↑{ahead}</span>}
-                                  {behind > 0 && <span className="statusbar-pull-label"> ↓{behind}</span>}
-                                </span>
-                              )}
+                              <div className="branch-reference-heading">
+                                <span className="statusbar-menu-item-title">{b.name}</span>
+                                {(b.ahead != null || b.behind != null) && (
+                                  <span className="statusbar-menu-item-desc">
+                                    <span>↑{ahead}</span>
+                                    <span>↓{behind}</span>
+                                  </span>
+                                )}
+                                {isHead && b.ahead == null && b.behind == null && <span className="statusbar-menu-item-desc">{t('current')}</span>}
+                                <span className="branch-reference-category">{t('LOCAL')}</span>
+                              </div>
                               {commitDetail && (
                                 <div className="statusbar-menu-item-detail">
                                   <Codicon name="git-commit" />
@@ -1546,8 +1550,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                                 </div>
                               )}
                             </div>
-                            {isHead && <span className="statusbar-badge">{t('current')}</span>}
-                            <Codicon name="chevron-right" className="submenu-arrow" />
                           </button>
                         );
                       })}
@@ -1557,7 +1559,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                 {/* 远程分支列表 REMOTE */}
                 {activeRepoBranches.filter((b) => b.remote && !b.name.endsWith('/HEAD')).length > 0 && (
                   <div className="statusbar-menu-section">
-                    <div className="statusbar-menu-group-header">{t('REMOTE')}</div>
                     {activeRepoBranches
                       .filter((b) => b.remote && !b.name.endsWith('/HEAD'))
                       .map((b) => {
@@ -1571,7 +1572,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           <button
                             key={b.name}
                             type="button"
-                            className={`statusbar-menu-item has-submenu ${isSelected ? 'selected' : ''}`}
+                            className={`statusbar-menu-item branch-reference-row ${isSelected ? 'selected' : ''}`}
                             onClick={(e) =>
                               handleOpenBranchActionMenu(
                                 activeSubmenuRepo.meta.id,
@@ -1584,7 +1585,10 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           >
                             <Codicon name={isPrimaryBranch(b.name.slice(b.name.indexOf('/') + 1)) ? 'star' : 'cloud'} />
                             <div className="statusbar-menu-item-text">
-                              <span className="statusbar-menu-item-title">{b.name}</span>
+                              <div className="branch-reference-heading">
+                                <span className="statusbar-menu-item-title">{b.name}</span>
+                                <span className="branch-reference-category">{t('REMOTE')}</span>
+                              </div>
                               {commitDetail && (
                                 <div className="statusbar-menu-item-detail">
                                   <Codicon name="git-commit" />
@@ -1592,7 +1596,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                                 </div>
                               )}
                             </div>
-                            <Codicon name="chevron-right" className="submenu-arrow" />
                           </button>
                         );
                       })}

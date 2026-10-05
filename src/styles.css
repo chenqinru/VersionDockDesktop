@@ -4810,6 +4810,17 @@ button.danger:not(:disabled):hover,
 .statusbar-quick-menu .statusbar-menu-item:focus-visible { background: var(--versiondock-selection-background); outline: none; }
 .statusbar-quick-menu .statusbar-menu-item.active-ref { background: transparent; font-weight: 500; }
 .statusbar-quick-menu .statusbar-menu-item.active-ref:is(:hover, .selected, .keyboard-selected) { background: var(--versiondock-selection-background); }
+.statusbar-quick-menu .branch-reference-row { align-items: flex-start; width: calc(100% - 8px); margin-inline: 4px; padding: 4px 6px; border-radius: 4px; }
+.branch-reference-row > .codicon { flex: 0 0 16px; margin-top: 1px; }
+.statusbar-quick-menu .branch-reference-row .statusbar-menu-item-text { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 3px; }
+.branch-reference-heading { display: flex; align-items: baseline; min-width: 0; gap: 6px; }
+.branch-reference-heading .statusbar-menu-item-title { min-width: 0; }
+.statusbar-quick-menu .branch-reference-heading .statusbar-menu-item-desc { flex: 0 0 auto; }
+.branch-reference-category { margin-left: auto; flex: 0 0 auto; font-size: 10px; font-weight: 400; color: var(--versiondock-muted); }
+.statusbar-menu-section > .branch-reference-row:not(:first-child) .branch-reference-category { display: none; }
+.statusbar-quick-menu .branch-reference-row .statusbar-menu-item-detail { margin-left: -22px; width: calc(100% + 22px); }
+.branch-reference-row .statusbar-menu-item-detail > .codicon { flex: 0 0 16px; }
+.branch-reference-row .statusbar-menu-item-detail > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar-quick-menu .statusbar-badge,
 .statusbar-quick-menu .statusbar-active-repo-badge { color: var(--versiondock-muted); background: var(--versiondock-hover); }
 
