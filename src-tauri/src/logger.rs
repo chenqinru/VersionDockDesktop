@@ -3,6 +3,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex},
 };
@@ -16,6 +17,8 @@ pub const MAX_IN_MEMORY_LOGS: usize = 3000;
 pub const MAX_LOG_FILE_DAYS: i64 = 7;
 const MAX_LOG_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_ROTATED_FILES: usize = 4;
+const WRITE_QUEUE_CAPACITY: usize = 2048;
+const WRITE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +98,8 @@ struct LogMemory {
     entries: Mutex<VecDeque<LogEntry>>,
     app_handle: Mutex<Option<AppHandle>>,
     storage_error: Mutex<Option<String>>,
+    queued: AtomicUsize,
+    dropped: AtomicUsize,
 }
 
 enum WriteMessage {
@@ -185,8 +190,10 @@ impl LogManager {
             entries: Mutex::new(VecDeque::with_capacity(MAX_IN_MEMORY_LOGS)),
             app_handle: Mutex::new(None),
             storage_error: Mutex::new(None),
+            queued: AtomicUsize::new(0),
+            dropped: AtomicUsize::new(0),
         });
-        let (writer, receiver) = mpsc::sync_channel(2048);
+        let (writer, receiver) = mpsc::sync_channel(WRITE_QUEUE_CAPACITY);
         let target = log_dir.clone();
         let state = memory.clone();
         std::thread::Builder::new()
@@ -219,15 +226,31 @@ impl LogManager {
     }
 
     pub fn set_relay_path(&self, path: PathBuf) {
-        let _ = self.writer.send(WriteMessage::Relay(path));
+        if self.writer.try_send(WriteMessage::Relay(path)).is_err() {
+            report_storage(&self.memory, Some("Unable to configure log relay".into()));
+        }
     }
 
     pub fn flush(&self) -> Result<(), String> {
         let (sender, receiver) = mpsc::channel();
-        self.writer
-            .send(WriteMessage::Flush(sender))
-            .map_err(|error| error.to_string())?;
-        receiver.recv().map_err(|error| error.to_string())?
+        let deadline = std::time::Instant::now() + WRITE_WAIT_TIMEOUT;
+        let mut message = WriteMessage::Flush(sender);
+        loop {
+            match self.writer.try_send(message) {
+                Ok(()) => break,
+                Err(mpsc::TrySendError::Disconnected(_)) => return Err("Log writer stopped".into()),
+                Err(mpsc::TrySendError::Full(returned)) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err("Timed out waiting for the log write queue".into());
+                    }
+                    message = returned;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+        }
+        receiver
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .map_err(|error| error.to_string())?
     }
 
     /// Worker records have already been persisted; only merge into memory and emit.
@@ -239,12 +262,22 @@ impl LogManager {
     pub fn push(&self, mut entry: LogEntry) {
         sanitize_entry(&mut entry);
         publish(&self.memory, entry.clone());
-        if self
-            .writer
-            .send(WriteMessage::Entry(Box::new(entry)))
-            .is_err()
-        {
-            report_storage(&self.memory, Some("Log writer stopped".into()));
+        self.memory.queued.fetch_add(1, Ordering::SeqCst);
+        match self.writer.try_send(WriteMessage::Entry(Box::new(entry))) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                self.memory.queued.fetch_sub(1, Ordering::SeqCst);
+                if self.memory.dropped.fetch_add(1, Ordering::SeqCst) == 0 {
+                    report_storage(
+                        &self.memory,
+                        Some("Log write queue is full; logs remain available in memory.".into()),
+                    );
+                }
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                self.memory.queued.fetch_sub(1, Ordering::SeqCst);
+                report_storage(&self.memory, Some("Log writer stopped".into()));
+            }
         }
     }
 
@@ -404,6 +437,9 @@ fn publish(memory: &LogMemory, entry: LogEntry) {
 }
 
 fn report_storage(memory: &LogMemory, error: Option<String>) {
+    if error.is_none() && memory.dropped.load(Ordering::SeqCst) > 0 {
+        return;
+    }
     let error = error.map(|value| crate::cli::redact(&value));
     let changed = if let Ok(mut previous) = memory.storage_error.lock() {
         if *previous == error {
@@ -454,11 +490,14 @@ fn write_loop(log_dir: PathBuf, memory: Arc<LogMemory>, receiver: mpsc::Receiver
             .map(Ok)
             .unwrap_or_else(|| receiver.recv_timeout(std::time::Duration::from_millis(100)));
         match message {
-            Ok(WriteMessage::Entry(entry)) => pending.push(*entry),
+            Ok(WriteMessage::Entry(entry)) => {
+                memory.queued.fetch_sub(1, Ordering::SeqCst);
+                pending.push(*entry);
+            }
             Ok(WriteMessage::Relay(path)) => relay = Some(path),
             Ok(WriteMessage::Flush(sender)) => {
-                let had_pending = !pending.is_empty();
-                let result = write_pending(&log_dir, &mut pending, relay.as_deref());
+                let had_pending = !pending.is_empty() || memory.dropped.load(Ordering::SeqCst) > 0;
+                let result = write_batch(&log_dir, &memory, &mut pending, relay.as_deref());
                 if had_pending {
                     report_storage(
                         &memory,
@@ -475,7 +514,7 @@ fn write_loop(log_dir: PathBuf, memory: Arc<LogMemory>, receiver: mpsc::Receiver
                 let _ = sender.send(error.map_or(Ok(()), Err));
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let result = write_pending(&log_dir, &mut pending, relay.as_deref());
+                let result = write_batch(&log_dir, &memory, &mut pending, relay.as_deref());
                 report_storage(&memory, result.err().map(|error| error.to_string()));
                 break;
             }
@@ -489,7 +528,10 @@ fn write_loop(log_dir: PathBuf, memory: Arc<LogMemory>, receiver: mpsc::Receiver
                     break;
                 }
                 match receiver.recv_timeout(remaining) {
-                    Ok(WriteMessage::Entry(entry)) => pending.push(*entry),
+                    Ok(WriteMessage::Entry(entry)) => {
+                        memory.queued.fetch_sub(1, Ordering::SeqCst);
+                        pending.push(*entry);
+                    }
                     Ok(other) => {
                         deferred = Some(other);
                         break;
@@ -497,7 +539,7 @@ fn write_loop(log_dir: PathBuf, memory: Arc<LogMemory>, receiver: mpsc::Receiver
                     Err(_) => break,
                 }
             }
-            let result = write_pending(&log_dir, &mut pending, relay.as_deref());
+            let result = write_batch(&log_dir, &memory, &mut pending, relay.as_deref());
             report_storage(&memory, result.err().map(|error| error.to_string()));
         }
         if maintenance.elapsed().as_secs() >= 3600 {
@@ -506,6 +548,49 @@ fn write_loop(log_dir: PathBuf, memory: Arc<LogMemory>, receiver: mpsc::Receiver
                 report_storage(&memory, Some(error.to_string()));
             }
             maintenance = std::time::Instant::now();
+        }
+    }
+}
+
+fn write_batch(
+    log_dir: &Path,
+    memory: &LogMemory,
+    entries: &mut Vec<LogEntry>,
+    relay: Option<&Path>,
+) -> std::io::Result<()> {
+    write_pending(log_dir, entries, relay)?;
+    if memory.queued.load(Ordering::SeqCst) < WRITE_QUEUE_CAPACITY / 2 {
+        let dropped = memory.dropped.swap(0, Ordering::SeqCst);
+        if dropped > 0 {
+            let summary = LogEntry {
+                id: uuid::Uuid::new_v4().to_string(), timestamp: Utc::now().to_rfc3339(),
+                level: LogLevel::Warn, channel: LogChannel::Core,
+                message: "Some log entries could not be written to disk.".into(),
+                details: Some(format!("{dropped} entries were retained in memory only while the write queue was full.")),
+                duration_ms: None, exit_code: None, cwd: None, context: None,
+            };
+            publish(memory, summary.clone());
+            write_pending(log_dir, &mut vec![summary], relay)?;
+        }
+    }
+    Ok(())
+}
+
+fn lock_log_file(lock: &std::fs::File) -> std::io::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() >= deadline => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Timed out waiting for the log file lock",
+                ));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
         }
     }
 }
@@ -540,7 +625,7 @@ fn write_pending(
         .read(true)
         .write(true)
         .open(log_dir.join(".writer.lock"))?;
-    lock.lock()?;
+    lock_log_file(&lock)?;
     let result = (|| {
         let today = Local::now().format("%Y-%m-%d").to_string();
         let path = log_dir.join(format!("versiondock-{today}.log"));
@@ -576,7 +661,7 @@ fn cleanup_old_logs(log_dir: &Path) -> std::io::Result<()> {
         .read(true)
         .write(true)
         .open(log_dir.join(".writer.lock"))?;
-    lock.lock()?;
+    lock_log_file(&lock)?;
     let result = (|| {
         for item in fs::read_dir(log_dir)? {
             let path = item?.path();
@@ -626,7 +711,7 @@ mod tests {
         let manager = LogManager::new(temp_dir.path().to_path_buf());
 
         for i in 0..MAX_IN_MEMORY_LOGS + 10 {
-            manager.push(LogEntry {
+            manager.forward(LogEntry {
                 id: format!("id-{}", i),
                 timestamp: chrono::DateTime::from_timestamp_millis(i as i64)
                     .unwrap()
@@ -690,6 +775,92 @@ mod tests {
         let error_logs = manager.get_entries(None, Some(LogLevel::Error), None);
         assert_eq!(error_logs.len(), 1);
         assert_eq!(error_logs[0].id, "2");
+    }
+
+    #[test]
+    fn saturated_writer_preserves_memory_and_reports_missing_disk_entries_without_blocking() {
+        let root = tempfile::tempdir().unwrap();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let manager = LogManager {
+            log_dir: root.path().join("logs"),
+            writer: sender,
+            memory: Arc::new(LogMemory {
+                entries: Mutex::new(VecDeque::new()),
+                app_handle: Mutex::new(None),
+                storage_error: Mutex::new(None),
+                queued: AtomicUsize::new(0),
+                dropped: AtomicUsize::new(0),
+            }),
+        };
+        manager.push(sample("queued"));
+        let started = std::time::Instant::now();
+        for id in ["overflow-1", "overflow-2"] {
+            manager.push(sample(id));
+        }
+        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+        assert!(manager.flush().is_err());
+        assert_eq!(manager.memory.dropped.load(Ordering::SeqCst), 2);
+        assert!(manager
+            .get_entries(None, None, None)
+            .iter()
+            .any(|entry| entry.id == "overflow-2"));
+        assert_eq!(
+            manager
+                .get_entries(None, None, None)
+                .iter()
+                .filter(|entry| entry.level == LogLevel::Error)
+                .count(),
+            1
+        );
+        let WriteMessage::Entry(entry) = receiver.recv().unwrap() else {
+            panic!("expected queued entry")
+        };
+        manager.memory.queued.fetch_sub(1, Ordering::SeqCst);
+        write_batch(manager.log_dir(), &manager.memory, &mut vec![*entry], None).unwrap();
+        report_storage(&manager.memory, None);
+        assert!(manager.storage_error().is_none());
+        let summary = manager
+            .get_entries(None, None, None)
+            .into_iter()
+            .find(|entry| entry.message == "Some log entries could not be written to disk.")
+            .unwrap();
+        assert!(summary.details.unwrap().starts_with("2 entries"));
+        let text = fs::read_to_string(manager.log_dir().join(format!(
+            "versiondock-{}.log",
+            Local::now().format("%Y-%m-%d")
+        )))
+        .unwrap();
+        assert!(text.contains("command-queued"));
+        assert!(text.contains("2 entries"));
+        assert!(!text.contains("command-overflow-1"));
+    }
+
+    #[test]
+    fn log_file_lock_wait_is_bounded_and_recovers() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(".writer.lock");
+        let held = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        held.lock().unwrap();
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(
+            lock_log_file(&competing).unwrap_err().kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        assert!(started.elapsed() < WRITE_WAIT_TIMEOUT);
+        held.unlock().unwrap();
+        lock_log_file(&competing).unwrap();
+        competing.unlock().unwrap();
     }
     fn sample(id: &str) -> LogEntry {
         LogEntry {

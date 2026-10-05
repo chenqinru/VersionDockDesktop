@@ -2,8 +2,8 @@ use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -63,6 +63,27 @@ type SvnTagCacheEntry = (Instant, Vec<TagInfo>);
 type SvnIncomingCacheEntry = (Instant, u64, u32);
 static SVN_BRANCH_CACHE: OnceLock<Mutex<HashMap<String, SvnBranchCacheEntry>>> = OnceLock::new();
 static SVN_TAG_CACHE: OnceLock<Mutex<HashMap<String, SvnTagCacheEntry>>> = OnceLock::new();
+struct SvnRefQueries {
+    valid: AtomicBool,
+    branches: tokio::sync::Mutex<()>,
+    tags: tokio::sync::Mutex<()>,
+}
+static SVN_REF_QUERIES: OnceLock<Mutex<HashMap<String, Arc<SvnRefQueries>>>> = OnceLock::new();
+fn svn_ref_queries(repo_id: &str) -> Arc<SvnRefQueries> {
+    SVN_REF_QUERIES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .entry(repo_id.into())
+        .or_insert_with(|| {
+            Arc::new(SvnRefQueries {
+                valid: AtomicBool::new(true),
+                branches: tokio::sync::Mutex::new(()),
+                tags: tokio::sync::Mutex::new(()),
+            })
+        })
+        .clone()
+}
 static SVN_INCOMING_CACHE: OnceLock<Mutex<HashMap<String, SvnIncomingCacheEntry>>> =
     OnceLock::new();
 static SVN_INCOMING_GENERATION: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
@@ -90,11 +111,20 @@ pub fn invalidate_subtree_status_cache(repo_id: &str) {
 }
 
 pub fn invalidate_svn_ref_caches(repo_id: &str) {
+    if let Ok(mut queries) = SVN_REF_QUERIES.get_or_init(Default::default).lock() {
+        if let Some(previous) = queries.remove(repo_id) {
+            previous.valid.store(false, Ordering::SeqCst);
+        }
+    }
     if let Ok(mut cache) = SVN_BRANCH_CACHE.get_or_init(Default::default).lock() {
-        cache.remove(repo_id);
+        if let Some(entry) = cache.get_mut(repo_id) {
+            entry.0 = Instant::now();
+        }
     }
     if let Ok(mut cache) = SVN_TAG_CACHE.get_or_init(Default::default).lock() {
-        cache.remove(repo_id);
+        if let Some(entry) = cache.get_mut(repo_id) {
+            entry.0 = Instant::now();
+        }
     }
     if let Ok(mut cache) = SVN_INCOMING_CACHE.get_or_init(Default::default).lock() {
         cache.remove(repo_id);
@@ -247,6 +277,38 @@ async fn git_network(
     .await
 }
 
+// Ref metadata reports an empty upstream without failing for local-only,
+// detached or unborn branches. Do not use rev-parse @{upstream} as a probe.
+async fn git_upstream(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    git_upstream_at(repo, None, token).await
+}
+
+async fn git_upstream_at(
+    repo: &RepositoryMeta,
+    path: Option<&str>,
+    token: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    let mut args = Vec::new();
+    if let Some(path) = path {
+        args.extend(["-C".into(), path.into()]);
+    }
+    args.extend([
+        "for-each-ref".into(),
+        "--format=%(HEAD)%00%(upstream)".into(),
+        "refs/heads/".into(),
+    ]);
+    let output = git(args, repo, token).await?.stdout_text();
+    Ok(output
+        .lines()
+        .filter_map(|line| line.split_once('\0'))
+        .find(|(head, _)| head.trim() == "*")
+        .map(|(_, upstream)| upstream.trim().to_string())
+        .filter(|upstream| !upstream.is_empty()))
+}
+
 async fn git_network_quick(
     args: Vec<String>,
     repo: &RepositoryMeta,
@@ -279,8 +341,38 @@ async fn svn_with_timeout(
     token: &CancellationToken,
     timeout: Duration,
 ) -> Result<cli::CommandOutput, DesktopError> {
+    svn_with_timeout_mode(args, repo, token, timeout, cli::SvnCommandMode::Standard).await
+}
+
+async fn svn_optional_directory(
+    directory: &str,
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Option<cli::CommandOutput>, DesktopError> {
+    match svn_with_timeout_mode(
+        vec!["ls".into(), "--xml".into(), directory.into()],
+        repo,
+        token,
+        Duration::from_secs(8),
+        cli::SvnCommandMode::OptionalDirectory,
+    )
+    .await
+    {
+        Ok(output) => Ok(Some(output)),
+        Err(error) if error.code == "SVN_OPTIONAL_PATH_MISSING" => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+async fn svn_with_timeout_mode(
+    args: Vec<String>,
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+    timeout: Duration,
+    mode: cli::SvnCommandMode,
+) -> Result<cli::CommandOutput, DesktopError> {
     let auth = crate::svn_account::cached_auth(repo);
-    let first = svn_once(&args, repo, auth.as_ref(), timeout, token).await;
+    let first = svn_once(&args, repo, auth.as_ref(), timeout, token, mode).await;
     match first {
         Err(error) if error.code == "SVN_AUTH_FAILED" => {
             let Some(credentials) =
@@ -288,7 +380,7 @@ async fn svn_with_timeout(
             else {
                 return Err(error);
             };
-            let retried = svn_once(&args, repo, Some(&credentials), timeout, token).await;
+            let retried = svn_once(&args, repo, Some(&credentials), timeout, token, mode).await;
             if retried
                 .as_ref()
                 .err()
@@ -308,6 +400,7 @@ async fn svn_once(
     auth: Option<&(String, String)>,
     timeout: Duration,
     token: &CancellationToken,
+    mode: cli::SvnCommandMode,
 ) -> Result<cli::CommandOutput, DesktopError> {
     let mut safe = vec!["--non-interactive".into()];
     if let Some((username, _)) = auth {
@@ -320,13 +413,13 @@ async fn svn_once(
     }
     safe.extend_from_slice(args);
     let input = auth.map(|(_, password)| format!("{password}\n"));
-    cli::run(
-        "svn",
+    cli::run_svn(
         &safe,
         Path::new(&repo.root_path),
         input.as_ref().map(|value| value.as_bytes()),
         timeout,
         token,
+        mode,
     )
     .await
 }
@@ -3645,18 +3738,7 @@ pub async fn sync(
         )
         && explicit_remote_branch.is_none()
     {
-        let has_upstream = git(
-            vec![
-                "rev-parse".into(),
-                "--abbrev-ref".into(),
-                "--symbolic-full-name".into(),
-                "@{u}".into(),
-            ],
-            repo,
-            token,
-        )
-        .await
-        .is_ok();
+        let has_upstream = git_upstream(repo, token).await?.is_some();
         if !has_upstream {
             return Ok(SyncResult {
                 restore_warning: None,
@@ -4549,21 +4631,9 @@ pub async fn unpushed_commits(
     token: &CancellationToken,
 ) -> Result<Vec<UnpushedCommit>, DesktopError> {
     ensure_git(repo)?;
-    let has_upstream = git(
-        vec![
-            "rev-parse".into(),
-            "--abbrev-ref".into(),
-            "--symbolic-full-name".into(),
-            "@{upstream}".into(),
-        ],
-        repo,
-        token,
-    )
-    .await
-    .is_ok();
-
-    let mut range = if has_upstream {
-        vec!["@{upstream}..HEAD".into()]
+    let upstream = git_upstream(repo, token).await?;
+    let mut range = if let Some(upstream) = upstream {
+        vec![format!("{upstream}..HEAD")]
     } else {
         let remotes = git(vec!["remote".into()], repo, token).await?.stdout_text();
         if remotes.lines().any(|line| !line.trim().is_empty()) {
@@ -4758,26 +4828,14 @@ pub async fn incoming_commits(
     token: &CancellationToken,
 ) -> Result<Vec<IncomingCommit>, DesktopError> {
     ensure_git(repo)?;
-    if git(
-        vec![
-            "rev-parse".into(),
-            "--abbrev-ref".into(),
-            "--symbolic-full-name".into(),
-            "@{upstream}".into(),
-        ],
-        repo,
-        token,
-    )
-    .await
-    .is_err()
-    {
+    let Some(upstream) = git_upstream(repo, token).await? else {
         return Ok(Vec::new());
-    }
+    };
 
     let raw = git(
         vec![
             "log".into(),
-            "HEAD..@{upstream}".into(),
+            format!("HEAD..{upstream}"),
             "--max-count=100".into(),
             format!("--format={RECORD}%H{FIELD}%h{FIELD}%s{FIELD}%B{FIELD}%an{FIELD}%aI{FIELD}%P{FIELD}%ae{META_END}"),
             "--numstat".into(),
@@ -4788,7 +4846,7 @@ pub async fn incoming_commits(
     .await?
     .stdout_text();
 
-    let potential_conflict_paths = incoming_conflict_paths(repo, token)
+    let potential_conflict_paths = incoming_conflict_paths(repo, &upstream, token)
         .await
         .into_iter()
         .collect::<HashSet<_>>();
@@ -4842,8 +4900,11 @@ pub async fn unpushed_changes(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| EMPTY_TREE_HASH.into())
     } else {
+        let upstream = git_upstream(repo, token).await?.ok_or_else(|| {
+            DesktopError::new("UPSTREAM_MISSING", "No upstream branch is configured", true)
+        })?;
         git(
-            vec!["merge-base".into(), "HEAD".into(), "@{upstream}".into()],
+            vec!["merge-base".into(), "HEAD".into(), upstream],
             repo,
             token,
         )
@@ -4865,8 +4926,11 @@ pub async fn incoming_changes(
     token: &CancellationToken,
 ) -> Result<RevisionChanges, DesktopError> {
     ensure_git(repo)?;
+    let upstream = git_upstream(repo, token).await?.ok_or_else(|| {
+        DesktopError::new("UPSTREAM_MISSING", "No upstream branch is configured", true)
+    })?;
     let to_revision = git(
-        vec!["rev-parse".into(), "--verify".into(), "@{upstream}".into()],
+        vec!["rev-parse".into(), "--verify".into(), upstream],
         repo,
         token,
     )
@@ -4887,9 +4951,13 @@ pub async fn incoming_changes(
     git_revision_changes(repo, from_revision, to_revision, token).await
 }
 
-async fn incoming_conflict_paths(repo: &RepositoryMeta, token: &CancellationToken) -> Vec<String> {
+async fn incoming_conflict_paths(
+    repo: &RepositoryMeta,
+    upstream: &str,
+    token: &CancellationToken,
+) -> Vec<String> {
     let Some(base) = git(
-        vec!["merge-base".into(), "HEAD".into(), "@{upstream}".into()],
+        vec!["merge-base".into(), "HEAD".into(), upstream.into()],
         repo,
         token,
     )
@@ -4932,7 +5000,7 @@ async fn incoming_conflict_paths(repo: &RepositoryMeta, token: &CancellationToke
         vec![
             "diff".into(),
             "--name-only".into(),
-            format!("{base}..@{{upstream}}"),
+            format!("{base}..{upstream}"),
         ],
         repo,
         token,
@@ -4993,27 +5061,14 @@ async fn ensure_unpushed_commits(
         }
     }
 
-    let has_upstream = git(
-        vec![
-            "rev-parse".into(),
-            "--abbrev-ref".into(),
-            "--symbolic-full-name".into(),
-            "@{upstream}".into(),
-        ],
-        repo,
-        token,
-    )
-    .await
-    .is_ok();
-
-    if has_upstream {
+    if let Some(upstream) = git_upstream(repo, token).await? {
         for hash in hashes {
             let is_ancestor = git(
                 vec![
                     "merge-base".into(),
                     "--is-ancestor".into(),
                     hash.clone(),
-                    "@{upstream}".into(),
+                    upstream.clone(),
                 ],
                 repo,
                 token,
@@ -6009,8 +6064,13 @@ async fn git_history(
             commit.refs = refs.clone();
         }
     }
-    let unpushed = git_unpushed_history_hashes(repo, token).await;
-    let incoming = git_revision_hashes(repo, vec!["HEAD..@{upstream}".into()], token).await;
+    let upstream = git_upstream(repo, token).await?;
+    let unpushed = git_unpushed_history_hashes(repo, upstream.as_deref(), token).await;
+    let incoming = if let Some(upstream) = upstream {
+        git_revision_hashes(repo, vec![format!("HEAD..{upstream}")], token).await
+    } else {
+        HashSet::new()
+    };
     for commit in &mut commits {
         commit.unpushed = unpushed
             .as_ref()
@@ -6169,17 +6229,11 @@ fn parse_git_log(repo_id: &str, raw: &str) -> Vec<CommitNode> {
 // None means there are no remote references: all visible commits are local.
 async fn git_unpushed_history_hashes(
     repo: &RepositoryMeta,
+    upstream: Option<&str>,
     token: &CancellationToken,
 ) -> Option<HashSet<String>> {
-    if git(
-        vec!["rev-parse".into(), "--verify".into(), "@{upstream}".into()],
-        repo,
-        token,
-    )
-    .await
-    .is_ok()
-    {
-        return Some(git_revision_hashes(repo, vec!["@{upstream}..HEAD".into()], token).await);
+    if let Some(upstream) = upstream {
+        return Some(git_revision_hashes(repo, vec![format!("{upstream}..HEAD")], token).await);
     }
     match git(
         vec![
@@ -7617,39 +7671,67 @@ async fn svn_branches(
         });
     };
 
+    let queries = svn_ref_queries(&repo.id);
+    let _query = tokio::select! {
+        _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
+        guard = queries.branches.lock() => guard,
+    };
     let cached = SVN_BRANCH_CACHE
         .get_or_init(Default::default)
         .lock()
         .ok()
-        .and_then(|cache| cache.get(&repo.id).cloned())
-        .filter(|(checked_at, _, _)| checked_at.elapsed() < Duration::from_secs(300));
-    let (has_trunk, branch_names) = if let Some((_, has_trunk, branch_names)) = cached {
-        (has_trunk, branch_names)
+        .and_then(|cache| cache.get(&repo.id).cloned());
+    let (has_trunk, branch_names) = if let Some((_, has_trunk, branch_names)) = cached
+        .as_ref()
+        .filter(|(until, _, _)| *until > Instant::now())
+    {
+        (*has_trunk, branch_names.clone())
     } else {
-        let (trunk, listed) = tokio::join!(
-            svn_with_timeout(
-                vec!["ls".into(), "--xml".into(), "^/trunk".into()],
-                repo,
-                token,
-                Duration::from_secs(3),
-            ),
-            svn_with_timeout(
-                vec!["ls".into(), "--xml".into(), "^/branches".into()],
-                repo,
-                token,
-                Duration::from_secs(3),
-            ),
-        );
-        let names = listed
-            .ok()
-            .and_then(|output| parse_svn_list_entries(&output.stdout_text()).ok())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(name, _, _)| name)
-            .collect::<Vec<_>>();
-        let value = (trunk.is_ok(), names);
+        let result: Result<(bool, Vec<String>), DesktopError> = async {
+            let (trunk, listed) = tokio::join!(
+                svn_optional_directory("^/trunk", repo, token),
+                svn_optional_directory("^/branches", repo, token),
+            );
+            let trunk = trunk?;
+            let names = listed?
+                .map(|output| parse_svn_list_entries(&output.stdout_text()))
+                .transpose()?
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect::<Vec<_>>();
+            Ok((trunk.is_some(), names))
+        }
+        .await;
+        let (value, lifetime) = match result {
+            Ok(value) => (value, Duration::from_secs(300)),
+            Err(error) => {
+                if token.is_cancelled() || error.code == "REQUEST_CANCELLED" {
+                    return Err(error);
+                }
+                crate::logger::log_entry(
+                    crate::logger::LogLevel::Error,
+                    crate::logger::LogChannel::Svn,
+                    "Failed to query remote branches",
+                    Some(format!("{}: {}", error.code, error.message)),
+                    None,
+                    None,
+                );
+                (
+                    cached
+                        .map(|(_, trunk, names)| (trunk, names))
+                        .unwrap_or_default(),
+                    Duration::from_secs(3),
+                )
+            }
+        };
         if let Ok(mut cache) = SVN_BRANCH_CACHE.get_or_init(Default::default).lock() {
-            cache.insert(repo.id.clone(), (Instant::now(), value.0, value.1.clone()));
+            if queries.valid.load(Ordering::SeqCst) {
+                cache.insert(
+                    repo.id.clone(),
+                    (Instant::now() + lifetime, value.0, value.1.clone()),
+                );
+            }
         }
         value
     };
@@ -8242,36 +8324,60 @@ pub async fn tags(
     token: &CancellationToken,
 ) -> Result<Vec<TagInfo>, DesktopError> {
     if repo.kind == VcsKind::Svn {
-        if let Some((_, tags)) = SVN_TAG_CACHE
+        let queries = svn_ref_queries(&repo.id);
+        let _query = tokio::select! {
+            _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
+            guard = queries.tags.lock() => guard,
+        };
+        let cached = SVN_TAG_CACHE
             .get_or_init(Default::default)
             .lock()
             .ok()
-            .and_then(|cache| cache.get(&repo.id).cloned())
-            .filter(|(checked_at, _)| checked_at.elapsed() < Duration::from_secs(300))
-        {
-            return Ok(tags);
+            .and_then(|cache| cache.get(&repo.id).cloned());
+        if let Some((_, tags)) = cached.as_ref().filter(|(until, _)| *until > Instant::now()) {
+            return Ok(tags.clone());
         }
-        let raw = svn_with_timeout(
-            vec!["ls".into(), "--xml".into(), "^/tags".into()],
-            repo,
-            token,
-            Duration::from_secs(3),
-        )
-        .await
-        .map(|value| value.stdout_text())
-        .unwrap_or_default();
-        let tags = parse_svn_list_entries(&raw)?
-            .into_iter()
-            .map(|(name, revision, date)| TagInfo {
-                hash: revision
-                    .map(|value| format!("r{value}"))
-                    .unwrap_or_else(|| name.clone()),
-                name,
-                date,
-            })
-            .collect::<Vec<_>>();
+        let result: Result<Vec<TagInfo>, DesktopError> = async {
+            let raw = svn_optional_directory("^/tags", repo, token)
+                .await?
+                .map(|value| value.stdout_text())
+                .unwrap_or_default();
+            Ok(parse_svn_list_entries(&raw)?
+                .into_iter()
+                .map(|(name, revision, date)| TagInfo {
+                    hash: revision
+                        .map(|value| format!("r{value}"))
+                        .unwrap_or_else(|| name.clone()),
+                    name,
+                    date,
+                })
+                .collect::<Vec<_>>())
+        }
+        .await;
+        let (tags, lifetime) = match result {
+            Ok(tags) => (tags, Duration::from_secs(300)),
+            Err(error) => {
+                if token.is_cancelled() || error.code == "REQUEST_CANCELLED" {
+                    return Err(error);
+                }
+                crate::logger::log_entry(
+                    crate::logger::LogLevel::Error,
+                    crate::logger::LogChannel::Svn,
+                    "Failed to query remote tags",
+                    Some(format!("{}: {}", error.code, error.message)),
+                    None,
+                    None,
+                );
+                (
+                    cached.map(|(_, tags)| tags).unwrap_or_default(),
+                    Duration::from_secs(3),
+                )
+            }
+        };
         if let Ok(mut cache) = SVN_TAG_CACHE.get_or_init(Default::default).lock() {
-            cache.insert(repo.id.clone(), (Instant::now(), tags.clone()));
+            if queries.valid.load(Ordering::SeqCst) {
+                cache.insert(repo.id.clone(), (Instant::now() + lifetime, tags.clone()));
+            }
         }
         return Ok(tags);
     }
@@ -8350,7 +8456,7 @@ fn parse_svn_list_entries(
         .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
     Ok(document
         .descendants()
-        .filter(|node| node.has_tag_name("entry"))
+        .filter(|node| node.has_tag_name("entry") && node.attribute("kind") == Some("dir"))
         .filter_map(|entry| {
             let name = entry
                 .children()
@@ -8409,15 +8515,14 @@ async fn fetch_svn_incoming_revisions(
         return res;
     }
 
-    let Some(start) = revision.checked_add(1) else {
-        return Ok(0);
-    };
+    // Include the working-copy revision as a valid lower boundary. Asking for
+    // revision + 1 fails when the working copy is already at repository HEAD.
     let output = svn_with_timeout(
         vec![
             "log".into(),
             "--xml".into(),
             "-r".into(),
-            format!("{start}:HEAD"),
+            format!("{revision}:HEAD"),
         ],
         repo,
         token,
@@ -8425,16 +8530,18 @@ async fn fetch_svn_incoming_revisions(
     )
     .await?;
     let raw = output.stdout_text();
-    let behind = roxmltree::Document::parse(&raw)
-        .ok()
-        .map(|document| {
-            document
-                .descendants()
-                .filter(|node| node.has_tag_name("logentry"))
-                .count()
-                .min(u32::MAX as usize) as u32
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let behind = document
+        .descendants()
+        .filter(|node| node.has_tag_name("logentry"))
+        .filter(|node| {
+            node.attribute("revision")
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some_and(|value| value > revision)
         })
-        .unwrap_or(0);
+        .count()
+        .min(u32::MAX as usize) as u32;
     Ok(behind)
 }
 
@@ -9734,14 +9841,19 @@ pub async fn submodules(
         .filter(|value| !value.is_empty());
         let (index_commit, conflict_stages, type_change, companion_path) =
             submodule_index_state(repo, &path, token).await;
-        let unpushed_count = if initialized && current_branch.is_some() {
+        let upstream = if initialized && current_branch.is_some() {
+            git_upstream_at(repo, Some(&path), token).await?
+        } else {
+            None
+        };
+        let unpushed_count = if let Some(upstream) = upstream {
             git(
                 vec![
                     "-C".into(),
                     path.clone(),
                     "rev-list".into(),
                     "--count".into(),
-                    "@{upstream}..HEAD".into(),
+                    format!("{upstream}..HEAD"),
                 ],
                 repo,
                 token,
@@ -11753,6 +11865,105 @@ pub async fn is_git_conflict_binary(
     false
 }
 
+async fn svn_file_kind_properties(
+    repo: &RepositoryMeta,
+    safe_path: &str,
+    token: &CancellationToken,
+) -> Result<(String, String), DesktopError> {
+    let literal_target = format!("{safe_path}@");
+    let info = svn(
+        vec![
+            "info".into(),
+            "--xml".into(),
+            "--".into(),
+            literal_target.clone(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let document = roxmltree::Document::parse(&info)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let entry = document
+        .descendants()
+        .find(|node| node.has_tag_name("entry"))
+        .ok_or_else(|| DesktopError::new("SVN_XML_INVALID", "SVN info has no entry", true))?;
+    let schedule = entry
+        .descendants()
+        .find(|node| node.has_tag_name("schedule"))
+        .and_then(|node| node.text());
+    let mut args = vec!["proplist".into(), "--xml".into(), "--verbose".into()];
+    let target = if entry.attribute("kind") == Some("none") {
+        // A moved/deleted victim may retain a tree-conflict record without a
+        // working-copy node. Read the exact recorded revision, never HEAD.
+        let source = ["source-left", "source-right"]
+            .into_iter()
+            .find_map(|side| {
+                entry
+                    .descendants()
+                    .filter(|node| node.has_tag_name("tree-conflict"))
+                    .flat_map(|node| node.children())
+                    .find(|node| {
+                        node.has_tag_name("version")
+                            && node.attribute("side") == Some(side)
+                            && matches!(node.attribute("kind"), Some("file" | "dir"))
+                    })
+            });
+        let Some(source) = source else {
+            return Ok((String::new(), String::new()));
+        };
+        let (Some(root_url), Some(path), Some(revision)) = (
+            source.attribute("repos-url"),
+            source.attribute("path-in-repos"),
+            source
+                .attribute("revision")
+                .and_then(|value| value.parse::<u64>().ok()),
+        ) else {
+            return Err(DesktopError::new(
+                "SVN_XML_INVALID",
+                "Incomplete SVN conflict source",
+                true,
+            ));
+        };
+        let mut url = url::Url::parse(root_url)
+            .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+        {
+            let mut segments = url.path_segments_mut().map_err(|_| {
+                DesktopError::new("SVN_XML_INVALID", "Invalid SVN repository URL", true)
+            })?;
+            segments.pop_if_empty();
+            for segment in path.trim_start_matches('/').split('/') {
+                segments.push(segment);
+            }
+        }
+        args.extend(["-r".into(), revision.to_string()]);
+        format!("{url}@{revision}")
+    } else {
+        // SVN refuses WORKING properties for scheduled deletions, including
+        // delete/edit conflicts and deletions that kept their local file.
+        if schedule == Some("delete") {
+            args.extend(["-r".into(), "BASE".into()]);
+        }
+        literal_target
+    };
+    args.extend(["--".into(), target]);
+    // proplist succeeds with an empty property list. Two propget calls would
+    // both fail for ordinary files that have neither optional property.
+    let raw = svn(args, repo, token).await?.stdout_text();
+    let document = roxmltree::Document::parse(&raw)
+        .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+    let property = |name: &str| {
+        document
+            .descendants()
+            .find(|node| node.has_tag_name("property") && node.attribute("name") == Some(name))
+            .and_then(|node| node.text())
+            .unwrap_or_default()
+            .to_string()
+    };
+    Ok((property("svn:mime-type"), property("svn:special")))
+}
+
 pub async fn is_svn_conflict_binary(
     repo: &RepositoryMeta,
     safe_path: &str,
@@ -11769,32 +11980,9 @@ pub async fn is_svn_conflict_binary(
             return true;
         }
     }
-    let mime_out = svn(
-        vec![
-            "propget".into(),
-            "svn:mime-type".into(),
-            "--".into(),
-            safe_path.to_string(),
-        ],
-        repo,
-        token,
-    )
-    .await
-    .map(|o| o.stdout_text())
-    .unwrap_or_default();
-    let special_out = svn(
-        vec![
-            "propget".into(),
-            "svn:special".into(),
-            "--".into(),
-            safe_path.to_string(),
-        ],
-        repo,
-        token,
-    )
-    .await
-    .map(|o| o.stdout_text())
-    .unwrap_or_default();
+    let (mime_out, special_out) = svn_file_kind_properties(repo, safe_path, token)
+        .await
+        .unwrap_or_default();
     let mime = mime_out.trim().to_lowercase();
     let is_binary_mime = !mime.is_empty()
         && !mime.starts_with("text/")
@@ -12048,32 +12236,9 @@ pub async fn conflict_versions(
                 .await
                 .map(|m| m.file_type().is_symlink())
                 .unwrap_or(false);
-            let mime_out = svn(
-                vec![
-                    "propget".into(),
-                    "svn:mime-type".into(),
-                    "--".into(),
-                    safe.clone(),
-                ],
-                repo,
-                token,
-            )
-            .await
-            .map(|o| o.stdout_text())
-            .unwrap_or_default();
-            let special_out = svn(
-                vec![
-                    "propget".into(),
-                    "svn:special".into(),
-                    "--".into(),
-                    safe.clone(),
-                ],
-                repo,
-                token,
-            )
-            .await
-            .map(|o| o.stdout_text())
-            .unwrap_or_default();
+            let (mime_out, special_out) = svn_file_kind_properties(repo, &safe, token)
+                .await
+                .unwrap_or_default();
             let mime = mime_out.trim().to_lowercase();
             let is_binary_mime = !mime.is_empty()
                 && !mime.starts_with("text/")
@@ -12851,32 +13016,9 @@ async fn accept_svn_tree_conflict(
             ));
         }
 
-        let mime_out = svn(
-            vec![
-                "propget".into(),
-                "svn:mime-type".into(),
-                "--".into(),
-                safe_path.to_string(),
-            ],
-            repo,
-            token,
-        )
-        .await
-        .map(|o| o.stdout_text())
-        .unwrap_or_default();
-        let special_out = svn(
-            vec![
-                "propget".into(),
-                "svn:special".into(),
-                "--".into(),
-                safe_path.to_string(),
-            ],
-            repo,
-            token,
-        )
-        .await
-        .map(|o| o.stdout_text())
-        .unwrap_or_default();
+        let (mime_out, special_out) = svn_file_kind_properties(repo, safe_path, token)
+            .await
+            .unwrap_or_default();
         let mime = mime_out.trim().to_lowercase();
         let is_binary_mime = !mime.is_empty()
             && !mime.starts_with("text/")

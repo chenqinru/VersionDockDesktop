@@ -2747,6 +2747,53 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().selectedCommit).toEqual(detail);
   });
 
+  it('keeps SVN reference queries silent and preserves old data when the bridge rejects', async () => {
+    const workspace = snapshot('svn-reference-parity', 1);
+    const svn = repository('svn', 'SVN Repository'); svn.meta.kind = 'svn';
+    workspace.repositories = [svn];
+    const branch = { name: 'release', current: false, remote: false, remoteName: null, upstream: null, ahead: 0, behind: 0, detachedTag: null, detachedHash: null, lastCommitMessage: null, lastCommitDate: null };
+    const tag = { name: 'v1', hash: 'r1', date: '' };
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'branches' || command.type === 'tags') throw new BridgeError({ code: 'SVN_AUTHORIZATION_FAILED', message: 'Authorization failed', command: 'svn', exitCode: 1, stderr: null, recoverable: true });
+      if (command.type === 'history') return { commits: [], hasMore: false };
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, notifications: [], selectedRepoId: 'svn', branchesByRepo: { svn: [branch] }, tagsByRepo: { svn: [tag] } });
+    await useAppStore.getState().selectRepo('svn', true);
+    expect(useAppStore.getState().branchesByRepo.svn).toEqual([branch]);
+    expect(useAppStore.getState().tagsByRepo.svn).toEqual([tag]);
+    expect(useAppStore.getState().notifications).toEqual([]);
+  });
+
+  it('does not publish SVN branch or tag notifications during background refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      let subscriber: ((event: BridgeEvent) => void) | undefined;
+      const commands: BridgeCommand[] = [];
+      const bridge = new MockBridge((command) => {
+        commands.push(command);
+        if (command.type === 'bootstrap') return bootstrap;
+        if (command.type === 'repositoryStatus') {
+          const svn = repository('svn', 'SVN Repository'); svn.meta.kind = 'svn'; return svn;
+        }
+        if (command.type === 'branches' || command.type === 'tags') throw new BridgeError({ code: 'SVN_AUTHORIZATION_FAILED', message: 'Authorization failed', command: 'svn', exitCode: 1, stderr: null, recoverable: true });
+        if (command.type === 'history') return { commits: [], hasMore: false };
+        return [];
+      });
+      bridge.subscribe = (handler) => { subscriber = handler; return () => undefined; };
+      await useAppStore.getState().initialize(bridge);
+      const current = snapshot('svn-background-parity', 1);
+      const svn = repository('svn', 'SVN Repository'); svn.meta.kind = 'svn';
+      current.repositories = [svn];
+      useAppStore.setState({ snapshot: current, allRepositories: [svn], selectedRepoId: 'svn', notifications: [], historyByRepo: { svn: [] }, historyTopologyByRepo: { svn: [] }, historyScope: { repoIds: null, revisionsByRepo: {} } });
+      subscriber?.({ workspaceId: current.workspace.id, repoId: 'svn', generation: 1, source: 'watcher', scopes: ['refs', 'history'] });
+      await vi.advanceTimersByTimeAsync(301);
+      expect(commands.some((command) => command.type === 'branches')).toBe(true);
+      expect(commands.some((command) => command.type === 'tags')).toBe(true);
+      expect(useAppStore.getState().notifications).toEqual([]);
+    } finally { useAppStore.getState().dispose(); vi.useRealTimers(); }
+  });
+
   it('interleaves repository heads without breaking each repository order', () => {
     const make = (repoId: string, hash: string, date: string): CommitNode => ({
       repoId, hash, shortHash: hash, parents: [], author: 'Ada', email: '', authorDate: date, committerDate: date, message: hash, refs: [],

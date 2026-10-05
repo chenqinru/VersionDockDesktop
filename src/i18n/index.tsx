@@ -4,6 +4,12 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'This SVN account does not have permission to access the requested repository path.': 'This SVN account does not have permission to access the requested repository path.',
+  'No upstream branch is configured': 'No upstream branch is configured',
+  'Log write queue is full; logs remain available in memory.': 'Log write queue is full; logs remain available in memory.',
+  'Some log entries could not be written to disk.': 'Some log entries could not be written to disk.',
+  'Log file writing failed; logs remain available in memory.': 'Log file writing failed; logs remain available in memory.',
+  'Log file writing resumed.': 'Log file writing resumed.',
   'Scrollbar visibility': 'Scrollbar visibility',
   'Follow system': 'Follow system',
   'Auto-hide': 'Auto-hide',
@@ -1233,6 +1239,12 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'This SVN account does not have permission to access the requested repository path.': '当前 SVN 账号无权访问请求的仓库路径，请检查目录访问权限。',
+  'No upstream branch is configured': '当前分支未配置上游分支',
+  'Log write queue is full; logs remain available in memory.': '日志写入队列已满，未写入文件的日志仍可在内存中查看。',
+  'Some log entries could not be written to disk.': '部分日志未能写入文件。',
+  'Log file writing failed; logs remain available in memory.': '日志文件写入失败，日志仍可在内存中查看。',
+  'Log file writing resumed.': '日志文件写入已恢复。',
   'Scrollbar visibility': '滚动条显示方式',
   'Follow system': '跟随系统',
   'Auto-hide': '自动隐藏',

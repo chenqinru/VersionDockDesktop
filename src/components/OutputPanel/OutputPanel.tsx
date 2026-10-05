@@ -67,6 +67,11 @@ export function OutputPanel() {
   const setLogChannel = useAppStore((state) => state.setLogChannel);
   const setLogLevel = useAppStore((state) => state.setLogLevel);
   const setLogProject = useAppStore((state) => state.setLogProject);
+  const resolvedProject = activeProject !== 'all' && activeProject !== 'current'
+    && !tabs.some((tab) => tab.id === activeProject) ? 'current' : activeProject;
+  useEffect(() => {
+    if (resolvedProject !== activeProject) setLogProject(resolvedProject);
+  }, [resolvedProject, activeProject, setLogProject]);
   const setSearchQuery = useAppStore((state) => state.setLogSearchQuery);
   const setAutoScroll = useAppStore((state) => state.setLogAutoScroll);
   const clearLogs = useAppStore((state) => state.clearLogs);
@@ -98,13 +103,13 @@ export function OutputPanel() {
       { id: 'current', label: 'Current Project' },
       { id: 'all', label: 'All Projects' },
     ];
-    if (tabs.length > 1) {
+    if (tabs.length > 1 || tabs.some((tab) => tab.id === resolvedProject)) {
       tabs.forEach((tab) => {
         list.push({ id: tab.id, label: tab.name });
       });
     }
     return list;
-  }, [tabs]);
+  }, [tabs, resolvedProject]);
 
   const snapshot = useAppStore((state) => state.snapshot);
   const currentTab = tabs.find((t) => t.id === activeTabId);
@@ -113,20 +118,22 @@ export function OutputPanel() {
     if (snapshot) return snapshot.workspace.paths;
     return [];
   }, [currentTab, snapshot]);
-  const selectedTab = activeProject !== 'current' && activeProject !== 'all'
-    ? tabs.find((t) => t.id === activeProject)
+  const selectedTab = resolvedProject !== 'current' && resolvedProject !== 'all'
+    ? tabs.find((t) => t.id === resolvedProject)
     : null;
   const selectedPaths = useMemo(() => selectedTab ? selectedTab.paths : [], [selectedTab]);
 
   const filteredEntries = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return logEntries.filter((entry) => {
-      if (activeProject === 'current') {
-        if (currentPaths.length > 0 && !isLogEntryInWorkspace(entry, currentPaths, currentTab?.id ?? snapshot?.workspace.id)) {
+      if (resolvedProject === 'current') {
+        const workspaceId = currentTab?.id ?? snapshot?.workspace.id;
+        if ((currentPaths.length > 0 || workspaceId) && !isLogEntryInWorkspace(entry, currentPaths, workspaceId)) {
           return false;
         }
-      } else if (activeProject !== 'all') {
-        if (selectedPaths.length > 0 && !isLogEntryInWorkspace(entry, selectedPaths, selectedTab?.id)) {
+        if (!workspaceId && currentPaths.length === 0 && (entry.context?.workspaceId || entry.cwd)) return false;
+      } else if (resolvedProject !== 'all') {
+        if (!isLogEntryInWorkspace(entry, selectedPaths, selectedTab?.id)) {
           return false;
         }
       }
@@ -145,7 +152,7 @@ export function OutputPanel() {
       }
       return true;
     });
-  }, [logEntries, activeProject, currentPaths, selectedPaths, activeChannel, activeLevel, searchQuery, currentTab?.id, snapshot?.workspace.id, selectedTab?.id]);
+  }, [logEntries, resolvedProject, currentPaths, selectedPaths, activeChannel, activeLevel, searchQuery, currentTab?.id, snapshot?.workspace.id, selectedTab?.id]);
 
   const virtual = filteredEntries.length > 100;
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -276,7 +283,7 @@ export function OutputPanel() {
         <div className="output-panel-controls">
           <OutputDropdown
             ariaLabel={t('Filter by project')}
-            value={activeProject}
+            value={resolvedProject}
             options={projectOptions}
             onChange={(val) => setLogProject(val)}
             className="output-dropdown-project"
@@ -388,7 +395,7 @@ export function OutputPanel() {
       {(actionError || logError || storageError) && <div className="output-error-banner" role="status">
         <Codicon name="warning" />
         <span>{actionError ? t(actionError) : logError ? t(logError) : t('Log files are unavailable. Logs remain available in this window.')}</span>
-        {storageError && <span className="output-storage-error" title={storageError}>{storageError}</span>}
+        {storageError && <span className="output-storage-error" title={t(storageError)}>{t(storageError)}</span>}
       </div>}
       <div
         ref={scrollContainerRef}
@@ -425,13 +432,13 @@ export function OutputPanel() {
                   <span className="output-log-time">{formatTime(entry.timestamp)}</span>
                   <span className={`output-log-level ${entry.level}`}>{entry.level.toUpperCase()}</span>
                   <span className="output-log-channel">[{entry.channel.toUpperCase()}]</span>
-                  {activeProject === 'all' && (() => {
+                  {resolvedProject === 'all' && (() => {
                     const matchedTab = entry.cwd || entry.context?.workspaceId ? tabs.find((tab) => isLogEntryInWorkspace(entry, tab.paths, tab.id)) : undefined;
                     const name = entry.context?.workspaceName ?? matchedTab?.name ?? entry.context?.workspaceId;
                     return name ? <span className="output-log-project" title={entry.cwd ?? undefined}>[{name}]</span> : null;
                   })()}
                   {entry.context?.repositoryName && <span className="output-log-project" title={entry.cwd ?? undefined}>[{entry.context.repositoryName}]</span>}
-                  <span className="output-log-msg">{entry.message}</span>
+                  <span className="output-log-msg">{t(entry.message)}</span>
                   {entry.durationMs !== null && entry.durationMs !== undefined && (
                     <span className="output-log-duration">{entry.durationMs}ms</span>
                   )}

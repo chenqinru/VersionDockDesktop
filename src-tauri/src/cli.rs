@@ -16,6 +16,19 @@ pub const MAX_OUTPUT_BYTES: usize = 20 * 1024 * 1024;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(600);
 
+#[derive(Clone, Copy)]
+pub(crate) enum SvnCommandMode {
+    Standard,
+    OptionalDirectory,
+}
+
+#[derive(Clone, Copy)]
+enum ExitPolicy {
+    Strict,
+    DiffComparison,
+    OptionalSvnDirectory,
+}
+
 #[derive(Debug)]
 pub struct CommandOutput {
     pub stdout: Vec<u8>,
@@ -101,7 +114,7 @@ pub async fn run_with_env(
             timeout,
             cancellation,
             secret_env,
-            false,
+            ExitPolicy::Strict,
         )
         .await
         {
@@ -124,7 +137,17 @@ pub(crate) async fn run_with_isolated_git_index(
     cancellation: &CancellationToken,
     env: &[(String, String)],
 ) -> Result<CommandOutput, DesktopError> {
-    run_once("git", args, cwd, stdin, timeout, cancellation, env, false).await
+    run_once(
+        "git",
+        args,
+        cwd,
+        stdin,
+        timeout,
+        cancellation,
+        env,
+        ExitPolicy::Strict,
+    )
+    .await
 }
 
 /// `git diff --no-index` returns 1 for a successful comparison with differences.
@@ -133,7 +156,81 @@ pub(crate) async fn compare_files(
     cwd: &Path,
     token: &CancellationToken,
 ) -> Result<CommandOutput, DesktopError> {
-    run_once("git", args, cwd, None, DEFAULT_TIMEOUT, token, &[], true).await
+    run_once(
+        "git",
+        args,
+        cwd,
+        None,
+        DEFAULT_TIMEOUT,
+        token,
+        &[],
+        ExitPolicy::DiffComparison,
+    )
+    .await
+}
+
+pub(crate) async fn run_svn(
+    args: &[String],
+    cwd: &Path,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    mode: SvnCommandMode,
+) -> Result<CommandOutput, DesktopError> {
+    let policy = match mode {
+        SvnCommandMode::Standard => ExitPolicy::Strict,
+        SvnCommandMode::OptionalDirectory => ExitPolicy::OptionalSvnDirectory,
+    };
+    run_once("svn", args, cwd, stdin, timeout, cancellation, &[], policy).await
+}
+
+fn optional_svn_directory_missing(args: &[String], output: &CommandOutput) -> bool {
+    if output.exit_code != Some(1)
+        || svn_subcommand(args) != Some("ls")
+        || !args
+            .last()
+            .is_some_and(|arg| matches!(arg.as_str(), "^/trunk" | "^/branches" | "^/tags"))
+    {
+        return false;
+    }
+    // Match SVN diagnostic codes, independent of the installed client's locale.
+    // E200009 alone is generic: every diagnostic must belong to a missing path.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut missing = false;
+    for line in stderr.lines().filter(|line| !line.trim().is_empty()) {
+        let Some(code) = line.split(':').map(str::trim).find(|part| {
+            part.len() == 7
+                && part.as_bytes()[0].is_ascii_alphabetic()
+                && part.as_bytes()[1..].iter().all(u8::is_ascii_digit)
+        }) else {
+            return false;
+        };
+        match code {
+            "W160013" | "E160013" => missing = true,
+            "E200009" => {}
+            _ => return false,
+        }
+    }
+    missing
+}
+
+fn svn_subcommand(args: &[String]) -> Option<&str> {
+    let mut arguments = args.iter();
+    while let Some(argument) = arguments.next() {
+        if matches!(
+            argument.as_str(),
+            "--username"
+                | "--password"
+                | "--config-dir"
+                | "--config-option"
+                | "--trust-server-cert-failures"
+        ) {
+            arguments.next();
+        } else if !argument.starts_with('-') {
+            return Some(argument);
+        }
+    }
+    None
 }
 
 async fn run_once(
@@ -144,7 +241,7 @@ async fn run_once(
     timeout: Duration,
     cancellation: &CancellationToken,
     secret_env: &[(String, String)],
-    accept_diff_exit: bool,
+    exit_policy: ExitPolicy,
 ) -> Result<CommandOutput, DesktopError> {
     let start_time = std::time::Instant::now();
     let channel = if program.contains("svn") {
@@ -281,20 +378,38 @@ async fn run_once(
         exit_code: status.code(),
     };
     let duration_ms = start_time.elapsed().as_millis() as u32;
-    if !status.success() && !(accept_diff_exit && status.code() == Some(1)) {
+    if !status.success()
+        && !(matches!(exit_policy, ExitPolicy::DiffComparison) && status.code() == Some(1))
+    {
         let stderr = redact(&String::from_utf8_lossy(&result.stderr));
-        let (code, hint) = classify_failure(program, &stderr);
+        let (mut code, hint) = classify_failure(program, &stderr);
         // `git config --get` uses exit 1 with no output for an absent key.
         // Preserve the result for callers' fallback logic without logging it as
-        // an operational failure. Malformed config and other failures stay errors.
+        // an operational failure. Only explicitly optional SVN directory probes
+        // receive the same treatment; malformed config and other failures stay errors.
         let missing_config = is_git_program(program)
-            && args.first().is_some_and(|argument| argument == "config")
+            && git_subcommand(args) == Some("config")
             && args.iter().any(|argument| argument == "--get")
             && result.exit_code == Some(1)
             && result.stdout.is_empty()
             && result.stderr.is_empty();
+        let missing_directory = matches!(exit_policy, ExitPolicy::OptionalSvnDirectory)
+            && optional_svn_directory_missing(args, &result);
+        if missing_directory {
+            code = "SVN_OPTIONAL_PATH_MISSING";
+        }
+        let negative_git_probe = is_git_program(program)
+            && result.exit_code == Some(1)
+            && result.stdout.is_empty()
+            && result.stderr.is_empty()
+            && ((git_subcommand(args) == Some("merge-base")
+                && args.iter().any(|arg| arg == "--is-ancestor"))
+                || (git_subcommand(args) == Some("symbolic-ref")
+                    && args
+                        .iter()
+                        .any(|arg| matches!(arg.as_str(), "--quiet" | "-q"))));
         crate::logger::log_entry_with_cwd(
-            if missing_config {
+            if missing_config || missing_directory || negative_git_probe {
                 crate::logger::LogLevel::Debug
             } else {
                 crate::logger::LogLevel::Error
@@ -517,16 +632,31 @@ fn is_git_index_lock_error(error: &DesktopError) -> bool {
 
 fn is_read_only_command(program: &str, args: &[String]) -> bool {
     let lower_prog = program.to_ascii_lowercase();
-    if lower_prog.ends_with("git") {
-        let first_cmd = args
-            .iter()
-            .find(|arg| !arg.starts_with('-') && !arg.contains('='))
-            .map(|s| s.as_str());
+    if args.first().is_some_and(|arg| arg == "--version")
+        || lower_prog.ends_with("svnversion")
+        || lower_prog.ends_with("svnversion.exe")
+    {
+        return true;
+    }
+    if is_git_program(program) {
+        let first_cmd = git_subcommand(args);
         match first_cmd {
             Some(
                 "status" | "rev-parse" | "check-ref-format" | "for-each-ref" | "rev-list" | "show"
-                | "diff" | "log" | "cat-file" | "ls-files" | "ls-tree",
+                | "diff" | "log" | "cat-file" | "ls-files" | "ls-tree" | "merge-base" | "diff-tree"
+                | "describe" | "show-ref" | "name-rev",
             ) => true,
+            Some("symbolic-ref") => {
+                let command = args.iter().position(|arg| arg == "symbolic-ref").unwrap();
+                !args
+                    .iter()
+                    .any(|arg| matches!(arg.as_str(), "--delete" | "-d"))
+                    && args[command + 1..]
+                        .iter()
+                        .filter(|arg| !arg.starts_with('-'))
+                        .count()
+                        <= 1
+            }
             Some("remote") => !args.iter().any(|arg| {
                 matches!(
                     arg.as_str(),
@@ -551,18 +681,34 @@ fn is_read_only_command(program: &str, args: &[String]) -> bool {
             }),
             _ => false,
         }
-    } else if lower_prog.ends_with("svn") {
-        let first_cmd = args
-            .iter()
-            .find(|arg| !arg.starts_with('-'))
-            .map(|s| s.as_str());
+    } else if lower_prog.ends_with("svn") || lower_prog.ends_with("svn.exe") {
+        if svn_subcommand(args) == Some("auth") {
+            return !args.iter().any(|arg| arg == "--remove");
+        }
         matches!(
-            first_cmd,
-            Some("status" | "info" | "log" | "diff" | "cat" | "list" | "ls")
+            svn_subcommand(args),
+            Some(
+                "status" | "info" | "log" | "diff" | "cat" | "list" | "ls" | "propget" | "proplist"
+            )
         )
     } else {
         false
     }
+}
+
+fn git_subcommand(args: &[String]) -> Option<&str> {
+    let mut arguments = args.iter();
+    while let Some(argument) = arguments.next() {
+        if matches!(
+            argument.as_str(),
+            "-c" | "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env"
+        ) {
+            arguments.next();
+        } else if !argument.starts_with('-') {
+            return Some(argument);
+        }
+    }
+    None
 }
 
 fn escape_control_chars(input: &str) -> String {
@@ -585,6 +731,19 @@ fn escape_control_chars(input: &str) -> String {
 fn format_command_for_log(program: &str, args: &[String]) -> String {
     let mut parts = vec![program.to_string()];
     let mut skip_next = false;
+    let message_short_option = if is_git_program(program) {
+        matches!(
+            git_subcommand(args),
+            Some("commit" | "merge" | "tag" | "notes")
+        )
+    } else if program.contains("svn") {
+        matches!(
+            svn_subcommand(args),
+            Some("commit" | "copy" | "delete" | "mkdir" | "move" | "import" | "lock")
+        )
+    } else {
+        false
+    };
     for arg in args {
         if skip_next {
             parts.push("<redacted>".into());
@@ -593,7 +752,7 @@ fn format_command_for_log(program: &str, args: &[String]) -> String {
         }
         let lower = arg.to_ascii_lowercase();
         let value = if lower == "--password"
-            || lower == "-m"
+            || (arg == "-m" && message_short_option)
             || lower == "--message"
             || lower == "--token"
             || lower == "--auth-password"
@@ -603,7 +762,7 @@ fn format_command_for_log(program: &str, args: &[String]) -> String {
         } else if lower.starts_with("--password=")
             || lower.starts_with("--token=")
             || lower.starts_with("--auth-password=")
-            || lower.starts_with("-m=")
+            || (arg.starts_with("-m=") && message_short_option)
             || lower.starts_with("--message=")
         {
             let key = arg.split('=').next().unwrap_or(arg);
@@ -646,6 +805,19 @@ async fn terminate_process_tree(child: &mut tokio::process::Child) {
 
 fn classify_failure(program: &str, stderr: &str) -> (&'static str, Option<&'static str>) {
     let lower = stderr.to_ascii_lowercase();
+    if program.contains("svn")
+        && (lower.contains("authorization failed")
+            || lower.contains("not authorized")
+            || lower.contains("e220001")
+            || lower.contains("403 forbidden")
+            || lower.contains("e175013")
+            || lower.contains("e220004"))
+    {
+        return (
+            "SVN_AUTHORIZATION_FAILED",
+            Some("The account cannot access this repository path; check SVN access rules"),
+        );
+    }
     if lower.contains("authentication failed")
         || lower.contains("authorization failed")
         || lower.contains("e170001")
@@ -787,6 +959,8 @@ fn redact_email_and_identities(line: &str) -> String {
             words.push("user.name=<redacted>");
         } else if word.starts_with("user.email=") {
             words.push("user.email=<redacted-email>");
+        } else if is_git_revision_selector(word) {
+            words.push(word);
         } else if word.contains('@') && !word.contains("://") && word.contains('.') {
             let clean = word.trim_matches(|c| {
                 c == '<' || c == '>' || c == '"' || c == '\'' || c == ',' || c == ';'
@@ -805,6 +979,29 @@ fn redact_email_and_identities(line: &str) -> String {
         }
     }
     words.join(" ")
+}
+
+fn is_git_revision_selector(word: &str) -> bool {
+    let word = word.trim_matches(['\'', '"']);
+    if !word.contains("@{") {
+        return false;
+    }
+    word.split("..")
+        .filter(|part| !part.is_empty())
+        .all(|part| {
+            let Some((prefix, rest)) = part.split_once("@{") else {
+                return !part.contains('@');
+            };
+            let Some((selector, suffix)) = rest.split_once('}') else {
+                return false;
+            };
+            !prefix.contains('@')
+                && (matches!(selector, "upstream" | "u" | "push")
+                    || !selector.is_empty() && selector.bytes().all(|byte| byte.is_ascii_digit()))
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'^' | b'~'))
+        })
 }
 
 fn redact_url_userinfo(value: &str) -> String {
@@ -881,6 +1078,159 @@ mod tests {
                 Some("Commit, stash, carry, or discard local changes before retrying")
             )
         );
+    }
+
+    #[test]
+    fn git_revision_ranges_are_preserved_while_real_email_addresses_are_redacted() {
+        for revision in [
+            "HEAD..@{upstream}",
+            "@{upstream}..HEAD",
+            "HEAD...@{u}",
+            "main@{push}~2",
+            "HEAD@{1}",
+        ] {
+            let command = format!("git rev-list {revision}");
+            assert_eq!(redact(&command), command);
+        }
+        assert_eq!(
+            redact("git rev-list HEAD..@{upstream} Author: <alice@example.test>"),
+            "git rev-list HEAD..@{upstream} Author: <redacted-email>"
+        );
+        assert_eq!(redact("alice@example.test@{u}"), "<redacted-email>");
+        assert_eq!(
+            redact("user.email=HEAD..@{upstream}"),
+            "user.email=<redacted-email>"
+        );
+    }
+
+    #[test]
+    fn command_logging_preserves_case_sensitive_flags_and_readonly_metadata() {
+        let args = vec![
+            "-c".into(),
+            "core.quotepath=false".into(),
+            "diff-tree".into(),
+            "-M".into(),
+            "abc123".into(),
+            "def456".into(),
+        ];
+        assert!(format_command_for_log("git", &args).ends_with("-M abc123 def456"));
+        assert!(is_read_only_command("git", &args));
+        assert!(format_command_for_log(
+            "git",
+            &["branch".into(), "-m".into(), "old".into(), "new".into()]
+        )
+        .ends_with("-m old new"));
+        assert!(format_command_for_log(
+            "git",
+            &["commit".into(), "-m".into(), "private message".into()]
+        )
+        .ends_with("-m <redacted>"));
+        assert!(is_read_only_command(
+            "git",
+            &[
+                "-C".into(),
+                "nested".into(),
+                "merge-base".into(),
+                "HEAD".into(),
+                "main".into()
+            ]
+        ));
+        assert!(is_read_only_command("svn", &["auth".into()]));
+        assert!(is_read_only_command(
+            "svn",
+            &["--version".into(), "--quiet".into()]
+        ));
+        assert!(is_read_only_command("svnversion", &[".".into()]));
+        assert!(!is_read_only_command(
+            "git",
+            &[
+                "symbolic-ref".into(),
+                "HEAD".into(),
+                "refs/heads/new".into()
+            ]
+        ));
+        assert!(!is_read_only_command(
+            "git",
+            &["commit".into(), "--".into(), "--version".into()]
+        ));
+        assert!(!is_read_only_command(
+            "svn",
+            &["auth".into(), "--remove".into()]
+        ));
+        assert_eq!(
+            classify_failure("svn", "svn: E170001: Authorization failed").0,
+            "SVN_AUTHORIZATION_FAILED"
+        );
+        assert_eq!(
+            classify_failure(
+                "svn",
+                "svn: E170001: Authentication error: Password incorrect"
+            )
+            .0,
+            "SVN_AUTH_FAILED"
+        );
+        assert_eq!(
+            classify_failure("svn", "svn: E210003: Connection closed unexpectedly").0,
+            "COMMAND_FAILED"
+        );
+    }
+
+    #[tokio::test]
+    async fn negative_git_predicates_are_debug_while_invalid_refs_remain_errors() {
+        use crate::logger::LogLevel;
+        let root = tempfile::tempdir().unwrap();
+        let logger = crate::logger::get_logger()
+            .unwrap_or_else(|| crate::logger::init_global_logger(root.path().join("logs")));
+        let token = CancellationToken::new();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.name", "Audit"],
+            vec!["config", "user.email", "audit@example.test"],
+            vec!["commit", "--allow-empty", "-m", "base"],
+            vec!["branch", "side"],
+            vec!["commit", "--allow-empty", "-m", "next"],
+            vec!["checkout", "--detach", "HEAD"],
+        ] {
+            run(
+                "git",
+                &args.into_iter().map(str::to_string).collect::<Vec<_>>(),
+                root.path(),
+                None,
+                DEFAULT_TIMEOUT,
+                &token,
+            )
+            .await
+            .unwrap();
+        }
+        for (args, expected) in [
+            (
+                vec!["merge-base", "--is-ancestor", "HEAD", "side"],
+                LogLevel::Debug,
+            ),
+            (
+                vec!["symbolic-ref", "--quiet", "--short", "HEAD"],
+                LogLevel::Debug,
+            ),
+            (
+                vec!["merge-base", "--is-ancestor", "missing", "HEAD"],
+                LogLevel::Error,
+            ),
+        ] {
+            let args: Vec<String> = args.into_iter().map(str::to_string).collect();
+            run("git", &args, root.path(), None, DEFAULT_TIMEOUT, &token)
+                .await
+                .unwrap_err();
+            let log = logger
+                .get_entries(None, None, None)
+                .into_iter()
+                .rev()
+                .find(|entry| {
+                    entry.cwd.as_deref() == root.path().to_str()
+                        && entry.message == format_command_for_log("git", &args)
+                })
+                .unwrap();
+            assert_eq!(log.level, expected);
+        }
     }
 
     #[tokio::test]
@@ -1071,6 +1421,68 @@ mod tests {
             .unwrap_err();
         assert!(!error.stderr.unwrap_or_default().is_empty());
         assert_eq!(latest_level(&logger, root.path(), &args), LogLevel::Error);
+    }
+
+    #[test]
+    fn optional_svn_directory_detection_keeps_auth_network_and_other_errors() {
+        let args = vec![
+            "--non-interactive".into(),
+            "ls".into(),
+            "--xml".into(),
+            "^/branches".into(),
+        ];
+        let result = |stderr: &str| CommandOutput {
+            stdout: vec![],
+            stderr: stderr.as_bytes().to_vec(),
+            exit_code: Some(1),
+        };
+        assert!(optional_svn_directory_missing(
+            &args,
+            &result("svn: warning: W160013: missing\nsvn: E200009: missing targets\n")
+        ));
+        assert!(optional_svn_directory_missing(
+            &args,
+            &result("svn: E160013: missing\n")
+        ));
+        assert!(!optional_svn_directory_missing(
+            &args,
+            &result("svn: E200009: invalid target\n")
+        ));
+        assert!(!optional_svn_directory_missing(
+            &args,
+            &result("svn: W160013: missing\nsvn: E170001: authorization failed\n")
+        ));
+        assert!(!optional_svn_directory_missing(
+            &args,
+            &result("svn: E170013: connection failed\n")
+        ));
+        assert!(!optional_svn_directory_missing(
+            &args,
+            &result("svn: E155007: not a working copy\n")
+        ));
+        let mut other_target = args.clone();
+        other_target[3] = "^/important-file".into();
+        assert!(!optional_svn_directory_missing(
+            &other_target,
+            &result("svn: E160013: missing\n")
+        ));
+        let authenticated = vec![
+            "--non-interactive".into(),
+            "--username".into(),
+            "ls".into(),
+            "--password-from-stdin".into(),
+            "proplist".into(),
+            "--xml".into(),
+            "--verbose".into(),
+            "--".into(),
+            "^/tags".into(),
+        ];
+        assert_eq!(svn_subcommand(&authenticated), Some("proplist"));
+        assert!(is_read_only_command("svn", &authenticated));
+        assert!(!optional_svn_directory_missing(
+            &authenticated,
+            &result("svn: E160013: missing\n")
+        ));
     }
 
     #[cfg(unix)]

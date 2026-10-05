@@ -72,6 +72,426 @@ async fn real_git_history_author_email_filter_is_case_insensitive() {
 }
 
 #[tokio::test]
+async fn real_git_upstream_metadata_avoids_false_errors_and_preserves_tracking() {
+    use crate::logger::LogLevel;
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let working = directory.path().join("working");
+    let remote = directory.path().join("remote.git");
+    std::fs::create_dir(&working).unwrap();
+    command("git", &["init", "-b", "main"], &working);
+    // Use a separate bare repository; no application/user checkout is written.
+    command(
+        "git",
+        &["init", "--bare", remote.to_str().unwrap()],
+        directory.path(),
+    );
+    command("git", &["config", "user.name", "Upstream Test"], &working);
+    command(
+        "git",
+        &["config", "user.email", "upstream@example.test"],
+        &working,
+    );
+    command("git", &["commit", "--allow-empty", "-m", "base"], &working);
+    let mut repository = repo(&working, VcsKind::Git);
+    repository.id = format!("git-upstream-{}", uuid::Uuid::new_v4());
+    let token = CancellationToken::new();
+    let logger = crate::logger::get_logger()
+        .unwrap_or_else(|| crate::logger::init_global_logger(directory.path().join("logs")));
+    let base = command_output("git", &["rev-parse", "HEAD"], &working);
+    let local_page = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(local_page
+        .commits
+        .iter()
+        .all(|commit| commit.unpushed && !commit.incoming));
+    assert!(vcs::incoming_commits(&repository, &token)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        vcs::unpushed_commits(&repository, &token)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        vcs::incoming_changes(&repository, &token)
+            .await
+            .unwrap_err()
+            .code,
+        "UPSTREAM_MISSING"
+    );
+    command(
+        "git",
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+        &working,
+    );
+    command(
+        "git",
+        &["push", "--set-upstream", "origin", "main"],
+        &working,
+    );
+    command("git", &["branch", "incoming", &base], &working);
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "local only"],
+        &working,
+    );
+    let local_hash = command_output("git", &["rev-parse", "HEAD"], &working);
+    command("git", &["switch", "incoming"], &working);
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "remote only"],
+        &working,
+    );
+    let remote_hash = command_output("git", &["rev-parse", "HEAD"], &working);
+    command("git", &["push", "origin", "HEAD:main"], &working);
+    command("git", &["switch", "main"], &working);
+    let page = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(
+        page.commits
+            .iter()
+            .find(|commit| commit.hash == local_hash)
+            .unwrap()
+            .unpushed
+    );
+    let incoming = vcs::incoming_commits(&repository, &token).await.unwrap();
+    assert_eq!(incoming.len(), 1);
+    assert_eq!(incoming[0].hash, remote_hash);
+    assert_eq!(
+        vcs::unpushed_commits(&repository, &token)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    command("git", &["branch", "--unset-upstream"], &working);
+    assert!(vcs::incoming_commits(&repository, &token)
+        .await
+        .unwrap()
+        .is_empty());
+    let untracked = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(
+        untracked
+            .commits
+            .iter()
+            .find(|commit| commit.hash == local_hash)
+            .unwrap()
+            .unpushed
+    );
+    assert!(
+        !untracked
+            .commits
+            .iter()
+            .find(|commit| commit.hash == base)
+            .unwrap()
+            .unpushed
+    );
+    command("git", &["checkout", "--detach", &local_hash], &working);
+    assert!(vcs::incoming_commits(&repository, &token)
+        .await
+        .unwrap()
+        .is_empty());
+    let detached = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(detached.commits.iter().all(|commit| !commit.incoming));
+    let logs = logger
+        .get_entries(None, None, None)
+        .into_iter()
+        .filter(|entry| entry.cwd.as_deref() == working.to_str())
+        .collect::<Vec<_>>();
+    assert!(
+        !logs.iter().any(|entry| entry.level == LogLevel::Error),
+        "{logs:#?}"
+    );
+    assert!(!logs
+        .iter()
+        .any(|entry| entry.message.contains("@{upstream}")
+            || entry.message.contains("<redacted-email>")));
+    // A configured-but-missing tracking ref remains a genuine error.
+    command("git", &["switch", "main"], &working);
+    command(
+        "git",
+        &["branch", "--set-upstream-to=origin/main"],
+        &working,
+    );
+    command(
+        "git",
+        &["update-ref", "-d", "refs/remotes/origin/main"],
+        &working,
+    );
+    assert!(vcs::incoming_commits(&repository, &token).await.is_err());
+    assert!(logger
+        .get_entries(None, None, None)
+        .iter()
+        .any(|entry| entry.cwd.as_deref() == working.to_str() && entry.level == LogLevel::Error));
+}
+
+#[tokio::test]
+async fn real_svn_optional_probes_and_incoming_revision_bounds() {
+    use crate::logger::{LogLevel, LogManager};
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let store = directory.path().join("store");
+    let wc = directory.path().join("wc");
+    command(
+        "svnadmin",
+        &["create", store.to_str().unwrap()],
+        directory.path(),
+    );
+    let url = svn_file_url(&store);
+    command(
+        "svn",
+        &["checkout", &url, wc.to_str().unwrap()],
+        directory.path(),
+    );
+    std::fs::write(wc.join("plain.txt"), "plain text\n").unwrap();
+    std::fs::write(wc.join("mime.txt"), "looks like text\n").unwrap();
+    std::fs::write(wc.join("special.txt"), "link target\n").unwrap();
+    command("svn", &["add", "plain.txt", "mime.txt", "special.txt"], &wc);
+    command("svn", &["commit", "-m", "initial"], &wc);
+    command("svn", &["update"], &wc);
+    let logger: std::sync::Arc<LogManager> = crate::logger::get_logger()
+        .unwrap_or_else(|| crate::logger::init_global_logger(directory.path().join("logs")));
+    let mut repository = repo(&wc, VcsKind::Svn);
+    repository.id = format!("svn-probes-{}", uuid::Uuid::new_v4());
+    let token = CancellationToken::new();
+    assert!(!vcs::is_svn_conflict_binary(&repository, "plain.txt", &token).await);
+    command(
+        "svn",
+        &[
+            "propset",
+            "svn:mime-type",
+            "application/octet-stream",
+            "mime.txt",
+        ],
+        &wc,
+    );
+    assert!(vcs::is_svn_conflict_binary(&repository, "mime.txt", &token).await);
+    command(
+        "svn",
+        &["propset", "svn:mime-type", "text/plain", "mime.txt"],
+        &wc,
+    );
+    assert!(!vcs::is_svn_conflict_binary(&repository, "mime.txt", &token).await);
+    command("svn", &["propset", "svn:special", "*", "special.txt"], &wc);
+    assert!(vcs::is_svn_conflict_binary(&repository, "special.txt", &token).await);
+
+    assert_eq!(vcs::svn_incoming_revisions(&repository, &token).await, 0);
+    // A second working copy advances HEAD without updating the tested copy.
+    let upstream = directory.path().join("upstream");
+    command(
+        "svn",
+        &["checkout", &url, upstream.to_str().unwrap()],
+        directory.path(),
+    );
+    for message in ["second", "third"] {
+        std::fs::write(upstream.join("plain.txt"), message).unwrap();
+        command("svn", &["commit", "-m", message], &upstream);
+    }
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    assert_eq!(vcs::svn_incoming_revisions(&repository, &token).await, 2);
+    command("svn", &["update"], &wc);
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    assert_eq!(vcs::svn_incoming_revisions(&repository, &token).await, 0);
+
+    let branches = vcs::branches(&repository, &token).await.unwrap();
+    assert_eq!(branches.len(), 1);
+    assert!(vcs::tags(&repository, &token).await.unwrap().is_empty());
+    let entries = || {
+        logger
+            .get_entries(None, None, None)
+            .into_iter()
+            .filter(|entry| entry.cwd.as_deref() == wc.to_str())
+            .collect::<Vec<_>>()
+    };
+    let logs = entries();
+    assert!(
+        !logs.iter().any(|entry| entry.level == LogLevel::Error),
+        "{logs:#?}"
+    );
+    for target in ["^/trunk", "^/branches", "^/tags"] {
+        let probe = logs
+            .iter()
+            .rev()
+            .find(|entry| entry.message.ends_with(target))
+            .unwrap();
+        assert_eq!(probe.level, LogLevel::Debug);
+        assert_eq!(probe.exit_code, Some(1));
+    }
+    // Ordinary user commands keep their missing-path failures as ERROR.
+    let missing = vec![
+        "--non-interactive".into(),
+        "ls".into(),
+        "--xml".into(),
+        "^/tags".into(),
+    ];
+    crate::cli::run(
+        "svn",
+        &missing,
+        &wc,
+        None,
+        crate::cli::DEFAULT_TIMEOUT,
+        &token,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(entries().last().unwrap().level, LogLevel::Error);
+    vcs::invalidate_svn_ref_caches(&repository.id);
+}
+
+#[tokio::test]
+async fn real_svn_file_kind_probes_preserve_deleted_moved_and_missing_conflicts() {
+    use crate::logger::LogLevel;
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let store = directory.path().join("store 中文");
+    let wc = directory.path().join("wc");
+    let upstream = directory.path().join("upstream");
+    command(
+        "svnadmin",
+        &["create", store.to_str().unwrap()],
+        directory.path(),
+    );
+    let url = svn_file_url(&store);
+    command(
+        "svn",
+        &["checkout", &url, wc.to_str().unwrap()],
+        directory.path(),
+    );
+    let binary_paths = ["move @中文.txt", "delete.txt", "kept.txt", "missing.txt"];
+    for name in binary_paths.into_iter().chain(["plain.txt"]) {
+        std::fs::write(wc.join(name), "base text\n").unwrap();
+        let literal = format!("{name}@");
+        command("svn", &["add", "--", &literal], &wc);
+        if name != "plain.txt" {
+            command(
+                "svn",
+                &[
+                    "propset",
+                    "svn:mime-type",
+                    "application/octet-stream",
+                    "--",
+                    &literal,
+                ],
+                &wc,
+            );
+        }
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("plain.txt", wc.join("link.txt")).unwrap();
+        command("svn", &["add", "link.txt"], &wc);
+    }
+    command("svn", &["commit", "-m", "base properties"], &wc);
+    command("svn", &["update"], &wc);
+    command(
+        "svn",
+        &["checkout", &url, upstream.to_str().unwrap()],
+        directory.path(),
+    );
+    command("svn", &["move", "--", "move @中文.txt@", "moved.txt"], &wc);
+    #[cfg(unix)]
+    command("svn", &["move", "link.txt", "moved-link.txt"], &wc);
+    command("svn", &["delete", "delete.txt", "plain.txt"], &wc);
+    command("svn", &["delete", "--keep-local", "kept.txt"], &wc);
+    std::fs::remove_file(wc.join("missing.txt")).unwrap();
+    command("svn", &["delete", "--", "move @中文.txt@"], &upstream);
+    #[cfg(unix)]
+    command("svn", &["delete", "link.txt"], &upstream);
+    for name in ["delete.txt", "kept.txt", "plain.txt"] {
+        std::fs::write(upstream.join(name), "incoming edit\n").unwrap();
+    }
+    command("svn", &["commit", "-m", "delete and edit"], &upstream);
+    command("svn", &["update"], &wc);
+    assert!(wc.join("kept.txt").exists());
+    // Update may restore a missing file. Keep this probe genuinely missing.
+    if wc.join("missing.txt").exists() {
+        std::fs::remove_file(wc.join("missing.txt")).unwrap();
+    }
+    let snapshot = |raw: &str| {
+        let document = roxmltree::Document::parse(raw).unwrap();
+        document
+            .descendants()
+            .filter(|node| node.has_tag_name("entry"))
+            .map(|entry| {
+                let status = entry
+                    .children()
+                    .find(|node| node.has_tag_name("wc-status"))
+                    .unwrap();
+                let attributes = status
+                    .attributes()
+                    .map(|attribute| (attribute.name().to_string(), attribute.value().to_string()))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                (entry.attribute("path").unwrap().to_string(), attributes)
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let before = command_output("svn", &["status", "--xml"], &wc);
+    let logger = crate::logger::get_logger()
+        .unwrap_or_else(|| crate::logger::init_global_logger(directory.path().join("logs")));
+    let mut repository = repo(&wc, VcsKind::Svn);
+    repository.id = format!("svn-tree-probe-{}", uuid::Uuid::new_v4());
+    let token = CancellationToken::new();
+    for name in binary_paths {
+        assert!(
+            vcs::is_svn_conflict_binary(&repository, name, &token).await,
+            "properties must survive: {name}"
+        );
+    }
+    assert!(!vcs::is_svn_conflict_binary(&repository, "plain.txt", &token).await);
+    #[cfg(unix)]
+    assert!(vcs::is_svn_conflict_binary(&repository, "link.txt", &token).await);
+    let status = workspace::svn_status(repository.clone(), &token)
+        .await
+        .unwrap();
+    for name in ["move @中文.txt", "delete.txt", "kept.txt", "plain.txt"] {
+        let file = status.files.iter().find(|file| file.path == name).unwrap();
+        assert!(file.conflicted, "tree conflict must remain visible: {name}");
+        assert!(file
+            .conflict_types
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|kind| kind == "tree"));
+    }
+    assert_eq!(
+        snapshot(&before),
+        snapshot(&command_output("svn", &["status", "--xml"], &wc))
+    );
+    let logs = logger
+        .get_entries(None, None, None)
+        .into_iter()
+        .filter(|entry| entry.cwd.as_deref() == wc.to_str())
+        .collect::<Vec<_>>();
+    assert!(
+        !logs.iter().any(|entry| entry.level == LogLevel::Error),
+        "{logs:#?}"
+    );
+    assert!(logs
+        .iter()
+        .any(|entry| entry.message.contains("proplist") && entry.message.contains("-r BASE")));
+    assert!(logs.iter().any(|entry| entry.message.contains("proplist")
+        && entry.message.contains("-r 1")
+        && entry.message.ends_with("@1")));
+    vcs::invalidate_svn_ref_caches(&repository.id);
+}
+
+#[tokio::test]
 async fn v5_init_clone_commit_messages_and_structured_history_are_real() {
     if !available("git") {
         return;
@@ -7293,6 +7713,169 @@ async fn parity_svn_authentication_retries_only_the_original_command_and_honors_
         }
         drop(server);
     }
+}
+
+#[tokio::test]
+async fn real_svn_reference_queries_match_plugin_fallback_cooldown_and_request_reuse() {
+    if !available("svn") || !available("svnadmin") || !available("svnserve") {
+        return;
+    }
+    struct Server(std::process::Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = tempdir().unwrap();
+    let storage = root.path().join("repo");
+    command(
+        "svnadmin",
+        &["create", storage.to_str().unwrap()],
+        root.path(),
+    );
+    let config = storage.join("conf");
+    std::fs::write(config.join("svnserve.conf"), "[general]\nanon-access = write\nauth-access = write\nauthz-db = authz\nrealm = Log audit\n").unwrap();
+    std::fs::write(config.join("authz"), "[/]\n* = rw\n").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let _server = Server(
+        Command::new("svnserve")
+            .args([
+                "--daemon",
+                "--foreground",
+                "--listen-host",
+                "127.0.0.1",
+                "--listen-port",
+                &port.to_string(),
+                "--root",
+                root.path().to_str().unwrap(),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let url = format!("svn://127.0.0.1:{port}/repo");
+    let working = root.path().join("working");
+    command(
+        "svn",
+        &[
+            "checkout",
+            "--non-interactive",
+            "--no-auth-cache",
+            &url,
+            working.to_str().unwrap(),
+        ],
+        root.path(),
+    );
+    command(
+        "svn",
+        &[
+            "mkdir",
+            "trunk",
+            "branches",
+            "branches/release",
+            "tags",
+            "tags/v1",
+        ],
+        &working,
+    );
+    command("svn", &["commit", "-m", "layout"], &working);
+    let mut repository = repo(&working, VcsKind::Svn);
+    repository.id = format!("svn-denied-{}", uuid::Uuid::new_v4());
+    let token = CancellationToken::new();
+    std::fs::write(
+        config.join("authz"),
+        "[/]\n* = rw\n[/trunk]\n* =\n[/branches]\n* =\n[/tags]\n* =\n",
+    )
+    .unwrap();
+    let prompts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let logger = crate::logger::get_logger()
+        .unwrap_or_else(|| crate::logger::init_global_logger(root.path().join("logs")));
+    let observed = prompts.clone();
+    let (branches, duplicate_branches, tags, duplicate_tags) =
+        crate::interactions::with_test_responder(
+            std::sync::Arc::new(move |_| {
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                crate::interactions::InteractionResponse {
+                    choice: "cancel".into(),
+                    ..Default::default()
+                }
+            }),
+            async {
+                tokio::join!(
+                    vcs::branches(&repository, &token),
+                    vcs::branches(&repository, &token),
+                    vcs::tags(&repository, &token),
+                    vcs::tags(&repository, &token)
+                )
+            },
+        )
+        .await;
+    assert_eq!(branches.unwrap().len(), 1);
+    assert_eq!(duplicate_branches.unwrap().len(), 1);
+    assert!(tags.unwrap().is_empty());
+    assert!(duplicate_tags.unwrap().is_empty());
+    assert_eq!(prompts.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let count_queries = || {
+        logger
+            .get_entries(None, None, None)
+            .iter()
+            .filter(|entry| {
+                entry.cwd.as_deref() == working.to_str()
+                    && entry.message.starts_with("svn --non-interactive ls --xml")
+            })
+            .count()
+    };
+    assert_eq!(
+        count_queries(),
+        3,
+        "concurrent calls share one remote query per directory"
+    );
+    // Like the plugin, cold failures return current branch / empty tags for 3 seconds.
+    std::fs::write(config.join("authz"), "[/]\n* = rw\n").unwrap();
+    assert_eq!(vcs::branches(&repository, &token).await.unwrap().len(), 1);
+    assert!(vcs::tags(&repository, &token).await.unwrap().is_empty());
+    assert_eq!(count_queries(), 3);
+    tokio::time::sleep(std::time::Duration::from_millis(3100)).await;
+    let branches = vcs::branches(&repository, &token).await.unwrap();
+    assert!(branches.iter().any(|branch| branch.name == "trunk"));
+    assert!(branches.iter().any(|branch| branch.name == "release"));
+    assert_eq!(vcs::tags(&repository, &token).await.unwrap()[0].name, "v1");
+    assert_eq!(count_queries(), 6);
+    // Expiring a populated cache must preserve previous data on failure.
+    std::fs::write(
+        config.join("authz"),
+        "[/]\n* = rw\n[/trunk]\n* =\n[/branches]\n* =\n[/tags]\n* =\n",
+    )
+    .unwrap();
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    let stale = vcs::branches(&repository, &token).await.unwrap();
+    assert!(stale.iter().any(|branch| branch.name == "release"));
+    assert_eq!(vcs::tags(&repository, &token).await.unwrap()[0].name, "v1");
+    assert_eq!(count_queries(), 9);
+    assert!(vcs::branches(&repository, &token)
+        .await
+        .unwrap()
+        .iter()
+        .any(|branch| branch.name == "release"));
+    assert_eq!(count_queries(), 9);
+    std::fs::write(config.join("authz"), "[/]\n* = rw\n").unwrap();
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    assert_eq!(vcs::tags(&repository, &token).await.unwrap()[0].name, "v1");
+    assert_eq!(
+        count_queries(),
+        10,
+        "forced invalidation can retry immediately"
+    );
 }
 
 #[test]

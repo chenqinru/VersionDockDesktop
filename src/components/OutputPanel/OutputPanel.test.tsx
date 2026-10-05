@@ -102,6 +102,21 @@ describe('OutputPanel & LogStatusBarItem', () => {
     expect(screen.queryByText(/Failed to connect to remote repository/)).not.toBeInTheDocument();
   });
 
+  it('returns to current project when the selected project closes without exposing other logs', () => {
+    useAppStore.setState({
+      tabs: [{ id: 'tab-a', name: 'Project A', paths: ['/project-a'], lastOpenedAt: '', available: true }],
+      activeTabId: 'tab-a', activeLogProject: 'closed-tab',
+      logEntries: [
+        { ...sampleLogs[0], id: 'a', cwd: '/project-a', message: 'Current project record' },
+        { ...sampleLogs[0], id: 'b', cwd: '/project-b', message: 'Other project record' },
+      ],
+    });
+    renderWithProviders(<OutputPanel />, bridge);
+    expect(useAppStore.getState().activeLogProject).toBe('current');
+    expect(screen.getByText('Current project record')).toBeInTheDocument();
+    expect(screen.queryByText('Other project record')).not.toBeInTheDocument();
+  });
+
   it('filters logs by level', () => {
     renderWithProviders(<OutputPanel />, bridge);
     const levelTrigger = screen.getByLabelText(/Filter by level/i);
@@ -355,4 +370,3 @@ describe('OutputPanel & LogStatusBarItem', () => {
   });
 
 });
-

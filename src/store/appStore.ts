@@ -1281,9 +1281,17 @@ function cancelRequests() {
   requestControllers.clear();
 }
 
-const errorText = (error: unknown) => error instanceof BridgeError && error.code === 'GIT_UPDATE_CONFLICT'
-  ? createTranslator(resolveLanguage(useAppStore.getState().bootstrap?.state.settings?.language ?? 'system'))('Update stopped with conflicts or an unfinished version-control operation.')
-  : error instanceof Error ? error.message : String(error);
+const errorText = (error: unknown) => {
+  const messages: Record<string, string> = {
+    GIT_UPDATE_CONFLICT: 'Update stopped with conflicts or an unfinished version-control operation.',
+    SVN_AUTHORIZATION_FAILED: 'This SVN account does not have permission to access the requested repository path.',
+    UPSTREAM_MISSING: 'No upstream branch is configured',
+  };
+  const message = error instanceof BridgeError ? messages[error.code] : undefined;
+  return message
+    ? createTranslator(resolveLanguage(useAppStore.getState().bootstrap?.state.settings?.language ?? 'system'))(message)
+    : error instanceof Error ? error.message : String(error);
+};
 const errorDetails = (error: unknown) => error instanceof BridgeError
   ? [error.code, error.operation, error.repositoryId, error.subject, error.hint, error.command, error.exitCode, error.stderr].filter((value) => value !== null && value !== undefined && value !== '').join('\n')
   : undefined;
@@ -2147,7 +2155,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           if (get().snapshot?.workspace.id !== workspaceId) return;
           const repoItem = get().snapshot?.repositories.find((r) => r.meta.id === repoId);
           const repoName = repoItem?.meta.name ?? repoId;
-          if (branchesResult.status === 'rejected' && !isAbortError(branchesResult.reason)) {
+          if (repoItem?.meta.kind !== 'svn' && branchesResult.status === 'rejected' && !isAbortError(branchesResult.reason)) {
             get().addNotification({
               type: 'warning',
               title: 'Branch error',
@@ -2155,7 +2163,7 @@ export const useAppStore = create<AppStore>((set, get) => {
               workspaceId,
             });
           }
-          if (tagsResult.status === 'rejected' && !isAbortError(tagsResult.reason)) {
+          if (repoItem?.meta.kind !== 'svn' && tagsResult.status === 'rejected' && !isAbortError(tagsResult.reason)) {
             get().addNotification({
               type: 'warning',
               title: 'Tag error',
@@ -3156,6 +3164,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             }));
           }).catch((error) => {
             if (get().snapshot?.workspace.id !== currentWorkspace) return;
+            if (item.meta.kind === 'svn' || isAbortError(error)) return;
             get().addNotification({
               type: 'warning',
               title: 'Branch error',
@@ -3171,6 +3180,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             }));
           }).catch((error) => {
             if (get().snapshot?.workspace.id !== currentWorkspace) return;
+            if (item.meta.kind === 'svn' || isAbortError(error)) return;
             get().addNotification({
               type: 'warning',
               title: 'Tag error',
