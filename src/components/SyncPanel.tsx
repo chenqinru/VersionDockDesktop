@@ -595,6 +595,10 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
   };
   const pushableRepos = selectedRepos.filter((repo) => outgoingActive(repo.meta.id) && (repo.ahead > 0 || (outgoing[repo.meta.id]?.length ?? 0) > 0 || Boolean(branchesByRepo[repo.meta.id]?.find((branch) => branch.current && !branch.upstream))));
   const pullableRepos = selectedRepos.filter((repo) => incomingActive(repo.meta.id) && (repo.behind > 0 || (incoming[repo.meta.id]?.length ?? 0) > 0));
+  const repoHasUpstream = (repo: RepositoryStatus) => {
+    const branch = branchesByRepo[repo.meta.id]?.find((candidate) => candidate.current);
+    return branch ? Boolean(branch.upstream) : true;
+  };
   const totalAhead = pushableRepos.reduce((sum, repo) => sum + Math.max(repo.ahead, outgoing[repo.meta.id]?.length ?? 0), 0);
   const totalBehind = pullableRepos.reduce((sum, repo) => sum + Math.max(repo.behind, incoming[repo.meta.id]?.length ?? 0), 0);
   const publishCount = pushableRepos.filter((repo) => Boolean(branchesByRepo[repo.meta.id]?.find((branch) => branch.current && !branch.upstream))).length;
@@ -610,19 +614,19 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
     await useAppStore.getState().fetchRepositories(repos.map((repo) => repo.meta.id), true, wid);
     await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
-  const syncSelected = async (strategy?: 'merge' | 'rebase' | 'ff-only') => {
+  const syncSelected = async (strategy?: 'merge' | 'rebase' | 'ff-only', direction: 'all' | 'outgoing' | 'incoming' = 'all') => {
     const wid = useAppStore.getState().snapshot?.workspace.id;
     if (!wid) return;
     let effectiveStrategy = strategy;
-    if (pullableRepos.length > 0) {
+    if (direction !== 'outgoing' && pullableRepos.length > 0) {
       effectiveStrategy = await resolvePullStrategy(t, strategy);
       if (!effectiveStrategy) return;
     }
     const store = useAppStore.getState();
     if (!isWorkspaceOpen(store, wid)) return;
     for (const repo of selectedRepos) {
-      const canPull = pullableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
-      const canPush = pushableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
+      const canPull = direction !== 'outgoing' && pullableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
+      const canPush = direction !== 'incoming' && pushableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
       if (canPull) {
         const action = effectiveStrategy === 'rebase' ? 'pullRebase' : effectiveStrategy === 'ff-only' ? 'pullFfOnly' : 'pull';
         if (!await sync(repo.meta.id, action, undefined, undefined, wid)) continue;
@@ -653,8 +657,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
   const runFooterMenu = async (id: string) => {
     const wid = useAppStore.getState().snapshot?.workspace.id;
     if (!wid) return;
-    if (id === 'fetch') await fetchAll();
-    else if (id === 'tags') {
+    if (id === 'tags') {
       if (await confirmDialog({ title: t('Push Tags'), message: t('Push all local tags for selected Git repositories?') })) {
         const store = useAppStore.getState();
         if (!isWorkspaceOpen(store, wid)) return;
@@ -670,27 +673,37 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
       await pullSelected(id === 'rebase' ? 'rebase' : id === 'ff' ? 'ff-only' : 'merge', wid);
     }
   };
-  const footerItems: ContextMenuEntry[] = pullableRepos.length > 0 ? [
+  const pullItems: ContextMenuEntry[] = [
     { id: 'rebase', label: t('Update Strategy: Rebase'), icon: 'git-merge' },
     { id: 'merge', label: t('Update Strategy: Merge'), icon: 'git-merge' },
     { id: 'ff', label: t('Update Strategy: Fast-Forward Only'), icon: 'arrow-right' },
-    ...(pushableRepos.length > 0 ? [{ separator: true } as ContextMenuEntry, { id: 'force', label: t('Safe Force Push...'), icon: 'warning', danger: true } as ContextMenuEntry] : []),
-    { id: 'tags', label: t('Push All Tags'), icon: 'tag' },
-    { separator: true },
-    { id: 'fetch', label: t('Fetch All'), icon: 'cloud-download' },
-  ] : pushableRepos.length > 0 ? [
+  ];
+  const pushItems: ContextMenuEntry[] = [
     { id: 'force', label: t('Safe Force Push...'), icon: 'warning', danger: true },
     { id: 'tags', label: t('Push All Tags'), icon: 'tag' },
-    { separator: true },
-    { id: 'fetch', label: t('Fetch All'), icon: 'cloud-download' },
-  ] : [];
-  const mainAction = pullableRepos.length > 0 && pushableRepos.length > 0
-    ? { icon: 'sync', label: `${t('Sync')} ↓${totalBehind} ↑${totalAhead}`, tone: 'sync' }
-    : pullableRepos.length > 0
-      ? { icon: 'cloud-download', label: pullableRepos.length > 1 ? `${t('Update')} (${pullableRepos.length})` : t('Update'), tone: 'pull' }
-      : pushableRepos.length > 0
-        ? { icon: 'cloud-upload', label: countedPushLabel, tone: 'push' }
-        : { icon: 'cloud-download', label: t('Fetch All'), tone: 'fetch' };
+  ];
+  const mainAction = (() => {
+    const pull = { icon: 'cloud-download', label: pullableRepos.length > 1 ? `${t('Update')} (${pullableRepos.length})` : t('Update'), tone: 'pull', enabled: pullableRepos.length > 0, items: pullItems, fetch: false, direction: 'incoming' as const };
+    const purePush = pushableRepos.every(repoHasUpstream);
+    const push = { icon: 'cloud-upload', label: countedPushLabel, tone: purePush ? 'push' : 'default', enabled: pushableRepos.length > 0, items: purePush ? pushItems : [], fetch: false, direction: 'outgoing' as const };
+    const unpublished = selectedRepos.filter(repo => !repoHasUpstream(repo) && outgoingActive(repo.meta.id)).length;
+    const published = selectedRepos.some(repoHasUpstream);
+    const syncLabel = !singleRepo && unpublished > 0 && published
+      ? t(unpublished === 1 ? 'Sync & Publish Branch' : 'Sync & Publish Branches') : t('Sync');
+    const sync = { icon: 'sync', label: `${syncLabel}${totalBehind > 0 ? ` ↓${totalBehind}` : ''}${totalAhead > 0 ? ` ↑${totalAhead}` : ''}`, tone: 'sync', enabled: true, items: [] as ContextMenuEntry[], fetch: false, direction: 'all' as const };
+    if (singleRepo) {
+      const filter = filters[repos[0].meta.id] ?? 'all';
+      if (filter === 'incoming') return pull;
+      if (filter === 'outgoing') return push;
+      if (filter === 'none') return { ...sync, label: t('Sync'), enabled: false };
+      if (!repoHasUpstream(repos[0])) return push;
+    }
+    if (pullableRepos.length && pushableRepos.length) return sync;
+    if (pullableRepos.length) return pull;
+    if (pushableRepos.length) return push;
+    return { icon: 'cloud-download', label: t(singleRepo ? 'Fetch' : 'Fetch All'), tone: 'fetch', enabled: repos.length > 0, items: [] as ContextMenuEntry[], fetch: true, direction: 'all' as const };
+  })();
+  const footerItems = mainAction.items;
 
   return <div className="sync-panel">
     <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
@@ -734,10 +747,10 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
         })}
       </div>}
       <div className={`sync-primary-split action-split ${mainAction.tone}`}>
-        <button className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} onClick={() => void runAction(() => pullableRepos.length || pushableRepos.length ? syncSelected() : fetchAll())}><Codicon name={mainAction.icon} />{mainAction.label}</button>
-        {footerItems.length > 0 && <SplitButtonMore className="sync-primary-more" disabled={actionBusy || (repos.length > 1 && selectedRepos.length === 0)} title={t('More Actions')} aria-expanded={Boolean(footerMenu)} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu(current => current ? undefined : rect); }} />}
+        <button className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || !mainAction.enabled} onClick={() => void runAction(() => mainAction.fetch ? fetchAll() : syncSelected(undefined, mainAction.direction))}><Codicon name={mainAction.icon} />{mainAction.label}</button>
+        {footerItems.length > 0 && <SplitButtonMore className="sync-primary-more" disabled={actionBusy || !mainAction.enabled} title={t('More Actions')} aria-expanded={Boolean(footerMenu)} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu(current => current ? undefined : rect); }} />}
       </div>
-      {footerMenu && <ContextMenu x={footerMenu.left} y={footerMenu.top} anchorRect={footerMenu} placement="above" items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}
+      {footerMenu && footerItems.length > 0 && <ContextMenu x={footerMenu.left} y={footerMenu.top} anchorRect={footerMenu} placement="above" items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}
     </footer>
   </div>;
 }

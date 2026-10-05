@@ -367,3 +367,97 @@ describe('SyncPanel error handling', () => {
     choiceSpy.mockRestore();
   });
 });
+
+describe('SyncPanel footer parity with plugin', () => {
+  const initial = useAppStore.getState();
+  afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks(); });
+  const setup = (ahead: number, behind: number, upstream: string | null = 'origin/main', multiple = false) => {
+    const target = { ...gitRepo, ahead, behind };
+    const repos = multiple ? [target, { ...target, meta: { ...target.meta, id: 'repo-2', name: 'Repo 2' } }] : [target];
+    const fetch = vi.fn().mockResolvedValue(undefined);
+    const sync = vi.fn().mockResolvedValue(true);
+    useAppStore.setState({
+      bridge, snapshot: { ...snapshot, repositories: repos }, operations: {}, loadErrors: {}, sync,
+      bootstrap: { state: { settings: { updateProjectMethod: 'rebase' } } } as any,
+      incomingCommits: Object.fromEntries(repos.map(repo => [repo.meta.id, behind ? sampleIncoming : []])),
+      unpushedCommits: Object.fromEntries(repos.map(repo => [repo.meta.id, ahead ? sampleOutgoing : []])),
+      branchesByRepo: Object.fromEntries(repos.map(repo => [repo.meta.id, [{ name: 'main', current: true, remote: false, remoteName: null, upstream, ahead, behind, detachedTag: null, detachedHash: null, lastCommitMessage: null, lastCommitDate: null }]])),
+      loadIncomingCommits: vi.fn().mockResolvedValue(undefined), loadUnpushedCommits: vi.fn().mockResolvedValue(undefined),
+      fetchRepositories: fetch,
+    });
+    const view = render(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
+    return { ...view, fetch, sync };
+  };
+
+  it.each([
+    { ahead: 1, behind: 0, label: 'Push', items: ['Safe Force Push...', 'Push All Tags'] },
+    { ahead: 0, behind: 1, label: 'Update', items: ['Update Strategy: Rebase', 'Update Strategy: Merge', 'Update Strategy: Fast-Forward Only'] },
+    { ahead: 1, behind: 1, label: 'Sync ↓1 ↑1', items: [] },
+    { ahead: 0, behind: 0, label: 'Fetch', items: [] },
+  ])('matches the single-repo $label button and menu', ({ ahead, behind, label, items }) => {
+    const { container } = setup(ahead, behind);
+    expect(container.querySelector('.sync-primary-action')).toHaveTextContent(label);
+    const more = container.querySelector('.sync-primary-more');
+    if (items.length) {
+      expect(more).not.toBeNull();
+      fireEvent.click(more!);
+      expect(screen.getAllByRole('menuitem').map(item => item.textContent?.trim())).toEqual(items);
+      expect(screen.queryByRole('menuitem', { name: 'Fetch All' })).not.toBeInTheDocument();
+    } else expect(more).toBeNull();
+  });
+
+  it('publishes without push options or pulling when a single repository has no upstream', async () => {
+    const { container, sync } = setup(1, 1, null);
+    const primary = container.querySelector('.sync-primary-action')!;
+    expect(primary).toHaveTextContent('Publish Branch');
+    expect(primary).not.toHaveClass('push');
+    expect(container.querySelector('.sync-primary-more')).toBeNull();
+    fireEvent.click(primary);
+    await vi.waitFor(() => expect(sync).toHaveBeenCalledTimes(1));
+    expect(sync).toHaveBeenCalledWith('repo-1', 'push', undefined, undefined, 'workspace-1');
+  });
+
+  it('uses direction-specific menus and disables Sync when both directions are off', () => {
+    const { container } = setup(1, 1);
+    const outgoing = container.querySelector('.sync-direction-pill.outgoing')!;
+    const incoming = container.querySelector('.sync-direction-pill.incoming')!;
+    fireEvent.click(outgoing);
+    expect(container.querySelector('.sync-primary-action')).toHaveTextContent('Update');
+    fireEvent.click(container.querySelector('.sync-primary-more')!);
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent?.trim())).toEqual(['Update Strategy: Rebase', 'Update Strategy: Merge', 'Update Strategy: Fast-Forward Only']);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(outgoing);
+    fireEvent.click(incoming);
+    expect(container.querySelector('.sync-primary-action')).toHaveTextContent('Push');
+    fireEvent.click(outgoing);
+    expect(container.querySelector('.sync-primary-action')).toHaveTextContent('Sync');
+    expect(container.querySelector('.sync-primary-action')).toBeDisabled();
+    expect(container.querySelector('.sync-primary-more')).toBeNull();
+  });
+
+  it('keeps Fetch All available with no repository selected and fetches every repository', async () => {
+    const { container, fetch } = setup(1, 0, 'origin/main', true);
+    const primary = container.querySelector('.sync-primary-action')!;
+    expect(primary).toHaveTextContent('Fetch All');
+    expect(primary).toBeEnabled();
+    expect(container.querySelector('.sync-primary-more')).toBeNull();
+    fireEvent.click(primary);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(['repo-1', 'repo-2'], true, 'workspace-1'));
+  });
+
+  it.each([
+    { ahead: 1, behind: 0, label: 'Push (2)', items: ['Safe Force Push...', 'Push All Tags'], upstream: 'origin/main' },
+    { ahead: 0, behind: 1, label: 'Update (2)', items: ['Update Strategy: Rebase', 'Update Strategy: Merge', 'Update Strategy: Fast-Forward Only'], upstream: 'origin/main' },
+    { ahead: 1, behind: 1, label: 'Sync ↓2 ↑2', items: [], upstream: 'origin/main' },
+    { ahead: 1, behind: 0, label: 'Publish Branches (2)', items: [], upstream: null },
+  ])('matches multi-repo $label and its menu', ({ ahead, behind, label, items, upstream }) => {
+    const { container } = setup(ahead, behind, upstream, true);
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+    expect(container.querySelector('.sync-primary-action')).toHaveTextContent(label);
+    const more = container.querySelector('.sync-primary-more');
+    if (items.length) {
+      fireEvent.click(more!);
+      expect(screen.getAllByRole('menuitem').map(item => item.textContent?.trim())).toEqual(items);
+    } else expect(more).toBeNull();
+  });
+});
