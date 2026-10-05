@@ -1531,11 +1531,11 @@ export const useAppStore = create<AppStore>((set, get) => {
     operation: () => Promise<T>,
     domain = 'workspace',
     target?: { repositoryId?: string | null; target?: string | null; workspaceId?: string | null; remote?: string | null; branch?: string | null },
-    options?: { rethrow?: boolean; notifyError?: boolean },
+    options?: { rethrow?: boolean; notifyError?: boolean; trackBusy?: boolean },
   ): Promise<T | undefined> => {
     const operationId = `client-${Date.now()}-${++localOperationSequence}`;
     const context = { ...operationContext(domain, get()), ...target, visibility: 'background' as const };
-    set((state) => ({
+    if (options?.trackBusy !== false) set((state) => ({
       operations: {
         ...state.operations,
         [operationId]: {
@@ -1595,7 +1595,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (options?.rethrow) throw error;
       return undefined;
     } finally {
-      set((state) => {
+      if (options?.trackBusy !== false) set((state) => {
         const operations = { ...state.operations };
         delete operations[operationId];
         return { operations };
@@ -3663,7 +3663,13 @@ export const useAppStore = create<AppStore>((set, get) => {
           await Promise.all([get().loadUnpushedCommits(repoId, wid), get().loadIncomingCommits(repoId, wid)]);
         }
         return result.update ?? undefined;
-      }, `sync:${repoId}`, { workspaceId: wid, repositoryId: repoId, remote: options.remote, branch: options.branch }, { rethrow: options.rethrow, notifyError: action !== 'fetch' || notify || Boolean(options.rethrow) });
+      }, `sync:${repoId}`, { workspaceId: wid, repositoryId: repoId, remote: options.remote, branch: options.branch }, {
+        rethrow: options.rethrow,
+        notifyError: action !== 'fetch' || notify || Boolean(options.rethrow),
+        // Automatic fetch runs silently, as in the plugin, without disabling
+        // sync or commit actions. Manual fetch and all writes retain their guard.
+        trackBusy: action !== 'fetch' || notify,
+      });
     },
 
     updateProject: async (strategy) => {

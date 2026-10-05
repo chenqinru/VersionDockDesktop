@@ -26,6 +26,7 @@ const originalRefresh = useAppStore.getState().refresh;
 const originalLoadStashes = useAppStore.getState().loadStashes;
 const originalUnstage = useAppStore.getState().unstage;
 const originalStage = useAppStore.getState().stage;
+const originalSync = useAppStore.getState().sync;
 
 afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
@@ -133,15 +134,15 @@ describe('CommitPanel capabilities and file view', () => {
 
     fireEvent.click(screen.getByTitle('Switch branch'));
     const branchMenu = screen.getByRole('dialog', { name: 'Repository — Branches' });
-    await waitFor(() => expect(within(branchMenu).getByRole('option', { name: 'topic' })).toBeInTheDocument());
-    fireEvent.click(within(branchMenu).getByRole('option', { name: 'topic' }));
+    await waitFor(() => expect(within(branchMenu).getByRole('option', { name: /topic/ })).toBeInTheDocument());
+    fireEvent.click(within(branchMenu).getByRole('option', { name: /topic/ }));
     expect(screen.getByRole('dialog', { name: 'topic — Repository' })).toBeInTheDocument();
     expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
 
     fireEvent.click(within(screen.getByRole('dialog', { name: 'topic — Repository' })).getByRole('button', { name: 'Back' }));
     expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(within(branchMenu).getByText('LOCAL'));
+    fireEvent.click(within(branchMenu).getByText('Repository — Branches'));
     expect(repositoryToggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.change(within(branchMenu).getByRole('combobox'), { target: { value: 'topic' } });
     fireEvent.click(within(branchMenu).getByRole('button', { name: 'Clear search' }));
@@ -152,7 +153,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(repositoryToggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByTitle('Switch branch'));
     const reopenedMenu = screen.getByRole('dialog', { name: 'Repository — Branches' });
-    fireEvent.click(within(reopenedMenu).getByRole('option', { name: 'topic' }));
+    fireEvent.click(within(reopenedMenu).getByRole('option', { name: /topic/ }));
     expect(repositoryToggle).toHaveAttribute('aria-expanded', 'true');
   });
 
@@ -258,6 +259,32 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByRole('button', { name: 'Commit' })).toBeEnabled();
     fireEvent.click(screen.getByLabelText('one.ts'));
     expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
+  });
+
+  it('keeps commit and save actions enabled during automatic fetch but guarded during manual fetch', async () => {
+    const changedRepo: RepositoryStatus = { ...gitRepo, files: [{ path: 'app.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
+    let finish!: (value: unknown) => void;
+    let pending: Promise<unknown>;
+    const fetchBridge = new MockBridge(command => command.type === 'sync' ? pending : []);
+    useAppStore.setState({ bridge: fetchBridge, bootstrap: bootstrap(true, true), snapshot: { ...gitSnapshot, repositories: [changedRepo] }, selectedRepoId: 'repo' });
+    render(<BridgeContext.Provider value={fetchBridge}><CommitPanel /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByLabelText('app.ts'));
+    fireEvent.change(screen.getByPlaceholderText(/Commit message/), { target: { value: 'Update app' } });
+    const actions = () => [screen.getByRole('button', { name: 'Commit' }), screen.getByRole('button', { name: /^(Stash|Shelve)$/ }), screen.getByTitle('Commit options'), screen.getByTitle('Save options')];
+    for (const notify of [false, true]) {
+      pending = new Promise(resolve => { finish = resolve; });
+      let request!: Promise<unknown>;
+      act(() => { request = originalSync('repo', 'fetch', notify); });
+      try {
+        for (const button of actions()) {
+          if (notify) expect(button).toBeDisabled();
+          else expect(button).toBeEnabled();
+        }
+      } finally {
+        await act(async () => { finish({ output: '', update: null }); await request; });
+      }
+      for (const button of actions()) expect(button).toBeEnabled();
+    }
   });
 
   it('keeps failed repository selections and reports the precise batch failure stage non-modally', async () => {

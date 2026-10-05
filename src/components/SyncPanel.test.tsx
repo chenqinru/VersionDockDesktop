@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SyncPanel } from './SyncPanel';
 import { useAppStore } from '../store/appStore';
@@ -388,6 +388,27 @@ describe('SyncPanel footer parity with plugin', () => {
     const view = render(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
     return { ...view, fetch, sync };
   };
+
+  it.each([{ ahead: 1, behind: 0 }, { ahead: 0, behind: 1 }, { ahead: 1, behind: 1 }, { ahead: 0, behind: 0 }])('keeps footer and repository actions enabled during automatic fetch ($ahead/$behind)', async ({ ahead, behind }) => {
+    const { container } = setup(ahead, behind);
+    let finish!: (value: unknown) => void;
+    const pending = new Promise(resolve => { finish = resolve; });
+    const fetchBridge = new MockBridge(command => command.type === 'sync' ? pending : []);
+    useAppStore.setState({ bridge: fetchBridge });
+    let request!: Promise<unknown>;
+    act(() => { request = initial.sync('repo-1', 'fetch', false); });
+    try {
+      expect(container.querySelector('.sync-primary-action')).toBeEnabled();
+      const more = container.querySelector('.sync-primary-more');
+      if (more) expect(more).toBeEnabled();
+      fireEvent.contextMenu(container.querySelector('.sync-repo-heading')!);
+      for (const name of ['Fetch', ...(ahead ? ['Push'] : []), ...(behind ? ['Update'] : []), ...(ahead && behind ? ['Sync'] : [])]) {
+        expect(screen.getByRole('menuitem', { name })).toBeEnabled();
+      }
+    } finally {
+      await act(async () => { finish({ output: '', update: null }); await request; });
+    }
+  });
 
   it.each([
     { ahead: 1, behind: 0, label: 'Push', items: ['Safe Force Push...', 'Push All Tags'] },

@@ -129,6 +129,50 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().notifications).toHaveLength(0);
   });
 
+  it.each([
+    { action: 'fetch' as const, notify: false, busy: false },
+    { action: 'fetch' as const, notify: true, busy: true },
+    { action: 'push' as const, notify: false, busy: true },
+    { action: 'pull' as const, notify: false, busy: true },
+  ])('keeps the action guard appropriate for $action with notify=$notify until refresh completes', async ({ action, notify, busy }) => {
+    const current = snapshot('workspace', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    let finishSync!: (value: unknown) => void;
+    let finishRead!: (value: unknown) => void;
+    const pendingSync = new Promise(resolve => { finishSync = resolve; });
+    const pendingRead = new Promise(resolve => { finishRead = resolve; });
+    let readRequested = false;
+    const bridge = new MockBridge(command => {
+      if (command.type === 'sync') return pendingSync;
+      if (command.type === 'unpushedCommits') { readRequested = true; return pendingRead; }
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current });
+    const request = useAppStore.getState().sync('repo', action, notify);
+    const active = () => isOperationActiveForRepositories(useAppStore.getState().operations, ['repo'], { workspaceId: 'workspace', domain: 'sync' });
+    expect(active()).toBe(busy);
+    finishSync({ output: '', update: null });
+    await vi.waitFor(() => expect(readRequested).toBe(true));
+    expect(active()).toBe(busy);
+    finishRead([]);
+    await request;
+    expect(active()).toBe(false);
+  });
+
+  it.each([false, true])('cleans up a failed fetch with notify=%s', async notify => {
+    const current = snapshot('workspace', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    let fail!: (error: Error) => void;
+    const pending = new Promise((_, reject) => { fail = reject; });
+    const bridge = new MockBridge(command => command.type === 'sync' ? pending : []);
+    useAppStore.setState({ bridge, bootstrap, snapshot: current });
+    const request = useAppStore.getState().sync('repo', 'fetch', notify);
+    fail(new Error('Remote unavailable'));
+    await request;
+    expect(useAppStore.getState().operations).toEqual({});
+    expect(useAppStore.getState().notifications).toHaveLength(notify ? 1 : 0);
+  });
+
   it('aggregates manual fetch progress and keeps the original workspace through completion', async () => {
     const current = snapshot('fetch-original', 1);
     current.repositories = [repository('a', 'A'), repository('b', 'B')];
