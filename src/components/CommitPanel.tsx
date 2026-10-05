@@ -8,7 +8,7 @@ import { IconButton } from './IconButton';
 import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
-import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, multiChoiceDialog, promptDialog } from './dialogService';
 import { capabilityAvailable, capabilityReason, isOperationActive, isOperationActiveForRepositories, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { FileChange, RecentCommitMessage, RepositoryStatus } from '../bindings/generated';
@@ -360,6 +360,7 @@ export function CommitPanel() {
   const [commitMenu, setCommitMenu] = useState(false);
   const [saveMenu, setSaveMenu] = useState(false);
   const [viewMenu, setViewMenu] = useState(false);
+  const allRepositories = useAppStore((state) => state.allRepositories);
   const switchTab = useCallback((targetTab: string) => {
     setCommitMenu(false);
     setSaveMenu(false);
@@ -420,7 +421,7 @@ export function CommitPanel() {
   const setAmendRepoIds = useAppStore((state) => state.setAmendRepoIds);
   const amendRepos = useMemo(() => new Set(amendRepoIds), [amendRepoIds]);
   const openWorkingChanges = useAppStore((state) => state.openWorkingChanges);
-  const [viewSubmenu, setViewSubmenu] = useState<'expand' | 'view'>('expand');
+  const [viewSubmenu, setViewSubmenu] = useState<'expand' | 'view'>();
   const [settings, setSettings] = useState(false);
   const openIdentityPanel = useAppStore((state) => state.openIdentityPanel);
   const [ignoreManager, setIgnoreManager] = useState<{ repoId: string; directory: string }>();
@@ -1621,6 +1622,38 @@ export function CommitPanel() {
     };
   }, [commitMenu, saveMenu, viewMenu]);
 
+  const manageRepositoryVisibility = async () => {
+    setViewMenu(false);
+    const state = useAppStore.getState();
+    const workspaceId = state.snapshot?.workspace.id;
+    const repositories = state.allRepositories;
+    if (!workspaceId || repositories.length < 2) return;
+    const hidden = new Set(state.bootstrap?.state.settings?.hiddenRepositoryIds ?? []);
+    const selected = await multiChoiceDialog({
+      title: t('Manage Repository Visibility'),
+      message: t('Select repositories to display in the panel (uncheck to hide)'),
+      choices: repositories.map(repo => ({ id: repo.meta.id, label: repo.meta.name, description: repo.meta.rootPath, icon: 'repo' })),
+      initialSelected: repositories.filter(repo => !hidden.has(repo.meta.id)).map(repo => repo.meta.id),
+    });
+    if (selected === null) return;
+    const current = useAppStore.getState();
+    if (current.snapshot?.workspace.id !== workspaceId) return;
+    const visible = new Set(selected);
+    const currentRepos = current.allRepositories;
+    // Repositories discovered while the dialog was open retain their visibility.
+    const managed = new Set(repositories.map(repo => repo.meta.id));
+    const nextHidden = new Set(current.bootstrap?.state.settings?.hiddenRepositoryIds ?? []);
+    for (const id of managed) {
+      if (visible.has(id)) nextHidden.delete(id);
+      else nextHidden.add(id);
+    }
+    if (!currentRepos.some(repo => !nextHidden.has(repo.meta.id))) {
+      await confirmDialog({ title: t('Manage Repository Visibility'), message: t('VersionDock: At least one repository must remain visible.'), confirmLabel: t('OK') });
+      return;
+    }
+    await current.updateSettings({ hiddenRepositoryIds: [...nextHidden] });
+  };
+
   const panelViewMode = tab === 'shelf' ? shelfViewMode : tab === 'stash' ? stashViewMode : tab === 'sync' ? syncFileViewMode : viewMode;
   const setPanelViewMode = (mode: 'tree' | 'list') => {
     if (tab === 'shelf') setShelfViewMode(mode);
@@ -1819,7 +1852,7 @@ export function CommitPanel() {
     </IconButton>
     <IconButton className={settings ? 'selected' : ''} title={t('VersionDock: Settings')} aria-label={t('VersionDock: Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></IconButton>
     <div ref={viewMenuRef} className="view-options panel-view-options">
-      <IconButton title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu('expand'); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></IconButton>
+      <IconButton title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu(undefined); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></IconButton>
       {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
         <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('expand')} onFocus={() => setViewSubmenu('expand')}>
           <button type="button" role="menuitem" className={viewSubmenu === 'expand' ? 'active' : ''} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
@@ -1835,6 +1868,7 @@ export function CommitPanel() {
             <button type="button" aria-pressed={panelViewMode === 'tree'} className={panelViewMode === 'tree' ? 'selected' : ''} onClick={() => setPanelViewMode('tree')}><span className="view-menu-check">{panelViewMode === 'tree' && <Codicon name="check" />}</span><span>{t('Tree view')}</span></button>
           </div>}
         </div>
+        {allRepositories.length > 1 && <button type="button" role="menuitem" onMouseEnter={() => setViewSubmenu(undefined)} onFocus={() => setViewSubmenu(undefined)} onClick={() => void manageRepositoryVisibility()}><span>{t('Manage Repository Visibility')}</span></button>}
       </div>}
     </div>
   </div>;

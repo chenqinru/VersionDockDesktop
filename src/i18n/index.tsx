@@ -4,6 +4,9 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Manage Repository Visibility': 'Manage Repository Visibility',
+  'Select repositories to display in the panel (uncheck to hide)': 'Select repositories to display in the panel (uncheck to hide)',
+  'VersionDock: At least one repository must remain visible.': 'VersionDock: At least one repository must remain visible.',
   'This SVN account does not have permission to access the requested repository path.': 'This SVN account does not have permission to access the requested repository path.',
   'No upstream branch is configured': 'No upstream branch is configured',
   'Log write queue is full; logs remain available in memory.': 'Log write queue is full; logs remain available in memory.',
@@ -1239,6 +1242,9 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Manage Repository Visibility': '仓库可见性管理',
+  'Select repositories to display in the panel (uncheck to hide)': '选择要在面板中显示的仓库（取消勾选以隐藏）',
+  'VersionDock: At least one repository must remain visible.': 'VersionDock：至少保留一个可见仓库。',
   'This SVN account does not have permission to access the requested repository path.': '当前 SVN 账号无权访问请求的仓库路径，请检查目录访问权限。',
   'No upstream branch is configured': '当前分支未配置上游分支',
   'Log write queue is full; logs remain available in memory.': '日志写入队列已满，未写入文件的日志仍可在内存中查看。',

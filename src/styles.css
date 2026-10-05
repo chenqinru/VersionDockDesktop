@@ -2883,8 +2883,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .view-submenu-entry { position: relative; }
 .view-options-menu button,
 .view-options-submenu button { width: 100%; height: 25px; padding: 0 6px; display: flex; align-items: center; justify-content: flex-start; gap: 5px; color: var(--versiondock-text); border-radius: 3px; text-align: left; font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1)); }
-.view-options-menu button > span:not(.view-menu-check),
-.view-options-submenu button > span:not(.view-menu-check) { min-width: 0; flex: 1; white-space: nowrap; }
+.view-options-menu button > span:not(.view-menu-check):not(.codicon),
+.view-options-submenu button > span:not(.view-menu-check):not(.codicon) { min-width: 0; flex: 1; white-space: nowrap; }
 .view-options-menu button > .codicon:last-child { margin-left: auto; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .view-options-menu > .view-submenu-entry > button:hover,
 .view-options-menu > .view-submenu-entry > button:focus-visible,
@@ -2894,7 +2894,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .view-options-submenu button:focus-visible { color: #fff; background: var(--versiondock-accent-bg); outline: 1px solid color-mix(in srgb, #fff 28%, transparent); outline-offset: -1px; }
 .view-menu-check { width: 13px; height: 13px; flex: 0 0 13px; display: grid; place-items: center; }
 .view-menu-check .codicon { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.panel-view-options .view-options-menu { left: 0; right: auto; }
+.panel-view-options .view-options-menu { left: 0; right: auto; width: max-content; min-width: 128px; }
+.view-options-menu > button:is(:hover, :focus-visible) { color: var(--versiondock-selection-foreground); background: var(--versiondock-selection-background); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
 
 .conflict-action-wrapper { position: relative; }
 .conflict-actions-menu,

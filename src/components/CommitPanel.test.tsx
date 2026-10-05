@@ -7,6 +7,8 @@ import { useAppStore } from '../store/appStore';
 import type { BootstrapData, RepositoryStatus, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
+import { DialogHost } from './DialogHost';
+import { DEFAULT_SETTINGS } from '../settings/defaults';
 
 import * as dialogService from './dialogService';
 
@@ -82,6 +84,8 @@ describe('CommitPanel capabilities and file view', () => {
     expect(container.querySelector('.panel-toolbar [title="Rollback"]')).not.toBeInTheDocument();
     expect(screen.getByTitle('More Actions...')).toBeInTheDocument();
     fireEvent.click(screen.getByTitle('More Actions...'));
+    expect(screen.queryByRole('button', { name: 'Expand all' })).not.toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Expand Mode' }));
     expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Collapse all' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stage' })).not.toBeInTheDocument();
@@ -110,9 +114,11 @@ describe('CommitPanel capabilities and file view', () => {
     fireEvent.click(screen.getByRole('button', { name: /Empty Two/ }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
     fireEvent.click(screen.getByTitle('More Actions...'));
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Expand Mode' }));
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTitle('More Actions...'));
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Expand Mode' }));
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
     expect(screen.getAllByText('No changes')).toHaveLength(2);
   });
@@ -157,6 +163,7 @@ describe('CommitPanel capabilities and file view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Repository/ }));
     fireEvent.click(screen.getByTitle('More Actions...'));
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Expand Mode' }));
 
     expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveClass('selected');
     expect(screen.getByRole('button', { name: 'Collapse all' })).not.toHaveClass('selected');
@@ -1134,4 +1141,84 @@ it('updates bypass hooks from settings without resetting a manual override on un
   expect(checkbox).not.toBeChecked();
   act(() => useAppStore.setState({ bootstrap: { ...initial, state: { ...initial.state, settings: { ...DEFAULT_SETTINGS, noVerify: true, theme: 'dark' } } } }));
   expect(checkbox).not.toBeChecked();
+});
+
+describe('CommitPanel repository visibility menu', () => {
+  const initial = useAppStore.getState();
+  const otherRepo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'hidden', name: 'Hidden repository', rootPath: '/tmp/hidden' } };
+  const setup = () => {
+    const requests: import('../bindings/generated').BridgeCommand[] = [];
+    const visibilityBridge = new MockBridge(command => {
+      requests.push(command);
+      if (command.type === 'updateSettings') return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: false } };
+      return [];
+    });
+    const data = bootstrap(false);
+    data.state.settings = { ...DEFAULT_SETTINGS, hiddenRepositoryIds: ['hidden', 'other-project'] };
+    useAppStore.setState({ bridge: visibilityBridge, bootstrap: data, snapshot: gitSnapshot, allRepositories: [gitRepo, otherRepo], selectedRepoId: 'repo', operations: {}, commitSelections: {} });
+    const view = render(<BridgeContext.Provider value={visibilityBridge}><CommitPanel /><DialogHost /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByTitle('More Actions...'));
+    return { ...view, requests };
+  };
+  afterEach(() => { dialogService.publishDialog(undefined); useAppStore.getState().dispose(); useAppStore.setState(initial, true); vi.restoreAllMocks(); });
+
+  it('opens only the root menu and lists hidden repositories with their current visibility', async () => {
+    const { container } = setup();
+    expect(container.querySelector('.view-options-submenu')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Expand all' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }).querySelector('.codicon')).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Manage Repository Visibility' });
+    expect(within(dialog).getByRole('button', { name: /Repository\s*\/tmp\/repo/ })).toHaveClass('selected');
+    expect(within(dialog).getByRole('button', { name: /Hidden repository\s*\/tmp\/hidden/ })).not.toHaveClass('selected');
+  });
+
+  it('hides and restores repositories through the existing settings writer, preserving other projects', async () => {
+    const { requests } = setup();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Manage Repository Visibility' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Repository\s*\/tmp\/repo/ }));
+    expect(within(dialog).getByRole('button', { name: 'Confirm' })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: /Hidden repository\s*\/tmp\/hidden/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(useAppStore.getState().snapshot?.repositories.map(repo => repo.meta.id)).toEqual(['hidden']));
+    expect(useAppStore.getState().bootstrap?.state.settings?.hiddenRepositoryIds).toEqual(['other-project', 'repo']);
+    expect(requests.some(request => request.type === 'updateSettings')).toBe(true);
+    fireEvent.click(screen.getByTitle('More Actions...'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }));
+    const restoredDialog = await screen.findByRole('dialog', { name: 'Manage Repository Visibility' });
+    fireEvent.click(within(restoredDialog).getByRole('button', { name: /Repository\s*\/tmp\/repo/ }));
+    fireEvent.click(within(restoredDialog).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(useAppStore.getState().snapshot?.repositories.map(repo => repo.meta.id)).toEqual(['repo', 'hidden']));
+    expect(useAppStore.getState().bootstrap?.state.settings?.hiddenRepositoryIds).toEqual(['other-project']);
+  });
+
+  it('cancels without updating visibility and resets the submenu when reopened', async () => {
+    const { requests, container } = setup();
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Expand Mode' }));
+    expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Manage Repository Visibility' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(requests.some(request => request.type === 'updateSettings')).toBe(false);
+    fireEvent.click(screen.getByTitle('More Actions...'));
+    expect(container.querySelector('.view-options-submenu')).toBeNull();
+  });
+
+  it('does not apply an old visibility dialog to the new project after switching', async () => {
+    const { requests } = setup();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Manage Repository Visibility' });
+    act(() => useAppStore.setState({ snapshot: { ...gitSnapshot, workspace: { ...gitSnapshot.workspace, id: 'another' } } }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(requests.some(request => request.type === 'updateSettings')).toBe(false);
+  });
+
+  it('shows the visibility entry only when the project has multiple repositories', () => {
+    setup();
+    expect(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' })).toBeInTheDocument();
+    act(() => useAppStore.setState({ allRepositories: [gitRepo] }));
+    expect(screen.queryByRole('menuitem', { name: 'Manage Repository Visibility' })).not.toBeInTheDocument();
+  });
 });
