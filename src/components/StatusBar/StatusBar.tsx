@@ -14,7 +14,7 @@ export function StatusBar() {
 
   const hasTasks = useTaskProgressStore((state) => state.open || Object.keys(state.tasks).length > 0);
 
-  if (!ready || !snapshot && !hasTasks) {
+  if (!ready || (!snapshot && !hasTasks)) {
     return null;
   }
 
@@ -26,9 +26,11 @@ export function StatusBar() {
       </div>
       <div className="statusbar-right">
         <OperationStatusBarItem />
-        <UpdateStatusBarItem />
-        <LogStatusBarItem />
-        <NotificationStatusBarItem />
+        {snapshot && <>
+          <UpdateStatusBarItem />
+          <LogStatusBarItem />
+          <NotificationStatusBarItem />
+        </>}
       </div>
     </footer>
   );

@@ -150,6 +150,29 @@ afterEach(() => {
 });
 
 describe('StatusBar', () => {
+  it('keeps project controls off welcome while opening and restores them with the workspace', () => {
+    vi.useFakeTimers();
+    try {
+      const { container, bridge } = renderStatusBar();
+      const current = snapshot();
+      configureTaskProgress(() => bridge.cancelOperation());
+      act(() => {
+        useAppStore.setState({ snapshot: undefined, activeTabId: null });
+        useTaskProgressStore.getState().requested(createOperationRequestEvent({ type: 'workspaceOpen', payload: { paths: ['/test/repo1'] } }, {}, 'open-project'), { workspaceName: 'Project' });
+      });
+      expect(container.querySelector('.log-status-item')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Notifications' })).not.toBeInTheDocument();
+      expect(screen.queryByText('main')).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(251));
+      expect(screen.getByRole('button', { name: 'Task progress' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Output and Logs' })).not.toBeInTheDocument();
+      act(() => useAppStore.setState({ snapshot: current, activeTabId: current.workspace.id }));
+      expect(screen.getByRole('button', { name: 'Output and Logs' })).toBeInTheDocument();
+      expect(screen.getByText('main')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Notifications' })).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('renders branch status and accounts item', async () => {
     const { requests } = renderStatusBar();
 

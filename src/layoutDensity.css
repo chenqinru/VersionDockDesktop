@@ -33,7 +33,7 @@
 [data-density="comfortable"] :is(.file-row, .directory-row, .file-item, .folder-item, .sync-timeline-row) { margin-inline: var(--density-inset); width: auto; border-radius: var(--density-row-radius); box-sizing: border-box; }
 [data-density="comfortable"] :is(.vscode-section-header, .changelist-heading) { margin: 4px 6px 2px; height: 28px !important; min-height: 28px; border-radius: 6px; border: 1px solid var(--versiondock-border); border-left: 3px solid var(--versiondock-selection-border); box-sizing: border-box; }
 [data-density="comfortable"] .vscode-section { border-bottom: 0 !important; }
-[data-density="comfortable"] :is(.sync-repo-body, .stash-list, .submodule-repo-body) { padding-bottom: 6px; }
+[data-density="comfortable"] :is(.stash-list, .submodule-repo-body) { padding-bottom: 6px; }
 
 /* Saved changes and auxiliary tabs use the same inset card boundaries. */
 [data-density="comfortable"] .commit-tab-content:not(.changes-tab-content):not(.sync-tab-content) { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); background: var(--versiondock-surface); padding-block: 4px 6px; box-sizing: border-box; }
@@ -110,8 +110,9 @@
 [data-density="comfortable"] .detail-refs > [data-ref-badge] { height: 19px !important; line-height: 17px !important; border-radius: 4px !important; padding-inline: 7px !important; font-size: 11px !important; }
 [data-density="comfortable"] .merge-parent-group { position: relative; margin-top: 2px; padding-top: 4px; border-top: 0; }
 [data-density="comfortable"] .merge-parent-group::before { content: ''; position: absolute; left: 6px; right: 6px; top: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
-[data-density="comfortable"] :is(.repo-change-group, .repo-sub-group):has(.file-row, .file-item, .sync-timeline-row) { position: relative; padding-bottom: 7px; }
-[data-density="comfortable"] :is(.repo-change-group, .repo-sub-group):has(.file-row, .file-item, .sync-timeline-row)::after { content: ''; position: absolute; left: 6px; right: 6px; bottom: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
+/* Sync commits already provide their own divider, including the last commit. */
+[data-density="comfortable"] :is(.repo-change-group:not(.sync-repo-section), .repo-sub-group):has(.file-row, .file-item) { position: relative; padding-bottom: 7px; }
+[data-density="comfortable"] :is(.repo-change-group:not(.sync-repo-section), .repo-sub-group):has(.file-row, .file-item)::after { content: ''; position: absolute; left: 6px; right: 6px; bottom: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
 [data-density="comfortable"] :is(.branch-working-file-row, .branch-working-directory-row, .merge-parent-row) { width: calc(100% - 12px); margin-inline: var(--density-inset); border-radius: var(--density-row-radius); }
 [data-density="comfortable"] :is(.filter-options label, .history-more .more-menu > button) { width: auto; margin: 1px 4px; border-radius: 4px; }
 [data-density="comfortable"] .history-filters .commit-search { border-radius: 6px; }
