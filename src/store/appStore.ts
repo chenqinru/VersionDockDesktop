@@ -628,7 +628,6 @@ let autoFetchTimer: ReturnType<typeof setInterval> | undefined;
 let workspaceRequestGeneration = 0;
 let watcherRefreshInFlight = false;
 let watcherRefreshQueued = false;
-const watcherScopes = new Map<string, Set<RefreshScope>>();
 const repositoryEventGenerations = new Map<string, number>();
 let commitSelectionGeneration = 0;
 let changesDiffGeneration = 0;
@@ -1378,9 +1377,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       recordPendingWorkspaceEvent(wid, null, ['workspaceSnapshot']);
       return;
     }
-    const scopes = watcherScopes.get('') ?? new Set<RefreshScope>();
-    scopes.add('workspaceSnapshot');
-    watcherScopes.set('', scopes);
+    recordPendingWorkspaceEvent(wid, null, ['workspaceSnapshot']);
     if (watcherTimer) clearTimeout(watcherTimer);
     if (!updatingWorkingTree(wid)) watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
   };
@@ -2098,44 +2095,49 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   const refreshFromWatcher = async () => {
-    if (!get().snapshot?.workspace.id) return;
-    if (updatingWorkingTree(get().snapshot!.workspace.id)) return;
+    const workspaceId = get().snapshot?.workspace.id;
+    if (!workspaceId || updatingWorkingTree(workspaceId)) return;
     if (watcherRefreshInFlight) {
       watcherRefreshQueued = true;
       return;
     }
+    const pending = pendingWorkspaceEvents.get(workspaceId);
+    if (!pending?.size) return;
+    pendingWorkspaceEvents.delete(workspaceId);
     watcherRefreshInFlight = true;
-    const pending = new Map(watcherScopes);
-    watcherScopes.clear();
-    try {
-      const workspaceId = get().snapshot?.workspace.id;
-      if (!workspaceId) return;
-      const epoch = updateEpoch(workspaceId);
-      const requeue = () => {
+    const requestGeneration = workspaceRequestGeneration;
+    const lifecycle = workingTreeLifecycle;
+    const epoch = updateEpoch(workspaceId);
+    const interrupted = () => {
+      if (lifecycle !== workingTreeLifecycle) return true;
+      const workspaceChanged = get().snapshot?.workspace.id !== workspaceId || requestGeneration !== workspaceRequestGeneration;
+      const workingTreeChanged = updatingWorkingTree(workspaceId) || updateEpoch(workspaceId) !== epoch;
+      if (!workspaceChanged && !workingTreeChanged) return false;
+      if (get().snapshot?.workspace.id === workspaceId || get().tabs.some((tab) => tab.id === workspaceId)) {
         for (const [repoId, scopes] of pending) recordPendingWorkspaceEvent(workspaceId, repoId || null, [...scopes]);
-        if (get().snapshot?.workspace.id === workspaceId) drainPendingWorkspaceEvents(workspaceId);
-        queueStableRefresh(workspaceId);
-      };
+        drainPendingWorkspaceEvents(workspaceId);
+        if (workingTreeChanged) queueStableRefresh(workspaceId);
+      }
+      return true;
+    };
+    try {
       const refreshSnapshot = [...pending.values()].some((scopes) => scopes.has('workspaceSnapshot'));
       if (refreshSnapshot) {
         await get().refresh(true);
-        if (updatingWorkingTree(workspaceId) || updateEpoch(workspaceId) !== epoch) {
-          requeue();
-          return;
-        }
+        if (interrupted()) return;
       }
       for (const [repoId, scopes] of pending) {
-        if (!repoId) continue;
+        if (interrupted()) return;
+        // Events may outlive a repository removal or a rescan. Never query a
+        // repository that is absent from this workspace's current inventory.
+        if (!repoId || !get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
         if (!refreshSnapshot && (scopes.has('status') || scopes.has('index') || scopes.has('operation') || scopes.has('svnRevision') || scopes.has('refs'))) {
           const status = await bridge().request<RepositoryStatus>(
             { type: 'repositoryStatus', payload: { workspace_id: workspaceId, repo_id: repoId } },
             { showProgress: false },
           );
-          if (get().snapshot?.workspace.id !== workspaceId) return;
-          if (updatingWorkingTree(workspaceId) || updateEpoch(workspaceId) !== epoch) {
-            requeue();
-            return;
-          }
+          if (interrupted()) return;
+          if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
           const previous = get().allRepositories.find((repo) => repo.meta.id === repoId);
           if (previous) notifyNewUntrackedFiles([previous], [status], workspaceId);
           set((state) => {
@@ -2152,25 +2154,8 @@ export const useAppStore = create<AppStore>((set, get) => {
             bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
             bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
           ]);
-          if (get().snapshot?.workspace.id !== workspaceId) return;
-          const repoItem = get().snapshot?.repositories.find((r) => r.meta.id === repoId);
-          const repoName = repoItem?.meta.name ?? repoId;
-          if (repoItem?.meta.kind !== 'svn' && branchesResult.status === 'rejected' && !isAbortError(branchesResult.reason)) {
-            get().addNotification({
-              type: 'warning',
-              title: 'Branch error',
-              message: { key: 'Failed to load branches for {0}: {1}', args: [repoName, errorText(branchesResult.reason)] },
-              workspaceId,
-            });
-          }
-          if (repoItem?.meta.kind !== 'svn' && tagsResult.status === 'rejected' && !isAbortError(tagsResult.reason)) {
-            get().addNotification({
-              type: 'warning',
-              title: 'Tag error',
-              message: { key: 'Failed to load tags for {0}: {1}', args: [repoName, errorText(tagsResult.reason)] },
-              workspaceId,
-            });
-          }
+          if (interrupted()) return;
+          if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
           set((state) => ({
             branchesByRepo: branchesResult.status === 'fulfilled' ? { ...state.branchesByRepo, [repoId]: branchesResult.value } : state.branchesByRepo,
             tagsByRepo: tagsResult.status === 'fulfilled' ? { ...state.tagsByRepo, [repoId]: tagsResult.value } : state.tagsByRepo,
@@ -2179,6 +2164,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           }));
           if (!get().historyLoading) await refreshHistoryRepository(workspaceId, repoId);
         }
+        if (interrupted()) return;
         if (scopes.has('unpushed') || scopes.has('refs')) {
           const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
           if (repo?.meta.kind === 'git') await Promise.all([
@@ -2186,12 +2172,17 @@ export const useAppStore = create<AppStore>((set, get) => {
             ...(scopes.has('refs') ? [get().loadStashes(repoId)] : []),
           ]);
         }
+        if (interrupted()) return;
         if (scopes.has('conflicts')) await get().loadConflicts(true, repoId);
+        if (interrupted()) return;
         if (scopes.has('worktrees')) await get().loadWorktrees(repoId);
+        if (interrupted()) return;
         if (scopes.has('subtrees')) await get().loadSubtrees(repoId);
+        if (interrupted()) return;
         if (scopes.has('submodules') || scopes.has('index') || scopes.has('status') || scopes.has('refs')) {
           await get().loadSubmodules(repoId);
         }
+        if (interrupted()) return;
         const selected = get().selectedFile;
         if (scopes.has('diff') && selected?.repoId === repoId && get().mode === 'diff') {
           const generation = ++diffRequestGeneration;
@@ -2223,24 +2214,25 @@ export const useAppStore = create<AppStore>((set, get) => {
           }
         }
       }
+    } catch (error) {
+      if (!interrupted() && !isAbortError(error)) console.debug('Background repository refresh failed', error);
     } finally {
-      watcherRefreshInFlight = false;
-      if (watcherRefreshQueued) {
-        watcherRefreshQueued = false;
-        watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
+      if (lifecycle === workingTreeLifecycle) {
+        watcherRefreshInFlight = false;
+        const activeWorkspace = get().snapshot?.workspace.id;
+        if (watcherRefreshQueued || (activeWorkspace && pendingWorkspaceEvents.get(activeWorkspace)?.size)) {
+          watcherRefreshQueued = false;
+          if (watcherTimer) clearTimeout(watcherTimer);
+          watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
+        }
       }
     }
   };
 
   function drainPendingWorkspaceEvents(workspaceId: string): boolean {
+    if (get().snapshot?.workspace.id !== workspaceId) return false;
     const pending = pendingWorkspaceEvents.get(workspaceId);
     if (!pending || pending.size === 0) return false;
-    pendingWorkspaceEvents.delete(workspaceId);
-    for (const [key, scopes] of pending) {
-      const existing = watcherScopes.get(key) ?? new Set<RefreshScope>();
-      scopes.forEach((s) => existing.add(s));
-      watcherScopes.set(key, existing);
-    }
     if (watcherTimer) clearTimeout(watcherTimer);
     watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
     return true;
@@ -2443,10 +2435,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             const previousGeneration = repositoryEventGenerations.get(generationKey) ?? 0;
             if (event.generation < previousGeneration) return;
             repositoryEventGenerations.set(generationKey, event.generation);
-            const key = event.repoId ?? '';
-            const scopes = watcherScopes.get(key) ?? new Set<RefreshScope>();
-            event.scopes.forEach((scope) => scopes.add(scope));
-            watcherScopes.set(key, scopes);
+            recordPendingWorkspaceEvent(event.workspaceId, event.repoId, event.scopes);
             if (watcherTimer) clearTimeout(watcherTimer);
             watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
           } else {
@@ -2529,7 +2518,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       commitSelectionSaveTimers.clear();
       watcherTimer = undefined;
       autoRefreshTimer = undefined;
-      watcherScopes.clear();
+      pendingWorkspaceEvents.clear();
+      watcherRefreshInFlight = false;
+      watcherRefreshQueued = false;
       repositoryEventGenerations.clear();
       pendingPullAutoStashes.clear();
       activeStashOperations.clear();
@@ -3162,32 +3153,14 @@ export const useAppStore = create<AppStore>((set, get) => {
               branchesByRepo: { ...state.branchesByRepo, [item.meta.id]: branches },
               branches: item.meta.id === get().selectedRepoId ? branches : state.branches,
             }));
-          }).catch((error) => {
-            if (get().snapshot?.workspace.id !== currentWorkspace) return;
-            if (item.meta.kind === 'svn' || isAbortError(error)) return;
-            get().addNotification({
-              type: 'warning',
-              title: 'Branch error',
-              message: { key: 'Failed to load branches for {0}: {1}', args: [item.meta.name, errorText(error)] },
-              workspaceId: currentWorkspace,
-            });
-          }));
+          }).catch(() => undefined));
           refRequests.push(bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }, { showProgress: false, timeoutMs: 12_000 }).then((tags) => {
             if (get().snapshot?.workspace.id !== currentWorkspace) return;
             set((state) => ({
               tagsByRepo: { ...state.tagsByRepo, [item.meta.id]: tags },
               tags: item.meta.id === get().selectedRepoId ? tags : state.tags,
             }));
-          }).catch((error) => {
-            if (get().snapshot?.workspace.id !== currentWorkspace) return;
-            if (item.meta.kind === 'svn' || isAbortError(error)) return;
-            get().addNotification({
-              type: 'warning',
-              title: 'Tag error',
-              message: { key: 'Failed to load tags for {0}: {1}', args: [item.meta.name, errorText(error)] },
-              workspaceId: currentWorkspace,
-            });
-          }));
+          }).catch(() => undefined));
         }
         const otherResults = Promise.allSettled(requests);
         try { await Promise.all(refRequests); }
