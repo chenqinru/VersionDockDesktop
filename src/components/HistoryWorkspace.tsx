@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import { useLayoutDensity, historyDensityMetrics } from '../layoutDensity';
 import { AiCommitComposerIcon } from './AiCommitComposerIcon';
 import { generateHistoricalMessage, openCommitExplanation, useAiStore } from '../ai/aiStore';
@@ -47,7 +48,7 @@ function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded, showRep
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const close = (event: MouseEvent) => { if (!ref.current?.contains(event.target as Node)) onToggle(); };
+    const close = (event: MouseEvent) => { if (!scrollbarContains(ref.current, event.target as Node)) onToggle(); };
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') onToggle(); };
     const blur = () => onToggle();
     document.addEventListener('mousedown', close);
@@ -799,7 +800,7 @@ export function HistoryWorkspace() {
     if (!menu) return;
     const handleOutside = (event: Event) => {
       const target = event.target;
-      if (!(target instanceof Node) || !activeFilter.current?.contains(target)) setMenu(null);
+      if (!(target instanceof Node) || !scrollbarContains(activeFilter.current, target)) setMenu(null);
     };
     const closeMenu = () => setMenu(null);
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(null); };

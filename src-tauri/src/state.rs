@@ -1157,6 +1157,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scrollbar_mode_persists_without_refreshing_workspace() {
+        use crate::models::ScrollbarVisibility;
+        let root = tempdir().unwrap();
+        let state = AppState::load(root.path().to_path_buf());
+        assert_eq!(
+            state.app.read().await.settings.scrollbar_visibility,
+            ScrollbarVisibility::System
+        );
+        let before_layout = serde_json::to_value(&state.app.read().await.layout).unwrap();
+        let mut incoming = state.app.read().await.settings.clone();
+        incoming.scrollbar_visibility = ScrollbarVisibility::Visible;
+        let result = state
+            .update_settings(incoming, Some(&["scrollbarVisibility".into()]))
+            .await
+            .unwrap();
+        assert!(!result.effects.rescan_workspace);
+        assert!(!result.effects.reload_history);
+        assert!(!result.effects.restart_auto_refresh);
+        let restarted = AppState::load(root.path().to_path_buf());
+        assert_eq!(
+            restarted.app.read().await.settings.scrollbar_visibility,
+            ScrollbarVisibility::Visible
+        );
+        assert_eq!(
+            serde_json::to_value(&restarted.app.read().await.layout).unwrap(),
+            before_layout
+        );
+        assert!(
+            serde_json::from_value::<ScrollbarVisibility>(serde_json::json!("invalid")).is_err()
+        );
+    }
+
+    #[tokio::test]
     async fn layout_density_defaults_for_existing_settings_and_survives_restart() {
         use crate::models::LayoutDensity;
         let root = tempdir().unwrap();

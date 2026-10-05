@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import type { GitProfile, GitProfileOperation, RemoteProviderKind, RepositoryStatus, SvnAccountOperation } from '../../bindings/generated';
@@ -54,7 +55,7 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
     const outside = (event: PointerEvent) => {
       if (pending.current || provider || currentDialog()) return;
       const target = event.target as Node;
-      if (popoverRef.current?.contains(target) || submenuRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
+      if (scrollbarContains(popoverRef.current, target) || scrollbarContains(submenuRef.current, target) || scrollbarContains(anchorRef.current, target)) return;
       onClose();
     };
     const escape = (event: KeyboardEvent) => {

@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -17,7 +18,7 @@ export function ChangelistManager({ repoId, close }: { repoId: string; close: ()
   useEffect(() => {
     const handleOutsideInteraction = (event: Event) => {
       const target = event.target;
-      if (target instanceof Node && popover.current?.contains(target)) return;
+      if (target instanceof Node && scrollbarContains(popover.current, target)) return;
       close();
     };
     const handleKeyDown = (event: KeyboardEvent) => {

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ContextMenu } from './ContextMenu';
+import { scrollbarOwners } from '../scrollbars/ownership';
 
 const items = [{ id: 'fetch', label: 'Fetch All', icon: 'cloud-download' }];
 beforeEach(() => {
@@ -55,4 +56,21 @@ it('dismisses an anchored menu when a resize invalidates the button position', (
   render(<ContextMenu x={400} y={650} anchorRect={{ left: 400, right: 430, top: 650, bottom: 680 }} placement="above" items={items} onSelect={vi.fn()} onClose={close} />);
   fireEvent(window, new Event('resize'));
   expect(close).toHaveBeenCalledOnce();
+});
+
+it('keeps the menu open while using its portalled scrollbar', () => {
+  const close = vi.fn();
+  render(<ContextMenu x={20} y={20} items={items} onSelect={vi.fn()} onClose={close} />);
+  const menu = screen.getByRole('menu');
+  const viewport = document.createElement('div'); viewport.dataset.versiondockScrollbarViewport = '';
+  const thumb = document.createElement('div'); viewport.append(thumb); document.body.append(viewport);
+  scrollbarOwners.set(viewport, menu);
+  fireEvent.mouseDown(thumb);
+  expect(close).not.toHaveBeenCalled();
+  thumb.addEventListener('keydown', event => event.preventDefault());
+  thumb.focus();
+  const item = screen.getByRole('menuitem'); item.blur();
+  fireEvent.keyDown(thumb, { key: 'ArrowDown' });
+  expect(item).not.toHaveFocus();
+  viewport.remove(); scrollbarOwners.delete(viewport);
 });

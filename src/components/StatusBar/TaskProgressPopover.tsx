@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../../scrollbars/ownership';
 import { createPortal } from 'react-dom';
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useI18n } from '../../i18n';
@@ -38,7 +39,7 @@ export function TaskProgressPopover({ anchorRef, currentWorkspaceId, onClose }: 
   useEffect(() => {
     const panel = panelRef.current, anchor = anchorRef.current;
     panel?.focus({ preventScroll: true });
-    const outside = (event: PointerEvent) => { if (!panel?.contains(event.target as Node) && !anchor?.contains(event.target as Node)) closeRef.current(); };
+    const outside = (event: PointerEvent) => { if (!scrollbarContains(panel, event.target as Node) && !scrollbarContains(anchor, event.target as Node)) closeRef.current(); };
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector('[aria-modal="true"], [role="menu"]')) { event.preventDefault(); closeRef.current(); } };
     document.addEventListener('pointerdown', outside); document.addEventListener('keydown', key);
     return () => {

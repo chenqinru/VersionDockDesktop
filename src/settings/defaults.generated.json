@@ -70,6 +70,7 @@
     ],
     "repositoryScanDepth": 1,
     "resetViewLocationsOnStartup": false,
+    "scrollbarVisibility": "system",
     "shelveComparisonBase": "local",
     "showProfileStatusBar": true,
     "showPushDialogForProtectedBranches": true,

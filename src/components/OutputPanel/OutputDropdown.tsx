@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../../scrollbars/ownership';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
 import { useI18n } from '../../i18n';
@@ -17,7 +18,7 @@ export function OutputDropdown<T extends string>({ value, options, onChange, ari
     if (!open) return;
     items.current[selectedIndex]?.focus();
     const outside = (event: MouseEvent) => {
-      if (!container.current?.contains(event.target as Node)) setOpen(false);
+      if (!scrollbarContains(container.current, event.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', outside);
     return () => document.removeEventListener('mousedown', outside);

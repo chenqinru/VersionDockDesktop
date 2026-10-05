@@ -7,6 +7,7 @@ const optionLabels: Partial<Record<SettingPath, Record<string, string>>> = {
   language: { system: 'System', zhCn: 'Simplified Chinese', en: 'English' },
   uiFontSize: { minimum: 'Minimum', small: 'Small', standard: 'Standard', large: 'Large', maximum: 'Maximum' },
   layoutDensity: { comfortable: 'Comfortable', compact: 'Compact' },
+  scrollbarVisibility: { system: 'Follow system', auto: 'Auto-hide', visible: 'Always visible' },
   'layout.fileViewMode': { tree: 'Tree view', list: 'List view' },
   changesDisplayMode: { simplified: 'Simplified', changelists: 'Changelists', vscode: 'VS Code style (Staged / Changes)' },
   defaultCommitAction: { commit: 'Commit', commitAndPush: 'Commit and push' },

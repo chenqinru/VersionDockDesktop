@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { SettingLabel } from './SettingsMetadata';
@@ -28,7 +29,7 @@ export function SettingSelect({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | globalThis.MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (dropdownRef.current && !scrollbarContains(dropdownRef.current, event.target as Node)) {
         setIsOpen(false);
       }
     };

@@ -881,6 +881,7 @@ export type DesktopSettings = {
 	language: LanguagePreference,
 	uiFontSize: UiFontSizePreference,
 	layoutDensity?: LayoutDensity,
+	scrollbarVisibility?: ScrollbarVisibility,
 	changesDisplayMode: ChangesDisplayMode,
 	defaultCommitAction: DefaultCommitAction,
 	defaultSaveAction: DefaultSaveAction,
@@ -1424,6 +1425,8 @@ export type RuntimeCapabilities = {
 	notificationPermission: NotificationPermissionState,
 	secureCredentials: SecureCredentialCapability,
 };
+
+export type ScrollbarVisibility = "system" | "auto" | "visible";
 
 export type SecureCredentialCapability = {
 	status: CapabilityStatus,

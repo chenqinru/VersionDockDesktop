@@ -571,24 +571,28 @@ function useTransientScrollbarVisibility() {
     setActive(true);
   }, [clearHideTimer]);
 
+  const hide = useCallback(() => { clearHideTimer(); setActive(false); }, [clearHideTimer]);
+
   const showTemporarily = useCallback(() => {
     clearHideTimer();
     setActive(true);
     hideTimerRef.current = setTimeout(() => {
       hideTimerRef.current = null;
       setActive(false);
-    }, OVERLAY_SCROLLBAR_HIDE_DELAY_MS);
+    }, document.documentElement.dataset.versiondockScrollbarVisibility === 'auto'
+      || document.documentElement.dataset.versiondockScrollbarVisibility === 'visible' ? 500 : OVERLAY_SCROLLBAR_HIDE_DELAY_MS);
   }, [clearHideTimer]);
 
   useEffect(() => clearHideTimer, [clearHideTimer]);
 
-  return { active, holdVisible, showTemporarily };
+  return { active, holdVisible, showTemporarily, hide };
 }
 
 function OverlayVerticalScrollbar({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement> }) {
   const [metrics, setMetrics] = useState<VerticalScrollbarMetrics>({ visible: false, top: 0, height: 0, trackHeight: 0, scrollVal: 0, scrollMax: 0 });
+  const hovering = useRef(false);
   const dragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
-  const { active, holdVisible, showTemporarily } = useTransientScrollbarVisibility();
+  const { active, holdVisible, showTemporarily, hide } = useTransientScrollbarVisibility();
 
   useEffect(() => {
     const pane = scrollRef.current;
@@ -596,7 +600,8 @@ function OverlayVerticalScrollbar({ scrollRef }: { scrollRef: React.RefObject<HT
 
     const update = () => {
       const titleHeight = pane.querySelector<HTMLElement>('[data-merge-column-title]')?.offsetHeight ?? 29;
-      const horizontalScrollbarHeight = pane.scrollWidth > pane.clientWidth + 1 ? 10 : 0;
+      const size = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--versiondock-scrollbar-size')) || 10;
+      const horizontalScrollbarHeight = pane.scrollWidth > pane.clientWidth + 1 ? size : 0;
       const trackHeight = Math.max(0, pane.clientHeight - titleHeight - horizontalScrollbarHeight);
       const scrollableHeight = Math.max(0, pane.scrollHeight - pane.clientHeight);
       if (scrollableHeight === 0 || trackHeight === 0) {
@@ -612,21 +617,35 @@ function OverlayVerticalScrollbar({ scrollRef }: { scrollRef: React.RefObject<HT
 
     const handleScroll = () => {
       update();
-      if (dragRef.current) holdVisible();
+      if (dragRef.current || hovering.current && document.documentElement.dataset.versiondockScrollbarVisibility === 'auto') holdVisible();
       else showTemporarily();
     };
 
+    const handleEnter = () => {
+      hovering.current = true;
+      if (document.documentElement.dataset.versiondockScrollbarVisibility === 'auto') holdVisible();
+    };
+    const handleLeave = () => {
+      hovering.current = false;
+      if (!dragRef.current && document.documentElement.dataset.versiondockScrollbarVisibility === 'auto') hide();
+    };
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(pane);
     const codeArea = pane.querySelector<HTMLElement>('[data-merge-code-area]');
     if (codeArea) resizeObserver.observe(codeArea);
     pane.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('versiondock-scrollbar-appearance-changed', update);
+    pane.parentElement?.addEventListener('pointerenter', handleEnter);
+    pane.parentElement?.addEventListener('pointerleave', handleLeave);
     update();
     return () => {
       resizeObserver.disconnect();
       pane.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('versiondock-scrollbar-appearance-changed', update);
+      pane.parentElement?.removeEventListener('pointerenter', handleEnter);
+      pane.parentElement?.removeEventListener('pointerleave', handleLeave);
     };
-  }, [holdVisible, scrollRef, showTemporarily]);
+  }, [hide, holdVisible, scrollRef, showTemporarily]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const pane = scrollRef.current;
@@ -650,7 +669,8 @@ function OverlayVerticalScrollbar({ scrollRef }: { scrollRef: React.RefObject<HT
     if (dragRef.current?.pointerId !== event.pointerId) return;
     dragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    showTemporarily();
+    if (document.documentElement.dataset.versiondockScrollbarVisibility === 'auto' && !hovering.current) hide();
+    else showTemporarily();
   };
 
   const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -666,7 +686,7 @@ function OverlayVerticalScrollbar({ scrollRef }: { scrollRef: React.RefObject<HT
 
   if (!metrics.visible) return null;
   return (
-    <div style={styles.overlayScrollbarTrack(metrics.trackHeight, active)} onPointerDown={onTrackPointerDown}>
+    <div data-versiondock-overlay-scrollbar="vertical" data-versiondock-scrollbar-active={active ? '' : undefined} style={styles.overlayScrollbarTrack(metrics.trackHeight, active)} onPointerDown={onTrackPointerDown}>
       <div
         role="scrollbar"
         aria-label={t('Vertical scrollbar')}
@@ -686,15 +706,17 @@ function OverlayVerticalScrollbar({ scrollRef }: { scrollRef: React.RefObject<HT
 
 function OverlayHorizontalScrollbar({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement> }) {
   const [metrics, setMetrics] = useState<HorizontalScrollbarMetrics>({ visible: false, left: 0, width: 0, trackWidth: 0, scrollVal: 0, scrollMax: 0 });
+  const hovering = useRef(false);
   const dragRef = useRef<{ pointerId: number; startX: number; startScrollLeft: number } | null>(null);
-  const { active, holdVisible, showTemporarily } = useTransientScrollbarVisibility();
+  const { active, holdVisible, showTemporarily, hide } = useTransientScrollbarVisibility();
 
   useEffect(() => {
     const pane = scrollRef.current;
     if (!pane) return;
 
     const update = () => {
-      const verticalScrollbarWidth = pane.scrollHeight > pane.clientHeight + 1 ? 10 : 0;
+      const size = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--versiondock-scrollbar-size')) || 10;
+      const verticalScrollbarWidth = pane.scrollHeight > pane.clientHeight + 1 ? size : 0;
       const trackWidth = Math.max(0, pane.clientWidth - verticalScrollbarWidth);
       const scrollableWidth = Math.max(0, pane.scrollWidth - pane.clientWidth);
       if (scrollableWidth === 0 || trackWidth === 0) {
@@ -710,21 +732,35 @@ function OverlayHorizontalScrollbar({ scrollRef }: { scrollRef: React.RefObject<
 
     const handleScroll = () => {
       update();
-      if (dragRef.current) holdVisible();
+      if (dragRef.current || hovering.current && document.documentElement.dataset.versiondockScrollbarVisibility === 'auto') holdVisible();
       else showTemporarily();
     };
 
+    const handleEnter = () => {
+      hovering.current = true;
+      if (document.documentElement.dataset.versiondockScrollbarVisibility === 'auto') holdVisible();
+    };
+    const handleLeave = () => {
+      hovering.current = false;
+      if (!dragRef.current && document.documentElement.dataset.versiondockScrollbarVisibility === 'auto') hide();
+    };
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(pane);
     const codeArea = pane.querySelector<HTMLElement>('[data-merge-code-area]');
     if (codeArea) resizeObserver.observe(codeArea);
     pane.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('versiondock-scrollbar-appearance-changed', update);
+    pane.parentElement?.addEventListener('pointerenter', handleEnter);
+    pane.parentElement?.addEventListener('pointerleave', handleLeave);
     update();
     return () => {
       resizeObserver.disconnect();
       pane.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('versiondock-scrollbar-appearance-changed', update);
+      pane.parentElement?.removeEventListener('pointerenter', handleEnter);
+      pane.parentElement?.removeEventListener('pointerleave', handleLeave);
     };
-  }, [holdVisible, scrollRef, showTemporarily]);
+  }, [hide, holdVisible, scrollRef, showTemporarily]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const pane = scrollRef.current;
@@ -748,7 +784,8 @@ function OverlayHorizontalScrollbar({ scrollRef }: { scrollRef: React.RefObject<
     if (dragRef.current?.pointerId !== event.pointerId) return;
     dragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    showTemporarily();
+    if (document.documentElement.dataset.versiondockScrollbarVisibility === 'auto' && !hovering.current) hide();
+    else showTemporarily();
   };
 
   const onTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -764,7 +801,7 @@ function OverlayHorizontalScrollbar({ scrollRef }: { scrollRef: React.RefObject<
 
   if (!metrics.visible) return null;
   return (
-    <div style={styles.overlayHorizontalScrollbarTrack(metrics.trackWidth, active)} onPointerDown={onTrackPointerDown}>
+    <div data-versiondock-overlay-scrollbar="horizontal" data-versiondock-scrollbar-active={active ? '' : undefined} style={styles.overlayHorizontalScrollbarTrack(metrics.trackWidth, active)} onPointerDown={onTrackPointerDown}>
       <div
         role="scrollbar"
         aria-label={t('Horizontal scrollbar')}
@@ -832,8 +869,8 @@ function Column({ refEl, title, side, segments, resolutions, normalEdits, baseNo
   }, [segments, resolutions, normalEdits, normalVersionLines, side]);
 
   return (
-    <div style={styles.columnFrame}>
-      <div ref={refEl} className="versiondock-merge-pane" data-merge-pane={side} style={styles.column} onScroll={onScroll}>
+    <div data-versiondock-scrollbar-container style={styles.columnFrame}>
+      <div ref={refEl} className="versiondock-merge-pane" data-versiondock-native-scrollbar="hidden" data-merge-pane={side} style={styles.column} onScroll={onScroll}>
         <div data-merge-column-title style={styles.columnTitle} title={title}>{title}</div>
         <div data-merge-code-area style={styles.codeWrap}>
           {segments.map((segment, index) => {

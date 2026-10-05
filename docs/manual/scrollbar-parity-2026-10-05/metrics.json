@@ -1,0 +1,4780 @@
+[
+  {
+    "case": "sb2-fixture-visible",
+    "result": {
+      "mode": "visible",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 32
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 512
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 218,
+            "height": 694
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 214,
+            "height": 692
+          },
+          "clip": "inset(0px)",
+          "z": "1",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 214,
+              "height": 8,
+              "left": 593,
+              "top": 761,
+              "thumb": {
+                "left": 593,
+                "top": 761,
+                "width": 204.4375,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 436
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 80
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-box",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 190,
+              "left": 648,
+              "top": 167.328125,
+              "thumb": {
+                "left": 648,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 280,
+              "height": 8,
+              "left": 368,
+              "top": 357.328125,
+              "thumb": {
+                "left": 368,
+                "top": 357.328125,
+                "width": 80.625,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-text",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 198,
+              "left": 954,
+              "top": 167.328125,
+              "thumb": {
+                "left": 954,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-nested",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 280,
+            "height": 160
+          },
+          "clip": "inset(0px 0px 82px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 160,
+              "left": 640,
+              "top": 418.65625,
+              "thumb": {
+                "left": 640,
+                "top": 418.65625,
+                "width": 8,
+                "height": 28.4375
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb2-drag-global-vertical",
+    "result": {
+      "mode": "visible",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 32
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 512
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 218,
+            "height": 694
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 214,
+            "height": 692
+          },
+          "clip": "inset(0px)",
+          "z": "1",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 214,
+              "height": 8,
+              "left": 593,
+              "top": 761,
+              "thumb": {
+                "left": 593,
+                "top": 761,
+                "width": 204.4375,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 436
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 80
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-box",
+          "position": {
+            "top": 1431,
+            "left": 100,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 190,
+              "left": 648,
+              "top": 167.328125,
+              "thumb": {
+                "left": 648,
+                "top": 300.109375,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 280,
+              "height": 8,
+              "left": 368,
+              "top": 357.328125,
+              "thumb": {
+                "left": 396,
+                "top": 357.328125,
+                "width": 80.625,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-text",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 198,
+              "left": 954,
+              "top": 167.328125,
+              "thumb": {
+                "left": 954,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-nested",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 280,
+            "height": 160
+          },
+          "clip": "inset(0px 0px 82px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 160,
+              "left": 640,
+              "top": 418.65625,
+              "thumb": {
+                "left": 640,
+                "top": 418.65625,
+                "width": 8,
+                "height": 28.4375
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb2-drag-global-horizontal",
+    "result": {
+      "mode": "visible",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 32
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 512
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 218,
+            "height": 694
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 214,
+            "height": 692
+          },
+          "clip": "inset(0px)",
+          "z": "1",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 214,
+              "height": 8,
+              "left": 593,
+              "top": 761,
+              "thumb": {
+                "left": 593,
+                "top": 761,
+                "width": 204.4375,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 436
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 80
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-box",
+          "position": {
+            "top": 1431,
+            "left": 600,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 190,
+              "left": 648,
+              "top": 167.328125,
+              "thumb": {
+                "left": 648,
+                "top": 300.109375,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 280,
+              "height": 8,
+              "left": 368,
+              "top": 357.328125,
+              "thumb": {
+                "left": 536,
+                "top": 357.328125,
+                "width": 80.625,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-text",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 198,
+              "left": 954,
+              "top": 167.328125,
+              "thumb": {
+                "left": 954,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-nested",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 280,
+            "height": 160
+          },
+          "clip": "inset(0px 0px 82px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 160,
+              "left": 640,
+              "top": 418.65625,
+              "thumb": {
+                "left": 640,
+                "top": 418.65625,
+                "width": 8,
+                "height": 28.4375
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb4-auto-hover",
+    "result": {
+      "hasFocus": true,
+      "hover": [],
+      "point": "<p>Row 2 long code example</p>",
+      "pointers": [
+        {
+          "type": "pointerout",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerdown",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        }
+      ],
+      "mode": "auto",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 32
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 512
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 218,
+            "height": 694
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 214,
+            "height": 692
+          },
+          "clip": "inset(0px)",
+          "z": "1",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 214,
+              "height": 8,
+              "left": 593,
+              "top": 761,
+              "thumb": {
+                "left": 593,
+                "top": 761,
+                "width": 204.4375,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 80
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 436
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-box",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 8,
+              "height": 190,
+              "left": 648,
+              "top": 167.328125,
+              "thumb": {
+                "left": 648,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 280,
+              "height": 8,
+              "left": 368,
+              "top": 357.328125,
+              "thumb": {
+                "left": 368,
+                "top": 357.328125,
+                "width": 80.625,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-text",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 8,
+              "height": 198,
+              "left": 954,
+              "top": 167.328125,
+              "thumb": {
+                "left": 954,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-nested",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 280,
+            "height": 160
+          },
+          "clip": "inset(0px 0px 82px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 8,
+              "height": 160,
+              "left": 640,
+              "top": 418.65625,
+              "thumb": {
+                "left": 640,
+                "top": 418.65625,
+                "width": 8,
+                "height": 28.4375
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb4-auto-idle",
+    "result": {
+      "hasFocus": true,
+      "hover": [],
+      "point": "<p>Row 2 long code example</p>",
+      "pointers": [
+        {
+          "type": "pointerout",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerdown",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerout",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 40,
+          "y": 40,
+          "target": ""
+        }
+      ],
+      "mode": "auto",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 32
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 346,
+            "height": 512
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 218,
+            "height": 694
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 214,
+            "height": 692
+          },
+          "clip": "inset(0px)",
+          "z": "1",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 214,
+              "height": 8,
+              "left": 593,
+              "top": 761,
+              "thumb": {
+                "left": 593,
+                "top": 761,
+                "width": 204.4375,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 80
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 436
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 378,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-box",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 8,
+              "height": 190,
+              "left": 648,
+              "top": 167.328125,
+              "thumb": {
+                "left": 648,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "0",
+              "width": 280,
+              "height": 8,
+              "left": 368,
+              "top": 357.328125,
+              "thumb": {
+                "left": 368,
+                "top": 357.328125,
+                "width": 80.625,
+                "height": 8
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-text",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 8,
+              "height": 198,
+              "left": 954,
+              "top": 167.328125,
+              "thumb": {
+                "left": 954,
+                "top": 167.328125,
+                "width": 8,
+                "height": 20
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-nested",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 280,
+            "height": 160
+          },
+          "clip": "inset(0px 0px 82px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "0",
+              "width": 8,
+              "height": 160,
+              "left": 640,
+              "top": 418.65625,
+              "thumb": {
+                "left": 640,
+                "top": 418.65625,
+                "width": 8,
+                "height": 28.4375
+              },
+              "radius": "4px",
+              "label": "垂直滚动条"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "0",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "4px",
+              "label": "水平滚动条"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb4-compact-dump",
+    "result": {
+      "hasFocus": true,
+      "hover": [],
+      "point": "<p>Row 2 long code example</p>",
+      "pointers": [
+        {
+          "type": "pointerout",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerdown",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerout",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 40,
+          "y": 40,
+          "target": ""
+        }
+      ],
+      "mode": "visible",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 359,
+            "height": 28
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 359,
+            "height": 545
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 219,
+            "height": 700
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 239,
+            "height": 700
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 380,
+            "height": 450
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 380,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 102
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-box",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 10,
+              "height": 188,
+              "left": 646,
+              "top": 167.328125,
+              "thumb": {
+                "left": 646,
+                "top": 167.328125,
+                "width": 10,
+                "height": 20
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 278,
+              "height": 10,
+              "left": 368,
+              "top": 355.328125,
+              "thumb": {
+                "left": 368,
+                "top": 355.328125,
+                "width": 80.0625,
+                "height": 10
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-text",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 10,
+              "height": 198,
+              "left": 952,
+              "top": 167.328125,
+              "thumb": {
+                "left": 952,
+                "top": 167.328125,
+                "width": 10,
+                "height": 20
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-nested",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 280,
+            "height": 160
+          },
+          "clip": "inset(0px 0px 82px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 10,
+              "height": 160,
+              "left": 638,
+              "top": 418.65625,
+              "thumb": {
+                "left": 638,
+                "top": 418.65625,
+                "width": 10,
+                "height": 28.4375
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb4-modal-dump",
+    "result": {
+      "hasFocus": true,
+      "hover": [],
+      "point": "<div class=\"vd-dialog-backdrop \" role=\"presentation\" style=\"z-index: 10000;\"><section aria-labelledby=\"app-dialog-title\" data-dialog-size=\"small\" class=\"vd-dial",
+      "pointers": [
+        {
+          "type": "pointerout",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerdown",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerout",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 40,
+          "y": 40,
+          "target": ""
+        }
+      ],
+      "mode": "visible",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 359,
+            "height": 28
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 359,
+            "height": 545
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 219,
+            "height": 700
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 239,
+            "height": 700
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 380,
+            "height": 450
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 380,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 102
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-box",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-text",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 288,
+            "height": 198
+          },
+          "clip": "inset(0px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "qa-scroll-nested",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 280,
+            "height": 160
+          },
+          "clip": "inset(0px 0px 82px)",
+          "z": "5001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "vd-dialog app-dialog",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 418,
+            "height": 155
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb4-system-dump",
+    "result": {
+      "hasFocus": true,
+      "hover": [],
+      "point": "<p>Row 2 long code example</p>",
+      "pointers": [
+        {
+          "type": "pointerout",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerdown",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerout",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 40,
+          "y": 40,
+          "target": ""
+        }
+      ],
+      "mode": "system",
+      "bars": [],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb4-settings-dump",
+    "result": {
+      "hasFocus": true,
+      "hover": [],
+      "point": "<div class=\"theme-preview-surface\" data-theme=\"light2026\"><div class=\"theme-sample-sidebar\"><span aria-hidden=\"true\" class=\"codicon codicon-files \"></span><span",
+      "pointers": [
+        {
+          "type": "pointerout",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 500,
+          "y": 240,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerdown",
+          "x": 500,
+          "y": 240,
+          "target": ""
+        },
+        {
+          "type": "pointerout",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointerover",
+          "x": 40,
+          "y": 40,
+          "target": "",
+          "related": ""
+        },
+        {
+          "type": "pointermove",
+          "x": 40,
+          "y": 40,
+          "target": ""
+        }
+      ],
+      "mode": "visible",
+      "bars": [
+        {
+          "owner": "titlebar-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 160,
+            "height": 37
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "commit-tabs",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 359,
+            "height": 28
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "changes-scroll",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 359,
+            "height": 545
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "branch-sidebar",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 219,
+            "height": 700
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "commit-list",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 239,
+            "height": 700
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "detail-files",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 380,
+            "height": 450
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "detail-summary",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 380,
+            "height": 220
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "toast-container",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 450,
+            "height": 102
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "settings-nav",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 189,
+            "height": 406
+          },
+          "clip": "none",
+          "z": "auto",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "block",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        },
+        {
+          "owner": "settings-content",
+          "position": {
+            "top": 0,
+            "left": 0,
+            "width": 648,
+            "height": 598
+          },
+          "clip": "inset(0px)",
+          "z": "10001",
+          "axes": [
+            {
+              "axis": "vertical",
+              "display": "block",
+              "opacity": "1",
+              "width": 10,
+              "height": 598,
+              "left": 1019,
+              "top": 121,
+              "thumb": {
+                "left": 1019,
+                "top": 121,
+                "width": 10,
+                "height": 344.84375
+              },
+              "radius": "0px",
+              "label": "Vertical scrollbar"
+            },
+            {
+              "axis": "horizontal",
+              "display": "none",
+              "opacity": "1",
+              "width": 0,
+              "height": 0,
+              "left": 0,
+              "top": 0,
+              "thumb": {
+                "left": 0,
+                "top": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radius": "0px",
+              "label": "Horizontal scrollbar"
+            }
+          ]
+        }
+      ],
+      "mergeBars": 0
+    }
+  },
+  {
+    "case": "sb5-merge-inspect-visible",
+    "result": {
+      "mode": "visible",
+      "tracks": [
+        {
+          "axis": "vertical",
+          "opacity": "1",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 603.328125,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" data-versiondock-scrollbar-active=\"\" style=\"position: absolute; top: 29px; right: 0px; z-"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "1",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 360,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" data-versiondock-scrollbar-active=\"\" style=\"position: absolute; left: 0px; bottom: 0px;"
+        },
+        {
+          "axis": "vertical",
+          "opacity": "1",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 896.65625,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" data-versiondock-scrollbar-active=\"\" style=\"position: absolute; top: 29px; right: 0px; z-"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "1",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 653.328125,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" data-versiondock-scrollbar-active=\"\" style=\"position: absolute; left: 0px; bottom: 0px;"
+        },
+        {
+          "axis": "vertical",
+          "opacity": "1",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 1190,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" data-versiondock-scrollbar-active=\"\" style=\"position: absolute; top: 29px; right: 0px; z-"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "1",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 946.65625,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" data-versiondock-scrollbar-active=\"\" style=\"position: absolute; left: 0px; bottom: 0px;"
+        }
+      ]
+    }
+  },
+  {
+    "case": "sb5-merge-inspect-auto-hover",
+    "result": {
+      "mode": "auto",
+      "tracks": [
+        {
+          "axis": "vertical",
+          "opacity": "1",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 603.328125,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" style=\"position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px;"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "1",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 360,
+          "pointer": "auto",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 1; pointer-events: auto; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" style=\"position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10"
+        },
+        {
+          "axis": "vertical",
+          "opacity": "0.265",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 896.65625,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" style=\"position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px;"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "0.265",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 653.328125,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" style=\"position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10"
+        },
+        {
+          "axis": "vertical",
+          "opacity": "0.265",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 1190,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" style=\"position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px;"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "0.265",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 946.65625,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" style=\"position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10"
+        }
+      ]
+    }
+  },
+  {
+    "case": "sb5-merge-inspect-auto-idle",
+    "result": {
+      "mode": "auto",
+      "tracks": [
+        {
+          "axis": "vertical",
+          "opacity": "0",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 603.328125,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" style=\"position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px;"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "0",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 360,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" style=\"position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10"
+        },
+        {
+          "axis": "vertical",
+          "opacity": "0",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 896.65625,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" style=\"position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px;"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "0",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 653.328125,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" style=\"position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10"
+        },
+        {
+          "axis": "vertical",
+          "opacity": "0",
+          "width": 10,
+          "height": 579,
+          "top": 139,
+          "left": 1190,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"vertical\" style=\"position: absolute; top: 29px; right: 0px; z-index: 9; width: 10px; height: 579px;"
+        },
+        {
+          "axis": "horizontal",
+          "opacity": "0",
+          "width": 243,
+          "height": 10,
+          "top": 718,
+          "left": 946.65625,
+          "pointer": "none",
+          "bg": "color(srgb 0.54902 0.54902 0.54902 / 0.5)",
+          "radius": "0px",
+          "display": "block",
+          "style": "position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10px; background: none; touch-action: none; opacity: 0; pointer-events: none; transition: opacity 500ms ease-out;",
+          "html": "<div data-versiondock-overlay-scrollbar=\"horizontal\" style=\"position: absolute; left: 0px; bottom: 0px; z-index: 9; width: 243px; height: 10"
+        }
+      ]
+    }
+  }
+]

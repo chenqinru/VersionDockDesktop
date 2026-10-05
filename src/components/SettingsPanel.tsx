@@ -1,5 +1,7 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import { DialogSurface } from './DialogSurface';
 import { LayoutDensitySetting } from './LayoutDensitySetting';
+import { ScrollbarVisibilitySetting } from './ScrollbarVisibilitySetting';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber, SettingToggle } from './SettingsControls';
 import { AiSettings } from './AiSettings';
@@ -251,6 +253,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         onChange={(value) => void setUiFontSize(value as UiFontSizePreference)}
                       />
                       <LayoutDensitySetting />
+                      <ScrollbarVisibilitySetting />
                     </SettingsCard>
                   </SettingsSection>
                 )}
@@ -1072,7 +1075,7 @@ function ExternalEditorSettings({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | globalThis.MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (dropdownRef.current && !scrollbarContains(dropdownRef.current, event.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -1336,6 +1339,9 @@ function SearchResults({
 
   if ([t('Layout density'), t('Comfortable'), t('Compact'), t('Comfortable uses rounded cards and inset rows; compact maximizes working space.'), 'layout', 'density', 'comfortable', 'compact'].some(match)) {
     appearanceItems.push(<LayoutDensitySetting key="density" />);
+  }
+  if ([t('Scrollbar visibility'), t('Follow system'), t('Auto-hide'), t('Always visible'), t('Control scrollbars across all panels and pages. Changes take effect immediately.'), 'scrollbar'].some(match)) {
+    appearanceItems.push(<ScrollbarVisibilitySetting key="scrollbars" />);
   }
 
   // 2. 更改与提交匹配项

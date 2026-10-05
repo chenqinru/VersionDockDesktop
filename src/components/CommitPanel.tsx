@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import { changeStatus } from '../theme/changeStatus';
 import { SplitButtonMore } from './SplitButtonMore';
 import { AiGenerationBorder } from './AiGenerationBorder';
@@ -500,8 +501,8 @@ export function CommitPanel() {
       const target = e.target as Node;
       if (
         conflictMenuRef.current &&
-        !conflictMenuRef.current.contains(target) &&
-        !conflictButtonRef.current?.contains(target)
+        !scrollbarContains(conflictMenuRef.current, target) &&
+        !scrollbarContains(conflictButtonRef.current, target)
       ) {
         setConflictMenuOpen(false);
       }
@@ -529,7 +530,7 @@ export function CommitPanel() {
     const closeWhenHidden = () => { if (document.visibilityState !== 'visible') setHistoryOpen(false); };
     const closeOnOutsideInteraction = (event: Event) => {
       const target = event.target;
-      if (target instanceof Node && !historyDialog.current?.contains(target)) setHistoryOpen(false);
+      if (target instanceof Node && !scrollbarContains(historyDialog.current, target)) setHistoryOpen(false);
     };
     window.addEventListener('blur', closeOnBlur);
     document.addEventListener('visibilitychange', closeWhenHidden);
@@ -1596,9 +1597,9 @@ export function CommitPanel() {
     const handleOutsideInteraction = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (viewMenu && !viewMenuRef.current?.contains(target)) setViewMenu(false);
-      if (saveMenu && !saveMenuRef.current?.contains(target)) setSaveMenu(false);
-      if (commitMenu && !commitMenuRef.current?.contains(target)) setCommitMenu(false);
+      if (viewMenu && !scrollbarContains(viewMenuRef.current, target)) setViewMenu(false);
+      if (saveMenu && !scrollbarContains(saveMenuRef.current, target)) setSaveMenu(false);
+      if (commitMenu && !scrollbarContains(commitMenuRef.current, target)) setCommitMenu(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;

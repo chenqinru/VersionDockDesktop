@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Codicon } from './Codicon';
@@ -72,9 +73,10 @@ export function ContextMenu({ x, y, header, anchorRect, placement = 'below', var
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     const handler = (e: MouseEvent) => {
       if (anchorRect && e.clientX >= anchorRect.left && e.clientX <= anchorRect.right && e.clientY >= anchorRect.top && e.clientY <= anchorRect.bottom) return;
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      if (ref.current && !scrollbarContains(ref.current, e.target as Node)) onClose();
     };
     const keyHandler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') { onClose(); return; }
       const entries = [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
       if (!entries.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;

@@ -1700,6 +1700,9 @@ pub struct DesktopSettings {
     #[serde(default)]
     #[specta(optional)]
     pub layout_density: LayoutDensity,
+    #[serde(default)]
+    #[specta(optional)]
+    pub scrollbar_visibility: ScrollbarVisibility,
     pub changes_display_mode: ChangesDisplayMode,
     pub default_commit_action: DefaultCommitAction,
     pub default_save_action: DefaultSaveAction,
@@ -1831,6 +1834,7 @@ impl Default for DesktopSettings {
             language: LanguagePreference::System,
             ui_font_size: UiFontSizePreference::Standard,
             layout_density: LayoutDensity::Comfortable,
+            scrollbar_visibility: ScrollbarVisibility::System,
             file_icon_theme: FileIconThemePreference::Material,
             changes_display_mode: ChangesDisplayMode::Simplified,
             default_commit_action: DefaultCommitAction::Commit,
@@ -2105,6 +2109,15 @@ pub enum LayoutDensity {
     #[default]
     Comfortable,
     Compact,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ScrollbarVisibility {
+    #[default]
+    System,
+    Auto,
+    Visible,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]

@@ -1,0 +1,585 @@
+{
+  "before-parity": {
+    "hits": [
+      null,
+      null
+    ],
+    "errors": [],
+    "mode": "visible",
+    "log": {
+      "h": 420,
+      "sh": 1600,
+      "w": 360,
+      "sw": 360,
+      "oy": "auto"
+    },
+    "bars": [
+      {
+        "owner": "log",
+        "z": "1",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 380,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 390,
+              "bottom": 498.40625,
+              "left": 380
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      {
+        "owner": "stack",
+        "z": "1",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 765,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 775,
+              "bottom": 498.40625,
+              "left": 765
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "after-parity": {
+    "hits": [
+      "scrollbar",
+      "scrollbar"
+    ],
+    "errors": [],
+    "mode": "visible",
+    "log": {
+      "h": 420,
+      "sh": 1600,
+      "w": 360,
+      "sw": 360,
+      "oy": "auto"
+    },
+    "bars": [
+      {
+        "owner": "log",
+        "z": "3",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 380,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 390,
+              "bottom": 498.40625,
+              "left": 380
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      {
+        "owner": "stack",
+        "z": "5",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 765,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 775,
+              "bottom": 498.40625,
+              "left": 765
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "after-auto": {
+    "hits": [
+      "scrollbar",
+      null
+    ],
+    "errors": [],
+    "mode": "auto",
+    "log": {
+      "h": 420,
+      "sh": 1600,
+      "w": 360,
+      "sw": 360,
+      "oy": "auto"
+    },
+    "bars": [
+      {
+        "owner": "log",
+        "z": "3",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 380,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 390,
+              "bottom": 498.40625,
+              "left": 380
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      {
+        "owner": "stack",
+        "z": "5",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "0",
+            "rect": {
+              "x": 765,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 775,
+              "bottom": 498.40625,
+              "left": 765
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "0",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "after-nested": {
+    "hits": [
+      "scrollbar",
+      null
+    ],
+    "errors": [],
+    "mode": "visible",
+    "log": {
+      "h": 420,
+      "sh": 1600,
+      "w": 360,
+      "sw": 360,
+      "oy": "auto"
+    },
+    "bars": [
+      {
+        "owner": "log",
+        "z": "3",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 380,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 390,
+              "bottom": 498.40625,
+              "left": 380
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      {
+        "owner": "stack",
+        "z": "6",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 765,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 775,
+              "bottom": 498.40625,
+              "left": 765
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "after-modal": {
+    "hits": [
+      null,
+      null
+    ],
+    "errors": [],
+    "mode": "visible",
+    "log": {
+      "h": 420,
+      "sh": 1600,
+      "w": 360,
+      "sw": 360,
+      "oy": "auto"
+    },
+    "bars": [
+      {
+        "owner": "log",
+        "z": "3",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      {
+        "owner": "stack",
+        "z": "5",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      {
+        "owner": "modal-scroll",
+        "z": "10001",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 950,
+              "y": 80,
+              "width": 10,
+              "height": 300,
+              "top": 80,
+              "right": 960,
+              "bottom": 380,
+              "left": 950
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "after-history-container": {
+    "hits": [
+      "scrollbar",
+      null
+    ],
+    "errors": [],
+    "mode": "auto",
+    "log": {
+      "h": 420,
+      "sh": 1600,
+      "w": 360,
+      "sw": 360,
+      "oy": "auto"
+    },
+    "bars": [
+      {
+        "owner": "log",
+        "z": "3",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "1",
+            "rect": {
+              "x": 380,
+              "y": 78.40625,
+              "width": 10,
+              "height": 420,
+              "top": 78.40625,
+              "right": 390,
+              "bottom": 498.40625,
+              "left": 380
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "1",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      {
+        "owner": "stack",
+        "z": "5",
+        "display": "block",
+        "axes": [
+          {
+            "axis": "vertical",
+            "display": "block",
+            "opacity": "0",
+            "rect": {
+              "x": 380,
+              "y": 571.8125,
+              "width": 10,
+              "height": 420,
+              "top": 571.8125,
+              "right": 390,
+              "bottom": 991.8125,
+              "left": 380
+            }
+          },
+          {
+            "axis": "horizontal",
+            "display": "none",
+            "opacity": "0",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

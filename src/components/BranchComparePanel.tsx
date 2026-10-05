@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import { buildHistoryAuthorOptions } from '../history/authors';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -104,7 +105,7 @@ function ComparePane({
     if (!menu) return;
     const close = (event: Event) => {
       const target = event.target;
-      if (!(target instanceof Node) || !activeFilter.current?.contains(target)) setMenu(null);
+      if (!(target instanceof Node) || !scrollbarContains(activeFilter.current, target)) setMenu(null);
     };
     const blur = () => setMenu(null);
     window.addEventListener('blur', blur);

@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { IconButton } from '../IconButton';
 import { useEffect, useRef, useState, type RefObject } from 'react';
@@ -55,7 +56,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (popoverRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
+      if (scrollbarContains(popoverRef.current, target) || scrollbarContains(anchorRef.current, target)) return;
       onClose();
     };
 

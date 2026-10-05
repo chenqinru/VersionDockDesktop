@@ -4,6 +4,12 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Scrollbar visibility': 'Scrollbar visibility',
+  'Follow system': 'Follow system',
+  'Auto-hide': 'Auto-hide',
+  'Always visible': 'Always visible',
+  'Control scrollbars across all panels and pages. Changes take effect immediately.': 'Control scrollbars across all panels and pages. Changes take effect immediately.',
+
   "Waiting for SVN authentication": "Waiting for SVN authentication",
   "Retrying after SVN authentication": "Retrying after SVN authentication",
 
@@ -1227,6 +1233,12 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Scrollbar visibility': '滚动条显示方式',
+  'Follow system': '跟随系统',
+  'Auto-hide': '自动隐藏',
+  'Always visible': '始终显示',
+  'Control scrollbars across all panels and pages. Changes take effect immediately.': '控制所有面板和页面的滚动条，修改后即时生效。',
+
   "Waiting for SVN authentication": "等待 SVN 认证",
   "Retrying after SVN authentication": "SVN 认证完成，正在重试",
 

@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../scrollbars/ownership';
 import { isLightTheme } from '../theme';
 import { getEffectiveTheme } from '../theme/useEffectiveTheme';
 import { IconButton } from './IconButton';
@@ -101,7 +102,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     const handleOutsideInteraction = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (addAnchorRef.current?.contains(target) || addMenuRef.current?.contains(target)) return;
+      if (scrollbarContains(addAnchorRef.current, target) || scrollbarContains(addMenuRef.current, target)) return;
       setNewTabMenuOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {

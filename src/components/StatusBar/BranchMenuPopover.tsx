@@ -1,3 +1,4 @@
+import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
@@ -241,9 +242,9 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (
-        popoverRef.current?.contains(target) ||
-        submenuRef.current?.contains(target) ||
-        actionMenuRef.current?.contains(target) ||
+        scrollbarContains(popoverRef.current, target) ||
+        scrollbarContains(submenuRef.current, target) ||
+        scrollbarContains(actionMenuRef.current, target) ||
         (target instanceof Element && Boolean(target.closest('.dialog-backdrop, .app-dialog')))
       ) {
         return;
