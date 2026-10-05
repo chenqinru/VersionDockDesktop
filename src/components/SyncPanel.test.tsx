@@ -2,10 +2,11 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SyncPanel } from './SyncPanel';
 import { useAppStore } from '../store/appStore';
-import type { IncomingCommit, RepositoryStatus, UnpushedCommit, WorkspaceSnapshot } from '../bindings/generated';
+import type { CommitDetail, CommitNode, IncomingCommit, RepositoryStatus, UnpushedCommit, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 import * as dialogService from './dialogService';
+import { commitKey } from '../history/commitDetails';
 
 const bridge = new MockBridge(() => []);
 const gitRepo: RepositoryStatus = {
@@ -388,6 +389,55 @@ describe('SyncPanel footer parity with plugin', () => {
     const view = render(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
     return { ...view, fetch, sync };
   };
+
+  it('keeps the footer enabled throughout read-only commit detail loading', async () => {
+    const { container } = setup(1, 0);
+    const commit: CommitNode = { repoId: 'repo-1', hash: 'detail-commit', shortHash: 'detail', parents: [],
+      author: 'Developer', email: 'developer@example.test', authorDate: '2026-10-06T00:00:00Z',
+      committerDate: '2026-10-06T00:00:00Z', message: 'Read commit details', refs: [] };
+    let finish!: (detail: CommitDetail) => void;
+    const pending = new Promise<CommitDetail>(resolve => { finish = resolve; });
+    useAppStore.setState({ bridge: new MockBridge(command => command.type === 'commitDetail' ? pending : []),
+      selectedCommits: [], selectedPrimaryKey: undefined, selectedCommitDetails: {}, selectedCommitLoading: {} });
+    const primary = container.querySelector('.sync-primary-action')!;
+    const more = container.querySelector('.sync-primary-more')!;
+    let request!: Promise<unknown>;
+    act(() => { request = initial.selectCommit(commit); });
+    try {
+      expect(useAppStore.getState().selectedCommitLoading[commitKey(commit.repoId, commit.hash)]).toBe(true);
+      expect(primary).toBeEnabled();
+      expect(more).toBeEnabled();
+      expect(useAppStore.getState().operations).toEqual({});
+      await act(async () => { await Promise.resolve(); });
+      expect(primary).toBeEnabled();
+      expect(more).toBeEnabled();
+    } finally {
+      await act(async () => {
+        finish({ commit, fullMessage: commit.message, branches: { local: [], remote: [], tags: [] }, files: [] });
+        await request;
+      });
+    }
+    expect(container.querySelector('.sync-primary-action')).toBe(primary);
+    expect(primary).toHaveTextContent('Push');
+    expect(primary).toBeEnabled();
+    expect(useAppStore.getState().selectedCommit?.commit.hash).toBe(commit.hash);
+  });
+
+  it('still guards the footer while a repository history write is pending', async () => {
+    const { container } = setup(1, 0);
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    useAppStore.setState({ bridge: new MockBridge(command => command.type === 'historyOperation' ? pending : []),
+      refresh: vi.fn().mockResolvedValue(undefined), loadHistory: vi.fn().mockResolvedValue(undefined) });
+    let request!: Promise<unknown>;
+    act(() => { request = initial.historyOperation('repo-1', { type: 'revert', revisions: ['revision'] }); });
+    try {
+      expect(container.querySelector('.sync-primary-action')).toBeDisabled();
+      expect(container.querySelector('.sync-primary-more')).toBeDisabled();
+    } finally { await act(async () => { finish(); await request; }); }
+    expect(container.querySelector('.sync-primary-action')).toBeEnabled();
+    expect(container.querySelector('.sync-primary-more')).toBeEnabled();
+  });
 
   it.each([{ ahead: 1, behind: 0 }, { ahead: 0, behind: 1 }, { ahead: 1, behind: 1 }, { ahead: 0, behind: 0 }])('keeps footer and repository actions enabled during automatic fetch ($ahead/$behind)', async ({ ahead, behind }) => {
     const { container } = setup(ahead, behind);

@@ -4269,6 +4269,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
+    // Selecting a commit only reads details. Its own loading state must not
+    // temporarily disable sync actions as a history rewrite would.
     selectCommit: async (commit, mode = 'single', rangeSource) => withBusy(async () => {
       const state = get();
       const clickedKey = commitKey(commit.repoId, commit.hash);
@@ -4332,7 +4334,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         });
         if (primary?.parents.length && primary.parents.length >= 2) void get().loadMergeCommits(primary);
       }
-    }, `history:${commit.repoId}`),
+    }, `history:${commit.repoId}`, undefined, { trackBusy: false }),
 
     reloadSelectedCommits: async (requestedWorkspaceId?: string) => {
       const activeWorkspaceId = get().snapshot?.workspace.id ?? get().activeTabId ?? '';
