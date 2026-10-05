@@ -301,12 +301,65 @@ async fn git_upstream_at(
         "refs/heads/".into(),
     ]);
     let output = git(args, repo, token).await?.stdout_text();
-    Ok(output
+    let upstream = output
         .lines()
         .filter_map(|line| line.split_once('\0'))
         .find(|(head, _)| head.trim() == "*")
         .map(|(_, upstream)| upstream.trim().to_string())
-        .filter(|upstream| !upstream.is_empty()))
+        .filter(|upstream| !upstream.is_empty());
+    let Some(upstream) = upstream else {
+        return Ok(None);
+    };
+    // A configured tracking ref can have disappeared after fetch/prune. Like
+    // the plugin's @{u} probe, treat it as absent, without logging a false error.
+    let mut args = Vec::new();
+    if let Some(path) = path {
+        args.extend(["-C".into(), path.into()]);
+    }
+    args.extend([
+        "for-each-ref".into(),
+        "--format=%(refname)".into(),
+        upstream.clone(),
+    ]);
+    let refs = git(args, repo, token).await?.stdout_text();
+    Ok(refs
+        .lines()
+        .any(|name| name == upstream)
+        .then_some(upstream))
+}
+
+async fn git_unpushed_count_at(
+    repo: &RepositoryMeta,
+    path: &str,
+    token: &CancellationToken,
+) -> Result<u32, DesktopError> {
+    let run = |args: Vec<String>| {
+        let mut command = vec!["-C".into(), path.into()];
+        command.extend(args);
+        git(command, repo, token)
+    };
+    if let Some(upstream) = git_upstream_at(repo, Some(path), token).await? {
+        if let Ok(output) = run(vec![
+            "rev-list".into(),
+            "--count".into(),
+            format!("{upstream}..HEAD"),
+        ])
+        .await
+        {
+            return Ok(output.stdout_text().trim().parse().unwrap_or(0));
+        }
+    }
+    // Detached HEAD and local branches without tracking still have unpublished
+    // commits. Match GitService.countUnpushedCommits' remote-reachability fallback.
+    let remotes = run(vec!["remote".into()]).await?.stdout_text();
+    let mut args = vec!["rev-list".into(), "HEAD".into(), "--count".into()];
+    if remotes.trim().is_empty() {
+        args.push("--max-count=100".into());
+    } else {
+        args.extend(["--not".into(), "--remotes".into()]);
+    }
+    let output = run(args).await?;
+    Ok(output.stdout_text().trim().parse().unwrap_or(0))
 }
 
 async fn git_network_quick(
@@ -4881,6 +4934,18 @@ pub async fn incoming_commits(
         .collect())
 }
 
+async fn empty_git_changes(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<RevisionChanges, DesktopError> {
+    let revision = current_revision(repo, token).await?;
+    Ok(RevisionChanges {
+        from_revision: revision.clone(),
+        to_revision: revision,
+        files: Vec::new(),
+    })
+}
+
 pub async fn unpushed_changes(
     repo: &RepositoryMeta,
     oldest_revision: Option<String>,
@@ -4900,9 +4965,9 @@ pub async fn unpushed_changes(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| EMPTY_TREE_HASH.into())
     } else {
-        let upstream = git_upstream(repo, token).await?.ok_or_else(|| {
-            DesktopError::new("UPSTREAM_MISSING", "No upstream branch is configured", true)
-        })?;
+        let Some(upstream) = git_upstream(repo, token).await? else {
+            return empty_git_changes(repo, token).await;
+        };
         git(
             vec!["merge-base".into(), "HEAD".into(), upstream],
             repo,
@@ -4926,9 +4991,9 @@ pub async fn incoming_changes(
     token: &CancellationToken,
 ) -> Result<RevisionChanges, DesktopError> {
     ensure_git(repo)?;
-    let upstream = git_upstream(repo, token).await?.ok_or_else(|| {
-        DesktopError::new("UPSTREAM_MISSING", "No upstream branch is configured", true)
-    })?;
+    let Some(upstream) = git_upstream(repo, token).await? else {
+        return empty_git_changes(repo, token).await;
+    };
     let to_revision = git(
         vec!["rev-parse".into(), "--verify".into(), upstream],
         repo,
@@ -8515,15 +8580,10 @@ async fn fetch_svn_incoming_revisions(
         return res;
     }
 
-    // Include the working-copy revision as a valid lower boundary. Asking for
-    // revision + 1 fails when the working copy is already at repository HEAD.
+    // A mixed-revision working copy cannot be compared to its highest revision:
+    // some files may still need updates. Start with the actual outdated paths.
     let output = svn_with_timeout(
-        vec![
-            "log".into(),
-            "--xml".into(),
-            "-r".into(),
-            format!("{revision}:HEAD"),
-        ],
+        vec!["status".into(), "-u".into(), "--xml".into()],
         repo,
         token,
         Duration::from_secs(20),
@@ -8532,17 +8592,133 @@ async fn fetch_svn_incoming_revisions(
     let raw = output.stdout_text();
     let document = roxmltree::Document::parse(&raw)
         .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
-    let behind = document
+    let outdated = document
         .descendants()
-        .filter(|node| node.has_tag_name("logentry"))
-        .filter(|node| {
-            node.attribute("revision")
-                .and_then(|value| value.parse::<u64>().ok())
-                .is_some_and(|value| value > revision)
+        .filter(|node| node.has_tag_name("entry"))
+        .filter_map(|entry| {
+            let remote = entry
+                .children()
+                .find(|node| node.has_tag_name("repos-status"))?;
+            let unchanged = |attribute| {
+                matches!(
+                    remote.attribute(attribute).unwrap_or("none"),
+                    "none" | "normal"
+                )
+            };
+            if unchanged("item") && unchanged("props") {
+                return None;
+            }
+            let path =
+                svn_status_relative_path(Path::new(&repo.root_path), entry.attribute("path")?)?;
+            if path.is_empty()
+                || Path::new(&path)
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir)
+            {
+                return None;
+            }
+            let base = entry
+                .children()
+                .find(|node| node.has_tag_name("wc-status"))
+                .and_then(|node| node.attribute("revision"))
+                .and_then(|value| value.parse::<u64>().ok());
+            Some((path.trim_start_matches("./").to_string(), base))
         })
-        .count()
-        .min(u32::MAX as usize) as u32;
-    Ok(behind)
+        .collect::<Vec<_>>();
+    if outdated.is_empty() {
+        return Ok(0);
+    }
+    let count = async {
+        let info = svn(vec!["info".into(), "--xml".into()], repo, token)
+            .await?
+            .stdout_text();
+        let info = roxmltree::Document::parse(&info)
+            .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+        let root_revision = info
+            .descendants()
+            .find(|node| node.has_tag_name("entry"))
+            .and_then(|node| node.attribute("revision"))
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(revision);
+        let prefix = info
+            .descendants()
+            .find(|node| node.has_tag_name("relative-url"))
+            .and_then(|node| node.text())
+            .unwrap_or("^/");
+        let prefix = decode_svn_path(prefix.trim_start_matches('^').trim_matches('/'));
+        let base = outdated
+            .iter()
+            .map(|(_, base)| base.unwrap_or(root_revision))
+            .min()
+            .unwrap_or(root_revision);
+        let Some(start) = base.checked_add(1) else {
+            return Ok::<u32, DesktopError>(1);
+        };
+        let log = svn_with_timeout(
+            vec![
+                "log".into(),
+                "--xml".into(),
+                "-v".into(),
+                "-r".into(),
+                format!("{start}:HEAD"),
+            ],
+            repo,
+            token,
+            Duration::from_secs(20),
+        )
+        .await?
+        .stdout_text();
+        let log = roxmltree::Document::parse(&log)
+            .map_err(|error| DesktopError::new("SVN_XML_INVALID", error.to_string(), true))?;
+        let mut revisions = HashSet::new();
+        for entry in log
+            .descendants()
+            .filter(|node| node.has_tag_name("logentry"))
+        {
+            let Some(revision) = entry
+                .attribute("revision")
+                .and_then(|value| value.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let changed = entry
+                .descendants()
+                .filter(|node| node.has_tag_name("path"))
+                .filter_map(|node| {
+                    let path = node.text()?.trim_start_matches('/');
+                    if prefix.is_empty() {
+                        Some(path)
+                    } else if path == prefix {
+                        Some(".")
+                    } else {
+                        path.strip_prefix(&prefix)
+                            .and_then(|suffix| suffix.strip_prefix('/'))
+                    }
+                })
+                .collect::<Vec<_>>();
+            if outdated.iter().any(|(path, path_base)| {
+                revision > path_base.unwrap_or(base)
+                    && changed.iter().any(|changed| {
+                        *changed == "."
+                            || path == "."
+                            || path == changed
+                            || path.starts_with(&format!("{changed}/"))
+                            || changed.starts_with(&format!("{path}/"))
+                    })
+            }) {
+                revisions.insert(revision);
+            }
+        }
+        Ok(revisions.len().max(1).min(u32::MAX as usize) as u32)
+    }
+    .await;
+    // The plugin still reports an update when status proves files are outdated,
+    // even if verbose history is unavailable. Cancellation must remain cancellable.
+    match count {
+        Err(error) if token.is_cancelled() || error.code == "REQUEST_CANCELLED" => Err(error),
+        Err(_) => Ok(1),
+        result => result,
+    }
 }
 
 pub fn svn_incoming_cached_behind(repo_id: &str, revision_str: &str) -> Option<u32> {
@@ -9841,27 +10017,13 @@ pub async fn submodules(
         .filter(|value| !value.is_empty());
         let (index_commit, conflict_stages, type_change, companion_path) =
             submodule_index_state(repo, &path, token).await;
-        let upstream = if initialized && current_branch.is_some() {
-            git_upstream_at(repo, Some(&path), token).await?
-        } else {
-            None
-        };
-        let unpushed_count = if let Some(upstream) = upstream {
-            git(
-                vec![
-                    "-C".into(),
-                    path.clone(),
-                    "rev-list".into(),
-                    "--count".into(),
-                    format!("{upstream}..HEAD"),
-                ],
-                repo,
-                token,
-            )
-            .await
-            .ok()
-            .and_then(|output| output.stdout_text().trim().parse().ok())
-            .unwrap_or(0)
+        let unpushed_count = if initialized {
+            match git_unpushed_count_at(repo, &path, token).await {
+                Err(error) if token.is_cancelled() || error.code == "REQUEST_CANCELLED" => {
+                    return Err(error)
+                }
+                result => result.unwrap_or(0),
+            }
         } else {
             0
         };

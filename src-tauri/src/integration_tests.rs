@@ -119,13 +119,16 @@ async fn real_git_upstream_metadata_avoids_false_errors_and_preserves_tracking()
             .len(),
         1
     );
-    assert_eq!(
-        vcs::incoming_changes(&repository, &token)
-            .await
-            .unwrap_err()
-            .code,
-        "UPSTREAM_MISSING"
-    );
+    assert!(vcs::incoming_changes(&repository, &token)
+        .await
+        .unwrap()
+        .files
+        .is_empty());
+    assert!(vcs::unpushed_changes(&repository, None, &token)
+        .await
+        .unwrap()
+        .files
+        .is_empty());
     command(
         "git",
         &["remote", "add", "origin", remote.to_str().unwrap()],
@@ -218,7 +221,7 @@ async fn real_git_upstream_metadata_avoids_false_errors_and_preserves_tracking()
         .iter()
         .any(|entry| entry.message.contains("@{upstream}")
             || entry.message.contains("<redacted-email>")));
-    // A configured-but-missing tracking ref remains a genuine error.
+    // A missing tracking ref falls back just like the plugin's failed @{u} probe.
     command("git", &["switch", "main"], &working);
     command(
         "git",
@@ -230,8 +233,47 @@ async fn real_git_upstream_metadata_avoids_false_errors_and_preserves_tracking()
         &["update-ref", "-d", "refs/remotes/origin/main"],
         &working,
     );
-    assert!(vcs::incoming_commits(&repository, &token).await.is_err());
-    assert!(logger
+    assert!(vcs::incoming_commits(&repository, &token)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        vcs::unpushed_commits(&repository, &token)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    let missing_tracking_page = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    assert!(missing_tracking_page
+        .commits
+        .iter()
+        .all(|commit| commit.unpushed && !commit.incoming));
+    assert!(vcs::incoming_changes(&repository, &token)
+        .await
+        .unwrap()
+        .files
+        .is_empty());
+    assert!(vcs::unpushed_changes(&repository, None, &token)
+        .await
+        .unwrap()
+        .files
+        .is_empty());
+    let skipped = vcs::sync(
+        &repository,
+        SyncAction::PullRebase,
+        None,
+        None,
+        false,
+        &crate::models::DesktopSettings::default(),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(skipped.output.contains("skipped"));
+    assert!(!logger
         .get_entries(None, None, None)
         .iter()
         .any(|entry| entry.cwd.as_deref() == working.to_str() && entry.level == LogLevel::Error));
@@ -350,6 +392,192 @@ async fn real_svn_optional_probes_and_incoming_revision_bounds() {
     .unwrap_err();
     assert_eq!(entries().last().unwrap().level, LogLevel::Error);
     vcs::invalidate_svn_ref_caches(&repository.id);
+}
+
+#[tokio::test]
+async fn real_svn_incoming_counts_only_outdated_paths_in_mixed_revision_working_copies() {
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let store = directory.path().join("store");
+    let wc = directory.path().join("wc");
+    let writer = directory.path().join("writer");
+    command(
+        "svnadmin",
+        &["create", store.to_str().unwrap()],
+        directory.path(),
+    );
+    let url = svn_file_url(&store);
+    let trunk = format!("{url}/trunk");
+    let outside = format!("{url}/outside");
+    command(
+        "svn",
+        &["mkdir", &trunk, &outside, "-m", "layout"],
+        directory.path(),
+    );
+    command(
+        "svn",
+        &["checkout", &trunk, wc.to_str().unwrap()],
+        directory.path(),
+    );
+    for name in ["中文 a@.txt", "b%.txt"] {
+        std::fs::write(wc.join(name), "base\n").unwrap();
+    }
+    command("svn", &["add", "中文 a@.txt@", "b%.txt"], &wc);
+    command("svn", &["commit", "-m", "base files"], &wc);
+    command("svn", &["update"], &wc);
+    command(
+        "svn",
+        &["checkout", &trunk, writer.to_str().unwrap()],
+        directory.path(),
+    );
+    for (file, message) in [
+        ("中文 a@.txt", "a first"),
+        ("b%.txt", "b first"),
+        ("中文 a@.txt", "a second"),
+    ] {
+        std::fs::write(writer.join(file), message).unwrap();
+        command("svn", &["commit", "-m", message], &writer);
+    }
+    command("svn", &["update", "中文 a@.txt@"], &wc);
+    let mut repository = repo(&wc, VcsKind::Svn);
+    repository.id = format!("mixed-svn-{}", uuid::Uuid::new_v4());
+    let token = CancellationToken::new();
+    assert_eq!(command_output("svnversion", &["."], &wc), "2:5");
+    assert_eq!(vcs::svn_incoming_revisions(&repository, &token).await, 1);
+    // Multiple paths changed in one revision count once, and a completely
+    // updated path or another repository subtree must not inflate the count.
+    std::fs::write(writer.join("中文 a@.txt"), "a third").unwrap();
+    std::fs::write(writer.join("b%.txt"), "b second").unwrap();
+    command("svn", &["commit", "-m", "both paths"], &writer);
+    command(
+        "svn",
+        &["mkdir", &format!("{outside}/other"), "-m", "unrelated"],
+        directory.path(),
+    );
+    command("svn", &["update", "中文 a@.txt@"], &wc);
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    assert_eq!(vcs::svn_incoming_revisions(&repository, &token).await, 2);
+    // Property-only remote changes also count as pending updates.
+    command(
+        "svn",
+        &["propset", "parity:test", "value", "b%.txt"],
+        &writer,
+    );
+    command("svn", &["commit", "-m", "remote property"], &writer);
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    assert_eq!(vcs::svn_incoming_revisions(&repository, &token).await, 3);
+    command("svn", &["update"], &wc);
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    assert_eq!(vcs::svn_incoming_revisions(&repository, &token).await, 0);
+    // Exercise the actual background consumer's cache key (highest WC version).
+    std::fs::write(writer.join("b%.txt"), "background change").unwrap();
+    command("svn", &["commit", "-m", "background change"], &writer);
+    vcs::invalidate_svn_ref_caches(&repository.id);
+    let effective = vcs::svn_working_copy_info(&repository, &token)
+        .await
+        .unwrap()
+        .revision;
+    vcs::svn_incoming_revisions_cached(&repository, &effective);
+    for _ in 0..100 {
+        if vcs::svn_incoming_cached_behind(&repository.id, &effective) == Some(1) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        vcs::svn_incoming_cached_behind(&repository.id, &effective),
+        Some(1)
+    );
+}
+
+#[tokio::test]
+async fn real_git_submodule_unpushed_counts_match_plugin_tracking_fallbacks() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let parent = directory.path().join("parent");
+    let source = directory.path().join("source");
+    std::fs::create_dir(&parent).unwrap();
+    std::fs::create_dir(&source).unwrap();
+    for root in [&parent, &source] {
+        command("git", &["init", "-b", "main"], root);
+        command("git", &["config", "user.name", "Parity QA"], root);
+        command("git", &["config", "user.email", "qa@example.test"], root);
+    }
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "module base"],
+        &source,
+    );
+    let path = "vendor/中文 module";
+    command(
+        "git",
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            source.to_str().unwrap(),
+            path,
+        ],
+        &parent,
+    );
+    command("git", &["commit", "-am", "add module"], &parent);
+    let module = parent.join(path);
+    command("git", &["config", "user.name", "Parity QA"], &module);
+    command("git", &["config", "user.email", "qa@example.test"], &module);
+    let repository = repo(&parent, VcsKind::Git);
+    let token = CancellationToken::new();
+    assert_eq!(
+        vcs::submodules(&repository, &token).await.unwrap()[0].unpushed_count,
+        0
+    );
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "local one"],
+        &module,
+    );
+    assert_eq!(
+        vcs::submodules(&repository, &token).await.unwrap()[0].unpushed_count,
+        1
+    );
+    command("git", &["branch", "--unset-upstream"], &module);
+    assert_eq!(
+        vcs::submodules(&repository, &token).await.unwrap()[0].unpushed_count,
+        1
+    );
+    command("git", &["branch", "--set-upstream-to=origin/main"], &module);
+    command(
+        "git",
+        &["update-ref", "-d", "refs/remotes/origin/main"],
+        &module,
+    );
+    assert_eq!(
+        vcs::submodules(&repository, &token).await.unwrap()[0].unpushed_count,
+        2
+    );
+    command(
+        "git",
+        &["update-ref", "refs/remotes/origin/main", "HEAD~1"],
+        &module,
+    );
+    command("git", &["checkout", "--detach", "HEAD"], &module);
+    command(
+        "git",
+        &["commit", "--allow-empty", "-m", "local detached"],
+        &module,
+    );
+    let entry = &vcs::submodules(&repository, &token).await.unwrap()[0];
+    assert_eq!(entry.current_branch, None);
+    assert_eq!(entry.unpushed_count, 2);
+    command("git", &["remote", "remove", "origin"], &module);
+    assert_eq!(
+        vcs::submodules(&repository, &token).await.unwrap()[0].unpushed_count,
+        3
+    );
 }
 
 #[tokio::test]
