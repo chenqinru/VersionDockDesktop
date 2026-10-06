@@ -46,7 +46,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:release": "node --test scripts/release.test.mjs",
-    "build": "npm run bindings:check && vite build",
+    "build": "npm run bindings:check && npm run build:frontend",
     "bindings": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings -- --nocapture",
     "bindings:check": "node scripts/check-bindings.mjs",
     "check:metadata": "node scripts/check-version.mjs",
@@ -55,9 +55,12 @@
     "check:i18n": "node scripts/check-i18n.mjs",
     "version:bump": "node scripts/bump-version.mjs",
     "icons:generate": "node scripts/generate-icons.mjs",
-    "check:frontend": "npm run check:metadata && npm run check:independence && npm run check:window && npm run check:i18n && npm run typecheck && npm run lint && npm run test:release && npm run test && npm run build",
+    "check:frontend": "npm run check:frontend:source && npm run build",
     "check:rust": "cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --locked --manifest-path src-tauri/Cargo.toml",
-    "check": "npm run check:frontend && npm run check:rust"
+    "check": "npm run check:frontend && npm run check:rust",
+    "build:frontend": "vite build",
+    "check:frontend:ci": "npm run check:frontend:source && npm run build:frontend",
+    "check:frontend:source": "npm run check:metadata && npm run check:independence && npm run check:window && npm run check:i18n && npm run typecheck && npm run lint && npm run test:release && npm run test"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",

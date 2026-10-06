@@ -7,6 +7,12 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      bundle:
+        description: Build private installation packages after all checks
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,19 +22,60 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Quality gate
+  frontend:
+    name: Frontend checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
+
+      - name: Install signature verifier
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
+
+      - name: Check frontend and project metadata
+        run: npm run check:frontend:ci
+
+      - name: Save checked frontend
+        uses: actions/upload-artifact@v4
+        with:
+          overwrite: true
+          name: frontend-ci-${{ github.sha }}
+          path: dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node for binding verification
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -40,26 +87,34 @@ jobs:
         with:
           # Target paths are relative to the workspace, not the repository root.
           workspaces: src-tauri -> target
-          # Start a new cache namespace so old registry-only hits cannot mask this fix.
           prefix-key: v1-versiondock-target
+          shared-key: native-quality
 
       - name: Install Linux system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev minisign
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
-
-      - name: Check frontend and project metadata
-        run: npm run check:frontend
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Check Rust formatting
         run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
 
       - name: Lint Rust
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+      - name: Verify generated bindings and defaults
+        run: npm run bindings:check
+
+  quality:
+    # Preserve the existing required-check name and fail when either check fails.
+    name: Quality gate
+    if: always()
+    needs: [frontend, rust]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all quality checks to succeed
+        env:
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+        run: test "$FRONTEND_RESULT" = success && test "$RUST_RESULT" = success
 
   platform:
     name: Test and bundle (${{ matrix.name }})
@@ -88,8 +143,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Setup Node
+        if: inputs.bundle
         uses: actions/setup-node@v7
         with:
           node-version: 20
@@ -107,6 +166,7 @@ jobs:
           workspaces: src-tauri -> target
           # Start a new cache namespace so old registry-only hits cannot mask this fix.
           prefix-key: v1-versiondock-target
+          shared-key: ${{ inputs.bundle && 'native-bundles' || 'native-tests' }}
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -175,7 +235,14 @@ jobs:
           path: ${{ runner.temp }}/versiondock-svn
           key: ${{ steps.windows-svn-cache.outputs.cache-primary-key }}
 
+      - name: Download checked frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-ci-${{ github.sha }}
+          path: dist
+
       - name: Install frontend dependencies
+        if: inputs.bundle
         run: npm ci
 
       - name: Run Git and SVN integration tests
@@ -183,5 +250,38 @@ jobs:
         env:
           VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
 
+      - name: Check the other macOS architecture
+        if: runner.os == 'macOS' && !inputs.bundle
+        env:
+          NATIVE_ARCH: ${{ runner.arch }}
+        run: |
+          case "$NATIVE_ARCH" in
+            ARM64) check_target=x86_64-apple-darwin ;;
+            X64) check_target=aarch64-apple-darwin ;;
+            *) echo "Unsupported macOS runner architecture: $NATIVE_ARCH" >&2; exit 1 ;;
+          esac
+          cargo check --locked --manifest-path src-tauri/Cargo.toml --target "$check_target" --features tauri/custom-protocol
+
+      - name: Reuse checked frontend for packaging
+        if: inputs.bundle
+        run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.reuse-frontend.conf.json', JSON.stringify({build:{beforeBuildCommand:null}}))"
+
       - name: Build native bundles
-        run: npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json ${{ matrix.bundle-args }}
+        if: inputs.bundle
+        run: npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json --config src-tauri/tauri.reuse-frontend.conf.json ${{ matrix.bundle-args }}
+
+      - name: Save private installation packages
+        if: inputs.bundle
+        uses: actions/upload-artifact@v4
+        with:
+          overwrite: true
+          name: ci-packages-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            src-tauri/target/**/release/bundle/**/*.dmg
+            src-tauri/target/**/release/bundle/**/*.exe
+            src-tauri/target/**/release/bundle/**/*.msi
+            src-tauri/target/**/release/bundle/**/*.AppImage
+            src-tauri/target/**/release/bundle/**/*.deb
+            src-tauri/target/**/release/bundle/**/*.rpm
+          if-no-files-found: error
+          retention-days: 7

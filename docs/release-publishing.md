@@ -14,7 +14,7 @@
 
 1. 运行 `npm run version:bump -- patch`（或明确的正式版本号），提交版本及改动。仅支持 `0.1.1` 这样的正式 SemVer，不支持 beta 或 build 后缀。
 2. 推送代码及匹配的版本标签，例如 `v0.1.1`。标签必须和 package、Tauri、Cargo 元数据一致；不能移动已发布标签。
-3. Release workflow 在标签对应的固定提交上执行完整检查，随后并行构建 macOS universal、Windows x64、Linux x64。签名产物先保存在私有 workflow artifacts，保留 14 天。
+3. Release workflow 先解析标签、验证版本并固定提交 SHA，随后并行执行前端检查和 Rust 完整检查。全部成功后，三平台复用同一份前端资源，并行构建 macOS universal、Windows x64、Linux x64。签名产物先保存在私有 workflow artifacts，保留 14 天。
 4. 最终发布任务验证版本、平台覆盖、SHA-256 和全部更新签名，再生成单份 `latest.json`。默认入口采用 macOS universal、Windows NSIS 和 Linux AppImage；如果构建了 MSI、deb 或 rpm，必须提供有效签名，并登记对应安装包类型的入口，避免混用格式。先上传公开仓库草稿，下载附件校验内容，一切完整后才公开并设为 latest。
 
 可在 Actions 页面选择 Release → Run workflow，输入已存在的版本标签重试。只有草稿可被补齐；已公开版本禁止覆盖。发布更低或相同版本也会失败。三平台任意构建失败，公开仓库保持上一版本。
@@ -28,8 +28,12 @@ GitHub Actions 的并发组会串行执行公开发布，待执行任务受 GitH
 ## 本地检查与普通 CI
 
 - 本地完整检查需要 Git、SVN、Rust、Node 20+ 及 `minisign`：macOS 使用 `brew install minisign`；Ubuntu 使用 `sudo apt-get install minisign`。运行 `npm run check`，其中 `npm run test:release` 使用临时测试密钥验证发布逻辑，不接触生产密钥。
-- 正式打包启用了 `bundle.createUpdaterArtifacts`，需要签名环境变量。普通 CI 和不生成更新包的本地打包使用 `npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json`；该配置关闭更新产物生成，不更换客户端更新公钥或地址。
+- 普通 `main` push / pull request CI 并行检查前端和 Rust，保留三平台真实 Git/SVN 测试；macOS 还检查另一种 CPU 架构。日常 CI 不生成完整安装包。
+- 临时需要安装包时，在 Actions → CI → Run workflow 勾选 `bundle`。通过检查后生成三平台安装包，保存为私有 `ci-packages-*` artifacts，保留 7 天；该任务不会发布公开 Release。
+- 正式打包启用了 `bundle.createUpdaterArtifacts`，需要签名环境变量。不生成更新包的本地打包使用 `npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json`；手动 CI 打包也使用该配置，不更换客户端更新公钥或地址。
 - 公钥与签名文本使用 Tauri 的 Base64 包装格式；校验复用 minisign，避免自行实现签名算法。
+
+缓存、并行任务及共享前端资源的细节见 [CI 耗时优化](ci-optimization.md)。
 
 ## 上线验收记录
 
