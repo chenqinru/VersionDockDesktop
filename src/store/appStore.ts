@@ -465,7 +465,7 @@ export interface AppStore {
   restoreTabsOnStartup: () => Promise<void>;
   restoreLastWorkspace: () => Promise<void>;
   removeRecent: (workspaceId: string) => Promise<void>;
-  refresh: (silent?: boolean, options?: { reloadRepository?: boolean }) => Promise<void>;
+  refresh: (silent?: boolean, options?: { reloadRepository?: boolean; trackBusy?: boolean }) => Promise<void>;
   selectRepo: (repoId: string, reload?: boolean) => Promise<void>;
   openDiff: (repoId: string, path: string, staged: boolean, revision?: string, range?: DiffRange) => Promise<void>;
   openStashDiff: (repoId: string, reference: string, path: string) => Promise<void>;
@@ -3121,7 +3121,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         const controller = beginRequest(`workspace:${id}`);
         const snapshot = await bridge().request<WorkspaceSnapshot>(
           { type: 'workspaceRefresh', payload: { workspace_id: id } },
-          { signal: controller.signal, showProgress: !silent },
+          { signal: controller.signal, showProgress: !silent && options.trackBusy !== false },
         );
         if (get().snapshot?.workspace.id !== id) return;
         if (updatingWorkingTree(id) || updateEpoch(id) !== epoch) {
@@ -3139,7 +3139,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           }
         }
       } else {
-        await withBusy(operation, 'workspace');
+        await withBusy(operation, 'workspace', undefined, { trackBusy: options.trackBusy });
       }
     },
 

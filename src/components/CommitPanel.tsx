@@ -555,8 +555,8 @@ export function CommitPanel() {
   const gitRepos = useMemo(() => repos.filter((repo) => repo.meta.kind === 'git'), [repos]);
   const parentGitRepos = useMemo(() => gitRepos.filter((repo) => !repo.meta.isSubmodule), [gitRepos]);
   const updateProject = useAppStore((state) => state.updateProject);
-  const [toolbarAction, setToolbarAction] = useState<'refresh' | 'update' | undefined>();
-  const toolbarActionRef = useRef<'refresh' | 'update' | undefined>();
+  const [toolbarAction, setToolbarAction] = useState<'update' | undefined>();
+  const toolbarActionsRef = useRef(new Set<'refresh' | 'update'>());
   const unpushedCommits = useAppStore((state) => state.unpushedCommits);
   const incomingCommits = useAppStore((state) => state.incomingCommits);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
@@ -573,22 +573,22 @@ export function CommitPanel() {
   }, 0), [branchesByRepo, gitRepos, unpushedCommits]);
   const totalToSync = useMemo(() => totalToPush + gitRepos.reduce((sum, repo) => sum + Math.max(repo.behind, incomingCommits[repo.meta.id]?.length ?? 0), 0), [gitRepos, incomingCommits, totalToPush]);
   const runToolbarAction = async (action: 'refresh' | 'update', operation: () => Promise<void>) => {
-    if (toolbarActionRef.current) return;
-    toolbarActionRef.current = action;
-    setToolbarAction(action);
+    if (toolbarActionsRef.current.has(action)) return;
+    toolbarActionsRef.current.add(action);
+    if (action === 'update') setToolbarAction(action);
     try {
       await operation();
     } catch (error) {
       useAppStore.getState().addNotification({ type: 'error', title: action === 'update' ? 'Project update' : 'Workspace refresh failed', message: String(error), workspaceId: snapshot?.workspace.id });
     } finally {
-      toolbarActionRef.current = undefined;
-      setToolbarAction(undefined);
+      toolbarActionsRef.current.delete(action);
+      if (action === 'update') setToolbarAction(undefined);
     }
   };
   const refreshPanel = () => runToolbarAction('refresh', async () => {
     lastTabSyncAtRef.current = { [tab]: Date.now() };
     const store = useAppStore.getState();
-    await store.refresh(false, { reloadRepository: false });
+    await store.refresh(false, { reloadRepository: false, trackBusy: false });
     if (useAppStore.getState().snapshot?.workspace.id !== snapshot?.workspace.id) return;
     const requests = [store.loadStashes(), store.loadShelves(), store.loadUnpushedCommits(), store.loadIncomingCommits()];
     if (changelistCapability) requests.push(store.loadChangelists());

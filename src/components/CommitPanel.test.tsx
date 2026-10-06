@@ -27,8 +27,9 @@ const originalLoadStashes = useAppStore.getState().loadStashes;
 const originalUnstage = useAppStore.getState().unstage;
 const originalStage = useAppStore.getState().stage;
 const originalSync = useAppStore.getState().sync;
+const originalUpdateProject = useAppStore.getState().updateProject;
 
-afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
+afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, updateProject: originalUpdateProject, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
 describe('CommitPanel capabilities and file view', () => {
   it('keeps only review, split and message history in the commit options', () => {
@@ -375,7 +376,60 @@ describe('CommitPanel capabilities and file view', () => {
     loadStashes.mockClear();
     fireEvent.click(screen.getByTitle('VersionDock: Refresh Commit Panel'));
     await waitFor(() => expect(loadStashes).toHaveBeenCalledOnce());
-    expect(refresh).toHaveBeenCalledExactlyOnceWith(false, { reloadRepository: false });
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(false, { reloadRepository: false, trackBusy: false });
+  });
+
+  it('keeps refresh and update clickable during refresh and does not release an overlapping update guard', async () => {
+    let finishRefresh!: (value: WorkspaceSnapshot) => void;
+    let finishUpdate!: () => void;
+    const refreshGate = new Promise<WorkspaceSnapshot>(resolve => { finishRefresh = resolve; });
+    const updateGate = new Promise<void>(resolve => { finishUpdate = resolve; });
+    const updateProject = vi.fn(() => updateGate);
+    let refreshCalls = 0;
+    const refreshBridge = new MockBridge((command, options) => {
+      if (command.type === 'workspaceRefresh') {
+        refreshCalls++;
+        expect(options?.showProgress).toBe(false);
+        return refreshGate;
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge: refreshBridge, bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo', refresh: originalRefresh, updateProject });
+    render(<BridgeContext.Provider value={refreshBridge}><CommitPanel /></BridgeContext.Provider>);
+    const refreshButton = screen.getByTitle('VersionDock: Refresh Commit Panel');
+    const updateButton = screen.getByTitle('VersionDock: Update Project');
+    fireEvent.click(refreshButton);
+    expect(refreshButton).toBeEnabled();
+    expect(updateButton).toBeEnabled();
+    expect(useAppStore.getState().operations).toEqual({});
+    fireEvent.click(refreshButton);
+    expect(refreshCalls).toBe(1);
+    fireEvent.click(updateButton);
+    expect(updateProject).toHaveBeenCalledOnce();
+    expect(updateButton).toBeDisabled();
+    await act(async () => { finishRefresh(gitSnapshot); await refreshGate; });
+    expect(updateButton).toBeDisabled();
+    expect(refreshButton).toBeDisabled();
+    await act(async () => { finishUpdate(); await updateGate; });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    expect(updateButton).toBeEnabled();
+  });
+
+  it('allows another panel refresh after the previous request fails', async () => {
+    let rejectRefresh!: (error: Error) => void;
+    const refreshGate = new Promise<WorkspaceSnapshot>((_, reject) => { rejectRefresh = reject; });
+    let refreshCalls = 0;
+    const refreshBridge = new MockBridge(command => command.type === 'workspaceRefresh' ? ++refreshCalls === 1 ? refreshGate : gitSnapshot : []);
+    useAppStore.setState({ bridge: refreshBridge, bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo', refresh: originalRefresh });
+    render(<BridgeContext.Provider value={refreshBridge}><CommitPanel /></BridgeContext.Provider>);
+    const refreshButton = screen.getByTitle('VersionDock: Refresh Commit Panel');
+    fireEvent.click(refreshButton);
+    await act(async () => { rejectRefresh(new Error('Refresh failed')); await refreshGate.catch(() => undefined); });
+    expect(refreshButton).toBeEnabled();
+    expect(screen.getByTitle('VersionDock: Update Project')).toBeEnabled();
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(refreshCalls).toBe(2));
+    expect(useAppStore.getState().snapshot).toEqual(gitSnapshot);
   });
 
   it('shows shelf only after its storage and backend capability is enabled', () => {
