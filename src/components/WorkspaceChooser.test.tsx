@@ -4,15 +4,36 @@ import { WorkspaceChooser } from './WorkspaceChooser';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
+import { version } from '../../package.json';
 
 const originalCloneRepository = useAppStore.getState().cloneRepository;
+const originalOpenWorkspace = useAppStore.getState().openWorkspace;
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ bootstrap: undefined, operations: {}, cloneRepository: originalCloneRepository });
+  useAppStore.setState({ bootstrap: undefined, operations: {}, cloneRepository: originalCloneRepository, openWorkspace: originalOpenWorkspace });
 });
 
 describe('WorkspaceChooser V5 setup actions', () => {
+  it('uses the package version and retries a saved unavailable workspace only after a click', () => {
+    const openWorkspace = vi.fn(async () => true);
+    const bridge = new MockBridge(() => true);
+    useAppStore.setState({
+      openWorkspace,
+      operations: {},
+      bootstrap: {
+        state: { recentWorkspaces: [{ id: 'external', name: 'External project', paths: ['/Volumes/WorkSSD/project'], lastOpenedAt: '', available: false }] },
+      } as any,
+    });
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
+    expect(screen.getByRole('button', { name: `v${version}` })).toBeInTheDocument();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const recent = screen.getByRole('button', { name: /External project/ });
+    expect(recent).toBeEnabled();
+    fireEvent.click(recent);
+    expect(openWorkspace).toHaveBeenCalledWith(['/Volumes/WorkSSD/project']);
+  });
+
   it('infers an editable clone folder and forwards the explicit target', async () => {
     const cloneRepository = vi.fn(async () => true);
     const bridge = new MockBridge(() => true);
@@ -70,4 +91,3 @@ describe('WorkspaceChooser V5 setup actions', () => {
     expect(icons[1]).toHaveTextContent('A');
   });
 });
-

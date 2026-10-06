@@ -4,6 +4,7 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Path was unavailable — click to retry': 'Path was unavailable — click to retry',
   'Restarting…': 'Restarting…',
   'Restart failed: {0}': 'Restart failed: {0}',
   'Updating to v{0}… {1}%': 'Updating to v{0}… {1}%',
@@ -1283,6 +1284,7 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Path was unavailable — click to retry': '路径此前不可用，点击重试',
   'Restarting…': '正在重启…',
   'Restart failed: {0}': '重启失败：{0}',
   'Updating to v{0}… {1}%': '正在更新至 v{0}… {1}%',

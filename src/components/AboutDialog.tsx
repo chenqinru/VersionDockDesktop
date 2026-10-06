@@ -6,8 +6,8 @@ import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { useAppUpdateStore } from '../store/appUpdateStore';
+import { APP_CURRENT_VERSION } from '../version';
 import {
-  APP_CURRENT_VERSION,
   AUTHOR_GITHUB_URL,
   AUTHOR_NAME,
   GITHUB_ISSUES_URL,

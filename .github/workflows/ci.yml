@@ -320,6 +320,10 @@ jobs:
         if: inputs.bundle
         run: npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json --config src-tauri/tauri.reuse-frontend.conf.json ${{ matrix.bundle-args }}
 
+      - name: Verify macOS app bundle signature
+        if: inputs.bundle && runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 "src-tauri/target/universal-apple-darwin/release/bundle/macos/VersionDock Desktop.app"
+
       - name: Save private installation packages
         if: inputs.bundle
         uses: actions/upload-artifact@v4

@@ -1079,10 +1079,9 @@ async fn dispatch(
 ) -> Result<serde_json::Value, DesktopError> {
     match command {
         BridgeCommand::Bootstrap => {
-            let mut snapshot = state.app.read().await.clone();
-            for workspace in &mut snapshot.recent_workspaces {
-                workspace.available = workspace.paths.iter().all(|path| Path::new(path).is_dir());
-            }
+            // Display saved history without touching external/protected volumes.
+            // WorkspaceOpen validates the paths when the user opens a project.
+            let snapshot = state.app.read().await.clone();
             let tools = workspace::tool_availability(token).await;
             state.cache_tools(tools.clone()).await;
             let runtime = runtime_capabilities().await;

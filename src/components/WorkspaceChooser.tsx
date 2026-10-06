@@ -6,6 +6,7 @@ import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './RepositoryCheckoutDialog';
+import { APP_CURRENT_VERSION } from '../version';
 
 export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
@@ -64,7 +65,7 @@ export function WorkspaceChooser() {
                   title={t('About VersionDock & Check Updates')}
                   onClick={() => openAbout('about')}
                 >
-                  v0.1.0
+                  v{APP_CURRENT_VERSION}
                 </button>
               </div>
               <p className="welcome-tagline">{t('Unified Git & SVN Desktop Client')}</p>
@@ -167,7 +168,7 @@ export function WorkspaceChooser() {
                     <button
                       type="button"
                       className="recent-card-btn"
-                      disabled={!workspace.available || busy}
+                      disabled={busy}
                       onClick={(event) => handleRecentClick(event, workspace.paths)}
                     >
                       <ProjectIcon
@@ -182,7 +183,7 @@ export function WorkspaceChooser() {
                         <span className="recent-card-path" title={workspace.paths.join(' · ')}>
                           {workspace.paths.join(' · ')}
                         </span>
-                        {!workspace.available && <span className="recent-card-badge">{t('Path is unavailable')}</span>}
+                        {!workspace.available && <span className="recent-card-badge">{t('Path was unavailable — click to retry')}</span>}
                       </div>
                     </button>
                     <div className="recent-card-actions">
@@ -191,7 +192,7 @@ export function WorkspaceChooser() {
                         className="recent-card-action-btn"
                         title={t('Open in New Window')}
                         aria-label={t('Open in New Window')}
-                        disabled={!workspace.available || busy}
+                        disabled={busy}
                         onClick={(e) => {
                           e.stopPropagation();
                           void bridge.openInNewWindow(workspace.paths);

@@ -45,7 +45,7 @@
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:release": "node --test scripts/release.test.mjs",
+    "test:release": "node --test scripts/release.test.mjs scripts/package-macos-dmg.test.mjs",
     "build": "npm run bindings:check && npm run build:frontend",
     "bindings": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings -- --nocapture",
     "bindings:check": "node scripts/check-bindings.mjs",

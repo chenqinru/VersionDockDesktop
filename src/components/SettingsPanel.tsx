@@ -26,6 +26,7 @@ import type {
 } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
+import { APP_CURRENT_VERSION } from '../version';
 import { Codicon } from './Codicon';
 import { EditorIcon } from './EditorIcons';
 import { ThemePreviewSelector, FileIconThemePreviewSelector } from './AppearanceSelectors';
@@ -649,7 +650,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         <div className="settings-about-meta">
                           <div className="settings-about-name-row">
                             <span className="settings-about-app-name">VersionDock Desktop</span>
-                            <span className="settings-about-badge">v0.1.0</span>
+                            <span className="settings-about-badge">v{APP_CURRENT_VERSION}</span>
                           </div>
                           <span className="settings-about-desc">{t('Independent Git & SVN Workbench')}</span>
                         </div>

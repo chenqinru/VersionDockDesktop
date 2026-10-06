@@ -5,6 +5,7 @@ import { I18nContext, createTranslator } from '../i18n';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
 import { SettingsPanel } from './SettingsPanel';
+import { version } from '../../package.json';
 
 const state = (): AppStateSnapshot => ({
   schemaVersion: 3,
@@ -168,6 +169,9 @@ describe('SettingsPanel', () => {
       expect(target).toBeTruthy();
       expect(document.getElementById(target ?? '')).toHaveClass('settings-section-title');
       expect(document.getElementById(target ?? '')?.querySelector('.codicon')).toBeInTheDocument();
+      if (target === 'settings-section-about-title') {
+        expect(screen.getByText(`v${version}`)).toBeInTheDocument();
+      }
     }
 
     fireEvent.click(screen.getByRole('link', { name: 'External editor' }));

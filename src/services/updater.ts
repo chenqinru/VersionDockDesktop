@@ -1,7 +1,7 @@
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { version } from '../../package.json';
+import { APP_CURRENT_VERSION } from '../version';
 import type { WorkspaceSnapshot, DesktopSettings } from '../bindings/generated';
 
 export interface AppUpdateCheckResult {
@@ -23,7 +23,7 @@ export interface UpdateDownloadProgress {
   percent: number;
 }
 
-export const APP_CURRENT_VERSION = version;
+export { APP_CURRENT_VERSION } from '../version';
 export const GITHUB_REPO_URL = 'https://github.com/chenqinru/VersionDockDesktop-Releases';
 export const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 export const GITHUB_ISSUES_URL = `${GITHUB_REPO_URL}/issues/new`;

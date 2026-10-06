@@ -254,6 +254,10 @@ jobs:
           uploadWorkflowArtifacts: false
           args: --ci --config src-tauri/tauri.reuse-frontend.conf.json ${{ matrix.bundle-args }}
 
+      - name: Verify macOS app bundle signature
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 "src-tauri/target/universal-apple-darwin/release/bundle/macos/VersionDock Desktop.app"
+
       - name: Stage only installation assets and signatures
         env:
           RELEASE_PLATFORM: ${{ matrix.platform }}
