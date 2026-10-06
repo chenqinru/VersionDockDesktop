@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use specta::Type;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiConfig {
     pub execution_mode: String,
@@ -65,7 +67,8 @@ impl AiConfig {
         self
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum AiTask {
     CommitMessage,
@@ -85,20 +88,23 @@ impl AiTask {
         }
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiCandidate {
     pub repo_id: String,
     pub paths: Vec<String>,
     pub staged_only: bool,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiCommit {
     pub repo_id: String,
     pub hash: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiRequest {
     pub request_id: String,
@@ -118,7 +124,8 @@ pub struct AiRequest {
     #[serde(default)]
     pub unit_ids: Vec<String>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiAnchor {
     pub id: String,
@@ -130,7 +137,8 @@ pub struct AiAnchor {
     pub new_line: Option<u32>,
     pub fingerprint: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiFinding {
     pub id: String,
@@ -142,20 +150,23 @@ pub struct AiFinding {
     pub suggestion: String,
     pub anchor: AiAnchor,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiReview {
     pub verdict: String,
     pub summary: String,
     pub findings: Vec<AiFinding>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiResolution {
     pub index: u32,
     pub lines: Vec<String>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiGroup {
     pub id: String,
@@ -164,7 +175,8 @@ pub struct AiGroup {
     pub rationale: String,
     pub unit_ids: Vec<String>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiUnit {
     pub id: String,
@@ -179,7 +191,8 @@ pub struct AiUnit {
     pub removed: u32,
     pub atomic: bool,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiComposerSource {
     pub session_id: String,
@@ -192,7 +205,8 @@ pub struct AiComposerSource {
     pub units: Vec<AiUnit>,
     pub original_commit_count: Option<u32>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiApplyResult {
     pub commit_count: u32,
@@ -201,7 +215,8 @@ pub struct AiApplyResult {
     pub recovery_command: Option<String>,
     pub completed_groups: Option<u32>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiResult {
     pub text: String,
@@ -216,7 +231,8 @@ pub struct AiResult {
     pub file_count: u32,
     pub repository_count: u32,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiEvent {
     pub r#type: String,
@@ -224,7 +240,8 @@ pub struct AiEvent {
     pub phase: String,
     pub delta: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiRuntime {
     pub configured: bool,
@@ -234,7 +251,8 @@ pub struct AiRuntime {
     pub message: String,
     pub version: Option<String>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AiPrompt {
     pub text: String,

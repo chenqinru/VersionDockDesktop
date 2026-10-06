@@ -10,6 +10,7 @@ mod changelist;
 mod cli;
 mod commands;
 mod diff_content;
+mod http_client;
 mod identity;
 mod interactions;
 pub mod logger;

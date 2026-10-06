@@ -1,63 +1,19 @@
 import { useEffect, useState } from 'react';
-import { createHighlighterCore, type HighlighterCore } from 'shiki/core';
-import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
-import darkPlus from 'shiki/themes/dark-plus.mjs';
-import lightPlus from 'shiki/themes/light-plus.mjs';
-import githubDimmed from 'shiki/themes/github-dark-dimmed.mjs';
-import oneDarkPro from 'shiki/themes/one-dark-pro.mjs';
-import dracula from 'shiki/themes/dracula.mjs';
-import nord from 'shiki/themes/nord.mjs';
-import { theme2026Dark, theme2026Light } from '../theme';
-import css from 'shiki/langs/css.mjs';
-import go from 'shiki/langs/go.mjs';
-import html from 'shiki/langs/html.mjs';
-import java from 'shiki/langs/java.mjs';
-import javascript from 'shiki/langs/javascript.mjs';
-import json from 'shiki/langs/json.mjs';
-import markdown from 'shiki/langs/markdown.mjs';
-import php from 'shiki/langs/php.mjs';
-import python from 'shiki/langs/python.mjs';
-import shell from 'shiki/langs/shell.mjs';
-import typescript from 'shiki/langs/typescript.mjs';
-import xml from 'shiki/langs/xml.mjs';
-import yaml from 'shiki/langs/yaml.mjs';
+import type { HighlighterCore } from 'shiki/core';
+import { cachedHighlighter, ensureHighlighter } from './highlighter';
 
-let highlighterInstance: HighlighterCore | null = null;
-let highlighterPromise: Promise<HighlighterCore> | null = null;
-
-function ensureHighlighter(): Promise<HighlighterCore> {
-  if (highlighterInstance) return Promise.resolve(highlighterInstance);
-
-  if (!highlighterPromise) {
-    highlighterPromise = createHighlighterCore({
-      themes: [theme2026Dark, theme2026Light, darkPlus, lightPlus, githubDimmed, oneDarkPro, dracula, nord],
-      langs: [javascript, typescript, json, css, html, markdown, java, xml, yaml, php, python, go, shell],
-      engine: createJavaScriptRegexEngine(),
-    }).then((highlighter) => {
-      highlighterInstance = highlighter;
-      return highlighter;
-    }).catch((error) => {
-      highlighterPromise = null;
-      throw error;
-    });
-  }
-
-  return highlighterPromise;
-}
-
-export function useShiki(): HighlighterCore | null {
-  const [highlighter, setHighlighter] = useState<HighlighterCore | null>(highlighterInstance);
+export function useShiki(language: string): HighlighterCore | null {
+  const [ready, setReady] = useState(() => ({ language, highlighter: cachedHighlighter(language) }));
 
   useEffect(() => {
     let disposed = false;
-    ensureHighlighter().then((instance) => {
-      if (!disposed) setHighlighter(instance);
+    ensureHighlighter(language).then((highlighter) => {
+      if (!disposed) setReady({ language, highlighter });
     }).catch(() => {
-      if (!disposed) setHighlighter(null);
+      if (!disposed) setReady({ language, highlighter: null });
     });
-
     return () => { disposed = true; };
-  }, []);
+  }, [language]);
 
-  return highlighter;
+  return ready.language === language ? ready.highlighter : null;
 }

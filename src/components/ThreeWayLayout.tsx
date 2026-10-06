@@ -1195,7 +1195,7 @@ function CodeLines({ lines, startLine, language, dim, changeFlags, changeTone }:
   changeTone?: ChangeTone;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const highlighter = useShiki();
+  const highlighter = useShiki(normalizeShikiLang(language));
   const colorTheme = useEffectiveTheme();
   const displayedLines = useMemo(() => lines.length > 0 ? lines : [''], [lines]);
 
@@ -1247,7 +1247,7 @@ function EditableCodeBlock({ value, startLine, language, ariaLabel, dim, changeF
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlighter = useShiki();
+  const highlighter = useShiki(normalizeShikiLang(language));
   const colorTheme = useEffectiveTheme();
   const lines = useMemo(() => {
     const split = value.split('\n');

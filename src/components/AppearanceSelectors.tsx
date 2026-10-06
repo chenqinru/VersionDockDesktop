@@ -36,7 +36,7 @@ function RadioCards<T extends string>({ label, value, choices, onChange, classNa
 
 const sampleCode = 'let n=1;\nreturn n;';
 function ThemeSample({ theme }: { theme: EffectiveTheme }) {
-  const highlighter = useShiki();
+  const highlighter = useShiki('typescript');
   const tokens = useMemo(() => highlighter?.codeToTokens(sampleCode, { lang: 'typescript', theme: resolveShikiTheme(theme) }).tokens, [highlighter, theme]);
   return <div className="theme-preview-surface" data-theme={theme}>
     <div className="theme-sample-sidebar"><Codicon name="files" /><span /><span className="active" /></div>

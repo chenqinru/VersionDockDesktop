@@ -1,7 +1,8 @@
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { bundledLanguages, codeToTokensBase, type BundledLanguage, type BundledTheme, type ThemeRegistrationRaw, type ThemedToken } from 'shiki';
+import type { BundledLanguage, BundledTheme, ThemeRegistrationRaw, ThemedToken } from 'shiki/types';
+import { ensureHighlighter, resolveHighlightLanguage } from '../utils/highlighter';
 import { BridgeContext } from '../platform/context';
 import { FileSearchWidget } from './FileSearchWidget';
 import { IconButton } from './IconButton';
@@ -81,7 +82,7 @@ export function resolveDiffHighlightLanguage(language: string, path: string, lin
     if (looksLikeStylesheet(lines)) return 'css';
     return 'typescript';
   }
-  return requested in bundledLanguages ? requested as BundledLanguage : null;
+  return resolveHighlightLanguage(requested);
 }
 
 export interface DiffSelectionLineRange {
@@ -196,7 +197,11 @@ export function extractDiffLineRange(container: HTMLElement, target?: Element | 
 export async function highlightDiffLines(lines: string[], language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw): Promise<ThemedToken[][]> {
   const resolved = resolveDiffHighlightLanguage(language, path, lines);
   if (!resolved) return lines.map(() => []);
-  return codeToTokensBase(lines.join('\n'), { lang: resolved, theme });
+  const highlighter = await ensureHighlighter(resolved);
+  if (typeof theme !== 'string' && (!theme.name || !highlighter.getLoadedThemes().includes(theme.name))) {
+    highlighter.loadTheme(theme);
+  }
+  return highlighter.codeToTokensBase(lines.join('\n'), { lang: resolved, theme });
 }
 
 function diffCellGroups(parsed: ParsedUnifiedDiff, side: DiffSide): DiffCell[][] {

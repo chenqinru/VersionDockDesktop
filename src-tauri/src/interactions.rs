@@ -1,6 +1,7 @@
 //! In-operation prompts: retry only the failed command, never an entire batch.
 use crate::models::{DesktopError, PushProtectionTarget, RepositoryMeta, RequestContext};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use specta::Type;
 use std::{
     collections::HashMap,
@@ -10,14 +11,16 @@ use tauri::{Emitter, Manager, WebviewWindow};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum InteractionKind {
     SvnAuthentication,
     PushRecovery,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -41,7 +44,8 @@ pub enum InteractionEvent {
     },
 }
 
-#[derive(Debug, Default, Deserialize, Type)]
+#[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct InteractionResponse {
     pub choice: String,

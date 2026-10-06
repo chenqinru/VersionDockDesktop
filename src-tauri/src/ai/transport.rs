@@ -1,6 +1,5 @@
 use super::models::AiConfig;
 use crate::models::DesktopError;
-use reqwest::Client;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -197,7 +196,7 @@ pub async fn generate(
         }] = json!(max_output);
         v
     };
-    let client = Client::builder()
+    let client = crate::http_client::builder()
         .timeout(Duration::from_secs(120))
         .redirect(reqwest::redirect::Policy::none())
         .build()

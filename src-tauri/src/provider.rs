@@ -40,7 +40,7 @@ struct PendingFlow {
 static FLOWS: OnceLock<Mutex<HashMap<String, PendingFlow>>> = OnceLock::new();
 
 fn client() -> Result<Client, DesktopError> {
-    Client::builder()
+    crate::http_client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .user_agent("VersionDock-Desktop/0.1")

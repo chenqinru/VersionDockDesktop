@@ -1,19 +1,22 @@
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use specta::Type;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RequestEnvelope {
     pub request_id: String,
     pub context: RequestContext,
     pub command: BridgeCommand,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub push_approvals: Vec<PushProtectionTarget>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PushProtectionTarget {
     pub repo_id: String,
@@ -24,7 +27,8 @@ pub struct PushProtectionTarget {
     pub proof: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub generation: u32,
@@ -36,7 +40,8 @@ pub struct RequestContext {
     pub target: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum OperationVisibility {
     #[default]
@@ -44,7 +49,8 @@ pub enum OperationVisibility {
     Background,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum OperationDomain {
     Application,
@@ -70,7 +76,8 @@ pub enum OperationDomain {
     System,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum OperationStatus {
     Queued,
@@ -82,16 +89,18 @@ pub enum OperationStatus {
     TimedOut,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ResponseEnvelope {
     pub request_id: String,
-    #[specta(type = specta_typescript::Unknown)]
+    #[cfg_attr(test, specta(type = specta_typescript::Unknown))]
     pub result: Option<serde_json::Value>,
     pub error: Option<DesktopError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WindowTabTransfer {
     pub transfer_id: String,
@@ -101,7 +110,8 @@ pub struct WindowTabTransfer {
     pub paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WindowTabImport {
     pub transfer: WindowTabTransfer,
@@ -110,7 +120,8 @@ pub struct WindowTabImport {
     pub target_client_x: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WindowTabTransferCompleted {
     pub transfer_id: String,
@@ -138,7 +149,8 @@ impl ResponseEnvelope {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum BridgeCommand {
     Bootstrap,
@@ -290,7 +302,7 @@ pub enum BridgeCommand {
     },
     WindowStoreTabSession {
         transfer: WindowTabTransfer,
-        #[specta(type = specta_typescript::Unknown)]
+        #[cfg_attr(test, specta(type = specta_typescript::Unknown))]
         session: serde_json::Value,
     },
     WindowReadTabSession {
@@ -359,7 +371,7 @@ pub enum BridgeCommand {
         repo_id: String,
         paths: Vec<String>,
         #[serde(default)]
-        #[specta(optional)]
+        #[cfg_attr(test, specta(optional))]
         allow_truncated: bool,
     },
     Unstage {
@@ -678,7 +690,7 @@ pub enum BridgeCommand {
         content: String,
         expected_fingerprint: String,
         #[serde(default)]
-        #[specta(optional)]
+        #[cfg_attr(test, specta(optional))]
         delete_file: Option<bool>,
     },
     ConflictAccept {
@@ -697,7 +709,7 @@ pub enum BridgeCommand {
         repo_id: String,
         operation: String,
         #[serde(default)]
-        #[specta(optional)]
+        #[cfg_attr(test, specta(optional))]
         skip: Option<bool>,
     },
     GitUnlockIndex {
@@ -765,7 +777,7 @@ pub enum BridgeCommand {
     LogExport {
         target_path: String,
         #[serde(default)]
-        #[specta(optional)]
+        #[cfg_attr(test, specta(optional))]
         entries: Option<Vec<crate::logger::LogEntry>>,
     },
     LogClientPush {
@@ -779,7 +791,8 @@ pub enum BridgeCommand {
 #[allow(unused_imports)]
 pub use crate::logger::{LogChannel, LogEntry, LogLevel};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct BatchCommitTarget {
     pub repo_id: String,
@@ -787,17 +800,18 @@ pub struct BatchCommitTarget {
     pub amend: bool,
     pub paths: Vec<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub unstage_paths: Vec<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub no_verify: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub staged_only: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryOperationResult {
     pub repo_id: String,
@@ -811,26 +825,30 @@ pub struct RepositoryOperationResult {
     pub error: Option<DesktopError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeRepositoryResult {
     pub snapshot: WorkspaceSnapshot,
     pub repository_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CloneRepositoryResult {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CheckoutRepositoryResult {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum RemoteProviderKind {
     Github,
@@ -838,7 +856,8 @@ pub enum RemoteProviderKind {
     Gitee,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteProviderAccount {
     pub id: String,
@@ -849,7 +868,8 @@ pub struct RemoteProviderAccount {
     pub secure_storage_ref: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct GithubDeviceFlow {
     pub flow_id: String,
@@ -859,7 +879,8 @@ pub struct GithubDeviceFlow {
     pub interval: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteNamespace {
     pub id: String,
@@ -869,7 +890,8 @@ pub struct RemoteNamespace {
     pub host: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteRepository {
     pub id: String,
@@ -884,7 +906,8 @@ pub struct RemoteRepository {
     pub private: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteRepositoryPage {
     pub items: Vec<RemoteRepository>,
@@ -892,7 +915,8 @@ pub struct RemoteRepositoryPage {
     pub has_more: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum RemoteVisibility {
     Private,
@@ -900,7 +924,8 @@ pub enum RemoteVisibility {
     Public,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PublishRepositoryResult {
     pub repository: RemoteRepository,
@@ -913,7 +938,8 @@ pub struct PublishRepositoryResult {
     pub error: Option<DesktopError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RecentCommitMessage {
     pub repo_id: String,
@@ -922,14 +948,16 @@ pub struct RecentCommitMessage {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct LineRange {
     pub start: u32,
     pub end: u32,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryQuery {
     pub text: Option<String>,
@@ -942,17 +970,19 @@ pub struct HistoryQuery {
     pub line_range: Option<LineRange>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SyncResult {
     pub output: String,
     pub update: Option<RepositoryUpdateResult>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub restore_warning: Option<UpdateRestoreWarning>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRestoreWarning {
     pub shelf: bool,
@@ -962,7 +992,8 @@ pub struct UpdateRestoreWarning {
     pub details: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryUpdateResult {
     pub repo_id: String,
@@ -974,7 +1005,8 @@ pub struct RepositoryUpdateResult {
     pub after_status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSummary {
     pub kind: UpdateKind,
@@ -984,7 +1016,8 @@ pub struct UpdateSummary {
     pub detail: UpdateDetail,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateKind {
     NoChanges,
@@ -992,14 +1025,16 @@ pub enum UpdateKind {
     Updated,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDetail {
     pub commits: Vec<CommitNode>,
     pub files: Vec<CommitFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct IgnoreRules {
     pub directory: String,
@@ -1007,7 +1042,8 @@ pub struct IgnoreRules {
     pub patterns: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum SyncAction {
     Fetch,
@@ -1019,7 +1055,8 @@ pub enum SyncAction {
     Update,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum BranchOperation {
     Create {
@@ -1047,14 +1084,16 @@ pub enum BranchOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct BranchOperationResult {
     pub completed: bool,
     pub conflicted: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum BranchRecoveryOperation {
     StashAndCheckout { target: String },
@@ -1063,7 +1102,8 @@ pub enum BranchRecoveryOperation {
     StashAndMerge { target: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum BranchRecoveryStatus {
     Completed,
@@ -1071,7 +1111,8 @@ pub enum BranchRecoveryStatus {
     PartialFailure,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct BranchRecoveryResult {
     pub status: BranchRecoveryStatus,
@@ -1082,7 +1123,8 @@ pub struct BranchRecoveryResult {
     pub recovery_hint: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TagOperation {
     Create {
@@ -1105,7 +1147,8 @@ pub enum TagOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum StashOperation {
     Create {
@@ -1130,7 +1173,8 @@ pub enum StashOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ShelfOperation {
     Create {
@@ -1147,7 +1191,8 @@ pub enum ShelfOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ChangelistOperation {
     Create {
@@ -1169,7 +1214,8 @@ pub enum ChangelistOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorktreeOperation {
     Create {
@@ -1193,7 +1239,8 @@ pub enum WorktreeOperation {
     Prune,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SubtreeOperation {
     Add {
@@ -1239,7 +1286,8 @@ pub enum SubtreeOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleEntry {
     pub name: String,
@@ -1252,10 +1300,10 @@ pub struct SubmoduleEntry {
     pub sync_status: SubmoduleSyncStatus,
     pub recorded_commit: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub index_commit: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub conflict_stages: Option<SubmoduleConflictStages>,
     pub current_branch: Option<String>,
     pub detached: bool,
@@ -1263,14 +1311,15 @@ pub struct SubmoduleEntry {
     #[serde(default)]
     pub type_change: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub companion_path: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub diff_summary: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleConflictStages {
     pub base: Option<String>,
@@ -1278,7 +1327,8 @@ pub struct SubmoduleConflictStages {
     pub theirs: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum SubmoduleSyncStatus {
     Synced,
@@ -1287,7 +1337,8 @@ pub enum SubmoduleSyncStatus {
     Conflict,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SubmoduleOperation {
     Add {
@@ -1336,14 +1387,16 @@ pub enum SubmoduleOperation {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum SubtreeState {
     Active,
     Pending,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ConflictChoice {
     Mine,
@@ -1351,7 +1404,8 @@ pub enum ConflictChoice {
     Working,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GitProfileOperation {
     Save { profile: GitProfile },
@@ -1359,7 +1413,8 @@ pub enum GitProfileOperation {
     Select { profile_id: Option<String> },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct GitProfile {
     pub id: String,
@@ -1368,7 +1423,8 @@ pub struct GitProfile {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum GitIdentitySource {
     Custom,
@@ -1377,7 +1433,8 @@ pub enum GitIdentitySource {
     Missing,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveGitIdentity {
     pub user_name: String,
@@ -1387,7 +1444,8 @@ pub struct EffectiveGitIdentity {
     pub valid: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct GitIdentityState {
     pub profiles: Vec<GitProfile>,
@@ -1397,7 +1455,8 @@ pub struct GitIdentityState {
     pub effective: EffectiveGitIdentity,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SvnAccountOperation {
     Switch {
@@ -1416,7 +1475,8 @@ pub enum SvnAccountOperation {
     },
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum SvnCredentialSource {
     VersionDockSecureStore,
@@ -1426,7 +1486,8 @@ pub enum SvnCredentialSource {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SvnNativeCredential {
     pub id: String,
@@ -1434,7 +1495,8 @@ pub struct SvnNativeCredential {
     pub username: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SvnOperation {
     RemoveIgnoreEntries {
@@ -1475,7 +1537,8 @@ pub enum SvnOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SvnAccountState {
     pub repository_url: String,
@@ -1491,7 +1554,8 @@ pub struct SvnAccountState {
     pub native_credentials: Vec<SvnNativeCredential>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum RemoteOperation {
     Add {
@@ -1515,7 +1579,8 @@ pub enum RemoteOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopError {
     pub code: String,
@@ -1524,18 +1589,18 @@ pub struct DesktopError {
     pub exit_code: Option<i32>,
     pub stderr: Option<String>,
     pub recoverable: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub operation: Option<String>,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub workspace_id: Option<String>,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub repository_id: Option<String>,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub subject: Option<String>,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub hint: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub restore_warning: Option<UpdateRestoreWarning>,
 }
 
@@ -1563,7 +1628,8 @@ impl DesktopError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct OperationEvent {
     pub operation_id: String,
@@ -1576,12 +1642,13 @@ pub struct OperationEvent {
     pub completed: Option<u32>,
     pub total: Option<u32>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub result: Option<OperationResultSummary>,
     pub error: Option<DesktopError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct OperationResultSummary {
     pub summary: String,
@@ -1589,6 +1656,8 @@ pub struct OperationResultSummary {
     pub failed: u32,
 }
 
+// 前端事件契约的生成类型，实际事件载荷由具体操作发出。
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceEvent {
@@ -1597,7 +1666,8 @@ pub struct WorkspaceEvent {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryEvent {
     pub workspace_id: String,
@@ -1607,7 +1677,8 @@ pub struct RepositoryEvent {
     pub scopes: Vec<RefreshScope>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum RepositoryEventSource {
     Watcher,
@@ -1616,7 +1687,8 @@ pub enum RepositoryEventSource {
     OtherWindow,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum RefreshScope {
     WorkspaceSnapshot,
@@ -1634,57 +1706,58 @@ pub enum RefreshScope {
     Submodules,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AppStateSnapshot {
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub settings: DesktopSettings,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub layout: LayoutState,
     pub last_workspace_id: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub open_workspace_ids: Vec<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub active_workspace_id: Option<String>,
     pub recent_workspaces: Vec<WorkspaceDescriptor>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub commit_selections: BTreeMap<String, Vec<RepositoryCommitSelection>>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub theme: Option<ThemePreference>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub language: Option<LanguagePreference>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub ui_font_size: Option<UiFontSizePreference>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub panel_sizes: Option<PanelSizes>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub active_tab: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub file_view_mode: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub stash_view_mode: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub external_editor: Option<ExternalEditor>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub branch_sidebar_collapsed: Option<bool>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub branch_sidebar_collapsed_sections: Option<Vec<String>>,
 }
 
@@ -1692,21 +1765,22 @@ fn default_schema_version() -> u32 {
     7
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettings {
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub ai_config: crate::ai::models::AiConfig,
 
     pub theme: ThemePreference,
     pub language: LanguagePreference,
     pub ui_font_size: UiFontSizePreference,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub layout_density: LayoutDensity,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub scrollbar_visibility: ScrollbarVisibility,
     pub changes_display_mode: ChangesDisplayMode,
     pub default_commit_action: DefaultCommitAction,
@@ -1716,13 +1790,13 @@ pub struct DesktopSettings {
     pub auto_refresh_interval: u32,
     pub fetch_on_startup: bool,
     #[serde(default = "default_true")]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub auto_fetch_on_focus: bool,
     #[serde(default = "default_auto_fetch_minutes")]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub auto_fetch_interval_minutes: u32,
     #[serde(default = "default_true")]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub show_profile_status_bar: bool,
     pub reset_view_locations_on_startup: bool,
     pub notify_incoming_commits: bool,
@@ -1732,22 +1806,22 @@ pub struct DesktopSettings {
     pub maximum_graph_commits: u32,
     pub project_colors: BTreeMap<String, String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub hidden_repository_ids: Vec<String>,
     pub external_editor: Option<ExternalEditor>,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub skipped_update_version: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub online_avatars_enabled: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub gravatar_enabled: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub avatar_cross_platform_fallback: bool,
     #[serde(default)]
     pub file_icon_theme: FileIconThemePreference,
@@ -1968,7 +2042,8 @@ fn normalize_color(value: &str) -> Option<String> {
     is_color(value).then(|| value.to_ascii_lowercase())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ChangesDisplayMode {
     #[default]
@@ -1977,7 +2052,8 @@ pub enum ChangesDisplayMode {
     Vscode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum DefaultCommitAction {
     #[default]
@@ -1985,7 +2061,8 @@ pub enum DefaultCommitAction {
     CommitAndPush,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum DefaultSaveAction {
     #[default]
@@ -1993,7 +2070,8 @@ pub enum DefaultSaveAction {
     Shelf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum OnPushRejectedAction {
     #[default]
@@ -2002,7 +2080,8 @@ pub enum OnPushRejectedAction {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateProjectMethod {
     #[default]
@@ -2011,7 +2090,8 @@ pub enum UpdateProjectMethod {
     Prompt,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum CleanWorkingTreeMethod {
     #[default]
@@ -2019,7 +2099,8 @@ pub enum CleanWorkingTreeMethod {
     Stash,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ShelveComparisonBase {
     #[default]
@@ -2027,7 +2108,8 @@ pub enum ShelveComparisonBase {
     Parent,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum CatFileFilterMode {
     #[default]
@@ -2036,7 +2118,8 @@ pub enum CatFileFilterMode {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum FetchTagsMode {
     #[default]
@@ -2045,7 +2128,8 @@ pub enum FetchTagsMode {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutState {
     pub panel_sizes: PanelSizes,
@@ -2069,7 +2153,8 @@ impl Default for LayoutState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsEffects {
     pub rescan_workspace: bool,
@@ -2077,14 +2162,16 @@ pub struct SettingsEffects {
     pub restart_auto_refresh: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsUpdateResult {
     pub settings: DesktopSettings,
     pub effects: SettingsEffects,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ThemePreference {
     #[default]
@@ -2099,7 +2186,8 @@ pub enum ThemePreference {
     Dark,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum LanguagePreference {
     #[default]
@@ -2108,7 +2196,8 @@ pub enum LanguagePreference {
     En,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum LayoutDensity {
     #[default]
@@ -2116,7 +2205,8 @@ pub enum LayoutDensity {
     Compact,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ScrollbarVisibility {
     #[default]
@@ -2125,7 +2215,8 @@ pub enum ScrollbarVisibility {
     Visible,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum UiFontSizePreference {
     Minimum,
@@ -2136,7 +2227,8 @@ pub enum UiFontSizePreference {
     Maximum,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum FileIconThemePreference {
     #[default]
@@ -2146,14 +2238,16 @@ pub enum FileIconThemePreference {
     Codicon,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalEditor {
     pub executable: String,
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PanelSizes {
     pub commit: u32,
@@ -2171,7 +2265,8 @@ impl Default for PanelSizes {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapData {
     pub state: AppStateSnapshot,
@@ -2179,14 +2274,15 @@ pub struct BootstrapData {
     pub capabilities: DesktopCapabilities,
     pub application_session_id: String,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub launch_workspace_id: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub runtime: RuntimeCapabilities,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityStatus {
     pub available: bool,
@@ -2212,7 +2308,8 @@ impl CapabilityStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum NotificationPermissionState {
     #[default]
@@ -2223,7 +2320,8 @@ pub enum NotificationPermissionState {
     Unavailable,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SecureCredentialCapability {
     pub status: CapabilityStatus,
@@ -2231,7 +2329,8 @@ pub struct SecureCredentialCapability {
     pub password_stdin_supported: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCapabilities {
     pub system_notifications: CapabilityStatus,
@@ -2239,39 +2338,41 @@ pub struct RuntimeCapabilities {
     pub secure_credentials: SecureCredentialCapability,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopCapabilities {
     pub ai: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub initialize_repository: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub clone_repository: bool,
     pub stash: bool,
     pub shelf: bool,
     pub changelist: bool,
     pub worktree: bool,
     pub subtree: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub submodule: bool,
     pub compare: bool,
     pub remote_management: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub identity: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub svn_account: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub file_history: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub secure_credentials: bool,
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub system_notifications: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub availability: BTreeMap<String, CapabilityStatus>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryCapabilities {
     pub status: bool,
@@ -2292,25 +2393,27 @@ pub struct RepositoryCapabilities {
     pub svn_account: bool,
     pub file_history: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub availability: BTreeMap<String, CapabilityStatus>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ToolAvailability {
     pub git: bool,
     pub svn: bool,
     pub svnadmin: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub git_version: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub svn_version: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDescriptor {
     pub id: String,
@@ -2320,7 +2423,8 @@ pub struct WorkspaceDescriptor {
     pub available: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSnapshot {
     pub workspace: WorkspaceDescriptor,
@@ -2329,7 +2433,8 @@ pub struct WorkspaceSnapshot {
     pub tools: ToolAvailability,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryMeta {
     pub id: String,
@@ -2343,14 +2448,16 @@ pub struct RepositoryMeta {
     pub is_worktree: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum VcsKind {
     Git,
     Svn,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryStatus {
     pub meta: RepositoryMeta,
@@ -2362,14 +2469,15 @@ pub struct RepositoryStatus {
     pub conflicts: u32,
     pub operation: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub capabilities: RepositoryCapabilities,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub tool_available: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct FileChange {
     pub path: String,
@@ -2378,26 +2486,27 @@ pub struct FileChange {
     pub unstaged: bool,
     pub conflicted: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub conflict_type: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub conflict_types: Option<Vec<String>>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub conflict_status: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub submodule: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub is_truncated: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub truncation_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DiffLineHistoryTarget {
     pub path: String,
@@ -2405,7 +2514,8 @@ pub struct DiffLineHistoryTarget {
     pub line_range: LineRange,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DiffDocument {
     pub path: String,
@@ -2416,7 +2526,8 @@ pub struct DiffDocument {
     pub line_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CommitNode {
     pub repo_id: String,
@@ -2435,7 +2546,8 @@ pub struct CommitNode {
     pub unpushed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct GraphCommitNode {
     pub repo_id: String,
@@ -2445,7 +2557,8 @@ pub struct GraphCommitNode {
     pub refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CommitFile {
     pub path: String,
@@ -2454,7 +2567,8 @@ pub struct CommitFile {
     pub removed: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RevisionChanges {
     pub from_revision: String,
@@ -2462,7 +2576,8 @@ pub struct RevisionChanges {
     pub files: Vec<CommitFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct MergeParentChange {
     pub hash: String,
@@ -2474,7 +2589,8 @@ pub struct MergeParentChange {
     pub file_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CommitDetail {
     pub commit: CommitNode,
@@ -2482,24 +2598,26 @@ pub struct CommitDetail {
     pub files: Vec<CommitFile>,
     pub branches: CommitBranches,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub branches_pending: Option<bool>,
     #[serde(default)]
     pub merge_parent_changes: Vec<MergeParentChange>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CommitBranches {
     pub local: Vec<String>,
     pub remote: Vec<String>,
     pub tags: Vec<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub is_head: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct MergeCommitSummary {
     pub hash: String,
@@ -2510,14 +2628,16 @@ pub struct MergeCommitSummary {
     pub parent_index: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryPage {
     pub commits: Vec<CommitNode>,
     pub has_more: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct FileHistoryEntry {
     pub revision: String,
@@ -2530,14 +2650,16 @@ pub struct FileHistoryEntry {
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct FileHistoryPage {
     pub entries: Vec<FileHistoryEntry>,
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct FileRevisionDocument {
     pub revision: String,
@@ -2547,21 +2669,22 @@ pub struct FileRevisionDocument {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct UnpushedCommit {
     pub hash: String,
     pub short_hash: String,
     pub message: String,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub body: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub full_message: Option<String>,
     pub author: String,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub author_email: Option<String>,
     pub date: String,
     pub files_changed: u32,
@@ -2571,21 +2694,22 @@ pub struct UnpushedCommit {
     pub parents: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct IncomingCommit {
     pub hash: String,
     pub short_hash: String,
     pub message: String,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub body: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub full_message: Option<String>,
     pub author: String,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub author_email: Option<String>,
     pub date: String,
     pub files_changed: u32,
@@ -2595,7 +2719,8 @@ pub struct IncomingCommit {
     pub potential_conflict_paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum UnpushedOperation {
     Revert {
@@ -2618,7 +2743,8 @@ pub enum UnpushedOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum HistoryOperation {
     Checkout {
@@ -2657,7 +2783,8 @@ pub enum HistoryOperation {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CommitPathOperationEntry {
     pub revision: String,
@@ -2665,14 +2792,16 @@ pub struct CommitPathOperationEntry {
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PatchDocument {
     pub file_name: String,
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct BranchCompareResult {
     pub base: String,
@@ -2682,7 +2811,8 @@ pub struct BranchCompareResult {
     pub files: Vec<CommitFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct BranchInfo {
     pub name: String,
@@ -2703,7 +2833,8 @@ pub struct BranchInfo {
     pub last_commit_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct TagInfo {
     pub name: String,
@@ -2711,7 +2842,8 @@ pub struct TagInfo {
     pub date: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct StashEntry {
     pub reference: String,
@@ -2723,14 +2855,16 @@ pub struct StashEntry {
     pub files: Vec<ShelfFileEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ShelfFileEntry {
     pub path: String,
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ShelfEntry {
     pub id: String,
@@ -2741,7 +2875,8 @@ pub struct ShelfEntry {
     pub files: Vec<ShelfFileEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ChangelistEntry {
     pub id: String,
@@ -2753,7 +2888,8 @@ pub struct ChangelistEntry {
     pub is_active: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeEntry {
     pub path: String,
@@ -2767,7 +2903,8 @@ pub struct WorktreeEntry {
     pub main: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDiffResult {
     pub path: String,
@@ -2776,7 +2913,8 @@ pub struct WorktreeDiffResult {
     pub files: Vec<CommitFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SubtreeEntry {
     pub id: String,
@@ -2787,7 +2925,8 @@ pub struct SubtreeEntry {
     pub state: SubtreeState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SubtreePushStatus {
     pub subtree_id: String,
@@ -2799,7 +2938,8 @@ pub struct SubtreePushStatus {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteInfo {
     pub name: String,
@@ -2807,7 +2947,8 @@ pub struct RemoteInfo {
     pub push_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictFile {
     pub repo_id: String,
@@ -2817,23 +2958,24 @@ pub struct ConflictFile {
     pub kind: VcsKind,
     pub binary: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub conflict_type: String,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub conflict_types: Option<Vec<String>>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub actions: Vec<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub current_status: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub incoming_status: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictBlock {
     pub index: u32,
@@ -2846,7 +2988,8 @@ pub struct ConflictBlock {
     pub end_line: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct MergeVersions {
     pub path: String,
@@ -2862,35 +3005,39 @@ pub struct MergeVersions {
     pub fingerprint: String,
     pub binary: bool,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub ours_status: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub theirs_status: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryCommitSelection {
     pub repo_id: String,
     pub paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreConflictFailure {
     pub path: String,
     pub error: DesktopError,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreConflictsResult {
     pub restored_paths: Vec<String>,
     pub failures: Vec<RestoreConflictFailure>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictResolutionResult {
     pub resolved: bool,
@@ -2899,7 +3046,8 @@ pub struct ConflictResolutionResult {
     pub auto_committed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct LargeFileInfo {
     pub path: String,
@@ -2907,14 +3055,16 @@ pub struct LargeFileInfo {
     pub size_formatted: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct InvalidFileNameInfo {
     pub path: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CommitSafetyCheckResult {
     pub has_issues: bool,

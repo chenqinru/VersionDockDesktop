@@ -10,6 +10,7 @@ use std::{
 
 use chrono::{Local, Utc};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use specta::Type;
 use tauri::{AppHandle, Emitter};
 
@@ -20,7 +21,8 @@ const MAX_ROTATED_FILES: usize = 4;
 const WRITE_QUEUE_CAPACITY: usize = 2048;
 const WRITE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct LogContext {
     pub workspace_id: Option<String>,
@@ -35,7 +37,8 @@ pub async fn with_log_context<F: std::future::Future>(context: LogContext, futur
     LOG_CONTEXT.scope(context, future).await
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum LogLevel {
     Trace,
@@ -57,7 +60,8 @@ impl LogLevel {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum LogChannel {
     Git,
@@ -77,7 +81,8 @@ impl LogChannel {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {
     pub id: String,
@@ -90,7 +95,7 @@ pub struct LogEntry {
     pub exit_code: Option<i32>,
     pub cwd: Option<String>,
     #[serde(default)]
-    #[specta(optional)]
+    #[cfg_attr(test, specta(optional))]
     pub context: Option<LogContext>,
 }
 

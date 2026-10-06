@@ -135,7 +135,7 @@ function buildDiffDisplayLines(diff: string): DiffDisplayLine[] {
 }
 
 function DiffBlock({ unit }: { unit: ComposerChangeUnit }) {
-  const highlighter = useShiki();
+  const highlighter = useShiki(unit.language);
   const effectiveTheme = useEffectiveTheme();
   const binary = unit.status === 'binary' || unit.diff.includes('GIT binary patch');
   const rows = useMemo(() => binary ? [] : buildDiffDisplayLines(unit.diff), [binary, unit.diff]);
