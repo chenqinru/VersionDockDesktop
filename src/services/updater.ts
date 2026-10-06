@@ -1,6 +1,7 @@
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { version } from '../../package.json';
 import type { WorkspaceSnapshot, DesktopSettings } from '../bindings/generated';
 
 export interface AppUpdateCheckResult {
@@ -22,8 +23,8 @@ export interface UpdateDownloadProgress {
   percent: number;
 }
 
-export const APP_CURRENT_VERSION = '0.1.0';
-export const GITHUB_REPO_URL = 'https://github.com/chenqinru/VersionDockDesktop';
+export const APP_CURRENT_VERSION = version;
+export const GITHUB_REPO_URL = 'https://github.com/chenqinru/VersionDockDesktop-Releases';
 export const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 export const GITHUB_ISSUES_URL = `${GITHUB_REPO_URL}/issues/new`;
 export const AUTHOR_GITHUB_URL = 'https://github.com/chenqinru';
@@ -32,16 +33,18 @@ export const SPONSOR_URL = 'https://github.com/sponsors/chenqinru';
 export const LICENSE_NAME = 'GPL-3.0';
 
 let cachedUpdateInstance: Update | null = null;
+let checkGeneration = 0;
 
 /**
  * 检查应用是否有新版本
  */
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   const currentVersion = APP_CURRENT_VERSION;
+  const generation = ++checkGeneration;
+  cachedUpdateInstance = null;
   try {
-    const update = await check();
+    const update = await check({ timeout: 30_000 });
     if (!update) {
-      cachedUpdateInstance = null;
       return {
         available: false,
         currentVersion,
@@ -49,7 +52,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
       };
     }
 
-    cachedUpdateInstance = update;
+    if (generation === checkGeneration) cachedUpdateInstance = update;
     return {
       available: update.available,
       currentVersion: update.currentVersion || currentVersion,
@@ -59,33 +62,27 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
       rawUpdate: update,
     };
   } catch (error) {
+    if (generation === checkGeneration) cachedUpdateInstance = null;
     const message = error instanceof Error ? error.message : String(error);
     const isDev = message.includes('pubkey') || message.includes('target not set') || !('__TAURI_INTERNALS__' in window);
-    const isRemoteNotFound = message.includes('Could not fetch a valid release JSON') || message.includes('404');
-    if (isRemoteNotFound) {
-      return {
-        available: false,
-        currentVersion,
-        rawUpdate: null,
-      };
-    }
 
     // 尝试通过 GitHub API 获取最新 Release 信息供展示
     try {
-      const res = await fetch('https://api.github.com/repos/chenqinru/VersionDockDesktop/releases/latest', {
+      const res = await fetch(`${GITHUB_REPO_URL.replace('https://github.com/', 'https://api.github.com/repos/')}/releases/latest`, {
         headers: { Accept: 'application/vnd.github.v3+json' },
+        signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) {
         const data = await res.json();
         const latestTag = (data.tag_name || '').replace(/^v/, '');
-        const hasNewer = isNewerVersion(currentVersion, latestTag);
         return {
-          available: hasNewer,
+          available: false,
           currentVersion,
           latestVersion: latestTag || currentVersion,
           releaseDate: data.published_at,
           releaseNotes: data.body || '',
           rawUpdate: null,
+          error: message,
           isDevelopmentMode: isDev,
         };
       }
@@ -124,7 +121,7 @@ export function isNewerVersion(current: string, target: string): boolean {
 export async function downloadAndInstallAppUpdate(
   onProgress?: (progress: UpdateDownloadProgress) => void,
 ): Promise<void> {
-  const update = cachedUpdateInstance || (await check());
+  const update = cachedUpdateInstance || (await check({ timeout: 30_000 }));
   if (!update) {
     throw new Error('No update package available to install.');
   }
@@ -132,25 +129,29 @@ export async function downloadAndInstallAppUpdate(
   let downloaded = 0;
   let total = 0;
 
-  await update.downloadAndInstall((event) => {
-    switch (event.event) {
-      case 'Started':
-        total = event.data.contentLength ?? 0;
-        break;
-      case 'Progress':
-        downloaded += event.data.chunkLength;
-        onProgress?.({
-          chunkLength: event.data.chunkLength,
-          contentLength: total,
-          downloadedBytes: downloaded,
-          totalBytes: total,
-          percent: total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0,
-        });
-        break;
-      case 'Finished':
-        break;
-    }
-  });
+  try {
+    await update.downloadAndInstall((event) => {
+      switch (event.event) {
+        case 'Started':
+          total = event.data.contentLength ?? 0;
+          break;
+        case 'Progress':
+          downloaded += event.data.chunkLength;
+          onProgress?.({
+            chunkLength: event.data.chunkLength,
+            contentLength: total,
+            downloadedBytes: downloaded,
+            totalBytes: total,
+            percent: total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0,
+          });
+          break;
+        case 'Finished':
+          break;
+      }
+    });
+  } finally {
+    cachedUpdateInstance = null;
+  }
 }
 
 /**

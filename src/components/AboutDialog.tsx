@@ -80,15 +80,13 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
     setDownloading(true);
     setDownloadProgress(null);
     try {
-      if (checkResult?.rawUpdate) {
-        await downloadAndInstallAppUpdate((progress) => {
-          setDownloadProgress(progress);
-        });
-        setReadyToRestart(true);
-      } else {
-        // 如果没有原生 rawUpdate（如开发模式或降级模式），直接打开浏览器下载
-        await openExternalLink(GITHUB_RELEASES_URL);
+      if (!checkResult?.rawUpdate) {
+        throw new Error('No update package available to install.');
       }
+      await downloadAndInstallAppUpdate((progress) => {
+        setDownloadProgress(progress);
+      });
+      setReadyToRestart(true);
     } catch (error) {
       void confirmDialog({ title: t('Software Update'), message: t('Update download failed: {0}', error instanceof Error ? error.message : String(error)) });
     } finally {
@@ -98,7 +96,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
 
   const handleSkipVersion = (version: string) => {
     void updateSettings({ skippedUpdateVersion: version });
-    setCheckResult((prev) => (prev ? { ...prev, available: false } : null));
+    setCheckResult(null);
   };
 
   const handleCopyDiagnostics = async () => {

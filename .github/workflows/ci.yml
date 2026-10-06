@@ -41,7 +41,7 @@ jobs:
           workspaces: src-tauri -> src-tauri/target
 
       - name: Install Linux system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev minisign
 
       - name: Install frontend dependencies
         run: npm ci
@@ -178,4 +178,4 @@ jobs:
           VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
 
       - name: Build native bundles
-        run: npm run tauri:build -- --ci ${{ matrix.bundle-args }}
+        run: npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json ${{ matrix.bundle-args }}

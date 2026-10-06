@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable version tag to build (e.g. v0.1.1)
+        required: true
+        type: string
   push:
     tags:
       - 'v*'
@@ -10,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -20,10 +25,18 @@ jobs:
     timeout-minutes: 30
     outputs:
       version: ${{ steps.version.outputs.version }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
-      - name: Checkout
+      - name: Validate stable tag
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: node -e 'if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(process.env.RELEASE_TAG)) throw new Error("An existing stable version tag is required")'
+
+      - name: Checkout release tag
         uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ github.event.inputs.tag || github.ref_name }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -42,7 +55,7 @@ jobs:
           workspaces: src-tauri -> src-tauri/target
 
       - name: Install Linux system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev subversion
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev subversion minisign
 
       - name: Install frontend dependencies
         run: npm ci
@@ -55,36 +68,45 @@ jobs:
         env:
           VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
 
-      - name: Verify release version
+      - name: Verify release version and pin source commit
         id: version
-        run: node scripts/check-version.mjs
+        env:
+          GITHUB_REF_TYPE: tag
+          GITHUB_REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          node scripts/check-version.mjs
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  publish:
-    name: Publish (${{ matrix.name }})
+  build:
+    name: Build (${{ matrix.name }})
     needs: verify
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: macOS universal
+            platform: macos
             os: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             bundle-args: --target universal-apple-darwin
           - name: Windows x64
+            platform: windows
             os: windows-latest
             rust-targets: ''
             bundle-args: ''
           - name: Linux x64
+            platform: linux
             os: ubuntu-24.04
             rust-targets: ''
             bundle-args: ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      - name: Checkout
+      - name: Checkout verified source commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -109,31 +131,74 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and publish release
+      - name: Build signed bundles without publishing
+        id: bundles
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: v${{ needs.verify.outputs.version }}
-          releaseName: VersionDock Desktop v${{ needs.verify.outputs.version }}
-          releaseBody: See assets below to download VersionDock Desktop for your operating system.
-          releaseCommitish: ${{ github.sha }}
-          releaseDraft: true
-          prerelease: ${{ needs.verify.outputs.prerelease }}
-          args: ${{ matrix.bundle-args }}
+          uploadUpdaterJson: false
+          uploadWorkflowArtifacts: false
+          args: --ci ${{ matrix.bundle-args }}
 
-  finalize:
-    name: Finalize release
-    needs:
-      - verify
-      - publish
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - name: Publish completed draft
-        run: gh release edit "v${{ needs.verify.outputs.version }}" --draft=false --prerelease=${{ needs.verify.outputs.prerelease }}
+      - name: Stage only installation assets and signatures
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
+          RELEASE_PLATFORM: ${{ matrix.platform }}
+          RELEASE_VERSION: ${{ steps.bundles.outputs.appVersion }}
+          RELEASE_ARTIFACT_PATHS: ${{ steps.bundles.outputs.artifactPaths }}
+          RELEASE_OUTPUT_DIR: ${{ runner.temp }}/release-${{ matrix.platform }}
+        run: node scripts/release-artifacts.mjs stage
+
+      - name: Save private build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: ${{ runner.temp }}/release-${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish complete release
+    needs: [verify, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: versiondock-public-release
+      cancel-in-progress: false
+    env:
+      RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - name: Checkout verified source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Install signature verifier
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign
+
+      - name: Configure artifact paths
+        run: |
+          echo "RELEASE_ARTIFACTS_DIR=$RUNNER_TEMP/release-artifacts" >> "$GITHUB_ENV"
+          echo "RELEASE_OUTPUT_DIR=$RUNNER_TEMP/prepared-release" >> "$GITHUB_ENV"
+
+      - name: Download all private platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: ${{ env.RELEASE_ARTIFACTS_DIR }}
+
+      - name: Verify packages against client public key and generate manifest
+        run: node scripts/release-artifacts.mjs prepare
+
+      - name: Upload, verify and publish public release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: node scripts/publish-release.mjs

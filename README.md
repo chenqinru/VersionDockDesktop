@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/chenqinru/VersionDockDesktop/actions/workflows/ci.yml"><img alt="CI Status" src="https://img.shields.io/github/actions/workflow/status/chenqinru/VersionDockDesktop/ci.yml?branch=main&label=CI&logo=github"></a>
-  <a href="https://github.com/chenqinru/VersionDockDesktop/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/chenqinru/VersionDockDesktop?color=green"></a>
+  <a href="https://github.com/chenqinru/VersionDockDesktop-Releases/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/chenqinru/VersionDockDesktop-Releases?color=green"></a>
   <a href="https://v2.tauri.app/"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.0-24C8D8?logo=tauri"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-1.78%2B-DEA584?logo=rust"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-GPL--3.0-red"></a>
@@ -93,7 +93,7 @@ npm run bindings:check
 ## 📦 打包构建
 
 ```bash
-npm run tauri:build
+npm run tauri:build -- --config src-tauri/tauri.unsigned.conf.json
 ```
 
 - **macOS**：Apple Silicon / Intel 通用 `.dmg`、`.app`
@@ -116,8 +116,8 @@ npm run tauri:build
 
 欢迎提交 Pull Request 和 Issue！请参考 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详情。
 
-- 🐛 [报告 Bug](https://github.com/chenqinru/VersionDockDesktop/issues/new?template=bug_report.yml)
-- 💡 [提出 Feature](https://github.com/chenqinru/VersionDockDesktop/issues/new?template=feature_request.yml)
+- 🐛 [报告 Bug](https://github.com/chenqinru/VersionDockDesktop-Releases/issues/new)
+- 💡 [提出 Feature](https://github.com/chenqinru/VersionDockDesktop-Releases/issues/new)
 - 🔒 [安全政策](SECURITY.md)
 
 ---
@@ -125,3 +125,5 @@ npm run tauri:build
 ## 📄 许可证
 
 本项目采用 [GNU General Public License v3.0](LICENSE) 开源。
+
+自动更新与公开安装包的发布配置见 [公开发布流程](docs/release-publishing.md)。本地完整检查还需要安装 `minisign`（macOS：`brew install minisign`；Ubuntu：`sudo apt-get install minisign`）。

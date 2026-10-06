@@ -4,6 +4,7 @@ import { I18nContext, createTranslator } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { AboutDialog } from './AboutDialog';
 import * as updaterService from '../services/updater';
+import { version } from '../../package.json';
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
   check: vi.fn().mockResolvedValue(null),
@@ -46,7 +47,7 @@ describe('AboutDialog', () => {
   it('renders app name, version, and author info', () => {
     renderAboutDialog();
     expect(screen.getByText('VersionDock Desktop')).toBeInTheDocument();
-    expect(screen.getByText('v0.1.0')).toBeInTheDocument();
+    expect(screen.getByText(`v${version}`)).toBeInTheDocument();
     expect(screen.getByText('chenqinru')).toBeInTheDocument();
     expect(screen.getByText('GPL-3.0')).toBeInTheDocument();
   });
@@ -96,6 +97,32 @@ describe('AboutDialog', () => {
       expect(screen.getByText('Fixed bugs and improved performance')).toBeInTheDocument();
       expect(screen.getByText('Download and Install Update')).toBeInTheDocument();
     });
+  });
+
+  it('shows an update endpoint error without claiming the installed version is current', async () => {
+    vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
+      available: false, currentVersion: version, latestVersion: '0.2.0', error: '404', rawUpdate: null,
+    });
+    renderAboutDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Check for Updates/i }));
+    await waitFor(() => expect(screen.getByText('Update check error: 404')).toBeInTheDocument());
+    expect(screen.queryByText(/VersionDock is up to date/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Download and Install Update/i })).not.toBeInTheDocument();
+  });
+
+  it('downloads and installs the native package before offering restart', async () => {
+    const rawUpdate = { available: true } as NonNullable<updaterService.AppUpdateCheckResult['rawUpdate']>;
+    vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
+      available: true, currentVersion: version, latestVersion: '0.2.0', rawUpdate,
+    });
+    const install = vi.spyOn(updaterService, 'downloadAndInstallAppUpdate').mockResolvedValue(undefined);
+    const open = vi.spyOn(updaterService, 'openExternalLink').mockResolvedValue(undefined);
+    renderAboutDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Check for Updates/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Download and Install Update/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Restart to Install Update/i })).toBeInTheDocument());
+    expect(install).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
   });
 
   it('copies diagnostic report to clipboard', async () => {
