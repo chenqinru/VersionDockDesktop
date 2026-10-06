@@ -916,7 +916,7 @@ mod tests {
         .unwrap();
         let lines: Vec<_> = text.lines().collect();
         assert_eq!(lines.len(), 1200);
-        for record in lines.chunks_exact(3) {
+        for record in lines.as_chunks::<3>().0 {
             let id = record[1].strip_prefix("details-").unwrap();
             assert!(record[0].contains(&format!("command-{id} [workspace=Workspace]")));
             assert_eq!(record[2], format!("end-{id}"));
@@ -962,7 +962,7 @@ mod tests {
         .unwrap();
         let lines: Vec<_> = text.lines().collect();
         assert_eq!(lines.len(), 900);
-        for record in lines.chunks_exact(3) {
+        for record in lines.as_chunks::<3>().0 {
             let id = record[1].strip_prefix("details-").unwrap();
             assert!(record[0].contains(&format!("command-{id} [workspace=Workspace]")));
             assert_eq!(record[2], format!("end-{id}"));

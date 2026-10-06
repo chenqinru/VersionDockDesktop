@@ -14,7 +14,7 @@
   <a href="https://github.com/chenqinru/VersionDockDesktop/actions/workflows/ci.yml"><img alt="CI Status" src="https://img.shields.io/github/actions/workflow/status/chenqinru/VersionDockDesktop/ci.yml?branch=main&label=CI&logo=github"></a>
   <a href="https://github.com/chenqinru/VersionDockDesktop-Releases/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/chenqinru/VersionDockDesktop-Releases?color=green"></a>
   <a href="https://v2.tauri.app/"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.0-24C8D8?logo=tauri"></a>
-  <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-1.78%2B-DEA584?logo=rust"></a>
+  <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-1.99.0-DEA584?logo=rust"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-GPL--3.0-red"></a>
 </p>
 
@@ -50,7 +50,7 @@ VersionDock Desktop 是基于 Tauri 2、Rust、React 18 和 TypeScript 构建的
 
 ### 环境要求
 - **Node.js**: `20+`
-- **Rust**: `stable` (1.78+)
+- **Rust**: `1.99.0`，由 `rust-toolchain.toml` 固定，包含 rustfmt 和 Clippy；CI 使用相同版本
 - **System WebView**: 系统自带组件（macOS WebKit, Windows WebView2, Linux WebKit2GTK）
 - **Git**：系统 PATH 中安装 2.23 或更高版本
 - **SVN**：系统 PATH 中安装 1.9 或更高版本；安全的 password-stdin 凭据集成要求 1.10 或更高版本

@@ -126,6 +126,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.99.0
           components: rustfmt, clippy
 
       - name: Cache Rust build
@@ -203,6 +204,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.99.0
           targets: ${{ matrix.rust-targets }}
 
       - name: Cache Rust build

@@ -43,6 +43,7 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 - Rust 缓存统一使用 `src-tauri -> target`，新命名空间为 `v1-versiondock-target`，避开旧的错误缓存。
 - CI / Release 的 Rust 质量检查共用 `native-quality` 缓存键；日常平台测试使用 `native-tests`，完整打包使用 `native-bundles`。平台、架构、工具链和依赖锁文件仍由缓存 action 区分，避免测试缓存阻止完整打包缓存的建立。
 - 接口生成检查加入 `--locked`，防止检查过程中更新 Cargo 锁文件。
+- 本地通过 `rust-toolchain.toml` 固定 Rust 1.99.0，CI 与 Release 的所有 Rust 安装步骤显式使用相同版本。升级工具链时同步修改这几处配置并重新执行检查，避免浮动 `stable` 带来本地与 CI 的 Clippy 规则差异。
 
 本地 `npm run build`、`npm run check:frontend` 和 `npm run check` 仍执行原有完整校验。新增 `build:frontend` 为纯 Vite 构建，`check:frontend:source` 为前端检查，`check:frontend:ci` 将两者组合；Rust 接口校验由另一任务把关。
 
@@ -53,5 +54,6 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 - 执行工作流实际汇总命令，验证普通 CI 的 16 种、Release 的 64 种上游结果组合，每组仅全部成功时放行。
 - 使用共享前端的临时 Tauri 配置完成本地 Apple Silicon 原生 release 编译；`dist` 的 61 个文件哈希及修改时间全部保持不变，确认没有重复执行前端构建。该验证使用 `--no-bundle`，不代表安装包或更新签名验收。
 - 日常 macOS 新增的 Intel 目标检查命令本地执行通过，使用 `x86_64-apple-darwin` 和 `tauri/custom-protocol`。该检查不执行 Intel 程序。
+- 后续 CI 的浮动 `stable` 升级到 Rust 1.99.0，触发三处 Clippy 警告：Agent CLI 的延迟初始化和日志测试中的固定长度分块。已按新规则调整，并固定工具链；Rust 1.99.0 下 fmt、全目标/全特性 Clippy（`-D warnings`）、生成接口检查及 221 项 Rust 回归通过，6 项默认跳过。
 
 改动合入 `main` 并推送后才能验证 GitHub 运行耗时。新缓存首次运行仍需要冷构建；至少记录一次成功冷构建和一次依赖未变化的缓存命中运行，并比较关键路径及实际编译耗时。手动 CI 安装包和真实签名 Release 也需各运行一次。配置检查与本地编译不等于 GitHub 三平台工作流已执行。

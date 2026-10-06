@@ -353,9 +353,8 @@ pub async fn generate(
     let mut env: Vec<(String, String)> = Vec::new();
     let schema_dir = tempfile::tempdir().map_err(|e| error("AI_CLI_TEMP_FAILED", e.to_string()))?;
     let full=format!("{system}\n\nYou are analyzing the supplied evidence only. Do not edit files, run commands, browse, delegate, schedule tasks, or call write tools. Return the requested output and finish.\n\n{input}");
-    let stdin;
     let session_title = format!("VersionDock:{}", uuid::Uuid::new_v4());
-    match provider {
+    let stdin = match provider {
         "claude" => {
             args.extend(
                 [
@@ -378,7 +377,7 @@ pub async fn generate(
             for root in roots.iter().skip(1) {
                 args.extend(["--add-dir".into(), root.clone()]);
             }
-            stdin = full.clone();
+            full.clone()
         }
         "codex" => {
             args.extend(
@@ -403,7 +402,7 @@ pub async fn generate(
                     path.to_string_lossy().into_owned(),
                 ]);
             }
-            stdin = full.clone();
+            full.clone()
         }
         "antigravity" => {
             args.extend(
@@ -431,10 +430,10 @@ pub async fn generate(
             {
                 args.extend(["--conversation".into(), id]);
             }
-            stdin = format!(
+            format!(
                 "{}\n",
                 json!({"event":"user","message":{"role":"user","content":[{"type":"text","text":full}]}})
-            );
+            )
         }
         "opencode" => {
             args.extend(
@@ -468,10 +467,10 @@ pub async fn generate(
             }
             existing["agent"]["versiondock-readonly"] = json!({"mode":"primary","permission":{"*":"deny","read":{"*":"allow","*.env":"deny","*.env.*":"deny","*.pem":"deny","*.key":"deny"},"glob":"allow","grep":"allow","list":"allow"}});
             env.push(("OPENCODE_CONFIG_CONTENT".into(), existing.to_string()));
-            stdin = String::new();
+            String::new()
         }
         _ => return Err(error("AI_CLI_INVALID", "Unknown Agent CLI")),
-    }
+    };
     if !config.cli_model.is_empty() {
         let model = if provider == "opencode" && !config.cli_model.contains('/') {
             format!("opencode/{}", config.cli_model)
