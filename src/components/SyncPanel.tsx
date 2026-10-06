@@ -163,7 +163,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
     const success = await unpushedOperation(repo.meta.id, operation);
     if (!success) {
       const latest = useAppStore.getState().notifications.find((notification) => notification.type === 'error');
-      throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed'));
+      throw new Error(latest ? resolveNotificationText(latest.message, t, latest.repositoryCount) : t('Operation failed'));
     }
     return true;
   };

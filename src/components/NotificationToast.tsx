@@ -49,7 +49,7 @@ function ToastItem({
         <div className={`notification-severity-icon ${notification.type}`}>
           <Codicon name={notification.type === 'error' ? 'error' : notification.type === 'warning' ? 'warning' : 'info'} />
         </div>
-        <div className="toast-message" title={resolveNotificationText(notification.title, t)}>{resolveNotificationText(notification.message, t)}{notification.progressMessage && <> {resolveNotificationText(notification.progressMessage, t)}</>}</div>
+        <div className="toast-message" title={resolveNotificationText(notification.title, t, notification.repositoryCount)}>{resolveNotificationText(notification.message, t, notification.repositoryCount)}{notification.progressMessage && <> {resolveNotificationText(notification.progressMessage, t, notification.repositoryCount)}</>}</div>
         {!notification.progress && <IconButton
           type="button"
           className="toast-close"
@@ -69,7 +69,7 @@ function ToastItem({
                 disabled={notification.actionState?.[index] === 'done' || Object.values(notification.actionState ?? {}).includes('running')}
                 key={`${action.type}-${index}`}
                 onClick={() => onAction(index)}
-              >{resolveNotificationText(action.label, t)}</button>
+              >{resolveNotificationText(action.label, t, notification.repositoryCount)}</button>
             ))}
           </div>
         </div>
@@ -82,7 +82,7 @@ function ToastItem({
       )}
       {notification.progress && (
         <div className="toast-progress-track" role="progressbar"
-          aria-label={resolveNotificationText(notification.message, t)}
+          aria-label={resolveNotificationText(notification.message, t, notification.repositoryCount)}
           aria-valuenow={notification.progressValue} aria-valuemin={0} aria-valuemax={100}>
           {notification.progressValue !== undefined ? (
             <div className="toast-progress-bar-determinate" style={{ width: `${Math.min(100, Math.max(0, notification.progressValue))}%` }} />

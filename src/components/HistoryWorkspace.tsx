@@ -529,7 +529,7 @@ function CommitList({
       const name = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
       await editorDialog({ title: t('Edit Commit Message'), message: `${name} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, generate: (signal, onMessage) => generateHistoricalMessage([{ repoId: commit.repoId, hash: commit.hash }], signal, onMessage), confirmLabel: t('Save'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message });
-        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed')); }
+        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t, latest.repositoryCount) : t('Operation failed')); }
         return true;
       } });
     }
@@ -539,7 +539,7 @@ function CommitList({
     if (id === 'squash-multi') {
       await editorDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n'), generate: (signal, onMessage) => generateHistoricalMessage(newestFirst.map((c) => ({ repoId: c.repoId, hash: c.hash })), signal, onMessage), items: oldestFirst.map((item) => ({ id: item.shortHash, label: item.message, description: item.author })), confirmLabel: t('Squash'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'squash', hashes: newestFirst.map((item) => item.hash), message });
-        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t) : t('Operation failed')); }
+        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t, latest.repositoryCount) : t('Operation failed')); }
         return true;
       } });
     }

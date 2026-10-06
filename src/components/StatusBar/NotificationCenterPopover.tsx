@@ -191,7 +191,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                 <div className="notification-item-body">
                   <div className="notification-item-row">
                     <div className="notification-item-heading">
-                      <strong className="notification-item-title">{resolveNotificationText(item.title, t)}</strong>
+                      <strong className="notification-item-title">{resolveNotificationText(item.title, t, item.repositoryCount)}</strong>
                       {workspaceName && (scope === 'all' || !activeTabId) && (
                         <span className="notification-workspace-tag" title={workspaceName}>{workspaceName}</span>
                       )}
@@ -200,9 +200,9 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                       {formatRelativeTime(item.timestamp, t, language)}
                     </span>
                   </div>
-                  <p className="notification-item-msg">{resolveNotificationText(item.message, t)}</p>
+                  <p className="notification-item-msg">{resolveNotificationText(item.message, t, item.repositoryCount)}</p>
                   {item.details && <details className="toast-details"><summary>{t('Technical details')}</summary><pre>{item.details}</pre></details>}
-                  {item.progress && <progress className="notification-center-progress" aria-label={resolveNotificationText(item.title, t)} max={100} value={item.progressValue} />}
+                  {item.progress && <progress className="notification-center-progress" aria-label={resolveNotificationText(item.title, t, item.repositoryCount)} max={100} value={item.progressValue} />}
 
                 </div>
                 {!item.progress && <IconButton
@@ -229,7 +229,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                           void handleAction(item, actionIndex);
                         }}
                       >
-                        <span>{resolveNotificationText(action.label, t)}</span>
+                        <span>{resolveNotificationText(action.label, t, item.repositoryCount)}</span>
                       </button>
                     ))}
                 </div>}

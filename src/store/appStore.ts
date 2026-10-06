@@ -121,6 +121,7 @@ export interface AppNotification {
   timestamp: number;
   read: boolean;
   workspaceId?: string;
+  repositoryCount?: number;
   details?: string;
   urgent?: boolean;
   progress?: boolean;
@@ -131,10 +132,15 @@ export interface AppNotification {
   actions: AppNotificationAction[];
 }
 
-export function resolveNotificationText(value: NotificationText, t: (key: string, ...args: Array<string | number>) => string): string {
-  if (typeof value === 'string') return t(value);
-  if ('raw' in value) return value.raw;
-  return t(value.key, ...(value.args ?? []));
+export function resolveNotificationText(value: NotificationText, t: (key: string, ...args: Array<string | number>) => string, repositoryCount?: number): string {
+  const text = typeof value === 'string' ? t(value) : 'raw' in value ? value.raw : t(value.key, ...(value.args ?? []));
+  if (repositoryCount === undefined || repositoryCount > 1) return text;
+  // Match the plugin's shared formatter after translation, including warnings.
+  return text.replace(/^VersionDock\s*\[[^\]]+\]\s*(警告：|Warning:\s*|：|:\s*)/, (_match, suffix: string) => {
+    if (suffix.startsWith('警告')) return 'VersionDock 警告：';
+    if (suffix.startsWith('Warning')) return 'VersionDock Warning: ';
+    return suffix.includes('：') ? 'VersionDock：' : 'VersionDock: ';
+  });
 }
 
 export interface BatchCommitReport {
@@ -5734,13 +5740,18 @@ export const useAppStore = create<AppStore>((set, get) => {
         ? [{ type: 'openLogPanel', label: 'View Log' }]
         : [];
       const currentWorkspaceId = get().snapshot?.workspace.id ?? get().activeTabId ?? undefined;
+      const targetWorkspaceId = notification.workspaceId ?? currentWorkspaceId;
+      const repositories = targetWorkspaceId && targetWorkspaceId === get().snapshot?.workspace.id
+        ? get().allRepositories.length ? get().allRepositories : get().snapshot?.repositories
+        : targetWorkspaceId ? get().sessions[targetWorkspaceId]?.allRepositories ?? get().sessions[targetWorkspaceId]?.snapshot?.repositories : undefined;
       const item: AppNotification = {
         id,
         timestamp: Date.now(),
         read: false,
         ...notification,
+        repositoryCount: notification.repositoryCount ?? repositories?.filter(repo => !repo.meta.isWorktree).length,
         actions: notification.actions ?? defaultActions,
-        workspaceId: notification.workspaceId ?? currentWorkspaceId,
+        workspaceId: targetWorkspaceId,
       };
       set((state) => {
         const nextNotifications = [item, ...state.notifications].slice(0, 100);
