@@ -158,11 +158,8 @@ export async function downloadAndInstallAppUpdate(
  * 重启应用程序以完成更新
  */
 export async function restartApp(): Promise<void> {
-  try {
-    await relaunch();
-  } catch {
-    window.location.reload();
-  }
+  // Reloading the webview does not restart the native app or finish an update.
+  await relaunch();
 }
 
 /**

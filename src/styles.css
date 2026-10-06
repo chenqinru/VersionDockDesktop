@@ -18,6 +18,10 @@
   --versiondock-accent: #3994BC;
   --versiondock-accent-bg: #297AA0;
   --versiondock-success: #72C892;
+  --versiondock-update-background: var(--versiondock-success);
+  --versiondock-update-foreground: #10251a;
+  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 88%, #ffffff);
+  --versiondock-sponsor-foreground: #ffb3c4;
   --versiondock-danger: #F28772;
   --versiondock-warning: #CCA700;
   --versiondock-input: #191A1B;
@@ -166,6 +170,9 @@
 }
 
 :root[data-theme="light2026"], .theme-preview-surface[data-theme="light2026"] {
+  --versiondock-sponsor-foreground: #a3214c;
+  --versiondock-update-foreground: #ffffff;
+  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 88%, #000000);
   --versiondock-bg: #FFFFFF;
   --versiondock-surface: #FAFAFD;
   --versiondock-surface-alt: #F0F0F3;
@@ -185,6 +192,9 @@
 }
 
 :root[data-theme="light"], .theme-preview-surface[data-theme="light"] {
+  --versiondock-sponsor-foreground: #a3214c;
+  --versiondock-update-foreground: #ffffff;
+  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 88%, #000000);
   --versiondock-bg: #ffffff;
   --versiondock-surface: #f3f3f3;
   --versiondock-surface-alt: #ececec;
@@ -5555,8 +5565,8 @@ button.notification-item-action-btn:focus-visible {
 .update-badge {
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--versiondock-success);
-  color: #ffffff;
+  background: var(--versiondock-update-background);
+  color: var(--versiondock-update-foreground);
   font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
   font-weight: 600;
 }
@@ -5633,12 +5643,13 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .about-btn.primary {
-  background: var(--versiondock-accent-bg);
+  background: color-mix(in srgb, var(--versiondock-accent-bg) 85%, #000000);
   color: #ffffff;
 }
 
-.about-btn.primary:hover:not(:disabled) {
-  background: var(--versiondock-accent);
+.about-btn.primary:is(:hover, :focus-visible):not(:disabled) {
+  background: color-mix(in srgb, var(--versiondock-accent-bg) 75%, #000000);
+  color: #ffffff;
 }
 
 .about-btn.secondary {
@@ -5734,13 +5745,14 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .about-pill-btn.sponsor {
-  color: #ff6b8b;
-  border-color: rgba(255, 107, 139, 0.4);
-  background: color-mix(in srgb, #ff6b8b 10%, var(--versiondock-surface-alt));
+  color: var(--versiondock-sponsor-foreground);
+  border-color: color-mix(in srgb, var(--versiondock-sponsor-foreground) 40%, transparent);
+  background: color-mix(in srgb, var(--versiondock-sponsor-foreground) 5%, var(--versiondock-surface-alt));
 }
 
-.about-pill-btn.sponsor:hover {
-  background: color-mix(in srgb, #ff6b8b 20%, var(--versiondock-surface-alt));
+.about-pill-btn.sponsor:is(:hover, :focus-visible) {
+  color: var(--versiondock-sponsor-foreground);
+  background: color-mix(in srgb, var(--versiondock-sponsor-foreground) 10%, var(--versiondock-surface-alt));
 }
 
 .about-pill-btn.sponsor:active {
@@ -5829,24 +5841,27 @@ button.notification-item-action-btn:focus-visible {
 }
 
 /* 状态栏更新徽章 */
-.statusbar-update-badge {
+.statusbar-item.statusbar-update-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 0 8px;
   height: 100%;
-  color: #ffffff;
-  background: var(--versiondock-success) !important;
+  color: var(--versiondock-update-foreground);
+  background: var(--versiondock-update-background);
   font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
   font-weight: 600;
   border-radius: 2px;
-  animation: pulse-update 2.4s infinite;
 }
 
-@keyframes pulse-update {
-  0% { opacity: 1; }
-  50% { opacity: 0.75; }
-  100% { opacity: 1; }
+.statusbar-item.statusbar-update-badge:is(:hover, :focus-visible, .active) {
+  color: var(--versiondock-update-foreground);
+  background: var(--versiondock-update-hover-background);
+}
+
+.statusbar-item.statusbar-update-badge:disabled {
+  opacity: 1;
+  cursor: progress;
 }
 
 .statusbar-update-text {

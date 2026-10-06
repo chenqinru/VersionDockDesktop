@@ -50,6 +50,21 @@ for (const statement of i18nSource.statements) {
 }
 
 const nativeMessages = new Set();
+// Calling t() is not enough if the built-in catalogs lack the requested key.
+for (const path of ['src/components/AboutDialog.tsx', 'src/components/StatusBar/UpdateStatusBarItem.tsx']) {
+  const source = ts.createSourceFile(path, readFileSync(join(root, path), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function visitUpdateText(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === 't' && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
+      const message = node.arguments[0].text;
+      if (!catalogs.desktopEn.has(message) || !catalogs.desktopZh.has(message)) {
+        violations.push(`About/update text requires built-in English and Chinese translations: ${message}`);
+      }
+    }
+    ts.forEachChild(node, visitUpdateText);
+  }
+  visitUpdateText(source);
+}
+
 for (const path of ['src-tauri/src/commands.rs', 'src-tauri/src/state.rs']) {
   const source = readFileSync(join(root, path), 'utf8');
   for (const match of source.matchAll(/\b(?:emit_operation_phase|emit_current_operation)\s*\(/g)) {

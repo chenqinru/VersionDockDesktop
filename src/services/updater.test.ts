@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { check, type Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { version } from '../../package.json';
-import { checkAppUpdate, downloadAndInstallAppUpdate, generateDiagnosticReport, isNewerVersion, APP_CURRENT_VERSION, GITHUB_REPO_URL } from './updater';
+import { checkAppUpdate, downloadAndInstallAppUpdate, restartApp, generateDiagnosticReport, isNewerVersion, APP_CURRENT_VERSION, GITHUB_REPO_URL } from './updater';
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }));
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }));
@@ -16,6 +17,7 @@ function updateFixture() {
 
 beforeEach(() => {
   vi.mocked(check).mockReset().mockResolvedValue(null);
+  vi.mocked(relaunch).mockReset().mockResolvedValue(undefined);
   vi.stubGlobal('__TAURI_INTERNALS__', {});
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
 });
@@ -23,6 +25,11 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('updater service', () => {
+  it('propagates native restart failure instead of refreshing the webview as a successful restart', async () => {
+    vi.mocked(relaunch).mockRejectedValueOnce(new Error('restart unavailable'));
+    await expect(restartApp()).rejects.toThrow('restart unavailable');
+  });
+
   it('uses the package version and public releases repository', () => {
     expect(APP_CURRENT_VERSION).toBe(version);
     expect(GITHUB_REPO_URL).toBe('https://github.com/chenqinru/VersionDockDesktop-Releases');

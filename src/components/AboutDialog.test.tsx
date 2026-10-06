@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nContext, createTranslator } from '../i18n';
 import { useAppStore } from '../store/appStore';
+import { useAppUpdateStore } from '../store/appUpdateStore';
 import { AboutDialog } from './AboutDialog';
 import * as updaterService from '../services/updater';
 import { version } from '../../package.json';
@@ -18,7 +19,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
-const renderAboutDialog = (onClose = vi.fn(), initialTab: 'about' | 'changelog' = 'about') => {
+const renderAboutDialog = (onClose = vi.fn(), initialTab: 'about' | 'changelog' = 'about', language: 'en' | 'zh-CN' = 'en') => {
   useAppStore.setState({
     ready: true,
     snapshot: {
@@ -30,7 +31,7 @@ const renderAboutDialog = (onClose = vi.fn(), initialTab: 'about' | 'changelog' 
   });
 
   const view = render(
-    <I18nContext.Provider value={{ language: 'en', preference: 'system', t: createTranslator('en') }}>
+    <I18nContext.Provider value={{ language, preference: 'system', t: createTranslator(language) }}>
       <AboutDialog onClose={onClose} initialTab={initialTab} />
     </I18nContext.Provider>,
   );
@@ -39,11 +40,35 @@ const renderAboutDialog = (onClose = vi.fn(), initialTab: 'about' | 'changelog' 
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ ready: false, snapshot: undefined });
+  useAppStore.setState({ ready: false, snapshot: undefined, updateAvailableInfo: null });
+  useAppUpdateStore.setState({ phase: 'idle', targetVersion: null, progress: null, error: null });
   vi.restoreAllMocks();
 });
 
 describe('AboutDialog', () => {
+  it('renders Chinese about, update actions and built-in release notes without an external language bundle', async () => {
+    vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
+      available: true, currentVersion: version, latestVersion: '0.2.0',
+    });
+    renderAboutDialog(vi.fn(), 'about', 'zh-CN');
+    expect(screen.getByRole('tab', { name: '关于与更新' })).toBeInTheDocument();
+    expect(screen.getByText('软件更新')).toBeInTheDocument();
+    expect(screen.getByText(`当前使用 VersionDock Desktop v${version}`)).toBeInTheDocument();
+    expect(screen.getByText('作者与项目')).toBeInTheDocument();
+    expect(screen.getByText('许可证:')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '赞助项目' })).toBeInTheDocument();
+    expect(screen.getByText('环境与诊断')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '复制诊断信息' })).toBeInTheDocument();
+    expect(screen.getAllByText('已安装')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    expect(await screen.findByText('发现新版本')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载并安装更新' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '跳过此版本' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '更新日志' }));
+    expect(screen.getByText('VersionDock 版本历史')).toBeInTheDocument();
+    expect(screen.getByText('🚀 VersionDock Desktop 首次发布')).toBeInTheDocument();
+  });
+
   it('renders app name, version, and author info', () => {
     renderAboutDialog();
     expect(screen.getByText('VersionDock Desktop')).toBeInTheDocument();

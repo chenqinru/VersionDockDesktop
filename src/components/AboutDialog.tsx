@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
+import { useAppUpdateStore } from '../store/appUpdateStore';
 import {
   APP_CURRENT_VERSION,
   AUTHOR_GITHUB_URL,
@@ -15,12 +16,9 @@ import {
   LICENSE_NAME,
   SPONSOR_URL,
   checkAppUpdate,
-  downloadAndInstallAppUpdate,
   generateDiagnosticReport,
   openExternalLink,
-  restartApp,
   type AppUpdateCheckResult,
-  type UpdateDownloadProgress,
 } from '../services/updater';
 
 interface AboutDialogProps {
@@ -52,10 +50,10 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
 
   const [activeTab, setActiveTab] = useState<'about' | 'changelog'>(initialTab);
   const [checking, setChecking] = useState(false);
-  const [checkResult, setCheckResult] = useState<AppUpdateCheckResult | null>(null);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<UpdateDownloadProgress | null>(null);
-  const [readyToRestart, setReadyToRestart] = useState(false);
+  const [checkResult, setCheckResult] = useState<AppUpdateCheckResult | null>(() => useAppStore.getState().updateAvailableInfo);
+  const { phase, progress: downloadProgress, install, restart } = useAppUpdateStore();
+  const downloading = phase === 'downloading';
+  const readyToRestart = phase === 'ready' || phase === 'restarting';
   const [copiedDiag, setCopiedDiag] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -77,20 +75,13 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   };
 
   const handleDownloadAndInstall = async () => {
-    setDownloading(true);
-    setDownloadProgress(null);
     try {
       if (!checkResult?.rawUpdate) {
         throw new Error('No update package available to install.');
       }
-      await downloadAndInstallAppUpdate((progress) => {
-        setDownloadProgress(progress);
-      });
-      setReadyToRestart(true);
+      await install(checkResult.latestVersion || checkResult.currentVersion);
     } catch (error) {
       void confirmDialog({ title: t('Software Update'), message: t('Update download failed: {0}', error instanceof Error ? error.message : String(error)) });
-    } finally {
-      setDownloading(false);
     }
   };
 
@@ -266,7 +257,10 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                           <button
                             type="button"
                             className="about-btn primary"
-                            onClick={() => void restartApp()}
+                            disabled={phase === 'restarting'}
+                            onClick={() => void restart().catch((error: unknown) => {
+                              void confirmDialog({ title: t('Software Update'), message: t('Restart failed: {0}', error instanceof Error ? error.message : String(error)) });
+                            })}
                           >
                             <Codicon name="refresh" />
                             <span>{t('Restart to Install Update')}</span>
@@ -463,7 +457,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                     </div>
                     <ul className="changelog-highlights">
                       {item.highlights.map((highlight, idx) => (
-                        <li key={idx}>{highlight}</li>
+                        <li key={idx}>{t(highlight)}</li>
                       ))}
                     </ul>
                   </div>
