@@ -2,10 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
-const rootDir = new URL('..', import.meta.url).pathname;
+const rootDir = fileURLToPath(new URL('..', import.meta.url));
 const srcLogo = join(rootDir, 'public/icons/versiondock-logo-dark.png');
 const iconsDir = join(rootDir, 'src-tauri/icons');
+const windowsOnly = process.argv.includes('--windows-only');
 
 if (!existsSync(srcLogo)) {
   console.error(`Source logo not found: ${srcLogo}`);
@@ -19,16 +21,19 @@ const tempDir = mkdtempSync(join(tmpdir(), 'vdesktop-icon-'));
 const objcSource = join(tempDir, 'render.m');
 const binaryPath = join(tempDir, 'render');
 const iconsetDir = join(tempDir, 'icon.iconset');
+const windowsDir = join(tempDir, 'windows');
 mkdirSync(iconsetDir, { recursive: true });
+mkdirSync(windowsDir, { recursive: true });
 
 const objcCode = `
 #import <Cocoa/Cocoa.h>
 
 int main(int argc, const char * argv[]) {
     @autoreleasepool {
-        if (argc < 3) return 1;
+        if (argc < 4) return 1;
         NSString *srcPath = [NSString stringWithUTF8String:argv[1]];
         NSString *iconsetPath = [NSString stringWithUTF8String:argv[2]];
+        NSString *windowsPath = [NSString stringWithUTF8String:argv[3]];
 
         NSImage *srcImage = [[NSImage alloc] initWithContentsOfFile:srcPath];
         if (!srcImage) {
@@ -100,6 +105,27 @@ int main(int argc, const char * argv[]) {
             NSString *filePath = [iconsetPath stringByAppendingPathComponent:[NSString stringWithUTF8String:sizes[i].name]];
             [png writeToFile:filePath atomically:YES];
         }
+
+        // Windows uses the source's own rounded corners and margins. The macOS
+        // dock inset and shadows make taskbar icons unnecessarily small.
+        int windowsSizes[] = {16, 24, 32, 48, 64, 128, 256};
+        for (int i = 0; i < sizeof(windowsSizes)/sizeof(windowsSizes[0]); i++) {
+            int s = windowsSizes[i];
+            NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
+                initWithBitmapDataPlanes:NULL pixelsWide:s pixelsHigh:s
+                bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+                colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+            [NSGraphicsContext saveGraphicsState];
+            [NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:rep]];
+            [[NSGraphicsContext currentContext] setImageInterpolation:NSImageInterpolationHigh];
+            [srcImage drawInRect:NSMakeRect(0, 0, s, s) fromRect:NSZeroRect
+                operation:NSCompositingOperationCopy fraction:1.0];
+            [NSGraphicsContext restoreGraphicsState];
+            NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+            NSString *filePath = [windowsPath stringByAppendingPathComponent:
+                [NSString stringWithFormat:@"icon_%d.png", s]];
+            if (![png writeToFile:filePath atomically:YES]) return 1;
+        }
     }
     return 0;
 }
@@ -111,34 +137,35 @@ try {
   console.log('Compiling native icon generator...');
   execFileSync('clang', ['-framework', 'Cocoa', objcSource, '-o', binaryPath]);
 
-  console.log('Rendering HIG-compliant iconset...');
-  execFileSync(binaryPath, [srcLogo, iconsetDir]);
+  console.log('Rendering platform-specific iconsets...');
+  execFileSync(binaryPath, [srcLogo, iconsetDir, windowsDir]);
 
-  // 2. Generate icon.icns via iconutil
-  console.log('Building icon.icns via iconutil...');
-  const icnsPath = join(iconsDir, 'icon.icns');
-  execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', icnsPath]);
+  if (!windowsOnly) {
+    // 2. Generate icon.icns via iconutil
+    console.log('Building icon.icns via iconutil...');
+    const icnsPath = join(iconsDir, 'icon.icns');
+    execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', icnsPath]);
 
-  // 3. Copy/Generate required PNGs for Tauri
-  console.log('Writing Tauri PNG icons...');
-  writeFileSync(join(iconsDir, '32x32.png'), readFileSync(join(iconsetDir, 'icon_32x32.png')));
-  writeFileSync(join(iconsDir, '64x64.png'), readFileSync(join(iconsetDir, 'icon_32x32@2x.png')));
-  writeFileSync(join(iconsDir, '128x128.png'), readFileSync(join(iconsetDir, 'icon_128x128.png')));
-  writeFileSync(join(iconsDir, '128x128@2x.png'), readFileSync(join(iconsetDir, 'icon_128x128@2x.png')));
-  writeFileSync(join(iconsDir, 'icon.png'), readFileSync(join(iconsetDir, 'icon_512x512.png')));
+    // 3. Copy/Generate required PNGs for Tauri
+    console.log('Writing Tauri PNG icons...');
+    writeFileSync(join(iconsDir, '32x32.png'), readFileSync(join(iconsetDir, 'icon_32x32.png')));
+    writeFileSync(join(iconsDir, '64x64.png'), readFileSync(join(iconsetDir, 'icon_32x32@2x.png')));
+    writeFileSync(join(iconsDir, '128x128.png'), readFileSync(join(iconsetDir, 'icon_128x128.png')));
+    writeFileSync(join(iconsDir, '128x128@2x.png'), readFileSync(join(iconsetDir, 'icon_128x128@2x.png')));
+    writeFileSync(join(iconsDir, 'icon.png'), readFileSync(join(iconsetDir, 'icon_512x512.png')));
+  }
 
   // 4. Build standard multi-resolution icon.ico for Windows
   console.log('Building icon.ico...');
-  const icoSizes = [16, 32, 64, 128, 256];
+  const icoSizes = [16, 24, 32, 48, 64, 128, 256];
   const pngBuffers = [];
 
   for (const s of icoSizes) {
-    const pngName = s === 16 ? 'icon_16x16.png'
-      : s === 32 ? 'icon_32x32.png'
-      : s === 64 ? 'icon_32x32@2x.png'
-      : s === 128 ? 'icon_128x128.png'
-      : 'icon_256x256.png';
-    pngBuffers.push({ size: s, buffer: readFileSync(join(iconsetDir, pngName)) });
+    const buffer = readFileSync(join(windowsDir, `icon_${s}.png`));
+    if (buffer.readUInt32BE(16) !== s || buffer.readUInt32BE(20) !== s) {
+      throw new Error(`Windows icon PNG dimensions do not match ${s}px`);
+    }
+    pngBuffers.push({ size: s, buffer });
   }
 
   // Assemble standard ICO binary
@@ -171,7 +198,7 @@ try {
   const icoBuffer = Buffer.concat([header, ...entryBuffers, ...imageBuffers]);
   writeFileSync(join(iconsDir, 'icon.ico'), icoBuffer);
 
-  console.log('✅ All icons successfully generated with macOS HIG compliance in src-tauri/icons/');
+  console.log(`✅ ${windowsOnly ? 'Windows icon' : 'Platform icons'} generated in src-tauri/icons/`);
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
 }

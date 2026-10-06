@@ -107,7 +107,7 @@ pub async fn secure_store_capability() -> SecureCredentialCapability {
 }
 
 fn svn_password_stdin_available() -> bool {
-    let version = std::process::Command::new("svn")
+    let version = cli::background_command(cli::resolve_executable("svn"))
         .args(["--version", "--quiet"])
         .output()
         .ok()

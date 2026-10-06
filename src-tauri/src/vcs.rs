@@ -11096,7 +11096,10 @@ fn vscode_workspace_storage_dirs() -> Vec<PathBuf> {
 
 async fn extract_vscode_subtree_json(db_path: &Path) -> Vec<serde_json::Value> {
     let mut results = Vec::new();
-    let output = tokio::process::Command::new("sqlite3")
+    let mut command = tokio::process::Command::new("sqlite3");
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let output = command
         .arg(db_path)
         .arg("SELECT value FROM ItemTable WHERE key IN ('chenqinru.versiondock', 'versiondock.subtrees', 'RioNoir.gitcharm', 'gitcharm.subtrees');")
         .output()

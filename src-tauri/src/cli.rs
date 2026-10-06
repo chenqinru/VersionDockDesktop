@@ -42,6 +42,21 @@ impl CommandOutput {
     }
 }
 
+pub(crate) fn background_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    // Background probes communicate through captured output, never a console.
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
 pub fn resolve_executable(program: &str) -> std::path::PathBuf {
     #[cfg(windows)]
     {
@@ -51,10 +66,7 @@ pub fn resolve_executable(program: &str) -> std::path::PathBuf {
         } else {
             format!("{program}.exe")
         };
-        if let Ok(output) = std::process::Command::new(program)
-            .arg("--version")
-            .output()
-        {
+        if let Ok(output) = background_command(program).arg("--version").output() {
             if output.status.success() {
                 return PathBuf::from(program);
             }

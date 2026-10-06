@@ -494,6 +494,8 @@ pub async fn generate(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
     #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
