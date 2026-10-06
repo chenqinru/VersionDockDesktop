@@ -169,6 +169,7 @@ jobs:
           # Start a new cache namespace so old registry-only hits cannot mask this fix.
           prefix-key: v1-versiondock-target
           shared-key: ${{ inputs.bundle && 'native-bundles' || 'native-tests' }}
+          cache-on-failure: true
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -246,6 +247,15 @@ jobs:
       - name: Install frontend dependencies
         if: inputs.bundle
         run: npm ci
+
+      - name: Compile Windows tests and verify embedded manifests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifactsFile = Join-Path $env:RUNNER_TEMP "versiondock-rust-test-artifacts.jsonl"
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --no-run --message-format=json > $artifactsFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/check-windows-test-manifests.ps1 -ArtifactsFile $artifactsFile
 
       - name: Run Git and SVN integration tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml

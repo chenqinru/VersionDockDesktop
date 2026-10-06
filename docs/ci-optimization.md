@@ -44,6 +44,7 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 - CI / Release 的 Rust 质量检查共用 `native-quality` 缓存键；日常平台测试使用 `native-tests`，完整打包使用 `native-bundles`。平台、架构、工具链和依赖锁文件仍由缓存 action 区分，避免测试缓存阻止完整打包缓存的建立。
 - 接口生成检查加入 `--locked`，防止检查过程中更新 Cargo 锁文件。
 - 本地通过 `rust-toolchain.toml` 固定 Rust 1.99.0，CI 与 Release 的所有 Rust 安装步骤显式使用相同版本。升级工具链时同步修改这几处配置并重新执行检查，避免浮动 `stable` 带来本地与 CI 的 Clippy 规则差异。
+- 平台任务在测试失败时也保存 Rust 依赖缓存；测试仍必须通过，缓存不会替代检查结果。这样可避免启动失败后再次冷编译全部依赖。
 
 本地 `npm run build`、`npm run check:frontend` 和 `npm run check` 仍执行原有完整校验。新增 `build:frontend` 为纯 Vite 构建，`check:frontend:source` 为前端检查，`check:frontend:ci` 将两者组合；Rust 接口校验由另一任务把关。
 
@@ -57,3 +58,15 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 - 后续 CI 的浮动 `stable` 升级到 Rust 1.99.0，触发三处 Clippy 警告：Agent CLI 的延迟初始化和日志测试中的固定长度分块。已按新规则调整，并固定工具链；Rust 1.99.0 下 fmt、全目标/全特性 Clippy（`-D warnings`）、生成接口检查及 221 项 Rust 回归通过，6 项默认跳过。
 
 改动合入 `main` 并推送后才能验证 GitHub 运行耗时。新缓存首次运行仍需要冷构建；至少记录一次成功冷构建和一次依赖未变化的缓存命中运行，并比较关键路径及实际编译耗时。手动 CI 安装包和真实签名 Release 也需各运行一次。配置检查与本地编译不等于 GitHub 三平台工作流已执行。
+
+## Windows 测试程序启动失败
+
+2026-10-06 的 Windows CI 在编译成功后，以 `0xc0000139 / STATUS_ENTRYPOINT_NOT_FOUND` 退出，测试尚未运行；同次 macOS、Linux 和质量检查均通过。
+
+当前 `tauri-build 2.6.3` 通过 `tauri-winres` 的 `compile()` 输出 `rustc-link-arg-bins`，默认 Common-Controls v6 清单只嵌入主程序。库单元测试 EXE 不在这个范围内，与 [Tauri 已知问题 #13419](https://github.com/tauri-apps/tauri/issues/13419) 的构建条件一致。缺少该清单可能让 Windows 加载默认 Common-Controls v5，而测试程序链接的控件 API（例如 `TaskDialogIndirect`）需要 v6。
+
+Windows MSVC 构建改为通过 `build.rs` 的通用链接参数嵌入 `windows-app-manifest.xml`，覆盖主程序、库单元测试和其他链接目标；关闭 Tauri 原有的主程序清单嵌入以避免重复，但继续保留其图标及版本资源。项目清单与当前 Tauri 默认清单相同，升级 `tauri-build` 时需对照上游模板。
+
+Windows CI 先用 `cargo test --no-run --message-format=json` 编译测试，再通过 Windows SDK 的 `mt.exe` 读取每个测试 EXE 的资源 #1，要求存在 Common-Controls v6 依赖，随后运行原有完整测试。编译与清单检查均不可跳过或吞掉错误。
+
+本地验证：Rust fmt、Clippy、221 项 Rust 回归通过（6 项默认跳过）；XML 与上游默认模板一致；PowerShell 语法检查通过，脚本逻辑覆盖有效清单、无测试程序、缺少 v6 依赖和清单读取失败。脚本逻辑测试模拟了 SDK 提取步骤，不代表 Windows PE 或程序启动验收。尚未取得失败 EXE 的导入表，缺失入口点的确切名称与 Windows 启动恢复仍需在新提交的 CI 中验证。
