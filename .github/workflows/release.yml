@@ -111,6 +111,11 @@ jobs:
     needs: source
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # Match ordinary CI so binding export and the complete test suite reuse
+      # its test-profile dependencies. The shipped release profile is unchanged.
+      CARGO_PROFILE_TEST_OPT_LEVEL: "0"
+      CARGO_PROFILE_TEST_DEBUG: "1"
     steps:
       - name: Checkout pinned source commit
         uses: actions/checkout@v7
@@ -135,6 +140,8 @@ jobs:
           workspaces: src-tauri -> target
           prefix-key: v1-versiondock-target
           shared-key: native-quality
+          # Tag caches cannot be read by the next tag. Reuse main's cache.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux system dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev subversion
@@ -215,6 +222,9 @@ jobs:
           # Start a new cache namespace so old registry-only hits cannot mask this fix.
           prefix-key: v1-versiondock-target
           shared-key: native-bundles
+          # warm-release-cache.yml seeds this cache on main for all version tags.
+          # Skip tag-local compression/uploads that cannot benefit the next tag.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'

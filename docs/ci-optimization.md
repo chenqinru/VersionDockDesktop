@@ -45,7 +45,7 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 - 接口生成检查加入 `--locked`，防止检查过程中更新 Cargo 锁文件。
 - 本地通过 `rust-toolchain.toml` 固定 Rust 1.99.0，CI 与 Release 的所有 Rust 安装步骤显式使用相同版本。升级工具链时同步修改这几处配置并重新执行检查，避免浮动 `stable` 带来本地与 CI 的 Clippy 规则差异。
 - 平台任务在测试失败时也保存 Rust 依赖缓存；测试仍必须通过，缓存不会替代检查结果。这样可避免启动失败后再次冷编译全部依赖。
-- Windows 测试及普通 CI 的类型导出设置 `CARGO_PROFILE_TEST_OPT_LEVEL=0`、`CARGO_PROFILE_TEST_DEBUG=1`，减少 LLVM 优化和完整调试符号的编译开销；保留 debug assertions 和溢出检查。正式 release profile 与本地开发配置不变。
+- Windows 测试、普通 CI 的类型导出及 Release Rust 检查设置 `CARGO_PROFILE_TEST_OPT_LEVEL=0`、`CARGO_PROFILE_TEST_DEBUG=1`，减少 LLVM 优化和完整调试符号的编译开销；保留 debug assertions 和溢出检查。正式 release profile 与本地开发配置不变。
 - Windows 通过 `cargo test --lib --no-run` 预编译并校验测试程序清单，再通过 `cargo nextest run --lib` 运行；当前全部 221 项有效 Rust 测试均位于库中，避免为零测试的 `main.rs` 额外编译主库的 staticlib/cdylib 和二进制测试程序。类型导出检查也显式指定 `--lib`。macOS、Linux 平台和 Release 完整检查仍使用原来的全目标测试命令；新增独立 `tests/` 目录或主程序测试时需同步调整 Windows 命令。
 - Windows 缓存增加 `windows-tests-o0-debug1-lib-v1` 区分该测试配置，避免旧的优化/完整符号缓存命中后无法保存新编译产物。普通 CI Rust 任务的测试配置通过 job 环境变量参与 Rust cache 的键计算。
 
@@ -102,3 +102,25 @@ Windows 使用固定 `cargo-nextest 0.9.146`，每个测试独立进程运行，
 | SVN 后台探测串联 | 测试只模拟计数探测，遗漏工作副本修订读取，导致等待真实 SVN 进程；固定等待 120 毫秒也受 runner 调度影响。补齐修订 mock，并给四项并发时序测试使用 Tokio 暂停时钟，保留旧请求、回滚和失效保护断言。`test-util` 仅用于测试构建。 |
 
 本地验证：Nextest 221 项通过、6 项默认忽略，运行 21.845 秒；普通 Cargo 测试同样 221 项通过、6 项默认忽略，运行 21.48 秒。Rust fmt、全目标/全特性 Clippy（`-D warnings`）及接口/默认值一致性检查通过。这些修正仍需提交后的 Windows CI 验证，不能仅凭本地回归声明 Windows 全部通过。
+
+## 跨版本 Release 缓存与桌面链接优化
+
+2026-10-06 第二次发布 `v0.1.2`（运行 `37472574928`）总耗时 34 分 22 秒。Windows Release 任务占 22 分 32 秒，其中 Rust 构建 18 分 14 秒，安装包制作约 36 秒，缓存收尾 1 分 54 秒。该任务仍明确记录 `No cache found`；`v0.1.1` 与 `v0.1.2` 的 `native-bundles` 缓存虽然键相同，却保存在不同 ref 下，新标签不能读取另一个标签的缓存。同一提交的普通 CI（`37472508707`）Windows 缓存完全命中，任务已缩短到 7 分 59 秒。
+
+### 缓存预热
+
+- 新增 `Warm release cache` 工作流，在 `main` 上维护与正式发布相同的 `native-bundles` 缓存，覆盖 macOS universal、Windows x64 和 Linux x64。工具链、runner、Rust 目标及缓存键与 Release 一致。
+- `main` 上推送 Cargo 清单、锁文件、Rust 工具链、Cargo 配置或相关发布工作流变更时自动运行；也可在 Actions 手动运行并选择 `main`。其他分支的手动运行不生成共享缓存。
+- 预热生成一次前端资源，使用正式 release profile 和 `--no-bundle` 编译应用，不制作安装包、不加载签名凭据、不执行公开发布。精确命中现有缓存时跳过原生编译。预热不会替代 CI 或 Release 的任何检查。
+- 标签 Release 只恢复缓存，避免为每个标签再次压缩上传只能由该标签访问的缓存。手动从 `main` 启动 Release 时仍可保存 `main` 缓存。质量检查同样复用普通 CI 在 `main` 保存的 `native-quality` 缓存。
+- **首次合入后，先等待 `Warm release cache` 三平台成功，再发布新标签。** 初始化完成后，依赖未变化时仍可同时推送 `main` 和版本标签，新标签可恢复上一次 `main` 的缓存。依赖变化较大时，先完成当次预热可进一步提高命中率。缓存被淘汰、runner 或工具链变化时仍可能冷构建。
+
+### 测试配置与库输出
+
+Release Rust 检查使用与普通 CI 相同的较轻测试配置，覆盖接口生成和完整测试；格式、Clippy、真实 Git/SVN 测试、签名校验及完整发布门槛保持。`v0.1.2` 的接口检查曾占 2 分 45 秒，完整测试编译占 4 分 31 秒，而测试本身仅 18.20 秒，统一配置用于减少重复编译。
+
+项目仅交付桌面应用，库输出改为 `rlib`，由 Rust 主程序链接，停止生成无人消费的 `staticlib`、`cdylib`，减少额外代码生成和链接。未来增加移动端或 C ABI 使用方时需重新配置对应库输出。`lto = "thin"`、`codegen-units = 1` 和符号裁剪保持，编译并行度调整需要另行比较耗时、体积和性能。
+
+配置和本地验证不代表 GitHub 预热已经执行；合入后分别记录首次预热、后续标签缓存恢复及三平台实际打包结果。
+
+本轮本地验证：actionlint（含 ShellCheck）通过；检查三平台矩阵及缓存参数一致、Release/CI 测试配置一致、预热仅在 `main` 运行且不引用签名 Secret、公开发布仍等待完整验证与所有平台构建成功。发布逻辑 13 项通过；Rust fmt、Clippy、完整 Rust 测试通过（221 项成功、6 项原有忽略项），接口与默认值一致性检查通过。Apple Silicon 的 Tauri 原生 Release 构建使用 `--no-bundle` 成功，Cargo 元数据确认仅有 `rlib` 和主程序输出；该结果不等于 Windows、Intel Mac 或安装包签名验收。

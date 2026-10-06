@@ -1,0 +1,129 @@
+name: Warm release cache
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'src-tauri/.cargo/**'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/warm-release-cache.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cache-${{ github.ref }}
+  # Finish the initial seed even if another dependency change is pushed.
+  cancel-in-progress: false
+
+jobs:
+  frontend:
+    name: Prepare cache build frontend
+    # Caches must be written under main, which every version tag can read.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Prepare frontend assets for native compilation
+        run: |
+          npm ci
+          npm run build:frontend
+
+      - name: Save private cache build frontend
+        uses: actions/upload-artifact@v4
+        with:
+          overwrite: true
+          name: cache-frontend-${{ github.sha }}
+          path: dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  native:
+    name: Warm release dependencies (${{ matrix.name }})
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            build-args: --target universal-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            rust-targets: ''
+            build-args: ''
+          - name: Linux x64
+            os: ubuntu-24.04
+            rust-targets: ''
+            build-args: ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout main commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Restore and seed shared release dependencies
+        id: release-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          prefix-key: v1-versiondock-target
+          shared-key: native-bundles
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux' && steps.release-cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Download frontend assets
+        if: steps.release-cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: cache-frontend-${{ github.sha }}
+          path: dist
+
+      - name: Install build dependencies
+        if: steps.release-cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Reuse frontend assets
+        if: steps.release-cache.outputs.cache-hit != 'true'
+        run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.reuse-frontend.conf.json', JSON.stringify({build:{beforeBuildCommand:null}}))"
+
+      - name: Compile native release without installers or signing
+        if: steps.release-cache.outputs.cache-hit != 'true'
+        run: npm run tauri:build -- --ci --no-bundle --config src-tauri/tauri.unsigned.conf.json --config src-tauri/tauri.reuse-frontend.conf.json ${{ matrix.build-args }}
