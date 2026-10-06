@@ -28,6 +28,177 @@ fn available(program: &str) -> bool {
 }
 
 #[tokio::test]
+async fn real_git_diff_binary_markers_in_source_stay_text() {
+    use crate::{diff_content, models::CatFileFilterMode};
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "Diff Test"], root);
+    command("git", &["config", "user.email", "diff@example.test"], root);
+    command("git", &["config", "commit.gpgsign", "false"], root);
+    std::fs::write(root.join("vcs.rs"), include_str!("vcs.rs")).unwrap();
+    std::fs::write(root.join("image.png"), b"\x89PNG\r\n\x1a\n\0old").unwrap();
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "initial source"], root);
+    let first = command_output("git", &["rev-parse", "HEAD"], root);
+    let repository = repo(root, VcsKind::Git);
+    let token = CancellationToken::new();
+    let source = format!("{}\n// regression update\n", include_str!("vcs.rs"));
+    std::fs::write(root.join("vcs.rs"), &source).unwrap();
+    std::fs::write(root.join("image.png"), b"\x89PNG\r\n\x1a\n\0new").unwrap();
+    for staged in [false, true] {
+        if staged {
+            command("git", &["add", "."], root);
+        }
+        let text = diff_content::file_diff(
+            &repository,
+            "vcs.rs",
+            staged,
+            None,
+            None,
+            None,
+            &CatFileFilterMode::Filters,
+            &token,
+        )
+        .await
+        .unwrap();
+        assert!(!text.binary && !text.truncated);
+        assert!(text.content.contains("+// regression update"));
+        assert!(text.content.contains("GIT binary patch"));
+        let binary = diff_content::file_diff(
+            &repository,
+            "image.png",
+            staged,
+            None,
+            None,
+            None,
+            &CatFileFilterMode::Filters,
+            &token,
+        )
+        .await
+        .unwrap();
+        assert!(binary.binary);
+    }
+    command("git", &["commit", "-m", "updated source"], root);
+    let second = command_output("git", &["rev-parse", "HEAD"], root);
+    for (revision, from, to) in [
+        (Some(first.clone()), None, None),
+        (Some(second.clone()), None, None),
+        (None, Some(first), Some(second.clone())),
+    ] {
+        let text = diff_content::file_diff(
+            &repository,
+            "vcs.rs",
+            false,
+            revision,
+            from,
+            to,
+            &CatFileFilterMode::Filters,
+            &token,
+        )
+        .await
+        .unwrap();
+        assert!(!text.binary && !text.truncated);
+        assert!(text.content.contains("GIT binary patch"));
+    }
+    assert!(
+        vcs::diff(
+            &repository,
+            "image.png",
+            false,
+            Some(second),
+            None,
+            None,
+            &token
+        )
+        .await
+        .unwrap()
+        .binary
+    );
+}
+
+#[tokio::test]
+async fn real_svn_diff_binary_markers_in_source_stay_text() {
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let store = directory.path().join("store");
+    let wc = directory.path().join("wc");
+    command(
+        "svnadmin",
+        &["create", store.to_str().unwrap()],
+        directory.path(),
+    );
+    let url = format!("file://{}", store.display());
+    command(
+        "svn",
+        &["checkout", &url, wc.to_str().unwrap()],
+        directory.path(),
+    );
+    std::fs::write(wc.join("vcs.rs"), include_str!("vcs.rs")).unwrap();
+    std::fs::write(wc.join("image.png"), b"\x89PNG\r\n\x1a\n\0old").unwrap();
+    command("svn", &["add", "vcs.rs", "image.png"], &wc);
+    command(
+        "svn",
+        &[
+            "propset",
+            "svn:mime-type",
+            "application/octet-stream",
+            "image.png",
+        ],
+        &wc,
+    );
+    command("svn", &["commit", "-m", "initial source"], &wc);
+    std::fs::write(
+        wc.join("vcs.rs"),
+        format!("{}\n// regression update\n", include_str!("vcs.rs")),
+    )
+    .unwrap();
+    std::fs::write(wc.join("image.png"), b"\x89PNG\r\n\x1a\n\0new").unwrap();
+    let repository = repo(&wc, VcsKind::Svn);
+    let token = CancellationToken::new();
+    for revision in [None, Some("2".into())] {
+        if revision.is_some() {
+            command("svn", &["commit", "-m", "updated source"], &wc);
+        }
+        let text = vcs::diff(
+            &repository,
+            "vcs.rs",
+            false,
+            revision.clone(),
+            None,
+            None,
+            &token,
+        )
+        .await
+        .unwrap();
+        assert!(!text.binary && !text.truncated);
+        assert!(text.content.contains("+// regression update"));
+        assert!(text
+            .content
+            .contains("Cannot display: file marked as a binary type."));
+        assert!(
+            vcs::diff(
+                &repository,
+                "image.png",
+                false,
+                revision,
+                None,
+                None,
+                &token
+            )
+            .await
+            .unwrap()
+            .binary
+        );
+    }
+}
+
+#[tokio::test]
 async fn real_git_history_author_email_filter_is_case_insensitive() {
     if !available("git") {
         return;

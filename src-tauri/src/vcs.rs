@@ -1691,9 +1691,12 @@ fn diff_file_line_count(content: &str) -> usize {
 pub(crate) fn make_diff(path: &str, bytes: Vec<u8>) -> Result<DiffDocument, DesktopError> {
     let content = String::from_utf8_lossy(&bytes).into_owned();
     let binary = bytes_are_binary(&bytes)
-        || content.contains("Binary files")
-        || content.contains("GIT binary patch")
-        || content.contains("Cannot display: file marked as a binary type.");
+        // 补丁正文行带有空格、+ 或 - 前缀；源码里的标记文字不是 VCS 元数据。
+        || content.lines().any(|line| {
+            line == "GIT binary patch"
+                || (line.starts_with("Binary files ") && line.ends_with(" differ"))
+                || line == "Cannot display: file marked as a binary type."
+        });
     let patch_line_count = content.lines().count();
     let line_count = diff_file_line_count(&content);
     let truncated = bytes.len() > DIFF_MAX_BYTES || patch_line_count > DIFF_MAX_LINES;
@@ -13623,6 +13626,36 @@ mod tests {
         assert!(bytes_are_binary(b"\x89PNG\r\n\x1a\nnot-yet-compressed"));
         assert!(bytes_are_binary(b"%PDF-1.7\n1 0 obj"));
         assert!(!bytes_are_binary("中文文本\nsecond line".as_bytes()));
+    }
+
+    #[test]
+    fn binary_marker_text_inside_diff_hunks_is_not_binary() {
+        for prefix in [' ', '+', '-'] {
+            let patch = format!(
+                "diff --git a/vcs.rs b/vcs.rs\n--- a/vcs.rs\n+++ b/vcs.rs\n@@ -1,3 +1,3 @@\n{prefix}GIT binary patch\n{prefix}Binary files a/image.png and b/image.png differ\n{prefix}Cannot display: file marked as a binary type.\n"
+            );
+            let diff = make_diff("vcs.rs", patch.clone().into_bytes()).unwrap();
+            assert!(!diff.binary, "text hunk with prefix {prefix:?}");
+            assert_eq!(diff.content, patch);
+        }
+        let diff = make_diff(
+            "Binary files.rs",
+            b"diff --git a/Binary files.rs b/Binary files.rs\n--- a/Binary files.rs\n+++ b/Binary files.rs\n@@ -1 +1 @@\n-old\n+new\n".to_vec(),
+        ).unwrap();
+        assert!(!diff.binary);
+    }
+
+    #[test]
+    fn standalone_vcs_binary_markers_remain_binary() {
+        for marker in [
+            "GIT binary patch\nliteral 3\nabc",
+            "Binary files a/image.png and b/image.png differ",
+            "Cannot display: file marked as a binary type.\nsvn:mime-type = application/octet-stream",
+        ] {
+            let patch = format!("diff --git a/file b/file\n{marker}\n");
+            assert!(make_diff("file", patch.into_bytes()).unwrap().binary);
+        }
+        assert!(make_diff("file", b"raw\0binary".to_vec()).unwrap().binary);
     }
 
     #[test]
