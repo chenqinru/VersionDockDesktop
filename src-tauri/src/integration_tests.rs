@@ -133,7 +133,7 @@ async fn real_svn_diff_binary_markers_in_source_stay_text() {
         &["create", store.to_str().unwrap()],
         directory.path(),
     );
-    let url = format!("file://{}", store.display());
+    let url = svn_file_url(&store);
     command(
         "svn",
         &["checkout", &url, wc.to_str().unwrap()],
@@ -757,6 +757,7 @@ async fn real_svn_file_kind_probes_preserve_deleted_moved_and_missing_conflicts(
     if !available("svn") || !available("svnadmin") {
         return;
     }
+    eprintln!("SVN file-kind probe: creating local repository and working copies");
     let directory = tempdir().unwrap();
     let store = directory.path().join("store 中文");
     let wc = directory.path().join("wc");
@@ -816,6 +817,7 @@ async fn real_svn_file_kind_probes_preserve_deleted_moved_and_missing_conflicts(
         std::fs::write(upstream.join(name), "incoming edit\n").unwrap();
     }
     command("svn", &["commit", "-m", "delete and edit"], &upstream);
+    eprintln!("SVN file-kind probe: updating into tree conflicts");
     command("svn", &["update"], &wc);
     assert!(wc.join("kept.txt").exists());
     // Update may restore a missing file. Keep this probe genuinely missing.
@@ -847,6 +849,7 @@ async fn real_svn_file_kind_probes_preserve_deleted_moved_and_missing_conflicts(
     repository.id = format!("svn-tree-probe-{}", uuid::Uuid::new_v4());
     let token = CancellationToken::new();
     for name in binary_paths {
+        eprintln!("SVN file-kind probe: checking binary properties for {name}");
         assert!(
             vcs::is_svn_conflict_binary(&repository, name, &token).await,
             "properties must survive: {name}"
@@ -855,6 +858,7 @@ async fn real_svn_file_kind_probes_preserve_deleted_moved_and_missing_conflicts(
     assert!(!vcs::is_svn_conflict_binary(&repository, "plain.txt", &token).await);
     #[cfg(unix)]
     assert!(vcs::is_svn_conflict_binary(&repository, "link.txt", &token).await);
+    eprintln!("SVN file-kind probe: reading conflicted working-copy status");
     let status = workspace::svn_status(repository.clone(), &token)
         .await
         .unwrap();
@@ -2246,11 +2250,11 @@ fn read_text(path: impl AsRef<Path>) -> String {
 
 fn command(program: &str, args: &[&str], cwd: &Path) {
     let resolved = crate::cli::resolve_executable(program);
-    let output = Command::new(&resolved)
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .unwrap();
+    let mut command = Command::new(&resolved);
+    if program == "svn" {
+        command.arg("--non-interactive");
+    }
+    let output = command.args(args).current_dir(cwd).output().unwrap();
     assert!(
         output.status.success(),
         "{program} {:?}: {}",
@@ -2261,11 +2265,11 @@ fn command(program: &str, args: &[&str], cwd: &Path) {
 
 fn command_output(program: &str, args: &[&str], cwd: &Path) -> String {
     let resolved = crate::cli::resolve_executable(program);
-    let output = Command::new(&resolved)
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .unwrap();
+    let mut command = Command::new(&resolved);
+    if program == "svn" {
+        command.arg("--non-interactive");
+    }
+    let output = command.args(args).current_dir(cwd).output().unwrap();
     assert!(
         output.status.success(),
         "{program} {:?}: {}",
@@ -2276,8 +2280,10 @@ fn command_output(program: &str, args: &[&str], cwd: &Path) -> String {
 }
 
 fn repo(path: &Path, kind: VcsKind) -> RepositoryMeta {
+    use sha2::Digest;
+    let identity = sha2::Sha256::digest(format!("{}::{kind:?}", path.display()).as_bytes());
     RepositoryMeta {
-        id: "integration".into(),
+        id: format!("integration-{}", hex::encode(&identity[..16])),
         name: "integration".into(),
         root_path: path.to_string_lossy().into_owned(),
         color: "#4EC9B0".into(),
@@ -6531,7 +6537,7 @@ async fn real_svn_diff_full_context_properties_and_history_mapping() {
         &["create", store.to_str().unwrap()],
         directory.path(),
     );
-    let url = format!("file://{}", store.display());
+    let url = svn_file_url(&store);
     command(
         "svn",
         &["checkout", &url, wc.to_str().unwrap()],

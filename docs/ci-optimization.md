@@ -46,7 +46,7 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 - 本地通过 `rust-toolchain.toml` 固定 Rust 1.99.0，CI 与 Release 的所有 Rust 安装步骤显式使用相同版本。升级工具链时同步修改这几处配置并重新执行检查，避免浮动 `stable` 带来本地与 CI 的 Clippy 规则差异。
 - 平台任务在测试失败时也保存 Rust 依赖缓存；测试仍必须通过，缓存不会替代检查结果。这样可避免启动失败后再次冷编译全部依赖。
 - Windows 测试及普通 CI 的类型导出设置 `CARGO_PROFILE_TEST_OPT_LEVEL=0`、`CARGO_PROFILE_TEST_DEBUG=1`，减少 LLVM 优化和完整调试符号的编译开销；保留 debug assertions 和溢出检查。正式 release profile 与本地开发配置不变。
-- Windows 只编译和运行 `cargo test --lib`，当前全部 221 项有效 Rust 测试均位于库中；避免为零测试的 `main.rs` 额外编译主库的 staticlib/cdylib 和二进制测试程序。类型导出检查也显式指定 `--lib`。macOS、Linux 平台和 Release 完整检查仍使用原来的全目标测试命令；新增独立 `tests/` 目录或主程序测试时需同步调整 Windows 命令。
+- Windows 通过 `cargo test --lib --no-run` 预编译并校验测试程序清单，再通过 `cargo nextest run --lib` 运行；当前全部 221 项有效 Rust 测试均位于库中，避免为零测试的 `main.rs` 额外编译主库的 staticlib/cdylib 和二进制测试程序。类型导出检查也显式指定 `--lib`。macOS、Linux 平台和 Release 完整检查仍使用原来的全目标测试命令；新增独立 `tests/` 目录或主程序测试时需同步调整 Windows 命令。
 - Windows 缓存增加 `windows-tests-o0-debug1-lib-v1` 区分该测试配置，避免旧的优化/完整符号缓存命中后无法保存新编译产物。普通 CI Rust 任务的测试配置通过 job 环境变量参与 Rust cache 的键计算。
 
 本地 `npm run build`、`npm run check:frontend` 和 `npm run check` 仍执行原有完整校验。新增 `build:frontend` 为纯 Vite 构建，`check:frontend:source` 为前端检查，`check:frontend:ci` 将两者组合；Rust 接口校验由另一任务把关。
@@ -70,12 +70,22 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 
 Windows MSVC 构建改为通过 `build.rs` 的通用链接参数嵌入 `windows-app-manifest.xml`，覆盖主程序、库单元测试和其他链接目标；关闭 Tauri 原有的主程序清单嵌入以避免重复，但继续保留其图标及版本资源。项目清单与当前 Tauri 默认清单相同，升级 `tauri-build` 时需对照上游模板。
 
-Windows CI 先用 `cargo test --no-run --message-format=json` 编译测试，再通过 Windows SDK 的 `mt.exe` 读取每个测试 EXE 的资源 #1，要求存在 Common-Controls v6 依赖，随后运行原有完整测试。编译与清单检查均不可跳过或吞掉错误。
+Windows CI 先用 `cargo test --lib --no-run --message-format=json` 编译测试，再通过 Windows SDK 的 `mt.exe` 读取每个测试 EXE 的资源 #1，要求存在 Common-Controls v6 依赖，随后运行全部库测试。编译与清单检查均不可跳过或吞掉错误。
 
-本地验证：Rust fmt、Clippy、221 项 Rust 回归通过（6 项默认跳过）；XML 与上游默认模板一致；PowerShell 语法检查通过，脚本逻辑覆盖有效清单、无测试程序、缺少 v6 依赖和清单读取失败。脚本逻辑测试模拟了 SDK 提取步骤，不代表 Windows PE 或程序启动验收。尚未取得失败 EXE 的导入表，缺失入口点的确切名称与 Windows 启动恢复仍需在新提交的 CI 中验证。
+本地验证：Rust fmt、Clippy、221 项 Rust 回归通过（6 项默认跳过）；XML 与上游默认模板一致；PowerShell 语法检查通过，脚本逻辑覆盖有效清单、无测试程序、缺少 v6 依赖和清单读取失败。脚本逻辑测试模拟了 SDK 提取步骤，不代表 Windows PE 或程序启动验收。后续 Windows 运行 `37441744989` 已通过实际 SDK 清单校验并开始运行测试，证实测试程序启动恢复；尚未取得此前失败 EXE 的导入表，缺失入口点的确切名称仍未确认。
 
 ## 本轮 Windows 与类型导出编译优化
 
 同次 CI 总耗时 36 分 39 秒，关键路径为 Rust 检查 10 分 7 秒，然后 Windows 26 分 20 秒；前端 4 分 5 秒已和 Rust 检查重叠。Windows 的 Rust 与 SVN 缓存均未命中：测试程序编译占 20 分 18 秒，测试尚未执行。Rust 检查中类型导出占约 6 分 56 秒，Clippy 编译约 1 分 49 秒。
 
 已对上述两段编译使用前述库测试与较轻的测试配置。本地以相同配置编译库测试耗时 1 分 18 秒、执行 22.97 秒，221 项通过、6 项默认跳过；接口/默认值一致性校验和 Clippy 通过。此为 macOS 本地数据，不能与 Windows runner 的 20 分 18 秒直接计算加速比例；Windows 冷缓存及缓存命中后的实际耗时需重新运行 CI 记录。
+
+## Windows 测试失败与挂起
+
+运行 `37441744989` 的 Windows 日志显示，预编译耗时 19 分 40 秒，正式测试命令又编译约 5 分 5 秒；此次代码尚未包含较轻的测试配置及 `--lib` 优化。大部分测试在正式开始后约 4 分钟内结束，但有 13 项报告失败，`real_svn_file_kind_probes_preserve_deleted_moved_and_missing_conflicts` 长时间未退出，最终被任务超时取消。普通测试运行器未在取消前输出失败断言详情，因此不能据此认定所有失败原因。
+
+已修正能从源码确认的夹具问题：两项仓库扫描断言改用平台路径组件比较；三处 SVN 本地仓库 URL 使用 `Url::from_file_path`；共用 SVN 命令显式禁止交互；共用仓库夹具 ID 按路径及类型生成，避免不同测试仓库复用同一缓存键。Windows 临时 runner 显式关闭 Git 的全局自动换行转换，具体测试的本地 Git 配置仍可覆盖。
+
+Windows 使用固定 `cargo-nextest 0.9.146`，每个测试独立进程运行，避免进程级全局状态相互干扰；`.config/nextest.toml` 配置每 60 秒报告慢测试，连续两次后终止该测试，其他测试继续执行。失败输出立即显示并在最后汇总，JUnit 报告保存在私有 `windows-test-report-*` artifact，保留 7 天。原挂起测试增加阶段日志，便于从超时输出定位停滞步骤。编译和整个任务仍受原有任务超时约束；单项测试超时不包含编译耗时。
+
+本地使用相同 Nextest 版本、CI 配置和测试编译设置验证：221 项通过、6 项保持默认忽略，测试运行 22.356 秒，JUnit 报告成功生成。Windows 的其余失败仍需下一次 CI 提供断言和实际超时阶段，不能把本地通过当作 Windows 已全部修复。

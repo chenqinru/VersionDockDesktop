@@ -327,7 +327,9 @@ async fn svn_file_groups_commit_to_a_real_local_repository() {
         .success());
     svn(&[
         "checkout".into(),
-        format!("file://{}", repository.display()),
+        url::Url::from_file_path(&repository)
+            .expect("absolute SVN repository path")
+            .into(),
         working.to_string_lossy().into(),
     ]);
     for path in ["a.txt", "b.txt"] {

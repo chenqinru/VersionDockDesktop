@@ -254,6 +254,16 @@ jobs:
         if: inputs.bundle
         run: npm ci
 
+      - name: Install Windows test runner
+        if: runner.os == 'Windows'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.146
+
+      - name: Configure deterministic Windows Git test fixtures
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
       - name: Compile Windows tests and verify embedded manifests
         if: runner.os == 'Windows'
         shell: pwsh
@@ -274,11 +284,21 @@ jobs:
 
       - name: Run Windows Git and SVN integration tests
         if: runner.os == 'Windows'
-        run: cargo test --lib --locked --manifest-path src-tauri/Cargo.toml
+        run: cargo nextest run --lib --locked --manifest-path src-tauri/Cargo.toml --config-file .config/nextest.toml --profile ci
         env:
           VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
           CARGO_PROFILE_TEST_OPT_LEVEL: "0"
           CARGO_PROFILE_TEST_DEBUG: "1"
+
+      - name: Save Windows test report
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-report-${{ github.sha }}
+          overwrite: true
+          path: src-tauri/target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Check the other macOS architecture
         if: runner.os == 'macOS' && !inputs.bundle

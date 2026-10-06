@@ -1590,9 +1590,8 @@ mod tests {
         let repos = scan(&ws, &settings).unwrap();
         assert_eq!(repos.len(), 2);
         assert!(repos.iter().any(|repo| repo.name == "visible"));
-        assert!(repos
-            .iter()
-            .any(|repo| repo.name == "secret" && repo.root_path.ends_with("other/secret")));
+        assert!(repos.iter().any(|repo| repo.name == "secret"
+            && Path::new(&repo.root_path).ends_with(Path::new("other").join("secret"))));
         assert!(!scan_ignore_matches("packages/secrets", "packages/secret"));
         assert!(scan_ignore_matches(
             "packages/secret/nested",
@@ -1628,7 +1627,8 @@ mod tests {
         };
         let repos = scan(&ws, &settings).unwrap();
         assert_eq!(repos.len(), 1);
-        assert!(repos[0].root_path.ends_with("packages/literal/repository"));
+        assert!(Path::new(&repos[0].root_path)
+            .ends_with(Path::new("packages").join("literal").join("repository")));
         settings.exclude_ignored_directories = false;
         assert_eq!(scan(&ws, &settings).unwrap().len(), 3);
     }
