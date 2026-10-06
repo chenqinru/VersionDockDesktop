@@ -569,14 +569,16 @@ async fn verify_credentials(
             username.into(),
             "--password-from-stdin".into(),
         ]);
-        format!("{password}\n")
+        // SVN reads through its native EOL or EOF. An LF alone on Windows is
+        // retained as part of the password; close stdin with the exact bytes.
+        password.as_bytes()
     });
     args.push(url.into());
     cli::run(
         "svn",
         &args,
         Path::new(&repo.root_path),
-        input.as_deref().map(str::as_bytes),
+        input,
         cli::NETWORK_TIMEOUT,
         token,
     )

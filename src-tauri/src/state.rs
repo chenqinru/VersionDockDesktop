@@ -982,7 +982,9 @@ pub fn canonical_directory(value: &str) -> Result<PathBuf, DesktopError> {
             false,
         ));
     }
-    let path = std::fs::canonicalize(value).map_err(|_| {
+    // Prefer normal Windows paths for external tools, preserving verbatim paths
+    // when removing the prefix would change their meaning or exceed MAX_PATH.
+    let path = dunce::canonicalize(value).map_err(|_| {
         DesktopError::new(
             "PATH_NOT_FOUND",
             format!("Path is not available: {value}"),
@@ -1418,7 +1420,7 @@ mod tests {
     async fn real_watcher_detects_external_git_stage_commit_and_push() {
         use std::process::Command;
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
+        let root = dunce::canonicalize(temp.path()).unwrap();
         let working = root.join("working");
         let remote = root.join("remote.git");
         std::fs::create_dir(&working).unwrap();

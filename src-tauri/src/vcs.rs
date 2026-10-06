@@ -465,11 +465,12 @@ async fn svn_once(
         ]);
     }
     safe.extend_from_slice(args);
-    let input = auth.map(|(_, password)| format!("{password}\n"));
+    // EOF terminates SVN's stdin password without adding a platform-specific EOL.
+    let input = auth.map(|(_, password)| password.as_bytes());
     cli::run_svn(
         &safe,
         Path::new(&repo.root_path),
-        input.as_ref().map(|value| value.as_bytes()),
+        input,
         timeout,
         token,
         mode,
@@ -865,21 +866,12 @@ pub async fn checkout_svn_repository(
             "--config-option".into(),
             "servers:global:store-auth-creds=yes".into(),
         ]);
-        password_stdin_supported.then(|| format!("{password}\n"))
+        Some(password.as_bytes())
     } else {
         None
     };
     args.push("--non-interactive".into());
-    if let Err(error) = cli::run(
-        "svn",
-        &args,
-        &staging,
-        stdin.as_deref().map(str::as_bytes),
-        cli::NETWORK_TIMEOUT,
-        token,
-    )
-    .await
-    {
+    if let Err(error) = cli::run("svn", &args, &staging, stdin, cli::NETWORK_TIMEOUT, token).await {
         cleanup_checkout_staging(&staging);
         return Err(error);
     }
@@ -14268,7 +14260,7 @@ mod tests {
         invalidate_svn_ref_caches(&repo.id);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn svn_incoming_probe_chains_pending_new_revision_and_prevents_stale_overwrite() {
         let repo = RepositoryMeta {
             id: "svn-chain-test-repo".into(),
@@ -14283,6 +14275,9 @@ mod tests {
         };
 
         invalidate_svn_ref_caches(&repo.id);
+
+        // Keep the probe-chain test independent of real SVN startup and I/O.
+        set_svn_wc_revision_for_test(&repo.id, Some(105));
 
         // 安装 mock 处理函数：
         // 探测 r100 耗时 80ms，返回 Ok(0)（计数无变化）
@@ -14337,7 +14332,7 @@ mod tests {
         invalidate_svn_ref_caches(&repo.id);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn svn_incoming_probe_delayed_stale_request_does_not_clear_pending_new_revision() {
         let repo = RepositoryMeta {
             id: "svn-delayed-stale-repo".into(),
@@ -14409,7 +14404,7 @@ mod tests {
         invalidate_svn_ref_caches(&repo.id);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn svn_incoming_probe_real_rollback_recheck_adopts_active_result() {
         let repo = RepositoryMeta {
             id: "svn-rollback-recheck-repo".into(),
@@ -14469,7 +14464,7 @@ mod tests {
         invalidate_svn_ref_caches(&repo.id);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn svn_incoming_probe_branch_switch_invalidation_prevents_stale_writeback() {
         let repo = RepositoryMeta {
             id: "svn-branch-switch-repo".into(),

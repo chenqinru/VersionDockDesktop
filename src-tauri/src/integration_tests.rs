@@ -1402,7 +1402,22 @@ async fn real_svn_commit_keeps_unselected_children_out_of_revision() {
     let changed = command_output("svn", &["log", "-v", "-r", "HEAD"], &checkout);
     assert!(changed.contains("/new/selected.txt"));
     assert!(!changed.contains("/new/other.txt"));
-    assert!(command_output("svn", &["status"], &checkout).contains("?       new/other.txt"));
+    let status_of = |path: &str| {
+        let raw = command_output("svn", &["status", "--xml"], &checkout);
+        let document = roxmltree::Document::parse(&raw).unwrap();
+        document
+            .descendants()
+            .find(|entry| {
+                entry.has_tag_name("entry")
+                    && entry
+                        .attribute("path")
+                        .is_some_and(|value| Path::new(value) == Path::new(path))
+            })
+            .and_then(|entry| entry.children().find(|node| node.has_tag_name("wc-status")))
+            .and_then(|status| status.attribute("item"))
+            .map(str::to_owned)
+    };
+    assert_eq!(status_of("new/other.txt").as_deref(), Some("unversioned"));
 
     std::fs::write(directory.join("selected.txt"), "changed\n").unwrap();
     command(
@@ -1419,7 +1434,7 @@ async fn real_svn_commit_keeps_unselected_children_out_of_revision() {
     )
     .await
     .unwrap();
-    assert!(command_output("svn", &["status"], &checkout).contains("M       new/selected.txt"));
+    assert_eq!(status_of("new/selected.txt").as_deref(), Some("modified"));
 
     let overflow = checkout.join("overflow");
     std::fs::create_dir(&overflow).unwrap();
@@ -8157,6 +8172,16 @@ async fn parity_svn_authentication_retries_only_the_original_command_and_honors_
         if choice == "authenticate" {
             result.unwrap();
             assert_eq!(revision.trim(), "1");
+            let checkout = vcs::checkout_svn_repository(
+                &url,
+                root.path(),
+                "authenticated checkout",
+                Some(&("alice".into(), "secret".into())),
+                &t,
+            )
+            .await
+            .unwrap();
+            assert_eq!(read_text(checkout.join("added.txt")), "new\n");
         } else {
             assert_eq!(result.unwrap_err().code, "REQUEST_CANCELLED");
             assert_eq!(revision.trim(), "0");
