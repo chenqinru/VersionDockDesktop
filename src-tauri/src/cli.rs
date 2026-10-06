@@ -44,6 +44,8 @@ impl CommandOutput {
 
 pub(crate) fn background_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
     let mut command = std::process::Command::new(program);
+    #[cfg(target_os = "macos")]
+    configure_macos_locale(&mut command);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -58,6 +60,11 @@ pub(crate) fn background_command(program: impl AsRef<std::ffi::OsStr>) -> std::p
 }
 
 pub fn resolve_executable(program: &str) -> std::path::PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        let path = std::env::var_os("PATH");
+        resolve_macos_executable(program, path.as_deref(), &MACOS_TOOL_DIRECTORIES)
+    }
     #[cfg(windows)]
     {
         use std::path::PathBuf;
@@ -90,7 +97,79 @@ pub fn resolve_executable(program: &str) -> std::path::PathBuf {
             }
         }
     }
+    #[cfg(not(target_os = "macos"))]
     std::path::PathBuf::from(program)
+}
+
+#[cfg(target_os = "macos")]
+const MACOS_TOOL_DIRECTORIES: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
+
+#[cfg(target_os = "macos")]
+fn resolve_macos_executable(
+    program: &str,
+    path: Option<&std::ffi::OsStr>,
+    fallback_directories: &[&str],
+) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Explicit paths and the user's PATH retain priority over package managers.
+    if program.contains('/') {
+        return PathBuf::from(program);
+    }
+    path.into_iter()
+        .flat_map(std::env::split_paths)
+        .chain(fallback_directories.iter().map(PathBuf::from))
+        .map(|directory| directory.join(program))
+        .find(|candidate| {
+            candidate.metadata().is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from(program))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_locale_override(
+    lc_all: Option<&std::ffi::OsStr>,
+    lc_ctype: Option<&std::ffi::OsStr>,
+    lang: Option<&std::ffi::OsStr>,
+) -> Option<&'static str> {
+    let nonempty = |value: &std::ffi::OsStr| !value.is_empty();
+    let lc_all = lc_all.filter(|value| nonempty(value));
+    let effective = lc_all
+        .or(lc_ctype.filter(|value| nonempty(value)))
+        .or(lang.filter(|value| nonempty(value)));
+    if effective.is_some_and(|value| {
+        let locale = value.to_string_lossy().to_ascii_lowercase();
+        let locale = locale.split('@').next().unwrap_or_default();
+        locale.ends_with(".utf-8") || locale.ends_with(".utf8")
+    }) {
+        return None;
+    }
+    // Finder may omit locale variables. SVN otherwise corrupts UTF-8 paths.
+    Some(if lc_all.is_some() {
+        "LC_ALL"
+    } else {
+        "LC_CTYPE"
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn configure_macos_locale(command: &mut std::process::Command) {
+    let effective_env = |key: &str| {
+        command
+            .get_envs()
+            .find(|(name, _)| *name == key)
+            .map_or_else(|| std::env::var_os(key), |(_, value)| value.map(Into::into))
+    };
+    let lc_all = effective_env("LC_ALL");
+    let lc_ctype = effective_env("LC_CTYPE");
+    let lang = effective_env("LANG");
+    if let Some(key) =
+        macos_locale_override(lc_all.as_deref(), lc_ctype.as_deref(), lang.as_deref())
+    {
+        command.env(key, "en_US.UTF-8");
+    }
 }
 
 pub async fn run(
@@ -263,6 +342,17 @@ async fn run_once(
     };
     let formatted_cmd = format_command_for_log(program, args);
 
+    #[cfg(target_os = "macos")]
+    let resolved = {
+        let path = secret_env
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "PATH")
+            .map(|(_, value)| std::ffi::OsString::from(value))
+            .or_else(|| std::env::var_os("PATH"));
+        resolve_macos_executable(program, path.as_deref(), &MACOS_TOOL_DIRECTORIES)
+    };
+    #[cfg(not(target_os = "macos"))]
     let resolved = resolve_executable(program);
     let mut command = Command::new(&resolved);
     command
@@ -277,6 +367,8 @@ async fn run_once(
             Stdio::null()
         });
     command.envs(secret_env.iter().map(|(key, value)| (key, value)));
+    #[cfg(target_os = "macos")]
+    configure_macos_locale(command.as_std_mut());
     if is_git_program(program) {
         // Read-only Git commands must not refresh the index and contend with
         // VersionDock or another Git client for index.lock.
@@ -1048,6 +1140,200 @@ fn redact_url_userinfo(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_tool_resolution_preserves_path_priority_and_skips_nonexecutables() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path_bin = directory.path().join("path-bin");
+        let homebrew = directory.path().join("homebrew-bin");
+        let intel = directory.path().join("intel-bin");
+        for bin in [&path_bin, &homebrew, &intel] {
+            std::fs::create_dir(bin).unwrap();
+            let executable = bin.join("svn");
+            std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+            std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = std::env::join_paths([&path_bin]).unwrap();
+        let fallback = [homebrew.to_str().unwrap(), intel.to_str().unwrap()];
+        assert_eq!(
+            resolve_macos_executable("svn", Some(&path), &fallback),
+            path_bin.join("svn")
+        );
+        assert_eq!(
+            resolve_macos_executable("svn", None, &fallback),
+            homebrew.join("svn")
+        );
+        std::fs::set_permissions(homebrew.join("svn"), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        assert_eq!(
+            resolve_macos_executable("svn", None, &fallback),
+            intel.join("svn")
+        );
+        std::fs::remove_file(intel.join("svn")).unwrap();
+        std::fs::create_dir(intel.join("svn")).unwrap();
+        assert_eq!(
+            resolve_macos_executable("svn", None, &fallback),
+            PathBuf::from("svn")
+        );
+        assert_eq!(
+            resolve_macos_executable("/custom/bin/svn", Some(&path), &fallback),
+            PathBuf::from("/custom/bin/svn")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_locale_uses_effective_precedence_and_preserves_utf8() {
+        use std::ffi::OsStr;
+        let c = Some(OsStr::new("C"));
+        let utf8 = Some(OsStr::new("zh_CN.UTF-8"));
+        assert_eq!(macos_locale_override(None, None, None), Some("LC_CTYPE"));
+        assert_eq!(macos_locale_override(None, c, utf8), Some("LC_CTYPE"));
+        assert_eq!(macos_locale_override(c, utf8, utf8), Some("LC_ALL"));
+        assert_eq!(macos_locale_override(utf8, c, c), None);
+        assert_eq!(macos_locale_override(None, utf8, c), None);
+        assert_eq!(macos_locale_override(None, None, utf8), None);
+        assert_eq!(
+            macos_locale_override(None, None, Some(OsStr::new("en_US.UTF-8@modifier"))),
+            None
+        );
+        assert_eq!(
+            macos_locale_override(Some(OsStr::new("")), None, Some(OsStr::new("en_US.utf8"))),
+            None
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_commands_use_explicit_path_and_repair_non_utf8_locale() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("versiondock-test-probe");
+        std::fs::write(&executable, "#!/bin/sh\nprintf '%s' \"$LC_ALL\"\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let output = run_with_env(
+            "versiondock-test-probe",
+            &[],
+            directory.path(),
+            None,
+            Duration::from_secs(10),
+            &CancellationToken::new(),
+            &[
+                ("PATH".into(), directory.path().to_str().unwrap().into()),
+                ("LC_ALL".into(), "C".into()),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.stdout_text(), "en_US.UTF-8");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_gui_environment_checks_out_real_svn_with_unicode_paths() {
+        for program in ["svn", "svnadmin"] {
+            let available = background_command(resolve_executable(program))
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success());
+            if !available {
+                assert_ne!(
+                    std::env::var("VERSIONDOCK_REQUIRE_VCS_TESTS").as_deref(),
+                    Ok("1"),
+                    "required integration-test tool is unavailable: {program}"
+                );
+                eprintln!("SKIP: {program} not available");
+                return;
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let repository = root.join("仓库");
+        let working_copy = root.join("工作 副本");
+        let config = root.join("svn-config");
+        let token = CancellationToken::new();
+        // These overrides simulate Finder without changing the test process environment.
+        let gui_env = [
+            ("PATH".into(), "/usr/bin:/bin:/usr/sbin:/sbin".into()),
+            ("LC_ALL".into(), "".into()),
+            ("LC_CTYPE".into(), "".into()),
+            ("LANG".into(), "".into()),
+        ];
+        run_with_env(
+            "svnadmin",
+            &["create".into(), repository.to_str().unwrap().into()],
+            root,
+            None,
+            Duration::from_secs(20),
+            &token,
+            &gui_env,
+        )
+        .await
+        .unwrap();
+        assert!(repository.join("format").is_file());
+        let url = url::Url::from_directory_path(&repository)
+            .unwrap()
+            .to_string();
+        run_with_env(
+            "svn",
+            &[
+                "checkout".into(),
+                "--non-interactive".into(),
+                "--config-dir".into(),
+                config.to_str().unwrap().into(),
+                url,
+                working_copy.to_str().unwrap().into(),
+            ],
+            root,
+            None,
+            Duration::from_secs(20),
+            &token,
+            &gui_env,
+        )
+        .await
+        .unwrap();
+        assert!(working_copy.join(".svn/wc.db").is_file());
+        std::fs::write(working_copy.join("中文 文件.txt"), "SVN UTF-8 路径").unwrap();
+        run_with_env(
+            "svn",
+            &[
+                "add".into(),
+                "--non-interactive".into(),
+                "--config-dir".into(),
+                config.to_str().unwrap().into(),
+                "中文 文件.txt".into(),
+            ],
+            &working_copy,
+            None,
+            Duration::from_secs(20),
+            &token,
+            &gui_env,
+        )
+        .await
+        .unwrap();
+        let status = run_with_env(
+            "svn",
+            &[
+                "status".into(),
+                "--xml".into(),
+                "--non-interactive".into(),
+                "--config-dir".into(),
+                config.to_str().unwrap().into(),
+            ],
+            &working_copy,
+            None,
+            Duration::from_secs(20),
+            &token,
+            &gui_env,
+        )
+        .await
+        .unwrap();
+        assert!(status.stdout_text().contains("中文 文件.txt"));
+        assert!(status.stdout_text().contains("item=\"added\""));
+    }
 
     #[test]
     fn secrets_are_redacted() {

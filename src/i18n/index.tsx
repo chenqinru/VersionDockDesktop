@@ -4,6 +4,7 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'SVN command-line client was not detected. Install SVN and restart the app.': 'SVN command-line client was not detected. Install SVN and restart the app.',
   'Path was unavailable — click to retry': 'Path was unavailable — click to retry',
   'Restarting…': 'Restarting…',
   'Restart failed: {0}': 'Restart failed: {0}',
@@ -1284,6 +1285,7 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'SVN command-line client was not detected. Install SVN and restart the app.': '未检测到 SVN 命令行客户端，请安装 SVN 后重启应用。',
   'Path was unavailable — click to retry': '路径此前不可用，点击重试',
   'Restarting…': '正在重启…',
   'Restart failed: {0}': '重启失败：{0}',

@@ -91,7 +91,7 @@ export function WorkspaceChooser() {
               <div className="welcome-action-icon"><Codicon name="repo-clone" /></div>
               <div className="welcome-action-text"><span className="welcome-action-title">{t('Clone Repository')}</span><span className="welcome-action-desc">{t('Clone a Git repository into a local folder.')}</span></div>
             </button>
-            <button type="button" className="welcome-action-btn" disabled={busy || !svnAvailable} onClick={() => setCheckoutKind('svn')}>
+            <button type="button" className="welcome-action-btn" disabled={busy || !svnAvailable} title={!svnAvailable ? t('SVN command-line client was not detected. Install SVN and restart the app.') : undefined} onClick={() => setCheckoutKind('svn')}>
               <div className="welcome-action-icon"><Codicon name="cloud-download" /></div>
               <div className="welcome-action-text"><span className="welcome-action-title">{t('Checkout SVN Repository')}</span><span className="welcome-action-desc">{t('Check out an SVN repository into a local folder.')}</span></div>
             </button>

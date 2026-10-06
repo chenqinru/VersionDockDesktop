@@ -15,6 +15,25 @@ afterEach(() => {
 });
 
 describe('WorkspaceChooser V5 setup actions', () => {
+  it.each([false, true])('gates SVN checkout on tool availability (%s) and explains the disabled state', (svnAvailable) => {
+    const bridge = new MockBridge(() => true);
+    useAppStore.setState({
+      operations: {},
+      bootstrap: { state: { recentWorkspaces: [] }, tools: { svn: svnAvailable } } as any,
+    });
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
+    const checkout = screen.getByRole('button', { name: /Checkout SVN Repository/ });
+    if (svnAvailable) {
+      expect(checkout).toBeEnabled();
+      expect(checkout).not.toHaveAttribute('title');
+    } else {
+      expect(checkout).toBeDisabled();
+      expect(checkout).toHaveAttribute('title', 'SVN command-line client was not detected. Install SVN and restart the app.');
+      fireEvent.click(checkout);
+      expect(screen.queryByLabelText('SVN URL')).not.toBeInTheDocument();
+    }
+  });
+
   it('uses the package version and retries a saved unavailable workspace only after a click', () => {
     const openWorkspace = vi.fn(async () => true);
     const bridge = new MockBridge(() => true);

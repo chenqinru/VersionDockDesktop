@@ -53,7 +53,7 @@ VersionDock Desktop 是基于 Tauri 2、Rust、React 18 和 TypeScript 构建的
 - **Rust**: `1.99.0`，由 `rust-toolchain.toml` 固定，包含 rustfmt 和 Clippy；CI 使用相同版本
 - **System WebView**: 系统自带组件（macOS WebKit, Windows WebView2, Linux WebKit2GTK）
 - **Git**：系统 PATH 中安装 2.23 或更高版本
-- **SVN**：系统 PATH 中安装 1.9 或更高版本；安全的 password-stdin 凭据集成要求 1.10 或更高版本
+- **SVN**：安装 1.9 或更高版本的命令行客户端；安全的 password-stdin 凭据集成要求 1.10 或更高版本。优先使用系统 PATH，macOS 也会自动检测 Homebrew（`/opt/homebrew/bin`、`/usr/local/bin`）和 MacPorts（`/opt/local/bin`）安装路径，安装后重启 App 即可
 
 > Windows 上当前稳定的 SVN 1.14.5 CLI 会将命令行参数转换到系统 ANSI code page，无法可靠处理中文等超出该代码页的路径；1.15.0-rc3 源码同样尚未包含修复。此类路径需要使用包含 Apache Subversion r1935602 Unicode argv 修复的客户端。CI 会从固定源码提交构建并验证该能力，待修复进入正式版后再切换到对应稳定版本。
 
