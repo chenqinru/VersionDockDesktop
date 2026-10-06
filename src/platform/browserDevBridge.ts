@@ -548,7 +548,8 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'pushProtectionCheck': return [];
       case 'branches': return this.branchValues[command.payload.repo_id] ?? [];
       case 'tags': return this.tagValues[command.payload.repo_id] ?? [];
-      case 'commitDetail': return this.commitDetail(command.payload.repo_id, command.payload.revision);
+      case 'commitDetail': return { ...this.commitDetail(command.payload.repo_id, command.payload.revision), branches: { local: [], remote: [], tags: [] }, branchesPending: true } satisfies CommitDetail;
+      case 'commitBranches': return this.commitDetail(command.payload.repo_id, command.payload.revision).branches;
       case 'commitMergeCommits': return this.mergeCommits(command.payload.repo_id, command.payload.revision) satisfies MergeCommitSummary[];
       case 'commitMergeParentFiles': return [
         { path: 'src/demo-parent-change.ts', status: 'M', added: 12, removed: 4 },

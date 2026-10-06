@@ -4286,23 +4286,24 @@ async fn real_git_core_workflow() {
     let head_detail = vcs::commit_detail(&repository, &history.commits[0].hash, &token)
         .await
         .unwrap();
-    assert_eq!(head_detail.branches.is_head, Some(true));
-    assert!(head_detail
-        .branches
-        .local
-        .iter()
-        .any(|value| value == "main"));
-    assert!(!head_detail
-        .branches
+    assert_eq!(head_detail.branches_pending, Some(true));
+    let head_branches = vcs::commit_branches(&repository, &history.commits[0].hash, &token)
+        .await
+        .unwrap();
+    assert_eq!(head_branches.is_head, Some(true));
+    assert!(head_branches.local.iter().any(|value| value == "main"));
+    assert!(!head_branches
         .remote
         .iter()
         .any(|value| value.ends_with("/HEAD")));
     let pushed_detail = vcs::commit_detail(&repository, &history.commits[1].hash, &token)
         .await
         .unwrap();
-    assert_eq!(pushed_detail.branches.is_head, Some(false));
-    assert!(pushed_detail
-        .branches
+    let pushed_branches = vcs::commit_branches(&repository, &pushed_detail.commit.hash, &token)
+        .await
+        .unwrap();
+    assert_eq!(pushed_branches.is_head, Some(false));
+    assert!(pushed_branches
         .remote
         .iter()
         .any(|value| value == "origin/main"));
@@ -4970,7 +4971,16 @@ async fn real_git_commit_detail_merge_refs_and_range_diff() {
         .await
         .unwrap();
     assert!(detail.commit.parents.len() >= 2);
-    assert!(detail.branches.local.iter().any(|branch| branch == "main"));
+    assert_eq!(detail.branches_pending, Some(true));
+    assert!(detail.branches.local.is_empty());
+    let branches = vcs::commit_branches(&repository, &merge_hash, &token)
+        .await
+        .unwrap();
+    assert!(branches.local.iter().any(|branch| branch == "main"));
+    assert_eq!(branches.is_head, Some(true));
+    assert!(vcs::commit_branches(&repository, "--help", &token)
+        .await
+        .is_err());
     assert!(detail.files.is_empty());
     assert!(detail
         .merge_parent_changes
@@ -5024,7 +5034,10 @@ async fn real_git_commit_detail_merge_refs_and_range_diff() {
     let tagged = vcs::commit_detail(&repository, &merge_hash, &token)
         .await
         .unwrap();
-    assert!(tagged.branches.tags.iter().any(|tag| tag == "v-detail"));
+    let tagged_branches = vcs::commit_branches(&repository, &tagged.commit.hash, &token)
+        .await
+        .unwrap();
+    assert!(tagged_branches.tags.iter().any(|tag| tag == "v-detail"));
 
     // An aggregate including the root must compare against the empty tree,
     // retaining the root's original lines rather than showing only the latest commit.
@@ -5053,6 +5066,39 @@ async fn real_git_commit_detail_merge_refs_and_range_diff() {
     .await
     .unwrap();
     assert!(range.content.contains("+feature"));
+}
+
+#[tokio::test]
+async fn real_svn_commit_detail_without_branch_enrichment() {
+    if !available("svn") || !available("svnadmin") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let server = directory.path().join("server");
+    let wc = directory.path().join("wc");
+    command(
+        "svnadmin",
+        &["create", server.to_str().unwrap()],
+        directory.path(),
+    );
+    command(
+        "svn",
+        &["checkout", &svn_file_url(&server), wc.to_str().unwrap()],
+        directory.path(),
+    );
+    std::fs::write(wc.join("app.txt"), "SVN detail\n").unwrap();
+    command("svn", &["add", "app.txt"], &wc);
+    command("svn", &["commit", "-m", "Initial files"], &wc);
+    let repository = repo(&wc, VcsKind::Svn);
+    let token = CancellationToken::new();
+    let detail = vcs::commit_detail(&repository, "1", &token).await.unwrap();
+    assert_eq!(detail.files.len(), 1);
+    assert_eq!(detail.files[0].path, "app.txt");
+    assert_eq!(detail.branches_pending, None);
+    let branches = vcs::commit_branches(&repository, "1", &token)
+        .await
+        .unwrap();
+    assert!(branches.local.is_empty());
 }
 
 #[tokio::test]

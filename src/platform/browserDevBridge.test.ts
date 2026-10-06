@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BootstrapData, BridgeCommand, CommitDetail, HistoryPage, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, BridgeCommand, CommitBranches, CommitDetail, HistoryPage, WorkspaceSnapshot } from '../bindings/generated';
 import { BrowserDevBridge } from './browserDevBridge';
 
 describe('BrowserDevBridge', () => {
@@ -19,6 +19,11 @@ describe('BrowserDevBridge', () => {
     const command: BridgeCommand = { type: 'stage', payload: { workspace_id: 'browser-demo', repo_id: 'admin', paths: ['apps/web-antd/src/api/infra/config/index.ts'] } };
     await bridge.request(command);
     expect(detail.files).toHaveLength(2);
+    expect(detail.branchesPending).toBe(true);
+    expect(detail.branches.local).toEqual([]);
+    const branches = await bridge.request<CommitBranches>({ type: 'commitBranches', payload: { workspace_id: 'browser-demo', repo_id: 'admin', revision: page.commits[0].hash } });
+    expect(branches.remote).toEqual(expect.any(Array));
+    expect(branches).not.toEqual(detail.branches);
     expect(JSON.stringify(command)).not.toContain('cwd');
     const status = await bridge.request<{ files: Array<{ path: string; staged: boolean }> }>({ type: 'repositoryStatus', payload: { workspace_id: 'browser-demo', repo_id: 'admin' } });
     expect(status.files.find((file) => file.path.endsWith('/index.ts'))?.staged).toBe(true);

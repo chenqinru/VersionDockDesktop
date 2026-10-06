@@ -458,6 +458,11 @@ pub enum BridgeCommand {
         repo_id: String,
         revision: String,
     },
+    CommitBranches {
+        workspace_id: String,
+        repo_id: String,
+        revision: String,
+    },
     CommitMergeCommits {
         workspace_id: String,
         repo_id: String,
@@ -2476,6 +2481,9 @@ pub struct CommitDetail {
     pub full_message: String,
     pub files: Vec<CommitFile>,
     pub branches: CommitBranches,
+    #[serde(default)]
+    #[specta(optional)]
+    pub branches_pending: Option<bool>,
     #[serde(default)]
     pub merge_parent_changes: Vec<MergeParentChange>,
 }

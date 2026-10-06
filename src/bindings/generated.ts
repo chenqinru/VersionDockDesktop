@@ -477,6 +477,10 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	workspace_id: string,
 	repo_id: string,
 	revision: string,
+} } | { type: "commitBranches"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	revision: string,
 } } | { type: "commitMergeCommits"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -764,6 +768,7 @@ export type CommitDetail = {
 	fullMessage: string,
 	files: CommitFile[],
 	branches: CommitBranches,
+	branchesPending?: boolean | null,
 	mergeParentChanges?: MergeParentChange[],
 };
 

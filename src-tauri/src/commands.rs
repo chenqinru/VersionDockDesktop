@@ -3150,6 +3150,15 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(Box::pin(vcs::commit_detail(&repo, &revision, token)).await?)
         }
+        BridgeCommand::CommitBranches {
+            workspace_id,
+            repo_id,
+            revision,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::commit_branches(&repo, &revision, token).await?)
+        }
         BridgeCommand::CommitMergeCommits {
             workspace_id,
             repo_id,

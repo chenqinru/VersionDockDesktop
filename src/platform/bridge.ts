@@ -171,7 +171,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'repositoryStatus': return 'status';
     case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff':
     case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
-    case 'history': case 'historyTopology': case 'commitDetail': case 'commitMergeCommits':
+    case 'history': case 'historyTopology': case 'commitDetail': case 'commitBranches': case 'commitMergeCommits':
     case 'commitMergeParentFiles': case 'unpushedCommits': case 'unpushedOperation':
     case 'historyOperation': case 'createPatch': case 'savePatch': case 'savePatches': case 'branchCompare': case 'branchCompareCommits': return 'history';
     case 'branches': case 'branchOperation': case 'branchRecovery': case 'gitUnlockIndex': return 'branch';

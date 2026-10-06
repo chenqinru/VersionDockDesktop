@@ -7079,12 +7079,12 @@ pub async fn commit_detail(
                 )?;
                 (merge_git_files(&stats, &statuses), Vec::new())
             };
-            let branches = containing_branches(repo, &commit.hash, token).await?;
             Ok(CommitDetail {
                 commit,
                 full_message: full_message.trim().into(),
                 files,
-                branches,
+                branches: CommitBranches::default(),
+                branches_pending: Some(true),
                 merge_parent_changes,
             })
         }
@@ -7227,6 +7227,7 @@ pub async fn commit_detail(
                     tags: Vec::new(),
                     is_head: None,
                 },
+                branches_pending: None,
                 merge_parent_changes: Vec::new(),
             })
         }
@@ -7433,7 +7434,7 @@ pub async fn merge_commits(
     Ok(result)
 }
 
-async fn containing_branches(
+pub async fn commit_branches(
     repo: &RepositoryMeta,
     revision: &str,
     token: &CancellationToken,
@@ -7441,6 +7442,7 @@ async fn containing_branches(
     if !matches!(repo.kind, VcsKind::Git) {
         return Ok(CommitBranches::default());
     }
+    validate_revision(revision)?;
     let (local, remote, tags, head) = tokio::try_join!(
         git(
             vec![

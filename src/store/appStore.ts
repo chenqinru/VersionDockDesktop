@@ -4,7 +4,7 @@ import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '
 import { SettingsWriter } from '../services/settingsWriter';
 import { create } from 'zustand';
 import type {
-  AppStateSnapshot, BootstrapData, BranchInfo, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
+  AppStateSnapshot, BootstrapData, BranchInfo, CommitBranches, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
   BranchCompareResult, HistoryPage, MergeVersions, RemoteInfo, RemoteOperation, RepositoryStatus, TagInfo, ThemePreference, LanguagePreference, UiFontSizePreference, FileIconThemePreference,
   WorkspaceSnapshot, StashEntry, StashOperation, ShelfEntry, ShelfOperation, ChangelistEntry, ChangelistOperation, WorktreeDiffResult, WorktreeEntry, WorktreeOperation, SubtreeEntry, SubtreeOperation, SubmoduleEntry, SubmoduleOperation,
   IncomingCommit, UnpushedCommit, UnpushedOperation, HistoryOperation, PatchDocument, SvnOperation, MergeCommitSummary, DesktopSettings, LayoutState, SettingsUpdateResult, RepositoryOperationResult,
@@ -1615,6 +1615,43 @@ export const useAppStore = create<AppStore>((set, get) => {
     return value;
   };
 
+  const enrichCommitBranches = async (wid: string, key: string, detail: CommitDetail) => {
+    const requestKey = `commit-branches:${wid}:${key}`;
+    if (requestControllers.has(requestKey)) return;
+    const controller = beginRequest(requestKey);
+    try {
+      const branches = await bridge().request<CommitBranches>({
+        type: 'commitBranches',
+        payload: { workspace_id: wid, repo_id: detail.commit.repoId, revision: detail.commit.hash },
+      }, { signal: controller.signal, showProgress: false });
+      if (controller.signal.aborted || !isCurrentRequest(requestKey, controller)) return;
+      set(state => {
+        const active = state.snapshot?.workspace.id === wid;
+        const session = state.sessions[wid];
+        const target = active ? state : session;
+        // A newer file request may have replaced this detail while refs loaded.
+        if (!target || target.selectedCommitDetails[key] !== detail) return {};
+        const enriched: CommitDetail = {
+          ...detail, branchesPending: false,
+          branches: {
+            local: [...new Set([...detail.branches.local, ...branches.local])],
+            remote: [...new Set([...detail.branches.remote, ...branches.remote])],
+            tags: [...new Set([...detail.branches.tags, ...branches.tags])],
+            isHead: branches.isHead ?? detail.branches.isHead,
+          },
+        };
+        const patch = {
+          selectedCommitDetails: { ...target.selectedCommitDetails, [key]: enriched },
+          selectedCommit: target.selectedPrimaryKey === key ? enriched : target.selectedCommit,
+        };
+        return active ? patch : { sessions: { ...state.sessions, [wid]: { ...session, ...patch } } };
+      });
+    } catch {
+      // Supplementary refs must never erase loaded files or publish an error
+      // toast. A cached partial detail can retry this query on the next visit.
+    } finally { endRequest(requestKey, controller); }
+  };
+
   const settings = () => get().bootstrap?.state.settings ?? emptyState.settings!;
   const layout = () => get().bootstrap?.state.layout ?? emptyState.layout!;
 
@@ -2781,6 +2818,9 @@ export const useAppStore = create<AppStore>((set, get) => {
             }
           })();
         }
+        for (const commit of cachedSession.selectedCommits) {
+          if (cachedSession.selectedCommitDetails[commitKey(commit.repoId, commit.hash)]?.branchesPending) void get().loadCommitDetail(commit).catch(() => undefined);
+        }
         drainPendingWorkspaceEvents(workspaceId);
         try {
           await persistTabs(get().tabs, workspaceId);
@@ -3167,8 +3207,6 @@ export const useAppStore = create<AppStore>((set, get) => {
         finally { if (get().snapshot?.workspace.id === currentWorkspace) set({ branchesLoading: false }); }
         const failures = (await otherResults).filter((result): result is PromiseRejectedResult => result.status === 'rejected');
         if (failures.length) throw failures[0].reason;
-        const firstCommit = get().history[0];
-        if (firstCommit && !get().selectedCommits.length) await get().selectCommit(firstCommit);
       }, `repository:${repoId}`);
     },
 
@@ -3839,13 +3877,16 @@ export const useAppStore = create<AppStore>((set, get) => {
       const commits = result.summary?.detail.commits ?? [];
       if (!commits.length) return;
       const details = await mapWithConcurrency(commits, 4, (commit) => get().loadCommitDetail(commit));
-      const byKey = Object.fromEntries(details.map((detail) => [commitKey(detail.commit.repoId, detail.commit.hash), detail]));
+      const byKey = Object.fromEntries(details.map(detail => {
+        const key = commitKey(detail.commit.repoId, detail.commit.hash);
+        return [key, get().selectedCommitDetails[key] ?? detail];
+      }));
       const { hadPathFilter, historyScope, historyQuery, historyFilter } = resetHistoryPathFilterState(get());
       set({
         selectedCommits: commits,
         selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash),
         commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash),
-        selectedCommit: details[0],
+        selectedCommit: byKey[commitKey(commits[0].repoId, commits[0].hash)],
         selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey },
         historyScope,
         historyQuery,
@@ -3860,13 +3901,16 @@ export const useAppStore = create<AppStore>((set, get) => {
       const commits = results.flatMap((result) => result.summary?.detail.commits ?? []);
       if (!commits.length) return;
       const details = await mapWithConcurrency(commits, 4, (commit) => get().loadCommitDetail(commit));
-      const byKey = Object.fromEntries(details.map((detail) => [commitKey(detail.commit.repoId, detail.commit.hash), detail]));
+      const byKey = Object.fromEntries(details.map(detail => {
+        const key = commitKey(detail.commit.repoId, detail.commit.hash);
+        return [key, get().selectedCommitDetails[key] ?? detail];
+      }));
       const { hadPathFilter, historyScope, historyQuery, historyFilter } = resetHistoryPathFilterState(get());
       set({
         selectedCommits: commits,
         selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash),
         commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash),
-        selectedCommit: details[0],
+        selectedCommit: byKey[commitKey(commits[0].repoId, commits[0].hash)],
         selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey },
         historyScope,
         historyQuery,
@@ -3968,6 +4012,10 @@ export const useAppStore = create<AppStore>((set, get) => {
           historyRepoErrors: repoErrors,
           historyLoading: false,
         });
+
+        // Match the plugin: start selected-file loading as soon as the log page
+        // is visible, before refs, auxiliary tabs or topology finish loading.
+        if (history[0] && get().mode === 'history' && !get().selectedCommits.length) void get().selectCommit(history[0]);
 
         // 异步后台加载图谱拓扑并限制最大抓取量，拓扑返回后平滑更新泳道排线
         // 使用独立的 topologyGeneration 与 'history:topology' 控制器，绝不与后续滚动分页冲突
@@ -4095,8 +4143,14 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!force) {
         const isCurrent = (get().snapshot?.workspace.id ?? get().activeTabId ?? '') === targetWorkspaceId;
         const cached = isCurrent ? get().selectedCommitDetails[key] : get().sessions[targetWorkspaceId]?.selectedCommitDetails[key];
-        if (cached) return cached;
+        if (cached) {
+          if (cached.branchesPending) void enrichCommitBranches(targetWorkspaceId, key, cached);
+          return cached;
+        }
       }
+      const branchesRequestKey = `commit-branches:${targetWorkspaceId}:${key}`;
+      requestControllers.get(branchesRequestKey)?.abort();
+      requestControllers.delete(branchesRequestKey);
       const isCurrentInitial = (get().snapshot?.workspace.id ?? get().activeTabId ?? '') === targetWorkspaceId;
       if (isCurrentInitial) {
         set((state) => ({
@@ -4128,14 +4182,14 @@ export const useAppStore = create<AppStore>((set, get) => {
         );
         const hasExtraRefs = commit.refs?.some((ref) => !(detail.commit?.refs ?? []).includes(ref));
         let mergedDetail = detail;
-        if (hasExtraRefs) {
+        if (hasExtraRefs || detail.branchesPending) {
           const resolvedRefs = Array.from(new Set([...(commit.refs ?? []), ...(detail.commit?.refs ?? [])]));
           const localBranches = new Set(detail.branches?.local ?? []);
           const remoteBranches = new Set(detail.branches?.remote ?? []);
           const tags = new Set(detail.branches?.tags ?? []);
           let isHead = Boolean(detail.branches?.isHead);
 
-          for (const raw of commit.refs ?? []) {
+          for (const raw of resolvedRefs) {
             if (raw === 'HEAD') {
               isHead = true;
             } else if (raw.startsWith('HEAD -> ')) {
@@ -4220,6 +4274,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             });
           }
         }
+        if (isCurrent && !controller.signal.aborted && mergedDetail.branchesPending) void enrichCommitBranches(targetWorkspaceId, key, mergedDetail);
         return mergedDetail;
       } catch (error) {
         const isCurrent = isCurrentRequest(requestKey, controller);
@@ -4325,7 +4380,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (isCurrentWorkspace) {
         const details = { ...get().selectedCommitDetails };
         for (const res of results) {
-          if (res) details[res.key] = res.detail;
+          if (res) details[res.key] ??= res.detail;
         }
         set({
           selectedCommitDetails: details,
@@ -4369,7 +4424,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (isCurrentWorkspace) {
         const details = { ...get().selectedCommitDetails };
         for (const res of results) {
-          if (res?.detail) details[res.key] = res.detail;
+          if (res?.detail) details[res.key] ??= res.detail;
         }
         set({
           selectedCommitDetails: details,
