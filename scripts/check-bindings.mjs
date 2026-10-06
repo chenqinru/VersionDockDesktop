@@ -7,7 +7,7 @@ const cwd = fileURLToPath(new URL('../', import.meta.url));
 const defaultsPath = fileURLToPath(new URL('../src/settings/defaults.generated.json', import.meta.url));
 const before = await readFile(path, 'utf8');
 const defaultsBefore = await readFile(defaultsPath, 'utf8');
-const result = spawnSync('cargo', ['test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml', 'export_bindings', '--', '--nocapture'], {
+const result = spawnSync('cargo', ['test', '--lib', '--locked', '--manifest-path', 'src-tauri/Cargo.toml', 'export_bindings', '--', '--nocapture'], {
   cwd,
   encoding: 'utf8',
 });
