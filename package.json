@@ -1,6 +1,6 @@
 {
   "name": "versiondock-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Independent Git and SVN desktop workbench built with Tauri 2, Rust and React",
   "private": true,
   "license": "GPL-3.0-only",
