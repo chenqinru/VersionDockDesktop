@@ -38,7 +38,10 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> src-tauri/target
+          # Target paths are relative to the workspace, not the repository root.
+          workspaces: src-tauri -> target
+          # Start a new cache namespace so old registry-only hits cannot mask this fix.
+          prefix-key: v1-versiondock-target
 
       - name: Install Linux system dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev minisign
@@ -100,7 +103,10 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> src-tauri/target
+          # Target paths are relative to the workspace, not the repository root.
+          workspaces: src-tauri -> target
+          # Start a new cache namespace so old registry-only hits cannot mask this fix.
+          prefix-key: v1-versiondock-target
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
