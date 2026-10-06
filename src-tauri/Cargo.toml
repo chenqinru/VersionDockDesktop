@@ -56,3 +56,8 @@ specta-typescript = "0.0.12"
 
 [profile.dev]
 opt-level = 1
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
