@@ -82,3 +82,24 @@ describe('DialogHost identity prompts', () => {
   });
 
 });
+
+ it('waits for asynchronous Git validation and keeps invalid input editable', async () => {
+    render(<DialogHost />);
+    let validate!: (value: string | undefined) => void;
+    const finished = vi.fn();
+    const validateInput = vi.fn(() => new Promise<string | undefined>(resolve => { validate = resolve; }));
+    await act(async () => { void promptDialog({ title: 'New Tag', message: '', validateInput }).then(finished); });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'invalid' } });
+    fireEvent.click(screen.getByText('Confirm'));
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    fireEvent.click(screen.getByText('Confirm'));
+    expect(validateInput).toHaveBeenCalledTimes(1);
+    await act(async () => { validate('Invalid tag'); });
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid tag');
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(finished).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'v1' } });
+    fireEvent.click(screen.getByText('Confirm'));
+    await act(async () => { validate(undefined); });
+    expect(finished).toHaveBeenCalledWith('v1');
+  });

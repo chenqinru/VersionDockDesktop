@@ -682,8 +682,8 @@ describe('HistoryWorkspace data helpers', () => {
     expect(subBadge).toHaveAttribute('title', 'Submodule');
   });
 
-  it('merges multi-repo tags across all associated repository instances', async () => {
-    const tagOperation = vi.fn().mockResolvedValue(undefined);
+  it('routes multi-repo tag merging through the shared workflow', async () => {
+    const runTagWorkflow = vi.fn().mockResolvedValue({ outcome: 'success', targets: [] });
     const secondRepo = {
       ...snapshot.repositories[0],
       meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' },
@@ -692,12 +692,12 @@ describe('HistoryWorkspace data helpers', () => {
       bootstrap: bootstrap(true, true),
       snapshot: { ...snapshot, repositories: [snapshot.repositories[0], secondRepo] },
       selectedRepoId: 'repo',
-      branchesByRepo: { repo: [], 'repo-2': [] },
+      branchesByRepo: { repo: [{ name: 'main', current: true, remote: false, upstream: null, ahead: 0, behind: 0 }], 'repo-2': [{ name: 'main', current: true, remote: false, upstream: null, ahead: 0, behind: 0 }] },
       tagsByRepo: {
         repo: [{ name: 'v2.0', hash: 'abc', date: '' }],
         'repo-2': [{ name: 'v2.0', hash: 'def', date: '' }],
       },
-      tagOperation,
+      runTagWorkflow,
     });
 
     render(<BranchSidebar repoFilter={new Set()} refFilter={new Set()} onRepoFilter={vi.fn()} onRefFilter={vi.fn()} onCompare={vi.fn()} onCollapse={vi.fn()} />);
@@ -707,8 +707,7 @@ describe('HistoryWorkspace data helpers', () => {
     fireEvent.click(screen.getByText('Merge into current'));
 
     await waitFor(() => {
-      expect(tagOperation).toHaveBeenCalledWith({ type: 'merge', name: 'v2.0' }, 'repo');
-      expect(tagOperation).toHaveBeenCalledWith({ type: 'merge', name: 'v2.0' }, 'repo-2');
+      expect(runTagWorkflow).toHaveBeenCalledWith({ action: 'merge', tagName: 'v2.0', repoIds: ['repo', 'repo-2'], preferredRepoId: 'repo' });
     });
   });
 });

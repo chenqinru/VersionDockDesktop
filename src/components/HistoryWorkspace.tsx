@@ -203,6 +203,8 @@ function CommitList({
   const historyOperation = useAppStore((state) => state.historyOperation);
   const unpushedOperation = useAppStore((state) => state.unpushedOperation);
   const branchOperation = useAppStore((state) => state.branchOperation);
+  const runTagWorkflow = useAppStore((state) => state.runTagWorkflow);
+  const tagBusy = useAppStore((state) => state.tagBusy);
   const tagOperation = useAppStore((state) => state.tagOperation);
   const createPatch = useAppStore((state) => state.createPatch);
   const savePatch = useAppStore((state) => state.savePatch);
@@ -351,7 +353,8 @@ function CommitList({
       { id: 'ai-explain', label: t('AI Explain'), icon: 'sparkle-filled' },
       { separator: true },
       { id: 'branch', label: t('New Branch...'), icon: 'git-branch' },
-      { id: hasTags ? 'manage-tags' : 'tag', label: t(hasTags ? 'Manage Tags...' : 'New Tag...'), icon: 'tag' },
+      { id: 'tag', label: t('New Tag...'), icon: 'tag', disabled: git && tagBusy },
+      ...(hasTags ? [{ id: 'manage-tags', label: t('Manage Tags...'), icon: 'tag', disabled: git && tagBusy } as ContextMenuEntry] : []),
       { separator: true },
       { id: 'checkout', label: t(checkoutTarget ? 'Checkout...' : git ? 'Checkout Revision' : 'Update to Revision'), icon: 'arrow-right' },
       ...(branchOptionsTarget ? [{ id: 'branch-options', label: t('Branch options...'), icon: 'git-branch' } as ContextMenuEntry] : []),
@@ -471,12 +474,24 @@ function CommitList({
       }
     }
     if (id === 'branch') { const name = await promptDialog({ title: t('New Branch'), message: commit.shortHash, inputLabel: t('Branch name') }); if (name) await branchOperation({ type: 'create', name, from: commit.hash }, commit.repoId); }
-    if (id === 'tag') { const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') }); if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId); }
+    const createCommitTag = async () => {
+      if (repoKindById[commit.repoId] === 'git') {
+        await runTagWorkflow({ action: 'create', repoId: commit.repoId, hash: commit.hash });
+      } else {
+        const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') });
+        if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId);
+      }
+    };
+    if (id === 'tag') await createCommitTag();
     if (id === 'manage-tags') {
       const tags = commit.refs.flatMap((ref) => ref.startsWith('refs/tags/') ? [ref.slice('refs/tags/'.length)] : ref.startsWith('tag: ') ? [ref.slice('tag: '.length).replace(/^refs\/tags\//, '')] : []);
       const action = await choiceDialog({ title: t('Manage Tags...'), message: commit.shortHash, choices: [{ id: 'create', label: t('New Tag...'), icon: 'add' }, ...tags.map((name) => ({ id: `delete:${name}`, label: t('Delete tag "{0}"', name), icon: 'trash', danger: true }))] });
-      if (action === 'create') { const name = await promptDialog({ title: t('New Tag'), message: commit.shortHash, inputLabel: t('Tag name') }); if (name) await tagOperation({ type: 'create', name, revision: commit.hash }, commit.repoId); }
-      if (action?.startsWith('delete:')) await tagOperation({ type: 'delete', name: action.slice('delete:'.length) }, commit.repoId);
+      if (action === 'create') await createCommitTag();
+      if (action?.startsWith('delete:')) {
+        const name = action.slice('delete:'.length);
+        if (repoKindById[commit.repoId] === 'git') await runTagWorkflow({ action: 'delete', repoId: commit.repoId, tagName: name });
+        else await tagOperation({ type: 'delete', name }, commit.repoId);
+      }
     }
     if (id === 'checkout') {
       if (checkoutTarget) {

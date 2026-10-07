@@ -71,6 +71,8 @@ export function ContextMenu({ x, y, header, anchorRect, placement = 'below', var
 
   useEffect(() => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const menu = ref.current;
+    if (!preserveSelection) menu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
     const handler = (e: MouseEvent) => {
       if (anchorRect && e.clientX >= anchorRect.left && e.clientX <= anchorRect.right && e.clientY >= anchorRect.top && e.clientY <= anchorRect.bottom) return;
       if (ref.current && !scrollbarContains(ref.current, e.target as Node)) onClose();
@@ -108,9 +110,9 @@ export function ContextMenu({ x, y, header, anchorRect, placement = 'below', var
       window.removeEventListener('blur', blurHandler);
       window.removeEventListener('pagehide', blurHandler);
       if (anchorRect) window.removeEventListener('resize', blurHandler);
-      trigger?.focus();
+      if (menu?.contains(document.activeElement) || document.activeElement === document.body) trigger?.focus();
     };
-  }, [onClose, anchorRect]);
+  }, [onClose, anchorRect, preserveSelection]);
 
   const style: React.CSSProperties = {
     position: 'fixed',

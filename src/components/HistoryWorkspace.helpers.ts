@@ -19,7 +19,7 @@ export type SidebarTag = {
   key: string;
   name: string;
   ref: string;
-  instances: Array<{ repo: RepositoryStatus; tag: { name: string; hash: string; date: string } }>;
+  instances: Array<{ repo: RepositoryStatus; tag: { name: string; hash: string; date: string; tagType?: string | null } }>;
   repoIds: string[];
   vcsKind: 'git' | 'svn';
 };
@@ -155,7 +155,7 @@ function mergeSidebarBranches(
 
 function mergeSidebarTags(
   repos: RepositoryStatus[],
-  tagsByRepo: Record<string, Array<{ name: string; hash: string; date: string }>>,
+  tagsByRepo: Record<string, Array<{ name: string; hash: string; date: string; tagType?: string | null }>>,
   filter: string,
 ): SidebarTag[] {
   const values = new Map<string, SidebarTag>();
@@ -186,7 +186,7 @@ function mergeSidebarTags(
 export function buildSidebarModel(
   repos: RepositoryStatus[],
   branchesByRepo: Record<string, BranchInfo[]>,
-  tagsByRepo: Record<string, Array<{ name: string; hash: string; date: string }>>,
+  tagsByRepo: Record<string, Array<{ name: string; hash: string; date: string; tagType?: string | null }>>,
   filter = '',
 ): SidebarModel {
   const local = mergeSidebarBranches(repos, branchesByRepo, false, filter);

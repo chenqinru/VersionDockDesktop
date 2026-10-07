@@ -3375,7 +3375,10 @@ button.conflict-action-item {
 .branch-section-toggle > .codicon:first-child { width: 10px; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); }
 .branch-section-toggle > .codicon:nth-child(2) { font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-text); }
 .branch-section-toggle strong { min-width: 0; flex: 1; color: var(--versiondock-text); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); letter-spacing: .06em; text-transform: uppercase; }
-.branch-section-toggle b { min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--versiondock-badge-background); color: var(--versiondock-badge-foreground); text-align: center; line-height: 14px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; }
+.branch-section-toggle b, .branch-section-count { min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--versiondock-badge-background); color: var(--versiondock-badge-foreground); text-align: center; line-height: 14px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; }
+.branch-section-title.has-action .branch-section-toggle { flex: 0 1 auto; padding-right: 4px; }
+.branch-section-title.has-action .branch-section-toggle strong { flex: 0 1 auto; }
+.branch-section-count { align-self: center; margin-left: auto; margin-right: 8px; }
 .branch-ref-row { min-width: 0; min-height: 22px; padding: 2px 8px 2px 12px; display: flex; align-items: center; gap: 5px; border-left: 2px solid transparent; cursor: pointer; }
 .branch-ref-row:hover, .branch-ref-row.filtered { background: var(--vscode-list-hoverBackground); }
 .branch-ref-row.context-active:not(.filtered) { background: var(--vscode-list-inactiveSelectionBackground); }
@@ -7797,3 +7800,9 @@ button.notification-item-action-btn:focus-visible {
 @media (max-width: 900px) { .setting-current-value { max-width: 40%; } .setting-metadata { gap: 4px; } }
 .settings-modified-results .setting-current-value { margin-left: auto; }
 .setting-edit { flex-shrink: 0; color: var(--versiondock-muted); }
+
+.branch-tag-create { flex-shrink: 0; margin-right: 8px; }
+.branch-tag-create:disabled { opacity: .4; cursor: default; }
+.branch-tags-empty { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; font-size: 11px; color: var(--versiondock-muted); }
+[data-density="comfortable"] .branch-tag-create { border-radius: 6px; transition: background .12s ease; }
+[data-density="compact"] .branch-tag-create { border-radius: 0; }

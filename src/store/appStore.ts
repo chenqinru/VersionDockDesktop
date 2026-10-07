@@ -1,3 +1,4 @@
+import { runGitTagWorkflow, type TagWorkflowRequest, type TagWorkflowResult } from '../services/gitTagWorkflow';
 import { DEFAULT_SETTINGS, DEFAULT_LAYOUT } from '../settings/defaults';
 import { mergeLogEntries } from '../logs/entries';
 import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
@@ -104,6 +105,7 @@ export type AppNotificationAction =
   | { type: 'disableIncoming'; label: NotificationText }
   | { type: 'openLogPanel'; label: NotificationText }
   | { type: 'openBranchComparison'; label: NotificationText; repoId: string; target: string }
+  | { type: 'pushTag'; label: NotificationText; repoId: string; tagName: string }
   | { type: 'pushToRemote'; label: NotificationText; repoId: string }
   | { type: 'cancelOperation'; label: NotificationText; operationId: string }
   | { type: 'recoverPush'; label: NotificationText; repoId: string; strategy: 'merge' | 'rebase' | 'force'; remote?: string | null; branch?: string | null }
@@ -364,6 +366,8 @@ export interface MergeEditorDraft {
 }
 
 export interface AppStore {
+  tagBusy: boolean;
+  runTagWorkflow: (request: TagWorkflowRequest) => Promise<TagWorkflowResult>;
   transferringTabIds: Record<string, true>;
   beginTabTransfer: (workspaceId: string) => boolean;
   endTabTransfer: (workspaceId: string) => void;
@@ -2284,6 +2288,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   return {
+    tagBusy: false,
     transferringTabIds: {},
     setMergeEditorDraft: (draft) => {
       if (get().transferringTabIds[get().snapshot?.workspace.id ?? '']) return;
@@ -4711,6 +4716,37 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
+    runTagWorkflow: async (request) => {
+      if (get().tagBusy) return { outcome: 'cancelled', targets: [] };
+      const snapshot = get().snapshot;
+      if (!snapshot || !get().bridge) return { outcome: 'failed', targets: [] };
+      const wid = snapshot.workspace.id;
+      const t = createTranslator(resolveLanguage(settings().language));
+      set({ tagBusy: true });
+      try {
+        return await runGitTagWorkflow(request, {
+          bridge: bridge(), workspaceId: wid, repositories: snapshot.repositories, t,
+          isAvailable: (repo) => get().snapshot?.workspace.id === wid && get().snapshot!.repositories.some(item => item.meta.id === repo.meta.id && item.meta.kind === 'git' && item.meta.rootPath === repo.meta.rootPath),
+          manageRemotes: (repoId) => get().openRemoteManager(repoId),
+          created: (repoId, name) => { get().addNotification({ type: 'success', title: 'Tag operation completed', message: { key: 'Tag "{0}" created locally.', args: [name] }, workspaceId: wid, actions: [{ type: 'pushTag', label: 'Push this tag', repoId, tagName: name }] }); },
+          notify: (outcome, detail) => { get().addNotification({ type: outcome === 'success' ? 'success' : outcome === 'partial' ? 'warning' : 'error', title: { key: 'Tag operation result: {0}', args: [t(outcome)] }, message: detail, workspaceId: wid }); },
+          refresh: async (repoIds) => {
+            if (get().snapshot?.workspace.id !== wid) return;
+            await get().refresh(true, { reloadRepository: false });
+            await Promise.allSettled(repoIds.map(async (repoId) => {
+              const [branches, tags] = await Promise.all([
+                bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false }),
+                bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false }),
+              ]);
+              if (get().snapshot?.workspace.id !== wid) return;
+              set(state => ({ branchesByRepo: { ...state.branchesByRepo, [repoId]: branches }, tagsByRepo: { ...state.tagsByRepo, [repoId]: tags }, ...(state.selectedRepoId === repoId ? { branches, tags } : {}) }));
+            }));
+            if (get().snapshot?.workspace.id === wid) await get().loadHistory(true, true);
+          },
+        });
+      } finally { set({ tagBusy: false }); }
+    },
+
     tagOperation: async (operation, requestedRepoId) => {
       const repoId = requestedRepoId ?? get().selectedRepoId;
       if (!repoId) return false;
@@ -5875,6 +5911,11 @@ export const useAppStore = create<AppStore>((set, get) => {
           case 'openStash': get().setActiveTab('stash'); break;
           case 'openShelf': get().setActiveTab('shelf'); break;
           case 'openConflicts': get().openConflicts(); break;
+          case 'pushTag': {
+            const result = await get().runTagWorkflow({ action: 'push', repoId: action.repoId, tagName: action.tagName });
+            actionSucceeded = result.outcome === 'success';
+            break;
+          }
           case 'pushToRemote': {
             try {
               await get().sync(action.repoId, 'push', false, { rethrow: true });

@@ -636,6 +636,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'sync': return { output: '', update: command.payload.action === 'pull' || command.payload.action === 'pullRebase' || command.payload.action === 'update' ? { repoId: command.payload.repo_id, beforeRevision: 'before', afterRevision: 'after', beforeStatus: 'before-status', afterStatus: 'after-status', summary: { kind: 'fastForward', commitCount: 1, fileCount: 1, containsMerge: false, detail: { commits: (activeHistories[command.payload.repo_id] ?? []).slice(0, 1), files: activeDetailFiles[command.payload.repo_id] ?? [] } }, summaryError: null } : null };
       case 'openWorktree': return command.payload.path;
       case 'branchOperation': return { completed: true, conflicted: false };
+      case 'tagResolveCommit': case 'tagPreflight': return (activeHistories[command.payload.repo_id] ?? [])[0]?.hash ?? 'browser-demo-commit';
       case 'tagOperation': case 'stashOperation': case 'shelfOperation':
       case 'changelistOperation': case 'worktreeOperation': case 'remoteOperation': case 'svnOperation': case 'submoduleOperation': case 'historyOperation': case 'systemOpen':
       case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'windowSetSize': return true;

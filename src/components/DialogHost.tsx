@@ -58,7 +58,7 @@ export function DialogHost() {
     finally { if (generation.current === control) { if (control.signal.aborted) setValue(previous); generation.current = undefined; setGenerating(false); } }
   };
   const submit = async () => {
-    if (generating) return;
+    if (generating || submitting) return;
     if (request.kind === 'multiChoice') {
       finish(selectedChoiceIds);
       return;
@@ -73,15 +73,20 @@ export function DialogHost() {
     if (request.kind === 'prompt') {
       const result = request.inputType === 'password' ? value : value.trim();
       if (!request.allowEmpty && !result.trim()) return;
-      const error = request.validateInput?.(result);
-      if (error) { setSubmitError(error); return; }
-      finish(request.allowEmpty ? result : result || null);
+      setSubmitting(true); setSubmitError('');
+      try {
+        const validation = request.validateInput?.(result);
+        const error = validation instanceof Promise ? await validation : validation;
+        if (error) { setSubmitError(error); return; }
+        finish(request.allowEmpty ? result : result || null);
+      } catch (error) { setSubmitError(error instanceof Error ? error.message : String(error)); }
+      finally { setSubmitting(false); }
     } else finish(true);
   };
   return <DialogSurface ref={dialog} size={request.kind === 'editor' || request.items?.length ? 'medium' : 'small'} className="app-dialog" onClose={() => finish(false)} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
       <header><Codicon name={request.danger ? 'warning' : request.kind === 'prompt' ? 'edit' : request.kind === 'editor' ? 'git-commit' : 'question'} /><strong id="app-dialog-title">{request.title}</strong><IconButton title={t('Close')} disabled={submitting} onClick={() => finish(false)}><Codicon name="close" /></IconButton></header>
       <p>{request.message}</p>
-      {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus aria-label={request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
+      {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus disabled={submitting} aria-label={request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
       {request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
       {request.kind === 'editor' && <label><span>{request.inputLabel}</span><div className="ai-input-surface"><AiGenerationBorder active={generating} /><textarea readOnly={generating} autoFocus className={`dialog-editor${generating ? ' ai-input-generating' : ''}`} value={value} onChange={(event) => setValue(event.target.value)} /></div></label>}
       {submitError && <p className="dialog-error" role="alert">{submitError}</p>}

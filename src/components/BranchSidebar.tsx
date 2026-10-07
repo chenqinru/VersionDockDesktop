@@ -29,6 +29,9 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
   const tagsByRepo = useAppStore((state) => state.tagsByRepo);
   const loading = useAppStore((state) => state.branchesLoading);
+  const runTagWorkflow = useAppStore((state) => state.runTagWorkflow);
+  const tagBusy = useAppStore((state) => state.tagBusy);
+  const selectedRepoId = useAppStore((state) => state.selectedRepoId);
   const tagOperation = useAppStore((state) => state.tagOperation);
   const persistedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
   const sidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
@@ -170,13 +173,15 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
       </SidebarSection>;
     })}
 
-    {model.tags.length > 0 && <SidebarSection
+    {repos.length > 0 && <SidebarSection
       icon="tag"
       title={t('Tags')}
       count={model.tags.length}
       collapsed={tagsCollapsed}
       onToggle={() => toggleSection('tags')}
+      action={repos.some(repo => repo.meta.kind === 'git') ? <IconButton className="branch-tag-create" title={t('New Tag...')} aria-label={t('New Tag...')} disabled={tagBusy} onClick={() => { void runTagWorkflow({ action: 'create', repoIds: repos.filter(repo => repo.meta.kind === 'git').map(repo => repo.meta.id), preferredRepoId: selectedRepoId ?? undefined }); }}><Codicon name="add" /></IconButton> : undefined}
     >
+      {model.tags.length === 0 && <div className="branch-tags-empty"><Codicon name="tag" /><span>{t(filter ? 'No matching tags' : 'No tags yet')}</span></div>}
       {model.tags.map((tag) => <TagRow
         key={tag.key}
         tag={tag}
@@ -196,11 +201,11 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         const svn = tag.vcsKind === 'svn';
         const anyDetached = tag.instances.some(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name));
         return [
-          { id: 'tag-checkout', label: t(svn ? 'Switch to "{0}"' : 'Checkout "{0}"', tag.name), icon: 'arrow-right' },
+          { id: 'tag-checkout', label: t(svn ? 'Switch to "{0}"' : 'Checkout "{0}"', tag.name), icon: 'arrow-right', disabled: !svn && tagBusy },
           { separator: true },
-          { id: 'tag-merge', label: t(svn ? 'Merge tag into working copy' : 'Merge into current'), icon: 'git-merge' },
-          ...(!svn ? [{ id: 'tag-push', label: t('Push to remote...'), icon: 'cloud-upload' } as ContextMenuEntry] : []),
-          ...(!anyDetached ? [{ separator: true } as ContextMenuEntry, { id: 'tag-delete', label: t(svn ? 'Delete SVN tag' : 'Delete tag'), icon: 'trash', danger: true } as ContextMenuEntry] : []),
+          { id: 'tag-merge', label: t(svn ? 'Merge tag into working copy' : 'Merge into current'), icon: 'git-merge', disabled: !svn && (tagBusy || !tag.instances.some(({ repo }) => (branchesByRepo[repo.meta.id] ?? []).some(branch => branch.current && !branch.detachedTag && !branch.detachedHash && branch.name !== 'HEAD'))) },
+          ...(!svn ? [{ id: 'tag-push', label: t('Push to remote...'), icon: 'cloud-upload', disabled: tagBusy } as ContextMenuEntry] : []),
+          ...(!anyDetached ? [{ separator: true } as ContextMenuEntry, { id: 'tag-delete', label: t(svn ? 'Delete SVN tag' : 'Delete tag'), icon: 'trash', danger: true, disabled: !svn && tagBusy } as ContextMenuEntry] : []),
         ];
       }
       const branch = context.branch!;
@@ -319,109 +324,19 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
       }
       if (context.kind === 'tag' && context.tag) {
         const tag = context.tag;
-        if (id === 'tag-checkout') for (const instance of tag.instances) await tagOperation({ type: 'checkout', name: tag.name }, instance.repo.meta.id);
-        if (id === 'tag-merge') {
-          for (const instance of tag.instances) {
-            await tagOperation({ type: 'merge', name: tag.name }, instance.repo.meta.id);
-          }
+        setContext(undefined);
+        if (tag.vcsKind === 'git') {
+          const action = ({ 'tag-checkout': 'checkout', 'tag-merge': 'merge', 'tag-push': 'push', 'tag-delete': 'delete' } as const)[id as 'tag-checkout' | 'tag-merge' | 'tag-push' | 'tag-delete'];
+          if (action) await runTagWorkflow({ action, repoIds: tag.repoIds, tagName: tag.name, preferredRepoId: selectedRepoId ?? undefined });
+          return;
+        }
+        if (id === 'tag-checkout' || id === 'tag-merge') {
+          for (const instance of tag.instances) await tagOperation({ type: id === 'tag-checkout' ? 'checkout' : 'merge', name: tag.name }, instance.repo.meta.id);
         }
         if (id === 'tag-delete') {
-          const checkedOutRepos = tag.instances.filter(({ repo }) =>
-            (branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name)
-          );
-          const eligibleInstances = tag.instances.filter(({ repo }) =>
-            !(branchesByRepo[repo.meta.id] ?? []).some((branch) => branch.detachedTag === tag.name)
-          );
-          if (eligibleInstances.length === 0) {
-            const singleName = tag.instances.length === 1 ? tag.instances[0].repo.meta.name : undefined;
-            await confirmDialog({
-              title: t('Cannot delete tag'),
-              message: singleName
-                ? t('VersionDock [{0}]: Cannot delete tag "{1}" — HEAD is detached on it.', singleName, tag.name)
-                : t('VersionDock: Cannot delete tag "{0}" — HEAD is detached on it in all target repositories.', tag.name),
-              confirmLabel: t('OK'),
-            });
-            setContext(undefined);
-            return;
-          }
-
-          if (tag.vcsKind === 'svn') {
-            const confirmed = await confirmDialog({
-              title: t('Delete tag?'),
-              message: `${tag.name}\n${t('{0} repositories', eligibleInstances.length)}`,
-              danger: true,
-            });
-            if (confirmed) {
-              for (const instance of eligibleInstances) {
-                await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
-              }
-            }
-          } else {
-            const skippedMsg = checkedOutRepos.length > 0
-              ? ` (${t('skipped in: {0} — HEAD detached on this tag', checkedOutRepos.map((i) => i.repo.meta.name).join(', '))})`
-              : '';
-            const choice = await choiceDialog({
-              title: t('Delete tag?'),
-              message: `${tag.name}${skippedMsg}\n${t('{0} repositories', eligibleInstances.length)}`,
-              danger: true,
-              choices: [
-                { id: 'local', label: t('Delete Local'), icon: 'trash', danger: true },
-                { id: 'remote', label: t('Delete on Remote'), icon: 'cloud', danger: true },
-                { id: 'both', label: t('Delete Local and Remote'), icon: 'warning', danger: true },
-              ],
-            });
-            if (!choice) {
-              setContext(undefined);
-              return;
-            }
-
-            if (choice === 'local') {
-              for (const instance of eligibleInstances) {
-                await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
-              }
-            } else if (choice === 'remote') {
-              for (const instance of eligibleInstances) {
-                const remote = await pickRemote(instance.repo.meta.id, t('Delete "{0}" from remote', tag.name));
-                if (remote) {
-                  await tagOperation({ type: 'delete', name: tag.name, remote }, instance.repo.meta.id);
-                }
-              }
-            } else if (choice === 'both') {
-              for (const instance of eligibleInstances) {
-                const deletedLocal = await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
-                if (!deletedLocal) continue;
-                const remote = await pickRemote(instance.repo.meta.id, t('Delete "{0}" from remote', tag.name));
-                if (remote) {
-                  await tagOperation({ type: 'delete', name: tag.name, remote }, instance.repo.meta.id);
-                }
-              }
-            }
-          }
-        }
-        if (id === 'tag-push') {
-          const inst = tag.instances.find((item) => item.repo.meta.kind === 'git');
-          if (!inst) return;
-          const targetRepoId = inst.repo.meta.id;
-          await useAppStore.getState().loadRemotes(targetRepoId);
-          const currentRemotes = useAppStore.getState().remotes[targetRepoId] ?? [];
-          if (currentRemotes.length === 0) {
-            useAppStore.getState().addNotification({
-              type: 'warning',
-              title: t('Push Tag'),
-              message: { key: 'VersionDock [{0}]: No remotes configured.', args: [inst.repo.meta.name] },
-              workspaceId: useAppStore.getState().snapshot?.workspace.id,
-            });
-            return;
-          }
-          const remote = currentRemotes.length === 1
-            ? currentRemotes[0].name
-            : await choiceDialog({
-                title: t('Push tag "{0}" — Select remote', tag.name),
-                message: t('Select a remote repository:'),
-                choices: currentRemotes.map((r) => ({ id: r.name, label: r.name, icon: 'cloud-upload' })),
-              });
-          if (remote) {
-            await tagOperation({ type: 'push', name: tag.name, remote }, targetRepoId);
+          const eligible = tag.instances.filter(({ repo }) => !(branchesByRepo[repo.meta.id] ?? []).some(branch => branch.detachedTag === tag.name));
+          if (eligible.length && await confirmDialog({ title: t('Delete tag?'), message: `${tag.name}\n${t('{0} repositories', eligible.length)}`, danger: true })) {
+            for (const instance of eligible) await tagOperation({ type: 'delete', name: tag.name }, instance.repo.meta.id);
           }
         }
       }
@@ -471,22 +386,25 @@ function RepositoryRow({ repo, showVcsBadges, selected, active, onClick, onDoubl
   </div>;
 }
 
-function SidebarSection({ icon, title, count, collapsed, onToggle, children }: {
+function SidebarSection({ icon, title, count, collapsed, onToggle, action, children }: {
   icon: string;
   title: string;
   count: number;
   collapsed: boolean;
   onToggle: () => void;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return <section className="branch-section">
-    <div className="branch-section-title">
-      <button className="branch-section-toggle" onClick={onToggle} aria-expanded={!collapsed}>
+    <div className={`branch-section-title${action ? ' has-action' : ''}`}>
+      <button className="branch-section-toggle" onClick={onToggle} aria-expanded={!collapsed} aria-label={action ? `${title} ${count}` : undefined}>
         <Codicon name={collapsed ? 'triangle-right' : 'triangle-down'} />
         <Codicon name={icon} />
         <strong>{title}</strong>
-        <b>{count}</b>
+        {!action && <b>{count}</b>}
       </button>
+      {action}
+      {action && <b className="branch-section-count" aria-hidden="true">{count}</b>}
     </div>
     {!collapsed && children}
   </section>;
@@ -559,7 +477,7 @@ function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, contextActi
     role="button"
     tabIndex={0}
     aria-pressed={active}
-    title={`${t('Tag: {0}', tag.name)}${detached ? ` (${t('current')})` : ''}\n${t('Right-click for actions')}`}
+    title={`${t('Tag: {0}', tag.name)}${detached ? ` (${t('current')})` : ''}\n${tag.instances.map(({ repo, tag }) => `${repo.meta.name}: ${tag.tagType ? t(tag.tagType === 'annotated' ? 'Annotated tag' : 'Lightweight tag') : tag.name}`).join('\n')}\n${t('Right-click for actions')}`}
     onClick={onClick}
     onContextMenu={onContextMenu}
     onKeyDown={(event) => {

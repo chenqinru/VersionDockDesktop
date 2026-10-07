@@ -4540,6 +4540,7 @@ async fn real_git_core_workflow() {
         TagOperation::Create {
             name: "v0.1.0".into(),
             revision: None,
+            message: None,
         },
         &token,
     )
@@ -5218,6 +5219,7 @@ async fn real_git_commit_detail_merge_refs_and_range_diff() {
         TagOperation::Create {
             name: "v-detail".into(),
             revision: Some(merge_hash.clone()),
+            message: None,
         },
         &token,
     )
@@ -8424,4 +8426,252 @@ async fn parity_multiple_patches_are_separate_and_apply_as_email_patches() {
         command_output("git", &["rev-parse", "HEAD^{tree}"], &working),
         command_output("git", &["rev-parse", "HEAD^{tree}"], &copy)
     );
+}
+
+#[tokio::test]
+async fn real_git_tag_management() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "Tag Test"], root);
+    command("git", &["config", "user.email", "tag@example.test"], root);
+    command("git", &["config", "commit.gpgsign", "false"], root);
+    let repository = repo(root, VcsKind::Git);
+    let token = CancellationToken::new();
+    let create =
+        |name: &str, revision: Option<String>, message: Option<String>| TagOperation::Create {
+            name: name.into(),
+            revision,
+            message,
+        };
+    assert!(
+        vcs::tag_operation(&repository, create("unborn", None, None), &token)
+            .await
+            .is_err()
+    );
+    std::fs::write(root.join("file.txt"), "one\n").unwrap();
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "initial"], root);
+    let initial = command_output("git", &["rev-parse", "HEAD"], root)
+        .trim()
+        .to_string();
+    command("git", &["config", "tag.gpgSign", "true"], root);
+    for name in [
+        "-unsafe",
+        "bad..tag",
+        "bad tag",
+        "path//tag",
+        "/tag",
+        "bad.lock",
+    ] {
+        assert!(
+            vcs::tag_operation(&repository, create(name, None, None), &token)
+                .await
+                .is_err(),
+            "accepted {name}"
+        );
+    }
+    vcs::tag_operation(&repository, create("shared", None, None), &token)
+        .await
+        .unwrap();
+    command("git", &["branch", "shared"], root);
+    vcs::tag_operation(
+        &repository,
+        create(
+            "release/v1",
+            Some("main".into()),
+            Some("发布说明\nsecond line".into()),
+        ),
+        &token,
+    )
+    .await
+    .unwrap();
+    let tags = vcs::tags(&repository, &token).await.unwrap();
+    assert!(tags.iter().any(|tag| tag.name == "shared"
+        && tag.hash == initial
+        && tag.tag_type.as_deref() == Some("lightweight")));
+    assert!(tags
+        .iter()
+        .any(|tag| tag.name == "release/v1" && tag.tag_type.as_deref() == Some("annotated")));
+    assert_eq!(
+        command_output("git", &["cat-file", "-t", "refs/tags/shared"], root).trim(),
+        "commit"
+    );
+    assert_eq!(
+        command_output("git", &["cat-file", "-t", "refs/tags/release/v1"], root).trim(),
+        "tag"
+    );
+    assert_eq!(
+        vcs::tag_preflight(
+            &repository,
+            &TagOperation::Checkout {
+                name: "release/v1".into()
+            },
+            &token
+        )
+        .await
+        .unwrap(),
+        initial
+    );
+    assert!(
+        vcs::tag_operation(&repository, create("shared", None, None), &token)
+            .await
+            .is_err()
+    );
+    assert!(vcs::tag_operation(
+        &repository,
+        create("missing", Some("not-a-commit".into()), None),
+        &token
+    )
+    .await
+    .is_err());
+    let remote_dir = tempdir().unwrap();
+    command("git", &["init", "--bare"], remote_dir.path());
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "origin",
+            remote_dir.path().to_str().unwrap(),
+        ],
+        root,
+    );
+    assert!(vcs::tag_operation(
+        &repository,
+        TagOperation::Push {
+            name: "shared".into(),
+            remote: "missing".into()
+        },
+        &token
+    )
+    .await
+    .is_err());
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Push {
+            name: "release/v1".into(),
+            remote: "origin".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        command_output(
+            "git",
+            &["rev-parse", "refs/tags/release/v1^{commit}"],
+            remote_dir.path()
+        )
+        .trim(),
+        initial
+    );
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Checkout {
+            name: "release/v1".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(vcs::tag_operation(
+        &repository,
+        TagOperation::Merge {
+            name: "shared".into()
+        },
+        &token
+    )
+    .await
+    .is_err());
+    assert!(vcs::tag_operation(
+        &repository,
+        TagOperation::Delete {
+            name: "release/v1".into(),
+            remote: None
+        },
+        &token
+    )
+    .await
+    .is_err());
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Delete {
+            name: "release/v1".into(),
+            remote: Some("origin".into()),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(vcs::tags(&repository, &token)
+        .await
+        .unwrap()
+        .iter()
+        .any(|tag| tag.name == "release/v1"));
+    command("git", &["switch", "main"], root);
+    std::fs::write(root.join("file.txt"), "two\n").unwrap();
+    command("git", &["commit", "-am", "second"], root);
+    vcs::tag_operation(
+        &repository,
+        create("previous", Some("HEAD~1".into()), None),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        command_output("git", &["rev-parse", "refs/tags/previous"], root).trim(),
+        initial
+    );
+    let latest = command_output("git", &["rev-parse", "HEAD"], root)
+        .trim()
+        .to_string();
+    vcs::tag_operation(
+        &repository,
+        create("latest", None, Some("latest release".into())),
+        &token,
+    )
+    .await
+    .unwrap();
+    command("git", &["switch", "-c", "consumer", &initial], root);
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Merge {
+            name: "latest".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        command_output("git", &["rev-parse", "HEAD"], root).trim(),
+        latest
+    );
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Merge {
+            name: "release/v1".into(),
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    vcs::tag_operation(
+        &repository,
+        TagOperation::Delete {
+            name: "release/v1".into(),
+            remote: None,
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert!(!vcs::tags(&repository, &token)
+        .await
+        .unwrap()
+        .iter()
+        .any(|tag| tag.name == "release/v1"));
 }

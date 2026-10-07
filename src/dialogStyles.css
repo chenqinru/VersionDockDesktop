@@ -4,6 +4,7 @@
   --dialog-shadow: 0 18px 54px rgba(0, 0, 0, .24), 0 4px 12px rgba(0, 0, 0, .12);
   --dialog-radius: 12px;
   --dialog-input-border: color-mix(in srgb, var(--versiondock-text) 18%, var(--versiondock-border));
+  --dialog-choice-border: color-mix(in srgb, var(--versiondock-text) 24%, var(--versiondock-border));
   --dialog-width-small: 420px;
   --dialog-width-medium: 580px;
   --dialog-width-large: 720px;
@@ -55,8 +56,31 @@
 .vd-dialog > footer > button.danger { background: var(--versiondock-danger); border-color: transparent; color: #fff; }
 .vd-dialog button:disabled { opacity: .45; cursor: default; }
 .vd-dialog .dialog-error { margin: 12px 0 0; color: var(--versiondock-danger); }
-.vd-dialog .dialog-choices { gap: 5px; }
-.vd-dialog .dialog-choices > button { min-height: 46px; padding: 9px 10px; border-radius: 7px; font-size: inherit; }
+.vd-dialog .dialog-choices { gap: 8px; }
+.vd-dialog .dialog-choices > button {
+  min-height: 46px; width: 100%; box-sizing: border-box; padding: 9px 12px;
+  border: 1px solid var(--dialog-choice-border); border-radius: 7px;
+  background: var(--versiondock-surface-alt); color: var(--versiondock-text);
+  font-size: inherit; line-height: 1.5;
+}
+.vd-dialog .dialog-choices > button:not(:disabled):hover {
+  background: var(--versiondock-hover); border-color: var(--versiondock-selection-border);
+}
+.vd-dialog .dialog-choices > button:focus-visible {
+  border-color: var(--versiondock-selection-border);
+  outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px;
+}
+.vd-dialog .dialog-choices > button.selected {
+  background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground);
+  border-color: var(--versiondock-selection-border); box-shadow: inset 0 0 0 1px var(--versiondock-selection-border);
+}
+.vd-dialog .dialog-choices > button > .codicon { flex-shrink: 0; }
+.vd-dialog .dialog-choices > button.danger-choice { color: var(--versiondock-danger); }
+.vd-dialog .dialog-choices > button.danger-choice > .codicon { color: var(--versiondock-danger); }
+.vd-dialog .dialog-choices > button.danger-choice:not(:disabled):hover {
+  background: color-mix(in srgb, var(--versiondock-danger) 8%, var(--versiondock-surface-alt));
+  border-color: color-mix(in srgb, var(--versiondock-danger) 55%, var(--dialog-choice-border));
+}
 .vd-dialog .dialog-choices > button > span { min-width: 0; overflow-wrap: anywhere; }
 .vd-dialog .dialog-choices small { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.5; }
 .vd-dialog .ai-input-surface { --ai-input-radius: 7px; --ai-marquee-radius: 6.5px; }

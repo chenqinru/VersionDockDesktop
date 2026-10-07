@@ -461,7 +461,7 @@ describe('SyncPanel footer parity with plugin', () => {
   });
 
   it.each([
-    { ahead: 1, behind: 0, label: 'Push', items: ['Safe Force Push...', 'Push All Tags'] },
+    { ahead: 1, behind: 0, label: 'Push', items: ['Safe Force Push...'] },
     { ahead: 0, behind: 1, label: 'Update', items: ['Update Strategy: Rebase', 'Update Strategy: Merge', 'Update Strategy: Fast-Forward Only'] },
     { ahead: 1, behind: 1, label: 'Sync ↓1 ↑1', items: [] },
     { ahead: 0, behind: 0, label: 'Fetch', items: [] },
@@ -517,7 +517,7 @@ describe('SyncPanel footer parity with plugin', () => {
   });
 
   it.each([
-    { ahead: 1, behind: 0, label: 'Push (2)', items: ['Safe Force Push...', 'Push All Tags'], upstream: 'origin/main' },
+    { ahead: 1, behind: 0, label: 'Push (2)', items: ['Safe Force Push...'], upstream: 'origin/main' },
     { ahead: 0, behind: 1, label: 'Update (2)', items: ['Update Strategy: Rebase', 'Update Strategy: Merge', 'Update Strategy: Fast-Forward Only'], upstream: 'origin/main' },
     { ahead: 1, behind: 1, label: 'Sync ↓2 ↑2', items: [], upstream: 'origin/main' },
     { ahead: 1, behind: 0, label: 'Publish Branches (2)', items: [], upstream: null },

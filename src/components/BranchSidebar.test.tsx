@@ -28,6 +28,35 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); useAppStore.setState(original, true); });
 
 describe('plugin sidebar interaction parity', () => {
+  it('keeps the tag section visible when empty and creates through the shared workflow', () => {
+    const runTagWorkflow = vi.fn().mockResolvedValue({ outcome: 'cancelled', targets: [] });
+    useAppStore.setState({ runTagWorkflow, tagBusy: false, selectedRepoId: 'b' });
+    renderSidebar();
+    expect(screen.getByText('No tags yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'New Tag...' }));
+    expect(runTagWorkflow).toHaveBeenCalledWith({ action: 'create', repoIds: ['a', 'b'], preferredRepoId: 'b' });
+  });
+
+  it('shows tag type metadata and blocks all tag actions while another entry point is busy', () => {
+    useAppStore.setState({ tagBusy: true, tagsByRepo: { a: [{ name: 'v1', hash: 'abc', date: '', tagType: 'annotated' }] } });
+    renderSidebar();
+    const tag = screen.getByText('v1').closest('.tag-row')!;
+    expect(tag).toHaveAttribute('title', expect.stringContaining('a: Annotated tag'));
+    expect(screen.getByRole('button', { name: 'New Tag...' })).toBeDisabled();
+    fireEvent.contextMenu(tag);
+    for (const item of screen.getAllByRole('menuitem')) expect(item).toBeDisabled();
+  });
+
+  it('shows filtered empty tags and disables merging into detached HEAD', () => {
+    useAppStore.setState({ tagBusy: false, branchesByRepo: { a: [{ ...branch('HEAD', true), detachedHash: 'abc' }] }, tagsByRepo: { a: [{ name: 'v1', hash: 'abc', date: '' }] } });
+    renderSidebar();
+    fireEvent.contextMenu(screen.getByText('v1'));
+    expect(screen.getByRole('menuitem', { name: 'Merge into current' })).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.change(screen.getByLabelText('Filter branches and tags'), { target: { value: 'absent' } });
+    expect(screen.getByText('No matching tags')).toBeInTheDocument();
+  });
+
   it('highlights the context target and dismisses on Escape without filtering', () => {
     const onRefFilter = vi.fn();
     renderSidebar({ onRefFilter });

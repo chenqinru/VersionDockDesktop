@@ -8407,6 +8407,7 @@ pub async fn tags(
             Ok(parse_svn_list_entries(&raw)?
                 .into_iter()
                 .map(|(name, revision, date)| TagInfo {
+                    tag_type: None,
                     hash: revision
                         .map(|value| format!("r{value}"))
                         .unwrap_or_else(|| name.clone()),
@@ -8444,11 +8445,12 @@ pub async fn tags(
         return Ok(tags);
     }
     let format =
-        format!("%(refname:short){FIELD}%(objectname){FIELD}%(creatordate:iso-strict){RECORD}");
+        format!("%(refname:strip=2){FIELD}%(objectname){FIELD}%(creatordate:iso-strict){FIELD}%(objecttype){RECORD}");
     let raw = git(
         vec![
             "for-each-ref".into(),
             format!("--format={format}"),
+            "--sort=-creatordate".into(),
             "refs/tags".into(),
         ],
         repo,
@@ -8461,6 +8463,14 @@ pub async fn tags(
         .filter_map(|record| {
             let values = record.trim().split(FIELD).collect::<Vec<_>>();
             (values.len() >= 3 && !values[0].is_empty()).then(|| TagInfo {
+                tag_type: Some(
+                    if values.get(3) == Some(&"tag") {
+                        "annotated"
+                    } else {
+                        "lightweight"
+                    }
+                    .into(),
+                ),
                 name: values[0].into(),
                 hash: values[1].into(),
                 date: values[2].into(),
@@ -9137,7 +9147,7 @@ pub async fn tag_operation(
                     format!("Delete {target} from VersionDock"),
                 ]
             }
-            TagOperation::Create { name, revision } => {
+            TagOperation::Create { name, revision, .. } => {
                 let destination = svn_repository_target(&format!("tags/{name}"))?;
                 let relative = svn_relative_url(repo, token).await?;
                 let source = if relative.is_empty() {
@@ -9174,51 +9184,222 @@ pub async fn tag_operation(
         result?;
         return Ok(());
     }
-    ensure_git(repo)?;
+    let commit = tag_preflight(repo, &operation, token).await?;
+    let network = matches!(
+        &operation,
+        TagOperation::Push { .. }
+            | TagOperation::Delete {
+                remote: Some(_),
+                ..
+            }
+    );
     let args = match operation {
-        TagOperation::Create { name, revision } => {
-            validate_ref(&name)?;
-            let mut args = vec!["tag".into(), name];
-            if let Some(value) = revision {
-                validate_revision_or_ref(&value)?;
-                args.push(value);
+        TagOperation::Create { name, message, .. } => {
+            let mut args = vec!["tag".into(), "--no-sign".into()];
+            if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
+                args.extend(["-a".into(), name, commit, "-m".into(), message]);
+            } else {
+                args.extend([name, commit]);
             }
             args
         }
         TagOperation::Delete { name, remote } => {
-            validate_ref(&name)?;
-            if let Some(remote_name) = remote {
-                validate_ref(&remote_name)?;
+            if let Some(remote) = remote {
                 vec![
                     "push".into(),
-                    remote_name,
+                    remote,
                     "--delete".into(),
                     format!("refs/tags/{name}"),
                 ]
             } else {
-                vec!["tag".into(), "-d".into(), name]
+                vec!["tag".into(), "-d".into(), "--".into(), name]
             }
         }
-        TagOperation::Checkout { name } => {
-            validate_ref(&name)?;
-            vec![
-                "switch".into(),
-                "--detach".into(),
-                format!("refs/tags/{name}"),
-            ]
-        }
-        TagOperation::Merge { name } => {
-            validate_ref(&name)?;
-            vec!["merge".into(), format!("refs/tags/{name}")]
-        }
-        TagOperation::Push { name, remote } => {
-            validate_ref(&name)?;
-            validate_ref(&remote)?;
-            vec!["push".into(), remote, format!("refs/tags/{name}")]
-        }
+        TagOperation::Checkout { .. } => vec!["switch".into(), "--detach".into(), commit],
+        TagOperation::Merge { .. } => vec!["merge".into(), commit],
+        TagOperation::Push { name, remote } => vec![
+            "push".into(),
+            remote,
+            format!("refs/tags/{name}:refs/tags/{name}"),
+        ],
     };
-    git(args, repo, token).await?;
+    if network {
+        git_network(args, repo, token).await?;
+    } else {
+        git(args, repo, token).await?;
+    }
     Ok(())
+}
+
+/// Read-only validation shared by workflow previews and execution under the write lock.
+pub async fn tag_preflight(
+    repo: &RepositoryMeta,
+    operation: &TagOperation,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    ensure_git(repo)?;
+    let name = match operation {
+        TagOperation::Create { name, .. }
+        | TagOperation::Delete { name, .. }
+        | TagOperation::Checkout { name }
+        | TagOperation::Merge { name }
+        | TagOperation::Push { name, .. } => name,
+    };
+    validate_ref(name)?;
+    let tag_ref = format!("refs/tags/{name}");
+    let normalized = git(
+        vec![
+            "check-ref-format".into(),
+            "--normalize".into(),
+            tag_ref.clone(),
+        ],
+        repo,
+        token,
+    )
+    .await
+    .map_err(|error| {
+        if error.code == "COMMAND_FAILED" {
+            DesktopError::new(
+                "INVALID_TAG_NAME",
+                format!("Invalid Git tag name: {name}"),
+                false,
+            )
+        } else {
+            error
+        }
+    })?;
+    if normalized.stdout_text().trim() != tag_ref {
+        return Err(DesktopError::new(
+            "INVALID_TAG_NAME",
+            format!("Invalid Git tag name: {name}"),
+            false,
+        ));
+    }
+    if let TagOperation::Push { remote, .. }
+    | TagOperation::Delete {
+        remote: Some(remote),
+        ..
+    } = operation
+    {
+        validate_ref(remote)?;
+        let names = git(vec!["remote".into()], repo, token).await?.stdout_text();
+        if !names.lines().any(|value| value == remote) {
+            return Err(DesktopError::new(
+                "TAG_REMOTE_NOT_FOUND",
+                format!("Remote not found: {remote}"),
+                false,
+            ));
+        }
+    }
+    if matches!(
+        operation,
+        TagOperation::Merge { .. } | TagOperation::Delete { remote: None, .. }
+    ) {
+        let current = branches(repo, token)
+            .await?
+            .into_iter()
+            .find(|branch| branch.current);
+        if matches!(operation, TagOperation::Merge { .. })
+            && current.as_ref().is_none_or(|branch| {
+                branch.detached_tag.is_some()
+                    || branch.detached_hash.is_some()
+                    || branch.name == "HEAD"
+            })
+        {
+            return Err(DesktopError::new(
+                "TAG_MERGE_DETACHED",
+                "Create or checkout a branch before merging a tag.",
+                false,
+            ));
+        }
+        if matches!(operation, TagOperation::Delete { .. })
+            && current
+                .as_ref()
+                .and_then(|branch| branch.detached_tag.as_deref())
+                == Some(name)
+        {
+            return Err(DesktopError::new(
+                "TAG_DELETE_CURRENT",
+                "Cannot delete the currently checked out tag locally.",
+                false,
+            ));
+        }
+    }
+    if matches!(operation, TagOperation::Delete { remote: None, .. }) {
+        let refs = git(
+            vec![
+                "for-each-ref".into(),
+                "--format=%(refname)".into(),
+                tag_ref.clone(),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text();
+        if !refs.lines().any(|value| value == tag_ref) {
+            return Err(DesktopError::new(
+                "TAG_NOT_FOUND",
+                format!("Local tag not found: {name}"),
+                false,
+            ));
+        }
+    }
+    let revision = if let TagOperation::Create { revision, .. } = operation {
+        let refs = git(
+            vec![
+                "for-each-ref".into(),
+                "--format=%(refname)".into(),
+                tag_ref.clone(),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text();
+        if refs.lines().any(|value| value == tag_ref) {
+            return Err(DesktopError::new(
+                "TAG_ALREADY_EXISTS",
+                format!("Tag \"{name}\" already exists."),
+                false,
+            ));
+        }
+        revision.as_deref().unwrap_or("HEAD")
+    } else if matches!(
+        operation,
+        TagOperation::Delete {
+            remote: Some(_),
+            ..
+        }
+    ) {
+        return Ok(String::new());
+    } else {
+        &tag_ref
+    };
+    resolve_tag_commit(repo, revision, token).await
+}
+
+pub async fn resolve_tag_commit(
+    repo: &RepositoryMeta,
+    revision: &str,
+    token: &CancellationToken,
+) -> Result<String, DesktopError> {
+    ensure_git(repo)?;
+    validate_revision_or_ref(revision)?;
+    Ok(git(
+        vec![
+            "rev-parse".into(),
+            "--verify".into(),
+            "--end-of-options".into(),
+            format!("{revision}^{{commit}}"),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text()
+    .trim()
+    .into())
 }
 
 fn parse_name_status_z(raw: &str) -> Vec<ShelfFileEntry> {

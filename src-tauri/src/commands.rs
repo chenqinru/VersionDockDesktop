@@ -787,6 +787,16 @@ fn command_error_context(
             workspace_id,
             repo_id,
         }
+        | BridgeCommand::TagResolveCommit {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::TagPreflight {
+            workspace_id,
+            repo_id,
+            ..
+        }
         | BridgeCommand::Tags {
             workspace_id,
             repo_id,
@@ -3343,6 +3353,24 @@ async fn dispatch(
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let _permit = state.acquire_read(token).await?;
             json(vcs::tags(&repo, token).await?)
+        }
+        BridgeCommand::TagResolveCommit {
+            workspace_id,
+            repo_id,
+            revision,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::resolve_tag_commit(&repo, &revision, token).await?)
+        }
+        BridgeCommand::TagPreflight {
+            workspace_id,
+            repo_id,
+            operation,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(vcs::tag_preflight(&repo, &operation, token).await?)
         }
         BridgeCommand::TagOperation {
             workspace_id,

@@ -68,6 +68,8 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const sync = useAppStore((state) => state.sync);
   const updateProject = useAppStore((state) => state.updateProject);
   const branchOperation = useAppStore((state) => state.branchOperation);
+  const runTagWorkflow = useAppStore((state) => state.runTagWorkflow);
+  const tagBusy = useAppStore((state) => state.tagBusy);
   const tagOperation = useAppStore((state) => state.tagOperation);
   const abortRepositoryOperation = useAppStore((state) => state.abortRepositoryOperation);
   const submoduleOperation = useAppStore((state) => state.submoduleOperation);
@@ -89,20 +91,6 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const bootstrap = useAppStore((state) => state.bootstrap);
   const initializeRepository = useAppStore((state) => state.initializeRepository);
   const initializeAvailable = bootstrap?.capabilities?.availability?.initializeRepository?.available ?? bootstrap?.tools?.git ?? false;
-
-  // 辅助函数：选取指定仓库的目标远端
-  const pickRemote = async (repoId: string, title: string): Promise<string | null> => {
-    await loadRemotes(repoId);
-    const repoRemotes = useAppStore.getState().remotes[repoId] ?? [];
-    const names = repoRemotes.map((r) => r.name);
-    if (names.length === 0) return null;
-    if (names.length === 1) return names[0];
-    return await choiceDialog({
-      title,
-      message: t('Select a remote repository:'),
-      choices: names.map((name) => ({ id: name, label: name, icon: 'cloud-upload' })),
-    });
-  };
 
   // 近期分支更新计数
   const [, setRecentVersion] = useState(0);
@@ -751,6 +739,22 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   }, [gitCurrentBranches]);
   const hasUnpushed = totalAhead > 0 || hasNoUpstream;
   const isMixedWorkspace = useMemo(() => isMixedRepoWorkspace(repositories), [repositories]);
+
+  const renderTagActions = (tagName: string, targetRepos: RepositoryStatus[], single: boolean) => {
+    const names = [...new Set(targetRepos.flatMap(repo => (remotes[repo.meta.id] ?? []).map(remote => remote.name)))];
+    const run = (action: 'checkout' | 'merge' | 'push' | 'delete', remote?: string) => {
+      onClose();
+      void runTagWorkflow({ action, tagName, ...(single ? { repoId: targetRepos[0]?.meta.id } : { repoIds: targetRepos.map(repo => repo.meta.id) }), remote });
+    };
+    const canMerge = targetRepos.some(repo => (branchesByRepo[repo.meta.id] ?? []).some(branch => branch.current && !branch.detachedTag && !branch.detachedHash && branch.name !== 'HEAD'));
+    const branchName = single ? currentRepoBranch : currentCommonBranchName;
+    return <div className="statusbar-menu-section">
+      <button type="button" className="statusbar-menu-item" disabled={tagBusy} onClick={() => run('checkout')}><Codicon name="arrow-right" /><span>{t('Checkout')}</span></button>
+      {(!single || canMerge) && <button type="button" className="statusbar-menu-item" disabled={tagBusy || !canMerge} onClick={() => run('merge')}><Codicon name="git-merge" /><span>{t('Merge "{0}" into "{1}"', tagName, branchName)}</span></button>}
+      {names.length ? names.map(remote => <button key={remote} type="button" className="statusbar-menu-item" disabled={tagBusy} onClick={() => run('push', remote)}><Codicon name="cloud-upload" /><span>{t('Push tag to "{0}"', remote)}</span></button>) : <button type="button" className="statusbar-menu-item" disabled={tagBusy} onClick={() => run('push')}><Codicon name="cloud-upload" /><span>{t('Push to remote...')}</span></button>}
+      <button type="button" className="statusbar-menu-item danger" disabled={tagBusy} onClick={() => run('delete')}><Codicon name="trash" /><span>{t('Delete tag')}</span></button>
+    </div>;
+  };
 
   return (
     <StatusBarPopoverPortal>
@@ -2064,111 +2068,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
             )}
 
             {/* 情况 C：公共 Tag 二级动作菜单（对齐原版 showCommonTagActionMenu） */}
-            {activeCommonTag && (
-              <div className="statusbar-menu-section">
-                <button
-                  type="button"
-                  className="statusbar-menu-item"
-                  onClick={async () => {
-                    onClose();
-                    await Promise.allSettled(
-                      gitRepos.map((r) => tagOperation({ type: 'checkout', name: activeCommonTag }, r.meta.id))
-                    );
-                    await refresh(true);
-                  }}
-                >
-                  <Codicon name="arrow-right" />
-                  <span>{t('Checkout')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="statusbar-menu-item"
-                  onClick={async () => {
-                    onClose();
-                    await Promise.allSettled(
-                      gitRepos.map((r) => tagOperation({ type: 'merge', name: activeCommonTag }, r.meta.id))
-                    );
-                    await refresh(true);
-                  }}
-                >
-                  <Codicon name="git-merge" />
-                  <span>{t('Merge "{0}" into "{1}"', activeCommonTag, currentCommonBranchName)}</span>
-                </button>
-
-                {(() => {
-                  const commonRemotes = Array.from(
-                    new Set(gitRepos.flatMap((r) => (remotes[r.meta.id] ?? []).map((rm) => rm.name)))
-                  );
-                  if (commonRemotes.length === 0) return null;
-                  return commonRemotes.map((remoteName) => (
-                    <button
-                      key={remoteName}
-                      type="button"
-                      className="statusbar-menu-item"
-                      onClick={async () => {
-                        onClose();
-                        const targetRepos = gitRepos.filter((r) =>
-                          (remotes[r.meta.id] ?? []).some((rm) => rm.name === remoteName)
-                        );
-                        await Promise.allSettled(
-                          targetRepos.map((r) =>
-                            tagOperation({ type: 'push', name: activeCommonTag, remote: remoteName }, r.meta.id)
-                          )
-                        );
-                        await refresh(true);
-                      }}
-                    >
-                      <Codicon name="cloud-upload" />
-                      <span>{t('Push tag to "{0}"', remoteName)}</span>
-                    </button>
-                  ));
-                })()}
-
-                <button
-                  type="button"
-                  className="statusbar-menu-item danger"
-                  onClick={async () => {
-                    onClose();
-                    const choice = await choiceDialog({
-                      title: t("Delete tag '{0}'?", activeCommonTag),
-                      message: gitRepos.length === 1
-                        ? t('VersionDock [{0}]: Delete tag "{1}"?', gitRepos[0].meta.name, activeCommonTag)
-                        : t('VersionDock: Delete tag "{0}" in {1} repositories?', activeCommonTag, gitRepos.length),
-                      danger: true,
-                      choices: [
-                        { id: 'local', label: t('Delete Local'), icon: 'trash', danger: true },
-                        { id: 'remote', label: t('Delete on Remote'), icon: 'cloud', danger: true },
-                        { id: 'both', label: t('Delete Local and Remote'), icon: 'warning', danger: true },
-                        { id: 'cancel', label: t('Cancel'), icon: 'close' },
-                      ],
-                    });
-                    if (!choice || choice === 'cancel') return;
-                    const deleteLocal = choice === 'local' || choice === 'both';
-                    const deleteRemote = choice === 'remote' || choice === 'both';
-
-                    await Promise.allSettled(
-                      gitRepos.map(async (r) => {
-                        if (deleteLocal) {
-                          await tagOperation({ type: 'delete', name: activeCommonTag }, r.meta.id);
-                        }
-                        if (deleteRemote) {
-                          await loadRemotes(r.meta.id);
-                          const repoRemotes = useAppStore.getState().remotes[r.meta.id] ?? [];
-                          for (const rem of repoRemotes) {
-                            await tagOperation({ type: 'delete', name: activeCommonTag, remote: rem.name }, r.meta.id);
-                          }
-                        }
-                      })
-                    );
-                    await refresh(true);
-                  }}
-                >
-                  <Codicon name="trash" />
-                  <span>{t('Delete tag')}</span>
-                </button>
-              </div>
-            )}
+            {activeCommonTag && renderTagActions(activeCommonTag, gitRepos, false)}
         </StatusBarQuickMenu>
       )}
 
@@ -2435,111 +2335,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
             )}
 
             {/* Tag 三级动作菜单（对齐原版 showSingleTagActionMenu） */}
-            {activeTagAction && (
-              <div className="statusbar-menu-section">
-                <button
-                  type="button"
-                  className="statusbar-menu-item"
-                  onClick={async () => {
-                    onClose();
-                    await tagOperation({ type: 'checkout', name: activeTagAction.tagName }, activeTagAction.repoId);
-                    await refresh(true);
-                  }}
-                >
-                  <Codicon name="arrow-right" />
-                  <span>{t('Checkout')}</span>
-                </button>
-
-                {(() => {
-                  const repoBranches = branchesByRepo[activeTagAction.repoId] ?? [];
-                  const currentBranch = repoBranches.find((b) => b.current);
-                  const repo = repositories.find((r) => r.meta.id === activeTagAction.repoId);
-                  const isDetached = Boolean(
-                    activeTagAction.isCurrent ||
-                    currentBranch?.detachedTag ||
-                    currentBranch?.detachedHash ||
-                    currentBranch?.name === 'HEAD' ||
-                    repo?.branch.startsWith('HEAD')
-                  );
-                  if (isDetached) return null;
-                  return (
-                    <button
-                      type="button"
-                      className="statusbar-menu-item"
-                      onClick={async () => {
-                        onClose();
-                        await tagOperation({ type: 'merge', name: activeTagAction.tagName }, activeTagAction.repoId);
-                        await refresh(true);
-                      }}
-                    >
-                      <Codicon name="git-merge" />
-                      <span>{t('Merge "{0}" into "{1}"', activeTagAction.tagName, currentRepoBranch)}</span>
-                    </button>
-                  );
-                })()}
-
-                {(() => {
-                  const repoRemotes = (remotes[activeTagAction.repoId] ?? []).map((rm) => rm.name);
-                  if (repoRemotes.length === 0) return null;
-                  return repoRemotes.map((remoteName) => (
-                    <button
-                      key={remoteName}
-                      type="button"
-                      className="statusbar-menu-item"
-                      onClick={async () => {
-                        onClose();
-                        await tagOperation(
-                          { type: 'push', name: activeTagAction.tagName, remote: remoteName },
-                          activeTagAction.repoId
-                        );
-                        await refresh(true);
-                      }}
-                    >
-                      <Codicon name="cloud-upload" />
-                      <span>{t('Push tag to "{0}"', remoteName)}</span>
-                    </button>
-                  ));
-                })()}
-
-                <button
-                  type="button"
-                  className="statusbar-menu-item danger"
-                  onClick={async () => {
-                    onClose();
-                    const targetRepo = repositories.find((r) => r.meta.id === activeTagAction.repoId);
-                    const repoName = targetRepo?.meta.name ?? activeTagAction.repoId;
-                    const choice = await choiceDialog({
-                      title: t("Delete tag '{0}'?", activeTagAction.tagName),
-                      message: t('VersionDock [{0}]: Delete tag "{1}"?', repoName, activeTagAction.tagName),
-                      danger: true,
-                      choices: [
-                        { id: 'local', label: t('Delete Local'), icon: 'trash', danger: true },
-                        { id: 'remote', label: t('Delete on Remote'), icon: 'cloud', danger: true },
-                        { id: 'both', label: t('Delete Local and Remote'), icon: 'warning', danger: true },
-                        { id: 'cancel', label: t('Cancel'), icon: 'close' },
-                      ],
-                    });
-                    if (!choice || choice === 'cancel') return;
-                    const deleteLocal = choice === 'local' || choice === 'both';
-                    const deleteRemote = choice === 'remote' || choice === 'both';
-
-                    if (deleteRemote) {
-                      const remote = await pickRemote(activeTagAction.repoId, t('Delete "{0}" from remote', activeTagAction.tagName));
-                      if (remote) {
-                        await tagOperation({ type: 'delete', name: activeTagAction.tagName, remote }, activeTagAction.repoId);
-                      }
-                    }
-                    if (deleteLocal) {
-                      await tagOperation({ type: 'delete', name: activeTagAction.tagName, remote: null }, activeTagAction.repoId);
-                    }
-                    await refresh(true);
-                  }}
-                >
-                  <Codicon name="trash" />
-                  <span>{t('Delete tag')}</span>
-                </button>
-              </div>
-            )}
+            {activeTagAction && renderTagActions(activeTagAction.tagName, repositories.filter(repo => repo.meta.id === activeTagAction.repoId), true)}
         </StatusBarQuickMenu>
       )}
 

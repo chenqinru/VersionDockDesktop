@@ -657,13 +657,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
   const runFooterMenu = async (id: string) => {
     const wid = useAppStore.getState().snapshot?.workspace.id;
     if (!wid) return;
-    if (id === 'tags') {
-      if (await confirmDialog({ title: t('Push Tags'), message: t('Push all local tags for selected Git repositories?') })) {
-        const store = useAppStore.getState();
-        if (!isWorkspaceOpen(store, wid)) return;
-        await Promise.allSettled(selectedRepos.map((repo) => sync(repo.meta.id, 'pushTags', undefined, undefined, wid)));
-      }
-    } else if (id === 'force') {
+    if (id === 'force') {
       if (await confirmDialog({ title: t('Safe Force Push...'), message: t('Force push selected repositories using force-with-lease?'), danger: true })) {
         const store = useAppStore.getState();
         if (!isWorkspaceOpen(store, wid)) return;
@@ -680,7 +674,6 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
   ];
   const pushItems: ContextMenuEntry[] = [
     { id: 'force', label: t('Safe Force Push...'), icon: 'warning', danger: true },
-    { id: 'tags', label: t('Push All Tags'), icon: 'tag' },
   ];
   const mainAction = (() => {
     const pull = { icon: 'cloud-download', label: pullableRepos.length > 1 ? `${t('Update')} (${pullableRepos.length})` : t('Update'), tone: 'pull', enabled: pullableRepos.length > 0, items: pullItems, fetch: false, direction: 'incoming' as const };

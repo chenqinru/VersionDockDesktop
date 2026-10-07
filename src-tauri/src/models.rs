@@ -549,6 +549,16 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
     },
+    TagResolveCommit {
+        workspace_id: String,
+        repo_id: String,
+        revision: String,
+    },
+    TagPreflight {
+        workspace_id: String,
+        repo_id: String,
+        operation: TagOperation,
+    },
     TagOperation {
         workspace_id: String,
         repo_id: String,
@@ -1130,6 +1140,8 @@ pub enum TagOperation {
     Create {
         name: String,
         revision: Option<String>,
+        #[serde(default)]
+        message: Option<String>,
     },
     Delete {
         name: String,
@@ -2837,6 +2849,8 @@ pub struct BranchInfo {
 #[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct TagInfo {
+    #[serde(default)]
+    pub tag_type: Option<String>,
     pub name: String,
     pub hash: String,
     pub date: String,
