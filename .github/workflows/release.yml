@@ -546,7 +546,7 @@ jobs:
         if: needs.source.outputs.artifact_cache == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/download-release-artifact.mjs platforms
+        run: node scripts/download-release-artifact.mjs
 
       - name: Verify every signature and generate release manifest once
         run: node scripts/release-artifacts.mjs prepare

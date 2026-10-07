@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": " ",
+        "title": "VersionDock Desktop",
         "width": 880,
         "height": 540,
         "minWidth": 800,
@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://github.com https://api.github.com https://objects.githubusercontent.com; img-src 'self' asset: http://asset.localhost data: https://avatars.githubusercontent.com https://www.gravatar.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src ipc: http://ipc.localhost https://github.com https://api.github.com https://objects.githubusercontent.com; img-src 'self' asset: http://asset.localhost data: https://avatars.githubusercontent.com https://www.gravatar.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "plugins": {

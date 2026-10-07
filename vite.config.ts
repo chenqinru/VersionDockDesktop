@@ -14,6 +14,7 @@ export default defineConfig({
       : undefined,
   },
   envPrefix: ['VITE_', 'TAURI_'],
+  worker: { format: 'es' },
   build: {
     target: 'es2020',
     minify: process.env.TAURI_ENV_DEBUG ? false : 'esbuild',

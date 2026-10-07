@@ -4,7 +4,7 @@
     "windows": [
       {
         "label": "main",
-        "title": " ",
+        "title": "VersionDock Desktop",
         "width": 880,
         "height": 540,
         "minWidth": 800,

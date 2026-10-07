@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 import { SourceCodeView } from './SourceCodeView';
 
-vi.mock('./UnifiedDiffView', () => ({ highlightDiffLines: vi.fn(async () => [[], []]) }));
+vi.mock('./UnifiedDiffView', () => ({ cachedDiffLines: vi.fn(), highlightDiffLines: vi.fn(async () => [[], []]) }));
 afterEach(cleanup);
 it('keeps plain text visible when syntax highlighting returns no tokens', async () => {
   const { container } = render(<SourceCodeView path="plain.txt" content={'plain text\nsecond plain text'} />);

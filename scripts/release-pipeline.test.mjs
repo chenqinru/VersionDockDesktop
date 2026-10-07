@@ -59,25 +59,25 @@ test('Release 发布前重新验证复用 CI，重跑中或重复同名 job 不�
   assert.equal(verifyReusableCi({ ...fixture.options, runId: 12 }), false);
 });
 
-function archiveFixture(entries = { 'assets/latest.json': '{}', 'assets/app.exe': 'signed package', 'release-notes.md': 'notes' }) {
+function archiveFixture(entries = { 'release-artifact.json': '{}', 'VersionDock.exe': 'signed package' }, platform = 'windows') {
   const root = temporary();
   const archive = path.join(root, 'source.zip');
   execFileSync('python3', ['-c', 'import json,sys,zipfile; z=zipfile.ZipFile(sys.argv[1],"w",zipfile.ZIP_DEFLATED); [z.writestr(k,v) for k,v in json.loads(sys.argv[2]).items()]; z.close()', archive, JSON.stringify(entries)]);
   const bytes = fs.readFileSync(archive);
-  const artifact = { id: 100, name: `prepared-release-${sha}`, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`, expired: false, size_in_bytes: bytes.length };
+  const artifact = { id: 100, name: `release-${platform}`, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`, expired: false, size_in_bytes: bytes.length };
   let downloads = 0;
   const options = {
-    repository, runId: 42, name: artifact.name, artifactId: artifact.id, cacheDir: path.join(root, 'cache'), outputDir: path.join(root, 'prepared'),
+    repository, runId: 42, name: artifact.name, artifactId: artifact.id, cacheDir: path.join(root, 'cache'), outputDir: path.join(root, artifact.name),
     api: () => ({ artifacts: [artifact] }), download: (_url, file) => { downloads++; fs.copyFileSync(archive, file); }, sleep: async () => {},
   };
   return { root, options, artifact, getDownloads: () => downloads };
 }
 
-test('真正的 ZIP 下载以 artifact ID 和 GitHub digest 缓存，发布重试无需重新下载', async () => {
+test('平台 ZIP 下载以 artifact ID 和 GitHub digest 缓存，重试无需重新下载', async () => {
   const fixture = archiveFixture();
   const first = await downloadReleaseArtifact(fixture.options);
   assert.equal(first.cached, false); assert.equal(fixture.getDownloads(), 1);
-  assert.equal(fs.readFileSync(path.join(fixture.options.outputDir, 'assets/app.exe'), 'utf8'), 'signed package');
+  assert.equal(fs.readFileSync(path.join(fixture.options.outputDir, 'VersionDock.exe'), 'utf8'), 'signed package');
   fs.rmSync(fixture.options.outputDir, { recursive: true });
   assert.equal((await downloadReleaseArtifact(fixture.options)).cached, true);
   assert.equal(fixture.getDownloads(), 1);
@@ -102,21 +102,28 @@ test('下载损坏重试三次但不写缓存，过期或 ID 不匹配在下载�
 });
 
 test('缓存身份相同但 ZIP 含路径穿越或非预期文件时拒绝解压', async () => {
-  for (const name of ['../outside', '/outside', 'assets/../../outside', 'other/file']) {
-    const fixture = archiveFixture({ 'assets/latest.json': '{}', 'release-notes.md': 'notes', [name]: 'bad' });
+  for (const name of ['../outside', '/outside', 'nested/../../outside', 'other/file', 'assets/latest.json', 'release-notes.md', 'folder/']) {
+    const fixture = archiveFixture({ 'release-artifact.json': '{}', [name]: 'bad' });
     await assert.rejects(downloadReleaseArtifact(fixture.options));
     assert.equal(fs.existsSync(fixture.options.outputDir), false);
     assert.equal(fs.existsSync(path.join(fixture.root, 'outside')), false);
   }
 });
 
+test('下载器拒绝旧 prepared-release 身份和缺少平台 metadata 的 ZIP', async () => {
+  const fixture = archiveFixture();
+  await assert.rejects(downloadReleaseArtifact({ ...fixture.options, name: `prepared-release-${sha}` }), /Invalid platform artifact identity/);
+  assert.equal(fixture.getDownloads(), 0);
+  const incomplete = archiveFixture({ 'VersionDock.exe': 'payload' });
+  await assert.rejects(downloadReleaseArtifact(incomplete.options), /Incomplete platform archive/);
+  assert.equal(fs.existsSync(incomplete.options.outputDir), false);
+});
+
 test('平台安装包只在完整 ZIP digest 通过后解压，三平台身份及 metadata 必须齐全', async () => {
   const fixtures = ['macos', 'windows', 'linux'].map((platform, index) => {
     const name = platform === 'macos' ? 'VersionDock.Desktop_0.1.7_universal.dmg' : platform === 'windows' ? 'VersionDock.exe' : 'VersionDock.AppImage';
-    const fixture = archiveFixture({ 'release-artifact.json': JSON.stringify({ platform, version: '0.1.7', files: [] }), [name]: 'complete payload' });
+    const fixture = archiveFixture({ 'release-artifact.json': JSON.stringify({ platform, version: '0.1.7', files: [] }), [name]: 'complete payload' }, platform);
     fixture.artifact.id += index;
-    fixture.artifact.name = `release-${platform}`;
-    fixture.options.name = fixture.artifact.name;
     fixture.options.artifactId = fixture.artifact.id;
     return { fixture, platform, name };
   });
@@ -139,8 +146,7 @@ test('平台安装包只在完整 ZIP digest 通过后解压，三平台身份�
 });
 
 test('损坏的 macOS 平台 ZIP 不解压部分 DMG，也不留有效缓存', async () => {
-  const fixture = archiveFixture({ 'release-artifact.json': '{}', 'VersionDock.dmg': 'complete' });
-  fixture.artifact.name = 'release-macos'; fixture.options.name = 'release-macos';
+  const fixture = archiveFixture({ 'release-artifact.json': '{}', 'VersionDock.dmg': 'complete' }, 'macos');
   await assert.rejects(downloadReleaseArtifact({ ...fixture.options, download: (_url, file) => fs.writeFileSync(file, 'partial archive') }), /SHA-256/);
   assert.equal(fs.existsSync(fixture.options.outputDir), false);
 });

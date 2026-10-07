@@ -11,6 +11,16 @@ const windowsMain = windows.app?.windows?.find((window) => window.label === 'mai
 const macosMain = macos.app?.windows?.find((window) => window.label === 'main');
 const linuxMain = linux.app?.windows?.find((window) => window.label === 'main');
 
+if (!base.productName?.trim()) {
+  throw new Error('The application product name must not be blank.');
+}
+
+for (const [platform, window] of [['base', mainWindow], ['Windows', windowsMain], ['macOS', macosMain], ['Linux', linuxMain]]) {
+  if (window?.title !== base.productName) {
+    throw new Error(`${platform} main window must use the product name as its native title for system window listings.`);
+  }
+}
+
 if (!mainWindow || mainWindow.decorations !== true) {
   throw new Error('The base Tauri main window must keep native decorations enabled.');
 }

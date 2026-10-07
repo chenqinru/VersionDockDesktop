@@ -9,8 +9,10 @@ import { App } from './App';
 import { BridgeContext } from './platform/context';
 import type { VersionDockBridge } from './platform/bridge';
 import { useAppStore } from './store/appStore';
+import { scheduleHighlightWarmup } from './utils/syntaxHighlighting';
 
 let disposeBridge: () => void = () => undefined;
+let cancelHighlightWarmup: () => void = () => undefined;
 
 async function start() {
   const browserDev = import.meta.env.MODE === 'browser';
@@ -28,6 +30,7 @@ async function start() {
     try { await initializable.initialize(); } catch (error) { console.warn('Native event channel unavailable', error); }
   }
   await useAppStore.getState().initialize(bridge);
+  cancelHighlightWarmup = scheduleHighlightWarmup();
   if (browserDev) {
     const firstCommit = useAppStore.getState().history[0];
     if (firstCommit) await useAppStore.getState().selectCommit(firstCommit);
@@ -40,6 +43,7 @@ void start().catch((error) => {
 });
 
 window.addEventListener('beforeunload', () => {
+  cancelHighlightWarmup();
   useAppStore.getState().dispose();
   disposeBridge();
 });

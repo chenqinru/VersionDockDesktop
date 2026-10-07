@@ -22,27 +22,21 @@ function downloadZip(endpoint, file) {
 
 const extractCode = `
 import sys, zipfile, pathlib, stat, re
-archive, destination, kind = sys.argv[1:]
+archive, destination = sys.argv[1:]
 with zipfile.ZipFile(archive) as z:
     for entry in z.infolist():
         parts = pathlib.PurePosixPath(entry.filename).parts
         mode = entry.external_attr >> 16
         if not parts or entry.filename.startswith('/') or '\\\\' in entry.filename or '..' in parts or stat.S_ISLNK(mode):
             raise ValueError('Unsafe artifact archive entry')
-        if kind == 'prepared':
-            if entry.is_dir():
-                if parts != ('assets',): raise ValueError('Unexpected artifact directory')
-            elif not (parts == ('release-notes.md',) or len(parts) == 2 and parts[0] == 'assets'):
-                raise ValueError('Unexpected artifact file')
-        elif entry.is_dir() or len(parts) != 1 or not (parts[0] == 'release-artifact.json' or re.fullmatch(r'[A-Za-z0-9._-]+(?:\\.app\\.tar\\.gz|\\.dmg|\\.exe|\\.msi|\\.AppImage|\\.deb|\\.rpm)(?:\\.sig)?', parts[0])):
+        if entry.is_dir() or len(parts) != 1 or not (parts[0] == 'release-artifact.json' or re.fullmatch(r'[A-Za-z0-9._-]+(?:\\.app\\.tar\\.gz|\\.dmg|\\.exe|\\.msi|\\.AppImage|\\.deb|\\.rpm)(?:\\.sig)?', parts[0])):
             raise ValueError('Unexpected platform artifact file')
     z.extractall(destination)
 `;
 
 export async function downloadReleaseArtifact({ repository, runId, name, artifactId, cacheDir, outputDir, api = readGitHubApi, download = downloadZip, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   validateRepository(repository);
-  if (!/^[1-9]\d*$/.test(String(runId)) || !/^(?:prepared-release-[a-f0-9]{40}|release-(?:macos|windows|linux))$/.test(name)) throw new Error('Invalid release artifact identity');
-  const prepared = name.startsWith('prepared-release-');
+  if (!/^[1-9]\d*$/.test(String(runId)) || !/^release-(?:macos|windows|linux)$/.test(name)) throw new Error('Invalid platform artifact identity');
   const matches = [];
   for (let page = 1; ; page++) {
     const result = api(`repos/${repository}/actions/runs/${runId}/artifacts?per_page=100&page=${page}`);
@@ -50,7 +44,7 @@ export async function downloadReleaseArtifact({ repository, runId, name, artifac
     matches.push(...result.artifacts.filter((artifact) => artifact.name === name));
     if (result.artifacts.length < 100) break;
   }
-  if (matches.length !== 1) throw new Error('Expected exactly one prepared release artifact from this run');
+  if (matches.length !== 1) throw new Error('Expected exactly one platform artifact from this run');
   const artifact = matches[0];
   if (artifact.expired || !Number.isSafeInteger(artifact.id) || artifact.id <= 0 || artifact.id !== artifactId || !/^sha256:[a-f0-9]{64}$/.test(artifact.digest || '')) {
     throw new Error('Artifact is expired or has no trusted SHA-256 digest');
@@ -84,14 +78,12 @@ export async function downloadReleaseArtifact({ repository, runId, name, artifac
     } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
   }
   const now = new Date(); fs.utimesSync(archive, now, now);
-  if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).length) throw new Error('Prepared release output must be empty');
+  if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).length) throw new Error('Platform artifact output must be empty');
   fs.mkdirSync(path.dirname(outputDir), { recursive: true });
   const staging = fs.mkdtempSync(path.join(path.dirname(outputDir), 'extract-release-'));
   try {
-    execFileSync('python3', ['-c', extractCode, archive, staging, prepared ? 'prepared' : 'platform'], { stdio: 'pipe' });
-    if (prepared
-      ? !fs.existsSync(path.join(staging, 'assets/latest.json')) || !fs.existsSync(path.join(staging, 'release-notes.md'))
-      : !fs.existsSync(path.join(staging, 'release-artifact.json'))) throw new Error('Incomplete release archive');
+    execFileSync('python3', ['-c', extractCode, archive, staging], { stdio: 'pipe' });
+    if (!fs.existsSync(path.join(staging, 'release-artifact.json'))) throw new Error('Incomplete platform archive');
     if (fs.existsSync(outputDir)) fs.rmdirSync(outputDir);
     fs.renameSync(staging, outputDir);
   } finally { fs.rmSync(staging, { recursive: true, force: true }); }
@@ -125,14 +117,12 @@ export async function downloadPlatformArtifacts({ repository, runId, outputDir, 
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  if (process.argv.length !== 2) throw new Error('Usage: node scripts/download-release-artifact.mjs');
   const options = {
     repository: process.env.GITHUB_REPOSITORY, runId: process.env.GITHUB_RUN_ID,
-    name: `prepared-release-${process.env.RELEASE_SOURCE_SHA}`, outputDir: process.env.RELEASE_OUTPUT_DIR,
-    artifactId: Number(process.env.RELEASE_ARTIFACT_ID),
+    outputDir: process.env.RELEASE_ARTIFACTS_DIR,
     cacheDir: process.env.VERSIONDOCK_ARTIFACT_CACHE_DIR || path.join(os.homedir(), '.cache/versiondock-release-artifacts'),
   };
-  const results = process.argv[2] === 'platforms'
-    ? await downloadPlatformArtifacts({ ...options, outputDir: process.env.RELEASE_ARTIFACTS_DIR })
-    : [await downloadReleaseArtifact(options)];
+  const results = await downloadPlatformArtifacts(options);
   for (const result of results) console.log(`${result.cached ? 'Reused verified cached' : 'Downloaded and verified'} artifact ${result.artifactId} (${(result.bytes / 1024 / 1024).toFixed(1)} MiB)`);
 }

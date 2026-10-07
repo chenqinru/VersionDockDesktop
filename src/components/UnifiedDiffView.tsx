@@ -2,7 +2,8 @@ import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { BundledLanguage, BundledTheme, ThemeRegistrationRaw, ThemedToken } from 'shiki/types';
-import { ensureHighlighter, resolveHighlightLanguage } from '../utils/highlighter';
+import { resolveHighlightLanguage } from '../utils/highlighter';
+import { cachedSyntaxTokens, highlightSyntax } from '../utils/syntaxHighlighting';
 import { BridgeContext } from '../platform/context';
 import { FileSearchWidget } from './FileSearchWidget';
 import { IconButton } from './IconButton';
@@ -194,14 +195,16 @@ export function extractDiffLineRange(container: HTMLElement, target?: Element | 
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export async function highlightDiffLines(lines: string[], language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw): Promise<ThemedToken[][]> {
+export async function highlightDiffLines(lines: string[], language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw, signal?: AbortSignal): Promise<ThemedToken[][]> {
   const resolved = resolveDiffHighlightLanguage(language, path, lines);
   if (!resolved) return lines.map(() => []);
-  const highlighter = await ensureHighlighter(resolved);
-  if (typeof theme !== 'string' && (!theme.name || !highlighter.getLoadedThemes().includes(theme.name))) {
-    highlighter.loadTheme(theme);
-  }
-  return highlighter.codeToTokensBase(lines.join('\n'), { lang: resolved, theme });
+  return highlightSyntax(lines.join('\n'), resolved, theme, signal);
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function cachedDiffLines(lines: string[], language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw): ThemedToken[][] | undefined {
+  const resolved = resolveDiffHighlightLanguage(language, path, lines);
+  return resolved ? cachedSyntaxTokens(lines.join('\n'), resolved, theme) : undefined;
 }
 
 function diffCellGroups(parsed: ParsedUnifiedDiff, side: DiffSide): DiffCell[][] {
@@ -226,11 +229,22 @@ function diffCellGroups(parsed: ParsedUnifiedDiff, side: DiffSide): DiffCell[][]
 // template hunks without their surrounding SFC tags; treating the entire patch
 // as one fragment makes one section's grammar corrupt every other section.
 // eslint-disable-next-line react-refresh/only-export-components
-export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: DiffSide, language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw): Promise<WeakMap<DiffCell, ThemedToken[]>> {
+export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: DiffSide, language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw, options?: { signal?: AbortSignal; onGroup?: (cells: DiffCell[], tokens: ThemedToken[][]) => void; onError?: (error: unknown) => void }): Promise<WeakMap<DiffCell, ThemedToken[]>> {
   const groups = diffCellGroups(parsed, side);
-  const tokenGroups = await Promise.all(groups.map((cells) => highlightDiffLines(cells.map((cell) => cell.content || ' '), language, path, theme)));
   const highlighted = new WeakMap<DiffCell, ThemedToken[]>();
-  groups.forEach((cells, groupIndex) => cells.forEach((cell, lineIndex) => highlighted.set(cell, tokenGroups[groupIndex]?.[lineIndex] ?? [])));
+  // Each side advances one hunk at a time. The shared worker interleaves both
+  // sides instead of queueing every old-side hunk ahead of the new-side viewport.
+  for (const cells of groups) {
+    if (options?.signal?.aborted) break;
+    try {
+      const tokens = await highlightDiffLines(cells.map((cell) => cell.content || ' '), language, path, theme, options?.signal);
+      if (options?.signal?.aborted) break;
+      cells.forEach((cell, index) => highlighted.set(cell, tokens[index] ?? []));
+      options?.onGroup?.(cells, tokens);
+    } catch (error) {
+      if (!options?.signal?.aborted) options?.onError?.(error);
+    }
+  }
   return highlighted;
 }
 
@@ -602,7 +616,17 @@ export function UnifiedDiffView({
     searchMatches.forEach((match, index) => values.set(match.cell, [...values.get(match.cell) ?? [], { start: match.start, end: match.end, current: index === selectedSearchIndex }]));
     return values;
   }, [searchMatches, selectedSearchIndex]);
-  const [highlighted, setHighlighted] = useState<WeakMap<DiffCell, ThemedToken[]>>();
+  const cachedTokens = useMemo(() => {
+    const tokens = new WeakMap<DiffCell, ThemedToken[]>();
+    if (content.length > 1_000_000 || parsed.rows.filter((row) => row.kind === 'pair').length > 10_000) return tokens;
+    for (const side of ['old', 'new'] as const) for (const cells of diffCellGroups(parsed, side)) {
+      const cached = cachedDiffLines(cells.map((cell) => cell.content || ' '), language, path, theme);
+      cells.forEach((cell, index) => { if (cached?.[index]) tokens.set(cell, cached[index]); });
+    }
+    return tokens;
+  }, [content.length, parsed, language, path, theme]);
+  const [highlighted, setHighlighted] = useState<{ parsed: ParsedUnifiedDiff; theme: typeof theme; language: string; tokens: WeakMap<DiffCell, ThemedToken[]> }>();
+  const renderedTokens = highlighted?.parsed === parsed && highlighted.theme === theme && highlighted.language === language ? highlighted.tokens : cachedTokens;
   const containerRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const horizontalOffset = useRef(0);
@@ -840,23 +864,47 @@ export function UnifiedDiffView({
   }, [splitBreakpoint]);
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
     const pairs = parsed.rows.filter((row): row is Extract<ParsedDiffRow, { kind: 'pair' }> => row.kind === 'pair');
-    if (content.length > 1_000_000 || pairs.length > 10_000) { setHighlighted(undefined); return () => { active = false; }; }
-    void Promise.all([
-      highlightParsedDiffSide(parsed, 'old', language, path, theme),
-      highlightParsedDiffSide(parsed, 'new', language, path, theme),
-    ]).then(([oldTokens, newTokens]) => {
-      if (!active) return;
-      const next = new WeakMap<DiffCell, ThemedToken[]>();
+    if (content.length > 1_000_000 || pairs.length > 10_000) return;
+    let frame: number | undefined;
+    const additions = new Map<DiffCell, ThemedToken[]>();
+    const publish = () => {
+      frame = undefined;
+      if (controller.signal.aborted) return;
+      const tokens = new WeakMap<DiffCell, ThemedToken[]>();
       pairs.forEach((row) => {
-        next.set(row.oldCell, oldTokens.get(row.oldCell) ?? []);
-        next.set(row.newCell, newTokens.get(row.newCell) ?? []);
+        for (const cell of [row.oldCell, row.newCell]) {
+          const value = additions.get(cell) ?? cachedTokens.get(cell);
+          if (value) tokens.set(cell, value);
+        }
       });
-      setHighlighted(next);
-    }).catch(() => { if (active) setHighlighted(undefined); });
-    return () => { active = false; };
-  }, [content.length, language, parsed, path, theme]);
+      setHighlighted({ parsed, theme, language, tokens });
+    };
+    let logged = false;
+    const onError = (error: unknown) => {
+      if (logged) return;
+      logged = true;
+      // The log records metadata only, never file contents or tokens.
+      const details = JSON.stringify({ path, language, reason: error instanceof Error ? error.message : 'UnknownError' });
+      if (bridge) void bridge.pushClientLog('warn', 'ui', 'Syntax highlighting failed', details).catch(() => undefined);
+      else console.warn('Syntax highlighting failed', details);
+    };
+    for (const side of ['old', 'new'] as const) {
+      void highlightParsedDiffSide(parsed, side, language, path, theme, {
+        signal: controller.signal,
+        onError,
+        onGroup: (cells, tokens) => {
+          cells.forEach((cell, index) => additions.set(cell, tokens[index] ?? []));
+          if (frame === undefined) frame = requestAnimationFrame(publish);
+        },
+      });
+    }
+    return () => {
+      controller.abort();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [content.length, language, parsed, path, theme, bridge, cachedTokens]);
   useEffect(() => {
     virtualizer.measure();
     if (view === 'split') {
@@ -963,7 +1011,7 @@ export function UnifiedDiffView({
                     side="old"
                     cell={row.oldCell}
                     peer={peerRow.kind === 'split' && peerRow.newCell.kind === 'addition' ? peerRow.newCell : undefined}
-                    tokens={highlighted?.get(row.oldCell)} search={searchHighlights.get(row.oldCell)}
+                    tokens={renderedTokens.get(row.oldCell)} search={searchHighlights.get(row.oldCell)}
                   />
                 </div>;
               })}
@@ -993,14 +1041,14 @@ export function UnifiedDiffView({
                     side="new"
                     cell={row.newCell}
                     peer={peerRow.kind === 'split' && peerRow.oldCell.kind === 'deletion' ? peerRow.oldCell : undefined}
-                    tokens={highlighted?.get(row.newCell)} search={searchHighlights.get(row.newCell)}
+                    tokens={renderedTokens.get(row.newCell)} search={searchHighlights.get(row.newCell)}
                   />
                 </div>;
               })}
             </div>
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const row = rows[virtualRow.index];
-              if (row.kind === 'meta') return <div key={`meta-${virtualRow.key}`} ref={virtualizer.measureElement} data-index={virtualRow.index} className="unified-diff-virtual-row split-center-meta-overlay" style={{ transform: `translateY(${virtualRow.start}px)` }}>{renderRow(row, highlighted, handleExpandFold, searchHighlights)}</div>;
+              if (row.kind === 'meta') return <div key={`meta-${virtualRow.key}`} ref={virtualizer.measureElement} data-index={virtualRow.index} className="unified-diff-virtual-row split-center-meta-overlay" style={{ transform: `translateY(${virtualRow.start}px)` }}>{renderRow(row, renderedTokens, handleExpandFold, searchHighlights)}</div>;
               if (row.kind !== 'fold') return null;
               return <div
                 key={`center-fold-${virtualRow.key}`}
@@ -1020,7 +1068,7 @@ export function UnifiedDiffView({
               data-index={virtualRow.index}
               className="unified-diff-virtual-row"
               style={{ transform: `translateY(${virtualRow.start}px)` }}
-            >{renderRow(row, highlighted, handleExpandFold, searchHighlights)}</div>;
+            >{renderRow(row, renderedTokens, handleExpandFold, searchHighlights)}</div>;
           })
         )}
       </div>

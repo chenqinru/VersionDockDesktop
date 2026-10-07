@@ -1940,7 +1940,12 @@ async fn dispatch(
             };
 
             let builder = tauri::WebviewWindowBuilder::new(app, &label, webview_url)
-                .title(" ")
+                .title(
+                    app.config()
+                        .product_name
+                        .as_deref()
+                        .unwrap_or("VersionDock Desktop"),
+                )
                 .inner_size(width.unwrap_or(880.0), height.unwrap_or(540.0))
                 .min_inner_size(800.0, 480.0)
                 // The frontend reveals a transfer after rendering its initial tab,
