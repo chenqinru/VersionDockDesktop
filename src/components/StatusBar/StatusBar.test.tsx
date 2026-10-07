@@ -6,6 +6,7 @@ import { MockBridge } from '../../platform/bridge';
 import type { RequestOptions } from '../../platform/bridge';
 import { BridgeContext } from '../../platform/context';
 import { useAppStore } from '../../store/appStore';
+import { useAppUpdateStore } from '../../store/appUpdateStore';
 import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '../../progress/taskProgressStore';
 import { createOperationRequestEvent } from '../../platform/bridge';
 import { StatusBar } from './StatusBar';
@@ -143,21 +144,38 @@ const renderStatusBar = () => {
 };
 
 afterEach(() => {
-  useAppStore.setState({ updateChecking: false, updateAvailableInfo: null });
   cleanup();
+  useAppStore.setState({ updateChecking: false, updateAvailableInfo: null });
+  useAppUpdateStore.setState({ phase: 'idle', targetVersion: null, progress: null, error: null });
   resetTaskProgress();
   useAppStore.setState({ bridge: undefined, bootstrap: undefined, ready: false, snapshot: undefined, operations: {} });
   vi.restoreAllMocks();
 });
 
 describe('StatusBar', () => {
-  it('retains update checks on the welcome screen without a workspace', () => {
+  it('hides the entire welcome status bar during update checks and after their results', () => {
     renderStatusBar();
     act(() => useAppStore.setState({ snapshot: undefined, updateAvailableInfo: null, updateChecking: true }));
-    expect(screen.getByRole('contentinfo')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Checking for updates…' })).toBeDisabled();
-    expect(screen.queryByText('main')).not.toBeInTheDocument();
-    act(() => useAppStore.setState({ updateChecking: false }));
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ updateChecking: false, updateAvailableInfo: { available: false, currentVersion: '0.1.0', error: 'timeout' } }));
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ updateAvailableInfo: { available: true, currentVersion: '0.1.0', latestVersion: '0.2.0' } }));
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ snapshot: snapshot() }));
+    expect(screen.getByRole('button', { name: 'New version v0.2.0 available — click to update' })).toBeInTheDocument();
+  });
+
+  it.each(['downloading', 'ready', 'restarting'] as const)('hides the welcome status bar while an update is %s without losing installation state', (phase) => {
+    renderStatusBar();
+    act(() => {
+      useAppUpdateStore.setState({ phase, targetVersion: '0.2.0' });
+      useAppStore.setState({ snapshot: undefined });
+    });
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+    expect(useAppUpdateStore.getState().phase).toBe(phase);
+    expect(useAppUpdateStore.getState().targetVersion).toBe('0.2.0');
+    act(() => useAppStore.setState({ snapshot: snapshot() }));
+    expect(document.querySelector('.statusbar-update-badge')).toBeInTheDocument();
   });
   it('renders branch status and accounts item', async () => {
     const { requests } = renderStatusBar();
