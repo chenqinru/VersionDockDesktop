@@ -1,35 +1,36 @@
 # 公开安装包发布流程
 
-源码仓库：`chenqinru/VersionDockDesktop`（私有）。下载仓库：`chenqinru/VersionDockDesktop-Releases`（公开，默认分支 `main`）。公开仓库的 README 来源于 `docs/public-downloads.md`，只发布安装包、更新清单及使用说明。
+源码、安装包、更新清单和问题反馈统一使用公开 GitHub 仓库 [`chenqinru/VersionDockDesktop`](https://github.com/chenqinru/VersionDockDesktop)，默认分支为 `main`。GitHub 不再使用独立下载仓库；公司 GitLab 的 `VersionDockDesktop-Releases` 仍仅保存安装包、签名和更新清单，作为备用更新源。下载与更新说明见 [下载指南](public-downloads.md)。
 
 ## 一次性设置
 
-1. 在 GitHub [创建 fine-grained PAT](https://github.com/settings/personal-access-tokens/new)，名称建议 `VersionDock Releases`。Resource owner 选择 `chenqinru`；Repository access 选择 **Only select repositories**，只选择 `VersionDockDesktop-Releases`；Repository permissions 中仅添加 **Contents: Read and write**。按公司策略设置有效期，到期前更新 Secret。
-2. 在私有源码仓库的 [Actions Secrets](https://github.com/chenqinru/VersionDockDesktop/settings/secrets/actions) 新增 `RELEASES_TOKEN`，值为上一步 PAT。也可在自己的终端运行 `gh secret set RELEASES_TOKEN --repo chenqinru/VersionDockDesktop`，按提示输入。不要把 Token 写入源码或聊天。
-3. 复用已有 `TAURI_SIGNING_PRIVATE_KEY`。如果密钥带密码，增加 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。GitHub Secret 无法被读回，发布任务会使用客户端公钥验证所有更新包，确保现有密钥匹配；匹配失败时不公开版本。不要重新生成密钥来绕过校验。
+1. 将 GitHub 项目仓库设为公开。发布任务会校验仓库身份、公开可见性及 `main` 默认分支。
+2. GitHub 发布使用当前工作流自动生成的 `GITHUB_TOKEN`，仅 `publish` 任务授予 `contents: write`，其他任务保持只读。无需跨仓库 PAT 或 `RELEASES_TOKEN` Secret。
+3. 复用已有 `TAURI_SIGNING_PRIVATE_KEY`。如果密钥带密码，增加 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。发布任务使用客户端公钥验证所有更新包，匹配失败时不公开版本；不要重新生成密钥来绕过校验。
+4. 保留 GitLab 的 `GITLAB_RELEASE_PROJECT_ID`、可选镜像 Variables 和 `GITLAB_RELEASE_TOKEN` Secret，具体设置见 [GitLab 镜像](gitlab-update-mirror.md)。GitLab 令牌仅注入镜像发布步骤，不进入构建任务或客户端。
 
-跨仓库凭据只注入最终发布步骤，不进入构建任务或客户端。默认 `GITHUB_TOKEN` 仅用于当前私有仓库的只读访问。
+公开仓库的 workflow 日志和 artifacts 可被有访问权限的用户读取，不能作为私有存储。Secrets 的值不会因仓库公开而直接公开，仍不得写入日志或 artifacts。公司自托管 runner 只用于正式 Release 发布；普通 PR 检查继续使用 GitHub 托管 runner。
 
 ## 日常发版
 
 1. 运行 `npm run version:bump -- patch`（或明确的正式版本号），在 `src/release-notes.json` 首部补齐该版本的日期及中英文公开更新内容，一起提交版本及改动。仅支持 `0.1.1` 这样的正式 SemVer，不支持 beta 或 build 后缀。缺少版本更新记录时，元数据检查会在构建前失败。
 2. 推送代码及匹配的版本标签，例如 `v0.1.1`。标签必须和 package、Tauri、Cargo 元数据一致；不能移动已发布标签。
-3. Release workflow 先解析标签、验证版本并固定提交 SHA，随后并行执行前端检查、Rust 完整检查和前端资源构建。资源构建完成后，三平台立即复用同一份前端资源，并行构建 macOS universal、Windows x64、Linux x64，无需等待其他检查结束。签名产物先保存在私有 workflow artifacts，保留 14 天；只有全部检查和全部平台构建成功后才进入公开发布。
+3. Release workflow 先解析标签、验证版本并固定提交 SHA，随后并行执行前端检查、Rust 完整检查和前端资源构建。资源构建完成后，三平台立即复用同一份前端资源，并行构建 macOS universal、Windows x64、Linux x64，无需等待其他检查结束。签名产物先保存在 workflow artifacts，保留 14 天；只有全部检查和全部平台构建成功后才进入公开发布。
 4. 最终发布任务验证版本、平台覆盖、SHA-256 和全部更新签名，再生成单份 `latest.json`。默认入口采用 macOS universal、Windows NSIS 和 Linux AppImage；如果构建了 MSI、deb 或 rpm，必须提供有效签名，并登记对应安装包类型的入口，避免混用格式。先上传公开仓库草稿，下载附件校验内容，一切完整后才公开并设为 latest。
 
 可在 Actions 页面选择 Release → Run workflow，输入已存在的版本标签重试。只有草稿可被补齐；已公开版本禁止覆盖。发布更低或相同版本也会失败。三平台任意构建失败，公开仓库保持上一版本。
 
 GitHub Actions 的并发组会串行执行公开发布，待执行任务受 GitHub 的 pending 队列规则影响；同一时间不要连续触发大量发版。被取消的待发布版本可按上述方式重试。
 
-草稿中的安装包在正式公开前不可匿名下载。所有上传与远程内容校验成功后，工作流才解除草稿状态。更新清单使用公开仓库版本地址，不依赖私有源码 SHA；公开标签基于公开仓库 `main`。
+草稿中的安装包在正式公开前不可匿名下载。所有上传与远程内容校验成功后，工作流才解除草稿状态。更新清单使用本项目仓库的版本下载地址。发布前及正式公开前都会确认已有版本标签指向已验证的构建 SHA；Release 使用该 SHA，不另外创建基于 `main` 的标签。
 
-公开说明按版本从 `src/release-notes.json` 读取实际更新内容，不自动复制私有提交信息或 CI 日志。记录的中文内容同时生成更新清单 `notes` 和 GitHub Release 正文，GitLab 镜像复用同一内容；应用内历史更新日志从同一文件按界面语言显示。更新提示读取远程清单中对应待安装版本的说明，并按 Markdown 渲染。已经公开的安装包和清单保持不可覆盖，新说明生成逻辑需要随新版本发布。客户端源码仓库首页的下载徽章及应用内下载、更新日志、反馈入口指向公开仓库。
+公开说明按版本从 `src/release-notes.json` 读取实际更新内容，不自动复制提交信息或 CI 日志。记录的中文内容同时生成更新清单 `notes` 和 GitHub Release 正文，GitLab 镜像复用同一内容；应用内历史更新日志从同一文件按界面语言显示。更新提示读取远程清单中对应待安装版本的说明，并按 Markdown 渲染。已经公开的安装包和清单保持不可覆盖，新说明生成逻辑需要随新版本发布。项目首页的下载徽章及应用内下载、更新日志、反馈入口均指向 `chenqinru/VersionDockDesktop`。
 
 ## 本地检查与普通 CI
 
 - 本地完整检查需要 Git、SVN、Rust、Node 20+ 及 `minisign`：macOS 使用 `brew install minisign`；Ubuntu 使用 `sudo apt-get install minisign`。运行 `npm run check`，其中 `npm run test:release` 使用临时测试密钥验证发布逻辑，不接触生产密钥。
 - 普通 `main` push / pull request CI 并行检查前端和 Rust，保留三平台真实 Git/SVN 测试；macOS 还检查另一种 CPU 架构。日常 CI 不生成完整安装包。
-- 临时需要安装包时，在 Actions → CI → Run workflow 勾选 `bundle`。通过检查后生成三平台安装包，保存为私有 `ci-packages-*` artifacts，保留 7 天；该任务不会发布公开 Release。
+- 临时需要安装包时，在 Actions → CI → Run workflow 勾选 `bundle`。通过检查后生成三平台安装包，保存为 `ci-packages-*` workflow artifacts，保留 7 天；该任务不会发布公开 Release。
 - 正式打包启用了 `bundle.createUpdaterArtifacts`，需要签名环境变量。不生成更新包的本地打包使用 `npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json`；手动 CI 打包也使用该配置，不更换客户端更新公钥或地址。
 - 公钥与签名文本使用 Tauri 的 Base64 包装格式；校验复用 minisign，避免自行实现签名算法。
 
@@ -49,7 +50,7 @@ GitHub Actions 的并发组会串行执行公开发布，待执行任务受 GitH
 
 自动化或构建通过不等于真实升级通过。首次发版后用两个递增版本分别记录以下实机证据：
 
-2026-10-06 已完成：公开下载仓库初始化并核验其公开属性及 `main` 默认分支；确认 `RELEASES_TOKEN` Secret 已保存（未读取值，权限待首次发布验证）；本地完整检查通过，前端 802 项测试、Rust 216 项测试通过（5 项标记 ignored），新增发布测试 13 项通过；Actions 配置通过 actionlint。使用真实 GitHub 草稿完成验证文件上传与下载 SHA-256 校验，临时草稿已删除。下载仓库目前未发布应用版本；源码改动尚未提交推送。
+历史记录（2026-10-06，独立 GitHub 下载仓库方案，已被当前方案替代）：公开下载仓库初始化并核验其公开属性及 `main` 默认分支；确认 `RELEASES_TOKEN` Secret 已保存（未读取值，权限待首次发布验证）；本地完整检查通过，前端 802 项测试、Rust 216 项测试通过（5 项标记 ignored），新增发布测试 13 项通过；Actions 配置通过 actionlint。使用真实 GitHub 草稿完成验证文件上传与下载 SHA-256 校验，临时草稿已删除。当时下载仓库尚未发布应用版本，源码改动尚未提交推送。
 
 | 检查项 | 当前状态 |
 | --- | --- |
@@ -61,5 +62,7 @@ GitHub Actions 的并发组会串行执行公开发布，待执行任务受 GitH
 | macOS 完整 App 的 ad-hoc 签名 | 本地复用已有二进制完成 Tauri 打包及严格签名校验；新版本安装待实机验收 |
 | Apple Developer ID 签名与公证 | 按用户选择不付费，不启用 |
 | Windows 代码签名 | 沿用现有配置，单独验收 |
+
+旧 GitHub 下载仓库已删除，不迁移历史 Releases，也不提供旧地址兼容。已安装客户端的更新地址由安装包内置，需要手动安装使用新地址的版本一次；GitLab 的 `VersionDockDesktop-Releases` 镜像继续发布。
 
 首次安装或旧更新地址迁移只需下载新版一次，之后无需人工分发。失败版本应发布修正版并增加版本号，不能修改已经公开的安装包。

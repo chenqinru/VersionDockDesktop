@@ -39,7 +39,7 @@ test('清单与公开 Release 共用版本更新内容，缺失说明时不准�
   assert.doesNotMatch(manifest.notes, /请根据操作系统选择安装包/);
   assert.equal(fs.readFileSync(path.join(input.outputDir, 'release-notes.md'), 'utf8').trim(), manifest.notes);
   const { state, github } = githubFixture();
-  publishRelease({ directory: input.outputDir, version: input.version, github });
+  publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github });
   assert.equal(state.draft.body.trim(), manifest.notes);
   const missing = fixture();
   assert.throws(() => prepareRelease({ ...missing, releaseNotes: [{ ...releaseNotes[0], version: '0.1.2' }] }), /缺少/);
@@ -53,7 +53,7 @@ test('GitLab 构建配置使用固定清单地址且只注入公开地址', () =
   assert.equal(config.latestUrl, 'https://git.gsdzone.net/api/v4/projects/42/repository/files/latest.json/raw?ref=main');
   const updater = prepareUpdaterConfig(env);
   assert.equal(updater.plugins.updater.endpoints.length, 2);
-  assert.ok(updater.plugins.updater.endpoints[0].startsWith('https://github.com/'));
+  assert.equal(updater.plugins.updater.endpoints[0], 'https://github.com/chenqinru/VersionDockDesktop/releases/latest/download/latest.json');
   assert.equal(updater.plugins.updater.endpoints[1], config.latestUrl);
   assert.ok(!JSON.stringify(updater).includes(env.GITLAB_RELEASE_TOKEN));
   assert.throws(() => gitlabReleaseConfig({ GITLAB_RELEASE_PROJECT_ID: 'abc' }), /数字项目/);
@@ -143,6 +143,7 @@ test('GitLab 服务端 503 最多重试三次，匿名请求不附带凭据', as
   assert.equal(calls, 3); assert.deepEqual(waits, [1000, 2000]);
 });
 
+const SOURCE_SHA = 'a'.repeat(40);
 const temporaryDirectories = [];
 afterEach(() => {
   temporaryDirectories.splice(0).forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }));
@@ -190,6 +191,7 @@ function githubFixture() {
   const state = { latest: { tag_name: 'v0.1.0' }, draft: null, packages: new Map(), publications: 0, failUpload: false, corruptDownload: false };
   const github = {
     repository: () => ({ full_name: RELEASE_REPOSITORY, private: false, default_branch: 'main' }),
+    tagCommit: () => SOURCE_SHA,
     latest: () => state.latest,
     release: () => state.draft,
     releaseById: () => state.draft,
@@ -230,7 +232,7 @@ test('三平台签名产物生成四个架构入口，公开文件不含私有�
   assert.deepEqual(Object.keys(manifest.platforms).sort(), ['darwin-aarch64', 'darwin-x86_64', 'linux-x86_64', 'linux-x86_64-appimage', 'windows-x86_64', 'windows-x86_64-nsis']);
   assert.deepEqual(manifest.platforms['darwin-aarch64'], manifest.platforms['darwin-x86_64']);
   for (const update of Object.values(manifest.platforms)) {
-    assert.ok(update.url.startsWith(`https://github.com/${RELEASE_REPOSITORY}/releases/download/v0.1.1/`));
+    assert.ok(update.url.startsWith('https://github.com/chenqinru/VersionDockDesktop/releases/download/v0.1.1/'));
     assert.ok(update.signature.length > 0);
   }
   assert.equal(manifest.pub_date, '2026-10-06T00:00:00.000Z');
@@ -326,24 +328,24 @@ test('草稿按标签查询返回 404 时使用分页列表查找，其他 API �
 test('上传全部附件并核对远程内容后才公开，已公开版本重试失败', () => {
   const input = fixture(); prepareRelease(input);
   const { state, github } = githubFixture();
-  publishRelease({ directory: input.outputDir, version: input.version, github });
+  publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github });
   assert.equal(state.publications, 1);
   assert.equal(state.latest.tag_name, 'v0.1.1');
-  assert.equal(state.draft.target_commitish, 'main');
-  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, github }), /禁止覆盖/);
+  assert.equal(state.draft.target_commitish, SOURCE_SHA);
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /禁止覆盖/);
 });
 
 test('上传失败保留草稿和上一 latest，可清除多余附件后重试', () => {
   const input = fixture(); prepareRelease(input);
   const { state, github } = githubFixture();
   state.failUpload = true;
-  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, github }), /网络上传失败/);
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /网络上传失败/);
   assert.equal(state.draft.draft, true);
   assert.equal(state.latest.tag_name, 'v0.1.0');
   state.packages.set('obsolete.txt', Buffer.from('old draft'));
   state.draft.assets.push({ id: 99, name: 'obsolete.txt' });
   state.failUpload = false;
-  publishRelease({ directory: input.outputDir, version: input.version, github });
+  publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github });
   assert.equal(state.packages.has('obsolete.txt'), false);
   assert.equal(state.publications, 1);
 });
@@ -352,12 +354,12 @@ test('远程内容损坏不公开，上传过程中更高版本发布时也不�
   const input = fixture(); prepareRelease(input);
   const { state, github } = githubFixture();
   state.corruptDownload = true;
-  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, github }), /内容校验失败/);
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /内容校验失败/);
   assert.equal(state.publications, 0);
   state.corruptDownload = false;
   const download = github.download;
   github.download = (...args) => { download(...args); state.latest = { tag_name: 'v0.2.0' }; };
-  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, github }), /必须高于/);
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /必须高于/);
   assert.equal(state.publications, 0);
 });
 
@@ -365,6 +367,44 @@ test('发布仓库不是指定公开仓库时不创建 Release', () => {
   const input = fixture(); prepareRelease(input);
   const { state, github } = githubFixture();
   github.repository = () => ({ full_name: RELEASE_REPOSITORY, private: true, default_branch: 'main' });
-  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, github }), /公开仓库/);
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /公开仓库/);
   assert.equal(state.draft, null);
+});
+
+test('主仓库 Release 要求已有标签对应实际构建提交', () => {
+  const input = fixture(); prepareRelease(input);
+  const { state, github } = githubFixture();
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, github }), /源码提交 SHA/);
+  github.tagCommit = () => 'b'.repeat(40);
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /标签.*不一致/);
+  assert.equal(state.draft, null);
+  github.tagCommit = () => { throw new Error('标签不存在'); };
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /标签不存在/);
+  assert.equal(state.draft, null);
+});
+
+test('上传期间版本标签移动时停止公开草稿', () => {
+  const input = fixture(); prepareRelease(input);
+  const { state, github } = githubFixture();
+  const download = github.download;
+  github.download = (...args) => { download(...args); github.tagCommit = () => 'b'.repeat(40); };
+  assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /标签.*不一致/);
+  assert.equal(state.publications, 0);
+  assert.equal(state.draft.draft, true);
+});
+
+test('GitHub 标签校验解析 lightweight 与 annotated 标签且不掩盖 404', () => {
+  for (const annotated of [false, true]) {
+    const calls = [];
+    const client = createGitHubClient({ run: (_command, args) => {
+      calls.push(args[1]);
+      return JSON.stringify({ object: annotated && calls.length === 1
+        ? { type: 'tag', sha: 'b'.repeat(40) } : { type: 'commit', sha: SOURCE_SHA } });
+    } });
+    assert.equal(client.tagCommit('v0.1.1'), SOURCE_SHA);
+    assert.equal(calls[0], 'repos/chenqinru/VersionDockDesktop/git/ref/tags/v0.1.1');
+    assert.equal(calls.length, annotated ? 2 : 1);
+  }
+  const client = createGitHubClient({ run: () => { throw new Error('HTTP 404'); } });
+  assert.throws(() => client.tagCommit('v0.1.1'), /HTTP 404/);
 });

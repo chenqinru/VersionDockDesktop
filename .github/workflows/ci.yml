@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       bundle:
-        description: Build private installation packages after all checks
+        description: Build installation packages after all checks
         type: boolean
         default: false
 
@@ -324,7 +324,7 @@ jobs:
         if: inputs.bundle && runner.os == 'macOS'
         run: codesign --verify --deep --strict --verbose=2 "src-tauri/target/universal-apple-darwin/release/bundle/macos/VersionDock Desktop.app"
 
-      - name: Save private installation packages
+      - name: Save installation packages
         if: inputs.bundle
         uses: actions/upload-artifact@v4
         with:

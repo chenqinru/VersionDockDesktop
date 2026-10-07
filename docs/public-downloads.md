@@ -1,10 +1,10 @@
 # VersionDock Desktop
 
-VersionDock Desktop 是独立的 Git / SVN 桌面工作台。此仓库用于分发安装包、更新清单和公开使用说明。
+VersionDock Desktop 是独立的 Git / SVN 桌面工作台。源码、GitHub 安装包、更新清单和问题反馈统一保存在公开仓库 `chenqinru/VersionDockDesktop`；公司 GitLab 的 `VersionDockDesktop-Releases` 继续作为安装包镜像。
 
 ## 下载与首次安装
 
-**[打开最新版本下载页](https://github.com/chenqinru/VersionDockDesktop-Releases/releases/latest)**
+**[打开最新版本下载页](https://github.com/chenqinru/VersionDockDesktop/releases/latest)**
 
 | 系统 | 首次安装 | 应用内自动更新使用的文件 |
 | --- | --- | --- |
@@ -22,8 +22,8 @@ Linux AppImage 可使用 `chmod +x VersionDock*.AppImage` 添加执行权限。�
 
 公司和家庭电脑都使用同一更新入口，不需要登录 GitHub；所在网络需要能访问 GitHub Releases 及其文件下载域名。
 
-已经安装、仍指向旧私有更新地址的测试版本，需要从本仓库下载安装新版一次。此后由 App 自动检测更新，无需额外获取安装包。
+已安装的旧版本需要手动安装使用新地址的版本一次，后续由 App 自动检测更新。旧 GitHub 下载仓库已删除；GitLab 的 `VersionDockDesktop-Releases` 镜像继续发布。
 
 ## 反馈
 
-通过 [Issues](https://github.com/chenqinru/VersionDockDesktop-Releases/issues) 反馈问题。请提供 App 版本、操作系统、复现步骤及相关错误信息；提交前移除日志或截图中的公司内部信息和凭据。
+通过 [Issues](https://github.com/chenqinru/VersionDockDesktop/issues) 反馈问题。请提供 App 版本、操作系统、复现步骤及相关错误信息；提交前移除日志或截图中的公司内部信息和凭据。

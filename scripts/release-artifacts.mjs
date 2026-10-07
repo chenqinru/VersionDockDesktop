@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { releaseNotesForVersion } from './release-notes.mjs';
 
-export const RELEASE_REPOSITORY = 'chenqinru/VersionDockDesktop-Releases';
+export const RELEASE_REPOSITORY = 'chenqinru/VersionDockDesktop';
 export const RELEASE_PLATFORMS = ['macos', 'windows', 'linux'];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const assetPattern = /(?:\.app\.tar\.gz|\.dmg|\.exe|\.msi|\.AppImage|\.deb|\.rpm)(?:\.sig)?$/;

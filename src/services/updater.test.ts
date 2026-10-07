@@ -97,7 +97,7 @@ describe('updater service', () => {
 
   it('uses the package version and public releases repository', () => {
     expect(APP_CURRENT_VERSION).toBe(version);
-    expect(GITHUB_REPO_URL).toBe('https://github.com/chenqinru/VersionDockDesktop-Releases');
+    expect(GITHUB_REPO_URL).toBe('https://github.com/chenqinru/VersionDockDesktop');
   });
 
   it('reports up to date only after a successful native check', async () => {
@@ -117,7 +117,7 @@ describe('updater service', () => {
       const result = await checkAppUpdate();
       expect(result).toMatchObject({ available: false, error: message });
       expect(fetch).toHaveBeenCalledWith(
-        'https://api.github.com/repos/chenqinru/VersionDockDesktop-Releases/releases/latest', expect.any(Object),
+        'https://api.github.com/repos/chenqinru/VersionDockDesktop/releases/latest', expect.any(Object),
       );
     },
   );

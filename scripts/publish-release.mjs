@@ -31,6 +31,14 @@ export function createGitHubClient({ run = execFileSync } = {}) {
   };
   return {
     repository: () => api(`repos/${RELEASE_REPOSITORY}`),
+    tagCommit: (tag) => {
+      let object = api(`repos/${RELEASE_REPOSITORY}/git/ref/tags/${tag}`).object;
+      while (object.type === 'tag') {
+        object = api(`repos/${RELEASE_REPOSITORY}/git/tags/${object.sha}`).object;
+      }
+      if (object.type !== 'commit') throw new Error('版本标签必须指向源码提交');
+      return object.sha;
+    },
     latest: () => optional(`repos/${RELEASE_REPOSITORY}/releases/latest`),
     release: (tag) => optional(`repos/${RELEASE_REPOSITORY}/releases/tags/${tag}`)
       // GitHub 的按标签查询接口不返回尚未公开的草稿。
@@ -67,8 +75,9 @@ export function createGitHubClient({ run = execFileSync } = {}) {
   };
 }
 
-export function publishRelease({ directory, version, github = createGitHubClient() }) {
+export function publishRelease({ directory, version, sourceSha, github = createGitHubClient() }) {
   validateVersion(version);
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || '')) throw new Error('发布必须提供已验证的源码提交 SHA');
   const assetsDir = path.join(directory, 'assets');
   const names = fs.readdirSync(assetsDir).sort();
   const manifest = JSON.parse(fs.readFileSync(path.join(assetsDir, 'latest.json'), 'utf8'));
@@ -78,10 +87,14 @@ export function publishRelease({ directory, version, github = createGitHubClient
     throw new Error('发布仓库必须是指定的公开仓库，默认分支为 main');
   }
   const tag = `v${version}`;
+  const assertSourceTag = () => {
+    if (github.tagCommit(tag) !== sourceSha) throw new Error('版本标签与已验证的源码提交不一致，停止发布');
+  };
+  assertSourceTag();
   const existing = github.release(tag);
   assertPublishable(version, github.latest(), existing);
   const draft = existing || github.create({
-    tag_name: tag, target_commitish: 'main', name: `VersionDock Desktop ${tag}`,
+    tag_name: tag, target_commitish: sourceSha, name: `VersionDock Desktop ${tag}`,
     body: fs.readFileSync(path.join(directory, 'release-notes.md'), 'utf8'), draft: true, prerelease: false,
   });
   for (const asset of draft.assets || []) {
@@ -109,6 +122,7 @@ export function publishRelease({ directory, version, github = createGitHubClient
     fs.rmSync(downloaded, { recursive: true, force: true });
   }
   // 上传期间可能有人在网页发布其他版本，公开前再检查一次。
+  assertSourceTag();
   assertPublishable(version, github.latest(), github.releaseById(draft.id));
   const published = github.publish(draft.id);
   if (published.draft || published.prerelease || github.latest()?.tag_name !== tag) {
@@ -118,7 +132,9 @@ export function publishRelease({ directory, version, github = createGitHubClient
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  if (!process.env.GH_TOKEN) throw new Error('请在私有源码仓库配置 RELEASES_TOKEN Secret');
-  const release = publishRelease({ directory: process.env.RELEASE_OUTPUT_DIR, version: process.env.RELEASE_VERSION });
+  if (!process.env.GH_TOKEN) throw new Error('请提供 GH_TOKEN；Actions 使用具有 contents: write 权限的 GITHUB_TOKEN');
+  const release = publishRelease({
+    directory: process.env.RELEASE_OUTPUT_DIR, version: process.env.RELEASE_VERSION, sourceSha: process.env.RELEASE_SOURCE_SHA,
+  });
   console.log(`已发布：${release.html_url}`);
 }

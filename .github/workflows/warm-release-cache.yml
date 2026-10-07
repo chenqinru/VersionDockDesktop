@@ -47,7 +47,7 @@ jobs:
           npm ci
           npm run build:frontend
 
-      - name: Save private cache build frontend
+      - name: Save cache build frontend
         uses: actions/upload-artifact@v4
         with:
           overwrite: true

@@ -76,7 +76,7 @@ jobs:
       - name: Build release frontend once
         run: npx vite build
 
-      - name: Save private release frontend
+      - name: Save release frontend
         uses: actions/upload-artifact@v4
         with:
           overwrite: true
@@ -298,7 +298,7 @@ jobs:
           RELEASE_OUTPUT_DIR: ${{ runner.temp }}/release-${{ matrix.platform }}
         run: node scripts/release-artifacts.mjs stage
 
-      - name: Save private build artifacts
+      - name: Save build artifacts
         uses: actions/upload-artifact@v4
         with:
           overwrite: true
@@ -310,6 +310,8 @@ jobs:
   publish:
     name: Publish complete release
     needs: [verify, build]
+    permissions:
+      contents: write
     runs-on: [self-hosted, linux, x64, gitlab-publish]
     timeout-minutes: 30
     concurrency:
@@ -317,6 +319,7 @@ jobs:
       cancel-in-progress: false
     env:
       RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+      RELEASE_SOURCE_SHA: ${{ needs.verify.outputs.sha }}
     steps:
       - name: Checkout verified source commit
         uses: actions/checkout@v7
@@ -341,7 +344,7 @@ jobs:
           echo "RELEASE_ARTIFACTS_DIR=$RUNNER_TEMP/release-artifacts" >> "$GITHUB_ENV"
           echo "RELEASE_OUTPUT_DIR=$RUNNER_TEMP/prepared-release" >> "$GITHUB_ENV"
 
-      - name: Download all private platform artifacts
+      - name: Download all platform artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -362,5 +365,5 @@ jobs:
 
       - name: Upload, verify and publish public release
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/publish-release.mjs

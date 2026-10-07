@@ -24,7 +24,7 @@ flowchart LR
 - Rust 任务检查格式、Clippy、生成接口及默认值的一致性。`Quality gate` 保留原检查名称，通过 `always()` 加显式结果判断汇总，失败、跳过或取消都不能放行平台任务。
 - 三平台运行完整 Rust 测试，强制要求真实 Git/SVN 工具可用；Windows SVN 的 Unicode 路径验证及独立缓存继续保留。
 - 日常 macOS 在宿主架构执行测试，并对另一架构执行带 `tauri/custom-protocol` 的编译检查。这不等于另一架构的链接、安装或实机运行验收。
-- 日常任务不安装前端 npm 依赖，也不执行完整安装包构建。需要临时包时，在 Actions → CI → Run workflow 勾选 `bundle`，三平台完整打包并上传私有安装包，保留 7 天。
+- 日常任务不安装前端 npm 依赖，也不执行完整安装包构建。需要临时包时，在 Actions → CI → Run workflow 勾选 `bundle`，三平台完整打包并上传 workflow 安装包 artifacts，保留 7 天。
 
 ## 正式发布
 
@@ -39,7 +39,7 @@ macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新
 - 每次 workflow 只生成一份 `dist`，前端 artifact 名称带固定源码 SHA，平台任务 checkout 同一 SHA 并下载当前运行的 artifact。
 - 平台构建通过临时 Tauri 配置将 `beforeBuildCommand` 设为 `null`，直接使用同一源码提交生成的 `dist`，避免再次运行 Vite 和类型导出检查。正式发布仍等待完整源码检查通过，平台窗口、更新配置和签名配置仍按原方式合并。
 - 前端 artifact 使用 `frontend-ci-*` / `frontend-release-*` 名称。公开发布只下载 `release-*` 安装包 artifacts，前端资源不会作为单独附件上传到公开仓库。
-- 同一次工作流重新执行时允许替换其私有 artifacts，避免固定名称发生上传冲突；这不改变公开 Release 已发布附件禁止覆盖的约束。
+- 同一次工作流重新执行时允许替换其 workflow artifacts，避免固定名称发生上传冲突；这不改变公开 Release 已发布附件禁止覆盖的约束。
 - Rust 缓存统一使用 `src-tauri -> target`，新命名空间为 `v1-versiondock-target`，避开旧的错误缓存。
 - CI / Release 的 Rust 质量检查和日常 Linux 平台测试共用 `native-quality` 缓存键；macOS、Windows 日常平台测试使用 `native-tests`，完整打包使用 `native-bundles`。平台、架构、工具链和依赖锁文件仍由缓存 action 区分，避免测试缓存阻止完整打包缓存的建立。
 - 接口生成检查加入 `--locked`，防止检查过程中更新 Cargo 锁文件。
@@ -86,7 +86,7 @@ Windows CI 先用 `cargo test --lib --no-run --message-format=json` 编译测试
 
 已修正能从源码确认的夹具问题：两项仓库扫描断言改用平台路径组件比较；三处 SVN 本地仓库 URL 使用 `Url::from_file_path`；共用 SVN 命令显式禁止交互；共用仓库夹具 ID 按路径及类型生成，避免不同测试仓库复用同一缓存键。Windows 临时 runner 显式关闭 Git 的全局自动换行转换，具体测试的本地 Git 配置仍可覆盖。
 
-Windows 使用固定 `cargo-nextest 0.9.146`，每个测试独立进程运行，避免进程级全局状态相互干扰；`.config/nextest.toml` 配置每 60 秒报告慢测试，连续两次后终止该测试，其他测试继续执行。失败输出立即显示并在最后汇总，JUnit 报告保存在私有 `windows-test-report-*` artifact，保留 7 天。原挂起测试增加阶段日志，便于从超时输出定位停滞步骤。编译和整个任务仍受原有任务超时约束；单项测试超时不包含编译耗时。
+Windows 使用固定 `cargo-nextest 0.9.146`，每个测试独立进程运行，避免进程级全局状态相互干扰；`.config/nextest.toml` 配置每 60 秒报告慢测试，连续两次后终止该测试，其他测试继续执行。失败输出立即显示并在最后汇总，JUnit 报告保存在 `windows-test-report-*` workflow artifact，保留 7 天。原挂起测试增加阶段日志，便于从超时输出定位停滞步骤。编译和整个任务仍受原有任务超时约束；单项测试超时不包含编译耗时。
 
 本地使用相同 Nextest 版本、CI 配置和测试编译设置验证：221 项通过、6 项保持默认忽略，测试运行 22.356 秒，JUnit 报告成功生成。Windows 的其余失败仍需下一次 CI 提供断言和实际超时阶段，不能把本地通过当作 Windows 已全部修复。
 

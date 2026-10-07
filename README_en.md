@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/chenqinru/VersionDockDesktop/actions/workflows/ci.yml"><img alt="CI Status" src="https://img.shields.io/github/actions/workflow/status/chenqinru/VersionDockDesktop/ci.yml?branch=main&label=CI&logo=github"></a>
-  <a href="https://github.com/chenqinru/VersionDockDesktop-Releases/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/chenqinru/VersionDockDesktop-Releases?color=green"></a>
+  <a href="https://github.com/chenqinru/VersionDockDesktop/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/chenqinru/VersionDockDesktop?color=green"></a>
   <a href="https://v2.tauri.app/"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.0-24C8D8?logo=tauri"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-1.78%2B-DEA584?logo=rust"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-GPL--3.0-red"></a>
@@ -91,8 +91,8 @@ npm run tauri:build -- --config src-tauri/tauri.unsigned.conf.json
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details.
 
-- 🐛 [Report a Bug](https://github.com/chenqinru/VersionDockDesktop-Releases/issues/new)
-- 💡 [Request a Feature](https://github.com/chenqinru/VersionDockDesktop-Releases/issues/new)
+- 🐛 [Report a Bug](https://github.com/chenqinru/VersionDockDesktop/issues/new)
+- 💡 [Request a Feature](https://github.com/chenqinru/VersionDockDesktop/issues/new)
 - 🔒 [Security Policy](SECURITY.md)
 
 ---

@@ -1,6 +1,6 @@
 # GitLab 安装包镜像与自动更新
 
-源码继续保存在 GitHub 私有仓库。GitHub 安装包仓库仍为主更新源；公司 GitLab 16.6.0 的独立公开项目仅存安装包、签名和更新清单，不存源码。
+公开 GitHub 仓库 `chenqinru/VersionDockDesktop` 同时保存源码和安装包，继续作为主更新源；公司 GitLab 16.6.0 的独立公开项目仅存安装包、签名和更新清单，不存源码。
 
 ## 待提供的配置
 
@@ -8,7 +8,7 @@
 
 在 GitLab 创建空项目并初始化 `main` 分支（可仅创建 README）。启用 Package Registry，允许未登录用户读取；项目中不要放源码或内部资料。
 
-GitHub 私有源码仓库的 Actions Variables：
+GitHub 项目仓库的 Actions Variables：
 
 | 名称 | 值 |
 | --- | --- |
@@ -17,7 +17,7 @@ GitHub 私有源码仓库的 Actions Variables：
 | `GITLAB_RELEASE_PACKAGE` | `versiondock-desktop`，可省略 |
 | `GITLAB_RELEASE_BRANCH` | `main`，可省略 |
 
-在 GitHub Actions Secrets 中设置 `GITLAB_RELEASE_TOKEN`：使用仅限该安装包项目的 Project Access Token，授予 `api` scope 和 Maintainer 角色，用于上传 Generic Packages 和提交 `latest.json`。若 GitLab 授权/版本不支持 Project Access Token，可使用专用发布账号的 Token，并仅给予该项目权限。令牌由管理员直接保存到 GitHub Secret，无需发到聊天。现有 `RELEASES_TOKEN`、Tauri 签名私钥及密码保持在流水线 Secrets 中。
+在 GitHub Actions Secrets 中设置 `GITLAB_RELEASE_TOKEN`：使用仅限该安装包项目的 Project Access Token，授予 `api` scope 和 Maintainer 角色，用于上传 Generic Packages 和提交 `latest.json`。若 GitLab 授权/版本不支持 Project Access Token，可使用专用发布账号的 Token，并仅给予该项目权限。令牌由管理员直接保存到 GitHub Secret，无需发到聊天。Tauri 签名私钥及密码继续保存在流水线 Secrets 中。GitHub 发布使用工作流的 `GITHUB_TOKEN`，不再需要 `RELEASES_TOKEN`。
 
 ## 公司发布 runner
 

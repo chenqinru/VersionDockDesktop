@@ -25,7 +25,7 @@ export interface UpdateDownloadProgress {
 }
 
 export { APP_CURRENT_VERSION } from '../version';
-export const GITHUB_REPO_URL = 'https://github.com/chenqinru/VersionDockDesktop-Releases';
+export const GITHUB_REPO_URL = 'https://github.com/chenqinru/VersionDockDesktop';
 export const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 export const GITHUB_ISSUES_URL = `${GITHUB_REPO_URL}/issues/new`;
 export const AUTHOR_GITHUB_URL = 'https://github.com/chenqinru';
