@@ -66,5 +66,5 @@
 - 准备版本或生成更新说明时使用 [versiondock-release Skill](.agents/skills/versiondock-release/SKILL.md)，无需把详细流程重复写入本文件。
 - 版本同步复用 `npm run version:bump -- patch` 或明确版本号；正式发布只支持 `X.Y.Z`。`src/release-notes.json` 同时服务应用内历史、更新提示与 Release 正文，保持中英文内容及版本对应。
 - 本地发布准备与实际发布按用户授权范围执行。提交、打标签和推送已有明确授权时继续执行，无需重复确认；不要因生成说明自动触发发布。
-- 真实发布以 [发布维护指南](docs/release-publishing.md)、[GitLab 镜像指南](docs/gitlab-update-mirror.md) 和 `.github/workflows/release.yml` 为准。不得移动已发布标签、覆盖已公开版本或更换生产更新密钥绕过签名失败。
+- 真实发布以 [发布维护指南](docs/release-publishing.md)、[GitCode 镜像指南](docs/gitcode-update-mirror.md) 和 `.github/workflows/release.yml` 为准。不得移动已发布标签、覆盖已公开版本或更换生产更新密钥绕过签名失败。
 - 用户要求提交时，采用 Conventional Commits：`type(scope): 中文总结`，正文用中文归纳行为变化；仅提交本次任务涉及的文件。

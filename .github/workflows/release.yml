@@ -312,13 +312,11 @@ jobs:
       - name: Reuse release frontend for packaging
         run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.reuse-frontend.conf.json', JSON.stringify({build:{beforeBuildCommand:null}}))"
 
-      - name: Configure GitLab update mirror without credentials
+      - name: Configure GitCode update mirror without credentials
         env:
-          GITLAB_RELEASE_PROJECT_ID: ${{ vars.GITLAB_RELEASE_PROJECT_ID }}
-          GITLAB_RELEASE_URL: ${{ vars.GITLAB_RELEASE_URL }}
-          GITLAB_RELEASE_PACKAGE: ${{ vars.GITLAB_RELEASE_PACKAGE }}
-          GITLAB_RELEASE_BRANCH: ${{ vars.GITLAB_RELEASE_BRANCH }}
-        run: node scripts/gitlab-release-config.mjs
+          GITCODE_RELEASE_REPOSITORY: ${{ vars.GITCODE_RELEASE_REPOSITORY }}
+          GITCODE_RELEASE_BRANCH: ${{ vars.GITCODE_RELEASE_BRANCH }}
+        run: node scripts/gitcode-release-config.mjs
 
       - name: Build signed bundles without publishing
         id: bundles
@@ -404,11 +402,9 @@ jobs:
 
       - name: Configure update mirror without credentials
         env:
-          GITLAB_RELEASE_PROJECT_ID: ${{ vars.GITLAB_RELEASE_PROJECT_ID }}
-          GITLAB_RELEASE_URL: ${{ vars.GITLAB_RELEASE_URL }}
-          GITLAB_RELEASE_PACKAGE: ${{ vars.GITLAB_RELEASE_PACKAGE }}
-          GITLAB_RELEASE_BRANCH: ${{ vars.GITLAB_RELEASE_BRANCH }}
-        run: node scripts/gitlab-release-config.mjs
+          GITCODE_RELEASE_REPOSITORY: ${{ vars.GITCODE_RELEASE_REPOSITORY }}
+          GITCODE_RELEASE_BRANCH: ${{ vars.GITCODE_RELEASE_BRANCH }}
+        run: node scripts/gitcode-release-config.mjs
 
       - name: Compile this architecture without bundling
         run: npm run tauri:build -- --ci --no-bundle --target ${{ matrix.target }} --config src-tauri/tauri.reuse-frontend.conf.json --config src-tauri/tauri.release-updater.conf.json
@@ -461,11 +457,9 @@ jobs:
 
       - name: Configure update mirror without credentials
         env:
-          GITLAB_RELEASE_PROJECT_ID: ${{ vars.GITLAB_RELEASE_PROJECT_ID }}
-          GITLAB_RELEASE_URL: ${{ vars.GITLAB_RELEASE_URL }}
-          GITLAB_RELEASE_PACKAGE: ${{ vars.GITLAB_RELEASE_PACKAGE }}
-          GITLAB_RELEASE_BRANCH: ${{ vars.GITLAB_RELEASE_BRANCH }}
-        run: node scripts/gitlab-release-config.mjs
+          GITCODE_RELEASE_REPOSITORY: ${{ vars.GITCODE_RELEASE_REPOSITORY }}
+          GITCODE_RELEASE_BRANCH: ${{ vars.GITCODE_RELEASE_BRANCH }}
+        run: node scripts/gitcode-release-config.mjs
 
       - name: Download the same release frontend for fingerprint verification
         uses: actions/download-artifact@v4
@@ -625,20 +619,22 @@ jobs:
           GODEBUG: http2client=0
         run: node scripts/publish-release.mjs
 
-  publish-gitlab:
-    name: Publish GitLab mirror
-    if: ${{ !cancelled() && vars.GITLAB_RELEASE_PROJECT_ID != '' && needs.verify.result == 'success' && needs.prepare.result == 'success' }}
-    needs: [source, verify, prepare]
-    runs-on: [self-hosted, linux, x64, gitlab-publish]
+  publish-gitcode:
+    name: Publish GitCode mirror
+    if: ${{ !cancelled() && vars.GITCODE_RELEASE_REPOSITORY != '' && needs.verify.result == 'success' && needs.prepare.result == 'success' }}
+    needs: [verify, prepare]
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
-      group: versiondock-gitlab-release
+      group: versiondock-gitcode-release
       cancel-in-progress: false
     env:
       RELEASE_VERSION: ${{ needs.verify.outputs.version }}
       RELEASE_SOURCE_SHA: ${{ needs.verify.outputs.sha }}
       RELEASE_OUTPUT_DIR: ${{ github.workspace }}/prepared-release-mirror
-      RELEASE_ARTIFACT_ID: ${{ needs.prepare.outputs.artifact_id }}
     steps:
       - name: Checkout verified source commit
         uses: actions/checkout@v7
@@ -651,32 +647,19 @@ jobs:
         with:
           node-version: 20
 
-      - name: Verify preinstalled mirror publishing tools
-        run: |
-          command -v minisign
-          command -v gh
-          if [ -f scripts/download-release-artifact.mjs ]; then command -v python3; fi
-          gh --version
+      - name: Install signature verifier
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign
 
-      - name: Download prepared release from legacy source
-        if: needs.source.outputs.artifact_cache != 'true'
+      - name: Download prepared release from this run
         uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ needs.prepare.outputs.artifact_id }}
           path: ${{ env.RELEASE_OUTPUT_DIR }}
           merge-multiple: true
 
-      - name: Download prepared release or reuse verified local archive
-        if: needs.source.outputs.artifact_cache == 'true'
+      - name: Upload GitCode attachments, verify hashes, then publish mirror manifest
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: node scripts/download-release-artifact.mjs
-
-      - name: Upload GitLab packages, verify hashes, then publish mirror manifest
-        env:
-          GITLAB_RELEASE_PROJECT_ID: ${{ vars.GITLAB_RELEASE_PROJECT_ID }}
-          GITLAB_RELEASE_URL: ${{ vars.GITLAB_RELEASE_URL }}
-          GITLAB_RELEASE_PACKAGE: ${{ vars.GITLAB_RELEASE_PACKAGE }}
-          GITLAB_RELEASE_BRANCH: ${{ vars.GITLAB_RELEASE_BRANCH }}
-          GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
-        run: node scripts/publish-gitlab-release.mjs
+          GITCODE_RELEASE_REPOSITORY: ${{ vars.GITCODE_RELEASE_REPOSITORY }}
+          GITCODE_RELEASE_BRANCH: ${{ vars.GITCODE_RELEASE_BRANCH }}
+          GITCODE_RELEASE_TOKEN: ${{ secrets.GITCODE_RELEASE_TOKEN }}
+        run: node scripts/publish-gitcode-release.mjs

@@ -44,7 +44,7 @@ Linux AppImage 可使用 `chmod +x 文件名.AppImage` 添加执行权限。macO
 
 默认在启动时检查更新，之后每 15 分钟及网络恢复时再次检查；也可在“关于与更新”中手动检查，或在设置中关闭自动检查。发现新版本后，按界面提示下载、安装并重启。
 
-正式构建以 GitHub 为主更新源，并通过 GitLab 镜像提供备用下载；用户下载安装和更新不需要登录 GitHub 或提供镜像令牌。更新使用 macOS universal `.app.tar.gz`、Windows NSIS `.exe` 和 Linux `.AppImage`；发布版本也可提供有对应签名的 MSI、deb 或 rpm 更新入口。
+正式构建以 GitHub 为主更新源，并通过 GitCode 镜像提供备用下载；用户下载安装和更新不需要登录 GitHub 或提供镜像令牌。更新使用 macOS universal `.app.tar.gz`、Windows NSIS `.exe` 和 Linux `.AppImage`；发布版本也可提供有对应签名的 MSI、deb 或 rpm 更新入口。
 
 更新包通过 Tauri 签名校验，这与操作系统的应用签名不同。仍使用旧 GitHub 下载仓库地址的客户端，需要手动安装使用新地址的版本一次；后续通过应用更新。
 
@@ -138,7 +138,7 @@ npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json
 
 本机打包默认使用当前主机架构。macOS universal 构建还需安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` Rust target，并增加 `--target universal-apple-darwin`。`tauri.unsigned.conf.json` 只关闭更新签名产物的生成，操作系统的应用签名仍按平台配置执行。
 
-正式发布由版本标签触发，三平台构建、检查和更新包签名校验全部通过后才发布 GitHub Release，并保留 GitLab 安装包镜像。发布配置见 [发布流程](docs/release-publishing.md) 和 [GitLab 镜像说明](docs/gitlab-update-mirror.md)。
+正式发布由版本标签触发，三平台构建、检查和更新包签名校验全部通过后才发布 GitHub Release，并提供 GitCode 安装包镜像。发布配置见 [发布流程](docs/release-publishing.md) 和 [GitCode 镜像说明](docs/gitcode-update-mirror.md)。
 
 ### 项目结构
 
@@ -148,7 +148,7 @@ src-tauri/    Rust 后端、Git/SVN 操作、AI、凭据及原生配置
 public/       Logo、编辑器图标、语言资源和拖拽预览页
 scripts/      开发辅助、接口校验、打包与发布脚本
 .github/      CI、缓存预热、三平台发布和 Issue 模板
-docs/         发布与 GitLab 镜像维护说明
+docs/         发布与 GitCode 镜像维护说明
 ```
 
 ## 参与贡献

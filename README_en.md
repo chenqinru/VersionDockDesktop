@@ -44,7 +44,7 @@ Adding tools to `PATH` is recommended. On macOS, the application also checks com
 
 Automatic checks run at startup, every 15 minutes, and when connectivity returns. You can also check manually through About & Updates or disable automatic checks in settings. Follow the prompts to download, install, and restart when an update is available.
 
-Release builds use GitHub as the primary source and a GitLab mirror for fallback downloads. Installation and updates do not require a GitHub login or a mirror token. Updates use a universal `.app.tar.gz` on macOS, an NSIS `.exe` on Windows, and an `.AppImage` on Linux; releases may also provide signed MSI, deb, or rpm update entries.
+Release builds use GitHub as the primary source and a GitCode mirror for fallback downloads. Installation and updates do not require a GitHub login or a mirror token. Updates use a universal `.app.tar.gz` on macOS, an NSIS `.exe` on Windows, and an `.AppImage` on Linux; releases may also provide signed MSI, deb, or rpm update entries.
 
 Tauri verifies update signatures separately from operating-system application signing. Clients still using the old GitHub download repository must install a version with the new update address manually once; subsequent updates can use the application.
 
@@ -138,7 +138,7 @@ npm run tauri:build -- --ci --config src-tauri/tauri.unsigned.conf.json
 
 Local packaging uses the host architecture by default. A macOS universal build also requires the `aarch64-apple-darwin` and `x86_64-apple-darwin` Rust targets and `--target universal-apple-darwin`. The unsigned configuration only disables update artifact generation; operating-system application signing still follows the platform configuration.
 
-Stable version tags trigger release workflows. GitHub Releases are published only after all three platform builds, checks, and update signature verification succeed; the GitLab package mirror is retained. See the [publishing guide](docs/release-publishing.md) and [GitLab mirror guide](docs/gitlab-update-mirror.md).
+Stable version tags trigger release workflows. GitHub Releases are published only after all three platform builds, checks, and update signature verification succeed; a GitCode package mirror provides fallback downloads. See the [publishing guide](docs/release-publishing.md) and [GitCode mirror guide](docs/gitcode-update-mirror.md).
 
 ### Project layout
 
@@ -148,7 +148,7 @@ src-tauri/    Rust backend, Git/SVN, AI, credentials, and native configuration
 public/       Logos, editor icons, translations, and the tab drag preview page
 scripts/      Development helpers, binding checks, packaging, and publishing
 .github/      CI, cache warmup, platform releases, and issue templates
-docs/         Publishing and GitLab mirror maintenance guides
+docs/         Publishing and GitCode mirror maintenance guides
 ```
 
 ## Contributing

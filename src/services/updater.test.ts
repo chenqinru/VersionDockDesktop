@@ -54,7 +54,7 @@ describe('updater service', () => {
     expect(check).toHaveBeenCalledTimes(2);
   });
 
-  it('switches a failed GitHub download to the same signed version on GitLab', async () => {
+  it('switches a failed GitHub download to the same version on the configured mirror', async () => {
     const primary = updateFixture();
     vi.mocked(primary.download).mockRejectedValue(new Error('GitHub timed out'));
     vi.mocked(check).mockResolvedValueOnce(primary);

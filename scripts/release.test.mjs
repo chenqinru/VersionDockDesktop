@@ -8,9 +8,204 @@ import { RELEASE_REPOSITORY, compareVersions, fileHash, prepareRelease, stageArt
 import { assertPublishable, createGitHubClient, publishRelease } from './publish-release.mjs';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { gitlabReleaseConfig, prepareUpdaterConfig } from './gitlab-release-config.mjs';
-import { createGitLabClient, publishGitLabRelease } from './publish-gitlab-release.mjs';
+import { createHash } from 'node:crypto';
+import { gitcodeReleaseConfig, prepareUpdaterConfig } from './gitcode-release-config.mjs';
+import { createGitCodeClient, publishGitCodeRelease } from './publish-gitcode-release.mjs';
 import { releaseNotesForVersion, validateReleaseNotes } from './release-notes.mjs';
+
+test('GitCode 构建配置只注入公开清单，拒绝 URL、凭据及无效分支', () => {
+  assert.equal(gitcodeReleaseConfig({}), null);
+  const env = { GITCODE_RELEASE_REPOSITORY: 'chenqinru/VersionDockDesktop-Releases', GITCODE_RELEASE_TOKEN: 'client-must-not-contain-this' };
+  const config = gitcodeReleaseConfig(env);
+  assert.equal(config.latestUrl, 'https://api.gitcode.com/api/v5/repos/chenqinru/VersionDockDesktop-Releases/raw/latest.json?ref=main');
+  assert.equal(config.packageUrl('0.1.1', 'app.tar.gz'), 'https://gitcode.com/chenqinru/VersionDockDesktop-Releases/releases/download/v0.1.1/app.tar.gz');
+  const updater = prepareUpdaterConfig(env);
+  assert.deepEqual(updater.plugins.updater.endpoints, ['https://github.com/chenqinru/VersionDockDesktop/releases/latest/download/latest.json', config.latestUrl]);
+  assert.ok(!JSON.stringify(updater).includes(env.GITCODE_RELEASE_TOKEN));
+  for (const repository of ['https://gitcode.com/a/b', 'token@a/b', 'a/b/c', 'a/..', 'a/b?access_token=secret']) {
+    assert.throws(() => gitcodeReleaseConfig({ GITCODE_RELEASE_REPOSITORY: repository }), /owner\/repo/);
+  }
+  assert.throws(() => gitcodeReleaseConfig({ ...env, GITCODE_RELEASE_BRANCH: '../main' }), /分支/);
+});
+
+async function gitcodeServer(t, options = {}) {
+  const state = { releases: new Map(), packages: new Map(), latest: null, commits: 0, uploads: 0,
+    uploadAttempts: 0, uploadUrls: 0, privateDownloads: 0, creations: 0, publications: 0, ...options };
+  const digest = () => createHash('sha1').update(state.latest || '').digest('hex');
+  const server = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const api = url.pathname.includes('/api/v5/');
+      const authorized = req.headers['private-token'] === 'pipeline-only-token';
+      if (api && !url.pathname.includes('/raw/') && !authorized) { res.writeHead(401).end(); return; }
+      const respond = (data, status = 200) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(data));
+      const body = async () => { const chunks = []; for await (const chunk of req) chunks.push(chunk); return Buffer.concat(chunks); };
+      if (url.pathname.includes('/releases/download/')) {
+        if (authorized) state.privateDownloads++;
+        const name = decodeURIComponent(url.pathname.split('/').pop());
+        const data = state.packages.get(name);
+        res.writeHead(data ? 200 : 404).end(data ? state.corrupt && !name.endsWith('.json') ? 'broken' : data : '');
+      } else if (url.pathname.startsWith('/upload/')) {
+        assert.equal(authorized, false);
+        assert.equal(req.headers['x-obs-callback'], 'fixture-callback');
+        state.uploadAttempts++;
+        if (state.failUploads && state.uploadAttempts <= state.failUploads) { await body(); respond({}, 503); return; }
+        const name = decodeURIComponent(url.pathname.split('/').pop());
+        state.packages.set(name, await body()); state.uploads++;
+        const release = [...state.releases.values()][0];
+        release.assets.push({ name, type: 'attach' });
+        if (state.onUpload) state.onUpload(name);
+        if (state.loseUploadResponse && state.uploads === 1) res.destroy(); else respond({});
+      } else if (url.pathname.includes('/upload_url')) {
+        state.uploadUrls++;
+        respond({ url: state.uploadTarget || `${base}/upload/${encodeURIComponent(url.searchParams.get('file_name'))}`, headers: state.uploadHeaders || { 'Content-Type': 'application/octet-stream', 'x-obs-callback': 'fixture-callback' } });
+      } else if (url.pathname.endsWith('/branches/main')) {
+        respond({ name: 'main' });
+      } else if (url.pathname.includes('/contents/') || url.pathname.includes('/raw/')) {
+        const raw = url.pathname.includes('/raw/');
+        if (raw && authorized) state.privateDownloads++;
+        if (req.method === 'GET') {
+          if (!state.latest) respond({}, 404);
+          else if (raw) res.writeHead(200).end(state.latest);
+          else respond({ encoding: 'base64', content: Buffer.from(state.latest).toString('base64'), sha: digest() });
+        } else {
+          const input = JSON.parse(await body());
+          if (state.rejectCommit) { respond({}, 403); return; }
+          if (state.changeBeforeCommit) state.latest = JSON.stringify({ version: '9.0.0' });
+          if (state.latest && input.sha !== digest() || !state.latest && input.sha) { respond({}, 409); return; }
+          state.latest = Buffer.from(input.content, 'base64').toString(); state.commits++;
+          if (state.loseCommitResponse) res.destroy(); else respond({});
+        }
+      } else if (url.pathname.endsWith('/releases') && req.method === 'POST') {
+        const input = JSON.parse(await body()); state.creations++;
+        state.releases.set(input.tag_name, { ...input, prerelease: true, assets: [] });
+        if (state.loseCreateResponse) res.destroy(); else respond(input);
+      } else if (req.method === 'PATCH') {
+        const current = state.releases.get(url.pathname.split('/').pop());
+        Object.assign(current, JSON.parse(await body()), { prerelease: false }); state.publications++;
+        if (state.losePublishResponse) res.destroy(); else respond(current);
+      } else {
+        const current = state.releases.get(url.pathname.split('/').pop());
+        respond(current || {}, current ? 200 : 404);
+      }
+    } catch (error) { res.writeHead(500).end(); state.serverError = error; }
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); assert.equal(state.serverError, undefined); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const api = `${base}/api/v5/repos/owner/mirror`;
+  const config = { api, branch: 'main', manifestFile: `${api}/contents/latest.json`, latestUrl: `${api}/raw/latest.json?ref=main`,
+    releaseUrl: (version) => `${api}/releases/tags/v${version}`,
+    packageUrl: (version, name) => `${base}/owner/mirror/releases/download/v${version}/${encodeURIComponent(name)}` };
+  return { state, config, client: createGitCodeClient({ config, token: 'pipeline-only-token', sleep: async () => {} }) };
+}
+
+const publishMirror = (input, server) => publishGitCodeRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config: server.config, client: server.client });
+
+test('GitCode 真实 HTTP 上传签名附件、匿名校验后更新清单，重跑不重复上传', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const server = await gitcodeServer(t);
+  const original = fs.readFileSync(path.join(input.outputDir, 'assets/latest.json'), 'utf8');
+  const manifest = await publishMirror(input, server);
+  assert.equal(server.state.uploads, 7); assert.equal(server.state.commits, 1); assert.equal(server.state.privateDownloads, 0);
+  assert.ok(Object.values(manifest.platforms).every(({ url }) => url.includes('/releases/download/v0.1.1/')));
+  assert.equal(fs.readFileSync(path.join(input.outputDir, 'assets/latest.json'), 'utf8'), original);
+  assert.equal(JSON.parse(server.state.latest).version, input.version);
+  const regenerated = JSON.parse(original); regenerated.pub_date = '2026-10-07T00:00:00Z';
+  fs.writeFileSync(path.join(input.outputDir, 'assets/latest.json'), JSON.stringify(regenerated));
+  await publishMirror(input, server);
+  assert.equal(server.state.uploads, 7); assert.equal(server.state.commits, 1); assert.equal(server.state.creations, 1);
+  assert.equal(JSON.parse(server.state.latest).pub_date, manifest.pub_date);
+  server.state.latest = JSON.stringify({ version: '9.0.0' });
+  await assert.rejects(publishMirror(input, server), /回退/);
+});
+
+test('GitCode 安装包损坏或已有同名不同内容时不提交更新清单', async (t) => {
+  for (const corrupt of [true, false]) {
+    const input = fixture(); prepareRelease(input);
+    const server = await gitcodeServer(t, { corrupt });
+    if (!corrupt) server.state.packages.set('VersionDock.Desktop.app.tar.gz', Buffer.from('wrong-existing-package'));
+    await assert.rejects(publishMirror(input, server), /SHA-256|同版本附件/);
+    assert.equal(server.state.commits, 0); assert.equal(server.state.latest, null); assert.equal(server.state.publications, 0);
+  }
+});
+
+test('GitCode 创建、上传、公开及提交响应丢失时读取实际结果，避免重复写入', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const server = await gitcodeServer(t, { loseCreateResponse: true, loseUploadResponse: true, losePublishResponse: true, loseCommitResponse: true });
+  await publishMirror(input, server);
+  assert.equal(server.state.creations, 1); assert.equal(server.state.uploadAttempts, 7);
+  assert.equal(server.state.publications, 1); assert.equal(server.state.commits, 1);
+});
+
+test('GitCode 版本附件已齐全但清单提交失败，重跑恢复原发布时间', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const server = await gitcodeServer(t, { rejectCommit: true });
+  await assert.rejects(publishMirror(input, server), /403/);
+  const original = JSON.parse(server.state.packages.get('latest.json'));
+  const file = path.join(input.outputDir, 'assets/latest.json');
+  const regenerated = JSON.parse(fs.readFileSync(file)); regenerated.pub_date = '2026-10-08T00:00:00Z';
+  fs.writeFileSync(file, JSON.stringify(regenerated)); server.state.rejectCommit = false;
+  await publishMirror(input, server);
+  assert.equal(server.state.uploads, 7); assert.equal(JSON.parse(server.state.latest).pub_date, original.pub_date);
+});
+
+test('GitCode 已正式发布版本缺失附件时拒绝修改，不能补传改变历史版本', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const server = await gitcodeServer(t);
+  await publishMirror(input, server);
+  server.state.releases.get('v0.1.1').assets.pop();
+  await assert.rejects(publishMirror(input, server), /正式发布版本的附件列表/);
+  assert.equal(server.state.uploads, 7); assert.equal(server.state.commits, 1);
+});
+
+test('GitCode 并发修改通过 Blob SHA 拒绝覆盖，上传期间新版本也不能回退', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const server = await gitcodeServer(t, { latest: JSON.stringify({ version: '0.1.0' }), changeBeforeCommit: true });
+  await assert.rejects(publishMirror(input, server), /409/);
+  assert.equal(server.state.commits, 0); assert.equal(JSON.parse(server.state.latest).version, '9.0.0');
+  const second = await gitcodeServer(t);
+  second.state.onUpload = () => { second.state.latest = JSON.stringify({ version: '9.0.0' }); };
+  await assert.rejects(publishMirror(input, second), /上传期间已有更新版本/);
+  assert.equal(second.state.publications, 0);
+});
+
+test('GitCode 上传 503 重试前重新检查远程文件并申请新的上传地址', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const server = await gitcodeServer(t, { failUploads: 2 });
+  await publishMirror(input, server);
+  assert.equal(server.state.uploads, 7); assert.equal(server.state.uploadAttempts, 9); assert.equal(server.state.uploadUrls, 9);
+});
+
+test('GitCode 匿名读取 503 重试三次，权限错误不重试，API 重定向不转发令牌', async () => {
+  const config = gitcodeReleaseConfig({ GITCODE_RELEASE_REPOSITORY: 'owner/mirror' });
+  let calls = 0; const waits = [];
+  const client = createGitCodeClient({ config, token: 'secret', sleep: async (delay) => waits.push(delay),
+    request: async (_url, options) => {
+      assert.deepEqual(options.headers, {}); calls++;
+      return new Response('', { status: calls < 3 ? 503 : 404 });
+    } });
+  assert.equal(await client.hash(config.packageUrl('0.1.1', 'file.exe')), null);
+  assert.equal(calls, 3); assert.deepEqual(waits, [1000, 2000]);
+  for (const status of [401, 403, 307]) {
+    let attempts = 0;
+    const forbidden = createGitCodeClient({ config, token: 'secret', sleep: async () => {}, request: async (_url, options) => {
+      assert.equal(options.redirect, 'error'); assert.equal(options.headers['PRIVATE-TOKEN'], 'secret'); attempts++;
+      return new Response('', { status });
+    } });
+    await assert.rejects(forbidden.latest(), new RegExp(String(status)));
+    assert.equal(attempts, 1);
+  }
+});
+
+test('GitCode 拒绝非可信存储地址和把发布令牌带到存储的上传配置', async (t) => {
+  for (const options of [{ uploadTarget: 'https://evil.example/upload' }, { uploadHeaders: { Authorization: 'pipeline-only-token' } }]) {
+    const input = fixture(); prepareRelease(input);
+    const server = await gitcodeServer(t, options);
+    await assert.rejects(publishMirror(input, server), /上传地址|上传头/);
+    assert.equal(server.state.uploadAttempts, 0); assert.equal(server.state.commits, 0);
+  }
+});
 
 test('发布说明匹配指定版本，不借用其他版本内容', () => {
   const records = [
@@ -44,103 +239,6 @@ test('清单与公开 Release 共用版本更新内容，缺失说明时不准�
   const missing = fixture();
   assert.throws(() => prepareRelease({ ...missing, releaseNotes: [{ ...releaseNotes[0], version: '0.1.2' }] }), /缺少/);
   assert.equal(fs.existsSync(missing.outputDir), false);
-});
-
-test('GitLab 构建配置使用固定清单地址且只注入公开地址', () => {
-  assert.equal(gitlabReleaseConfig({}), null);
-  const env = { GITLAB_RELEASE_PROJECT_ID: '42', GITLAB_RELEASE_TOKEN: 'should-never-be-in-client' };
-  const config = gitlabReleaseConfig(env);
-  assert.equal(config.latestUrl, 'https://git.gsdzone.net/api/v4/projects/42/repository/files/latest.json/raw?ref=main');
-  const updater = prepareUpdaterConfig(env);
-  assert.equal(updater.plugins.updater.endpoints.length, 2);
-  assert.equal(updater.plugins.updater.endpoints[0], 'https://github.com/chenqinru/VersionDockDesktop/releases/latest/download/latest.json');
-  assert.equal(updater.plugins.updater.endpoints[1], config.latestUrl);
-  assert.ok(!JSON.stringify(updater).includes(env.GITLAB_RELEASE_TOKEN));
-  assert.throws(() => gitlabReleaseConfig({ GITLAB_RELEASE_PROJECT_ID: 'abc' }), /数字项目/);
-  assert.throws(() => gitlabReleaseConfig({ ...env, GITLAB_RELEASE_URL: 'https://token@git.gsdzone.net' }), /不含凭据/);
-});
-
-async function gitlabServer(t, corrupt = false) {
-  const state = { packages: new Map(), latest: null, commits: 0, uploads: 0, authenticatedReads: 0 };
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://localhost');
-    const packageRequest = url.pathname.includes('/packages/generic/');
-    const raw = url.pathname.endsWith('/raw');
-    const authorized = req.headers['private-token'] === 'pipeline-only-token';
-    if ((req.method !== 'GET' || !packageRequest && !raw) && !authorized) {
-      res.writeHead(401).end(); return;
-    }
-    if (req.method === 'GET' && (packageRequest || raw) && authorized) state.authenticatedReads++;
-    if (packageRequest) {
-      if (req.method === 'PUT') {
-        const chunks = [];
-        for await (const chunk of req) chunks.push(chunk);
-        state.packages.set(url.pathname, Buffer.concat(chunks)); state.uploads++;
-        res.writeHead(201).end('{}');
-      } else {
-        const data = state.packages.get(url.pathname);
-        res.writeHead(data ? 200 : 404).end(data ? corrupt ? 'broken' : data : '');
-      }
-    } else if (req.method === 'GET') {
-      if (!state.latest) { res.writeHead(404).end(); return; }
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(raw ? state.latest : JSON.stringify({
-        content: Buffer.from(state.latest).toString('base64'), last_commit_id: String(state.commits),
-      }));
-    } else {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const input = JSON.parse(Buffer.concat(chunks));
-      if (state.latest && input.last_commit_id !== String(state.commits)) { res.writeHead(400).end(); return; }
-      state.latest = input.content; state.commits++;
-      res.writeHead(201).end('{}');
-    }
-  });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
-  const api = `http://127.0.0.1:${server.address().port}/api/v4/projects/42`;
-  const config = { api, branch: 'main', manifestFile: `${api}/repository/files/latest.json`,
-    latestUrl: `${api}/repository/files/latest.json/raw?ref=main`,
-    packageUrl: (version, name) => `${api}/packages/generic/versiondock-desktop/${version}/${name}` };
-  return { state, config, client: createGitLabClient({ config, token: 'pipeline-only-token', sleep: async () => {} }) };
-}
-
-test('真实 HTTP 上传签名附件，匿名校验完成后提交固定清单，重跑不重复上传', async (t) => {
-  const input = fixture(); prepareRelease(input);
-  const { state, config, client } = await gitlabServer(t);
-  const result = await publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client });
-  assert.equal(result.notes, JSON.parse(fs.readFileSync(path.join(input.outputDir, 'assets/latest.json'), 'utf8')).notes);
-  assert.equal(state.packages.size, 6); assert.equal(state.commits, 1); assert.equal(state.authenticatedReads, 0);
-  assert.ok(Object.values(result.platforms).every(({ url }) => url.includes('/packages/generic/')));
-  assert.ok(!state.latest.includes('pipeline-only-token'));
-  const githubManifestFile = path.join(input.outputDir, 'assets', 'latest.json');
-  const regenerated = JSON.parse(fs.readFileSync(githubManifestFile));
-  regenerated.pub_date = '2026-10-07T00:00:00Z';
-  fs.writeFileSync(githubManifestFile, JSON.stringify(regenerated));
-  await publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client });
-  assert.equal(state.uploads, 6); assert.equal(state.commits, 1);
-  assert.equal(JSON.parse(state.latest).pub_date, result.pub_date);
-  state.latest = JSON.stringify({ version: '9.0.0' });
-  await assert.rejects(publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client }), /回退/);
-});
-
-test('远程安装包损坏时停止发布且不修改 latest.json', async (t) => {
-  const input = fixture(); prepareRelease(input);
-  const { state, config, client } = await gitlabServer(t, true);
-  await assert.rejects(publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client }), /SHA-256/);
-  assert.equal(state.commits, 0); assert.equal(state.latest, null);
-});
-
-test('GitLab 服务端 503 最多重试三次，匿名请求不附带凭据', async () => {
-  let calls = 0;
-  const waits = [];
-  const config = gitlabReleaseConfig({ GITLAB_RELEASE_PROJECT_ID: '42' });
-  const client = createGitLabClient({ config, token: 'secret', sleep: async (delay) => waits.push(delay),
-    request: async (_url, options) => {
-      assert.deepEqual(options.headers, {});
-      calls++; return new Response('', { status: calls < 3 ? 503 : 404 });
-    } });
-  assert.equal(await client.hash(config.packageUrl('0.1.1', 'file.exe')), null);
-  assert.equal(calls, 3); assert.deepEqual(waits, [1000, 2000]);
 });
 
 const SOURCE_SHA = 'a'.repeat(40);
