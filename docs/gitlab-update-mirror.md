@@ -1,56 +1,92 @@
-# GitLab 安装包镜像与自动更新
+# GitLab 镜像维护指南
 
-公开 GitHub 仓库 `chenqinru/VersionDockDesktop` 同时保存源码和安装包，继续作为主更新源；公司 GitLab 16.6.0 的独立公开项目仅存安装包、签名和更新清单，不存源码。
+GitHub `chenqinru/VersionDockDesktop` 是主发布仓库。公司 GitLab 的 `VersionDockDesktop-Releases` 仅保存安装包、更新签名和固定更新清单，作为备用下载与更新源。完整发版步骤见 [发布维护指南](release-publishing.md)。
 
-## 镜像配置
+## 当前配置
 
-建议项目名 `VersionDockDesktop-Releases`，包名 `versiondock-desktop`。需要确认 GitLab 项目的命名空间、数字 Project ID、公开可见性，以及 GitHub Actions 是否能通过 HTTPS 访问 `https://git.gsdzone.net`。若公司不允许公开项目，需要另设允许匿名读取安装包和清单的发布入口；客户端不内置访问令牌。
+2026-10-07 已核对 GitHub Actions 配置：`GITLAB_RELEASE_PROJECT_ID` 为 `93`，`GITLAB_RELEASE_TOKEN` Secret 已保存；其余镜像 Variables 未设置，使用脚本默认值。
 
-在 GitLab 创建空项目并初始化 `main` 分支（可仅创建 README）。启用 Package Registry，允许未登录用户读取；项目中不要放源码或内部资料。
+| Actions Variable | 当前生效值 | 用途 |
+| --- | --- | --- |
+| `GITLAB_RELEASE_PROJECT_ID` | `93` | 镜像项目的数字 ID |
+| `GITLAB_RELEASE_URL` | `https://git.gsdzone.net`（默认） | GitLab HTTPS 根地址 |
+| `GITLAB_RELEASE_PACKAGE` | `versiondock-desktop`（默认） | Generic Package 名称 |
+| `GITLAB_RELEASE_BRANCH` | `main`（默认） | 固定清单所在分支 |
 
-GitHub 项目仓库的 Actions Variables：
+配置逻辑见 [gitlab-release-config.mjs](../scripts/gitlab-release-config.mjs)。缺少 Project ID 时，工作流仅发布 GitHub；当前 ID 已设置，镜像发布失败会阻止后续 GitHub 发布。
 
-| 名称 | 值 |
+GitLab 项目需要有 `main` 分支并启用 Package Registry，允许匿名读取安装包和仓库内的 `latest.json`。服务器与客户端均需能访问该 HTTPS 地址并信任其 TLS 证书。Secret 已保存不等于令牌权限、匿名下载和真实更新已经验证，发布时仍须按下文核验。
+
+`GITLAB_RELEASE_TOKEN` 用于上传 Generic Packages 和提交仓库文件。可使用仅限该镜像项目、具有 `api` scope 和 Maintainer 角色的 Project Access Token；实例不支持时，使用有对应项目权限的专用账号 Token。轮换令牌时更新 [GitHub Actions Secrets](https://github.com/chenqinru/VersionDockDesktop/settings/secrets/actions)。令牌只用于发布，客户端不携带它。
+
+## 发布 runner
+
+最终发布任务使用 `[self-hosted, linux, x64, gitlab-publish]`。当前 runner 名称为 `versiondock-release`；检查与三平台构建继续使用 GitHub 托管 runner。
+
+runner 服务用户的 `PATH` 需要包含 `git`、`minisign` 和 `gh`。Node.js 20 由 `actions/setup-node` 配置；发布任务不通过 `sudo apt-get` 安装工具。请在服务用户环境中检查：
+
+```bash
+command -v git
+command -v minisign
+command -v gh
+gh --version
+```
+
+该服务器需要同时访问 GitHub Actions、API、构建产物下载地址和公司 GitLab API。任务长期排队时，先检查 runner 在线状态与标签；任务启动后失败，则按失败步骤检查工具、网络或发布权限。
+
+## 清单与安装包地址
+
+固定更新清单保存在项目 `93` 的 `main` 分支根目录：
+
+```text
+https://git.gsdzone.net/api/v4/projects/93/repository/files/latest.json/raw?ref=main
+```
+
+版本安装包和签名使用 Generic Package Registry，地址格式为：
+
+```text
+https://git.gsdzone.net/api/v4/projects/93/packages/generic/versiondock-desktop/<版本号>/<文件名>
+```
+
+每个版本的附件使用独立地址。固定清单通过 Repository Files API 最后提交，不在 Generic Registry 中反复覆盖 `latest/latest.json`。清单中的安装包下载地址全部指向 GitLab。
+
+## 发布顺序与重试
+
+[publish-gitlab-release.mjs](../scripts/publish-gitlab-release.mjs) 在三平台产物校验后执行：
+
+1. 核对版本、安装包及更新签名，将清单的下载地址改为 GitLab 地址。
+2. 上传不存在的安装包与签名；已有附件必须与本地产物哈希一致。
+3. 匿名读取每个附件并验证 SHA-256。
+4. 全部附件验证完成后，提交固定 `latest.json` 并验证匿名读取结果。
+5. 镜像成功后，工作流继续上传和公开 GitHub Release。
+
+网络错误、HTTP 429 或 5xx 最多尝试 3 次，重试间隔为 1 秒、2 秒。同版本重跑仅接受相同内容，保留原镜像发布时间；不覆盖不同内容的附件，不回退清单版本。更新已有清单时使用 `last_commit_id` 检查并发修改。
+
+上传中断不会提前更新清单。若 GitLab 已完成而 GitHub 发布失败，镜像可能已经提供新版本；同一版本重试可复用一致的镜像产物。若需修改产物，应增加版本号。
+
+## 客户端行为
+
+正式构建时生成不含凭据的 updater 配置，依次写入 GitHub 主地址和 GitLab 备用地址。仅修改 Actions Variables 不会改变已安装应用的配置，必须构建并安装包含新配置的版本。
+
+启用自动检查后，客户端在启动、每 15 分钟及网络恢复时检查更新；也可在“关于与更新”中手动检查。欢迎页不显示工作区状态栏，进入工作区后可通过更新状态栏查看状态。
+
+检查优先使用 GitHub，失败时尝试 GitLab，最多检查 3 轮，每个源超时为 15 秒。GitHub 安装包下载失败时，客户端会检查 GitLab 的同版本包；版本不一致则要求重新检查，不自动安装其他版本。下载最多尝试 3 次，每次超时为 180 秒；安装只执行一次，失败需用户重试。两端更新包始终使用同一 Tauri 公钥校验签名。
+
+## 核验与排障
+
+先从发布服务器和实际使用网络分别执行无令牌读取：
+
+```bash
+curl --fail --location 'https://git.gsdzone.net/api/v4/projects/93/repository/files/latest.json/raw?ref=main'
+```
+
+检查清单的版本及 `platforms` 下载地址，再匿名下载一个真实安装包并核对哈希。首次启用镜像或修改配置后，还需使用签名客户端验证：GitHub 可用时正常更新、GitHub 不可达时通过镜像更新、仅 GitHub 下载失败时切换同版本镜像，以及下载中断重试和损坏包拒绝安装。
+
+| 现象 | 优先检查 |
 | --- | --- |
-| `GITLAB_RELEASE_PROJECT_ID` | 新项目的数字 ID；未设置时继续使用现有 GitHub 发布链路 |
-| `GITLAB_RELEASE_URL` | `https://git.gsdzone.net`，可省略 |
-| `GITLAB_RELEASE_PACKAGE` | `versiondock-desktop`，可省略 |
-| `GITLAB_RELEASE_BRANCH` | `main`，可省略 |
-
-在 GitHub Actions Secrets 中设置 `GITLAB_RELEASE_TOKEN`：使用仅限该安装包项目的 Project Access Token，授予 `api` scope 和 Maintainer 角色，用于上传 Generic Packages 和提交 `latest.json`。若 GitLab 授权/版本不支持 Project Access Token，可使用专用发布账号的 Token，并仅给予该项目权限。令牌由管理员直接保存到 GitHub Secret，无需发到聊天。Tauri 签名私钥及密码继续保存在流水线 Secrets 中。GitHub 发布使用工作流的 `GITHUB_TOKEN`，不再需要 `RELEASES_TOKEN`。
-
-## 公司发布 runner
-
-`release.yml` 的 `publish` 任务使用 `[self-hosted, linux, x64, gitlab-publish]`，对应已注册的 `versiondock-release`。检查和三平台构建继续使用原有 GitHub 托管 runner，构建完成后由公司服务器下载产物并发布。
-
-runner 服务用户的 PATH 需要包含 `git`、`minisign` 和 `gh`；Node.js 20 由 `actions/setup-node` 配置。发布任务只检查预装工具，不执行 `sudo apt-get`，可以使用普通用户运行。该服务器必须能访问 GitHub 的 Actions、API、构建产物下载地址，以及 GitLab HTTPS API。
-
-提交工作流修改后，在 Actions 的 Release 中选择 `main` 手动运行，`tag` 填要发布的正式版本标签。直接重跑旧的失败任务仍会使用旧工作流的 runner 配置。此调整只迁移发布任务，检查和三平台构建仍受 GitHub 托管 runner 的计费规则约束。
-
-## 地址与发布顺序
-
-版本包地址（将 `ID` 替换为真实项目 ID）：
-
-```text
-https://git.gsdzone.net/api/v4/projects/ID/packages/generic/versiondock-desktop/0.1.5/安装包文件名
-```
-
-固定清单地址：
-
-```text
-https://git.gsdzone.net/api/v4/projects/ID/repository/files/latest.json/raw?ref=main
-```
-
-固定清单保存在该独立项目的根目录，通过 Repository Files API 最后提交，避免在 Generic Registry 中重复覆盖 `latest/latest.json` 所造成的版本歧义。每个发布版本的安装包和签名保存在 Generic Registry，清单中的下载地址全部指向 GitLab。
-
-发布流程：三平台构建成功 → 校验 Tauri 签名 → 上传 GitLab 安装包及签名 → 匿名下载并校验每个文件 SHA-256 → 最后提交 GitLab `latest.json` → 发布 GitHub Release。上传和读取发生网络错误、429 或 5xx 时最多尝试 3 次，退避间隔为 1 秒、2 秒。任何文件不完整时都不会更新清单；重跑可复用哈希一致的附件，同版本不同内容和版本回退会被拒绝。提交清单使用 `last_commit_id` 防止并发覆盖。
-
-## 客户端行为与验收
-
-客户端优先检查 GitHub，失败时由原生 updater 尝试 GitLab 备用地址；检查失败最多尝试 3 轮，每个源的请求超时为 15 秒。已从 GitHub 获得清单但下载失败时，会尝试 GitLab 的同版本包，继续使用原有 Tauri 公钥验证签名。每次下载超时为 180 秒，最多尝试 3 次，安装只执行一次；安装失败需用户重试，避免自动重复执行安装器。
-
-启动后检查更新，之后每 15 分钟再次检查，网络恢复时重查。状态栏在欢迎页和工作区都显示检查中、检查失败及可重试入口；选择跳过的版本不主动提示。
-
-配置后需要重新构建发布含镜像地址的客户端；旧客户端只有 GitHub 地址，仍需通过 GitHub 更新或手动安装一次。
-
-验收需使用真正的签名发布包：允许 GitHub 时从 GitHub 更新；阻断 GitHub 时检查和下载都从 GitLab 完成；仅阻断 GitHub 安装包下载时切换 GitLab；中断下载后重试；损坏包拒绝安装；上传中断不提前更新清单。GitLab API 必须由 GitHub runner 和用户电脑同时可达，TLS 证书须可信。
+| 上传或文件提交返回 401 / 403 | Secret 是否过期，令牌 scope、项目角色及分支写入权限 |
+| 匿名读取返回 401 / 403 | 项目、Package Registry 与仓库文件是否允许匿名访问 |
+| 返回 404 | 项目 ID、分支、清单或版本附件是否存在；首次发布前清单可能尚未创建 |
+| 连接超时或 TLS 失败 | runner / 用户网络是否能访问 GitLab，证书链是否可信 |
+| 同版本哈希不一致或版本回退被拒绝 | 两端版本与本地产物是否匹配；需要修改产物时发新版本 |
+| 镜像缺少待安装版本 | 确认镜像发布结果并重新检查更新，不绕过版本及签名校验 |
