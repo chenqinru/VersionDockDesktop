@@ -245,6 +245,9 @@ pub enum BridgeCommand {
         password: Option<String>,
     },
     ProviderAccounts,
+    ProviderAccountAvatar {
+        account_id: String,
+    },
     ProviderGithubBegin {
         account_id: Option<String>,
     },

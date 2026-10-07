@@ -2,11 +2,33 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProviderPanel } from './ProviderPanel';
 import { BridgeContext } from '../platform/context';
-import { MockBridge } from '../platform/bridge';
+import { BridgeError, MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
+import { createTranslator, I18nContext } from '../i18n';
 
 afterEach(cleanup);
 describe('ProviderPanel', () => {
+  it('localizes invalid-token errors in the Chinese account connection form', async () => {
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'providerAccounts') return [];
+      if (command.type === 'providerGiteeSave') throw new BridgeError({ code: 'PROVIDER_AUTH_REQUIRED', message: 'Provider request failed (401)', command: null, stderr: null, exitCode: null, recoverable: true });
+      return null;
+    });
+    render(<I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t: createTranslator('zh-CN') }}><BridgeContext.Provider value={bridge}><ProviderPanel mode="manage" initialProvider="gitee" close={vi.fn()} /></BridgeContext.Provider></I18nContext.Provider>);
+    fireEvent.change(await screen.findByPlaceholderText('个人访问令牌'), { target: { value: 'synthetic-token' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    expect(await screen.findByText('账号认证失败，请重新认证。')).toBeInTheDocument();
+  });
+  it.each(['zh-CN', 'en'] as const)('translates account details and reauthentication in %s', async (language) => {
+    const bridge = new MockBridge((command) => command.type === 'providerAccounts'
+      ? [{ id: 'gitee', provider: 'gitee', host: 'https://gitee.com', login: 'alice', displayName: null, secureStorageRef: 'unused' }] : null);
+    const t = createTranslator(language);
+    render(<I18nContext.Provider value={{ language, preference: language === 'zh-CN' ? 'zhCn' : 'en', t }}><BridgeContext.Provider value={bridge}><ProviderPanel mode="manage" close={vi.fn()} /></BridgeContext.Provider></I18nContext.Provider>);
+    expect(await screen.findByRole('button', { name: t('Reauthenticate') })).toBeInTheDocument();
+    if (language === 'zh-CN') expect(screen.queryByText('Reauthenticate')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: t('Reauthenticate') }));
+    expect(await screen.findByText(t('Gitee Personal Access Token requires the projects and user_info scopes.'))).toBeInTheDocument();
+  });
   it('opens the requested provider form when only another platform is connected', async () => {
     const bridge = new MockBridge((command) => command.type === 'providerAccounts'
       ? [{ id: 'github', provider: 'github', host: 'https://github.com', login: 'octocat', displayName: null, secureStorageRef: 'ref' }] : []);
@@ -175,4 +197,3 @@ describe('ProviderPanel', () => {
     useAppStore.setState(originalState);
   });
 });
-

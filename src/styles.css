@@ -7131,9 +7131,12 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .provider-avatar-img {
+  display: block;
+  flex: 0 0 100%;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
 }
 
 .provider-detail-headings {

@@ -4,6 +4,20 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Account authentication failed. Please reauthenticate.': 'Account authentication failed. Please reauthenticate.',
+  'This token does not have the required permissions.': 'This token does not have the required permissions.',
+  'The platform rate limit was reached. Please try again later.': 'The platform rate limit was reached. Please try again later.',
+  'Unable to connect to the platform. Check your network and proxy settings.': 'Unable to connect to the platform. Check your network and proxy settings.',
+  'The platform request timed out. Please try again.': 'The platform request timed out. Please try again.',
+  'Enter a personal access token.': 'Enter a personal access token.',
+  'Enter a valid platform URL.': 'Enter a valid platform URL.',
+  'Use an HTTPS platform URL.': 'Use an HTTPS platform URL.',
+  'Reauthenticate': 'Reauthenticate',
+  'Personal Access Token (ghp_…)': 'Personal Access Token (ghp_…)',
+  'Enter gitlab.com or a self-hosted GitLab URL': 'Enter gitlab.com or a self-hosted GitLab URL',
+  'Hide': 'Hide',
+  'Show': 'Show',
+  'Search': 'Search',
   'Failed to refresh tags: {0}': 'Failed to refresh tags: {0}',
   'No release notes provided for this version.': 'No release notes provided for this version.',
   'Update check failed — click to retry': 'Update check failed — click to retry',
@@ -1330,6 +1344,20 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Account authentication failed. Please reauthenticate.': '账号认证失败，请重新认证。',
+  'This token does not have the required permissions.': '此令牌没有所需权限。',
+  'The platform rate limit was reached. Please try again later.': '平台请求次数已达上限，请稍后重试。',
+  'Unable to connect to the platform. Check your network and proxy settings.': '无法连接平台，请检查网络和代理设置。',
+  'The platform request timed out. Please try again.': '平台请求超时，请重试。',
+  'Enter a personal access token.': '请输入个人访问令牌。',
+  'Enter a valid platform URL.': '请输入有效的平台地址。',
+  'Use an HTTPS platform URL.': '请使用 HTTPS 平台地址。',
+  'Reauthenticate': '重新认证',
+  'Personal Access Token (ghp_…)': '个人访问令牌（ghp_…）',
+  'Enter gitlab.com or a self-hosted GitLab URL': '输入 gitlab.com 或自建 GitLab 地址',
+  'Hide': '隐藏',
+  'Show': '显示',
+  'Search': '搜索',
   'Failed to refresh tags: {0}': '刷新标签失败：{0}',
   'No release notes provided for this version.': '此版本尚未提供更新说明。',
   'Update check failed — click to retry': '检查更新失败，点击重试',

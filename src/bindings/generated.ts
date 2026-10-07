@@ -301,7 +301,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	target_name: string,
 	username: string | null,
 	password: string | null,
-} } | { type: "providerAccounts" } | { type: "providerGithubBegin"; payload: {
+} } | { type: "providerAccounts" } | { type: "providerAccountAvatar"; payload: {
+	account_id: string,
+} } | { type: "providerGithubBegin"; payload: {
 	account_id: string | null,
 } } | { type: "providerGithubComplete"; payload: {
 	flow_id: string,

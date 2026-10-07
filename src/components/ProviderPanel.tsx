@@ -17,6 +17,7 @@ import { Codicon } from './Codicon';
 import { DialogSurface } from './DialogSurface';
 import { useAppStore } from '../store/appStore';
 import { isAbortError } from '../platform/bridge';
+import { ProviderAccountAvatar } from './ProviderAccountAvatar';
 
 export interface ProviderPanelProps {
   mode: 'manage' | 'browse' | 'publish';
@@ -27,6 +28,22 @@ export interface ProviderPanelProps {
 }
 
 type ActiveView = 'none' | 'detail' | 'github_flow' | 'github_form' | 'gitlab_form' | 'gitee_form';
+
+const providerErrorKeys: Record<string, string> = {
+  PROVIDER_AUTH_REQUIRED: 'Account authentication failed. Please reauthenticate.',
+  PROVIDER_FORBIDDEN: 'This token does not have the required permissions.',
+  PROVIDER_RATE_LIMITED: 'The platform rate limit was reached. Please try again later.',
+  PROVIDER_NETWORK_ERROR: 'Unable to connect to the platform. Check your network and proxy settings.',
+  PROVIDER_TIMEOUT: 'The platform request timed out. Please try again.',
+  PROVIDER_TOKEN_REQUIRED: 'Enter a personal access token.',
+  INVALID_PROVIDER_HOST: 'Enter a valid platform URL.',
+  INSECURE_PROVIDER_HOST: 'Use an HTTPS platform URL.',
+};
+function formatProviderError(error: unknown, t: (key: string) => string): string {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+  const key = providerErrorKeys[code];
+  return key ? t(key) : error instanceof Error ? error.message : String(error);
+}
 
 export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }: ProviderPanelProps) {
   const bridge = useBridge();
@@ -118,9 +135,9 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
         setActiveView((current) => (current === 'detail' ? 'none' : current));
       }
     } catch (err) {
-      if (!isAbortError(err)) setError(String(err));
+      if (!isAbortError(err)) setError(formatProviderError(err, t));
     }
-  }, [bridge, initialProvider]);
+  }, [bridge, initialProvider, t]);
 
   useEffect(() => {
     let active = true;
@@ -150,12 +167,12 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
         setPage(value.page);
         setHasMore(value.hasMore);
       } catch (reason) {
-        if (!isAbortError(reason)) setError(String(reason));
+        if (!isAbortError(reason)) setError(formatProviderError(reason, t));
       } finally {
         setBusy(false);
       }
     },
-    [bridge, query, selectedAccountId]
+    [bridge, query, selectedAccountId, t]
   );
 
   useEffect(() => {
@@ -181,9 +198,9 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
         setNamespace(isPathNamespace ? values[0]?.fullPath ?? '' : values[0]?.id ?? '');
       })
       .catch((reason) => {
-        if (!isAbortError(reason)) setError(String(reason));
+        if (!isAbortError(reason)) setError(formatProviderError(reason, t));
       });
-  }, [accounts, bridge, mode, selectedAccountId]);
+  }, [accounts, bridge, mode, selectedAccountId, t]);
 
   // 1. GitHub Device Flow
   const startGithubAuth = async (accountId?: string) => {
@@ -216,7 +233,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
       setFlow(undefined);
     } catch (reason) {
       if (!controller.signal.aborted && !isAbortError(reason)) {
-        setError(String(reason));
+        setError(formatProviderError(reason, t));
       }
     } finally {
       if (!controller.signal.aborted) setBusy(false);
@@ -249,7 +266,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
       setSelectedAccountId(account.id);
       setActiveView('detail');
     } catch (reason) {
-      if (!isAbortError(reason)) setError(String(reason));
+      if (!isAbortError(reason)) setError(formatProviderError(reason, t));
     } finally {
       setBusy(false);
     }
@@ -273,7 +290,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
       setSelectedAccountId(account.id);
       setActiveView('detail');
     } catch (reason) {
-      if (!isAbortError(reason)) setError(String(reason));
+      if (!isAbortError(reason)) setError(formatProviderError(reason, t));
     } finally {
       setBusy(false);
     }
@@ -297,7 +314,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
       setSelectedAccountId(account.id);
       setActiveView('detail');
     } catch (reason) {
-      if (!isAbortError(reason)) setError(String(reason));
+      if (!isAbortError(reason)) setError(formatProviderError(reason, t));
     } finally {
       setBusy(false);
     }
@@ -312,7 +329,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
       window.dispatchEvent(new Event('versiondock-provider-accounts-changed'));
       await loadAccounts();
     } catch (reason) {
-      if (!isAbortError(reason)) setError(String(reason));
+      if (!isAbortError(reason)) setError(formatProviderError(reason, t));
     }
   };
 
@@ -340,7 +357,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
       );
       setPublishResult(value);
     } catch (reason) {
-      if (!isAbortError(reason)) setError(String(reason));
+      if (!isAbortError(reason)) setError(formatProviderError(reason, t));
     } finally {
       setBusy(false);
     }
@@ -420,7 +437,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
                           {account.displayName ? `${account.displayName} (${account.login})` : account.login}
                         </span>
                         <span className="provider-account-host">
-                          {account.provider.toUpperCase()} • {account.host.replace(/^https?:\/\//, '')}
+                          {{ github: 'GitHub', gitlab: 'GitLab', gitee: 'Gitee' }[account.provider]} • {account.host.replace(/^https?:\/\//, '')}
                         </span>
                       </div>
                     </div>
@@ -529,21 +546,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
                 {activeView === 'detail' && selectedAccount && (
                   <div className="provider-detail-card">
                     <div className="provider-detail-header">
-                      <div className="provider-avatar-box">
-                        <img
-                          src={
-                            selectedAccount.provider === 'github'
-                              ? `https://avatars.githubusercontent.com/${encodeURIComponent(selectedAccount.login)}`
-                              : './icons/versiondock-logo-dark.png'
-                          }
-                          alt={selectedAccount.login}
-                          className="provider-avatar-img"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display = 'none';
-                          }}
-                        />
-                        <Codicon name="account" />
-                      </div>
+                      <ProviderAccountAvatar account={selectedAccount} />
                       <div className="provider-detail-headings">
                         <div className="provider-detail-title-row">
                           <span className="provider-detail-name">

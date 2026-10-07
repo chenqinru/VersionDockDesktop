@@ -96,6 +96,138 @@ pub fn accounts(config_dir: &Path) -> Vec<RemoteProviderAccount> {
     load(config_dir).accounts
 }
 
+fn current_user_endpoint(account: &RemoteProviderAccount) -> String {
+    match account.provider {
+        RemoteProviderKind::Github => format!("{GITHUB_API}/user"),
+        RemoteProviderKind::Gitee => format!("{GITEE_API}/user"),
+        RemoteProviderKind::Gitlab => format!("{}/api/v4/user", account.host),
+    }
+}
+
+fn profile_avatar_url(host: &str, user: &Value) -> Option<String> {
+    let raw = user["avatar_url"].as_str()?.trim();
+    if raw.is_empty() || raw.contains("no_portrait") {
+        return None;
+    }
+    let url = url::Url::parse(&format!("{}/", host.trim_end_matches('/')))
+        .ok()?
+        .join(raw)
+        .ok()?;
+    (matches!(url.scheme(), "http" | "https")
+        && url.username().is_empty()
+        && url.password().is_none())
+    .then(|| url.to_string())
+}
+
+pub async fn account_avatar(
+    config_dir: &Path,
+    id: &str,
+    cancel: &CancellationToken,
+) -> Result<Option<String>, DesktopError> {
+    let account = account(config_dir, id)?;
+    let secret = token(&account)?;
+    let user = send(
+        authenticated(
+            client()?.get(current_user_endpoint(&account)),
+            &account,
+            &secret,
+        ),
+        "Account avatar",
+        cancel,
+    )
+    .await?;
+    let Some(url) = profile_avatar_url(&account.host, &user) else {
+        return Ok(None);
+    };
+    Ok(download_account_avatar(&account, &secret, &url, cancel).await)
+}
+
+// API authentication stays in Rust. Only same-origin image requests may carry
+// credentials, including after redirects to public avatar CDNs.
+async fn download_account_avatar(
+    account: &RemoteProviderAccount,
+    secret: &str,
+    avatar_url: &str,
+    cancel: &CancellationToken,
+) -> Option<String> {
+    let account_url = url::Url::parse(&account.host).ok()?;
+    let origin = account_url.origin();
+    let download = async {
+        let mut url = url::Url::parse(avatar_url).ok()?;
+        for _ in 0..=3 {
+            if !matches!(url.scheme(), "http" | "https")
+                || (url.scheme() == "http" && account_url.scheme() == "https")
+                || !url.username().is_empty()
+                || url.password().is_some()
+            {
+                return None;
+            }
+            let request = client().ok()?.get(url.clone());
+            let mut response = if url.origin() == origin {
+                authenticated(request, account, secret)
+            } else {
+                request
+            }
+            .send()
+            .await
+            .ok()?;
+            if response.status().is_redirection() {
+                url = url
+                    .join(
+                        response
+                            .headers()
+                            .get(reqwest::header::LOCATION)?
+                            .to_str()
+                            .ok()?,
+                    )
+                    .ok()?;
+                continue;
+            }
+            if !response.status().is_success()
+                || response
+                    .content_length()
+                    .is_some_and(|size| size > 1_048_576)
+            {
+                return None;
+            }
+            let mime = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)?
+                .to_str()
+                .ok()?
+                .split(';')
+                .next()?
+                .trim()
+                .to_ascii_lowercase();
+            if !matches!(
+                mime.as_str(),
+                "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+            ) {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.chunk().await.ok()? {
+                if bytes.len().saturating_add(chunk.len()) > 1_048_576 {
+                    return None;
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            if bytes.is_empty() {
+                return None;
+            }
+            return Some(format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            ));
+        }
+        None
+    };
+    tokio::select! {
+        _ = cancel.cancelled() => None,
+        result = tokio::time::timeout(Duration::from_secs(10), download) => result.ok().flatten(),
+    }
+}
+
 async fn checked(response: Response, scope: &str) -> Result<Value, DesktopError> {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
@@ -1274,58 +1406,141 @@ async fn fetch_private_gitlab_avatar(
     if avatar.origin() != account_url.origin() {
         return None;
     }
-    let download = async {
-        let mut response = client()
-            .ok()?
-            .get(avatar_url)
-            .header("PRIVATE-TOKEN", secret)
-            .send()
-            .await
-            .ok()?;
-        if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|length| length > 1_048_576)
-        {
-            return None;
-        }
-        let mime = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)?
-            .to_str()
-            .ok()?
-            .split(';')
-            .next()?
-            .trim()
-            .to_string();
-        if !matches!(
-            mime.as_str(),
-            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
-        ) {
-            return None;
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.ok()? {
-            if bytes.len().saturating_add(chunk.len()) > 1_048_576 {
-                return None;
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        Some(format!(
-            "data:{mime};base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        ))
-    };
-    tokio::select! {
-        _ = cancel.cancelled() => None,
-        result = tokio::time::timeout(Duration::from_secs(6), download) => result.ok().flatten(),
-    }
+    download_account_avatar(account, secret, avatar_url, cancel).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn account_avatar_endpoints_and_profile_urls_match_the_selected_provider() {
+        let mut account = RemoteProviderAccount {
+            id: "id".into(),
+            provider: RemoteProviderKind::Github,
+            host: "https://git.example.test/base".into(),
+            login: "alice".into(),
+            display_name: None,
+            secure_storage_ref: "unused".into(),
+        };
+        assert_eq!(
+            current_user_endpoint(&account),
+            "https://api.github.com/user"
+        );
+        account.provider = RemoteProviderKind::Gitee;
+        assert_eq!(
+            current_user_endpoint(&account),
+            "https://gitee.com/api/v5/user"
+        );
+        account.provider = RemoteProviderKind::Gitlab;
+        assert_eq!(
+            current_user_endpoint(&account),
+            "https://git.example.test/base/api/v4/user"
+        );
+        assert_eq!(
+            profile_avatar_url(&account.host, &json!({"avatar_url":"uploads/alice.png"}))
+                .as_deref(),
+            Some("https://git.example.test/base/uploads/alice.png")
+        );
+        for value in [
+            "",
+            "javascript:alert(1)",
+            "data:image/png;base64,AAAA",
+            "https://user:password@example.test/a.png",
+            "https://gitee.com/no_portrait.png",
+        ] {
+            assert!(profile_avatar_url(&account.host, &json!({"avatar_url":value})).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn account_avatar_downloads_private_images_without_leaking_tokens_on_redirects() {
+        for provider in [
+            RemoteProviderKind::Github,
+            RemoteProviderKind::Gitlab,
+            RemoteProviderKind::Gitee,
+        ] {
+            let private = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let public = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let host = format!("http://{}", private.local_addr().unwrap());
+            let target = format!("http://{}/avatar.png", public.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = private.accept().await.unwrap();
+                let mut buffer = [0_u8; 4096];
+                let size = socket.read(&mut buffer).await.unwrap();
+                let request = String::from_utf8_lossy(&buffer[..size]).to_string();
+                assert!(request.contains("test-avatar-secret"));
+                let response = format!("HTTP/1.1 302 Found\r\nLocation: {target}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                socket.write_all(response.as_bytes()).await.unwrap();
+                let (mut socket, _) = public.accept().await.unwrap();
+                let size = socket.read(&mut buffer).await.unwrap();
+                let request = String::from_utf8_lossy(&buffer[..size]);
+                assert!(!request.contains("test-avatar-secret"));
+                assert!(!request.to_ascii_lowercase().contains("private-token"));
+                assert!(!request.to_ascii_lowercase().contains("authorization"));
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 3\r\nConnection: close\r\n\r\nPNG").await.unwrap();
+            });
+            let account = RemoteProviderAccount {
+                id: "id".into(),
+                provider,
+                host: host.clone(),
+                login: "alice".into(),
+                display_name: None,
+                secure_storage_ref: "unused".into(),
+            };
+            let image = download_account_avatar(
+                &account,
+                "test-avatar-secret",
+                &format!("{host}/private.png"),
+                &CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(image.as_deref(), Some("data:image/png;base64,UE5H"));
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn account_avatar_rejects_nonimages_oversize_and_cancelled_downloads() {
+        for headers in [
+            "Content-Type: text/html\r\nContent-Length: 3",
+            "Content-Type: image/png\r\nContent-Length: 1048577",
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let host = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0_u8; 1024];
+                let size = socket.read(&mut bytes).await.unwrap();
+                assert!(size > 0);
+                let response =
+                    format!("HTTP/1.1 200 OK\r\n{headers}\r\nConnection: close\r\n\r\nPNG");
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+            let account = RemoteProviderAccount {
+                id: "id".into(),
+                provider: RemoteProviderKind::Gitlab,
+                host: host.clone(),
+                login: "alice".into(),
+                display_name: None,
+                secure_storage_ref: "unused".into(),
+            };
+            assert!(
+                download_account_avatar(&account, "secret", &host, &CancellationToken::new())
+                    .await
+                    .is_none()
+            );
+            server.await.unwrap();
+            let cancelled = CancellationToken::new();
+            cancelled.cancel();
+            assert!(
+                download_account_avatar(&account, "secret", &host, &cancelled)
+                    .await
+                    .is_none()
+            );
+        }
+    }
 
     async fn error_for(status: u16) -> DesktopError {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

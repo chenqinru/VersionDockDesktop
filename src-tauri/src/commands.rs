@@ -608,6 +608,7 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         }
         BridgeCommand::Sync { .. } => ("sync", "Synchronizing repository"),
         BridgeCommand::ProviderAccounts
+        | BridgeCommand::ProviderAccountAvatar { .. }
         | BridgeCommand::ProviderRepositories { .. }
         | BridgeCommand::ProviderNamespaces { .. }
         | BridgeCommand::ResolveAuthorAvatar { .. } => ("provider", "Loading remote provider data"),
@@ -1634,6 +1635,9 @@ async fn dispatch(
             })
         }
         BridgeCommand::ProviderAccounts => json(provider::accounts(&state.config_dir)),
+        BridgeCommand::ProviderAccountAvatar { account_id } => {
+            json(provider::account_avatar(&state.config_dir, &account_id, token).await?)
+        }
         BridgeCommand::ProviderGithubBegin { account_id } => {
             json(provider::github_begin(account_id, token).await?)
         }
