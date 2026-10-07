@@ -309,20 +309,56 @@ test('草稿按标签查询返回 404 时使用分页列表查找，其他 API �
   const calls = [];
   const client = createGitHubClient({ run: (_command, args) => {
     calls.push(args);
+    if (args.includes('--slurp')) throw new Error('unknown flag: --slurp');
     if (args[1].includes('/tags/')) {
       const error = new Error('not found');
       error.stderr = Buffer.from('gh: Not Found (HTTP 404)');
       throw error;
     }
-    return JSON.stringify([[{ id: 1, tag_name: 'v0.1.0', draft: false }], [{ id: 2, tag_name: 'v0.1.1', draft: true }]]);
+    if (args[1].endsWith('&page=1')) return JSON.stringify(Array.from({ length: 100 }, (_, id) => ({ id, tag_name: `v1.0.${id}`, draft: false })));
+    if (args[1].endsWith('&page=2')) return JSON.stringify([{ id: 102, tag_name: 'v0.1.1', draft: true }]);
+    throw new Error('unexpected API request');
   } });
-  assert.equal(client.release('v0.1.1').id, 2);
-  assert.ok(calls[1].includes('--paginate'));
-  assert.ok(calls[1].includes('--slurp'));
+  assert.equal(client.release('v0.1.1').id, 102);
+  assert.equal(calls.length, 3);
+  assert.ok(calls[1][1].endsWith('&page=1'));
+  assert.ok(calls[2][1].endsWith('&page=2'));
+  assert.ok(calls.every((args) => !args.includes('--paginate') && !args.includes('--slurp')));
   const forbidden = createGitHubClient({ run: () => {
     const error = new Error('forbidden'); error.stderr = Buffer.from('gh: Forbidden (HTTP 403)'); throw error;
   } });
   assert.throws(() => forbidden.release('v0.1.1'), /forbidden/);
+});
+
+test('Release 列表分页读到末页才认定不存在，异常响应和分页权限错误保留失败', () => {
+  const client = createGitHubClient({ run: (_command, args) => {
+    if (args[1].includes('/tags/')) {
+      const error = new Error('not found'); error.stderr = Buffer.from('gh: Not Found (HTTP 404)'); throw error;
+    }
+    return args[1].endsWith('&page=1') ? JSON.stringify(Array.from({ length: 100 }, () => ({ tag_name: 'v0.0.1' }))) : '[]';
+  } });
+  assert.equal(client.release('v0.1.1'), null);
+  for (const invalid of ['malformed', 'forbidden']) {
+    const broken = createGitHubClient({ run: (_command, args) => {
+      if (args[1].includes('/tags/')) {
+        const error = new Error('not found'); error.stderr = Buffer.from('gh: Not Found (HTTP 404)'); throw error;
+      }
+      if (invalid === 'malformed') return '{}';
+      throw new Error('HTTP 403');
+    } });
+    assert.throws(() => broken.release('v0.1.1'), invalid === 'malformed' ? /响应格式/ : /HTTP 403/);
+  }
+});
+
+test('标签接口已返回 Release 时不额外遍历列表', () => {
+  let calls = 0;
+  const client = createGitHubClient({ run: (_command, args) => {
+    calls++;
+    assert.ok(args[1].endsWith('/tags/v0.1.1'));
+    return JSON.stringify({ id: 7, tag_name: 'v0.1.1' });
+  } });
+  assert.equal(client.release('v0.1.1').id, 7);
+  assert.equal(calls, 1);
 });
 
 test('上传全部附件并核对远程内容后才公开，已公开版本重试失败', () => {

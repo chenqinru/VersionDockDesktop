@@ -14,10 +14,9 @@ export function assertPublishable(version, latest, existing) {
 }
 
 export function createGitHubClient({ run = execFileSync } = {}) {
-  const api = (endpoint, method = 'GET', body, paginate = false) => {
+  const api = (endpoint, method = 'GET', body) => {
     const args = ['api', endpoint, '--method', method, '--header', 'Cache-Control: no-cache'];
     if (body !== undefined) args.push('--input', '-');
-    if (paginate) args.push('--paginate', '--slurp');
     const response = run('gh', args, {
       input: body === undefined ? undefined : JSON.stringify(body), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -40,10 +39,19 @@ export function createGitHubClient({ run = execFileSync } = {}) {
       return object.sha;
     },
     latest: () => optional(`repos/${RELEASE_REPOSITORY}/releases/latest`),
-    release: (tag) => optional(`repos/${RELEASE_REPOSITORY}/releases/tags/${tag}`)
-      // GitHub 的按标签查询接口不返回尚未公开的草稿。
-      ?? api(`repos/${RELEASE_REPOSITORY}/releases?per_page=100`, 'GET', undefined, true)
-        .flat().find((release) => release.tag_name === tag) ?? null,
+    release: (tag) => {
+      const published = optional(`repos/${RELEASE_REPOSITORY}/releases/tags/${tag}`);
+      if (published) return published;
+      // 标签接口不返回草稿。显式分页兼容系统包管理器提供的旧版 gh，
+      // 并在找到目标草稿后停止读取后续页面。
+      for (let page = 1; ; page++) {
+        const releases = api(`repos/${RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`);
+        if (!Array.isArray(releases)) throw new Error('GitHub Release 列表响应格式不正确');
+        const release = releases.find((value) => value.tag_name === tag);
+        if (release) return release;
+        if (releases.length < 100) return null;
+      }
+    },
     releaseById: (id) => api(`repos/${RELEASE_REPOSITORY}/releases/${id}`),
     create: (body) => api(`repos/${RELEASE_REPOSITORY}/releases`, 'POST', body),
     deleteAsset: (id) => api(`repos/${RELEASE_REPOSITORY}/releases/assets/${id}`, 'DELETE'),
