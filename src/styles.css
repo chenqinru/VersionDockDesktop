@@ -3369,7 +3369,7 @@ button.conflict-action-item {
 .branch-repo-row > i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
 .branch-repo-row > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .branch-section { padding: 0; }
-.branch-section-title { height: 22px; display: flex; align-items: stretch; background: var(--vscode-sideBarSectionHeader-background, var(--versiondock-surface-alt)); border-bottom: 1px solid var(--versiondock-border); }
+.branch-section-title { height: 22px; display: flex; align-items: stretch; background: var(--vscode-sideBarSectionHeader-background, var(--versiondock-surface-alt)); border-bottom: 1px solid var(--versiondock-border); cursor: pointer; }
 .branch-section-toggle { min-width: 0; flex: 1; height: 21px; padding: 0 8px; display: flex; align-items: center; gap: 4px; text-align: left; }
 .branch-section-toggle:hover { background: var(--versiondock-hover); }
 .branch-section-toggle > .codicon:first-child { width: 10px; font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); }
@@ -7804,8 +7804,11 @@ button.notification-item-action-btn:focus-visible {
 .settings-modified-results .setting-current-value { margin-left: auto; }
 .setting-edit { flex-shrink: 0; color: var(--versiondock-muted); }
 
-.branch-tag-create { flex-shrink: 0; margin-right: 8px; }
-.branch-tag-create:disabled { opacity: .4; cursor: default; }
+.branch-section-title .branch-tag-create { flex-shrink: 0; margin-right: 8px; opacity: 0 !important; pointer-events: none; }
+.branch-section-title:hover .branch-tag-create,
+.branch-section-title:focus-within .branch-tag-create { opacity: 1 !important; pointer-events: auto; }
+.branch-section-title:hover .branch-tag-create:disabled,
+.branch-section-title:focus-within .branch-tag-create:disabled { opacity: .4 !important; cursor: default; }
 .branch-tags-empty { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; font-size: 11px; color: var(--versiondock-muted); }
 [data-density="comfortable"] .branch-tag-create { border-radius: 6px; transition: background .12s ease; }
 [data-density="compact"] .branch-tag-create { border-radius: 0; }

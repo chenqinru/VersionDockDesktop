@@ -396,8 +396,11 @@ function SidebarSection({ icon, title, count, collapsed, onToggle, action, child
   children: React.ReactNode;
 }) {
   return <section className="branch-section">
-    <div className={`branch-section-title${action ? ' has-action' : ''}`}>
-      <button className="branch-section-toggle" onClick={onToggle} aria-expanded={!collapsed} aria-label={action ? `${title} ${count}` : undefined}>
+    <div className={`branch-section-title${action ? ' has-action' : ''}`} onClick={(event) => {
+      const button = (event.target as HTMLElement).closest('button');
+      if (!button || button.classList.contains('branch-section-toggle')) onToggle();
+    }}>
+      <button className="branch-section-toggle" aria-expanded={!collapsed} aria-label={action ? `${title} ${count}` : undefined}>
         <Codicon name={collapsed ? 'triangle-right' : 'triangle-down'} />
         <Codicon name={icon} />
         <strong>{title}</strong>

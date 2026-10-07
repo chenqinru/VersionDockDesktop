@@ -4,6 +4,7 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Collapse commit detail': 'Collapse commit detail',
   'Account authentication failed. Please reauthenticate.': 'Account authentication failed. Please reauthenticate.',
   'This token does not have the required permissions.': 'This token does not have the required permissions.',
   'The platform rate limit was reached. Please try again later.': 'The platform rate limit was reached. Please try again later.',
@@ -1344,6 +1345,7 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Collapse commit detail': '折叠提交详情',
   'Account authentication failed. Please reauthenticate.': '账号认证失败，请重新认证。',
   'This token does not have the required permissions.': '此令牌没有所需权限。',
   'The platform rate limit was reached. Please try again later.': '平台请求次数已达上限，请稍后重试。',

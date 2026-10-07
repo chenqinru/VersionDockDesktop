@@ -5,6 +5,7 @@ import { DialogHost } from './DialogHost';
 import { publishDialog } from './dialogService';
 import { useAppStore } from '../store/appStore';
 import { commitKey } from '../history/commitDetails';
+import { createTranslator, I18nContext } from '../i18n';
 import type { CommitDetail, CommitNode, WorkspaceSnapshot } from '../bindings/generated';
 
 const snapshot: WorkspaceSnapshot = {
@@ -99,6 +100,21 @@ afterEach(() => {
 });
 
 describe('CommitDetailPanel merge commits', () => {
+  it.each([
+    ['zh-CN', '折叠提交详情'],
+    ['en', 'Collapse commit detail'],
+  ] as const)('localizes the collapse button in %s and preserves its action', (language, label) => {
+    useAppStore.setState({ snapshot, selectedCommit: mergeDetail, selectedCommits: [mergeCommit] });
+    const onCollapse = vi.fn();
+    render(<I18nContext.Provider value={{ language, preference: language === 'zh-CN' ? 'zhCn' : 'en', t: createTranslator(language) }}>
+      <CommitDetailPanel onCollapse={onCollapse} />
+    </I18nContext.Provider>);
+    const button = screen.getByRole('button', { name: label });
+    expect(button).toHaveAttribute('title', label);
+    fireEvent.click(button);
+    expect(onCollapse).toHaveBeenCalledOnce();
+  });
+
   it('shows HEAD explicitly and excludes symbolic remote HEAD references', () => {
     const detail: CommitDetail = {
       ...mergeDetail,

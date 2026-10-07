@@ -35,6 +35,19 @@ describe('plugin sidebar interaction parity', () => {
     expect(screen.getByText('No tags yet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'New Tag...' }));
     expect(runTagWorkflow).toHaveBeenCalledWith({ action: 'create', repoIds: ['a', 'b'], preferredRepoId: 'b' });
+    expect(screen.getByRole('button', { name: 'Tags 0' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('toggles tags from the header whitespace, count and keyboard-activated button', () => {
+    renderSidebar();
+    const toggle = screen.getByRole('button', { name: 'Tags 0' });
+    const header = toggle.closest('.branch-section-title')!;
+    fireEvent.click(header);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(header.querySelector('.branch-section-count')!);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(toggle, { detail: 0 });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('shows tag type metadata and blocks all tag actions while another entry point is busy', () => {
