@@ -19,6 +19,14 @@ GitHub 私有源码仓库的 Actions Variables：
 
 在 GitHub Actions Secrets 中设置 `GITLAB_RELEASE_TOKEN`：使用仅限该安装包项目的 Project Access Token，授予 `api` scope 和 Maintainer 角色，用于上传 Generic Packages 和提交 `latest.json`。若 GitLab 授权/版本不支持 Project Access Token，可使用专用发布账号的 Token，并仅给予该项目权限。令牌由管理员直接保存到 GitHub Secret，无需发到聊天。现有 `RELEASES_TOKEN`、Tauri 签名私钥及密码保持在流水线 Secrets 中。
 
+## 公司发布 runner
+
+`release.yml` 的 `publish` 任务使用 `[self-hosted, linux, x64, gitlab-publish]`，对应已注册的 `versiondock-release`。检查和三平台构建继续使用原有 GitHub 托管 runner，构建完成后由公司服务器下载产物并发布。
+
+runner 服务用户的 PATH 需要包含 `git`、`minisign` 和 `gh`；Node.js 20 由 `actions/setup-node` 配置。发布任务只检查预装工具，不执行 `sudo apt-get`，可以使用普通用户运行。该服务器必须能访问 GitHub 的 Actions、API、构建产物下载地址，以及 GitLab HTTPS API。
+
+提交工作流修改后，在 Actions 的 Release 中选择 `main` 手动运行，`tag` 填要发布的正式版本标签。直接重跑旧的失败任务仍会使用旧工作流的 runner 配置。此调整只迁移发布任务，检查和三平台构建仍受 GitHub 托管 runner 的计费规则约束。
+
 ## 地址与发布顺序
 
 版本包地址（将 `ID` 替换为真实项目 ID）：

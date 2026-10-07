@@ -310,7 +310,7 @@ jobs:
   publish:
     name: Publish complete release
     needs: [verify, build]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, gitlab-publish]
     timeout-minutes: 30
     concurrency:
       group: versiondock-public-release
@@ -329,8 +329,12 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install signature verifier
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign
+      - name: Verify publishing tools
+        run: |
+          command -v git
+          command -v minisign
+          command -v gh
+          gh --version
 
       - name: Configure artifact paths
         run: |
