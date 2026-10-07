@@ -1,0 +1,4 @@
+interface:
+  display_name: "VersionDock 发布准备"
+  short_description: "根据 Git 提交和实际差异生成中英文更新说明，并同步与校验发布版本"
+  default_prompt: "使用 $versiondock-release 准备下一个 patch 版本，生成中英文更新说明并完成本地校验。"

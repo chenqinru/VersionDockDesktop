@@ -20,6 +20,14 @@ GitHub 发布无需额外 PAT 或 `RELEASES_TOKEN`。更新签名私钥必须与
 
 ## 发布一个新版本
 
+可以在本项目的 Codex 聊天中使用项目 Skill 自动完成本地准备：
+
+```text
+$versiondock-release 准备下一个 patch 版本，生成中英文更新说明并完成本地校验
+```
+
+Skill 位于 [`.agents/skills/versiondock-release/SKILL.md`](../.agents/skills/versiondock-release/SKILL.md)，会读取上次版本标签后的提交和实际差异，整理双语记录、同步版本并校验。也支持“只生成更新说明，不修改版本号”。默认完成本地准备；提交、打标签和推送遵从当次发布指令。手动操作步骤如下，Skill 已完成的步骤无需重复执行。
+
 1. 在准备发布的代码上运行 `npm run version:bump -- patch`，也可传入明确的正式版本号。脚本同步 package、Tauri、Cargo 元数据及锁文件。
 2. 在 `src/release-notes.json` 首部添加相同版本的记录，填写有效日期、`highlights.zh-CN` 和 `highlights.en`。中文记录生成远程清单的 `notes` 和 Release 正文；应用内历史记录按界面语言展示。
 3. 运行 `npm run check`，检查并提交版本、更新说明及实现改动，然后推送 `main`。版本号只接受 `X.Y.Z`，当前发布流程不支持 prerelease 或 build 后缀。
