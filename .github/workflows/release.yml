@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
@@ -26,6 +27,10 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       sha: ${{ steps.version.outputs.sha }}
+      ci_run_id: ${{ steps.ci.outputs.ci_run_id }}
+      parallel_macos: ${{ steps.features.outputs.parallel_macos }}
+      artifact_cache: ${{ steps.features.outputs.artifact_cache }}
+      build_matrix: ${{ steps.features.outputs.build_matrix }}
     steps:
       - name: Validate stable tag
         env:
@@ -51,6 +56,33 @@ jobs:
         run: |
           node scripts/check-version.mjs
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Select optimizations available in the pinned source
+        id: features
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          const parallel = fs.existsSync('scripts/macos-release-binaries.mjs');
+          const include = [
+            { name: 'Windows x64', platform: 'windows', os: 'windows-latest', 'rust-targets': '', 'bundle-args': '' },
+            { name: 'Linux x64', platform: 'linux', os: 'ubuntu-24.04', 'rust-targets': '', 'bundle-args': '' },
+          ];
+          if (!parallel) include.push({ name: 'macOS universal', platform: 'macos', os: 'macos-latest', 'rust-targets': 'aarch64-apple-darwin,x86_64-apple-darwin', 'bundle-args': '--target universal-apple-darwin' });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `parallel_macos=${parallel}\nartifact_cache=${fs.existsSync('scripts/download-release-artifact.mjs')}\nbuild_matrix=${JSON.stringify({ include })}\n`);
+          JS
+
+      - name: Find reusable CI checks for this source commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_SOURCE_SHA="$(git rev-parse HEAD)"
+          export RELEASE_SOURCE_SHA
+          if [ -f scripts/reuse-release-ci.mjs ]; then
+            node scripts/reuse-release-ci.mjs
+          else
+            echo "ci_run_id=" >> "$GITHUB_OUTPUT"
+          fi
 
   assets:
     name: Prepare release frontend
@@ -89,6 +121,7 @@ jobs:
   frontend:
     name: Check release frontend
     needs: source
+    if: needs.source.outputs.ci_run_id == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -132,6 +165,7 @@ jobs:
   rust:
     name: Check release Rust
     needs: source
+    if: needs.source.outputs.ci_run_id == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -187,12 +221,40 @@ jobs:
       version: ${{ needs.source.outputs.version }}
       sha: ${{ needs.source.outputs.sha }}
     steps:
-      - name: Require all release checks to succeed
+      - name: Require checks or a verified reusable CI run
         env:
           SOURCE_RESULT: ${{ needs.source.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           RUST_RESULT: ${{ needs.rust.result }}
-        run: test "$SOURCE_RESULT" = success && test "$FRONTEND_RESULT" = success && test "$RUST_RESULT" = success
+          REUSED_CI_RUN_ID: ${{ needs.source.outputs.ci_run_id }}
+        run: |
+          test "$SOURCE_RESULT" = success
+          if [ -n "$REUSED_CI_RUN_ID" ]; then
+            test "$FRONTEND_RESULT" = skipped && test "$RUST_RESULT" = skipped
+          else
+            test "$FRONTEND_RESULT" = success && test "$RUST_RESULT" = success
+          fi
+
+      - name: Checkout pinned source for CI verification
+        if: needs.source.outputs.ci_run_id != ''
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node for CI verification
+        if: needs.source.outputs.ci_run_id != ''
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Revalidate exact source CI before approving release
+        if: needs.source.outputs.ci_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          REUSED_CI_RUN_ID: ${{ needs.source.outputs.ci_run_id }}
+        run: node scripts/reuse-release-ci.mjs verify
 
   build:
     name: Build (${{ matrix.name }})
@@ -200,23 +262,7 @@ jobs:
     needs: [source, assets]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: macOS universal
-            platform: macos
-            os: macos-latest
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            bundle-args: --target universal-apple-darwin
-          - name: Windows x64
-            platform: windows
-            os: windows-latest
-            rust-targets: ''
-            bundle-args: ''
-          - name: Linux x64
-            platform: linux
-            os: ubuntu-24.04
-            rust-targets: ''
-            bundle-args: ''
+      matrix: ${{ fromJSON(needs.source.outputs.build_matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -286,7 +332,7 @@ jobs:
           uploadWorkflowArtifacts: false
           args: --ci --config src-tauri/tauri.reuse-frontend.conf.json --config src-tauri/tauri.release-updater.conf.json ${{ matrix.bundle-args }}
 
-      - name: Verify macOS app bundle signature
+      - name: Verify legacy macOS app signature
         if: runner.os == 'macOS'
         run: codesign --verify --deep --strict --verbose=2 "src-tauri/target/universal-apple-darwin/release/bundle/macos/VersionDock Desktop.app"
 
@@ -307,19 +353,179 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish:
-    name: Publish complete release
-    needs: [verify, build]
-    permissions:
-      contents: write
-    runs-on: [self-hosted, linux, x64, gitlab-publish]
-    timeout-minutes: 30
-    concurrency:
-      group: versiondock-public-release
-      cancel-in-progress: false
+  macos-native:
+    name: Compile macOS (${{ matrix.target }})
+    needs: [source, assets]
+    if: needs.source.outputs.parallel_macos == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout pinned source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          targets: ${{ matrix.target }}
+
+      - name: Restore macOS release dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          prefix-key: v1-versiondock-target
+          shared-key: native-bundles
+          save-if: false
+
+      - name: Download release frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-release-${{ needs.source.outputs.sha }}
+          path: dist
+
+      - name: Install build dependencies
+        run: npm ci
+
+      - name: Reuse release frontend
+        run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.reuse-frontend.conf.json', JSON.stringify({build:{beforeBuildCommand:null}}))"
+
+      - name: Configure update mirror without credentials
+        env:
+          GITLAB_RELEASE_PROJECT_ID: ${{ vars.GITLAB_RELEASE_PROJECT_ID }}
+          GITLAB_RELEASE_URL: ${{ vars.GITLAB_RELEASE_URL }}
+          GITLAB_RELEASE_PACKAGE: ${{ vars.GITLAB_RELEASE_PACKAGE }}
+          GITLAB_RELEASE_BRANCH: ${{ vars.GITLAB_RELEASE_BRANCH }}
+        run: node scripts/gitlab-release-config.mjs
+
+      - name: Compile this architecture without bundling
+        run: npm run tauri:build -- --ci --no-bundle --target ${{ matrix.target }} --config src-tauri/tauri.reuse-frontend.conf.json --config src-tauri/tauri.release-updater.conf.json
+
+      - name: Verify architecture and record source and binary hash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          RELEASE_OUTPUT_DIR: ${{ runner.temp }}/macos-native-${{ matrix.target }}
+        run: node scripts/macos-release-binaries.mjs stage
+
+      - name: Save native binary
+        uses: actions/upload-artifact@v4
+        with:
+          overwrite: true
+          name: macos-native-${{ matrix.target }}-${{ needs.source.outputs.sha }}
+          path: ${{ runner.temp }}/macos-native-${{ matrix.target }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  macos-bundle:
+    name: Bundle and sign macOS Universal
+    needs: [source, macos-native]
+    if: needs.source.outputs.parallel_macos == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout pinned source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust for bundler metadata
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+
+      - name: Install packaging dependencies
+        run: npm ci
+
+      - name: Reuse release frontend configuration
+        run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.reuse-frontend.conf.json', JSON.stringify({build:{beforeBuildCommand:null}}))"
+
+      - name: Configure update mirror without credentials
+        env:
+          GITLAB_RELEASE_PROJECT_ID: ${{ vars.GITLAB_RELEASE_PROJECT_ID }}
+          GITLAB_RELEASE_URL: ${{ vars.GITLAB_RELEASE_URL }}
+          GITLAB_RELEASE_PACKAGE: ${{ vars.GITLAB_RELEASE_PACKAGE }}
+          GITLAB_RELEASE_BRANCH: ${{ vars.GITLAB_RELEASE_BRANCH }}
+        run: node scripts/gitlab-release-config.mjs
+
+      - name: Download the same release frontend for fingerprint verification
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-release-${{ needs.source.outputs.sha }}
+          path: dist
+
+      - name: Download both native binaries from this run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-native-*-${{ needs.source.outputs.sha }}
+          path: ${{ runner.temp }}/macos-binaries
+
+      - name: Verify identical source and configuration, merge architectures
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          RELEASE_BINARIES_DIR: ${{ runner.temp }}/macos-binaries
+        run: node scripts/macos-release-binaries.mjs merge
+
+      - name: Bundle and sign without rebuilding Rust
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri -- bundle --ci --target universal-apple-darwin --bundles app,dmg --config src-tauri/tauri.reuse-frontend.conf.json --config src-tauri/tauri.release-updater.conf.json
+
+      - name: Verify native app signature and both architectures
+        run: |
+          codesign --verify --deep --strict --verbose=2 "src-tauri/target/universal-apple-darwin/release/bundle/macos/VersionDock Desktop.app"
+          lipo "src-tauri/target/universal-apple-darwin/release/bundle/macos/VersionDock Desktop.app/Contents/MacOS/versiondock-desktop" -verify_arch arm64 x86_64
+
+      - name: Stage macOS installers and updater signatures
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          RELEASE_OUTPUT_DIR: ${{ runner.temp }}/release-macos
+        run: node scripts/macos-release-binaries.mjs bundles
+
+      - name: Save macOS release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          overwrite: true
+          name: release-macos
+          path: ${{ runner.temp }}/release-macos/
+          if-no-files-found: error
+          retention-days: 14
+
+  prepare:
+    name: Verify signatures and prepare complete release
+    needs: [source, verify, build, macos-bundle]
+    if: >-
+      !cancelled() && needs.verify.result == 'success' && needs.build.result == 'success' &&
+      ((needs.source.outputs.parallel_macos == 'true' && needs.macos-bundle.result == 'success') ||
+       (needs.source.outputs.parallel_macos != 'true' && needs.macos-bundle.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      artifact_id: ${{ steps.prepared.outputs.artifact-id }}
     env:
       RELEASE_VERSION: ${{ needs.verify.outputs.version }}
-      RELEASE_SOURCE_SHA: ${{ needs.verify.outputs.sha }}
+      RELEASE_ARTIFACTS_DIR: ${{ github.workspace }}/release-artifacts
+      RELEASE_OUTPUT_DIR: ${{ github.workspace }}/prepared-release
     steps:
       - name: Checkout verified source commit
         uses: actions/checkout@v7
@@ -332,17 +538,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Verify publishing tools
-        run: |
-          command -v git
-          command -v minisign
-          command -v gh
-          gh --version
-
-      - name: Configure artifact paths
-        run: |
-          echo "RELEASE_ARTIFACTS_DIR=$RUNNER_TEMP/release-artifacts" >> "$GITHUB_ENV"
-          echo "RELEASE_OUTPUT_DIR=$RUNNER_TEMP/prepared-release" >> "$GITHUB_ENV"
+      - name: Install signature verifier
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign
 
       - name: Download all platform artifacts
         uses: actions/download-artifact@v4
@@ -350,11 +547,124 @@ jobs:
           pattern: release-*
           path: ${{ env.RELEASE_ARTIFACTS_DIR }}
 
-      - name: Verify packages against client public key and generate manifest
+      - name: Verify every signature and generate release manifest once
         run: node scripts/release-artifacts.mjs prepare
 
+      - name: Save immutable prepared release
+        id: prepared
+        uses: actions/upload-artifact@v4
+        with:
+          overwrite: true
+          name: prepared-release-${{ needs.verify.outputs.sha }}
+          path: ${{ env.RELEASE_OUTPUT_DIR }}/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub release
+    needs: [verify, prepare]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.prepare.result == 'success' }}
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: versiondock-public-release
+      cancel-in-progress: false
+    env:
+      RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+      RELEASE_SOURCE_SHA: ${{ needs.verify.outputs.sha }}
+      RELEASE_OUTPUT_DIR: ${{ github.workspace }}/prepared-release
+    steps:
+      - name: Checkout verified source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Download prepared release from this run
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact_id }}
+          path: ${{ env.RELEASE_OUTPUT_DIR }}
+          merge-multiple: true
+
+      - name: Install signature verifier
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign
+
+      - name: Reverify prepared updater signatures before GitHub publication
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { verifySignature } from './scripts/release-artifacts.mjs';
+          const config = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+          const assets = path.join(process.env.RELEASE_OUTPUT_DIR, 'assets');
+          for (const name of fs.readdirSync(assets)) {
+            if (name.endsWith('.sig')) verifySignature(path.join(assets, name.slice(0, -4)), fs.readFileSync(path.join(assets, name), 'utf8').trim(), config.plugins.updater.pubkey);
+          }
+          JS
+
+      - name: Upload, verify and publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-release.mjs
+
+  publish-gitlab:
+    name: Publish GitLab mirror
+    if: ${{ !cancelled() && vars.GITLAB_RELEASE_PROJECT_ID != '' && needs.verify.result == 'success' && needs.prepare.result == 'success' }}
+    needs: [source, verify, prepare]
+    runs-on: [self-hosted, linux, x64, gitlab-publish]
+    timeout-minutes: 30
+    concurrency:
+      group: versiondock-gitlab-release
+      cancel-in-progress: false
+    env:
+      RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+      RELEASE_SOURCE_SHA: ${{ needs.verify.outputs.sha }}
+      RELEASE_OUTPUT_DIR: ${{ github.workspace }}/prepared-release-mirror
+      RELEASE_ARTIFACT_ID: ${{ needs.prepare.outputs.artifact_id }}
+    steps:
+      - name: Checkout verified source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Verify preinstalled mirror publishing tools
+        run: |
+          command -v minisign
+          command -v gh
+          if [ -f scripts/download-release-artifact.mjs ]; then command -v python3; fi
+          gh --version
+
+      - name: Download prepared release from legacy source
+        if: needs.source.outputs.artifact_cache != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact_id }}
+          path: ${{ env.RELEASE_OUTPUT_DIR }}
+          merge-multiple: true
+
+      - name: Download prepared release or reuse verified local archive
+        if: needs.source.outputs.artifact_cache == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/download-release-artifact.mjs
+
       - name: Upload GitLab packages, verify hashes, then publish mirror manifest
-        if: vars.GITLAB_RELEASE_PROJECT_ID != ''
         env:
           GITLAB_RELEASE_PROJECT_ID: ${{ vars.GITLAB_RELEASE_PROJECT_ID }}
           GITLAB_RELEASE_URL: ${{ vars.GITLAB_RELEASE_URL }}
@@ -362,8 +672,3 @@ jobs:
           GITLAB_RELEASE_BRANCH: ${{ vars.GITLAB_RELEASE_BRANCH }}
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: node scripts/publish-gitlab-release.mjs
-
-      - name: Upload, verify and publish public release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node scripts/publish-release.mjs

@@ -21,14 +21,15 @@ GitLab 项目需要有 `main` 分支并启用 Package Registry，允许匿名读
 
 ## 发布 runner
 
-最终发布任务使用 `[self-hosted, linux, x64, gitlab-publish]`。当前 runner 名称为 `versiondock-release`；检查与三平台构建继续使用 GitHub 托管 runner。
+GitLab 镜像任务 `publish-gitlab` 使用 `[self-hosted, linux, x64, gitlab-publish]`。当前 runner 名称为 `versiondock-release`；检查、三平台构建、产物准备和 GitHub 发布使用 GitHub 托管 runner。两端发布独立，GitLab 失败不会阻断 GitHub Release。
 
-runner 服务用户的 `PATH` 需要包含 `git`、`minisign` 和 `gh`。Node.js 20 由 `actions/setup-node` 配置；发布任务不通过 `sudo apt-get` 安装工具。请在服务用户环境中检查：
+runner 服务用户的 `PATH` 需要包含 `git`、`minisign`、`gh` 和 `python3`。Python 标准库用于安全解压 artifact ZIP，无需安装第三方依赖。Node.js 20 由 `actions/setup-node` 配置；镜像任务不通过 `sudo apt-get` 安装工具。请在服务用户环境中检查：
 
 ```bash
 command -v git
 command -v minisign
 command -v gh
+command -v python3
 gh --version
 ```
 
@@ -58,7 +59,7 @@ https://git.gsdzone.net/api/v4/projects/93/packages/generic/versiondock-desktop/
 2. 上传不存在的安装包与签名；已有附件必须与本地产物哈希一致。
 3. 匿名读取每个附件并验证 SHA-256。
 4. 全部附件验证完成后，提交固定 `latest.json` 并验证匿名读取结果。
-5. 镜像成功后，工作流继续上传和公开 GitHub Release。
+GitHub Release 从同一份验证完成的产物独立发布，镜像成功与否都不阻断 GitHub 发布。
 
 网络错误、HTTP 429 或 5xx 最多尝试 3 次，重试间隔为 1 秒、2 秒。同版本重跑仅接受相同内容，保留原镜像发布时间；不覆盖不同内容的附件，不回退清单版本。更新已有清单时使用 `last_commit_id` 检查并发修改。
 
