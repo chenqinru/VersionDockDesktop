@@ -1,5 +1,7 @@
 import { changeStatus } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
+import { changeSearchKey, hasSearchMatch, useChangeSearch } from './changeSearch';
+import { ChangeSearchText } from './ChangeSearchText';
 import { useChangeRowHighlight } from './changeRowHighlight';
 import React, { useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -28,7 +30,6 @@ interface VscodeChangesViewProps {
   onStage: (repoId: string, paths: string[]) => void;
   onUnstage: (repoId: string, paths: string[]) => void;
   onDiscard: (repoId: string, paths: string[]) => void;
-  speedSearchQuery?: string;
   selectedRepos?: Set<string>;
   onToggleRepoSelection?: (repoId: string) => void;
 }
@@ -64,11 +65,12 @@ function VscodeFileRow({
   const fileName = parts.at(-1) ?? file.path;
   const dirPath = parts.slice(0, -1).join('/');
   const isSvn = repo.meta.kind === 'svn';
-  const highlight = useChangeRowHighlight(repo.meta.id, file.path);
+  const highlight = useChangeRowHighlight(repo.meta.id, file.path, staged);
   const canAddToSvn = isSvn && !staged && file.status === 'untracked';
 
   return (
     <div
+      data-change-search-key={changeSearchKey(repo.meta.id, file.path, staged)}
       className={`file-item status-${changeStatus(file.status, file.conflicted)} ${highlight}`}
       style={{
         paddingLeft: viewMode === 'tree' ? 14 + depth * 14 : 14,
@@ -85,11 +87,11 @@ function VscodeFileRow({
     >
       <FileIcon name={fileName} />
       <span className="file-name" style={{ marginLeft: 6, fontSize: 12 }}>
-        {fileName}
+        <ChangeSearchText text={fileName} />
       </span>
       {viewMode === 'list' && dirPath && (
         <span className="file-dir" style={{ marginLeft: 6, fontSize: 11, opacity: 0.5 }}>
-          {dirPath}
+          <ChangeSearchText text={dirPath} />
         </span>
       )}
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -227,7 +229,7 @@ function VscodeTreeFolderRow({
     >
       <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} style={{ fontSize: 11, marginRight: 4 }} />
       <FileIcon name={node.name} folder open={expanded} />
-      <span style={{ marginLeft: 6, fontSize: 12 }}>{node.name}</span>
+      <span style={{ marginLeft: 6, fontSize: 12 }}><ChangeSearchText text={node.name} /></span>
     </div>
   );
 }
@@ -260,7 +262,8 @@ function VscodeFolderNode({
   onDiscard: (repoId: string, paths: string[]) => void;
 }) {
   const [localExpanded, setLocalExpanded] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
-  const isExpanded = localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded;
+  const search = useChangeSearch();
+  const isExpanded = hasSearchMatch(search, repo.meta.id, node.files, staged) || (localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded);
 
   if (node.file) {
     return (
@@ -439,7 +442,8 @@ function VscodeRepoSection({
   const [hovered, setHovered] = useState(false);
   const [localExpanded, setLocalExpanded] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
   const [branchMenuAnchor, setBranchMenuAnchor] = useState<DOMRect | undefined>(undefined);
-  const expanded = localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded;
+  const search = useChangeSearch();
+  const expanded = hasSearchMatch(search, repo.meta.id, files, staged) || (localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded);
 
   const tree = useMemo(() => buildFileTree(files), [files]);
   const branchClr = branchColor(repo.branch || repo.revision);
@@ -707,7 +711,6 @@ export function VscodeChangesView({
   onStage,
   onUnstage,
   onDiscard,
-  speedSearchQuery = '',
   selectedRepos,
   onToggleRepoSelection,
 }: VscodeChangesViewProps) {
@@ -717,27 +720,27 @@ export function VscodeChangesView({
   const [stagedHovered, setStagedHovered] = useState(false);
   const [unstagedHovered, setUnstagedHovered] = useState(false);
 
-  const needle = speedSearchQuery.trim().toLowerCase();
+  const search = useChangeSearch();
 
   const stagedRepos = useMemo(() => {
     return repos
       .map((r) => {
-        const files = r.files.filter((f) => f.staged && (!needle || f.path.toLowerCase().includes(needle)));
+        const files = r.files.filter((f) => f.staged);
         return { repo: r, files };
       })
       .filter((g) => g.files.length > 0);
-  }, [repos, needle]);
+  }, [repos]);
 
   const unstagedRepos = useMemo(() => {
     return repos
       .map((r) => {
         const files = r.files.filter(
-          (f) => (f.unstaged || f.status === 'untracked' || r.meta.kind === 'svn') && (!needle || f.path.toLowerCase().includes(needle)),
+          (f) => f.unstaged || f.status === 'untracked' || r.meta.kind === 'svn',
         );
         return { repo: r, files };
       })
       .filter((g) => g.files.length > 0);
-  }, [repos, needle]);
+  }, [repos]);
 
   const totalStaged = stagedRepos.reduce((sum, g) => sum + g.files.length, 0);
   const totalUnstaged = unstagedRepos.reduce((sum, g) => sum + g.files.length, 0);
@@ -749,7 +752,9 @@ export function VscodeChangesView({
   const canStageAll = allReposAreSvn ? hasSvnUntracked : totalUnstaged > 0;
   const stageAllTitle = allReposAreSvn ? t('Add to SVN') : t('Stage All');
   const [repoExpansion, setRepoExpansion] = useState({ sequence: expansion.sequence, expanded: true });
-  const repoExpanded = repoExpansion.sequence === expansion.sequence ? repoExpansion.expanded : expansion.expanded;
+  const repoExpanded = repos.some(repo => hasSearchMatch(search, repo.meta.id, repo.files, true) || hasSearchMatch(search, repo.meta.id, repo.files, false)) || (repoExpansion.sequence === expansion.sequence ? repoExpansion.expanded : expansion.expanded);
+  const showStaged = stagedExpanded || stagedRepos.some(group => hasSearchMatch(search, group.repo.meta.id, group.files, true));
+  const showUnstaged = unstagedExpanded || unstagedRepos.some(group => hasSearchMatch(search, group.repo.meta.id, group.files, false));
   const isSingleRepo = repos.length === 1;
   const singleRepo = isSingleRepo ? repos[0] : undefined;
 
@@ -815,7 +820,7 @@ export function VscodeChangesView({
             onMouseLeave={() => setStagedHovered(false)}
             onClick={() => setStagedExpanded(!stagedExpanded)}
           >
-            <Codicon name={stagedExpanded ? 'chevron-down' : 'chevron-right'} style={{ fontSize: 11, marginRight: 6 }} />
+            <Codicon name={showStaged ? 'chevron-down' : 'chevron-right'} style={{ fontSize: 11, marginRight: 6 }} />
             <Codicon name="git-commit" style={{ fontSize: 13, marginRight: 6, opacity: 0.8 }} />
             <span style={{ fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {t('Staged Changes')}
@@ -866,7 +871,7 @@ export function VscodeChangesView({
               <span className="count-badge">{totalStaged}</span>
             </div>
           </div>
-          {stagedExpanded && (
+          {showStaged && (
             <div className="vscode-section-body">
               {stagedRepos.length === 0 ? (
                 <div style={{ padding: '6px 16px', fontSize: 12, opacity: 0.5 }}>{t('No staged changes')}</div>
@@ -916,7 +921,7 @@ export function VscodeChangesView({
           onMouseLeave={() => setUnstagedHovered(false)}
           onClick={() => setUnstagedExpanded(!unstagedExpanded)}
         >
-          <Codicon name={unstagedExpanded ? 'chevron-down' : 'chevron-right'} style={{ fontSize: 11, marginRight: 6 }} />
+          <Codicon name={showUnstaged ? 'chevron-down' : 'chevron-right'} style={{ fontSize: 11, marginRight: 6 }} />
           <Codicon name="git-pull-request" style={{ fontSize: 13, marginRight: 6, opacity: 0.8 }} />
           <span style={{ fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             {t('Changes')}
@@ -988,7 +993,7 @@ export function VscodeChangesView({
             <span className="count-badge">{totalUnstaged}</span>
           </div>
         </div>
-        {unstagedExpanded && (
+        {showUnstaged && (
           <div className="vscode-section-body">
             {unstagedRepos.length === 0 ? (
               <div style={{ padding: '6px 16px', fontSize: 12, opacity: 0.5 }}>{t('No changes')}</div>

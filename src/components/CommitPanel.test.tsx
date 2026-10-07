@@ -352,6 +352,70 @@ describe('CommitPanel capabilities and file view', () => {
     expect(useAppStore.getState().bootstrap?.state.layout?.fileViewMode).toBe('tree');
   });
 
+  it.each(['simplified', 'changelists', 'vscode'] as const)('locates changes without filtering or changing selections in %s mode', async (mode) => {
+    const data = bootstrap(false);
+    data.state.settings = { ...DEFAULT_SETTINGS, changesDisplayMode: mode };
+    data.capabilities.changelist = true;
+    const repo = { ...gitRepo, files: [
+      { path: 'src/read-one.ts', status: 'modified', staged: true, unstaged: true, conflicted: false },
+      { path: 'src/read-two.ts', status: 'modified', staged: false, unstaged: true, conflicted: false },
+      { path: 'other.txt', status: 'untracked', staged: false, unstaged: true, conflicted: false },
+    ] };
+    useAppStore.setState({ bootstrap: data, snapshot: { ...gitSnapshot, repositories: [repo] }, selectedRepoId: 'repo', commitSelections: { repo: ['other.txt'] }, changelists: { repo: [] } });
+    const { container } = renderPanel();
+    const trigger = screen.getByTitle('VersionDock: Select All');
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'f', ctrlKey: true });
+    const input = screen.getByRole('textbox', { name: 'Search files...' });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: 'read' } });
+    const total = mode === 'vscode' ? 3 : 2;
+    expect(screen.getByRole('search')).toHaveTextContent(`1 / ${total}`);
+    expect(container.querySelectorAll('.speed-search-active')).toHaveLength(1);
+    fireEvent.keyDown(input, { key: 'a', metaKey: true });
+    expect((input as HTMLInputElement).selectionStart).toBe(0);
+    expect((input as HTMLInputElement).selectionEnd).toBe(4);
+    expect(screen.getByText('other.txt')).toBeVisible();
+    expect(container.querySelectorAll('mark')).not.toHaveLength(0);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByRole('search')).toHaveTextContent(`2 / ${total}`);
+    fireEvent.change(input, { target: { value: 'read-' } });
+    expect(screen.getByRole('search')).toHaveTextContent(`2 / ${total}`);
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(screen.getByRole('search')).toHaveTextContent(`1 / ${total}`);
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(screen.getByRole('search')).toHaveTextContent(`${total} / ${total}`);
+    expect(useAppStore.getState().commitSelections).toEqual({ repo: ['other.txt'] });
+    fireEvent.change(input, { target: { value: 'missing' } });
+    expect(screen.getByRole('search')).toHaveTextContent('No matches');
+    expect(screen.getByRole('button', { name: 'Next match' })).toBeDisabled();
+    expect(screen.getByText('other.txt')).toBeVisible();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('search')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('temporarily expands matching folders and restores their prior state when clearing search', () => {
+    const data = bootstrap(false);
+    data.state.settings = { ...DEFAULT_SETTINGS, changesDisplayMode: 'simplified' };
+    const repo = { ...gitRepo, files: [
+      { path: 'src/nested/read.ts', status: 'modified', staged: false, unstaged: true, conflicted: false },
+      { path: 'other.txt', status: 'modified', staged: false, unstaged: true, conflicted: false },
+    ] };
+    useAppStore.setState({ bootstrap: data, snapshot: { ...gitSnapshot, repositories: [repo] }, selectedRepoId: 'repo' });
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'src/nested' }));
+    expect(screen.queryByText('read.ts')).not.toBeInTheDocument();
+    const trigger = screen.getByTitle('VersionDock: Select All'); trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'r' });
+    const input = screen.getByRole('textbox', { name: 'Search files...' });
+    fireEvent.change(input, { target: { value: 'read' } });
+    expect(screen.getByTitle('src/nested/read.ts')).toBeVisible();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByText('read.ts')).not.toBeInTheDocument();
+    expect(screen.getByText('other.txt')).toBeVisible();
+  });
+
   it('keeps keyboard search owned by the visible tab after visiting saved-change tabs', async () => {
     useAppStore.setState({ bridge, bootstrap: bootstrap(true, true), snapshot: gitSnapshot, stashes: { repo: [] }, shelves: { repo: [] } });
     const { container } = renderPanel();

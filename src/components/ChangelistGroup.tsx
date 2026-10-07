@@ -4,6 +4,8 @@ import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import { ChangeRowActions, ChangeFolderActions } from './ChangeRowActions';
 import { ChangeRowHighlightContext, useChangeRowHighlight } from './changeRowHighlight';
 import { useContext, useMemo, useState } from 'react';
+import { changeSearchKey, hasSearchMatch, useChangeSearch } from './changeSearch';
+import { ChangeSearchText } from './ChangeSearchText';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
@@ -44,7 +46,8 @@ export function TreeNode({
   expansion: ExpansionCommand;
 }) {
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
-  const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
+  const search = useChangeSearch();
+  const expanded = hasSearchMatch(search, repo.meta.id, node.files) || (localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded);
   const currentPad = basePad + depth * 20;
   const highlight = useChangeRowHighlight(repo.meta.id, node.path);
 
@@ -70,7 +73,7 @@ export function TreeNode({
           <button title={node.path} onClick={(event) => { event.stopPropagation(); setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded }); }}>
             <Codicon name={expanded ? 'chevron-down' : 'chevron-right'} />
             <FileIcon name={node.name} folder open={expanded} />
-            <span>{node.name}</span>
+            <span><ChangeSearchText text={node.name} /></span>
           </button>
           <ChangeFolderActions repo={repo} files={node.files} />
           <b>{node.files.length}</b>
@@ -98,6 +101,7 @@ export function TreeNode({
   const key = `${repo.meta.id}\0${node.file.path}`;
   return (
     <div
+      data-change-search-key={changeSearchKey(repo.meta.id, node.file.path)}
       className={`file-row status-${changeStatus(node.file.status, node.file.conflicted)} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`}
       style={{ paddingLeft: currentPad }}
       onClick={() => onFile(node.file!)}
@@ -112,7 +116,7 @@ export function TreeNode({
       <button title={node.file.path} onClick={() => onFile(node.file!)}>
         <FileIcon name={node.name} />
         <span className="file-name-group">
-          <span className="file-name">{node.name}</span>
+          <span className="file-name"><ChangeSearchText text={node.name} /></span>
         </span>
       </button>
       <ChangeRowActions repo={repo} file={node.file} />
@@ -179,7 +183,8 @@ export function ChangelistGroup({
     sequence: 0,
     expanded: totalFiles > 0 || isDefault,
   }));
-  const expanded = localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded;
+  const search = useChangeSearch();
+  const expanded = repoGroups.some(group => hasSearchMatch(search, group.repo.meta.id, group.files)) || (localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded);
 
   const toggleAll = () => {
     const nextVal = !allSelected;
@@ -303,6 +308,7 @@ function SingleRepoFileList({
 }) {
   const tree = useMemo(() => buildFileTree(files), [files]);
   const highlight = useContext(ChangeRowHighlightContext);
+  const search = useChangeSearch();
 
   if (viewMode === 'tree') {
     return (
@@ -334,7 +340,8 @@ function SingleRepoFileList({
         const fileName = parts.pop();
         return (
           <div
-            className={`file-row status-${changeStatus(file.status, file.conflicted)} ${file.conflicted ? 'conflicted' : ''} ${highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path ? 'selected' : highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path ? 'context-active' : ''}`}
+            data-change-search-key={changeSearchKey(repo.meta.id, file.path)}
+            className={`file-row status-${changeStatus(file.status, file.conflicted)} ${file.conflicted ? 'conflicted' : ''} ${search.activeKey === changeSearchKey(repo.meta.id, file.path) ? 'speed-search-active' : ''} ${highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path ? 'selected' : highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path ? 'context-active' : ''}`}
             style={{ paddingLeft: basePad }}
             key={key}
             onClick={() => onFile(repo.meta.id, file)}
@@ -349,8 +356,8 @@ function SingleRepoFileList({
             <button title={file.path} onClick={() => onFile(repo.meta.id, file)}>
               <FileIcon name={fileName ?? file.path} />
               <span className="file-name-group">
-                <span className="file-name">{fileName}</span>
-                <small>{parts.join('/')}</small>
+                <span className="file-name"><ChangeSearchText text={fileName ?? file.path} /></span>
+                <small><ChangeSearchText text={parts.join('/')} /></small>
               </span>
             </button>
             <ChangeRowActions repo={repo} file={file} />
@@ -395,7 +402,8 @@ function RepoSubGroup({
     sequence: 0,
     expanded: files.length > 0,
   }));
-  const expanded = localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded;
+  const search = useChangeSearch();
+  const expanded = hasSearchMatch(search, repo.meta.id, files) || (localExpanded.sequence === expansion.sequence ? localExpanded.expanded : expansion.expanded);
 
   const totalFiles = files.length;
   const selectableFiles = files.filter((file) => !file.isTruncated);

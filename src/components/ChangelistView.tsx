@@ -2,6 +2,7 @@ import { IconButton } from './IconButton';
 import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import React, { useMemo, useState } from 'react';
 import { ChangelistGroup, type ChangelistRepoGroup, type ExpansionCommand } from './ChangelistGroup';
+import { hasSearchMatch, useChangeSearch } from './changeSearch';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
@@ -142,7 +143,8 @@ export function ChangelistView({
   const totalUnversionedFiles = unversionedRepoGroups.reduce((sum, g) => sum + g.files.length, 0);
 
   const [repoExpansion, setRepoExpansion] = useState({ sequence: expansion.sequence, expanded: true });
-  const repoExpanded = repoExpansion.sequence === expansion.sequence ? repoExpansion.expanded : expansion.expanded;
+  const search = useChangeSearch();
+  const repoExpanded = repos.some(repo => hasSearchMatch(search, repo.meta.id, repo.files)) || (repoExpansion.sequence === expansion.sequence ? repoExpansion.expanded : expansion.expanded);
 
   return (
     <div

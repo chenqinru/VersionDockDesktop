@@ -521,10 +521,7 @@ describe('CommitDetailPanel merge commits', () => {
 
     // 触发 SpeedSearch 输入 'alpha'
     fireEvent.keyDown(window, { key: 'a' });
-    fireEvent.keyDown(window, { key: 'l' });
-    fireEvent.keyDown(window, { key: 'p' });
-    fireEvent.keyDown(window, { key: 'h' });
-    fireEvent.keyDown(window, { key: 'a' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'alpha' } });
 
     // 自动展开仓库行和 src 目录，alpha.ts 重新可见
     expect(screen.getByTitle(/src\/alpha\.ts/)).toBeInTheDocument();
@@ -660,21 +657,21 @@ describe('CommitDetailPanel merge commits', () => {
     collapseAllBtn.focus();
 
     fireEvent.keyDown(window, { key: 't' });
-    fireEvent.keyDown(window, { key: 's' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'ts' } });
 
     expect(screen.getByRole('search')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Search files...' })).toHaveValue('ts');
-    expect(screen.getByRole('search')).toHaveTextContent('1/2');
+    expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*2/);
 
     const nextBtn = screen.getByTitle('Next match');
     expect(nextBtn).toBeInTheDocument();
 
     fireEvent.click(nextBtn);
-    expect(screen.getByText('2/2')).toBeInTheDocument();
+    expect(screen.getByText(/2\s*\/\s*2/)).toBeInTheDocument();
 
     const prevBtn = screen.getByTitle('Previous match');
     fireEvent.click(prevBtn);
-    expect(screen.getByText('1/2')).toBeInTheDocument();
+    expect(screen.getByText(/1\s*\/\s*2/)).toBeInTheDocument();
   });
 
   it('isolates active match highlight between repositories with identical file paths', () => {
@@ -728,11 +725,10 @@ describe('CommitDetailPanel merge commits', () => {
     const collapseAllBtn = screen.getByTitle('Collapse all');
     collapseAllBtn.focus();
     fireEvent.keyDown(window, { key: 'c' });
-    fireEvent.keyDown(window, { key: 'o' });
-    fireEvent.keyDown(window, { key: 'n' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'con' } });
 
     expect(screen.getByRole('search')).toBeInTheDocument();
-    expect(screen.getByRole('search')).toHaveTextContent('1/2');
+    expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*2/);
 
     const repo1Row = document.querySelector('[data-detail-repo-id="repo-1"][data-detail-path="src/config.ts"]');
     const repo2Row = document.querySelector('[data-detail-repo-id="repo-2"][data-detail-path="src/config.ts"]');
@@ -744,7 +740,7 @@ describe('CommitDetailPanel merge commits', () => {
     expect(isRepo1First !== isRepo2First).toBe(true);
 
     fireEvent.click(screen.getByTitle('Next match'));
-    expect(screen.getByRole('search')).toHaveTextContent('2/2');
+    expect(screen.getByRole('search')).toHaveTextContent(/2\s*\/\s*2/);
 
     expect(repo1Row?.classList.contains('is-active-match')).toBe(!isRepo1First);
     expect(repo2Row?.classList.contains('is-active-match')).toBe(!isRepo2First);
@@ -781,21 +777,17 @@ describe('CommitDetailPanel merge commits', () => {
     const collapseAllBtn = screen.getByTitle('Collapse all');
     collapseAllBtn.focus();
     fireEvent.keyDown(window, { key: 'i' });
-    fireEvent.keyDown(window, { key: 't' });
-    fireEvent.keyDown(window, { key: 'e' });
-    fireEvent.keyDown(window, { key: 'm' });
-    fireEvent.keyDown(window, { key: '_' });
-    fireEvent.keyDown(window, { key: '5' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'item_5' } });
 
     expect(screen.getByRole('search')).toBeInTheDocument();
-    expect(screen.getByRole('search')).toHaveTextContent('1/10');
+    expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*10/);
 
     const nextBtn = screen.getByTitle('Next match');
     fireEvent.click(nextBtn);
-    expect(screen.getByRole('search')).toHaveTextContent('2/10');
+    expect(screen.getByRole('search')).toHaveTextContent(/2\s*\/\s*10/);
 
     fireEvent.keyDown(window, { key: 'ArrowDown' });
-    expect(screen.getByRole('search')).toHaveTextContent('3/10');
+    expect(screen.getByRole('search')).toHaveTextContent(/3\s*\/\s*10/);
   });
 
   it('incorporates expanded merge parent change files into speed search and matches navigation', async () => {
@@ -848,12 +840,10 @@ describe('CommitDetailPanel merge commits', () => {
     fireEvent.click(parentGroupBtn!);
 
     fireEvent.keyDown(window, { key: 'u' });
-    fireEvent.keyDown(window, { key: 'n' });
-    fireEvent.keyDown(window, { key: 'i' });
-    fireEvent.keyDown(window, { key: 'q' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'uniq' } });
 
     // 搜索 parent-unique，匹配变为 1/1
-    expect(screen.getByRole('search')).toHaveTextContent('1/1');
+    expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*1/);
     expect(screen.getByTitle(/parent-unique\.ts/)).toBeInTheDocument();
 
     const matchedRow = document.querySelector(`[data-detail-path="src/parent-unique.ts"][data-detail-from-revision="${parentCommitHash}"]`);
@@ -910,12 +900,10 @@ describe('CommitDetailPanel merge commits', () => {
 
     // 搜索折叠分组中的缓存文件
     fireEvent.keyDown(window, { key: 'c' });
-    fireEvent.keyDown(window, { key: 'a' });
-    fireEvent.keyDown(window, { key: 'c' });
-    fireEvent.keyDown(window, { key: 'h' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'cach' } });
 
     // 搜索成功匹配，且自动展开了该父提交分组
-    expect(screen.getByRole('search')).toHaveTextContent('1/1');
+    expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*1/);
     expect(screen.getByTitle(/cached-feature\.ts/)).toBeInTheDocument();
 
     const matchedRow = document.querySelector(`[data-detail-path="src/cached-feature.ts"][data-detail-from-revision="${parentCommitHash}"]`);
@@ -1078,9 +1066,7 @@ describe('CommitDetailPanel merge commits', () => {
 
     // 键入开启搜索，触发预取
     fireEvent.keyDown(window, { key: 'p' });
-    fireEvent.keyDown(window, { key: 'r' });
-    fireEvent.keyDown(window, { key: 'e' });
-    fireEvent.keyDown(window, { key: 'f' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'pref' } });
 
     // 验证触发了对尚未缓存父提交文件的预取
     expect(loadMergeParentFiles).toHaveBeenCalledWith('repo-1', mergeCommitWithParents.hash, parentCommitHash);
@@ -1088,7 +1074,7 @@ describe('CommitDetailPanel merge commits', () => {
 
     // 异步加载完成后，匹配项自动展开并高亮
     await waitFor(() => {
-      expect(screen.getByRole('search')).toHaveTextContent('1/1');
+      expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*1/);
       expect(screen.getByTitle(/prefetched-feature\.ts/)).toBeInTheDocument();
       const matchedRow = document.querySelector(`[data-detail-path="src/prefetched-feature.ts"][data-detail-from-revision="${parentCommitHash}"]`);
       expect(matchedRow).toBeInTheDocument();
@@ -1159,7 +1145,7 @@ describe('CommitDetailPanel merge commits', () => {
 
     // 继续键入其他字符，不应重复重试失败的预取
     fireEvent.keyDown(window, { key: 'b' });
-    fireEvent.keyDown(window, { key: 'c' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'bc' } });
     expect(callCount).toBe(1);
   });
 
@@ -1256,16 +1242,52 @@ describe('CommitDetailPanel merge commits', () => {
     const input = screen.getByRole('textbox', { name: 'Search files...' });
     expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: '.ts' } });
-    expect(screen.getByRole('search')).toHaveTextContent('1/2');
+    expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*2/);
     expect(screen.getByRole('button', { name: /alpha\.ts/ })).toBeInTheDocument();
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(screen.getByRole('search')).toHaveTextContent('2/2');
+    expect(screen.getByRole('search')).toHaveTextContent(/2\s*\/\s*2/);
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
-    expect(screen.getByRole('search')).toHaveTextContent('1/2');
+    expect(screen.getByRole('search')).toHaveTextContent(/1\s*\/\s*2/);
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(screen.queryByRole('search')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /alpha\.ts/ })).not.toBeInTheDocument();
     expect(collapse).toHaveFocus();
+  });
+
+  it.each(['sidebar', 'workspace'] as const)('preserves a match while refining the query and leaves toolbar Enter alone in %s', (variant) => {
+    useAppStore.setState({ snapshot, selectedCommit: directoryDetail, selectedCommits: [directoryCommit], selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: directoryDetail } });
+    render(<CommitDetailPanel variant={variant} onCollapse={vi.fn()} />);
+    const trigger = screen.getByTitle('Collapse all'); trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'f', metaKey: true });
+    const input = screen.getByRole('textbox', { name: 'Search files...' });
+    fireEvent.change(input, { target: { value: '.ts' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByRole('search')).toHaveTextContent(/2\s*\/\s*2/);
+    fireEvent.change(input, { target: { value: 'ts' } });
+    expect(screen.getByRole('search')).toHaveTextContent(/2\s*\/\s*2/);
+    trigger.focus();
+    const key = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    trigger.dispatchEvent(key);
+    expect(key.defaultPrevented).toBe(false);
+    expect(screen.getByRole('search')).toHaveTextContent(/2\s*\/\s*2/);
+    fireEvent.keyDown(trigger, { key: 'f', ctrlKey: true });
+    expect(input).toHaveValue(variant === 'workspace' ? 'ts' : '');
+    expect(input).toHaveFocus();
+  });
+
+  it('searches merge parent files in standalone details only after their group has been expanded', () => {
+    const parent = mergeDetail.mergeParentChanges![0];
+    const cacheKey = `repo-1\0${mergeCommit.hash}\0${parent.hash}`;
+    useAppStore.setState({ snapshot, selectedCommit: mergeDetail, selectedCommits: [mergeCommit], selectedCommitDetails: { [commitKey('repo-1', mergeCommit.hash)]: mergeDetail }, mergeParentFiles: { [cacheKey]: [{ path: 'src/unique-parent.ts', status: 'M', added: 1, removed: 0 }] } });
+    const { container } = render(<CommitDetailPanel variant="workspace" onCollapse={vi.fn()} />);
+    const trigger = screen.getByTitle('Collapse all'); trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'f', metaKey: true });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search files...' }), { target: { value: 'unique-parent' } });
+    expect(screen.getByRole('search')).toHaveTextContent('0/0');
+    expect(screen.getByTitle('Next match')).toBeDisabled();
+    fireEvent.click(container.querySelector('.merge-parent-row')!);
+    expect(screen.getByRole('search')).toHaveTextContent('1/1');
+    expect(screen.getByTitle(/unique-parent\.ts/)).toBeVisible();
   });
 
   it('uses the message expansion preference on subsequently selected commits', () => {

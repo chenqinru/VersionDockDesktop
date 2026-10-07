@@ -16,6 +16,8 @@ import { branchColor, headColor, isPrimaryBranch, tagColor } from './branchColor
 import { BranchRefBadge } from './BranchRefBadge';
 import { useFileSearch } from '../hooks/useFileSearch';
 import { useResizable } from '../hooks/useResizable';
+import { FileSearchHighlight as HighlightText } from './FileSearchHighlight';
+import { useFileSearchMatches } from '../hooks/useFileSearchMatches';
 import { FileSearchWidget } from './FileSearchWidget';
 
 type DetailTreeNode = { name: string; path: string; key: string; children: DetailTreeNode[]; file?: DetailFileTarget; fileCount: number };
@@ -25,24 +27,6 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date);
 }
 
-function HighlightText({ text, query }: { text: string; query?: string }) {
-  if (!query || !query.trim()) return <>{text}</>;
-  const trimmed = query.trim();
-  const lowerText = text.toLowerCase();
-  const lowerQuery = trimmed.toLowerCase();
-  const index = lowerText.indexOf(lowerQuery);
-  if (index === -1) return <>{text}</>;
-  const before = text.slice(0, index);
-  const match = text.slice(index, index + trimmed.length);
-  const after = text.slice(index + trimmed.length);
-  return (
-    <>
-      {before}
-      <mark className="search-match-highlight" style={{ background: 'var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.35))', color: 'inherit', borderRadius: 2 }}>{match}</mark>
-      {after}
-    </>
-  );
-}
 
 function refLabel(ref: string): string {
   return ref
@@ -983,16 +967,9 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
     setDirContextMenu({ position: { x: event.clientX, y: event.clientY }, files });
   }, []);
 
-  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
-  const matchedTargetsRef = useRef<DetailFileTarget[]>([]);
-
-  const handleNavigateMatch = useCallback((direction: -1 | 1) => {
-    const list = matchedTargetsRef.current;
-    if (list.length === 0) return;
-    setActiveMatchIndex((prev) => (prev + direction + list.length) % list.length);
-  }, []);
-
-  const speedSearch = useFileSearch('.commit-detail', handleNavigateMatch);
+  const navigateMatchesRef = useRef<(direction: -1 | 1) => void>(() => {});
+  const handleNavigateMatch = useCallback((direction: -1 | 1) => navigateMatchesRef.current(direction), []);
+  const speedSearch = useFileSearch('.commit-detail', handleNavigateMatch, { restartOnFind: variant === 'sidebar' });
   const queryLower = speedSearch.query.trim().toLowerCase();
 
   useEffect(() => {
@@ -1060,7 +1037,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
 
   // 当开启搜索且当前选中合并提交时，自动预取尚未加载文件列表的 parent
   useEffect(() => {
-    if (!speedSearch.isOpen || !isMergeCommit || !detail || mergeParentChanges.length === 0) return;
+    if (variant !== 'sidebar' || !speedSearch.isOpen || !isMergeCommit || !detail || mergeParentChanges.length === 0) return;
     for (const parentChange of mergeParentChanges) {
       const cacheKey = `${detail.commit.repoId}\0${detail.commit.hash}\0${parentChange.hash}`;
       const hasFiles = Boolean(mergeParentFiles[cacheKey]);
@@ -1078,6 +1055,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
       }
     }
   }, [
+    variant,
     speedSearch.isOpen,
     isMergeCommit,
     detail,
@@ -1091,6 +1069,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
     if (!isMergeCommit || !detail) return [];
     const results: DetailFileTarget[] = [];
     for (const parentChange of mergeParentChanges) {
+      if (variant === 'workspace' && !expandedParentHashes.has(parentChange.hash)) continue;
       const cacheKey = `${detail.commit.repoId}\0${detail.commit.hash}\0${parentChange.hash}`;
       const files = mergeParentFiles[cacheKey];
       if (!files) continue;
@@ -1110,17 +1089,20 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
       }
     }
     return results;
-  }, [isMergeCommit, detail, mergeParentChanges, mergeParentFiles]);
+  }, [isMergeCommit, detail, mergeParentChanges, mergeParentFiles, variant, expandedParentHashes]);
 
   const allSearchableTargets = useMemo(() => {
     return [...targets, ...cachedParentTargets];
   }, [targets, cachedParentTargets]);
 
-  const matchedTargets = useMemo(() => {
-    if (!queryLower) return [];
-    return allSearchableTargets.filter((target) => target.path.toLowerCase().includes(queryLower));
-  }, [allSearchableTargets, queryLower]);
-  matchedTargetsRef.current = matchedTargets;
+  const searchableFiles = useMemo(() => allSearchableTargets.map(target => ({
+    ...target, key: JSON.stringify([target.repoId, target.commitHash, target.fromRevision, target.path]),
+  })), [allSearchableTargets]);
+  const matches = useFileSearchMatches(searchableFiles, speedSearch.query, variant === 'workspace' ? 'key' : 'index');
+  useEffect(() => { navigateMatchesRef.current = matches.navigate; }, [matches.navigate]);
+  const matchedTargets = matches.matches;
+  const activeMatchIndex = matches.index;
+  const activeMatch = matches.active;
 
   const autoExpandedParentHashes = useMemo(() => {
     if (!queryLower) return new Set<string>();
@@ -1133,17 +1115,6 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
     return set;
   }, [queryLower, matchedTargets]);
 
-  useEffect(() => {
-    setActiveMatchIndex(0);
-  }, [queryLower]);
-
-  useEffect(() => {
-    if (activeMatchIndex >= matchedTargets.length && matchedTargets.length > 0) {
-      setActiveMatchIndex(0);
-    }
-  }, [matchedTargets.length, activeMatchIndex]);
-
-  const activeMatch = matchedTargets[activeMatchIndex];
   const targetsByRepo = useMemo(() => {
     const groups = new Map<string, DetailFileTarget[]>();
     for (const target of targets) groups.set(target.repoId, [...(groups.get(target.repoId) ?? []), target]);
@@ -1337,7 +1308,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
           <IconButton type="button" className={fileMode === 'tree' ? 'selected' : ''} title={t('Tree view')} onClick={() => { setFileMode('tree'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-tree" /></IconButton>
           <IconButton type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('Flat list')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-flat" /></IconButton>
         </div>
-        <FileSearchWidget query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length }} onNavigate={handleNavigateMatch} />
+        <FileSearchWidget variant={workspaceView ? 'files' : 'speed'} query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length }} onNavigate={handleNavigateMatch} />
         <div className="detail-files" ref={fileListRef}>
           {loading && !targets.length && <div className="detail-loading">{t('Loading files...')}</div>}
           {!loading && isMergeCommit && targets.length === 0 && (

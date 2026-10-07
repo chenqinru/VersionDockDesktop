@@ -7806,3 +7806,17 @@ button.notification-item-action-btn:focus-visible {
 .branch-tags-empty { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; font-size: 11px; color: var(--versiondock-muted); }
 [data-density="comfortable"] .branch-tag-create { border-radius: 6px; transition: background .12s ease; }
 [data-density="compact"] .branch-tag-create { border-radius: 0; }
+
+/* Match the plugin's editable speed search and temporary active-file highlight. */
+.search-match-highlight { background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, .35)); color: inherit; border-radius: 2px; }
+.changes-scroll { position: relative; }
+.changes-scroll > .file-speed-search { position: sticky; top: 6px; right: auto; align-self: flex-end; margin: 6px 18px -36px auto; width: max-content; max-width: calc(100% - 32px); }
+.file-speed-search { top: 6px; right: 18px; padding: 3px 6px; gap: 3px; max-width: calc(100% - 32px); box-sizing: border-box; }
+.file-search-input { display: flex; align-items: center; min-width: 0; }
+.file-speed-search .file-search-input { height: 24px; padding: 1px 5px; min-width: 60px; max-width: 220px; flex: 1 1 auto; border: 1px solid var(--versiondock-border); border-radius: 3px; background: var(--vscode-input-background, var(--versiondock-surface-alt)); }
+.file-speed-search .file-search-input > .codicon { font-size: 12px; margin-right: 2px; opacity: .65; }
+.file-speed-search input { width: 140px; flex: 1 1 auto; padding: 0 2px; border: 0; background: transparent; outline: none; }
+.file-speed-search .file-search-input:focus-within { border-color: var(--versiondock-focus); }
+.file-speed-search .speed-search-count { flex-shrink: 0; white-space: nowrap; font-size: 11px; }
+.file-speed-search .no-matches { color: var(--vscode-errorForeground, #f48771); opacity: 1; }
+.changes-scroll .speed-search-active { background: var(--versiondock-selection-background); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }

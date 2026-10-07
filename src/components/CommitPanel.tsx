@@ -31,8 +31,11 @@ import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { ProviderPanel } from './ProviderPanel';
 import { InvertSelectionIcon, SelectAllIcon, WarningConflictIcon } from './CustomIcons';
 import { performCommitSafetyCheck } from '../history/safetyCheck';
-import { useSpeedSearch } from '../hooks/useSpeedSearch';
-import { SpeedSearchIndicator } from './SpeedSearchIndicator';
+import { useFileSearch } from '../hooks/useFileSearch';
+import { useFileSearchMatches } from '../hooks/useFileSearchMatches';
+import { FileSearchWidget } from './FileSearchWidget';
+import { ChangeSearchContext, changeSearchKey, hasSearchMatch, useChangeSearch } from './changeSearch';
+import { ChangeSearchText } from './ChangeSearchText';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { SubmoduleDiffModal } from './SubmoduleDiffModal';
 import { VscodeChangesView } from './VscodeChangesView';
@@ -150,18 +153,22 @@ function flattenVisibleTree(nodes: FileTreeNode[], isExpanded: (path: string) =>
 function TreeRow({ node, depth, expanded, toggleExpanded, showDirectory, repo, selected, setFiles, onFile, onContext, onFolderContext, onRollback, onOpenFile, onResolve, onStage }: { node: FileTreeNode; depth: number; expanded: boolean; toggleExpanded: () => void; showDirectory: boolean; repo: RepositoryStatus; selected: Set<string>; setFiles: (repoId: string, paths: string[], value: boolean) => void; onFile: (file: FileChange) => void; onContext: (event: React.MouseEvent, file: FileChange) => void; onFolderContext: (event: React.MouseEvent, folderPath: string, files: FileChange[]) => void; onRollback: (files: FileChange[]) => void; onOpenFile: (file: FileChange) => void; onResolve: (file: FileChange) => void; onStage: (file: FileChange) => void }) {
   const { t } = useI18n();
   const highlight = useChangeRowHighlight(repo.meta.id, node.path);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (highlight.includes('speed-search-active')) rowRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlight]);
   if (!node.file) {
     const selectable = node.files.filter((file) => !file.isTruncated);
     const selectedCount = selectable.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
     const allSelected = selectable.length > 0 && selectedCount === selectable.length;
-    return <div className={`directory-row ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={toggleExpanded} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectable.length} onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={(event) => { event.stopPropagation(); toggleExpanded(); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span>{node.name}</span></button><span className="change-row-actions" onClick={(event) => event.stopPropagation()}><IconButton type="button" title={t('Rollback all files in folder')} onClick={() => onRollback(node.files)}><Codicon name="discard" /></IconButton></span><b>{node.files.length}</b></div>;
+    return <div className={`directory-row ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={toggleExpanded} onContextMenu={(event) => onFolderContext(event, node.path, node.files)}><SelectionCheckbox label={node.path} checked={allSelected} indeterminate={selectedCount > 0 && !allSelected} disabled={!selectable.length} onChange={() => setFiles(repo.meta.id, selectable.map((file) => file.path), !allSelected)} /><button title={node.path} onClick={(event) => { event.stopPropagation(); toggleExpanded(); }}><Codicon name={expanded ? 'chevron-down' : 'chevron-right'} /><FileIcon name={node.name} folder open={expanded} /><span><ChangeSearchText text={node.name} /></span></button><span className="change-row-actions" onClick={(event) => event.stopPropagation()}><IconButton type="button" title={t('Rollback all files in folder')} onClick={() => onRollback(node.files)}><Codicon name="discard" /></IconButton></span><b>{node.files.length}</b></div>;
   }
   const key = `${repo.meta.id}\0${node.file.path}`;
   const pathParts = node.file.path.split('/');
   const fileName = pathParts.pop() ?? node.name;
-  return <div className={`file-row status-${changeStatus(node.file.status, node.file.conflicted)} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
+  return <div ref={rowRef} data-change-search-key={changeSearchKey(repo.meta.id, node.file.path)} className={`file-row status-${changeStatus(node.file.status, node.file.conflicted)} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`} style={{ paddingLeft: 20 + depth * 20 }} onClick={() => onFile(node.file!)} onContextMenu={(event) => onContext(event, node.file!)}>
     <SelectionCheckbox label={node.file.path} checked={selected.has(key)} disabled={node.file.isTruncated} onChange={() => setFiles(repo.meta.id, [node.file!.path], !selected.has(key))} />
-    <button title={node.file.path} onClick={(event) => { event.stopPropagation(); onFile(node.file!); }}><FileIcon name={fileName} /><span className="file-name-group"><span className="file-name">{fileName}</span>{showDirectory && <small>{pathParts.join('/')}</small>}</span></button>
+    <button title={node.file.path} onClick={(event) => { event.stopPropagation(); onFile(node.file!); }}><FileIcon name={fileName} /><span className="file-name-group"><span className="file-name"><ChangeSearchText text={fileName} /></span>{showDirectory && <small><ChangeSearchText text={pathParts.join('/')} /></small>}</span></button>
     <ChangeRowActions repo={repo} file={node.file} onOpenFile={() => onOpenFile(node.file!)} onRollback={() => onRollback([node.file!])} onResolve={() => onResolve(node.file!)} onStage={() => onStage(node.file!)} />
     {node.file.isTruncated && <span title={node.file.truncationReason === 'depth-limit' ? t('Directory scan depth limit reached') : t('Directory scan item limit reached')}><Codicon name="warning" /></span>}{node.file.staged && <span className="staged-dot" />}<StatusMark file={node.file} />
   </div>;
@@ -174,7 +181,8 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
   const openWorkingChanges = useAppStore((state) => state.openWorkingChanges);
   const [localExpansion, setLocalExpansion] = useState<ExpansionCommand>(() => ({ sequence: 0, expanded: repo.files.length > 0 }));
   const previousFileCount = useRef(repo.files.length);
-  const expanded = localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded;
+  const search = useChangeSearch();
+  const expanded = hasSearchMatch(search, repo.meta.id, repo.files) || (localExpansion.sequence === expansion.sequence ? localExpansion.expanded : expansion.expanded);
   const [hovered, setHovered] = useState(false);
   useEffect(() => {
     if (previousFileCount.current === 0 && repo.files.length > 0) {
@@ -190,9 +198,9 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
     }
     return flattenVisibleTree(tree, (path) => {
       const local = folderExpansion[path];
-      return local?.sequence === expansion.sequence ? local.expanded : expansion.expanded;
+      return repo.files.some(file => file.path.startsWith(`${path}/`) && search.matchedKeys.has(changeSearchKey(repo.meta.id, file.path))) || (local?.sequence === expansion.sequence ? local.expanded : expansion.expanded);
     });
-  }, [expansion, folderExpansion, repo.files, tree, viewMode]);
+  }, [expansion, folderExpansion, repo.meta.id, repo.files, tree, viewMode, search]);
   const [filesContainer, setFilesContainer] = useState<HTMLDivElement | null>(null);
   const shouldVirtualize = flatItems.length > 40;
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -204,6 +212,11 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
     overscan: 10,
     enabled: shouldVirtualize,
   });
+  useEffect(() => {
+    if (!search.activeKey || !shouldVirtualize) return;
+    const index = flatItems.findIndex(item => item.node.file && changeSearchKey(repo.meta.id, item.node.file.path) === search.activeKey);
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' });
+  }, [search.activeKey, shouldVirtualize, flatItems, repo.meta.id, virtualizer]);
   const selectableFiles = repo.files.filter((file) => !file.isTruncated);
   const selectedCount = selectableFiles.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
   const allSelected = selectableFiles.length > 0 && selectedCount === selectableFiles.length;
@@ -305,7 +318,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
       </div>
       {expanded && !repo.files.length && <div className="repo-no-changes">{t('No changes')}</div>}
       {expanded && <div ref={setFilesContainer} className="virtual-change-files" style={shouldVirtualize ? { height: virtualizer.getTotalSize(), position: 'relative' } : undefined}>
-        {(shouldVirtualize ? virtualizer.getVirtualItems().map((virtualRow) => ({ item: flatItems[virtualRow.index], start: virtualRow.start - virtualizer.options.scrollMargin })) : flatItems.map((item) => ({ item, start: undefined }))).map(({ item, start }) => item && <div key={item.key} style={start === undefined ? undefined : { position: 'absolute', top: 0, left: 0, width: '100%', height: 22, transform: `translateY(${start}px)` }}><TreeRow node={item.node} depth={item.depth} expanded={item.node.file ? false : (folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded)} toggleExpanded={() => { if (item.node.file) return; onManualExpansionChange(); const current = folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded; setFolderExpansion((value) => ({ ...value, [item.node.path]: { sequence: expansion.sequence, expanded: !current } })); }} showDirectory={viewMode === 'list'} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onRollback={onRollback} onOpenFile={onOpenFile} onResolve={onResolve} onStage={onStage} onContext={onContext} onFolderContext={onFolderContext} /></div>)}
+        {(shouldVirtualize ? virtualizer.getVirtualItems().map((virtualRow) => ({ item: flatItems[virtualRow.index], start: virtualRow.start - virtualizer.options.scrollMargin })) : flatItems.map((item) => ({ item, start: undefined }))).map(({ item, start }) => item && <div key={item.key} style={start === undefined ? undefined : { position: 'absolute', top: 0, left: 0, width: '100%', height: 22, transform: `translateY(${start}px)` }}><TreeRow node={item.node} depth={item.depth} expanded={item.node.file ? false : hasSearchMatch(search, repo.meta.id, item.node.files) || (folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded)} toggleExpanded={() => { if (item.node.file) return; onManualExpansionChange(); const current = folderExpansion[item.node.path]?.sequence === expansion.sequence ? folderExpansion[item.node.path].expanded : expansion.expanded; setFolderExpansion((value) => ({ ...value, [item.node.path]: { sequence: expansion.sequence, expanded: !current } })); }} showDirectory={viewMode === 'list'} repo={repo} selected={selected} setFiles={setFiles} onFile={onFile} onRollback={onRollback} onOpenFile={onOpenFile} onResolve={onResolve} onStage={onStage} onContext={onContext} onFolderContext={onFolderContext} /></div>)}
       </div>}
     </section>
   );
@@ -397,7 +410,9 @@ export function CommitPanel() {
       void useAppStore.getState().loadSubtrees();
     }
   }, [setTab]);
-  const speedSearch = useSpeedSearch(tab, tab === 'changes');
+  const navigateSearchRef = useRef<(direction: -1 | 1) => void>(() => {});
+  const navigateSearch = useCallback((direction: -1 | 1) => navigateSearchRef.current(direction), []);
+  const speedSearch = useFileSearch('.commit-panel', navigateSearch, { enabled: tab === 'changes', restartOnFind: true, scopeKey: `${snapshot?.workspace.id}:${tab}:${changesDisplayMode}:${viewMode}` });
   const changelistCapability = useAppStore((state) => capabilityAvailable(state.bootstrap?.capabilities, 'changelist') && (state.snapshot?.repositories.some((repo) => capabilityAvailable(repo.capabilities, 'changelist', true)) ?? true));
   const changelistEnabled = changelistCapability && changesDisplayMode === 'changelists';
   const changelists = useAppStore((state) => state.changelists);
@@ -545,12 +560,34 @@ export function CommitPanel() {
     };
   }, [historyDialog, historyOpen]);
   const repos = snapshot?.repositories ?? emptyRepositories;
-  const speedNeedle = speedSearch.query.trim().toLocaleLowerCase();
-  const visibleChangeRepos = useMemo(() => !speedNeedle ? repos : repos.flatMap((repo) => {
-    if (`${repo.meta.name} ${repo.branch}`.toLocaleLowerCase().includes(speedNeedle)) return [repo];
-    const files = repo.files.filter((file) => file.path.toLocaleLowerCase().includes(speedNeedle));
-    return files.length ? [{ ...repo, files }] : [];
-  }), [repos, speedNeedle]);
+  const searchableChanges = useMemo(() => repos.flatMap(repo => {
+    const files = repo.files;
+    const item = (file: FileChange, staged?: boolean) => ({
+      repoId: repo.meta.id, file, path: file.path, staged,
+      name: file.path === '.' ? repo.meta.name : undefined,
+      key: changeSearchKey(repo.meta.id, file.path, staged),
+    });
+    return changesDisplayMode === 'vscode' && !changelistEnabled
+      ? [...files.filter(file => file.staged).map(file => item(file, true)),
+          ...files.filter(file => file.unstaged || file.status === 'untracked' || repo.meta.kind === 'svn').map(file => item(file, false))]
+      : files.map(file => item(file));
+  }), [repos, changesDisplayMode, changelistEnabled]);
+  const changeMatches = useFileSearchMatches(searchableChanges, speedSearch.query);
+  useEffect(() => { navigateSearchRef.current = changeMatches.navigate; }, [changeMatches.navigate]);
+  const searchContext = useMemo(() => ({
+    query: speedSearch.query, activeKey: changeMatches.active?.key,
+    matchedKeys: new Set(changeMatches.matches.map(file => file.key)),
+  }), [speedSearch.query, changeMatches.active, changeMatches.matches]);
+  const changesScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!changeMatches.active) return;
+    const { repoId, path, file, staged } = changeMatches.active;
+    useAppStore.setState({ selectedFile: { repoId, path, staged: staged ?? (file.staged && !file.unstaged) } });
+    const frame = requestAnimationFrame(() => {
+      changesScrollRef.current?.querySelector(`[data-change-search-key="${CSS.escape(changeMatches.active!.key)}"]`)?.scrollIntoView?.({ block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [changeMatches.active]);
   const totalChanges = repos.reduce((sum, repo) => sum + repo.files.length, 0);
   const gitRepos = useMemo(() => repos.filter((repo) => repo.meta.kind === 'git'), [repos]);
   const parentGitRepos = useMemo(() => gitRepos.filter((repo) => !repo.meta.isSubmodule), [gitRepos]);
@@ -1890,11 +1927,11 @@ export function CommitPanel() {
         ...(gitRepos.length ? [{ id: 'sync', label: t('Sync'), icon: 'sync', count: totalToSync, detail: t('{0} incoming, {1} outgoing', totalToSync - totalToPush, totalToPush) }] : []),
       ]} />
       {visitedTabs.has('changes') && (
-        <ChangeRowHighlightContext.Provider value={{ selected: selectedFile && !selectedFile.revision && !selectedFile.fromRevision ? selectedFile : undefined, context: context ? { repoId: context.repo.meta.id, path: context.path ?? '' } : undefined }}>
+        <ChangeSearchContext.Provider value={searchContext}><ChangeRowHighlightContext.Provider value={{ selected: selectedFile && !selectedFile.revision && !selectedFile.fromRevision ? selectedFile : undefined, context: context ? { repoId: context.repo.meta.id, path: context.path ?? '' } : undefined }}>
         <div className="commit-tab-content changes-tab-content" style={{ display: tab === 'changes' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
 
-      <div className="changes-scroll">
-        {tab === 'changes' && <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />}
+      <div className="changes-scroll" ref={changesScrollRef}>
+        {tab === 'changes' && <FileSearchWidget variant="speed" query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: changeMatches.matches.length ? changeMatches.index + 1 : 0, total: changeMatches.matches.length }} onNavigate={navigateSearch} />}
         {!repos.length && <div className="empty-state"><Codicon name="source-control" />{t('No repositories found')}</div>}
         {changelistEnabled ? (
           <ChangelistView
@@ -1931,7 +1968,7 @@ export function CommitPanel() {
           />
         ) : changesDisplayMode === 'vscode' ? (
           <VscodeChangesView
-            repos={visibleChangeRepos}
+            repos={repos}
             selected={selected}
             setFiles={setFiles}
             onFile={(repoId, file, staged) => {
@@ -1992,7 +2029,6 @@ export function CommitPanel() {
               const files = repo?.files.filter((f) => paths.includes(f.path)) ?? [];
               if (repo && files.length) void confirmDiscard(repo, files);
             }}
-            speedSearchQuery={speedSearch.query}
             selectedRepos={vscodeTargetRepoIds}
             onToggleRepoSelection={(repoId) => {
               setVscodeDeselectedRepos((prev) => {
@@ -2007,7 +2043,7 @@ export function CommitPanel() {
             }}
           />
         ) : (
-          visibleChangeRepos.map((repo) => {
+          repos.map((repo) => {
             const fileProps = {
               selected,
               setFiles,
@@ -2208,7 +2244,7 @@ export function CommitPanel() {
         </div>
       </div>
       </div>
-        </ChangeRowHighlightContext.Provider>
+        </ChangeRowHighlightContext.Provider></ChangeSearchContext.Provider>
       )}
       {visitedTabs.has('shelf') && (
         <div className="commit-tab-content shelf-tab-content" style={{ display: tab === 'shelf' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
