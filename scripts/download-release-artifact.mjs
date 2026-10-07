@@ -15,29 +15,34 @@ async function hashFile(file) {
 function downloadZip(endpoint, file) {
   const descriptor = fs.openSync(file, 'wx', 0o600);
   try {
-    execFileSync('gh', ['api', endpoint], { stdio: ['ignore', descriptor, 'pipe'] });
+    const debug = (process.env.GODEBUG || '').split(',').filter((value) => value && !value.startsWith('http2client='));
+    execFileSync('gh', ['api', endpoint], { stdio: ['ignore', descriptor, 'pipe'], env: { ...process.env, GODEBUG: [...debug, 'http2client=0'].join(',') } });
   } finally { fs.closeSync(descriptor); }
 }
 
 const extractCode = `
-import sys, zipfile, pathlib, stat
-archive, destination = sys.argv[1:]
+import sys, zipfile, pathlib, stat, re
+archive, destination, kind = sys.argv[1:]
 with zipfile.ZipFile(archive) as z:
     for entry in z.infolist():
         parts = pathlib.PurePosixPath(entry.filename).parts
         mode = entry.external_attr >> 16
         if not parts or entry.filename.startswith('/') or '\\\\' in entry.filename or '..' in parts or stat.S_ISLNK(mode):
             raise ValueError('Unsafe artifact archive entry')
-        if entry.is_dir():
-            if parts != ('assets',): raise ValueError('Unexpected artifact directory')
-        elif not (parts == ('release-notes.md',) or len(parts) == 2 and parts[0] == 'assets'):
-            raise ValueError('Unexpected artifact file')
+        if kind == 'prepared':
+            if entry.is_dir():
+                if parts != ('assets',): raise ValueError('Unexpected artifact directory')
+            elif not (parts == ('release-notes.md',) or len(parts) == 2 and parts[0] == 'assets'):
+                raise ValueError('Unexpected artifact file')
+        elif entry.is_dir() or len(parts) != 1 or not (parts[0] == 'release-artifact.json' or re.fullmatch(r'[A-Za-z0-9._-]+(?:\\.app\\.tar\\.gz|\\.dmg|\\.exe|\\.msi|\\.AppImage|\\.deb|\\.rpm)(?:\\.sig)?', parts[0])):
+            raise ValueError('Unexpected platform artifact file')
     z.extractall(destination)
 `;
 
 export async function downloadReleaseArtifact({ repository, runId, name, artifactId, cacheDir, outputDir, api = readGitHubApi, download = downloadZip, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   validateRepository(repository);
-  if (!/^[1-9]\d*$/.test(String(runId)) || !/^prepared-release-[a-f0-9]{40}$/.test(name)) throw new Error('Invalid release artifact identity');
+  if (!/^[1-9]\d*$/.test(String(runId)) || !/^(?:prepared-release-[a-f0-9]{40}|release-(?:macos|windows|linux))$/.test(name)) throw new Error('Invalid release artifact identity');
+  const prepared = name.startsWith('prepared-release-');
   const matches = [];
   for (let page = 1; ; page++) {
     const result = api(`repos/${repository}/actions/runs/${runId}/artifacts?per_page=100&page=${page}`);
@@ -83,8 +88,10 @@ export async function downloadReleaseArtifact({ repository, runId, name, artifac
   fs.mkdirSync(path.dirname(outputDir), { recursive: true });
   const staging = fs.mkdtempSync(path.join(path.dirname(outputDir), 'extract-release-'));
   try {
-    execFileSync('python3', ['-c', extractCode, archive, staging], { stdio: 'pipe' });
-    if (!fs.existsSync(path.join(staging, 'assets/latest.json')) || !fs.existsSync(path.join(staging, 'release-notes.md'))) throw new Error('Incomplete prepared release archive');
+    execFileSync('python3', ['-c', extractCode, archive, staging, prepared ? 'prepared' : 'platform'], { stdio: 'pipe' });
+    if (prepared
+      ? !fs.existsSync(path.join(staging, 'assets/latest.json')) || !fs.existsSync(path.join(staging, 'release-notes.md'))
+      : !fs.existsSync(path.join(staging, 'release-artifact.json'))) throw new Error('Incomplete release archive');
     if (fs.existsSync(outputDir)) fs.rmdirSync(outputDir);
     fs.renameSync(staging, outputDir);
   } finally { fs.rmSync(staging, { recursive: true, force: true }); }
@@ -96,12 +103,36 @@ export async function downloadReleaseArtifact({ repository, runId, name, artifac
   return { cached, artifactId: artifact.id, bytes: artifact.size_in_bytes };
 }
 
+export async function downloadPlatformArtifacts({ repository, runId, outputDir, cacheDir, api = readGitHubApi, download = downloadZip, sleep }) {
+  validateRepository(repository);
+  if (!/^[1-9]\d*$/.test(String(runId))) throw new Error('Invalid release run');
+  const artifacts = [];
+  for (let page = 1; ; page++) {
+    const result = api(`repos/${repository}/actions/runs/${runId}/artifacts?per_page=100&page=${page}`);
+    if (!Array.isArray(result.artifacts)) throw new Error('Invalid artifact list');
+    artifacts.push(...result.artifacts);
+    if (result.artifacts.length < 100) break;
+  }
+  const results = [];
+  for (const platform of ['macos', 'windows', 'linux']) {
+    const name = `release-${platform}`;
+    const matches = artifacts.filter((artifact) => artifact.name === name);
+    if (matches.length !== 1) throw new Error(`Expected one ${name} artifact from this run`);
+    results.push(await downloadReleaseArtifact({ repository, runId, name, artifactId: matches[0].id, cacheDir,
+      outputDir: path.join(outputDir, name), api: () => ({ artifacts: matches }), download, sleep }));
+  }
+  return results;
+}
+
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  const result = await downloadReleaseArtifact({
+  const options = {
     repository: process.env.GITHUB_REPOSITORY, runId: process.env.GITHUB_RUN_ID,
     name: `prepared-release-${process.env.RELEASE_SOURCE_SHA}`, outputDir: process.env.RELEASE_OUTPUT_DIR,
     artifactId: Number(process.env.RELEASE_ARTIFACT_ID),
     cacheDir: process.env.VERSIONDOCK_ARTIFACT_CACHE_DIR || path.join(os.homedir(), '.cache/versiondock-release-artifacts'),
-  });
-  console.log(`${result.cached ? 'Reused verified cached' : 'Downloaded and verified'} artifact ${result.artifactId} (${(result.bytes / 1024 / 1024).toFixed(1)} MiB)`);
+  };
+  const results = process.argv[2] === 'platforms'
+    ? await downloadPlatformArtifacts({ ...options, outputDir: process.env.RELEASE_ARTIFACTS_DIR })
+    : [await downloadReleaseArtifact(options)];
+  for (const result of results) console.log(`${result.cached ? 'Reused verified cached' : 'Downloaded and verified'} artifact ${result.artifactId} (${(result.bytes / 1024 / 1024).toFixed(1)} MiB)`);
 }

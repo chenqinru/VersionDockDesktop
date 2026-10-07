@@ -13,13 +13,36 @@ export function assertPublishable(version, latest, existing) {
   }
 }
 
-export function createGitHubClient({ run = execFileSync } = {}) {
+function retryableGitHubError(error) {
+  const message = `${error?.message ?? ''}\n${error?.stderr ?? ''}`;
+  return /\(HTTP (?:429|5\d\d)\)|REFUSED_STREAM|GOAWAY|stream error|unexpected EOF|connection (?:reset|closed)|failed to connect|Could not connect|Could not resolve|socket hang up|timed? ?out|timeout|TLS|GnuTLS|dial tcp|network error/i.test(message);
+}
+
+const sleepSync = (milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+
+export function createGitHubClient({ run = execFileSync, sleep = sleepSync, environment = process.env } = {}) {
+  // HTTP/2 upload streams may be refused by an intermediary. gh cannot replay
+  // a streamed request body on its own. Use HTTP/1.1 without weakening TLS.
+  const godebug = (environment.GODEBUG || '').split(',').filter((value) => value && !value.startsWith('http2client='));
+  const env = { ...environment, GODEBUG: [...godebug, 'http2client=0'].join(',') };
+  const command = (args, options) => run('gh', args, { ...options, env });
+  const retry = (operation) => {
+    for (let attempt = 0; ; attempt++) {
+      try { return operation(); } catch (error) {
+        if (attempt === 2 || !retryableGitHubError(error)) throw error;
+        sleep(1000 * 2 ** attempt);
+      }
+    }
+  };
   const api = (endpoint, method = 'GET', body) => {
     const args = ['api', endpoint, '--method', method, '--header', 'Cache-Control: no-cache'];
     if (body !== undefined) args.push('--input', '-');
-    const response = run('gh', args, {
+    const request = () => command(args, {
       input: body === undefined ? undefined : JSON.stringify(body), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
     });
+    // Only read requests are safe to retry blindly. Uploads reconcile remote
+    // state below; creating/publishing a release never repeats automatically.
+    const response = method === 'GET' ? retry(request) : request();
     return response.trim() ? JSON.parse(response) : null;
   };
   const optional = (endpoint) => {
@@ -58,25 +81,51 @@ export function createGitHubClient({ run = execFileSync } = {}) {
     upload: (draft, files) => {
       for (const file of files) {
         const name = path.basename(file);
-        const previous = draft.assets?.find((asset) => asset.name === name);
-        if (previous) api(`repos/${RELEASE_REPOSITORY}/releases/assets/${previous.id}`, 'DELETE');
-        // 刚创建的草稿标签可能尚未被索引，始终使用 POST 返回的 ID 上传。
-        run('gh', [
-          'api', `https://uploads.github.com/repos/${RELEASE_REPOSITORY}/releases/${draft.id}/assets?name=${encodeURIComponent(name)}`,
-          '--method', 'POST', '--header', 'Content-Type: application/octet-stream', '--input', file,
-        ], { stdio: 'pipe' });
+        const digest = `sha256:${fileHash(file)}`;
+        const readDraft = () => {
+          const current = api(`repos/${RELEASE_REPOSITORY}/releases/${draft.id}`);
+          if (!current?.draft || current.prerelease || current.id !== draft.id || current.tag_name !== draft.tag_name || !Array.isArray(current.assets)) {
+            throw new Error('草稿状态或标签发生变化，禁止修改已公开版本附件');
+          }
+          return current.assets.filter((asset) => asset.name === name);
+        };
+        const matches = (assets) => assets.length === 1 && assets[0].state === 'uploaded' && assets[0].size === fs.statSync(file).size && assets[0].digest === digest;
+        retry(() => {
+          // A failed response can follow a successful upload. Re-read the draft
+          // on every attempt, reuse complete matching assets, and remove only
+          // incomplete/mismatched draft assets before opening a fresh body.
+          const previous = readDraft();
+          if (matches(previous)) return;
+          for (const asset of previous) api(`repos/${RELEASE_REPOSITORY}/releases/assets/${asset.id}`, 'DELETE');
+          // Always upload by draft ID, even before its tag is indexed.
+          try {
+            command([
+              'api', `https://uploads.github.com/repos/${RELEASE_REPOSITORY}/releases/${draft.id}/assets?name=${encodeURIComponent(name)}`,
+              '--method', 'POST', '--header', 'Content-Type: application/octet-stream', '--input', file,
+            ], { stdio: 'pipe' });
+          } catch (error) {
+            if (retryableGitHubError(error) && matches(readDraft())) return;
+            throw error;
+          }
+        });
       }
     },
     download: (release, directory) => {
       for (const asset of release.assets) {
-        const file = fs.openSync(path.join(directory, asset.name), 'wx');
-        try {
-          run('gh', ['api', `repos/${RELEASE_REPOSITORY}/releases/assets/${asset.id}`, '--header', 'Accept: application/octet-stream'], {
-            stdio: ['ignore', file, 'pipe'],
-          });
-        } finally {
-          fs.closeSync(file);
-        }
+        const destination = path.join(directory, asset.name);
+        retry(() => {
+          const file = fs.openSync(destination, 'wx');
+          let completed = false;
+          try {
+            command(['api', `repos/${RELEASE_REPOSITORY}/releases/assets/${asset.id}`, '--header', 'Accept: application/octet-stream'], {
+              stdio: ['ignore', file, 'pipe'],
+            });
+            completed = true;
+          } finally {
+            fs.closeSync(file);
+            if (!completed) fs.rmSync(destination, { force: true });
+          }
+        });
       }
     },
     publish: (id) => api(`repos/${RELEASE_REPOSITORY}/releases/${id}`, 'PATCH', { draft: false, prerelease: false, make_latest: 'true' }),

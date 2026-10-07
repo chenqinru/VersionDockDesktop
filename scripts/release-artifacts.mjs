@@ -104,8 +104,11 @@ export function prepareRelease({ artifactsDir, outputDir, version, pubkey, now =
       }
       if (files.has(name)) throw new Error(`平台间产物重名：${name}`);
       const source = path.join(directory, name);
-      if (!fs.lstatSync(source).isFile() || fs.statSync(source).size === 0 || fileHash(source) !== sha256) {
-        throw new Error(`产物为空或校验失败：${name}`);
+      const stat = fs.lstatSync(source);
+      if (!stat.isFile()) throw new Error(`产物不是普通文件：${name}`);
+      const actualHash = stat.size > 0 ? fileHash(source) : '<empty>';
+      if (stat.size === 0 || actualHash !== sha256) {
+        throw new Error(`产物为空或校验失败：${name}（大小 ${stat.size} 字节；期望 SHA-256 ${sha256}；实际 ${actualHash}）`);
       }
       files.set(name, source);
     }

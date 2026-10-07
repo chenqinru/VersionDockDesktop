@@ -290,6 +290,21 @@ test('拒绝未登记文件、路径穿越及校验值不匹配的文件', () =>
   assert.throws(() => prepareRelease(corrupted), /校验失败/);
 });
 
+test('产物完整性错误明确输出大小和期望实际哈希，空文件仍拒绝发布', () => {
+  const corrupted = fixture();
+  const directory = path.join(corrupted.artifactsDir, 'release-macos');
+  const metadata = JSON.parse(fs.readFileSync(path.join(directory, 'release-artifact.json')));
+  const entry = metadata.files[0]; const file = path.join(directory, entry.name);
+  fs.writeFileSync(file, 'partial dmg');
+  assert.throws(() => prepareRelease(corrupted), (error) => {
+    assert.ok(error.message.includes(entry.sha256));
+    assert.ok(error.message.includes(fileHash(file)));
+    assert.ok(error.message.includes('大小 11 字节')); return true;
+  });
+  fs.writeFileSync(file, '');
+  assert.throws(() => prepareRelease(corrupted), /大小 0 字节.*<empty>/);
+});
+
 test('拒绝规范化后重名的构建文件', () => {
   const input = fixture();
   const a = path.join(input.root, 'same name.exe');
@@ -359,6 +374,125 @@ test('标签接口已返回 Release 时不额外遍历列表', () => {
   } });
   assert.equal(client.release('v0.1.1').id, 7);
   assert.equal(calls, 1);
+});
+
+function ghTransferFixture({ onUpload, onDownload } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'versiondock-gh-transfer-'));
+  temporaryDirectories.push(root);
+  const local = path.join(root, 'latest.json'); fs.writeFileSync(local, '{"version":"0.1.7"}');
+  const state = { draft: { id: 12, tag_name: 'v0.1.7', draft: true, assets: [] }, uploads: 0, deletes: 0, downloads: 0, waits: [], bytes: fs.readFileSync(local) };
+  const saveComplete = () => {
+    state.draft.assets = [{ id: 99, name: 'latest.json', state: 'uploaded', size: state.bytes.length, digest: `sha256:${fileHash(local)}` }];
+  };
+  const client = createGitHubClient({
+    environment: { GODEBUG: 'gctrace=1,http2client=1', https_proxy: 'http://127.0.0.1:7897' },
+    sleep: (milliseconds) => state.waits.push(milliseconds),
+    run: (_command, args, options) => {
+      assert.equal(options.env.GODEBUG, 'gctrace=1,http2client=0');
+      assert.equal(options.env.https_proxy, 'http://127.0.0.1:7897');
+      if (args[1].startsWith('https://uploads.github.com/')) {
+        state.uploads++;
+        assert.equal(args.at(-1), local);
+        if (onUpload) return onUpload(state, saveComplete);
+        saveComplete(); return '{}';
+      }
+      if (args.includes('DELETE')) {
+        state.deletes++; state.draft.assets = []; return '';
+      }
+      if (args.includes('Accept: application/octet-stream')) {
+        state.downloads++;
+        if (onDownload) return onDownload(state, options.stdio[1]);
+        fs.writeSync(options.stdio[1], state.bytes); return '';
+      }
+      assert.ok(args[1].endsWith('/releases/12'));
+      return JSON.stringify(state.draft);
+    },
+  });
+  const destination = path.join(root, 'downloads'); fs.mkdirSync(destination);
+  return { local, destination, state, client, saveComplete };
+}
+
+function refusedStream() {
+  const error = new Error('http2: Transport: cannot retry after Request.Body was written');
+  error.stderr = Buffer.from('stream error: stream ID 1; REFUSED_STREAM; received from peer');
+  return error;
+}
+
+test('HTTP/2 上传失败时清理残留草稿附件并打开新请求体重试，远程哈希仍可校验', () => {
+  const fixture = ghTransferFixture({ onUpload: (state, save) => {
+    if (state.uploads === 1) {
+      state.draft.assets = [{ id: 88, name: 'latest.json', state: 'starter', size: 0 }]; throw refusedStream();
+    }
+    save(); return '{}';
+  } });
+  fixture.client.upload(fixture.state.draft, [fixture.local]);
+  assert.equal(fixture.state.uploads, 2); assert.equal(fixture.state.deletes, 1);
+  assert.deepEqual(fixture.state.waits, [1000]);
+  fixture.client.download(fixture.state.draft, fixture.destination);
+  assert.equal(fileHash(path.join(fixture.destination, 'latest.json')), fileHash(fixture.local));
+});
+
+test('已完整上传或上传成功后响应丢失时按 GitHub digest 复用，不重复上传', () => {
+  const cached = ghTransferFixture(); cached.saveComplete();
+  cached.client.upload(cached.state.draft, [cached.local]);
+  assert.equal(cached.state.uploads, 0); assert.equal(cached.state.deletes, 0);
+  const lostResponse = ghTransferFixture({ onUpload: (_state, save) => { save(); throw refusedStream(); } });
+  lostResponse.client.upload(lostResponse.state.draft, [lostResponse.local]);
+  assert.equal(lostResponse.state.uploads, 1); assert.equal(lostResponse.state.deletes, 0);
+  assert.deepEqual(lostResponse.state.waits, []);
+});
+
+test('上传最后一次响应丢失仍确认远程结果，持续失败只尝试三次', () => {
+  const recovered = ghTransferFixture({ onUpload: (state, save) => {
+    if (state.uploads === 3) save(); throw refusedStream();
+  } });
+  recovered.client.upload(recovered.state.draft, [recovered.local]);
+  assert.equal(recovered.state.uploads, 3);
+  const failed = ghTransferFixture({ onUpload: () => { throw refusedStream(); } });
+  assert.throws(() => failed.client.upload(failed.state.draft, [failed.local]), /cannot retry/);
+  assert.equal(failed.state.uploads, 3); assert.deepEqual(failed.state.waits, [1000, 2000]);
+});
+
+test('草稿同名文件缺少或不匹配 digest 时重传，避免只按文件大小认定一致', () => {
+  for (const digest of [undefined, `sha256:${'0'.repeat(64)}`]) {
+    const fixture = ghTransferFixture(); fixture.saveComplete(); fixture.state.draft.assets[0].digest = digest;
+    fixture.client.upload(fixture.state.draft, [fixture.local]);
+    assert.equal(fixture.state.uploads, 1); assert.equal(fixture.state.deletes, 1);
+  }
+});
+
+test('上传中草稿变为公开或权限失败时停止，不删除附件或继续网络重试', () => {
+  const published = ghTransferFixture({ onUpload: (state) => { state.draft.draft = false; throw refusedStream(); } });
+  assert.throws(() => published.client.upload(published.state.draft, [published.local]), /禁止修改已公开/);
+  assert.equal(published.state.uploads, 1); assert.equal(published.state.deletes, 0);
+  assert.deepEqual(published.state.waits, []);
+  const forbidden = ghTransferFixture({ onUpload: () => {
+    const error = new Error('forbidden'); error.stderr = Buffer.from('gh: Forbidden (HTTP 403)'); throw error;
+  } });
+  assert.throws(() => forbidden.client.upload(forbidden.state.draft, [forbidden.local]), /forbidden/);
+  assert.equal(forbidden.state.uploads, 1); assert.deepEqual(forbidden.state.waits, []);
+});
+
+test('远程附件下载中断后清除部分文件并从头重试，不拼接残留内容', () => {
+  const fixture = ghTransferFixture({ onDownload: (state, descriptor) => {
+    if (state.downloads === 1) { fs.writeSync(descriptor, 'partial'); throw refusedStream(); }
+    fs.writeSync(descriptor, state.bytes); return '';
+  } });
+  fixture.saveComplete(); fixture.client.download(fixture.state.draft, fixture.destination);
+  assert.equal(fixture.state.downloads, 2); assert.deepEqual(fixture.state.waits, [1000]);
+  assert.equal(fileHash(path.join(fixture.destination, 'latest.json')), fileHash(fixture.local));
+});
+
+test('API 读取可以重试 503，创建或公开 Release 的写请求不盲目重试', () => {
+  for (const method of ['GET', 'POST', 'PATCH']) {
+    let calls = 0; const waits = [];
+    const client = createGitHubClient({ sleep: (ms) => waits.push(ms), run: () => {
+      calls++; const error = new Error('service unavailable'); error.stderr = Buffer.from('gh: HTTP 503 (HTTP 503)'); throw error;
+    } });
+    assert.throws(() => method === 'GET' ? client.repository() : method === 'POST' ? client.create({}) : client.publish(12), /service unavailable/);
+    assert.equal(calls, method === 'GET' ? 3 : 1);
+    assert.deepEqual(waits, method === 'GET' ? [1000, 2000] : []);
+  }
 });
 
 test('上传全部附件并核对远程内容后才公开，已公开版本重试失败', () => {

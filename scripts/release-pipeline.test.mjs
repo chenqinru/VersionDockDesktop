@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { findReusableCi, verifyReusableCi } from './reuse-release-ci.mjs';
-import { downloadReleaseArtifact } from './download-release-artifact.mjs';
+import { downloadReleaseArtifact, downloadPlatformArtifacts } from './download-release-artifact.mjs';
 import { mergeMacosBinaries, stageMacosBinary } from './macos-release-binaries.mjs';
 
 const directories = [];
@@ -108,6 +108,41 @@ test('缓存身份相同但 ZIP 含路径穿越或非预期文件时拒绝解压
     assert.equal(fs.existsSync(fixture.options.outputDir), false);
     assert.equal(fs.existsSync(path.join(fixture.root, 'outside')), false);
   }
+});
+
+test('平台安装包只在完整 ZIP digest 通过后解压，三平台身份及 metadata 必须齐全', async () => {
+  const fixtures = ['macos', 'windows', 'linux'].map((platform, index) => {
+    const name = platform === 'macos' ? 'VersionDock.Desktop_0.1.7_universal.dmg' : platform === 'windows' ? 'VersionDock.exe' : 'VersionDock.AppImage';
+    const fixture = archiveFixture({ 'release-artifact.json': JSON.stringify({ platform, version: '0.1.7', files: [] }), [name]: 'complete payload' });
+    fixture.artifact.id += index;
+    fixture.artifact.name = `release-${platform}`;
+    fixture.options.name = fixture.artifact.name;
+    fixture.options.artifactId = fixture.artifact.id;
+    return { fixture, platform, name };
+  });
+  const root = temporary();
+  const artifacts = fixtures.map(({ fixture }) => fixture.artifact);
+  const results = await downloadPlatformArtifacts({
+    repository, runId: 42, outputDir: path.join(root, 'artifacts'), cacheDir: path.join(root, 'cache'),
+    api: () => ({ artifacts }), sleep: async () => {},
+    download: (url, file) => {
+      const index = fixtures.findIndex(({ fixture }) => url.endsWith(`/${fixture.artifact.id}/zip`));
+      assert.ok(index >= 0); fixtures[index].fixture.options.download(url, file);
+    },
+  });
+  assert.equal(results.length, 3);
+  for (const { platform, name } of fixtures) {
+    assert.equal(fs.readFileSync(path.join(root, 'artifacts', `release-${platform}`, name), 'utf8'), 'complete payload');
+  }
+  const missing = temporary();
+  await assert.rejects(downloadPlatformArtifacts({ repository, runId: 42, outputDir: missing, cacheDir: path.join(root, 'cache'), api: () => ({ artifacts: [] }) }), /Expected one release-macos/);
+});
+
+test('损坏的 macOS 平台 ZIP 不解压部分 DMG，也不留有效缓存', async () => {
+  const fixture = archiveFixture({ 'release-artifact.json': '{}', 'VersionDock.dmg': 'complete' });
+  fixture.artifact.name = 'release-macos'; fixture.options.name = 'release-macos';
+  await assert.rejects(downloadReleaseArtifact({ ...fixture.options, download: (_url, file) => fs.writeFileSync(file, 'partial archive') }), /SHA-256/);
+  assert.equal(fs.existsSync(fixture.options.outputDir), false);
 });
 
 function macosFixture() {
