@@ -10,6 +10,41 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { gitlabReleaseConfig, prepareUpdaterConfig } from './gitlab-release-config.mjs';
 import { createGitLabClient, publishGitLabRelease } from './publish-gitlab-release.mjs';
+import { releaseNotesForVersion, validateReleaseNotes } from './release-notes.mjs';
+
+test('发布说明匹配指定版本，不借用其他版本内容', () => {
+  const records = [
+    { version: '0.1.2', date: '2026-10-07', highlights: { 'zh-CN': ['修复 SVN 中文路径'], en: ['Fix SVN Unicode paths'] } },
+    { version: '0.1.1', date: '2026-10-06', highlights: { 'zh-CN': ['提供签名更新'], en: ['Provide signed updates'] } },
+  ];
+  assert.equal(releaseNotesForVersion('0.1.1', records), 'VersionDock Desktop v0.1.1\n\n- 提供签名更新');
+  assert.match(releaseNotesForVersion('0.1.2', records), /修复 SVN 中文路径/);
+  assert.throws(() => releaseNotesForVersion('0.1.3', records), /缺少 v0.1.3/);
+});
+
+test('公开更新记录拒绝重复版本、无效日期和缺少翻译的内容', () => {
+  const entry = { version: '0.1.1', date: '2026-10-06', highlights: { 'zh-CN': ['修复检出'], en: ['Fix checkout'] } };
+  assert.throws(() => validateReleaseNotes([entry, entry]), /版本重复/);
+  assert.throws(() => validateReleaseNotes([{ ...entry, date: '2026-02-30' }]), /日期无效/);
+  assert.throws(() => validateReleaseNotes([{ ...entry, highlights: { 'zh-CN': ['修复检出'] } }]), /en/);
+  assert.throws(() => validateReleaseNotes([{ ...entry, highlights: { ...entry.highlights, en: [' '] } }]), /en/);
+});
+
+test('清单与公开 Release 共用版本更新内容，缺失说明时不准备发布产物', () => {
+  const input = fixture();
+  const releaseNotes = [{ version: input.version, date: '2026-10-06',
+    highlights: { 'zh-CN': ['修复真实检出问题', '优化更新重试'], en: ['Fix checkout', 'Improve update retries'] } }];
+  const manifest = prepareRelease({ ...input, releaseNotes });
+  assert.match(manifest.notes, /修复真实检出问题/);
+  assert.doesNotMatch(manifest.notes, /请根据操作系统选择安装包/);
+  assert.equal(fs.readFileSync(path.join(input.outputDir, 'release-notes.md'), 'utf8').trim(), manifest.notes);
+  const { state, github } = githubFixture();
+  publishRelease({ directory: input.outputDir, version: input.version, github });
+  assert.equal(state.draft.body.trim(), manifest.notes);
+  const missing = fixture();
+  assert.throws(() => prepareRelease({ ...missing, releaseNotes: [{ ...releaseNotes[0], version: '0.1.2' }] }), /缺少/);
+  assert.equal(fs.existsSync(missing.outputDir), false);
+});
 
 test('GitLab 构建配置使用固定清单地址且只注入公开地址', () => {
   assert.equal(gitlabReleaseConfig({}), null);
@@ -73,6 +108,7 @@ test('真实 HTTP 上传签名附件，匿名校验完成后提交固定清单�
   const input = fixture(); prepareRelease(input);
   const { state, config, client } = await gitlabServer(t);
   const result = await publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client });
+  assert.equal(result.notes, JSON.parse(fs.readFileSync(path.join(input.outputDir, 'assets/latest.json'), 'utf8')).notes);
   assert.equal(state.packages.size, 6); assert.equal(state.commits, 1); assert.equal(state.authenticatedReads, 0);
   assert.ok(Object.values(result.platforms).every(({ url }) => url.includes('/packages/generic/')));
   assert.ok(!state.latest.includes('pipeline-only-token'));

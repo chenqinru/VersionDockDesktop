@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { releaseNotesForVersion } from './release-notes.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,6 +33,8 @@ const packageJson = readJson('package.json');
 const packageLock = readJson('package-lock.json');
 const tauriConfig = readJson('src-tauri/tauri.conf.json');
 const expectedVersion = packageJson.version;
+// Fail before expensive builds when a new version has no public-facing update notes.
+releaseNotesForVersion(expectedVersion);
 const versions = new Map([
   ['package.json', expectedVersion],
   ['package-lock.json', packageLock.version],

@@ -1,0 +1,104 @@
+[
+  {
+    "version": "0.1.5",
+    "date": "2026-10-07",
+    "highlights": {
+      "zh-CN": [
+        "启动时、每 15 分钟及网络恢复时自动检查新版本。",
+        "优化更新下载重试与错误提示，下载失败时可切换到公司 GitLab 镜像。",
+        "状态栏直接显示更新操作，下载完成后提示重启安装。",
+        "改善 Windows 上 Git 工具的识别，减少已安装但无法使用的问题。"
+      ],
+      "en": [
+        "Check for updates on startup, every 15 minutes and when the network reconnects.",
+        "Improve download retries and errors, with a company GitLab mirror available when downloads fail.",
+        "Show update actions in the status bar and prompt to restart after downloading.",
+        "Improve Git detection on Windows when Git is installed but cannot be found."
+      ]
+    }
+  },
+  {
+    "version": "0.1.4",
+    "date": "2026-10-07",
+    "highlights": {
+      "zh-CN": [
+        "修复 macOS 从 Finder 启动时无法识别 Homebrew 或 MacPorts 安装的 SVN，导致检出按钮禁用的问题。",
+        "修复 SVN 在缺少语言环境时处理中文路径产生乱码的问题。",
+        "最近工作区中此前不可用的路径可点击重试，并显示原因提示。"
+      ],
+      "en": [
+        "Detect SVN installed through Homebrew or MacPorts when launched from Finder, restoring the checkout action.",
+        "Keep SVN paths in UTF-8 when the launch environment has no locale configured.",
+        "Allow retrying previously unavailable recent workspaces and explain their status."
+      ]
+    }
+  },
+  {
+    "version": "0.1.3",
+    "date": "2026-10-06",
+    "highlights": {
+      "zh-CN": [
+        "状态栏更新按钮直接开始下载和安装，更新完成后提示重启。",
+        "统一欢迎页、设置及关于窗口的版本显示。",
+        "改善更新按钮在浅色和深色主题下的可读性及中文翻译。",
+        "优化发布依赖缓存与桌面程序链接，减少重复构建。"
+      ],
+      "en": [
+        "Download and install directly from the status bar, with a restart prompt when ready.",
+        "Use consistent version information across the welcome page, settings and About dialog.",
+        "Improve update button contrast in light and dark themes and Chinese translations.",
+        "Reuse release dependency caches and reduce unnecessary desktop linking."
+      ]
+    }
+  },
+  {
+    "version": "0.1.2",
+    "date": "2026-10-06",
+    "highlights": {
+      "zh-CN": [
+        "Windows 后台 Git 和 SVN 命令不再弹出终端窗口。"
+      ],
+      "en": [
+        "Run background Git and SVN commands on Windows without opening terminal windows."
+      ]
+    }
+  },
+  {
+    "version": "0.1.1",
+    "date": "2026-10-06",
+    "highlights": {
+      "zh-CN": [
+        "通过公开下载仓库提供 macOS 通用版、Windows x64 和 Linux x64 安装包及签名更新包。",
+        "修复文本差异中的二进制标记被误判为二进制文件的问题。"
+      ],
+      "en": [
+        "Distribute macOS universal, Windows x64 and Linux x64 installers and signed updates through the public download repository.",
+        "Keep binary-marker text in source diffs from being mistaken for binary files."
+      ]
+    }
+  },
+  {
+    "version": "0.1.0",
+    "date": "2026-08-28",
+    "highlights": {
+      "zh-CN": [
+        "🚀 VersionDock Desktop 首次发布",
+        "✨ 统一的 Git 与 Subversion（SVN）工作台",
+        "📑 多标签工作区管理，支持跨窗口拖放",
+        "🔍 可视化三方合并冲突编辑器与差异查看器",
+        "📦 原生搁置与暂存管理",
+        "🔄 自动获取、后台仓库扫描与智能状态栏",
+        "🎨 浅色、深色及跟随系统主题，可自定义界面字号"
+      ],
+      "en": [
+        "🚀 Initial release of VersionDock Desktop",
+        "✨ Unified workbench for Git and Subversion (SVN)",
+        "📑 Multi-tab workspace management with cross-window drag & drop",
+        "🔍 Visual 3-way Merge Conflict Editor and Diff Viewer",
+        "📦 Native Shelve and Stash management",
+        "🔄 Auto-fetch, background repository scanning and smart status bar",
+        "🎨 Light / Dark / System theme and customizable UI font sizes"
+      ]
+    }
+  }
+]

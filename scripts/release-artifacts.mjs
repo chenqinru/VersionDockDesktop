@@ -4,6 +4,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { releaseNotesForVersion } from './release-notes.mjs';
 
 export const RELEASE_REPOSITORY = 'chenqinru/VersionDockDesktop-Releases';
 export const RELEASE_PLATFORMS = ['macos', 'windows', 'linux'];
@@ -83,8 +84,9 @@ export function verifySignature(file, signature, pubkey) {
   }
 }
 
-export function prepareRelease({ artifactsDir, outputDir, version, pubkey, now = new Date() }) {
+export function prepareRelease({ artifactsDir, outputDir, version, pubkey, now = new Date(), releaseNotes }) {
   validateVersion(version);
+  const notes = releaseNotesForVersion(version, releaseNotes);
   const files = new Map();
   const platformFiles = new Map();
   for (const platform of RELEASE_PLATFORMS) {
@@ -120,7 +122,6 @@ export function prepareRelease({ artifactsDir, outputDir, version, pubkey, now =
     verifySignature(packageFile, fs.readFileSync(source, 'utf8').trim(), pubkey);
   }
 
-  const notes = `VersionDock Desktop v${version}\n\n支持 macOS（Apple Silicon / Intel）、Windows x64 和 Linux x64。请根据操作系统选择安装包，已安装新版客户端可在应用内更新。`;
   const manifest = { version, notes, pub_date: now.toISOString(), platforms: {} };
   for (const [platform, suffix, targets, required] of [
     ['macos', '.app.tar.gz', ['darwin-aarch64', 'darwin-x86_64'], true],

@@ -2,11 +2,13 @@ import { DialogSurface } from './DialogSurface';
 import { confirmDialog } from './dialogService';
 import { IconButton } from './IconButton';
 import { useRef, useState } from 'react';
+import Markdown from 'react-markdown';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { useAppUpdateStore } from '../store/appUpdateStore';
 import { APP_CURRENT_VERSION } from '../version';
+import releaseHistory from '../release-notes.json';
 import {
   AUTHOR_GITHUB_URL,
   AUTHOR_NAME,
@@ -26,24 +28,8 @@ interface AboutDialogProps {
   initialTab?: 'about' | 'changelog';
 }
 
-const BUILTIN_CHANGELOG = [
-  {
-    version: '0.1.0',
-    date: '2026-08-28',
-    highlights: [
-      '🚀 Initial release of VersionDock Desktop',
-      '✨ Unified workbench for Git and Subversion (SVN)',
-      '📑 Multi-tab workspace management with cross-window drag & drop',
-      '🔍 Visual 3-way Merge Conflict Editor and Diff Viewer',
-      '📦 Native Shelve and Stash management',
-      '🔄 Auto-fetch, background repository scanning and smart status bar',
-      '🎨 Light / Dark / System theme and customizable UI font sizes',
-    ],
-  },
-];
-
 export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const snapshot = useAppStore((state) => state.snapshot);
   const settings = useAppStore((state) => state.bootstrap?.state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
@@ -233,10 +219,15 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                         )}
                       </div>
 
-                      {checkResult.releaseNotes && (
+                      {checkResult.releaseNotes ? (
                         <div className="update-notes-preview">
-                          <pre>{checkResult.releaseNotes}</pre>
+                          <Markdown components={{ a: ({ href, children }) => <a href={href} onClick={(event) => {
+                            event.preventDefault();
+                            if (href && /^https?:\/\//i.test(href)) void openExternalLink(href);
+                          }}>{children}</a>, img: () => null }}>{checkResult.releaseNotes}</Markdown>
                         </div>
+                      ) : (
+                        <p className="about-muted">{t('No release notes provided for this version.')}</p>
                       )}
 
                       {downloading && downloadProgress && (
@@ -451,15 +442,15 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
               </div>
 
               <div className="changelog-list">
-                {BUILTIN_CHANGELOG.map((item) => (
+                {releaseHistory.map((item) => (
                   <div key={item.version} className="changelog-entry">
                     <div className="changelog-entry-header">
                       <strong className="changelog-ver">v{item.version}</strong>
                       <span className="changelog-date">{item.date}</span>
                     </div>
                     <ul className="changelog-highlights">
-                      {item.highlights.map((highlight, idx) => (
-                        <li key={idx}>{t(highlight)}</li>
+                      {item.highlights[language].map((highlight, idx) => (
+                        <li key={idx}>{highlight}</li>
                       ))}
                     </ul>
                   </div>

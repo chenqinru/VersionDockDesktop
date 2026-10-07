@@ -5590,6 +5590,30 @@ button.notification-item-action-btn:focus-visible {
   border-radius: 4px;
   font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
   color: var(--versiondock-text);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.update-notes-preview p {
+  margin: 0 0 6px;
+}
+
+.update-notes-preview :is(ul, ol) {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.update-notes-preview li + li {
+  margin-top: 4px;
+}
+
+.update-notes-preview :is(h1, h2, h3, h4, h5, h6) {
+  margin: 6px 0;
+  font-size: inherit;
+}
+
+.update-notes-preview a {
+  color: var(--versiondock-accent);
 }
 
 .update-notes-preview pre {

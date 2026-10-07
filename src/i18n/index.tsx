@@ -4,6 +4,7 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'No release notes provided for this version.': 'No release notes provided for this version.',
   'Update check failed — click to retry': 'Update check failed — click to retry',
   'SVN command-line client was not detected. Install SVN and restart the app.': 'SVN command-line client was not detected. Install SVN and restart the app.',
   'Path was unavailable — click to retry': 'Path was unavailable — click to retry',
@@ -1286,6 +1287,7 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'No release notes provided for this version.': '此版本尚未提供更新说明。',
   'Update check failed — click to retry': '检查更新失败，点击重试',
   'SVN command-line client was not detected. Install SVN and restart the app.': '未检测到 SVN 命令行客户端，请安装 SVN 后重启应用。',
   'Path was unavailable — click to retry': '路径此前不可用，点击重试',

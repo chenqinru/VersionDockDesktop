@@ -213,6 +213,7 @@ async function main() {
   updatedFiles.forEach((file) => {
     console.log(`  ${colors.cyan}• ${file}${colors.reset}`);
   });
+  console.log(`\n${colors.yellow}请在 src/release-notes.json 添加 ${newVersion} 的公开更新内容（中英文）。${colors.reset}`);
 
   console.log(`\n${colors.gray}接下来你可以运行:${colors.reset}`);
   console.log(`  ${colors.blue}npm run check${colors.reset}        ${colors.gray}# 执行完整静态检查与测试${colors.reset}`);

@@ -6,6 +6,7 @@ import { useAppUpdateStore } from '../store/appUpdateStore';
 import { AboutDialog } from './AboutDialog';
 import * as updaterService from '../services/updater';
 import { version } from '../../package.json';
+import releaseHistory from '../release-notes.json';
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
   check: vi.fn().mockResolvedValue(null),
@@ -46,6 +47,40 @@ afterEach(() => {
 });
 
 describe('AboutDialog', () => {
+  it.each(['en', 'zh-CN'] as const)('shows versioned release history in %s', (language) => {
+    const view = renderAboutDialog(vi.fn(), 'changelog', language);
+    const entries = view.baseElement.querySelectorAll('.changelog-entry');
+    expect(entries[0].querySelector('.changelog-ver')).toHaveTextContent(`v${releaseHistory[0].version}`);
+    const current = releaseHistory.find((entry) => entry.version === version)!;
+    expect(screen.getByText(current.highlights[language][0])).toBeInTheDocument();
+    const otherLanguage = language === 'en' ? 'zh-CN' : 'en';
+    expect(screen.queryByText(current.highlights[otherLanguage][0])).not.toBeInTheDocument();
+  });
+
+  it('renders the available version notes as Markdown and opens release links externally', async () => {
+    vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
+      available: true, currentVersion: version, latestVersion: '0.2.0',
+      releaseNotes: '## New in 0.2.0\n\n- Fix **SVN paths**\n- Improve download retries\n\n[Details](https://example.test/releases/v0.2.0)',
+    });
+    const open = vi.spyOn(updaterService, 'openExternalLink').mockResolvedValue(undefined);
+    renderAboutDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Check for Updates/i }));
+    expect(await screen.findByRole('heading', { name: 'New in 0.2.0' })).toBeInTheDocument();
+    expect(screen.getByText('SVN paths').tagName).toBe('STRONG');
+    expect(screen.getByText('Improve download retries').tagName).toBe('LI');
+    fireEvent.click(screen.getByRole('link', { name: 'Details' }));
+    expect(open).toHaveBeenCalledWith('https://example.test/releases/v0.2.0');
+  });
+
+  it('explains missing notes instead of showing a fixed product introduction', async () => {
+    vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
+      available: true, currentVersion: version, latestVersion: '0.2.0',
+    });
+    renderAboutDialog(vi.fn(), 'about', 'zh-CN');
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    expect(await screen.findByText('此版本尚未提供更新说明。')).toBeInTheDocument();
+  });
+
   it('renders Chinese about, update actions and built-in release notes without an external language bundle', async () => {
     vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
       available: true, currentVersion: version, latestVersion: '0.2.0',
