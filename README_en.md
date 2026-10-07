@@ -100,6 +100,7 @@ Platform accounts authorize platform API calls. Git Fetch / Pull / Push continue
 | Native build dependencies | macOS: Xcode Command Line Tools; Windows: MSVC Build Tools and WebView2; Linux: WebKitGTK 4.1, AppIndicator, and other Tauri dependencies |
 | Git / SVN | Real command-line tools for repository operations and integration tests, with the versions listed above |
 | minisign | Used by release tests and update signature verification; install with `brew install minisign` on macOS or `sudo apt-get install minisign` on Ubuntu |
+| curl | Used by GitCode attachment uploads and release regression tests; included with macOS, or install with `sudo apt-get install curl` on Ubuntu |
 
 See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for platform dependencies and the [CI workflow](.github/workflows/ci.yml) for installation steps used in CI.
 

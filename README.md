@@ -100,6 +100,7 @@ GitHub 支持 Personal Access Token，以及构建配置允许时的 OAuth Devic
 | 原生构建依赖 | macOS：Xcode Command Line Tools；Windows：MSVC Build Tools 与 WebView2；Linux：WebKitGTK 4.1、AppIndicator 等 Tauri 依赖 |
 | Git / SVN | 仓库操作与集成测试使用真实命令行工具，版本要求同上 |
 | minisign | 发布测试与更新包签名校验使用；macOS 可用 `brew install minisign`，Ubuntu 可用 `sudo apt-get install minisign` |
+| curl | GitCode 附件上传及发布回归测试使用；macOS 内置，Ubuntu 可用 `sudo apt-get install curl` |
 
 各平台完整系统依赖见 [Tauri 环境准备](https://v2.tauri.app/start/prerequisites/)，CI 使用的安装步骤见 [工作流配置](.github/workflows/ci.yml)。
 

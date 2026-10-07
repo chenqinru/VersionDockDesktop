@@ -51,7 +51,10 @@ async function gitcodeServer(t, options = {}) {
         state.uploadAttempts++;
         if (state.failUploads && state.uploadAttempts <= state.failUploads) { await body(); respond({}, 503); return; }
         const name = decodeURIComponent(url.pathname.split('/').pop());
-        state.packages.set(name, await body()); state.uploads++;
+        const content = await body();
+        assert.equal(Number(req.headers['content-length']), content.length);
+        if (state.uploadStatus) { respond({}, state.uploadStatus); return; }
+        state.packages.set(name, content); state.uploads++;
         const release = [...state.releases.values()][0];
         release.assets.push({ name, type: 'attach' });
         if (state.onUpload) state.onUpload(name);
@@ -97,7 +100,7 @@ async function gitcodeServer(t, options = {}) {
   const config = { api, branch: 'main', manifestFile: `${api}/contents/latest.json`, latestUrl: `${api}/raw/latest.json?ref=main`,
     releaseUrl: (version) => `${api}/releases/tags/v${version}`,
     packageUrl: (version, name) => `${base}/owner/mirror/releases/download/v${version}/${encodeURIComponent(name)}` };
-  return { state, config, client: createGitCodeClient({ config, token: 'pipeline-only-token', sleep: async () => {} }) };
+  return { state, config, client: createGitCodeClient({ config, token: 'pipeline-only-token', sleep: async () => {}, log: () => {} }) };
 }
 
 const publishMirror = (input, server) => publishGitCodeRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config: server.config, client: server.client });
@@ -199,11 +202,61 @@ test('GitCode 匿名读取 503 重试三次，权限错误不重试，API 重定
 });
 
 test('GitCode 拒绝非可信存储地址和把发布令牌带到存储的上传配置', async (t) => {
-  for (const options of [{ uploadTarget: 'https://evil.example/upload' }, { uploadHeaders: { Authorization: 'pipeline-only-token' } }]) {
+  for (const options of [{ uploadTarget: 'https://evil.example/upload' }, { uploadHeaders: { Authorization: 'pipeline-only-token' } },
+    { uploadHeaders: { 'x-obs-callback': 'fixture-callback\nurl = "https://evil.example"' } }]) {
     const input = fixture(); prepareRelease(input);
     const server = await gitcodeServer(t, options);
-    await assert.rejects(publishMirror(input, server), /上传地址|上传头/);
+    await assert.rejects(publishMirror(input, server), /上传地址|上传头|控制字符/);
     assert.equal(server.state.uploadAttempts, 0); assert.equal(server.state.commits, 0);
+  }
+});
+
+test('GitCode curl 上传真实大文件，保留签名请求头、字节长度和全部内容', async (t) => {
+  const server = await gitcodeServer(t);
+  await server.client.ensureRelease('0.1.1', 'test upload');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'versiondock-upload-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'payload.exe');
+  const content = Buffer.alloc(2 * 1024 * 1024);
+  for (let i = 0; i < content.length; i++) content[i] = i % 256;
+  fs.writeFileSync(file, content);
+  await server.client.upload('0.1.1', 'payload.exe', file);
+  assert.deepEqual(server.state.packages.get('payload.exe'), content);
+  assert.equal(server.state.uploadAttempts, 1);
+});
+
+test('GitCode 上传权限和重定向失败不重试，诊断不暴露签名地址', async (t) => {
+  for (const uploadStatus of [403, 307]) {
+    const input = fixture(); prepareRelease(input);
+    const server = await gitcodeServer(t, { uploadStatus });
+    const origin = new URL(server.config.api).origin;
+    server.state.uploadTarget = `${origin}/upload/file.exe?signature=private-upload-signature`;
+    await assert.rejects(publishMirror(input, server), (error) => {
+      assert.match(error.message, new RegExp(`HTTP ${uploadStatus}.*curl 0`));
+      assert.match(error.message, /VersionDock.*bytes.*127\.0\.0\.1/);
+      assert.ok(!String(error.stack).includes('private-upload-signature'));
+      assert.ok(!String(error.stack).includes('pipeline-only-token'));
+      return true;
+    });
+    assert.equal(server.state.uploadAttempts, 1); assert.equal(server.state.commits, 0);
+  }
+});
+
+test('GitCode fetch 诊断保留底层错误码与超时类别，丢弃原始敏感错误', async () => {
+  const config = gitcodeReleaseConfig({ GITCODE_RELEASE_REPOSITORY: 'owner/mirror' });
+  for (const cause of [Object.assign(new Error('https://storage?signature=private-signature'), { code: 'UND_ERR_CONNECT_TIMEOUT' }),
+    Object.assign(new Error('sensitive request details'), { name: 'TimeoutError' })]) {
+    let attempts = 0;
+    const client = createGitCodeClient({ config, token: 'secret-token', sleep: async () => {}, request: async () => {
+      attempts++; throw new TypeError('request contains secret-token', { cause });
+    } });
+    await assert.rejects(client.latest(), (error) => {
+      assert.match(error.message, /GET api\.gitcode\.com/);
+      assert.ok(error.message.includes(cause.code || 'REQUEST_TIMEOUT'));
+      assert.doesNotMatch(String(error.stack), /private-signature|secret-token|sensitive request/);
+      return true;
+    });
+    assert.equal(attempts, 3);
   }
 });
 

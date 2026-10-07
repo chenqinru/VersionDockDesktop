@@ -1,0 +1,80 @@
+name: Retry GitCode mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing published GitHub version (e.g. 0.1.8)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Mirror published GitHub release to GitCode
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: versiondock-gitcode-release
+      cancel-in-progress: false
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_OUTPUT_DIR: ${{ github.workspace }}/prepared-release-mirror
+    steps:
+      - name: Checkout mirror tooling from this workflow revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Install signature verifier and upload tool
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign curl
+
+      - name: Validate stable version
+        run: node --input-type=module -e "import { validateVersion } from './scripts/release-artifacts.mjs'; validateVersion(process.env.RELEASE_VERSION);"
+
+      - name: Download published assets and the original update public key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          import { readGitHubApi } from './scripts/release-github-api.mjs';
+          import { RELEASE_REPOSITORY, fileHash } from './scripts/release-artifacts.mjs';
+          const version = process.env.RELEASE_VERSION;
+          const tag = `v${version}`;
+          const release = readGitHubApi(`repos/${RELEASE_REPOSITORY}/releases/tags/${tag}`);
+          if (release.draft || release.prerelease || release.tag_name !== tag) throw new Error('Expected a published stable GitHub release');
+          const assets = release.assets;
+          if (!Array.isArray(assets) || assets.filter(({ name }) => name === 'latest.json').length !== 1 ||
+              assets.some(({ name, digest }) => !/^[A-Za-z0-9._-]+$/.test(name) || !/^sha256:[a-f0-9]{64}$/.test(digest || '')))
+            throw new Error('Published assets have invalid names or missing SHA-256 digests');
+          const directory = path.join(process.env.RELEASE_OUTPUT_DIR, 'assets');
+          fs.mkdirSync(directory, { recursive: true });
+          execFileSync('gh', ['release', 'download', tag, '--repo', RELEASE_REPOSITORY, '--dir', directory], { stdio: 'inherit' });
+          for (const asset of assets) if (`sha256:${fileHash(path.join(directory, asset.name))}` !== asset.digest)
+            throw new Error(`Published asset SHA-256 mismatch: ${asset.name}`);
+          const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'latest.json'), 'utf8'));
+          if (manifest.version !== version || typeof manifest.notes !== 'string') throw new Error('Published update manifest version is invalid');
+          fs.writeFileSync(path.join(process.env.RELEASE_OUTPUT_DIR, 'release-notes.md'), manifest.notes);
+          const original = readGitHubApi(`repos/${RELEASE_REPOSITORY}/contents/src-tauri/tauri.conf.json?ref=${tag}`);
+          const config = JSON.parse(Buffer.from(original.content, 'base64').toString('utf8'));
+          if (config.version !== version || !config.plugins?.updater?.pubkey) throw new Error('Original update configuration is invalid');
+          fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(config));
+          JS
+
+      - name: Publish and verify GitCode mirror
+        env:
+          GITCODE_RELEASE_REPOSITORY: ${{ vars.GITCODE_RELEASE_REPOSITORY }}
+          GITCODE_RELEASE_BRANCH: ${{ vars.GITCODE_RELEASE_BRANCH }}
+          GITCODE_RELEASE_TOKEN: ${{ secrets.GITCODE_RELEASE_TOKEN }}
+        run: node scripts/publish-gitcode-release.mjs

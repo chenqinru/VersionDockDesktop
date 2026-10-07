@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { compareVersions, fileHash, validateVersion, verifySignature } from './release-artifacts.mjs';
 import { gitcodeReleaseConfig } from './gitcode-release-config.mjs';
@@ -14,10 +15,56 @@ class HttpError extends Error {
   constructor(status) { super(`GitCode 请求失败：HTTP ${status}`); this.status = status; }
 }
 class NetworkError extends Error {
-  constructor() { super('GitCode 网络请求失败，请检查发布步骤的网络连接'); }
+  constructor(url, method, error) {
+    const causes = [error, error?.cause];
+    const code = causes.map((cause) => cause?.code).find((value) => typeof value === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(value));
+    const reason = code || (causes.some((cause) => ['TimeoutError', 'AbortError'].includes(cause?.name)) ? 'REQUEST_TIMEOUT'
+      : causes.some((cause) => cause?.message === 'unexpected redirect') ? 'REDIRECT_NOT_ALLOWED' : 'FETCH_FAILED');
+    super(`GitCode 网络请求失败：${method} ${new URL(url).hostname}，错误码 ${reason}`);
+  }
 }
 
-export function createGitCodeClient({ config, token, request = fetch, sleep = pause }) {
+class UploadError extends Error {
+  constructor(url, file, result, elapsed) {
+    const status = /^\d{3}$/.test(result.status) ? result.status : '000';
+    const code = Number.isInteger(result.code) ? result.code : 'SPAWN_FAILED';
+    super(`GitCode 附件上传失败：${path.basename(file)} (${fs.statSync(file).size} bytes)，PUT ${new URL(url).hostname}，HTTP ${status}，curl ${code}，耗时 ${elapsed.toFixed(1)} 秒`);
+    this.retryable = [5, 6, 7, 16, 18, 28, 35, 52, 55, 56, 92, 95].includes(code) || code === 0 && (status === '429' || Number(status) >= 500);
+  }
+}
+
+function curlConfigValue(value) {
+  if (typeof value !== 'string' || [...value].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
+    throw new Error('GitCode 上传配置含无效控制字符');
+  }
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+}
+
+async function uploadFile(url, file, headers) {
+  // A signed OBS PUT uses curl's file upload rather than a JS request stream.
+  // Feed the signed URL and headers through stdin, never process arguments or logs.
+  const config = [`url = ${curlConfigValue(url)}`, `upload-file = ${curlConfigValue(path.resolve(file))}`,
+    ...Object.entries(headers).map(([name, value]) => `header = ${curlConfigValue(`${name}: ${value}`)}`)].join('\n');
+  const started = Date.now();
+  const result = await new Promise((resolve) => {
+    const child = spawn('curl', ['--disable', '--config', '-', '--http1.1', '--globoff', '--request', 'PUT', '--silent', '--show-error',
+      '--connect-timeout', '30', '--max-time', '180', '--output', os.devNull, '--write-out', '%{http_code}'],
+    { stdio: ['pipe', 'pipe', 'pipe'] });
+    let status = '';
+    child.stdout.on('data', (chunk) => { status = (status + chunk.toString()).slice(0, 64); });
+    // curl stderr can contain a signed URL. Report only its exit code below.
+    child.stderr.resume();
+    child.on('error', () => resolve({ code: null, status }));
+    child.on('close', (code) => resolve({ code, status }));
+    child.stdin.on('error', () => {});
+    child.stdin.end(`${config}\n`);
+  });
+  if (result.code !== 0 || !/^2\d{2}$/.test(result.status)) {
+    throw new UploadError(url, file, result, (Date.now() - started) / 1000);
+  }
+}
+
+export function createGitCodeClient({ config, token, request = fetch, sleep = pause, log = console.log }) {
   if (!token) throw new Error('请在 GitHub Actions Secrets 配置 GITCODE_RELEASE_TOKEN');
   async function send(url, options = {}, authenticated = false, consume = async (response) => response) {
     if (authenticated && (!url.startsWith(`${config.api}/`) || new URL(url).origin !== new URL(config.api).origin)) {
@@ -26,11 +73,9 @@ export function createGitCodeClient({ config, token, request = fetch, sleep = pa
     const maxRetries = !options.method || options.method === 'GET' ? 2 : 0;
     for (let attempt = 0; ; attempt++) {
       try {
-        const { file, ...init } = options;
         const response = await request(url, {
-          ...init, redirect: authenticated || file ? 'error' : 'follow', signal: AbortSignal.timeout(180_000),
-          ...(file ? { body: fs.createReadStream(file), duplex: 'half' } : {}),
-          headers: { ...init.headers, ...(authenticated ? { 'PRIVATE-TOKEN': token } : {}) },
+          ...options, redirect: authenticated ? 'error' : 'follow', signal: AbortSignal.timeout(180_000),
+          headers: { ...options.headers, ...(authenticated ? { 'PRIVATE-TOKEN': token } : {}) },
         });
         if (response.status === 429 || response.status >= 500) {
           await response.body?.cancel();
@@ -42,7 +87,7 @@ export function createGitCodeClient({ config, token, request = fetch, sleep = pa
         if (error instanceof HttpError) throw error;
         if (error instanceof SyntaxError) throw new Error('GitCode 返回的 JSON 格式无效');
         // Do not include fetch errors or signed upload URLs in logs.
-        if (attempt === maxRetries) throw new NetworkError();
+        if (attempt === maxRetries) throw new NetworkError(url, options.method || 'GET', error);
         await sleep(1000 * 2 ** attempt);
       }
     }
@@ -97,13 +142,18 @@ export function createGitCodeClient({ config, token, request = fetch, sleep = pa
     },
     async upload(version, name, file) {
       for (let attempt = 0; ; attempt++) {
+        log(`GitCode 上传 v${version}/${name} (${fs.statSync(file).size} bytes)，第 ${attempt + 1}/3 次`);
         try { await this.uploadOnce(version, name, file); return; }
         catch (error) {
           // Check whether the object arrived before obtaining a new upload URL;
           // replaying a callback-bearing PUT can create duplicate attachments.
-          if (await hash(config.packageUrl(version, name)) === fileHash(file)) return;
-          const retryable = error instanceof NetworkError || error instanceof HttpError && (error.status === 429 || error.status >= 500);
+          if (await hash(config.packageUrl(version, name)) === fileHash(file)) {
+            log(`GitCode 已确认附件上传成功：${name}`); return;
+          }
+          const retryable = error instanceof NetworkError || error instanceof UploadError && error.retryable
+            || error instanceof HttpError && (error.status === 429 || error.status >= 500);
           if (!retryable || attempt === 2) throw error;
+          log(error.message);
           await sleep(1000 * 2 ** attempt);
         }
       }
@@ -125,10 +175,7 @@ export function createGitCodeClient({ config, token, request = fetch, sleep = pa
         headers[key] = value;
       }
       headers['Content-Length'] = String(fs.statSync(file).size);
-      await send(upload.url, { method: 'PUT', file, headers }, false, async (response) => {
-        if (!response.ok) { await response.body?.cancel(); throw new HttpError(response.status); }
-        await response.body?.cancel();
-      });
+      await uploadFile(upload.url, file, headers);
     },
     async finishRelease(version, notes) {
       const current = await release(version);

@@ -43,11 +43,22 @@ https://gitcode.com/chenqinru/VersionDockDesktop-Releases/releases/download/v<�
 
 匿名读取、网络错误、HTTP 429 和 5xx 最多尝试三次，间隔为 1 秒、2 秒。上传失败先读取远程文件确认是否已成功，再申请新 URL 重试，避免直接重复带回调的 PUT。创建、公开 Release 和提交清单不盲目重放；响应丢失时读取实际结果。401、403 等权限错误不自动重试。
 
-发布 PAT 仅通过请求头发送到 GitCode API，不跟随重定向。安装包 PUT 只使用 API 返回的存储签名与 `x-obs-*` 请求头；允许 GitCode 与华为云 HTTPS 存储域名，禁止转发 PAT。日志不输出完整存储 URL、签名查询参数或密钥。
+发布 PAT 仅通过请求头发送到 GitCode API，不跟随重定向。安装包 PUT 使用 `curl --http1.1` 直接上传文件，只使用 API 返回的存储签名与 `x-obs-*` 请求头；允许 GitCode 与华为云 HTTPS 存储域名，禁止转发 PAT。签名 URL 与请求头通过 curl 标准输入传递，不进入进程参数；禁止读取用户 curl 配置和跟随上传重定向。连接超时为 30 秒，单次上传总超时为 180 秒。失败日志只记录文件名、大小、目标主机、HTTP 状态、curl 退出码与耗时，不输出完整存储 URL、签名查询参数或密钥。
 
 ## 发布 runner
 
 `publish-gitcode` 使用 GitHub 托管 `ubuntu-24.04` runner，下载当前运行的 prepared artifact 并安装 minisign。它与 GitHub Release 独立执行，镜像失败不阻断 GitHub 发布。
+
+## 使用修正后的脚本补发镜像
+
+普通 Release 工作流固定使用版本标签中的脚本。直接重跑旧失败任务仍执行旧脚本；修复上传脚本后，使用 [Retry GitCode mirror 工作流](../.github/workflows/gitcode-mirror.yml) 补发已有版本：
+
+1. 将修复推送到 `main`，在 GitHub Actions 打开 **Retry GitCode mirror**，选择 `main`。
+2. 输入 GitHub 已公开的正式版本号，例如 `0.1.8`，不带 `v`。
+3. 工作流使用当前修复版本的镜像工具，读取对应 GitHub Release，下载安装包与签名，逐个比较 GitHub 提供的 SHA-256，再复用原版清单中的更新说明。
+4. 从原版本标签读取更新公钥，调用同一镜像脚本上传并核验 GitCode 安装包与固定清单。
+
+该工作流只补发 GitCode 镜像，不重建安装包，不创建或修改 GitHub Release、版本标签或更新密钥。与普通镜像发布共享并发组，同版本附件仍必须匹配已有内容。GitHub Release 必须已经公开且非预发布，全部附件需有有效的服务端 SHA-256。
 
 ## 客户端行为
 
@@ -73,4 +84,6 @@ curl --fail --location 'https://api.gitcode.com/api/v5/repos/chenqinru/VersionDo
 | 文件更新冲突 | Blob SHA 对应文件已变化，重查版本；不要绕过并发保护 |
 | 已有同名附件哈希不同 | 原版本不能覆盖，修改产物需发布新版本 |
 | 上传地址校验失败 | 核对 GitCode 当前存储域名及 API 文档，再决定是否扩展允许域名 |
-| GitHub 成功、GitCode 失败 | 仅重跑镜像任务，使用当前运行相同产物 |
+| 上传 curl 28 | 连接或传输超时，根据主机和耗时检查网络；30 秒附近为连接阶段，180 秒附近为总超时 |
+| 上传 curl 6 / 7 / 60 | 分别检查 DNS、连接和证书链；不关闭 TLS 校验绕过证书错误 |
+| GitHub 成功、GitCode 失败 | 原脚本不变时仅重跑镜像任务；脚本已修复时使用 Retry GitCode mirror 补发原版本 |
