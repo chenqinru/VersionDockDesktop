@@ -29,7 +29,7 @@ test('GitCode 构建配置只注入公开清单，拒绝 URL、凭据及无效�
 });
 
 async function gitcodeServer(t, options = {}) {
-  const state = { releases: new Map(), packages: new Map(), latest: null, commits: 0, uploads: 0,
+  const state = { releases: new Map(), packages: new Map(), uploadedNames: [], latest: null, commits: 0, uploads: 0,
     uploadAttempts: 0, uploadUrls: 0, privateDownloads: 0, creations: 0, publications: 0, ...options };
   const digest = () => createHash('sha1').update(state.latest || '').digest('hex');
   const server = createServer(async (req, res) => {
@@ -47,6 +47,7 @@ async function gitcodeServer(t, options = {}) {
         res.writeHead(data ? 200 : 404).end(data ? state.corrupt && !name.endsWith('.json') ? 'broken' : data : '');
       } else if (url.pathname.startsWith('/upload/')) {
         assert.equal(authorized, false);
+        assert.equal(req.headers.expect, undefined);
         assert.equal(req.headers['x-obs-callback'], 'fixture-callback');
         state.uploadAttempts++;
         if (state.failUploads && state.uploadAttempts <= state.failUploads) { await body(); respond({}, 503); return; }
@@ -54,7 +55,7 @@ async function gitcodeServer(t, options = {}) {
         const content = await body();
         assert.equal(Number(req.headers['content-length']), content.length);
         if (state.uploadStatus) { respond({}, state.uploadStatus); return; }
-        state.packages.set(name, content); state.uploads++;
+        state.packages.set(name, content); state.uploads++; state.uploadedNames.push(name);
         const release = [...state.releases.values()][0];
         release.assets.push({ name, type: 'attach' });
         if (state.onUpload) state.onUpload(name);
@@ -111,6 +112,7 @@ test('GitCode 真实 HTTP 上传签名附件、匿名校验后更新清单，重
   const original = fs.readFileSync(path.join(input.outputDir, 'assets/latest.json'), 'utf8');
   const manifest = await publishMirror(input, server);
   assert.equal(server.state.uploads, 7); assert.equal(server.state.commits, 1); assert.equal(server.state.privateDownloads, 0);
+  assert.ok(server.state.uploadedNames[0].endsWith('.sig'));
   assert.ok(Object.values(manifest.platforms).every(({ url }) => url.includes('/releases/download/v0.1.1/')));
   assert.equal(fs.readFileSync(path.join(input.outputDir, 'assets/latest.json'), 'utf8'), original);
   assert.equal(JSON.parse(server.state.latest).version, input.version);
@@ -234,6 +236,7 @@ test('GitCode 上传权限和重定向失败不重试，诊断不暴露签名地
     await assert.rejects(publishMirror(input, server), (error) => {
       assert.match(error.message, new RegExp(`HTTP ${uploadStatus}.*curl 0`));
       assert.match(error.message, /VersionDock.*bytes.*127\.0\.0\.1/);
+      assert.match(error.message, /已发送 \d+\/\d+ bytes，已接收 \d+ bytes/);
       assert.ok(!String(error.stack).includes('private-upload-signature'));
       assert.ok(!String(error.stack).includes('pipeline-only-token'));
       return true;

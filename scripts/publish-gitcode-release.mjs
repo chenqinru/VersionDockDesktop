@@ -26,9 +26,12 @@ class NetworkError extends Error {
 
 class UploadError extends Error {
   constructor(url, file, result, elapsed) {
+    const size = fs.statSync(file).size;
     const status = /^\d{3}$/.test(result.status) ? result.status : '000';
     const code = Number.isInteger(result.code) ? result.code : 'SPAWN_FAILED';
-    super(`GitCode 附件上传失败：${path.basename(file)} (${fs.statSync(file).size} bytes)，PUT ${new URL(url).hostname}，HTTP ${status}，curl ${code}，耗时 ${elapsed.toFixed(1)} 秒`);
+    const sent = /^\d+$/.test(result.sent || '') ? result.sent : '?';
+    const received = /^\d+$/.test(result.received || '') ? result.received : '?';
+    super(`GitCode 附件上传失败：${path.basename(file)} (${size} bytes)，PUT ${new URL(url).hostname}，HTTP ${status}，curl ${code}，耗时 ${elapsed.toFixed(1)} 秒，已发送 ${sent}/${size} bytes，已接收 ${received} bytes`);
     this.retryable = [5, 6, 7, 16, 18, 28, 35, 52, 55, 56, 92, 95].includes(code) || code === 0 && (status === '429' || Number(status) >= 500);
   }
 }
@@ -48,14 +51,21 @@ async function uploadFile(url, file, headers) {
   const started = Date.now();
   const result = await new Promise((resolve) => {
     const child = spawn('curl', ['--disable', '--config', '-', '--http1.1', '--globoff', '--request', 'PUT', '--silent', '--show-error',
-      '--connect-timeout', '30', '--max-time', '180', '--output', os.devNull, '--write-out', '%{http_code}'],
+      // OBS intermediaries can mishandle the extra 100-continue exchange.
+      // This header is transport-only and is not part of the signed x-obs headers.
+      '--header', 'Expect:', '--connect-timeout', '30', '--max-time', '180', '--output', os.devNull,
+      '--write-out', '%{http_code} %{size_upload} %{size_download}'],
     { stdio: ['pipe', 'pipe', 'pipe'] });
-    let status = '';
-    child.stdout.on('data', (chunk) => { status = (status + chunk.toString()).slice(0, 64); });
+    let metrics = '';
+    child.stdout.on('data', (chunk) => { metrics = (metrics + chunk.toString()).slice(0, 128); });
+    const finish = (code) => {
+      const [status, sent, received] = metrics.trim().split(/\s+/);
+      resolve({ code, status: status || '', sent, received });
+    };
     // curl stderr can contain a signed URL. Report only its exit code below.
     child.stderr.resume();
-    child.on('error', () => resolve({ code: null, status }));
-    child.on('close', (code) => resolve({ code, status }));
+    child.on('error', () => finish(null));
+    child.on('close', finish);
     child.stdin.on('error', () => {});
     child.stdin.end(`${config}\n`);
   });
@@ -257,7 +267,11 @@ export async function publishGitCodeRelease({ directory, version, config, client
     if (remote === null) await client.upload(version, name, file);
     if (await client.hash(url) !== local) throw new Error(`GitCode 远程附件 SHA-256 校验失败：${name}`);
   }
-  for (const name of names) await publishFile(name, path.join(assets, name));
+  // Verify small signatures first: transport or permission errors surface before
+  // spending minutes on a large installer. The fixed manifest still commits last.
+  const uploadOrder = [...names].sort((left, right) => Number(!left.endsWith('.sig')) - Number(!right.endsWith('.sig'))
+    || fs.statSync(path.join(assets, left)).size - fs.statSync(path.join(assets, right)).size || left.localeCompare(right));
+  for (const name of uploadOrder) await publishFile(name, path.join(assets, name));
   // Use a separate file so GitHub's prepared manifest remains unchanged.
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'versiondock-gitcode-'));
   const file = path.join(temporary, 'latest.json');

@@ -34,7 +34,7 @@ https://gitcode.com/chenqinru/VersionDockDesktop-Releases/releases/download/v<�
 
 1. 校验本地版本、更新清单、发布说明与 minisign 签名，拒绝版本回退和已发布版本内容变更。
 2. 检查镜像分支，创建或复用 `vX.Y.Z` 的预发布 Release。标签指向镜像分支，不代表源码提交；源码身份由 GitHub 版本标签和 prepared artifact 保证。
-3. 为缺失附件获取上传 URL，以新的文件流执行 PUT；随后匿名完整读取并校验 SHA-256。已有同名附件必须与本地产物一致，不覆盖不同内容。
+3. 先上传签名，再按文件大小上传安装包。为缺失附件获取上传 URL，以新的文件流执行 PUT；随后匿名完整读取并校验 SHA-256。已有同名附件必须与本地产物一致，不覆盖不同内容。
 4. 将下载地址改为 GitCode，上传并验证版本 `latest.json`，保持原 GitHub 清单不变。同版本重跑复用已发布清单的时间，避免重试时变化。
 5. 再次检查固定清单版本，确认无较新版本后将 Release 设为正式 latest，最后通过 Contents API 更新分支根目录的固定 `latest.json`。更新已有文件必须提供读取时的 Blob SHA，拒绝并发覆盖。
 6. 匿名读取固定清单并验证完整哈希。
@@ -43,7 +43,7 @@ https://gitcode.com/chenqinru/VersionDockDesktop-Releases/releases/download/v<�
 
 匿名读取、网络错误、HTTP 429 和 5xx 最多尝试三次，间隔为 1 秒、2 秒。上传失败先读取远程文件确认是否已成功，再申请新 URL 重试，避免直接重复带回调的 PUT。创建、公开 Release 和提交清单不盲目重放；响应丢失时读取实际结果。401、403 等权限错误不自动重试。
 
-发布 PAT 仅通过请求头发送到 GitCode API，不跟随重定向。安装包 PUT 使用 `curl --http1.1` 直接上传文件，只使用 API 返回的存储签名与 `x-obs-*` 请求头；允许 GitCode 与华为云 HTTPS 存储域名，禁止转发 PAT。签名 URL 与请求头通过 curl 标准输入传递，不进入进程参数；禁止读取用户 curl 配置和跟随上传重定向。连接超时为 30 秒，单次上传总超时为 180 秒。失败日志只记录文件名、大小、目标主机、HTTP 状态、curl 退出码与耗时，不输出完整存储 URL、签名查询参数或密钥。
+发布 PAT 仅通过请求头发送到 GitCode API，不跟随重定向。安装包 PUT 使用 `curl --http1.1` 直接上传文件，只使用 API 返回的存储签名与 `x-obs-*` 请求头；允许 GitCode 与华为云 HTTPS 存储域名，禁止转发 PAT。签名 URL 与请求头通过 curl 标准输入传递，不进入进程参数；禁止读取用户 curl 配置和跟随上传重定向，并清空 `Expect` 头，避免额外的 100-continue 握手。连接超时为 30 秒，单次上传总超时为 180 秒。失败日志只记录文件名、大小、目标主机、HTTP 状态、curl 退出码、耗时和发送/接收字节数，不输出完整存储 URL、签名查询参数或密钥。
 
 ## 发布 runner
 
@@ -85,5 +85,6 @@ curl --fail --location 'https://api.gitcode.com/api/v5/repos/chenqinru/VersionDo
 | 已有同名附件哈希不同 | 原版本不能覆盖，修改产物需发布新版本 |
 | 上传地址校验失败 | 核对 GitCode 当前存储域名及 API 文档，再决定是否扩展允许域名 |
 | 上传 curl 28 | 连接或传输超时，根据主机和耗时检查网络；30 秒附近为连接阶段，180 秒附近为总超时 |
+| HTTP 100 后超时 | 100 只是中间响应；比较已发送字节数与文件大小，判断文件传输是否完成。若全量发送后仍超时，需检查存储服务响应或回调，不按上传成功处理 |
 | 上传 curl 6 / 7 / 60 | 分别检查 DNS、连接和证书链；不关闭 TLS 校验绕过证书错误 |
 | GitHub 成功、GitCode 失败 | 原脚本不变时仅重跑镜像任务；脚本已修复时使用 Retry GitCode mirror 补发原版本 |
