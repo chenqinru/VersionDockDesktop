@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.1.6",
+    "date": "2026-10-07",
+    "highlights": {
+      "zh-CN": [
+        "完善 Git 标签创建、推送、删除、检出及合并流程，支持操作预检和多仓库选择。",
+        "更新提示显示对应版本的实际更新内容，更新日志支持中英文。",
+        "欢迎页不再显示工作区状态栏，避免检查更新时出现多余状态信息。",
+        "扫描工作区时跳过无权限访问的子目录；根目录无法访问时提供明确路径和权限提示。"
+      ],
+      "en": [
+        "Improve Git tag creation, push, deletion, checkout and merge workflows, with preflight checks and repository selection.",
+        "Show version-specific update details and release history in Chinese and English.",
+        "Keep the workspace status bar hidden on the welcome page during update checks.",
+        "Skip inaccessible subdirectories when scanning workspaces and show clear path and permission details for inaccessible roots."
+      ]
+    }
+  },
+  {
     "version": "0.1.5",
     "date": "2026-10-07",
     "highlights": {
