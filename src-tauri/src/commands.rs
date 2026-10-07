@@ -1698,12 +1698,9 @@ async fn dispatch(
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let remotes = if repo.kind == VcsKind::Git {
-                vcs::remotes(&repo, token)
+                vcs::avatar_remote_urls(&repo, token)
                     .await
                     .unwrap_or_default()
-                    .into_iter()
-                    .map(|item| item.fetch_url)
-                    .collect::<Vec<_>>()
             } else {
                 Vec::new()
             };

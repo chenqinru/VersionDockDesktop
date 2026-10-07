@@ -53,8 +53,15 @@ export function AuthorAvatar({ name, email, repoId, size = 20, className = 'avat
   const gravatar = useAppStore((state) => state.bootstrap?.state.settings?.gravatarEnabled ?? false);
   const crossPlatformFallback = useAppStore((state) => state.bootstrap?.state.settings?.avatarCrossPlatformFallback ?? false);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
-  const [url, setUrl] = useState<string | null>(null);
+  const remotes = useAppStore((state) => state.remotes[repoId ?? '']);
+  const branch = useAppStore((state) => state.allRepositories.find((repo) => repo.meta.id === repoId)?.branch);
+  const upstream = useAppStore((state) => state.branchesByRepo[repoId ?? '']?.find((branch) => branch.current)?.upstream);
+  const [resolved, setResolved] = useState<{ key: string; url: string | null }>();
   const [cacheVersion, setCacheVersion] = useState(0);
+  const repositoryScope = `${workspaceId ?? ''}\0${repoId ?? ''}\0`;
+  const remoteScope = JSON.stringify([branch, upstream, remotes?.map((remote) => [remote.name, remote.fetchUrl, remote.pushUrl])]);
+  const key = `${repositoryScope}${remoteScope}\0${email.trim().toLowerCase()}\0${name.trim().toLowerCase()}\0${size}\0${gravatar}\0${crossPlatformFallback}\0${cacheVersion}`;
+  const url = online && resolved?.key === key ? resolved.url : null;
   useEffect(() => {
     const refresh = () => setCacheVersion((value) => value + 1);
     window.addEventListener('versiondock-avatar-cache-clear', refresh);
@@ -62,9 +69,7 @@ export function AuthorAvatar({ name, email, repoId, size = 20, className = 'avat
   }, []);
   useEffect(() => {
     let active = true;
-    queueMicrotask(() => { if (active) setUrl(null); });
     if (online && (email.trim() || name.trim())) {
-      const key = `${repoId ?? ''}\0${email.trim().toLowerCase()}\0${name.trim().toLowerCase()}\0${size}\0${gravatar}\0${crossPlatformFallback}`;
       void cached(key, async () => {
         if (bridge && workspaceId && repoId) {
           const remote = await bridge.request<string | null>({ type: 'resolveAuthorAvatar', payload: { workspace_id: workspaceId, repo_id: repoId, email, author_name: name } }, { showProgress: false }).catch(() => null);
@@ -73,10 +78,10 @@ export function AuthorAvatar({ name, email, repoId, size = 20, className = 'avat
         const github = repoId ? null : githubUrl(email, size);
         if (github) { const valid = await validateImage(github); if (valid) return valid; }
         return gravatar && email.trim() ? validateImage(await gravatarUrl(email, size)) : null;
-      }).then((value) => { if (active) setUrl(value); });
+      }).then((value) => { if (active) setResolved({ key, url: value }); });
     }
     return () => { active = false; };
-  }, [bridge, cacheVersion, crossPlatformFallback, email, gravatar, name, online, repoId, size, workspaceId]);
+  }, [bridge, cacheVersion, crossPlatformFallback, email, gravatar, key, name, online, repoId, size, workspaceId]);
   const style = { width: size, height: size, flex: `0 0 ${size}px`, borderRadius: '50%', overflow: 'hidden', display: 'grid', placeItems: 'center', background: branchColor(email || name), color: '#fff', fontSize: size * .4 } as const;
-  return url ? <img className={className} src={url} alt="" title={`${name}${email ? ` <${email}>` : ''}`} style={{ ...style, objectFit: 'cover' }} onError={() => setUrl(null)} /> : <span className={className} title={`${name}${email ? ` <${email}>` : ''}`} style={style}>{initials(name)}</span>;
+  return url ? <img className={className} src={url} alt="" title={`${name}${email ? ` <${email}>` : ''}`} style={{ ...style, objectFit: 'cover' }} onError={() => setResolved({ key, url: null })} /> : <span className={className} title={`${name}${email ? ` <${email}>` : ''}`} style={style}>{initials(name)}</span>;
 }

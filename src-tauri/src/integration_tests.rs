@@ -28,6 +28,66 @@ fn available(program: &str) -> bool {
 }
 
 #[tokio::test]
+async fn real_git_avatar_platform_prioritizes_tracking_remote_then_origin() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "Avatar Test"], root);
+    command(
+        "git",
+        &["config", "user.email", "avatar@example.test"],
+        root,
+    );
+    command(
+        "git",
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "initial",
+        ],
+        root,
+    );
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "a-mirror",
+            "https://gitee.com/example/repo.git",
+        ],
+        root,
+    );
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ],
+        root,
+    );
+    let repository = repo(root, VcsKind::Git);
+    let token = CancellationToken::new();
+    assert!(vcs::avatar_remote_urls(&repository, &token).await.unwrap()[0].contains("github.com"));
+    command("git", &["config", "branch.main.remote", "a-mirror"], root);
+    command(
+        "git",
+        &["config", "branch.main.merge", "refs/heads/main"],
+        root,
+    );
+    assert!(vcs::avatar_remote_urls(&repository, &token).await.unwrap()[0].contains("gitee.com"));
+    command("git", &["checkout", "--detach"], root);
+    assert!(vcs::avatar_remote_urls(&repository, &token).await.unwrap()[0].contains("github.com"));
+}
+
+#[tokio::test]
 async fn real_git_diff_binary_markers_in_source_stay_text() {
     use crate::{diff_content, models::CatFileFilterMode};
     if !available("git") {

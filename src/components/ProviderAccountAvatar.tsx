@@ -8,7 +8,7 @@ const cache = new Map<string, CachedAvatar>();
 let epoch = 0;
 if (typeof window !== 'undefined') window.addEventListener('versiondock-avatar-cache-clear', () => { cache.clear(); epoch++; });
 
-export function ProviderAccountAvatar({ account }: { account: RemoteProviderAccount }) {
+export function ProviderAccountAvatar({ account, size = 48 }: { account: RemoteProviderAccount; size?: number }) {
   const bridge = useBridge();
   const key = JSON.stringify([account.id, account.provider, account.host, account.login]);
   const [version, setVersion] = useState(epoch);
@@ -43,7 +43,7 @@ export function ProviderAccountAvatar({ account }: { account: RemoteProviderAcco
     return () => controller.abort();
   }, [account.id, bridge, key, version]);
 
-  return <div className="provider-avatar-box">
+  return <div className="provider-avatar-box" style={{ width: size, height: size, fontSize: size / 2 }}>
     {url && failed !== imageKey
       ? <img key={imageKey} src={url} alt={account.login} className="provider-avatar-img" onError={() => { cache.delete(key); setFailed(imageKey); }} />
       : <Codicon name="account" />}

@@ -1130,6 +1130,40 @@ fn github_avatar_url(username: &str) -> Option<String> {
     })
 }
 
+// Match the plugin's authenticated-user lookup before searching public emails.
+// GitHub often hides email, so a matching commit author/login is sufficient.
+fn profile_matches_author(
+    user: &Value,
+    provider: RemoteProviderKind,
+    email: &str,
+    author_name: &str,
+) -> bool {
+    let login = user[if provider == RemoteProviderKind::Gitlab {
+        "username"
+    } else {
+        "login"
+    }]
+    .as_str()
+    .unwrap_or("")
+    .trim()
+    .to_lowercase();
+    let name = user["name"].as_str().unwrap_or("").trim().to_lowercase();
+    let author = author_name.trim().to_lowercase();
+    let email = email.trim().to_lowercase();
+    let prefix = email.split('@').next().unwrap_or("");
+    let stripped = prefix.trim_end_matches(|c: char| c.is_ascii_digit());
+    (!author.is_empty()
+        && ((!login.is_empty() && author == login) || (!name.is_empty() && author == name)))
+        || (!email.is_empty()
+            && user["email"].as_str().is_some_and(|value| {
+                !value.trim().is_empty() && value.trim().eq_ignore_ascii_case(&email)
+            }))
+        || (!login.is_empty()
+            && !email.is_empty()
+            && (login == email || login == prefix || (stripped.len() >= 3 && stripped == login)))
+        || (!name.is_empty() && !email.is_empty() && (name == email || name == prefix))
+}
+
 pub async fn resolve_author_avatar(
     config_dir: &Path,
     email: &str,
@@ -1226,11 +1260,6 @@ async fn resolve_author_avatar_on_host(
     let secret = token(account)?;
     let candidate = avatar_candidate(email, author_name, provider_kind);
     let normalized_email = email.trim().to_lowercase();
-    let current_match = account.login.eq_ignore_ascii_case(&candidate)
-        || account
-            .display_name
-            .as_deref()
-            .is_some_and(|name| name.eq_ignore_ascii_case(author_name));
     let value = match provider_kind {
         RemoteProviderKind::Github => {
             let current = send(
@@ -1244,11 +1273,10 @@ async fn resolve_author_avatar_on_host(
             )
             .await
             .ok();
-            let current_email_match = current
+            if current
                 .as_ref()
-                .and_then(|user| user["email"].as_str())
-                .is_some_and(|value| value.eq_ignore_ascii_case(&normalized_email));
-            if current_match || current_email_match {
+                .is_some_and(|user| profile_matches_author(user, provider_kind, email, author_name))
+            {
                 current
             } else if normalized_email.ends_with("@users.noreply.github.com") {
                 return Ok(github_avatar_url(&candidate));
@@ -1284,11 +1312,10 @@ async fn resolve_author_avatar_on_host(
             )
             .await
             .ok();
-            let current_email_match = current
+            if current
                 .as_ref()
-                .and_then(|user| user["email"].as_str())
-                .is_some_and(|value| value.eq_ignore_ascii_case(&normalized_email));
-            if current_match || current_email_match {
+                .is_some_and(|user| profile_matches_author(user, provider_kind, email, author_name))
+            {
                 current
             } else if !candidate.is_empty() {
                 let encoded =
@@ -1320,11 +1347,10 @@ async fn resolve_author_avatar_on_host(
             )
             .await
             .ok();
-            let current_email_match = current
+            if current
                 .as_ref()
-                .and_then(|user| user["email"].as_str())
-                .is_some_and(|value| value.eq_ignore_ascii_case(&normalized_email));
-            if current_match || current_email_match {
+                .is_some_and(|user| profile_matches_author(user, provider_kind, email, author_name))
+            {
                 current
             } else {
                 let search = send(
@@ -1413,6 +1439,47 @@ async fn fetch_private_gitlab_avatar(
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn github_private_email_matches_login_before_cross_platform_fallback() {
+        let user = json!({"login":"chenqinru", "name":"Different display name", "email":null, "avatar_url":"https://avatars.githubusercontent.com/u/123"});
+        assert!(profile_matches_author(
+            &user,
+            RemoteProviderKind::Github,
+            "chenqinru@qq.com",
+            "chenqinru"
+        ));
+        assert!(profile_matches_author(
+            &user,
+            RemoteProviderKind::Github,
+            "private@example.test",
+            "CHENQINRU"
+        ));
+        assert!(profile_matches_author(
+            &user,
+            RemoteProviderKind::Github,
+            "chenqinru123@qq.com",
+            "Other author"
+        ));
+        assert!(!profile_matches_author(
+            &user,
+            RemoteProviderKind::Github,
+            "other@qq.com",
+            "Other author"
+        ));
+        assert!(!profile_matches_author(
+            &user,
+            RemoteProviderKind::Github,
+            "",
+            ""
+        ));
+        assert!(profile_matches_author(
+            &json!({"username":"chenqinru","name":"GitLab name","email":null}),
+            RemoteProviderKind::Gitlab,
+            "private@example.test",
+            "chenqinru"
+        ));
+    }
 
     #[test]
     fn account_avatar_endpoints_and_profile_urls_match_the_selected_provider() {

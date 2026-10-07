@@ -2199,15 +2199,19 @@ export const useAppStore = create<AppStore>((set, get) => {
           checkStatusNotifications(get().allRepositories, workspaceId);
         }
         if (scopes.has('refs') || scopes.has('history')) {
-          const [branchesResult, tagsResult] = await Promise.allSettled([
+          const [branchesResult, tagsResult, remotesResult] = await Promise.allSettled([
             bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
             bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
+            // Config changes use refs events too. Refresh the shared avatar scope
+            // once, keeping the same workspace/generation guard as branch results.
+            scopes.has('refs') && get().allRepositories.find((repo) => repo.meta.id === repoId)?.meta.kind === 'git' ? bridge().request<RemoteInfo[]>({ type: 'remotes', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }) : Promise.resolve(undefined),
           ]);
           if (interrupted()) return;
           if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
           set((state) => ({
             branchesByRepo: branchesResult.status === 'fulfilled' ? { ...state.branchesByRepo, [repoId]: branchesResult.value } : state.branchesByRepo,
             tagsByRepo: tagsResult.status === 'fulfilled' ? { ...state.tagsByRepo, [repoId]: tagsResult.value } : state.tagsByRepo,
+            remotes: remotesResult.status === 'fulfilled' && Array.isArray(remotesResult.value) ? { ...state.remotes, [repoId]: remotesResult.value } : state.remotes,
             branches: state.selectedRepoId === repoId && branchesResult.status === 'fulfilled' ? branchesResult.value : state.branches,
             tags: state.selectedRepoId === repoId && tagsResult.status === 'fulfilled' ? tagsResult.value : state.tags,
           }));

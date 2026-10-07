@@ -11483,6 +11483,54 @@ pub async fn remotes(
     Ok(result)
 }
 
+pub async fn avatar_remote_urls(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<Vec<String>, DesktopError> {
+    let mut remotes = remotes(repo, token).await?;
+    let branch = git(vec!["branch".into(), "--show-current".into()], repo, token)
+        .await?
+        .stdout_text();
+    let upstream = if branch.trim().is_empty() {
+        None
+    } else {
+        git(
+            vec![
+                "config".into(),
+                "--get".into(),
+                format!("branch.{}.remote", branch.trim()),
+            ],
+            repo,
+            token,
+        )
+        .await
+        .ok()
+        .map(|value| value.stdout_text().trim().to_string())
+    };
+    let primary = upstream
+        .and_then(|name| remotes.iter().position(|remote| remote.name == name))
+        .or_else(|| {
+            remotes
+                .iter()
+                .position(|remote| remote.name.eq_ignore_ascii_case("origin"))
+        })
+        .unwrap_or(0);
+    if primary > 0 {
+        let remote = remotes.remove(primary);
+        remotes.insert(0, remote);
+    }
+    Ok(remotes
+        .into_iter()
+        .map(|remote| {
+            if remote.fetch_url.is_empty() {
+                remote.push_url
+            } else {
+                remote.fetch_url
+            }
+        })
+        .collect())
+}
+
 pub async fn remote_operation(
     repo: &RepositoryMeta,
     operation: RemoteOperation,

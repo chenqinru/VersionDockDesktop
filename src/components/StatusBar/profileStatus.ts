@@ -23,7 +23,7 @@ export function repositoryPlatforms(remotes: RemoteInfo[], branches: BranchInfo[
       return host && accountHost && (host === accountHost || host.endsWith(`.${accountHost}`));
     });
     const provider = account?.provider ?? (['github', 'gitlab', 'gitee'] as const).find((provider) => host === `${provider}.com` || host?.endsWith(`.${provider}.com`));
-    return { remote, provider, primary: remote === primary };
+    return { remote, provider, account, primary: remote === primary };
   });
 }
 
