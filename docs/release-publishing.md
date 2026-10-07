@@ -14,7 +14,7 @@
 
 1. 运行 `npm run version:bump -- patch`（或明确的正式版本号），提交版本及改动。仅支持 `0.1.1` 这样的正式 SemVer，不支持 beta 或 build 后缀。
 2. 推送代码及匹配的版本标签，例如 `v0.1.1`。标签必须和 package、Tauri、Cargo 元数据一致；不能移动已发布标签。
-3. Release workflow 先解析标签、验证版本并固定提交 SHA，随后并行执行前端检查和 Rust 完整检查。全部成功后，三平台复用同一份前端资源，并行构建 macOS universal、Windows x64、Linux x64。签名产物先保存在私有 workflow artifacts，保留 14 天。
+3. Release workflow 先解析标签、验证版本并固定提交 SHA，随后并行执行前端检查、Rust 完整检查和前端资源构建。资源构建完成后，三平台立即复用同一份前端资源，并行构建 macOS universal、Windows x64、Linux x64，无需等待其他检查结束。签名产物先保存在私有 workflow artifacts，保留 14 天；只有全部检查和全部平台构建成功后才进入公开发布。
 4. 最终发布任务验证版本、平台覆盖、SHA-256 和全部更新签名，再生成单份 `latest.json`。默认入口采用 macOS universal、Windows NSIS 和 Linux AppImage；如果构建了 MSI、deb 或 rpm，必须提供有效签名，并登记对应安装包类型的入口，避免混用格式。先上传公开仓库草稿，下载附件校验内容，一切完整后才公开并设为 latest。
 
 可在 Actions 页面选择 Release → Run workflow，输入已存在的版本标签重试。只有草稿可被补齐；已公开版本禁止覆盖。发布更低或相同版本也会失败。三平台任意构建失败，公开仓库保持上一版本。

@@ -28,24 +28,24 @@ flowchart LR
 
 ## 正式发布
 
-先解析已有正式标签、校验版本并固定 SHA，再并行执行完整前端检查与 Rust 检查。原有 `Verify release` 汇总检查必须成功，三平台构建才会开始。
+先解析已有正式标签、校验版本并固定 SHA，再并行执行完整前端检查、Rust 检查和独立的 Vite 资源构建。三平台在资源构建完成后开始编译，与检查重叠；原有 `Verify release` 汇总检查和所有平台构建必须成功，公开发布才会开始。
 
-前端检查中保留对旧版本标签的兼容：旧标签缺少新拆分的 npm 脚本时，执行原有各项前端检查和 Vite 构建。Rust 校验仍使用标签中已有的接口检查与完整 Rust 检查命令。
+前端检查中保留对旧版本标签的兼容：旧标签缺少新拆分的 npm 脚本时，执行原有各项前端检查；独立资源任务统一执行 Vite 构建。Rust 校验仍使用标签中已有的接口检查与完整 Rust 检查命令。
 
 macOS universal、Windows x64、Linux x64 保持正式 release profile 和更新签名。三平台成功后，原有签名、版本、平台覆盖、文件哈希、草稿上传、完整性验证和公开发布流程继续执行。
 
 ## 前端与缓存复用
 
 - 每次 workflow 只生成一份 `dist`，前端 artifact 名称带固定源码 SHA，平台任务 checkout 同一 SHA 并下载当前运行的 artifact。
-- 平台构建通过临时 Tauri 配置将 `beforeBuildCommand` 设为 `null`，直接使用已验证的 `dist`，避免再次运行 Vite 和类型导出检查。平台窗口、更新配置和签名配置仍按原方式合并。
+- 平台构建通过临时 Tauri 配置将 `beforeBuildCommand` 设为 `null`，直接使用同一源码提交生成的 `dist`，避免再次运行 Vite 和类型导出检查。正式发布仍等待完整源码检查通过，平台窗口、更新配置和签名配置仍按原方式合并。
 - 前端 artifact 使用 `frontend-ci-*` / `frontend-release-*` 名称。公开发布只下载 `release-*` 安装包 artifacts，前端资源不会作为单独附件上传到公开仓库。
 - 同一次工作流重新执行时允许替换其私有 artifacts，避免固定名称发生上传冲突；这不改变公开 Release 已发布附件禁止覆盖的约束。
 - Rust 缓存统一使用 `src-tauri -> target`，新命名空间为 `v1-versiondock-target`，避开旧的错误缓存。
-- CI / Release 的 Rust 质量检查共用 `native-quality` 缓存键；日常平台测试使用 `native-tests`，完整打包使用 `native-bundles`。平台、架构、工具链和依赖锁文件仍由缓存 action 区分，避免测试缓存阻止完整打包缓存的建立。
+- CI / Release 的 Rust 质量检查和日常 Linux 平台测试共用 `native-quality` 缓存键；macOS、Windows 日常平台测试使用 `native-tests`，完整打包使用 `native-bundles`。平台、架构、工具链和依赖锁文件仍由缓存 action 区分，避免测试缓存阻止完整打包缓存的建立。
 - 接口生成检查加入 `--locked`，防止检查过程中更新 Cargo 锁文件。
 - 本地通过 `rust-toolchain.toml` 固定 Rust 1.99.0，CI 与 Release 的所有 Rust 安装步骤显式使用相同版本。升级工具链时同步修改这几处配置并重新执行检查，避免浮动 `stable` 带来本地与 CI 的 Clippy 规则差异。
 - 平台任务在测试失败时也保存 Rust 依赖缓存；测试仍必须通过，缓存不会替代检查结果。这样可避免启动失败后再次冷编译全部依赖。
-- Windows 测试、普通 CI 的类型导出及 Release Rust 检查设置 `CARGO_PROFILE_TEST_OPT_LEVEL=0`、`CARGO_PROFILE_TEST_DEBUG=1`，减少 LLVM 优化和完整调试符号的编译开销；保留 debug assertions 和溢出检查。正式 release profile 与本地开发配置不变。
+- 三平台测试、普通 CI 的类型导出及 Release Rust 检查统一设置 `CARGO_PROFILE_TEST_OPT_LEVEL=0`、`CARGO_PROFILE_TEST_DEBUG=1`，减少 LLVM 优化和完整调试符号的编译开销；保留 debug assertions 和溢出检查。平台测试设置放在 job 环境中，缓存恢复、预编译和正式测试使用同一配置。本地开发配置不变。
 - Windows 通过 `cargo test --lib --no-run` 预编译并校验测试程序清单，再通过 `cargo nextest run --lib` 运行；当前全部 221 项有效 Rust 测试均位于库中，避免为零测试的 `main.rs` 额外编译主库的 staticlib/cdylib 和二进制测试程序。类型导出检查也显式指定 `--lib`。macOS、Linux 平台和 Release 完整检查仍使用原来的全目标测试命令；新增独立 `tests/` 目录或主程序测试时需同步调整 Windows 命令。
 - Windows 缓存增加 `windows-tests-o0-debug1-lib-v1` 区分该测试配置，避免旧的优化/完整符号缓存命中后无法保存新编译产物。普通 CI Rust 任务的测试配置通过 job 环境变量参与 Rust cache 的键计算。
 
@@ -124,3 +124,44 @@ Release Rust 检查使用与普通 CI 相同的较轻测试配置，覆盖接口
 配置和本地验证不代表 GitHub 预热已经执行；合入后分别记录首次预热、后续标签缓存恢复及三平台实际打包结果。
 
 本轮本地验证：actionlint（含 ShellCheck）通过；检查三平台矩阵及缓存参数一致、Release/CI 测试配置一致、预热仅在 `main` 运行且不引用签名 Secret、公开发布仍等待完整验证与所有平台构建成功。发布逻辑 13 项通过；Rust fmt、Clippy、完整 Rust 测试通过（221 项成功、6 项原有忽略项），接口与默认值一致性检查通过。Apple Silicon 的 Tauri 原生 Release 构建使用 `--no-bundle` 成功，Cargo 元数据确认仅有 `rlib` 和主程序输出；该结果不等于 Windows、Intel Mac 或安装包签名验收。
+
+## v0.1.4 后的并行与测试缓存优化（2026-10-07）
+
+核对 [v0.1.4 Release](https://github.com/chenqinru/VersionDockDesktop/actions/runs/37497043855) 日志，三平台均精确命中 `native-bundles` 缓存。发布总耗时 18 分 23 秒，Windows 构建任务耗时 11 分 23 秒，其中项目编译与链接 8 分 55 秒、安装包制作约 36 秒；macOS 两架构项目编译合计 6 分 14 秒。依赖缓存已经生效，进一步增加相同依赖的缓存无法消除项目自身的编译成本。
+
+原流程在完整检查结束后才启动构建。现将 Vite 资源构建拆为独立任务，资源生成后立即启动三平台原生构建，与完整检查并行：
+
+```mermaid
+flowchart LR
+  S[解析标签并固定 SHA] --> A[构建一份前端资源]
+  S --> F[前端完整检查]
+  S --> R[Rust 完整检查]
+  A --> B[三平台签名构建]
+  F --> V[Verify release]
+  R --> V
+  S --> V
+  V --> P[完整性与签名校验后发布]
+  B --> P
+```
+
+- 构建与检查都 checkout 固定的源码 SHA，前端 artifact 从当前运行下载。检查失败、取消或跳过时，`Verify release` 失败，即使所有安装包都构建成功也不执行公开发布。
+- `publish` 继续同时依赖 `verify` 和三平台矩阵 `build`，保持公开发布串行、平台覆盖、签名与哈希校验、完整草稿公开，以及 GitLab 镜像发布的现有门槛。
+- 同次 [普通 CI](https://github.com/chenqinru/VersionDockDesktop/actions/runs/37496951867) 的 Linux 测试未命中缓存，冷编译占 11 分 35 秒，测试执行约 19 秒。现三平台测试统一采用 `opt-level=0`、`debug=1`；日常 Linux 测试复用前置质量任务的 `native-quality` 依赖缓存。
+- 测试参数放在 job 环境中参与缓存键计算，避免预编译和正式测试采用不同配置。macOS、Windows 的环境键改变后可能需要一次预热；测试优化不改变发布优化级别、更新包签名或本地开发配置。
+
+按本次时间分布，检查与构建并行有约 4 分钟等待可压缩；这是结构上的估算，实际排队、编译耗时及 GitLab 镜像上传耗时需要下次发布确认。
+
+### 编译并行度的体积取舍
+
+在本地 Apple Silicon 使用同一份源码和前端资源、正式 `release` 与 `tauri/custom-protocol` 配置进行对比。只覆盖项目自身的 `codegen-units`，依赖维持原参数；每次仅清理隔离目录中的项目产物，确认日志只重新编译 `versiondock-desktop`。初次迁移缓存导致的依赖重建未纳入比较。MB 为十进制单位，测量的是主程序，未制作安装包。
+
+| 项目编译单元 | 单次构建耗时 | 主程序大小 | 相比原参数体积增加 |
+| --- | ---: | ---: | ---: |
+| 1（原参数） | 138.29 秒 | 19.07 MB | — |
+| 2 | 88.13 秒 | 25.79 MB | 35.26% |
+| 4 | 65.39 秒 | 26.86 MB | 40.83% |
+| 16 | 58.13 秒 | 29.27 MB | 53.50% |
+
+为保留此前的安装包体积优化，本轮不调整 `codegen-units=1`、ThinLTO 或符号裁剪。上述数据是本地单次构建对比，不代表 Windows runner 的加速比例，也不证明应用运行性能。编译参数通过命令行临时覆盖，未写入项目配置；构建目录位于系统临时目录，未替换已安装 App 或原有安装包。
+
+本轮验证：actionlint 通过；解析实际工作流依赖图，确认构建无需等待检查、发布仍依赖完整检查与全部构建，并执行 80 种上游结果组合的实际 shell 汇总命令，仅全部成功时放行。前端完整检查与构建通过，860 项前端测试、20 项发布测试通过；采用统一测试配置的接口/默认值校验、Rust fmt、全目标/全特性 Clippy 和完整 Rust 回归通过，226 项通过、6 项原有忽略项。GitHub 上的三平台新流程与实际提速需提交推送后验证。
