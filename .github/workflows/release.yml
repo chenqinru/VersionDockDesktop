@@ -633,7 +633,6 @@ jobs:
       cancel-in-progress: false
     env:
       RELEASE_VERSION: ${{ needs.verify.outputs.version }}
-      RELEASE_SOURCE_SHA: ${{ needs.verify.outputs.sha }}
       RELEASE_OUTPUT_DIR: ${{ github.workspace }}/prepared-release-mirror
     steps:
       - name: Checkout verified source commit
@@ -651,7 +650,6 @@ jobs:
         run: |
           command -v minisign
           command -v curl
-          command -v gh
 
       - name: Download prepared release from this run
         uses: actions/download-artifact@v4

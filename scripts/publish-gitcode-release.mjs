@@ -50,9 +50,8 @@ async function uploadFile(url, file, headers) {
     ...Object.entries(headers).map(([name, value]) => `header = ${curlConfigValue(`${name}: ${value}`)}`)].join('\n');
   const started = Date.now();
   const result = await new Promise((resolve) => {
-    const child = spawn('curl', ['--disable', '--config', '-', '--http1.1', '--globoff', '--request', 'PUT', '--silent', '--show-error',
-      // OBS intermediaries can mishandle the extra 100-continue exchange.
-      // This header is transport-only and is not part of the signed x-obs headers.
+    const child = spawn('curl', ['--disable', '--config', '-', '--http1.1', '--globoff', '--request', 'PUT', '--silent',
+      // Send the body directly; Expect is not part of the signed x-obs headers.
       '--header', 'Expect:', '--connect-timeout', '30', '--max-time', '180', '--output', os.devNull,
       '--write-out', '%{http_code} %{size_upload} %{size_download}'],
     { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -143,7 +142,7 @@ export function createGitCodeClient({ config, token, request = fetch, sleep = pa
           existing = await release(version);
           if (!existing) throw error;
         }
-        existing = await release(version);
+        if (!existing) existing = await release(version);
       }
       if (existing?.tag_name !== `v${version}` || typeof existing.body !== 'string' || existing.body.trim() !== notes.trim()) {
         throw new Error('GitCode 已有 Release 的标签或说明与本次发布不一致');
@@ -184,7 +183,6 @@ export function createGitCodeClient({ config, token, request = fetch, sleep = pa
         }
         headers[key] = value;
       }
-      headers['Content-Length'] = String(fs.statSync(file).size);
       await uploadFile(upload.url, file, headers);
     },
     async finishRelease(version, notes) {
@@ -214,7 +212,7 @@ export function createGitCodeClient({ config, token, request = fetch, sleep = pa
       } catch (error) {
         if (!equal((await latest())?.manifest, manifest)) throw error;
       }
-      if (await hash(config.latestUrl) !== createHash('sha256').update(serialize(manifest)).digest('hex')) {
+      if (await hash(config.latestUrl) !== fileHashForManifest(manifest)) {
         throw new Error('GitCode latest.json 匿名读取校验失败');
       }
     },
@@ -267,11 +265,7 @@ export async function publishGitCodeRelease({ directory, version, config, client
     if (remote === null) await client.upload(version, name, file);
     if (await client.hash(url) !== local) throw new Error(`GitCode 远程附件 SHA-256 校验失败：${name}`);
   }
-  // Verify small signatures first: transport or permission errors surface before
-  // spending minutes on a large installer. The fixed manifest still commits last.
-  const uploadOrder = [...names].sort((left, right) => Number(!left.endsWith('.sig')) - Number(!right.endsWith('.sig'))
-    || fs.statSync(path.join(assets, left)).size - fs.statSync(path.join(assets, right)).size || left.localeCompare(right));
-  for (const name of uploadOrder) await publishFile(name, path.join(assets, name));
+  for (const name of names) await publishFile(name, path.join(assets, name));
   // Use a separate file so GitHub's prepared manifest remains unchanged.
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'versiondock-gitcode-'));
   const file = path.join(temporary, 'latest.json');

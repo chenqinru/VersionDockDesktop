@@ -12,7 +12,7 @@ GitHub `chenqinru/VersionDockDesktop` 是源码与主发布仓库。公开 GitCo
 
 镜像仓库需初始化默认分支，公开项目、仓库文件和 Release 附件应允许匿名读取。客户端不携带 PAT。令牌创建见 [GitCode 官方说明](https://docs.gitcode.com/docs/help/home/user_center/security_management/user_pat/)，保存至 [GitHub Actions Secrets](https://github.com/chenqinru/VersionDockDesktop/settings/secrets/actions)。项目读写用于 Release、附件和 Contents API；当前发布不通过 Git 推送，不要求额外 Repository 推送权限。
 
-2026-10-07 已核对：GitHub 的 `GITCODE_RELEASE_TOKEN` Secret 存在，`GITCODE_RELEASE_REPOSITORY` 已设置为上述镜像仓库；镜像 `main` 分支和 README 能匿名读取。Secret 存在不等于令牌权限、上传额度或实际更新已验证；首次发布必须完成下文核验。
+2026-10-07 已核对：GitHub 的 `GITCODE_RELEASE_TOKEN` Secret 存在，`GITCODE_RELEASE_REPOSITORY` 已设置为上述镜像仓库；`0.1.8` 已由 `versiondock-release` runner 成功发布，14 个附件齐全，正式 Release 与固定清单均为该版本，清单可匿名读取且下载地址指向 GitCode。客户端实际下载、安装和重启仍需按下文验证。
 
 缺少 `GITCODE_RELEASE_REPOSITORY` 时只构建 GitHub 更新地址并跳过镜像任务。配置存在时，由 [gitcode-release-config.mjs](../scripts/gitcode-release-config.mjs) 生成不含凭据的构建配置，依次写入 GitHub 主地址和 GitCode 备用地址。
 
@@ -34,7 +34,7 @@ https://gitcode.com/chenqinru/VersionDockDesktop-Releases/releases/download/v<�
 
 1. 校验本地版本、更新清单、发布说明与 minisign 签名，拒绝版本回退和已发布版本内容变更。
 2. 检查镜像分支，创建或复用 `vX.Y.Z` 的预发布 Release。标签指向镜像分支，不代表源码提交；源码身份由 GitHub 版本标签和 prepared artifact 保证。
-3. 先上传签名，再按文件大小上传安装包。为缺失附件获取上传 URL，以新的文件流执行 PUT；随后匿名完整读取并校验 SHA-256。已有同名附件必须与本地产物一致，不覆盖不同内容。
+3. 为缺失附件获取上传 URL，以新的文件流执行 PUT；随后匿名完整读取并校验 SHA-256。已有同名附件必须与本地产物一致，不覆盖不同内容。
 4. 将下载地址改为 GitCode，上传并验证版本 `latest.json`，保持原 GitHub 清单不变。同版本重跑复用已发布清单的时间，避免重试时变化。
 5. 再次检查固定清单版本，确认无较新版本后将 Release 设为正式 latest，最后通过 Contents API 更新分支根目录的固定 `latest.json`。更新已有文件必须提供读取时的 Blob SHA，拒绝并发覆盖。
 6. 匿名读取固定清单并验证完整哈希。
@@ -49,9 +49,9 @@ https://gitcode.com/chenqinru/VersionDockDesktop-Releases/releases/download/v<�
 
 `publish-gitcode` 和 **Retry GitCode mirror** 使用 `[self-hosted, linux, x64, gitcode-publish]`，复用原有 `versiondock-release` runner。服务器只下载已经构建好的安装包、校验签名和发布 GitCode；源码检查、三平台构建与 GitHub Release 继续使用 GitHub 托管 runner。两端独立执行，镜像任务排队或失败不阻断 GitHub 发布。
 
-采用国内 runner 是因为托管 runner 在上传 `0.1.8` 时成功上传六个小签名，却连续三次在安装包发送约 2.4～2.7 MB 后达到 180 秒超时。更换上传网络后仍需验证完整安装包，runner 在线不等于已完成镜像发布。
+采用国内 runner 是因为托管 runner 在上传 `0.1.8` 时成功上传六个小签名，却连续三次在安装包发送约 2.4～2.7 MB 后达到 180 秒超时。更换上传网络后，`0.1.8` 的完整镜像发布与远程哈希核验已通过。
 
-服务器服务用户的 `PATH` 需包含 `minisign`、`curl` 和 `gh`；Node.js 20 由 `actions/setup-node` 配置。工作流只检查工具，不调用 `sudo apt-get` 安装。缺少工具时应在服务器上为 runner 服务用户准备：
+服务器服务用户的 `PATH` 需包含 `minisign` 和 `curl`；补发工作流还需 `gh` 从 GitHub 获取已有 Release。Node.js 20 由 `actions/setup-node` 配置。工作流只检查工具，不调用 `sudo apt-get` 安装。缺少工具时应在服务器上为 runner 服务用户准备：
 
 ```bash
 command -v minisign
