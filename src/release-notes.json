@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.1.8",
+    "date": "2026-10-07",
+    "highlights": {
+      "zh-CN": [
+        "命令超时或取消时保留已输出的错误详情，工作区更新失败提示提供更完整的原因，便于排查网络和认证问题。",
+        "优化差异和源码视图的语法高亮，通过后台处理与缓存减少重复计算，切换文件或主题时避免显示过期高亮。",
+        "修复应用窗口标题为空的问题，统一显示 VersionDock Desktop。",
+        "备用更新源切换为 GitCode，并改进安装包发布与校验流程，镜像发布失败时不阻断 GitHub 主更新源发布。"
+      ],
+      "en": [
+        "Preserve available error details when commands time out or are cancelled, and show more complete workspace update failures to help diagnose network and authentication issues.",
+        "Improve syntax highlighting in diff and source views with background processing and caching, reducing repeated work and preventing stale highlights when switching files or themes.",
+        "Fix empty application window titles and consistently display VersionDock Desktop.",
+        "Switch the fallback update source to GitCode and improve installer publishing and verification, allowing GitHub releases to proceed independently of mirror publishing failures."
+      ]
+    }
+  },
+  {
     "version": "0.1.7",
     "date": "2026-10-07",
     "highlights": {
