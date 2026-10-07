@@ -19,6 +19,54 @@ afterEach(() => vi.useRealTimers());
 const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 describe('native progress bridge contract', () => {
+  it('preserves native stderr and recovery warnings when timeout cancellation settles within the grace period', async () => {
+    let resolve!: (value: ResponseEnvelope) => void;
+    invoke.mockImplementation((name) => name === 'bridge_cancel' ? Promise.resolve(true) : new Promise((done) => { resolve = done; }));
+    const bridge = new TauriBridge(); await bridge.initialize();
+    let id = '';
+    const pending = bridge.request(command, { timeoutMs: 100, timeoutGraceMs: 1000, onOperationId: (value) => { id = value; } });
+    const failure = expect(pending).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT', command: 'git', stderr: 'fatal: SSL_ERROR_SYSCALL', restoreWarning: { details: 'restore failed' } });
+    await vi.waitFor(() => expect(id).not.toBe('')); await vi.advanceTimersByTimeAsync(100);
+    expect(invoke).toHaveBeenCalledWith('bridge_cancel', { requestId: id });
+    resolve({ requestId: id, result: null, error: { code: 'REQUEST_CANCELLED', message: 'Operation cancelled', command: 'git', exitCode: null, stderr: 'fatal: SSL_ERROR_SYSCALL', recoverable: true, restoreWarning: { shelf: false, backupName: '', backupId: 'hash', conflicted: false, details: 'restore failed' } } });
+    await failure; bridge.dispose();
+  });
+
+  it.each([false, true])('uses the actual native result during timeout grace (failure: %s)', async (failed) => {
+    let resolve!: (value: ResponseEnvelope) => void;
+    invoke.mockImplementation((name) => name === 'bridge_cancel' ? Promise.resolve(true) : new Promise((done) => { resolve = done; }));
+    const bridge = new TauriBridge(); await bridge.initialize();
+    let id = '';
+    const pending = bridge.request(command, { timeoutMs: 100, timeoutGraceMs: 1000, onOperationId: (value) => { id = value; } });
+    const outcome = failed ? expect(pending).rejects.toMatchObject({ code: 'COMMAND_FAILED', stderr: 'fatal: SSL_ERROR_SYSCALL' }) : expect(pending).resolves.toEqual({ output: 'updated', update: null });
+    await vi.waitFor(() => expect(id).not.toBe('')); await vi.advanceTimersByTimeAsync(100);
+    resolve({ requestId: id, result: failed ? null : { output: 'updated', update: null }, error: failed ? { code: 'COMMAND_FAILED', message: 'SSL failed', command: 'git', exitCode: 128, stderr: 'fatal: SSL_ERROR_SYSCALL', recoverable: true } : null });
+    await outcome; bridge.dispose();
+  });
+
+  it('bounds timeout recovery when native cancellation never settles', async () => {
+    invoke.mockImplementation((name) => name === 'bridge_cancel' ? Promise.resolve(true) : new Promise(() => undefined));
+    const bridge = new TauriBridge(); await bridge.initialize();
+    let id = ''; let completed = false; let started = 0;
+    const pending = bridge.request(command, { timeoutMs: 100, timeoutGraceMs: 1000, onOperationId: (value) => { id = value; started = Date.now(); } });
+    const failure = expect(pending).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT', stderr: null });
+    void pending.catch(() => { completed = true; });
+    await vi.waitFor(() => expect(id).not.toBe(''));
+    await vi.advanceTimersByTimeAsync(1099 - (Date.now() - started));
+    expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); await failure; bridge.dispose();
+  });
+
+  it('keeps user cancellation immediate even during timeout recovery', async () => {
+    invoke.mockImplementation((name) => name === 'bridge_cancel' ? Promise.resolve(true) : new Promise(() => undefined));
+    const bridge = new TauriBridge(); await bridge.initialize();
+    const controller = new AbortController(); let id = '';
+    const pending = bridge.request(command, { timeoutMs: 100, timeoutGraceMs: 1000, signal: controller.signal, onOperationId: (value) => { id = value; } });
+    const failure = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(id).not.toBe('')); await vi.advanceTimersByTimeAsync(100);
+    controller.abort(); await failure; bridge.dispose();
+  });
+
   it('registers the child ID before invoking and only emits one completion after native response', async () => {
     let resolve!: (value: ResponseEnvelope) => void;
     invoke.mockImplementation(() => new Promise((done) => { resolve = done; }));

@@ -484,24 +484,24 @@ async fn run_once(
         DesktopError::new("COMMAND_PIPE_FAILED", "Unable to capture stderr", true)
     })?;
     let stdout_task = tokio::spawn(read_capped(stdout));
-    let stderr_task = tokio::spawn(read_capped(stderr));
+    let mut stderr_task = tokio::spawn(read_capped(stderr));
 
     let status = tokio::select! {
         _ = cancellation.cancelled() => {
             terminate_process_tree(&mut child).await;
             stdout_task.abort();
-            stderr_task.abort();
+            let error = interrupted_command_error(program, "REQUEST_CANCELLED", "Operation cancelled".into(), &mut stderr_task).await;
             let duration_ms = start_time.elapsed().as_millis() as u32;
             crate::logger::log_entry_with_cwd(
                 crate::logger::LogLevel::Warn,
                 channel,
                 &formatted_cmd,
-                Some("Operation cancelled".to_string()),
+                Some([Some(error.message.clone()), error.stderr.clone()].into_iter().flatten().collect::<Vec<_>>().join("\n")),
                 Some(duration_ms),
                 None,
                 cwd_str.clone(),
             );
-            return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true));
+            return Err(error);
         }
         result = tokio::time::timeout(timeout, child.wait()) => {
             match result {
@@ -509,18 +509,18 @@ async fn run_once(
                 Err(_) => {
                     terminate_process_tree(&mut child).await;
                     stdout_task.abort();
-                    stderr_task.abort();
+                    let error = interrupted_command_error(program, "COMMAND_TIMEOUT", format!("{program} timed out"), &mut stderr_task).await;
                     let duration_ms = start_time.elapsed().as_millis() as u32;
                     crate::logger::log_entry_with_cwd(
                         crate::logger::LogLevel::Error,
                         channel,
                         &formatted_cmd,
-                        Some(format!("{program} timed out")),
+                        Some([Some(error.message.clone()), error.stderr.clone()].into_iter().flatten().collect::<Vec<_>>().join("\n")),
                         Some(duration_ms),
                         None,
                         cwd_str.clone(),
                     );
-                    return Err(DesktopError::new("COMMAND_TIMEOUT", format!("{program} timed out"), true));
+                    return Err(error);
                 },
             }
         }
@@ -950,6 +950,28 @@ fn format_command_for_log(program: &str, args: &[String]) -> String {
         }
     }
     parts.join(" ")
+}
+
+async fn interrupted_command_error(
+    program: &str,
+    code: &str,
+    message: String,
+    stderr_task: &mut tokio::task::JoinHandle<Result<(Vec<u8>, bool), std::io::Error>>,
+) -> DesktopError {
+    let mut error = DesktopError::new(code, message, true);
+    error.command = Some(program.to_string());
+    // Killing the process tree closes its pipes. Drain stderr before discarding
+    // it, with a bound in case an unrelated process inherited a pipe handle.
+    match tokio::time::timeout(Duration::from_millis(500), &mut *stderr_task).await {
+        Ok(Ok(Ok((stderr, _)))) => {
+            let stderr = redact(&String::from_utf8_lossy(&stderr));
+            if !stderr.trim().is_empty() {
+                error.stderr = Some(truncate_text(&stderr, 16 * 1024));
+            }
+        }
+        _ => stderr_task.abort(),
+    }
+    error
 }
 
 async fn terminate_process_tree(child: &mut tokio::process::Child) {
@@ -1876,6 +1898,78 @@ mod tests {
             &authenticated,
             &result("svn: E160013: missing\n")
         ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interrupted_commands_keep_redacted_stderr() {
+        let root = tempfile::tempdir().unwrap();
+        let script = "echo \"fatal: unable to access 'https://user:secret@example.com/repo.git/':\" >&2; echo 'LibreSSL SSL_connect: SSL_ERROR_SYSCALL' >&2";
+        let timeout = run(
+            "sh",
+            &["-c".into(), format!("{script}; sleep 5")],
+            root.path(),
+            None,
+            Duration::from_millis(200),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(timeout.code, "COMMAND_TIMEOUT");
+        assert_eq!(timeout.command.as_deref(), Some("sh"));
+        let stderr = timeout.stderr.unwrap();
+        assert!(stderr.contains("SSL_ERROR_SYSCALL"));
+        assert!(stderr.contains("https://<redacted>@example.com"));
+        assert!(!stderr.contains("secret"));
+
+        let token = CancellationToken::new();
+        let cancel = token.clone();
+        let ready = root.path().join("ready");
+        let command_root = root.path().to_path_buf();
+        let task = tokio::spawn(async move {
+            run(
+                "sh",
+                &["-c".into(), format!("{script}; touch ready; sleep 5")],
+                &command_root,
+                None,
+                DEFAULT_TIMEOUT,
+                &token,
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !ready.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        cancel.cancel();
+        let error = task.await.unwrap().unwrap_err();
+        assert_eq!(error.code, "REQUEST_CANCELLED");
+        let stderr = error.stderr.unwrap();
+        assert!(stderr.contains("SSL_ERROR_SYSCALL"));
+        assert!(!stderr.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn real_git_network_failure_preserves_stderr_and_exit_code() {
+        let root = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let error = run(
+            "git",
+            &["ls-remote".into(), format!("http://{address}/repo.git")],
+            root.path(),
+            None,
+            Duration::from_secs(5),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.exit_code, Some(128));
+        assert!(error.stderr.unwrap().contains("unable to access"));
     }
 
     #[cfg(unix)]

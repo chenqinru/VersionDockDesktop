@@ -3782,7 +3782,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         }));
       };
 
-      const settled: Array<{ repoId: string; repoName: string; result?: RepositoryUpdateResult; output?: string; error?: string; conflict?: boolean }> = [];
+      const settled: Array<{ repoId: string; repoName: string; result?: RepositoryUpdateResult; output?: string; error?: string; details?: string; conflict?: boolean }> = [];
       try {
         for (const repo of repositories) {
           if (taskProgress.isStopped(taskId)) break;
@@ -3797,7 +3797,7 @@ export const useAppStore = create<AppStore>((set, get) => {
                 remote: null,
                 branch: null,
               },
-            }, { timeoutMs: 45_000, onOperationId: (id) => taskProgress.bindChild(taskId, repo.meta.id, id) });
+            }, { timeoutMs: 45_000, timeoutGraceMs: 1_000, onOperationId: (id) => taskProgress.bindChild(taskId, repo.meta.id, id) });
             await notifyUpdateRestoreWarning(value.restoreWarning, wid, repo.meta.id);
             taskProgress.completeChild(taskId, repo.meta.id, 'succeeded');
             reportProgress(repo.meta.name, true);
@@ -3809,7 +3809,14 @@ export const useAppStore = create<AppStore>((set, get) => {
             reportProgress(repo.meta.name, true);
             if (taskProgress.isStopped(taskId) && isAbortError(error)) break;
             await handlePullAutoStashError(error, wid);
-            settled.push({ repoId: repo.meta.id, repoName: repo.meta.name, result: undefined, output: undefined, conflict: error instanceof BridgeError && error.restoreWarning?.conflicted === true, error: error instanceof BridgeError && error.code === 'REQUEST_TIMEOUT' ? t('Operation timed out after 45 seconds.') : errorText(error) });
+            const timedOut = error instanceof BridgeError && error.code === 'REQUEST_TIMEOUT';
+            // Raw command output matches the plugin's failure message. Semantic
+            // errors (conflicts/recovery) retain their actionable message.
+            const message = timedOut
+              ? [t('Operation timed out after 45 seconds.'), error.stderr?.trim()].filter(Boolean).join('\n')
+              : error instanceof BridgeError && error.stderr?.trim() && error.message === error.stderr.split('\n')[0]
+                ? error.stderr.trim() : errorText(error);
+            settled.push({ repoId: repo.meta.id, repoName: repo.meta.name, conflict: error instanceof BridgeError && error.restoreWarning?.conflicted === true, error: message, details: errorDetails(error) });
           }
         }
         releaseStableRefresh();
@@ -3877,7 +3884,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           urgent: failed > 0,
           title: message,
           message,
-          details: failed ? failedItems.map((item) => `${item.repoName}: ${item.error}`).join('\n') : undefined,
+          details: failed ? failedItems.map((item) => `${item.repoName}: ${item.details ?? item.error}`).join('\n\n') : undefined,
           workspaceId: wid,
           actions,
         });

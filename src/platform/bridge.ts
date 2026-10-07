@@ -12,6 +12,8 @@ import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
 export interface RequestOptions {
   timeoutMs?: number;
+  /** Bounded wait for native cancellation output after the request deadline. */
+  timeoutGraceMs?: number;
   signal?: AbortSignal;
   showProgress?: boolean;
   onOperationId?: (operationId: string) => void;
@@ -394,13 +396,15 @@ export class TauriBridge implements VersionDockBridge {
     });
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     let abortHandler: (() => void) | undefined;
     let remaining = timeoutMs;
     let scheduledAt = Date.now();
     const timeoutPromise = new Promise<never>((_, reject) => {
       const expire = () => {
+        timedOut = true;
         void invoke('bridge_cancel', { requestId: id }).catch(() => undefined);
-        reject(new BridgeError({
+        const rejectTimeout = () => reject(new BridgeError({
           code: 'REQUEST_TIMEOUT',
           message: `Request timed out after ${timeoutMs}ms`,
           command: null,
@@ -408,11 +412,13 @@ export class TauriBridge implements VersionDockBridge {
           stderr: null,
           recoverable: true,
         }));
+        if (options.timeoutGraceMs) timeout = setTimeout(rejectTimeout, options.timeoutGraceMs);
+        else rejectTimeout();
       };
       const schedule = () => { scheduledAt = Date.now(); timeout = setTimeout(expire, remaining); };
       this.operationTimers.set(id, {
-        pause: () => { if (timeout) { clearTimeout(timeout); timeout = undefined; remaining = Math.max(1, remaining - (Date.now() - scheduledAt)); } },
-        resume: () => { if (!timeout) schedule(); },
+        pause: () => { if (timeout && !timedOut) { clearTimeout(timeout); timeout = undefined; remaining = Math.max(1, remaining - (Date.now() - scheduledAt)); } },
+        resume: () => { if (!timeout && !timedOut) schedule(); },
       });
       schedule();
       abortHandler = () => {
@@ -429,7 +435,11 @@ export class TauriBridge implements VersionDockBridge {
       ]);
 
       if (response.error) {
-        throw new BridgeError(response.error);
+        // Cancellation is our timeout safeguard, not a user cancellation. Keep
+        // native stderr and restoration warnings returned during the grace period.
+        throw new BridgeError(timedOut && response.error.code === 'REQUEST_CANCELLED'
+          ? { ...response.error, code: 'REQUEST_TIMEOUT', message: `Request timed out after ${timeoutMs}ms` }
+          : response.error);
       }
 
       return response.result as T;
