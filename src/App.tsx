@@ -108,6 +108,20 @@ export function App() {
   }, [bridge, startupTab]);
 
   useEffect(() => {
+    if (!ready || bootstrap?.state.settings?.autoCheckUpdates === false) return;
+    const check = () => void useAppStore.getState().checkUpdateSilently();
+    // Recover after startup network failures and notice releases while the app
+    // remains open. The store prevents overlapping checks.
+    const timer = window.setInterval(check, 15 * 60 * 1000);
+    window.addEventListener('online', check);
+    check();
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('online', check);
+    };
+  }, [ready, bootstrap?.state.settings?.autoCheckUpdates]);
+
+  useEffect(() => {
     const handleFocus = () => {
       if (!ready || focusFetchRunning.current || (bootstrap?.state.settings?.autoFetchOnFocus ?? true) === false) return;
       const gitRepos = useAppStore.getState().snapshot?.repositories.filter((repo) => repo.meta.kind === 'git' && !repo.meta.isWorktree) ?? [];

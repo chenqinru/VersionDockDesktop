@@ -143,6 +143,7 @@ const renderStatusBar = () => {
 };
 
 afterEach(() => {
+  useAppStore.setState({ updateChecking: false, updateAvailableInfo: null });
   cleanup();
   resetTaskProgress();
   useAppStore.setState({ bridge: undefined, bootstrap: undefined, ready: false, snapshot: undefined, operations: {} });
@@ -150,6 +151,14 @@ afterEach(() => {
 });
 
 describe('StatusBar', () => {
+  it('retains update checks on the welcome screen without a workspace', () => {
+    renderStatusBar();
+    act(() => useAppStore.setState({ snapshot: undefined, updateAvailableInfo: null, updateChecking: true }));
+    expect(screen.getByRole('contentinfo')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Checking for updates…' })).toBeDisabled();
+    expect(screen.queryByText('main')).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ updateChecking: false }));
+  });
   it('renders branch status and accounts item', async () => {
     const { requests } = renderStatusBar();
 

@@ -6,6 +6,106 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { RELEASE_REPOSITORY, compareVersions, fileHash, prepareRelease, stageArtifacts, validateVersion } from './release-artifacts.mjs';
 import { assertPublishable, createGitHubClient, publishRelease } from './publish-release.mjs';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { gitlabReleaseConfig, prepareUpdaterConfig } from './gitlab-release-config.mjs';
+import { createGitLabClient, publishGitLabRelease } from './publish-gitlab-release.mjs';
+
+test('GitLab 构建配置使用固定清单地址且只注入公开地址', () => {
+  assert.equal(gitlabReleaseConfig({}), null);
+  const env = { GITLAB_RELEASE_PROJECT_ID: '42', GITLAB_RELEASE_TOKEN: 'should-never-be-in-client' };
+  const config = gitlabReleaseConfig(env);
+  assert.equal(config.latestUrl, 'https://git.gsdzone.net/api/v4/projects/42/repository/files/latest.json/raw?ref=main');
+  const updater = prepareUpdaterConfig(env);
+  assert.equal(updater.plugins.updater.endpoints.length, 2);
+  assert.ok(updater.plugins.updater.endpoints[0].startsWith('https://github.com/'));
+  assert.equal(updater.plugins.updater.endpoints[1], config.latestUrl);
+  assert.ok(!JSON.stringify(updater).includes(env.GITLAB_RELEASE_TOKEN));
+  assert.throws(() => gitlabReleaseConfig({ GITLAB_RELEASE_PROJECT_ID: 'abc' }), /数字项目/);
+  assert.throws(() => gitlabReleaseConfig({ ...env, GITLAB_RELEASE_URL: 'https://token@git.gsdzone.net' }), /不含凭据/);
+});
+
+async function gitlabServer(t, corrupt = false) {
+  const state = { packages: new Map(), latest: null, commits: 0, uploads: 0, authenticatedReads: 0 };
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    const packageRequest = url.pathname.includes('/packages/generic/');
+    const raw = url.pathname.endsWith('/raw');
+    const authorized = req.headers['private-token'] === 'pipeline-only-token';
+    if ((req.method !== 'GET' || !packageRequest && !raw) && !authorized) {
+      res.writeHead(401).end(); return;
+    }
+    if (req.method === 'GET' && (packageRequest || raw) && authorized) state.authenticatedReads++;
+    if (packageRequest) {
+      if (req.method === 'PUT') {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        state.packages.set(url.pathname, Buffer.concat(chunks)); state.uploads++;
+        res.writeHead(201).end('{}');
+      } else {
+        const data = state.packages.get(url.pathname);
+        res.writeHead(data ? 200 : 404).end(data ? corrupt ? 'broken' : data : '');
+      }
+    } else if (req.method === 'GET') {
+      if (!state.latest) { res.writeHead(404).end(); return; }
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(raw ? state.latest : JSON.stringify({
+        content: Buffer.from(state.latest).toString('base64'), last_commit_id: String(state.commits),
+      }));
+    } else {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const input = JSON.parse(Buffer.concat(chunks));
+      if (state.latest && input.last_commit_id !== String(state.commits)) { res.writeHead(400).end(); return; }
+      state.latest = input.content; state.commits++;
+      res.writeHead(201).end('{}');
+    }
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
+  const api = `http://127.0.0.1:${server.address().port}/api/v4/projects/42`;
+  const config = { api, branch: 'main', manifestFile: `${api}/repository/files/latest.json`,
+    latestUrl: `${api}/repository/files/latest.json/raw?ref=main`,
+    packageUrl: (version, name) => `${api}/packages/generic/versiondock-desktop/${version}/${name}` };
+  return { state, config, client: createGitLabClient({ config, token: 'pipeline-only-token', sleep: async () => {} }) };
+}
+
+test('真实 HTTP 上传签名附件，匿名校验完成后提交固定清单，重跑不重复上传', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const { state, config, client } = await gitlabServer(t);
+  const result = await publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client });
+  assert.equal(state.packages.size, 6); assert.equal(state.commits, 1); assert.equal(state.authenticatedReads, 0);
+  assert.ok(Object.values(result.platforms).every(({ url }) => url.includes('/packages/generic/')));
+  assert.ok(!state.latest.includes('pipeline-only-token'));
+  const githubManifestFile = path.join(input.outputDir, 'assets', 'latest.json');
+  const regenerated = JSON.parse(fs.readFileSync(githubManifestFile));
+  regenerated.pub_date = '2026-10-07T00:00:00Z';
+  fs.writeFileSync(githubManifestFile, JSON.stringify(regenerated));
+  await publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client });
+  assert.equal(state.uploads, 6); assert.equal(state.commits, 1);
+  assert.equal(JSON.parse(state.latest).pub_date, result.pub_date);
+  state.latest = JSON.stringify({ version: '9.0.0' });
+  await assert.rejects(publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client }), /回退/);
+});
+
+test('远程安装包损坏时停止发布且不修改 latest.json', async (t) => {
+  const input = fixture(); prepareRelease(input);
+  const { state, config, client } = await gitlabServer(t, true);
+  await assert.rejects(publishGitLabRelease({ directory: input.outputDir, version: input.version, pubkey: input.pubkey, config, client }), /SHA-256/);
+  assert.equal(state.commits, 0); assert.equal(state.latest, null);
+});
+
+test('GitLab 服务端 503 最多重试三次，匿名请求不附带凭据', async () => {
+  let calls = 0;
+  const waits = [];
+  const config = gitlabReleaseConfig({ GITLAB_RELEASE_PROJECT_ID: '42' });
+  const client = createGitLabClient({ config, token: 'secret', sleep: async (delay) => waits.push(delay),
+    request: async (_url, options) => {
+      assert.deepEqual(options.headers, {});
+      calls++; return new Response('', { status: calls < 3 ? 503 : 404 });
+    } });
+  assert.equal(await client.hash(config.packageUrl('0.1.1', 'file.exe')), null);
+  assert.equal(calls, 3); assert.deepEqual(waits, [1000, 2000]);
+});
 
 const temporaryDirectories = [];
 afterEach(() => {

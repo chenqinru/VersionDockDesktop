@@ -20,6 +20,7 @@ beforeEach(() => {
   useAppUpdateStore.setState({ phase: 'idle', targetVersion: null, progress: null, error: null });
   useAppStore.setState({
     aboutOpen: false,
+    updateChecking: false,
     updateAvailableInfo: { available: true, currentVersion: '0.1.0', latestVersion: '0.2.0' },
   });
   vi.spyOn(updater, 'downloadAndInstallAppUpdate').mockResolvedValue(undefined);
@@ -34,6 +35,17 @@ afterEach(() => {
 });
 
 describe('UpdateStatusBarItem', () => {
+  it('shows check progress and exposes a failed check as a retry action', async () => {
+    useAppStore.setState({ updateChecking: true, updateAvailableInfo: null });
+    renderUpdate();
+    expect(screen.getByRole('button', { name: '正在检查更新…' })).toBeDisabled();
+    act(() => useAppStore.setState({ updateChecking: false, updateAvailableInfo: { available: false, currentVersion: '0.1.0', error: 'timeout' } }));
+    const check = vi.spyOn(updater, 'checkAppUpdate').mockResolvedValue({ available: false, currentVersion: '0.1.0' });
+    const retry = screen.getByRole('button', { name: '检查更新失败，点击重试' });
+    expect(retry).toHaveAttribute('title', '检查更新失败：timeout');
+    fireEvent.click(retry);
+    await waitFor(() => expect(check).toHaveBeenCalledOnce());
+  });
   it('starts native installation directly and offers restart only after success', async () => {
     renderUpdate();
     fireEvent.click(screen.getByRole('button', { name: '发现新版本 v0.2.0，点击更新' }));

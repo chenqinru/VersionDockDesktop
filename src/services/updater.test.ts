@@ -1,30 +1,95 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { check, type Update } from '@tauri-apps/plugin-updater';
+import { check, Update } from '@tauri-apps/plugin-updater';
+import { invoke } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { version } from '../../package.json';
-import { checkAppUpdate, downloadAndInstallAppUpdate, restartApp, generateDiagnosticReport, isNewerVersion, APP_CURRENT_VERSION, GITHUB_REPO_URL } from './updater';
+import { checkAppUpdate as nativeCheck, downloadAndInstallAppUpdate as nativeDownload, restartApp, generateDiagnosticReport, isNewerVersion, APP_CURRENT_VERSION, GITHUB_REPO_URL } from './updater';
 
-vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }));
+vi.mock('@tauri-apps/plugin-updater', async (original) => ({ ...(await original<typeof import('@tauri-apps/plugin-updater')>()), check: vi.fn() }));
+vi.mock('@tauri-apps/api/core', async (original) => ({ ...(await original<typeof import('@tauri-apps/api/core')>()), invoke: vi.fn() }));
+
+async function flushRetries<T>(promise: Promise<T>): Promise<T> {
+  const outcome = promise.then((value) => ({ value }), (error: unknown) => ({ error }));
+  await vi.runAllTimersAsync();
+  const result = await outcome;
+  if ('error' in result) throw result.error;
+  return result.value;
+}
+const checkAppUpdate = () => flushRetries(nativeCheck());
+const downloadAndInstallAppUpdate = () => flushRetries(nativeDownload());
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 
 function updateFixture() {
   return {
     available: true, version: '0.1.1', currentVersion: version, date: '2026-10-06', body: 'Release notes',
-    downloadAndInstall: vi.fn().mockResolvedValue(undefined),
+    download: vi.fn().mockResolvedValue(undefined), install: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined),
   } as unknown as Update;
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.mocked(invoke).mockReset().mockResolvedValue(null);
   vi.mocked(check).mockReset().mockResolvedValue(null);
   vi.mocked(relaunch).mockReset().mockResolvedValue(undefined);
   vi.stubGlobal('__TAURI_INTERNALS__', {});
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('updater service', () => {
+  it('does not silently install a different version after a background check changes the cache', async () => {
+    const update = updateFixture();
+    vi.mocked(check).mockResolvedValueOnce(update);
+    await checkAppUpdate();
+    await expect(flushRetries(nativeDownload(undefined, '0.0.1'))).rejects.toThrow('selected update version has changed');
+    expect(update.download).not.toHaveBeenCalled();
+    expect(update.install).not.toHaveBeenCalled();
+  });
+  it('recovers from a startup network failure within three attempts', async () => {
+    const update = updateFixture();
+    vi.mocked(check).mockRejectedValueOnce(new Error('network timeout')).mockResolvedValueOnce(update);
+    expect(await checkAppUpdate()).toMatchObject({ available: true });
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it('switches a failed GitHub download to the same signed version on GitLab', async () => {
+    const primary = updateFixture();
+    vi.mocked(primary.download).mockRejectedValue(new Error('GitHub timed out'));
+    vi.mocked(check).mockResolvedValueOnce(primary);
+    vi.mocked(invoke).mockResolvedValueOnce({ rid: 1, version: primary.version, currentVersion: version, rawJson: {} });
+    const mirrorDownload = vi.spyOn(Update.prototype, 'download').mockResolvedValue(undefined);
+    const mirrorInstall = vi.spyOn(Update.prototype, 'install').mockResolvedValue(undefined);
+    vi.spyOn(Update.prototype, 'close').mockResolvedValue(undefined);
+    await checkAppUpdate();
+    await downloadAndInstallAppUpdate();
+    expect(invoke).toHaveBeenCalledWith('check_update_mirror');
+    expect(mirrorDownload).toHaveBeenCalledOnce();
+    expect(mirrorInstall).toHaveBeenCalledOnce();
+    expect(primary.install).not.toHaveBeenCalled();
+  });
+
+  it('never repeats a failing native installer automatically', async () => {
+    const update = updateFixture();
+    vi.mocked(update.install).mockRejectedValue(new Error('installer failed'));
+    vi.mocked(check).mockResolvedValueOnce(update);
+    await checkAppUpdate();
+    await expect(downloadAndInstallAppUpdate()).rejects.toThrow('installer failed');
+    expect(update.install).toHaveBeenCalledOnce();
+    expect(update.download).toHaveBeenCalledOnce();
+  });
+
+  it('rejects switching to a different mirror version', async () => {
+    const update = updateFixture();
+    vi.mocked(update.download).mockRejectedValue(new Error('GitHub timed out'));
+    vi.mocked(check).mockResolvedValueOnce(update);
+    vi.mocked(invoke).mockResolvedValueOnce({ rid: 1, version: '9.9.9', currentVersion: version, rawJson: {} });
+    vi.spyOn(Update.prototype, 'close').mockResolvedValue(undefined);
+    await checkAppUpdate();
+    await expect(downloadAndInstallAppUpdate()).rejects.toThrow('selected version');
+    expect(update.install).not.toHaveBeenCalled();
+  });
   it('propagates native restart failure instead of refreshing the webview as a successful restart', async () => {
     vi.mocked(relaunch).mockRejectedValueOnce(new Error('restart unavailable'));
     await expect(restartApp()).rejects.toThrow('restart unavailable');
@@ -65,22 +130,22 @@ describe('updater service', () => {
 
   it('failed checks invalidate previously cached update packages', async () => {
     const obsolete = updateFixture();
-    vi.mocked(check).mockResolvedValueOnce(obsolete).mockRejectedValueOnce(new Error('404')).mockResolvedValueOnce(null);
+    vi.mocked(check).mockResolvedValueOnce(obsolete).mockRejectedValueOnce(new Error('404')).mockRejectedValueOnce(new Error('404')).mockRejectedValueOnce(new Error('404')).mockResolvedValueOnce(null);
     await checkAppUpdate();
     await checkAppUpdate();
     await expect(downloadAndInstallAppUpdate()).rejects.toThrow('No update package');
-    expect(obsolete.downloadAndInstall).not.toHaveBeenCalled();
+    expect(obsolete.download).not.toHaveBeenCalled();
   });
 
   it('failed downloads report the error and clear the package before retrying', async () => {
     const failed = updateFixture();
     const retry = updateFixture();
-    vi.mocked(failed.downloadAndInstall).mockRejectedValue(new Error('download timed out'));
+    vi.mocked(failed.download).mockRejectedValue(new Error('download timed out'));
     vi.mocked(check).mockResolvedValueOnce(failed).mockResolvedValueOnce(retry);
     await checkAppUpdate();
     await expect(downloadAndInstallAppUpdate()).rejects.toThrow('download timed out');
     await downloadAndInstallAppUpdate();
-    expect(retry.downloadAndInstall).toHaveBeenCalledOnce();
+    expect(retry.download).toHaveBeenCalledOnce();
     expect(check).toHaveBeenCalledTimes(2);
   });
 
@@ -88,13 +153,13 @@ describe('updater service', () => {
     const obsolete = updateFixture();
     let completeOlder!: (update: Update) => void;
     vi.mocked(check).mockReturnValueOnce(new Promise((resolve) => { completeOlder = resolve; }))
-      .mockRejectedValueOnce(new Error('404')).mockResolvedValueOnce(null);
+      .mockRejectedValueOnce(new Error('404')).mockRejectedValueOnce(new Error('404')).mockRejectedValueOnce(new Error('404')).mockResolvedValueOnce(null);
     const older = checkAppUpdate();
     await checkAppUpdate();
     completeOlder(obsolete);
     await older;
     await expect(downloadAndInstallAppUpdate()).rejects.toThrow('No update package');
-    expect(obsolete.downloadAndInstall).not.toHaveBeenCalled();
+    expect(obsolete.download).not.toHaveBeenCalled();
   });
 
   describe('isNewerVersion', () => {

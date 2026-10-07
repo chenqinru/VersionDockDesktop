@@ -1,4 +1,5 @@
-import { check, type Update } from '@tauri-apps/plugin-updater';
+import { check, Update } from '@tauri-apps/plugin-updater';
+import { invoke } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { APP_CURRENT_VERSION } from '../version';
@@ -34,6 +35,23 @@ export const LICENSE_NAME = 'GPL-3.0';
 
 let cachedUpdateInstance: Update | null = null;
 let checkGeneration = 0;
+const retryDelay = (attempt: number) => new Promise<void>((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+
+async function checkWithRetry(): Promise<Update | null> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await check({ timeout: 15_000, headers: { 'Cache-Control': 'no-cache' } });
+    } catch (error) {
+      if (attempt === 2 || !('__TAURI_INTERNALS__' in window)) throw error;
+      await retryDelay(attempt);
+    }
+  }
+}
+
+async function checkMirror(): Promise<Update | null> {
+  const metadata = await invoke<ConstructorParameters<typeof Update>[0] | null>('check_update_mirror');
+  return metadata ? new Update(metadata) : null;
+}
 
 /**
  * 检查应用是否有新版本
@@ -41,9 +59,11 @@ let checkGeneration = 0;
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   const currentVersion = APP_CURRENT_VERSION;
   const generation = ++checkGeneration;
+  const previous = cachedUpdateInstance;
   cachedUpdateInstance = null;
+  void previous?.close().catch(() => {});
   try {
-    const update = await check({ timeout: 30_000 });
+    const update = await checkWithRetry();
     if (!update) {
       return {
         available: false,
@@ -120,37 +140,64 @@ export function isNewerVersion(current: string, target: string): boolean {
  */
 export async function downloadAndInstallAppUpdate(
   onProgress?: (progress: UpdateDownloadProgress) => void,
+  selectedVersion?: string,
 ): Promise<void> {
-  const update = cachedUpdateInstance || (await check({ timeout: 30_000 }));
+  let update = cachedUpdateInstance || (await checkWithRetry());
   if (!update) {
     throw new Error('No update package available to install.');
   }
-
-  let downloaded = 0;
-  let total = 0;
+  cachedUpdateInstance = null;
 
   try {
-    await update.downloadAndInstall((event) => {
-      switch (event.event) {
-        case 'Started':
-          total = event.data.contentLength ?? 0;
-          break;
-        case 'Progress':
-          downloaded += event.data.chunkLength;
-          onProgress?.({
-            chunkLength: event.data.chunkLength,
-            contentLength: total,
-            downloadedBytes: downloaded,
-            totalBytes: total,
-            percent: total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0,
-          });
-          break;
-        case 'Finished':
-          break;
+    if (selectedVersion && selectedVersion !== update.version) {
+      throw new Error('The selected update version has changed. Please check for updates again.');
+    }
+    const expectedVersion = update.version;
+    // Retry only download/verification. Never repeat a partially executed installer.
+    for (let attempt = 0; ; attempt++) {
+      let downloaded = 0;
+      let total = 0;
+      try {
+        await update.download((event) => {
+          switch (event.event) {
+            case 'Started':
+              downloaded = 0;
+              total = event.data.contentLength ?? 0;
+              break;
+            case 'Progress':
+              downloaded += event.data.chunkLength;
+              onProgress?.({
+                chunkLength: event.data.chunkLength,
+                contentLength: total,
+                downloadedBytes: downloaded,
+                totalBytes: total,
+                percent: total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0,
+              });
+              break;
+            case 'Finished':
+              break;
+          }
+        }, { timeout: 180_000 });
+        break;
+      } catch (error) {
+        if (attempt === 2) throw error;
+        await retryDelay(attempt);
+        if (attempt === 0) {
+          const mirror = await checkMirror().catch(() => null);
+          if (mirror && mirror.version !== expectedVersion) {
+            await mirror.close();
+            throw new Error('The update mirror does not contain the selected version. Please check for updates again.');
+          }
+          if (mirror) {
+            await update.close().catch(() => {});
+            update = mirror;
+          }
+        }
       }
-    });
+    }
+    await update.install();
   } finally {
-    cachedUpdateInstance = null;
+    await update.close().catch(() => {});
   }
 }
 

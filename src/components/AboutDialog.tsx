@@ -63,6 +63,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
     try {
       const result = await checkAppUpdate();
       setCheckResult(result);
+      useAppStore.getState().setUpdateAvailableInfo(result);
     } catch (error) {
       setCheckResult({
         available: false,
@@ -88,6 +89,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   const handleSkipVersion = (version: string) => {
     void updateSettings({ skippedUpdateVersion: version });
     setCheckResult(null);
+    useAppStore.getState().setUpdateAvailableInfo(null);
   };
 
   const handleCopyDiagnostics = async () => {

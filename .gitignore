@@ -12,3 +12,4 @@ test-results/
 playwright-report/
 .DS_Store
 *.key
+/src-tauri/tauri.release-updater.conf.json

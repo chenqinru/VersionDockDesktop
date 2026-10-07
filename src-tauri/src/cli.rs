@@ -79,6 +79,61 @@ pub fn resolve_executable(program: &str) -> std::path::PathBuf {
             }
         }
 
+        if program.eq_ignore_ascii_case("git") || program.eq_ignore_ascii_case("git.exe") {
+            let mut roots = Vec::new();
+            // Explorer can retain an old PATH after Git for Windows is installed.
+            // The registry also covers installations outside Program Files.
+            use winreg::{
+                enums::{
+                    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY,
+                    KEY_WOW64_64KEY,
+                },
+                RegKey,
+            };
+            for (hive, flags) in [
+                (HKEY_CURRENT_USER, KEY_READ),
+                (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_64KEY),
+                (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_32KEY),
+            ] {
+                if let Ok(key) =
+                    RegKey::predef(hive).open_subkey_with_flags(r"SOFTWARE\GitForWindows", flags)
+                {
+                    if let Ok(root) = key.get_value::<String, _>("InstallPath") {
+                        if !root.is_empty() {
+                            roots.push(PathBuf::from(root));
+                        }
+                    }
+                }
+            }
+            for variable in ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"] {
+                if let Some(directory) = std::env::var_os(variable) {
+                    roots.push(PathBuf::from(directory).join("Git"));
+                }
+            }
+            if let Some(directory) = std::env::var_os("LOCALAPPDATA") {
+                roots.push(PathBuf::from(directory).join("Programs").join("Git"));
+            }
+            if let Some(directory) = std::env::var_os("USERPROFILE") {
+                roots.push(
+                    PathBuf::from(directory)
+                        .join("scoop")
+                        .join("apps")
+                        .join("git")
+                        .join("current"),
+                );
+            }
+            roots.extend([
+                PathBuf::from(r"C:\Program Files\Git"),
+                PathBuf::from(r"C:\Program Files (x86)\Git"),
+            ]);
+            if let Some(candidate) = git_installation_candidates(&roots)
+                .into_iter()
+                .find(|path| path.is_file())
+            {
+                return candidate;
+            }
+        }
+
         let fallback_dirs = [
             r"C:\Program Files\SlikSvn\bin",
             r"C:\Program Files (x86)\SlikSvn\bin",
@@ -99,6 +154,19 @@ pub fn resolve_executable(program: &str) -> std::path::PathBuf {
     }
     #[cfg(not(target_os = "macos"))]
     std::path::PathBuf::from(program)
+}
+
+#[cfg(any(windows, test))]
+fn git_installation_candidates(roots: &[PathBuf]) -> Vec<PathBuf> {
+    roots
+        .iter()
+        .flat_map(|root| {
+            [
+                root.join("cmd").join("git.exe"),
+                root.join("bin").join("git.exe"),
+            ]
+        })
+        .collect()
 }
 
 #[cfg(target_os = "macos")]
@@ -1139,6 +1207,33 @@ fn redact_url_userinfo(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn git_installation_resolution_covers_cmd_and_bin_with_root_priority() {
+        let roots = [
+            std::path::PathBuf::from("custom-git"),
+            std::path::PathBuf::from("user-git"),
+        ];
+        let candidates = super::git_installation_candidates(&roots);
+        assert_eq!(
+            candidates,
+            vec![
+                roots[0].join("cmd/git.exe"),
+                roots[0].join("bin/git.exe"),
+                roots[1].join("cmd/git.exe"),
+                roots[1].join("bin/git.exe")
+            ]
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("Git");
+        std::fs::create_dir_all(root.join("cmd")).unwrap();
+        std::fs::write(root.join("cmd/git.exe"), "fixture").unwrap();
+        assert_eq!(
+            super::git_installation_candidates(std::slice::from_ref(&root))
+                .into_iter()
+                .find(|path| path.is_file()),
+            Some(root.join("cmd/git.exe"))
+        );
+    }
     use super::*;
 
     #[cfg(target_os = "macos")]

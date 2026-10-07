@@ -6,6 +6,7 @@
 )]
 
 mod ai;
+mod app_updater;
 mod changelist;
 mod cli;
 mod commands;
@@ -137,7 +138,8 @@ pub fn run() {
             commands::bridge_request,
             commands::bridge_cancel,
             interactions::respond_native_interaction,
-            commands::follow_tab_drag_preview
+            commands::follow_tab_drag_preview,
+            app_updater::check_update_mirror
         ])
         .run(tauri::generate_context!())
         .expect("error while running VersionDock Desktop");

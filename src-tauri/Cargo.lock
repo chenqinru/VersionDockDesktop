@@ -4932,6 +4932,7 @@ dependencies = [
  "url",
  "uuid",
  "webpki-roots",
+ "winreg",
 ]
 
 [[package]]

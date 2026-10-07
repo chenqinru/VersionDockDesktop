@@ -20,7 +20,7 @@ export const useAppUpdateStore = create<AppUpdateState>((set, get) => ({
     if (get().phase !== 'idle') return;
     set({ phase: 'downloading', targetVersion: version, progress: null, error: null });
     try {
-      await downloadAndInstallAppUpdate((progress) => set({ progress }));
+      await downloadAndInstallAppUpdate((progress) => set({ progress }), version);
       set({ phase: 'ready', progress: null });
     } catch (error) {
       set({ phase: 'idle', progress: null, error: error instanceof Error ? error.message : String(error) });

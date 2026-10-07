@@ -19,6 +19,7 @@ import type {
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
 import { checkAppUpdate, openExternalLink, type AppUpdateCheckResult } from '../services/updater';
+import { APP_CURRENT_VERSION } from '../version';
 import { choiceDialog, promptDialog, multiChoiceDialog, confirmDialog } from '../components/dialogService';
 import { buildPullRequestUrl } from '../history/prUrlHelper';
 import { createTranslator, resolveLanguage } from '../i18n';
@@ -381,8 +382,9 @@ export interface AppStore {
   openAbout: (tab?: 'about' | 'changelog') => void;
   closeAbout: () => void;
   updateAvailableInfo: AppUpdateCheckResult | null;
+  updateChecking: boolean;
   setUpdateAvailableInfo: (info: AppUpdateCheckResult | null) => void;
-  checkUpdateSilently: () => Promise<void>;
+  checkUpdateSilently: (force?: boolean) => Promise<void>;
   identityPanelRepoId: string | null;
   remoteManagerRepoId: string | null;
   bootstrap?: BootstrapData;
@@ -2340,23 +2342,25 @@ export const useAppStore = create<AppStore>((set, get) => {
     setLogProject: (project) => set({ activeLogProject: project }),
 
     operations: {},
+    updateChecking: false,
 
     openAbout: (tab = 'about') => set({ aboutOpen: true, aboutInitialTab: tab }),
     closeAbout: () => set({ aboutOpen: false }),
     setUpdateAvailableInfo: (info) => set({ updateAvailableInfo: info }),
-    checkUpdateSilently: async () => {
+    checkUpdateSilently: async (force = false) => {
+      if (get().updateChecking) return;
+      const settings = get().bootstrap?.state.settings;
+      if (!force && settings?.autoCheckUpdates === false) return;
+      set({ updateChecking: true });
       try {
-        const settings = get().bootstrap?.state.settings;
-        if (settings?.autoCheckUpdates === false) return;
         const result = await checkAppUpdate();
-        if (result.available && result.latestVersion) {
-          if (settings?.skippedUpdateVersion === result.latestVersion) {
-            return;
-          }
-          set({ updateAvailableInfo: result });
-        }
-      } catch {
-        // 静默检查异常捕获
+        const currentSettings = get().bootstrap?.state.settings;
+        if (!force && currentSettings?.autoCheckUpdates === false) return;
+        set({ updateAvailableInfo: result.available && currentSettings?.skippedUpdateVersion === result.latestVersion ? null : result });
+      } catch (error) {
+        set({ updateAvailableInfo: { available: false, currentVersion: APP_CURRENT_VERSION, error: error instanceof Error ? error.message : String(error) } });
+      } finally {
+        set({ updateChecking: false });
       }
     },
 

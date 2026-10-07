@@ -6,10 +6,24 @@ import { useAppUpdateStore } from '../../store/appUpdateStore';
 export function UpdateStatusBarItem() {
   const { t } = useI18n();
   const updateAvailableInfo = useAppStore((state) => state.updateAvailableInfo);
+  const checking = useAppStore((state) => state.updateChecking);
+  const checkUpdate = useAppStore((state) => state.checkUpdateSilently);
   const { phase, targetVersion, progress, error, install, restart } = useAppUpdateStore();
   const latestVersion = phase === 'idle' ? updateAvailableInfo?.latestVersion : targetVersion;
   const busy = phase === 'downloading' || phase === 'restarting';
   const ready = phase === 'ready' || phase === 'restarting';
+
+  if (phase === 'idle' && (checking || updateAvailableInfo?.error) && !updateAvailableInfo?.available) {
+    const label = t(checking ? 'Checking for updates…' : 'Update check failed — click to retry');
+    return (
+      <button type="button" className="statusbar-item statusbar-update-badge" disabled={checking}
+        aria-label={label} title={checking ? label : t('Update check error: {0}', updateAvailableInfo?.error ?? '')}
+        onClick={() => void checkUpdate(true)}>
+        <Codicon name={checking ? 'loading codicon-modifier-spin' : 'warning'} />
+        <span className="statusbar-update-text" aria-live="polite">{label}</span>
+      </button>
+    );
+  }
 
   if (!latestVersion || (phase === 'idle' && !updateAvailableInfo?.available)) {
     return null;
