@@ -401,9 +401,39 @@ fn walk(
             ignore_rules.push((current.to_path_buf(), local));
         }
     }
-    for entry in std::fs::read_dir(current)
-        .map_err(|error| DesktopError::new("WORKSPACE_SCAN_FAILED", error.to_string(), true))?
-    {
+    let entries = match std::fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(error) => {
+            let permission_denied = error.kind() == std::io::ErrorKind::PermissionDenied;
+            let message = format!("Cannot scan directory {}: {error}", current.display());
+            let skip = current != root && permission_denied;
+            crate::logger::log_entry_with_cwd(
+                if skip {
+                    crate::logger::LogLevel::Warn
+                } else {
+                    crate::logger::LogLevel::Error
+                },
+                crate::logger::LogChannel::Core,
+                &message,
+                None,
+                None,
+                None,
+                Some(current.to_string_lossy().into_owned()),
+            );
+            if skip {
+                return Ok(());
+            }
+            let mut failure = DesktopError::new("WORKSPACE_SCAN_FAILED", message, true);
+            failure.subject = Some(current.to_string_lossy().into_owned());
+            if permission_denied {
+                failure.hint = Some(
+                    "Allow VersionDock Desktop to access this folder in system privacy settings, then reopen the workspace.".into(),
+                );
+            }
+            return Err(failure);
+        }
+    };
+    for entry in entries {
         let entry = match entry {
             Ok(value) => value,
             Err(_) => continue,
@@ -1472,6 +1502,47 @@ fn git_operation(root: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_scan_skips_unreadable_children_and_keeps_accessible_repositories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempdir().unwrap();
+        let locked = root.path().join("restricted");
+        std::fs::create_dir_all(locked.join("hidden/.git")).unwrap();
+        std::fs::create_dir_all(root.path().join("visible/.git")).unwrap();
+        let ws = descriptor(vec![root.path().to_string_lossy().into_owned()]).unwrap();
+        let permissions = std::fs::metadata(&locked).unwrap().permissions();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let unreadable = std::fs::read_dir(&locked).is_err();
+        let result = scan(&ws, &DesktopSettings::default());
+        std::fs::set_permissions(&locked, permissions).unwrap();
+
+        assert!(unreadable, "fixture must deny directory access");
+        let repositories = result.unwrap();
+        assert_eq!(repositories.len(), 1);
+        assert_eq!(repositories[0].name, "visible");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_scan_reports_unreadable_explicit_roots_with_the_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempdir().unwrap();
+        let ws = descriptor(vec![root.path().to_string_lossy().into_owned()]).unwrap();
+        let permissions = std::fs::metadata(root.path()).unwrap().permissions();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let result = scan(&ws, &DesktopSettings::default());
+        std::fs::set_permissions(root.path(), permissions).unwrap();
+
+        let error = result.unwrap_err();
+        assert_eq!(error.code, "WORKSPACE_SCAN_FAILED");
+        assert!(error.message.contains(&ws.paths[0]));
+        assert_eq!(error.subject.as_deref(), Some(ws.paths[0].as_str()));
+        assert!(error.hint.is_some());
+    }
 
     #[test]
     fn scan_uses_configured_depth_for_git_and_svn() {
