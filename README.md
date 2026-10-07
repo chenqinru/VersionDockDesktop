@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/icon.png" alt="VersionDock Desktop logo" width="128">
+  <img src="public/icons/versiondock-logo-dark.png" alt="VersionDock Desktop logo" width="128">
 </p>
 
 <h1 align="center">VersionDock Desktop</h1>

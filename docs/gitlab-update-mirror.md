@@ -2,7 +2,7 @@
 
 公开 GitHub 仓库 `chenqinru/VersionDockDesktop` 同时保存源码和安装包，继续作为主更新源；公司 GitLab 16.6.0 的独立公开项目仅存安装包、签名和更新清单，不存源码。
 
-## 待提供的配置
+## 镜像配置
 
 建议项目名 `VersionDockDesktop-Releases`，包名 `versiondock-desktop`。需要确认 GitLab 项目的命名空间、数字 Project ID、公开可见性，以及 GitHub Actions 是否能通过 HTTPS 访问 `https://git.gsdzone.net`。若公司不允许公开项目，需要另设允许匿名读取安装包和清单的发布入口；客户端不内置访问令牌。
 
@@ -54,11 +54,3 @@ https://git.gsdzone.net/api/v4/projects/ID/repository/files/latest.json/raw?ref=
 配置后需要重新构建发布含镜像地址的客户端；旧客户端只有 GitHub 地址，仍需通过 GitHub 更新或手动安装一次。
 
 验收需使用真正的签名发布包：允许 GitHub 时从 GitHub 更新；阻断 GitHub 时检查和下载都从 GitLab 完成；仅阻断 GitHub 安装包下载时切换 GitLab；中断下载后重试；损坏包拒绝安装；上传中断不提前更新清单。GitLab API 必须由 GitHub runner 和用户电脑同时可达，TLS 证书须可信。
-
-## Windows 问题
-
-Git 工具检测现在除 PATH 外查找 Git for Windows 注册表的 InstallPath、Program Files、用户 Programs/Git 及 Scoop 常见路径；真正的检测与克隆命令共用相同解析逻辑。自定义安装位置通过 Git for Windows 注册表覆盖。对于非 Git for Windows 且没有 PATH 的其他便携发行版，仍需把其 `git.exe` 加入 PATH。
-
-当前 `icon.ico` 已使用 Windows 专用画布，包含 16、24、32、48、64、128、256 七种分辨率，256 像素图标主体为 240×240（93.75%），没有 macOS Dock 的额外缩小和阴影。Windows 原生窗口及安装包使用该 ICO。需要在更新后的真实 Windows 安装包上检查任务栏；旧快捷方式可取消固定后重新固定。
-
-本地静态检查与自动化测试不能替代 Windows 安装、任务栏截图和公司 GitLab 实际上传验证。

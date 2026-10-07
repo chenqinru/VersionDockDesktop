@@ -10,7 +10,7 @@ const failures = [];
 
 async function walk(dirPath) {
   for (const name of await readdir(dirPath)) {
-    if (ignored.has(name) || name === 'v1.md' || name === 'v2.md') continue;
+    if (ignored.has(name)) continue;
     const childPath = join(dirPath, name);
     if (childPath === currentScriptPath) continue;
     const stat = await lstat(childPath);

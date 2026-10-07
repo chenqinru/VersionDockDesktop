@@ -1,9 +1,0 @@
-{
-  "stagedVersions": "HEAD/INDEX",
-  "unstagedVersions": "INDEX/WORKTREE",
-  "mappedLineHistoryIncludesRealEdit": true,
-  "filePathFilterPreserved": true,
-  "aggregateFilesUnique": true,
-  "svnWorkingVersions": "BASE/WORKING",
-  "longPathTitleVisible": true
-}
