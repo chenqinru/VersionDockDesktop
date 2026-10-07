@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.9",
+    "date": "2026-10-08",
+    "highlights": {
+      "zh-CN": [
+        "GitHub、GitLab 和 Gitee 账号详情及状态栏提示支持展示平台头像，并提供缓存和加载失败回退。",
+        "作者头像优先使用当前分支跟踪的远程仓库，修复多远程仓库和切换账号时头像来源或显示不正确的问题。",
+        "托管平台的认证、权限、限流和网络错误提供中英文提示，便于识别失败原因。",
+        "分支侧栏支持点击分区标题空白和计数区域展开或折叠，创建标签按钮在悬停或键盘聚焦时显示。",
+        "调整差异视图新增和删除行的行号背景色，便于区分变更类型。",
+        "改进 GitCode 镜像安装包上传及失败重试，提升备用下载源的发布稳定性。"
+      ],
+      "en": [
+        "Show platform avatars in GitHub, GitLab and Gitee account details and status bar tooltips, with caching and a fallback when loading fails.",
+        "Prefer the current branch's tracked remote for author avatars, fixing incorrect avatar sources or displays with multiple remotes and when switching accounts.",
+        "Provide Chinese and English messages for hosting platform authentication, permission, rate limit and network errors.",
+        "Expand or collapse branch sidebar sections by clicking empty space or counts in their headers, and show the create-tag button on hover or keyboard focus.",
+        "Adjust line-number backgrounds for added and deleted lines in diff views to make change types easier to distinguish.",
+        "Improve GitCode mirror installer uploads and failure retries for more reliable publishing of the fallback download source."
+      ]
+    }
+  },
+  {
     "version": "0.1.8",
     "date": "2026-10-07",
     "highlights": {
