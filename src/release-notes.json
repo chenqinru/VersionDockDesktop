@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.1.7",
+    "date": "2026-10-07",
+    "highlights": {
+      "zh-CN": [
+        "变更列表支持按文件名和路径搜索、显示匹配数量并逐项定位，搜索时保留其他文件及原有提交勾选。",
+        "搜索结果高亮匹配文字并自动展开所在目录和分组，清除搜索后恢复原有折叠状态。",
+        "改善提交详情中的搜索定位和焦点恢复，支持快捷键打开搜索及切换匹配项，避免干扰工具栏按钮操作。",
+        "修正 GitHub 更新检查、安装包下载和问题反馈地址，统一指向当前公开项目仓库。"
+      ],
+      "en": [
+        "Search changes by file name or path, see match counts and navigate between matches while keeping other files visible and preserving commit selections.",
+        "Highlight matching text and automatically expand folders and groups containing results, restoring their previous collapsed state when search is cleared.",
+        "Improve search navigation and focus restoration in commit details, with shortcuts to open search and switch matches without interfering with toolbar buttons.",
+        "Correct GitHub update checks, installer downloads and issue links to use the current public project repository."
+      ]
+    }
+  },
+  {
     "version": "0.1.6",
     "date": "2026-10-07",
     "highlights": {
