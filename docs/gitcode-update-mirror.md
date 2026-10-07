@@ -47,7 +47,21 @@ https://gitcode.com/chenqinru/VersionDockDesktop-Releases/releases/download/v<�
 
 ## 发布 runner
 
-`publish-gitcode` 使用 GitHub 托管 `ubuntu-24.04` runner，下载当前运行的 prepared artifact 并安装 minisign。它与 GitHub Release 独立执行，镜像失败不阻断 GitHub 发布。
+`publish-gitcode` 和 **Retry GitCode mirror** 使用 `[self-hosted, linux, x64, gitcode-publish]`，复用原有 `versiondock-release` runner。服务器只下载已经构建好的安装包、校验签名和发布 GitCode；源码检查、三平台构建与 GitHub Release 继续使用 GitHub 托管 runner。两端独立执行，镜像任务排队或失败不阻断 GitHub 发布。
+
+采用国内 runner 是因为托管 runner 在上传 `0.1.8` 时成功上传六个小签名，却连续三次在安装包发送约 2.4～2.7 MB 后达到 180 秒超时。更换上传网络后仍需验证完整安装包，runner 在线不等于已完成镜像发布。
+
+服务器服务用户的 `PATH` 需包含 `minisign`、`curl` 和 `gh`；Node.js 20 由 `actions/setup-node` 配置。工作流只检查工具，不调用 `sudo apt-get` 安装。缺少工具时应在服务器上为 runner 服务用户准备：
+
+```bash
+command -v minisign
+command -v curl
+command -v gh
+```
+
+服务器必须能访问 GitHub Actions、API、artifacts 和 Releases 下载地址，以及 GitCode API、附件上传和下载地址。GitHub 下载可沿用原有代理；发布步骤设置 `NO_PROXY` 和 `no_proxy`，让 `gitcode.com`、其子域和 `myhuaweicloud.com` 子域直接访问，避免安装包上传再绕经境外代理。代理环境仅供传输使用，不关闭 TLS 校验。
+
+runner 在 GitHub 仓库中的自定义标签需为 `gitcode-publish`，无需重新注册或安装 GitLab。它与两条工作流共用一个镜像并发组，防止同时发布时改写固定清单。
 
 ## 使用修正后的脚本补发镜像
 

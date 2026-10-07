@@ -14,7 +14,7 @@ permissions:
 jobs:
   mirror:
     name: Mirror published GitHub release to GitCode
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, gitcode-publish]
     timeout-minutes: 30
     concurrency:
       group: versiondock-gitcode-release
@@ -34,8 +34,11 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install signature verifier and upload tool
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends minisign curl
+      - name: Verify mirror publishing tools
+        run: |
+          command -v minisign
+          command -v curl
+          command -v gh
 
       - name: Validate stable version
         run: node --input-type=module -e "import { validateVersion } from './scripts/release-artifacts.mjs'; validateVersion(process.env.RELEASE_VERSION);"
@@ -77,4 +80,7 @@ jobs:
           GITCODE_RELEASE_REPOSITORY: ${{ vars.GITCODE_RELEASE_REPOSITORY }}
           GITCODE_RELEASE_BRANCH: ${{ vars.GITCODE_RELEASE_BRANCH }}
           GITCODE_RELEASE_TOKEN: ${{ secrets.GITCODE_RELEASE_TOKEN }}
-        run: node scripts/publish-gitcode-release.mjs
+          NO_PROXY: gitcode.com,.gitcode.com,.myhuaweicloud.com
+        run: |
+          export no_proxy="$NO_PROXY"
+          node scripts/publish-gitcode-release.mjs

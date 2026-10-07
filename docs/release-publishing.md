@@ -17,7 +17,7 @@ GitHub 源码、Releases、安装包和更新清单统一位于公开仓库 `che
 
 GitHub 发布无需额外 PAT 或 `RELEASES_TOKEN`。更新签名私钥必须与 `src-tauri/tauri.conf.json` 中的公钥匹配，发布步骤会校验所有更新签名；不要通过更换密钥绕过失败。
 
-检查、三平台构建、产物准备、GitHub `publish` 和 GitCode `publish-gitcode` 均使用 GitHub 托管 runner；发布前安装 minisign 校验更新包签名。
+检查、三平台构建、产物准备和 GitHub `publish` 使用 GitHub 托管 runner。GitCode `publish-gitcode` 与补发镜像任务使用国内自托管 runner，标签为 `[self-hosted, linux, x64, gitcode-publish]`，仅下载、校验和上传镜像；GitHub 发布不等待该 runner。工具与网络配置见 [镜像 runner](gitcode-update-mirror.md#发布-runner)。
 
 本地发布测试还需要 Python 3（`python3` 命令），用于真实 ZIP 缓存和安全解压回归；不需要额外 Python 包。
 
@@ -52,7 +52,7 @@ git push origin "v$task_release_version"
 2. **检查与构建**：若找到 24 小时内同一源码 SHA、来自本仓库 `main` push、整个 CI 及全部三平台检查均成功的运行，则复用其检查结果；发布关口再次读取 CI 状态确认。未找到、API 不可访问或不符合条件时仍执行全部 Release 检查。前端仅构建一次；Windows、Linux 与 macOS 两个架构并行构建。macOS 合包前校验源码、版本、构建配置、前端资源哈希、二进制哈希和架构，再用 `lipo` 合成 Universal，调用 `tauri bundle` 打包并签名，不重复编译。artifacts 保留 14 天。
 3. **验证产物**：全部检查与平台构建成功后，托管 `prepare` 任务验证版本、平台覆盖、SHA-256 和更新签名，再生成 `latest.json`。完整产物作为 `prepared-release-源码SHA` 上传，供两端发布共同使用。
 4. **独立发布 GitHub**：托管 runner 下载同一份 prepared artifact，重新校验更新签名，再创建或补齐 Release 草稿，上传附件并下载比对哈希；再次检查版本标签及最新版本，验证通过后公开草稿并设为 latest。
-5. **独立更新 GitCode**：托管 runner 下载同一 prepared artifact，创建预发布 Release，上传镜像附件并匿名下载校验哈希，再上传版本清单；确认没有更新版本后将 Release 设为正式版本，最后提交固定 `latest.json`。与 GitHub 发布并行，失败时仅该任务报错。
+5. **独立更新 GitCode**：国内自托管 runner 下载同一 prepared artifact，创建预发布 Release，上传镜像附件并匿名下载校验哈希，再上传版本清单；确认没有更新版本后将 Release 设为正式版本，最后提交固定 `latest.json`。与 GitHub 发布并行，失败时仅该任务报错。
 
 GitHub 清单默认使用 macOS universal `.app.tar.gz`、Windows NSIS `.exe`、Linux `.AppImage`。生成 MSI、deb 或 rpm 时，也必须提供有效签名及对应格式的清单入口。GitHub 与 GitCode 使用同一更新公钥，但清单内的下载地址分别指向各自平台。
 
@@ -68,6 +68,7 @@ GitHub 清单默认使用 macOS universal `.app.tar.gz`、Windows NSIS `.exe`、
 | --- | --- |
 | 检查或构建失败 | 查看失败日志；代码需要修正时提交改动并使用新版本标签，环境问题可重跑原任务 |
 | GitCode 发布权限失败 | 检查 `GITCODE_RELEASE_TOKEN` 是否到期，以及项目读写权限和镜像仓库配置 |
+| GitCode 镜像任务排队 | 检查 `versiondock-release` runner 是否在线且包含 `gitcode-publish` 标签 |
 | 上传报 HTTP/2 `REFUSED_STREAM` | 发布步骤与脚本已对 `gh` 配置 HTTP/1.1 并保留 TLS 校验；检查失败日志与远端状态后重跑失败任务 |
 | 上传中断或草稿附件不完整 | 原版本未公开时可重试，脚本补齐附件并重新验证 |
 | `prepare` 报产物为空或校验失败 | 比较错误中的大小、期望和实际 SHA-256；远端 artifact 正确时只重新下载发布产物，不重编译、不修改校验记录。新流程先验证完整 ZIP 再解压，旧流程需要清理临时下载目录后重跑失败发布任务 |
