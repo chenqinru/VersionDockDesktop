@@ -26,6 +26,28 @@ beforeEach(() => {
 afterEach(() => { cleanup(); resetTaskProgress(); useAppStore.setState(original); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('task progress entry and details', () => {
+  it('shows batch commits and grouped pushes immediately while keeping quick single reads quiet', () => {
+    renderItem();
+    const event = createOperationRequestEvent({ type: 'batchCommit', payload: { workspace_id: 'current', targets: [{ repoId: 'repo' }, { repoId: 'next' }], push: false } } as any, {}, 'batch');
+    act(() => useTaskProgressStore.getState().requested(event, { workspaceName: 'Project', repositories: [{ id: 'repo', name: 'A' }, { id: 'next', name: 'B' }] }));
+    expect(screen.getByRole('button', { name: 'Task progress' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '2');
+    act(() => resetTaskProgress());
+    act(() => { useTaskProgressStore.getState().beginGroup('Push', 'current', 'Project', [{ id: 'repo', name: 'A' }, { id: 'next', name: 'B' }]); });
+    expect(screen.getByRole('button', { name: 'Task progress' })).toBeInTheDocument();
+  });
+
+  it('shows explicit single pushes immediately without waiting for native phases', () => {
+    renderItem();
+    const event = createOperationRequestEvent({ type: 'sync', payload: { workspace_id: 'current', repo_id: 'repo', action: 'push', remote: null, branch: null } }, { showProgress: false }, 'push');
+    act(() => {
+      useTaskProgressStore.getState().trackForegroundRequest('push', true);
+      useTaskProgressStore.getState().requested(event, { workspaceName: 'Project', repoName: 'A' });
+    });
+    expect(screen.getByRole('button', { name: 'Task progress' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+  });
+
   it('appears once after 250 ms even while native phases update every 50 ms', () => {
     renderItem(); let event!: ReturnType<typeof start>;
     act(() => { event = start(); });

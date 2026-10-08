@@ -276,6 +276,42 @@ describe('StatusBar', () => {
     expect(screen.getByText('Manage Remotes…')).toBeInTheDocument();
   });
 
+  it.each(['branch', 'profile'] as const)('closes the %s menu when pressing the trigger again, including focus changes between pointerdown and click', async kind => {
+    const { container } = renderStatusBar();
+    await screen.findByText('Git: Developer');
+    const trigger = container.querySelector<HTMLButtonElement>(`.${kind}-status-item`)!;
+    for (const part of ['button', 'label', 'icon'] as const) {
+      const target = part === 'button' ? trigger : trigger.querySelector(part === 'label' ? '.statusbar-label' : '.codicon')!;
+      fireEvent.pointerDown(target, { button: 0 });
+      fireEvent.click(target);
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.pointerDown(target, { button: 0 });
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      // Native focus/outside handlers can dismiss before the matching click runs.
+      fireEvent(window, new Event('blur'));
+      fireEvent.click(target);
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    }
+  });
+
+  it.each(['branch', 'profile'] as const)('preserves keyboard toggling after a cancelled pointer gesture on %s', async kind => {
+    const { container } = renderStatusBar();
+    await screen.findByText('Git: Developer');
+    const trigger = container.querySelector<HTMLButtonElement>(`.${kind}-status-item`)!;
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.pointerDown(trigger, { button: 0 });
+    fireEvent.pointerCancel(trigger);
+    fireEvent(window, new Event('blur'));
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.keyDown(trigger, { key: ' ' });
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('opens profile menu popover on clicking profile item', async () => {
     renderStatusBar();
 

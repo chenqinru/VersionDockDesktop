@@ -21,7 +21,7 @@ function ProfileMenuItem({ label, icon, onClick, description, detail, active = f
 }
 
 interface Props {
-  anchorRect: DOMRect | null; anchorRef: RefObject<HTMLButtonElement>; onClose: () => void;
+  anchorRect: DOMRect | null; anchorRef: RefObject<HTMLButtonElement>; onClose: (restoreFocus?: boolean) => void;
   data: ReturnType<typeof useProfileStatus>; repositories: RepositoryStatus[]; currentRepoId?: string;
   onRepositoryChange: (repoId: string) => void;
 }
@@ -56,14 +56,14 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
       if (pending.current || provider || currentDialog()) return;
       const target = event.target as Node;
       if (scrollbarContains(popoverRef.current, target) || scrollbarContains(submenuRef.current, target) || scrollbarContains(anchorRef.current, target)) return;
-      onClose();
+      onClose(false);
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || pending.current || provider || currentDialog()) return;
       event.preventDefault();
       if (profileId) back(); else if (page === 'repositories') setPage('identity'); else onClose();
     };
-    const blur = () => { if (!pending.current && !provider && !currentDialog()) onClose(); };
+    const blur = () => { if (!pending.current && !provider && !currentDialog()) onClose(false); };
     document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape); window.addEventListener('blur', blur); window.addEventListener('resize', blur);
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); window.removeEventListener('blur', blur); window.removeEventListener('resize', blur); };
   }, [anchorRef, onClose, page, profileId, provider]);

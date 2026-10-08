@@ -8,12 +8,14 @@ import { choiceDialog } from '../dialogService';
 import { BRANCH_STATUS_DOMAINS, deriveBranchStatus } from './branchStatus';
 import { BranchStatusTooltip } from './BranchStatusTooltip';
 import { useStatusTooltip } from './useStatusTooltip';
+import { usePopoverToggleState } from './usePopoverToggleState';
 
 export function BranchStatusBarItem() {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const tooltip = useStatusTooltip(open);
+  const toggleState = usePopoverToggleState(open);
   const mounted = useRef(true);
   const waiting = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -90,7 +92,7 @@ export function BranchStatusBarItem() {
 
   const handleClick = async () => {
     tooltip.dismiss();
-    if (open) {
+    if (toggleState.consume()) {
       setOpen(false);
       return;
     }
@@ -143,6 +145,9 @@ export function BranchStatusBarItem() {
         aria-describedby={tooltip.visible ? "branch-status-tooltip" : undefined}
         onMouseEnter={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); tooltip.onMouseEnter(); }}
         onMouseLeave={tooltip.onLeave}
+        onPointerDownCapture={toggleState.onPointerDown}
+        onPointerCancel={toggleState.onPointerCancel}
+        onKeyDownCapture={toggleState.onKeyDown}
         onPointerDown={tooltip.onPointerDown}
         onFocus={() => { if (anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect()); tooltip.onFocus(); }}
         onBlur={tooltip.onBlur}
@@ -180,6 +185,7 @@ export function BranchStatusBarItem() {
       {open && (
         <BranchMenuPopover
           anchorRect={anchorRect}
+          anchorRef={anchorRef}
           placement="bottomLeft"
           onClose={() => { tooltip.dismiss(); setOpen(false); }}
           initialRepoId={isSingleSvn ? repositories[0].meta.id : undefined}

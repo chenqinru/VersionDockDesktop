@@ -24,6 +24,7 @@ export interface ProgressTask {
   completed: number | null;
   total: number | null;
   cancellable: boolean;
+  immediate?: boolean;
   error?: string;
   cancelError?: string;
   children: TaskChild[];
@@ -53,6 +54,7 @@ const taskTitles: Record<string, string> = {
 export function taskTitle(event: OperationRequestEvent): string {
   if (event.command.type === 'branchOperation') return ({ create: 'Create Branch', checkout: 'Checkout', merge: 'Merge', rebase: 'Rebase', rename: 'Rename', delete: 'Delete' })[event.command.payload.operation.type];
   if (event.command.type === 'historyOperation') return ({ checkout: 'Checkout', cherryPick: 'Cherry-pick', revert: 'Revert', reset: 'Reset', checkoutFile: 'Checkout', revertFile: 'Revert', applyPaths: 'Apply', revertPaths: 'Revert', svnUpdateTo: 'Update' })[event.command.payload.operation.type];
+  if (event.command.type === 'batchCommit' && event.command.payload.push) return 'Commit and push';
   if (event.command.type === 'sync') return ({ fetch: 'Fetch', pull: 'Pull', pullRebase: 'Pull (Rebase)', pullFfOnly: 'Pull', push: 'Push', pushTags: 'Push Tags', update: 'Update Project' })[event.command.payload.action];
   return taskTitles[event.command.type] ?? 'Repository operation';
 }
@@ -62,7 +64,7 @@ interface TaskProgressState {
   tasks: Record<string, ProgressTask>;
   open: boolean;
   setOpen: (open: boolean) => void;
-  trackForegroundRequest: (id: string) => void;
+  trackForegroundRequest: (id: string, immediate?: boolean) => void;
   requested: (event: OperationRequestEvent, metadata: TaskMetadata) => void;
   operation: (event: OperationEvent) => void;
   settled: (event: OperationSettledEvent) => void;
@@ -74,7 +76,7 @@ interface TaskProgressState {
   cancel: (id: string) => Promise<void>;
 }
 const requests = new Map<string, RequestRecord>();
-const foregroundRequests = new Set<string>();
+const foregroundRequests = new Map<string, boolean>();
 const bindings = new Map<string, Binding>();
 const groups = new Map<string, GroupRecord>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -137,7 +139,7 @@ export const useTaskProgressStore = create<TaskProgressState>((set, get) => {
   };
   return {
     tasks: {}, open: false,
-    trackForegroundRequest: (id) => { foregroundRequests.add(id); },
+    trackForegroundRequest: (id, immediate = false) => { foregroundRequests.set(id, immediate); },
     setOpen: (open) => {
       set((state) => ({ open, tasks: open ? state.tasks : Object.fromEntries(Object.entries(state.tasks)
         .filter(([, task]) => isTaskActive(task) || Date.now() - (task.finishedAt ?? 0) < 2000)
@@ -147,6 +149,7 @@ export const useTaskProgressStore = create<TaskProgressState>((set, get) => {
     },
     requested: (event, metadata) => {
       const binding = bindings.get(event.requestId);
+      const immediate = foregroundRequests.get(event.requestId);
       const explicitForeground = foregroundRequests.delete(event.requestId);
       if (!binding && ((!explicitForeground && event.context.visibility === 'background') || !tracksTaskCommand(event.command.type))) return;
       requests.set(event.requestId, { command: event.command.type, groupId: binding?.groupId, nativeSeen: false, terminalSeen: false, cancelPending: false, cancelSent: false, latestStatus: 'queued' });
@@ -160,7 +163,7 @@ export const useTaskProgressStore = create<TaskProgressState>((set, get) => {
       }
       set((state) => ({ tasks: { ...state.tasks, [event.requestId]: {
         id: event.requestId, title: taskTitle(event), workspaceId: event.context.workspaceId, workspaceName: metadata.workspaceName, repoName: metadata.repoName,
-        status: 'queued', message: 'Waiting to start operation', startedAt: Date.now(), completed: event.command.type === 'batchCommit' ? 0 : null, total: event.command.type === 'batchCommit' ? event.command.payload.targets.length : null, cancellable: true, children: metadata.repositories?.map((repo) => ({ repoId: repo.id, repoName: repo.name, status: 'queued', message: 'Waiting to start operation' })) ?? [],
+        status: 'queued', immediate, message: 'Waiting to start operation', startedAt: Date.now(), completed: event.command.type === 'batchCommit' ? 0 : null, total: event.command.type === 'batchCommit' ? event.command.payload.targets.length : null, cancellable: true, children: metadata.repositories?.map((repo) => ({ repoId: repo.id, repoName: repo.name, status: 'queued', message: 'Waiting to start operation' })) ?? [],
       } } }));
     },
     operation: (event) => {

@@ -18,13 +18,14 @@ export function OperationStatusBarItem() {
   const [seen] = useState(() => new Set<string>());
   const active = useMemo(() => sortedTasks(Object.values(tasks).filter(isTaskActive), workspaceId), [tasks, workspaceId]);
   const candidate = active[0];
+  const immediate = Boolean(candidate && (candidate.immediate || candidate.children.length > 1));
   const candidateId = candidate?.id, candidateAt = candidate?.startedAt;
   useEffect(() => {
     if (!candidateId || candidateAt === undefined) return;
-    const delay = seen.size ? 0 : Math.max(0, candidateAt + 250 - Date.now());
+    const delay = immediate || seen.size ? 0 : Math.max(0, candidateAt + 250 - Date.now());
     const timer = window.setTimeout(() => { seen.add(candidateId); setVisibleId(candidateId); }, delay);
     return () => window.clearTimeout(timer);
-  }, [candidateId, candidateAt, seen]);
+  }, [candidateId, candidateAt, immediate, seen]);
   const newestFinish = Math.max(0, ...Object.values(tasks).filter((task) => seen.has(task.id)).map((task) => task.finishedAt ?? 0));
   useEffect(() => {
     if (!newestFinish) return;
@@ -39,7 +40,7 @@ export function OperationStatusBarItem() {
   const previous = tasks[visibleId ?? ''];
   const finished = Object.values(tasks).filter((item) => !isTaskActive(item) && seen.has(item.id) && (item.finishedAt ?? 0) + 2000 > now)
     .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
-  const task = active.length ? previous && isTaskActive(previous) ? previous : seen.size ? candidate : undefined : finished;
+  const task = active.length ? previous && isTaskActive(previous) ? previous : seen.size || immediate ? candidate : undefined : finished;
   const otherCount = active.filter((item) => item.workspaceId && item.workspaceId !== workspaceId).length;
   const onlyOthers = active.length > 0 && otherCount === active.length;
   if (!task && !open) return null;

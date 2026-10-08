@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BootstrapData, DesktopSettings, BridgeCommand, CommitDetail, CommitNode, HistoryPage, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, RepositoryUpdateResult, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
-import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
+import { BridgeError, MockBridge, createOperationRequestEvent, type BridgeEvent, type RequestOptions } from '../platform/bridge';
 import { resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
 import { currentDialog, publishDialog } from '../components/dialogService';
 import { commitKey } from '../history/commitDetails';
@@ -249,6 +249,187 @@ describe('appStore async lifecycle', () => {
     await useAppStore.getState().closeTab(workspace.workspace.id);
     expect(destroy).toHaveBeenCalledOnce();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('shows immediate batch commit progress in notifications and tasks (push=%s)', async push => {
+    const current = snapshot('commit-progress', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B'), repository('c', 'C')];
+    const gate = deferred<unknown>();
+    let operationId = '';
+    const bridge = new MockBridge((command, options) => {
+      if (command.type === 'bootstrap') return bootstrap;
+      if (command.type === 'batchCommit') { expect(options?.showProgress).toBe(false); return gate.promise; }
+      return [];
+    });
+    bridge.subscribe(event => { if ('progressEvent' in event && event.type === 'operation-request' && event.command.type === 'batchCommit') operationId = event.requestId; });
+    await useAppStore.getState().initialize(bridge);
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const pending = useAppStore.getState().commitMany(current.repositories.map(repo => ({ repoId: repo.meta.id, paths: ['a.txt'], unstagePaths: [], amend: false })), 'message', push);
+    await vi.waitFor(() => expect(operationId).toBeTruthy());
+    expect(useAppStore.getState().notifications.filter(n => n.progress)).toHaveLength(1);
+    expect(useTaskProgressStore.getState().tasks[operationId]).toMatchObject({ immediate: true, total: 3, title: push ? 'Commit and push' : 'Batch Commit' });
+    const phase: OperationEvent = { operationId, context: { generation: 1, domain: 'commit', visibility: 'background', workspaceId: 'commit-progress', repositoryId: null, target: null }, startedAt: '', status: 'running', phase: 'stagingAndCommitting', message: 'Preparing selected paths and creating commit', completed: 1, total: 3, cancellable: true, error: null };
+    bridge.emit(phase);
+    expect(useAppStore.getState().notifications.filter(n => n.progress)).toHaveLength(1);
+    expect(useAppStore.getState().notifications.find(n => n.progress)).toMatchObject({ workspaceId: 'commit-progress', progressValue: expect.closeTo(100 / 3, 5), progressMessage: { key: '({0}/{1}) {2}', args: [2, 3, 'B'] } });
+    useAppStore.setState({ snapshot: snapshot('other', 2), sessions: { 'commit-progress': { snapshot: current, allRepositories: current.repositories } as any } });
+    gate.resolve(current.repositories.map(repo => ({ repoId: repo.meta.id, committed: true, pushed: push, error: null })));
+    await pending;
+    expect(useAppStore.getState().notifications.some(n => n.progress)).toBe(false);
+    expect(useTaskProgressStore.getState().tasks[operationId].status).toBe('succeeded');
+    if (push) {
+      expect(useAppStore.getState().notifications).toHaveLength(1);
+      expect(useAppStore.getState().notifications[0].message).toEqual({ key: 'VersionDock: Commits committed and pushed successfully across {0} repositories.', args: [3] });
+    }
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('other');
+  });
+
+  it.each(['failed', 'cancelled', 'disposed'] as const)('cleans batch commit progress when %s', async outcome => {
+    const current = snapshot('commit-cleanup', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const gate = deferred<unknown>();
+    const bridge = new MockBridge(command => command.type === 'bootstrap' ? bootstrap : command.type === 'batchCommit' ? gate.promise : []);
+    await useAppStore.getState().initialize(bridge);
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const pending = useAppStore.getState().commitMany(current.repositories.map(repo => ({ repoId: repo.meta.id, paths: ['a.txt'], unstagePaths: [], amend: false })), 'message', false);
+    await vi.waitFor(() => expect(useAppStore.getState().notifications.some(n => n.progress)).toBe(true));
+    if (outcome === 'disposed') { useAppStore.getState().dispose(); expect(useAppStore.getState().notifications.some(n => n.progress)).toBe(false); }
+    gate.reject(outcome === 'cancelled' ? new DOMException('Operation cancelled', 'AbortError') : new Error('offline'));
+    await pending;
+    expect(useAppStore.getState().notifications.some(n => n.progress)).toBe(false);
+    expect(useAppStore.getState().toastNotificationIds.every(id => useAppStore.getState().notifications.some(n => n.id === id))).toBe(true);
+  });
+
+  it.each(['success', 'partial', 'cancelled'] as const)('keeps one push progress notification and task across the entire %s batch', async outcome => {
+    const current = snapshot('push-progress', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B'), repository('c', 'C')];
+    const gates = [deferred<unknown>(), deferred<unknown>(), deferred<unknown>()];
+    const requests: BridgeCommand[] = [];
+    const bridge = new MockBridge(command => {
+      if (command.type === 'bootstrap') return bootstrap;
+      if (command.type === 'sync') { requests.push(command); return gates[requests.length - 1].promise; }
+      return [];
+    });
+    await useAppStore.getState().initialize(bridge);
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const pending = useAppStore.getState().pushRepositories(['a', 'b', 'c'], { force: true });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    const group = Object.values(useTaskProgressStore.getState().tasks).find(task => task.title === 'Push')!;
+    expect(group.total).toBe(3);
+    expect(useAppStore.getState().notifications.filter(n => n.progress)).toHaveLength(1);
+    expect(useAppStore.getState().notifications.find(n => n.progress)?.progressMessage).toEqual({ key: '({0}/{1}) {2}', args: [1, 3, 'A'] });
+    if (outcome === 'cancelled') {
+      await useTaskProgressStore.getState().cancel(group.id);
+      gates[0].resolve({ output: '', update: null });
+      await pending;
+      expect(requests).toHaveLength(1);
+      expect(useAppStore.getState().notifications).toEqual([]);
+      expect(useTaskProgressStore.getState().tasks[group.id].status).toBe('cancelled');
+      return;
+    }
+    gates[0].resolve({ output: '', update: null });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(useAppStore.getState().notifications.find(n => n.progress)).toMatchObject({ progressValue: expect.closeTo(100 / 3, 5), progressMessage: { key: '({0}/{1}) {2}', args: [2, 3, 'B'] } });
+    if (outcome === 'partial') gates[1].reject(new Error('offline'));
+    else gates[1].resolve({ output: '', update: null });
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    gates[2].resolve({ output: '', update: null });
+    expect(await pending).toEqual(outcome === 'partial' ? ['a', 'c'] : ['a', 'b', 'c']);
+    expect(requests.every(command => command.type === 'sync' && command.payload.force === true && command.payload.workspace_id === 'push-progress')).toBe(true);
+    expect(useAppStore.getState().notifications).toHaveLength(1);
+    expect(useAppStore.getState().notifications[0].type).toBe(outcome === 'partial' ? 'error' : 'success');
+    expect(useTaskProgressStore.getState().tasks[group.id].status).toBe(outcome === 'partial' ? 'partial' : 'succeeded');
+    if (outcome === 'partial') expect(useAppStore.getState().notifications[0].details).toContain('B: offline');
+  });
+
+  it('skips a parent push after a failed submodule while continuing unrelated repositories', async () => {
+    const current = snapshot('push-dependency', 1);
+    const parent = repository('parent', 'Parent');
+    const child = { ...repository('child', 'Child'), meta: { ...repository('child', 'Child').meta, depth: 1, parentRepoId: 'parent', isSubmodule: true } };
+    current.repositories = [parent, child, repository('other', 'Other')];
+    const requests: string[] = [];
+    const bridge = new MockBridge(command => {
+      if (command.type === 'bootstrap') return bootstrap;
+      if (command.type === 'sync') {
+        requests.push(command.payload.repo_id);
+        if (command.payload.repo_id === 'child') throw new Error('[rejected] non-fast-forward');
+        return { output: '', update: null };
+      }
+      return [];
+    });
+    await useAppStore.getState().initialize(bridge);
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    expect(await useAppStore.getState().pushRepositories(['parent', 'child', 'other'])).toEqual(['other']);
+    expect(requests).toEqual(['child', 'other']);
+    expect(useAppStore.getState().notifications.filter(item => item.title === 'Push failed')).toHaveLength(1);
+    const summary = useAppStore.getState().notifications.find(item => item.title === 'Push failed')!;
+    expect(summary.details).toContain('Parent:');
+    expect(summary.actions).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'recoverPush', repoId: 'child' })]));
+  });
+
+  it('does not dispatch a protected push after its batch is cancelled during approval', async () => {
+    const current = snapshot('protected-batch', 1); current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const approval = deferred<void>();
+    const dispatch = vi.fn();
+    const bridge = new MockBridge(command => {
+      if (command.type === 'bootstrap') return bootstrap;
+      if (command.type === 'sync') { dispatch(command); return { output: '', update: null }; }
+      return [];
+    });
+    const originalRequest = bridge.request.bind(bridge);
+    bridge.request = async (command, options) => {
+      if (command.type === 'sync') await approval.promise;
+      return originalRequest(command, options);
+    };
+    await useAppStore.getState().initialize(bridge);
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const pending = useAppStore.getState().pushRepositories(['a', 'b']);
+    const group = Object.values(useTaskProgressStore.getState().tasks).find(task => task.title === 'Push')!;
+    await useTaskProgressStore.getState().cancel(group.id);
+    approval.resolve();
+    await pending;
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(useAppStore.getState().notifications).toEqual([]);
+    expect(useTaskProgressStore.getState().tasks[group.id].status).toBe('cancelled');
+  });
+
+  it('retains push progress after a client timeout until native recovery actually settles', async () => {
+    const current = snapshot('push-recovery', 1); current.repositories = [repository('a', 'A')];
+    const deadline = deferred<unknown>();
+    const bridge = new MockBridge(command => command.type === 'bootstrap' ? bootstrap : []);
+    const originalRequest = bridge.request.bind(bridge);
+    bridge.request = async (command, options = {}) => {
+      if (command.type !== 'sync') return originalRequest(command, options);
+      options.onOperationId?.('native-recovery');
+      bridge.emit(createOperationRequestEvent(command, options, 'native-recovery'));
+      return deadline.promise as any;
+    };
+    await useAppStore.getState().initialize(bridge);
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const pending = useAppStore.getState().sync('a', 'push');
+    const error = new BridgeError({ code: 'REQUEST_TIMEOUT', message: 'timed out', command: null, stderr: null, exitCode: null, recoverable: true });
+    deadline.reject(error);
+    await pending;
+    expect(useAppStore.getState().notifications.filter(item => item.progress)).toHaveLength(1);
+    expect(useTaskProgressStore.getState().tasks['native-recovery'].status).toBe('queued');
+    bridge.emit({ type: 'operation-settled', progressEvent: true, requestId: 'native-recovery', error });
+    expect(useAppStore.getState().notifications.some(item => item.progress)).toBe(false);
+    expect(useTaskProgressStore.getState().tasks['native-recovery'].status).toBe('timedOut');
+  });
+
+  it('shows indeterminate single push progress immediately and retains the caller operation callback', async () => {
+    const current = snapshot('single-push', 1); current.repositories = [repository('a', 'A')];
+    const gate = deferred<unknown>();
+    const bridge = new MockBridge(command => command.type === 'bootstrap' ? bootstrap : command.type === 'sync' ? gate.promise : []);
+    await useAppStore.getState().initialize(bridge);
+    useAppStore.setState({ snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const callback = vi.fn();
+    const pending = useAppStore.getState().sync('a', 'push', true, { onOperationId: callback });
+    await vi.waitFor(() => expect(callback).toHaveBeenCalled());
+    expect(useAppStore.getState().notifications.find(n => n.progress)?.progressValue).toBeUndefined();
+    expect(useTaskProgressStore.getState().tasks[callback.mock.calls[0][0]]).toMatchObject({ immediate: true, title: 'Push' });
+    gate.resolve({ output: '', update: null }); await pending;
+    expect(useAppStore.getState().notifications.some(n => n.progress)).toBe(false);
   });
 
   it('shows long foreground operation progress, cancels without switching workspace, and removes it on completion', async () => {

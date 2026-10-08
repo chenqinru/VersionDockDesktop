@@ -118,6 +118,18 @@ describe('identity status menu', () => {
     fireEvent.click(anchor); fireEvent.pointerDown(document.body); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     fireEvent.click(anchor); fireEvent(window, new Event('blur')); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+  it('does not steal focus from an external control when a pointer press closes the menu', async () => {
+    setup(); await open();
+    const external = document.createElement('button');
+    document.body.append(external);
+    try {
+      external.focus();
+      fireEvent.pointerDown(external);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(external).toHaveFocus();
+    } finally { external.remove(); }
+  });
+
   it('shows failures, permits retry, and does not apply a cancelled dialog to another workspace', async () => {
     let fail = true;
     const commands = setup((command) => { if (command.type === 'gitIdentity' && fail) throw new Error('Identity read failed'); });

@@ -1,6 +1,6 @@
 import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Codicon } from '../Codicon';
 import { useAppStore, type AppNotificationAction } from '../../store/appStore';
 import { useI18n } from '../../i18n';
@@ -54,6 +54,7 @@ function recordRecentBranch(repoId: string, branchName: string) {
 
 interface BranchMenuPopoverProps {
   anchorRect: DOMRect | null;
+  anchorRef?: RefObject<HTMLElement>;
   placement?: 'anchor' | 'bottomLeft';
   onClose: () => void;
   initialRepoId?: string;
@@ -61,7 +62,7 @@ interface BranchMenuPopoverProps {
   directBranch?: { repoId: string; branchName: string; isCurrent: boolean };
 }
 
-export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly = false, directBranch, placement = 'anchor' }: BranchMenuPopoverProps) {
+export function BranchMenuPopover({ anchorRect, anchorRef, onClose, initialRepoId, repoOnly = false, directBranch, placement = 'anchor' }: BranchMenuPopoverProps) {
   const { t } = useI18n();
   const bridge = useBridge();
   const snapshot = useAppStore((state) => state.snapshot);
@@ -233,6 +234,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
         scrollbarContains(popoverRef.current, target) ||
         scrollbarContains(submenuRef.current, target) ||
         scrollbarContains(actionMenuRef.current, target) ||
+        scrollbarContains(anchorRef?.current, target) ||
         (target instanceof Element && Boolean(target.closest('.dialog-backdrop, .app-dialog')))
       ) {
         return;
@@ -266,7 +268,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, repoOnly, directBranch, backFromAction, backFromSubmenu]);
+  }, [anchorRef, onClose, activeBranchAction, activeTagAction, activeSubmenuRepoId, activeCommonBranch, activeCommonTag, repoOnly, directBranch, backFromAction, backFromSubmenu]);
 
   const repositories = useMemo(() => snapshot?.repositories ?? [], [snapshot?.repositories]);
   const gitRepos = useMemo(() => repositories.filter((r) => r.meta.kind === 'git'), [repositories]);

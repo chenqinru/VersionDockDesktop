@@ -645,10 +645,10 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
       pulled = [pullTargets[0].meta.id];
     }
     if (direction !== 'incoming') {
-      for (const repo of pushableRepos) {
-        if (pullTargets.some(target => target.meta.id === repo.meta.id) && !pulled.includes(repo.meta.id)) continue;
-        if (!isWorkspaceOpen(useAppStore.getState(), wid)) break;
-        await sync(repo.meta.id, 'push', undefined, undefined, wid);
+      const pushTargets = pushableRepos.filter(repo => !pullTargets.some(target => target.meta.id === repo.meta.id) || pulled.includes(repo.meta.id));
+      if (isWorkspaceOpen(useAppStore.getState(), wid)) {
+        if (pushTargets.length > 1) await store.pushRepositories(pushTargets.map(repo => repo.meta.id), {}, wid);
+        else if (pushTargets.length) await sync(pushTargets[0].meta.id, 'push', undefined, undefined, wid);
       }
     }
     await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
@@ -683,7 +683,8 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
       if (await confirmDialog({ title: t('Safe Force Push...'), message: t('Force push selected repositories using force-with-lease?'), danger: true })) {
         const store = useAppStore.getState();
         if (!isWorkspaceOpen(store, wid)) return;
-        await Promise.allSettled(pushableRepos.map((repo) => sync(repo.meta.id, 'push', true, { force: true }, wid)));
+        if (pushableRepos.length > 1) await store.pushRepositories(pushableRepos.map(repo => repo.meta.id), { force: true }, wid);
+        else await Promise.allSettled(pushableRepos.map(repo => sync(repo.meta.id, 'push', true, { force: true }, wid)));
       }
     } else if (id === 'rebase' || id === 'merge' || id === 'ff') {
       await pullSelected(id === 'rebase' ? 'rebase' : id === 'ff' ? 'ff-only' : 'merge', wid);

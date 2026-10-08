@@ -1,7 +1,7 @@
 import { runGitTagWorkflow, type TagWorkflowRequest, type TagWorkflowResult } from '../services/gitTagWorkflow';
 import { DEFAULT_SETTINGS, DEFAULT_LAYOUT } from '../settings/defaults';
 import { mergeLogEntries } from '../logs/entries';
-import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
+import { configureTaskProgress, isTaskActive, resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
 import { SettingsWriter } from '../services/settingsWriter';
 import { create } from 'zustand';
 import type {
@@ -49,6 +49,7 @@ export interface SyncOptions {
   remote?: string;
   branch?: string;
   rethrow?: boolean;
+  notifyError?: boolean;
   showProgress?: boolean;
   onOperationId?: (id: string) => void;
 }
@@ -503,6 +504,7 @@ export interface AppStore {
   retryBatchResult: (repoId: string, options?: { reportId?: string; workspaceId?: string }) => Promise<void>;
   dismissBatchReport: () => void;
   sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'pullFfOnly' | 'push' | 'pushTags' | 'update', notify?: boolean, options?: SyncOptions & { force?: boolean }, targetWorkspaceId?: string) => Promise<RepositoryUpdateResult | undefined>;
+  pushRepositories: (repoIds: string[], options?: { force?: boolean }, targetWorkspaceId?: string) => Promise<string[]>;
   fetchRepositories: (repoIds: string[], notifyCompletion?: boolean, targetWorkspaceId?: string) => Promise<void>;
   notifyPushSuccess: (repoId: string, workspaceId: string, remote?: string, branch?: string) => Promise<void>;
   updateProject: (strategy?: 'merge' | 'rebase') => Promise<void>;
@@ -1771,6 +1773,47 @@ export const useAppStore = create<AppStore>((set, get) => {
     bridge().send({ type: 'updateLayout', payload: { layout: next } });
   };
 
+  const showBatchProgress = (message: NotificationText, wid: string, repositories: Array<{ id: string; name: string }>) => {
+    const notificationId = get().addNotification({ type: 'info', title: 'VersionDock', message, workspaceId: wid, progress: true, progressValue: repositories.length > 1 ? 0 : undefined });
+    let unsubscribe = () => undefined as void;
+    let taskId: string | undefined;
+    let finishing = false;
+    const cleanup = () => {
+      unsubscribe();
+      get().removeNotification(notificationId);
+      const index = bridgeSubscriptions.indexOf(cleanup);
+      if (index >= 0) bridgeSubscriptions.splice(index, 1);
+    };
+    const finish = () => {
+      const task = taskId ? useTaskProgressStore.getState().tasks[taskId] : undefined;
+      if (task && isTaskActive(task)) finishing = true;
+      else cleanup();
+    };
+    bridgeSubscriptions.push(cleanup);
+    return {
+      followTask: (id: string) => {
+        taskId = id;
+        unsubscribe();
+        const update = () => {
+          const task = useTaskProgressStore.getState().tasks[id];
+          if (finishing && (!task || !isTaskActive(task))) { cleanup(); return; }
+          if (!task) return;
+          const total = task.total ?? repositories.length;
+          const completed = task.completed ?? 0;
+          const repoName = task.repoName ?? repositories[Math.min(completed, repositories.length - 1)]?.name ?? '';
+          set(state => ({ notifications: state.notifications.map(item => item.id === notificationId ? {
+            ...item,
+            progressMessage: task.total !== null ? { key: '({0}/{1}) {2}', args: [Math.min(completed + (isTaskActive(task) ? 1 : 0), total), total, repoName] } : undefined,
+            progressValue: task.total !== null && total > 0 ? Math.min(100, completed / total * 100) : undefined,
+          } : item) }));
+        };
+        unsubscribe = useTaskProgressStore.subscribe(update);
+        update();
+      },
+      finish,
+    };
+  };
+
   const extractCurrentSession = (state: AppStore): WorkspaceSessionState | undefined => {
     if (!state.snapshot) return undefined;
     return {
@@ -2385,12 +2428,14 @@ export const useAppStore = create<AppStore>((set, get) => {
             workingTreeRequests.set(event.requestId, holdWorkingTreeRefresh(wid));
           }
           const snapshot = get().snapshot?.workspace.id === wid ? get().snapshot : wid ? get().sessions[wid]?.snapshot : get().snapshot;
+          const repositories = get().snapshot?.workspace.id === wid && get().allRepositories.length
+            ? get().allRepositories : (wid ? get().sessions[wid]?.allRepositories : undefined) ?? snapshot?.repositories ?? [];
           progress.requested(event, {
             workspaceName: get().tabs.find((tab) => tab.id === wid)?.name ?? snapshot?.workspace.name ?? 'VersionDock',
-            repoName: snapshot?.repositories.find((repo) => repo.meta.id === event.context.repositoryId)?.meta.name,
+            repoName: repositories.find((repo) => repo.meta.id === event.context.repositoryId)?.meta.name,
             repositories: event.command.type === 'batchCommit' ? [...event.command.payload.targets]
-              .sort((a, b) => (snapshot?.repositories.find((repo) => repo.meta.id === b.repoId)?.meta.depth ?? 0) - (snapshot?.repositories.find((repo) => repo.meta.id === a.repoId)?.meta.depth ?? 0))
-              .map((target) => ({ id: target.repoId, name: snapshot?.repositories.find((repo) => repo.meta.id === target.repoId)?.meta.name ?? target.repoId })) : undefined,
+              .sort((a, b) => (repositories.find((repo) => repo.meta.id === b.repoId)?.meta.depth ?? 0) - (repositories.find((repo) => repo.meta.id === a.repoId)?.meta.depth ?? 0))
+              .map((target) => ({ id: target.repoId, name: repositories.find((repo) => repo.meta.id === target.repoId)?.meta.name ?? target.repoId })) : undefined,
           });
         } else if ('progressEvent' in event && event.type === 'operation-settled') {
           progress.settled(event);
@@ -3404,55 +3449,73 @@ export const useAppStore = create<AppStore>((set, get) => {
       const workspace_id = targetWorkspaceId ?? workspaceId();
       const repositoryIds = targets.map((target) => target.repoId);
       const operationTarget = `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(repositoryIds)}`;
-      const results = await bridge().request<RepositoryOperationResult[]>({
-        type: 'batchCommit',
-        payload: {
-          workspace_id,
-          targets: targets.map((target) => ({
-            repoId: target.repoId,
-            message,
-            amend: target.amend,
-            paths: target.paths,
-            unstagePaths: target.unstagePaths,
-            noVerify: Boolean(target.noVerify),
-            stagedOnly: Boolean(target.stagedOnly),
-          })),
-          push,
-        },
-      }, {
-        timeoutMs: 600_000,
-        context: {
-          repositoryId: repositoryIds.length === 1 ? repositoryIds[0] : null,
-          target: operationTarget,
-        },
-      });
-      const reportId = `report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const report: BatchCommitReport = { id: reportId, message, push, targets, results, workspaceId: workspace_id };
-
-      set((state) => ({
-        batchCommitReports: { ...state.batchCommitReports, [reportId]: report },
-      }));
-
-      if (get().snapshot?.workspace.id === workspace_id) {
-        set({ batchCommitReport: report });
-      } else {
-        set((state) => ({
-          sessions: {
-            ...state.sessions,
-            [workspace_id]: state.sessions[workspace_id]
-              ? { ...state.sessions[workspace_id], batchCommitReport: report }
-              : state.sessions[workspace_id],
+      const source = get().snapshot?.workspace.id === workspace_id ? get() : get().sessions[workspace_id];
+      const repositories = source?.allRepositories?.length ? source.allRepositories : source?.snapshot?.repositories ?? [];
+      const progress = targets.length > 1 ? showBatchProgress({
+        key: push ? 'VersionDock: Committing and pushing {0} repositories…' : 'VersionDock: Committing {0} repositories', args: [targets.length],
+      }, workspace_id, targets.map(target => ({ id: target.repoId, name: repositories.find(repo => repo.meta.id === target.repoId)?.meta.name ?? target.repoId }))) : undefined;
+      try {
+        const results = await bridge().request<RepositoryOperationResult[]>({
+          type: 'batchCommit',
+          payload: {
+            workspace_id,
+            targets: targets.map((target) => ({
+              repoId: target.repoId,
+              message,
+              amend: target.amend,
+              paths: target.paths,
+              unstagePaths: target.unstagePaths,
+              noVerify: Boolean(target.noVerify),
+              stagedOnly: Boolean(target.stagedOnly),
+            })),
+            push,
           },
+        }, {
+          timeoutMs: 600_000,
+          showProgress: progress ? false : undefined,
+          onOperationId: progress ? id => {
+            useTaskProgressStore.getState().trackForegroundRequest(id, true);
+            progress.followTask(id);
+          } : undefined,
+          context: {
+            repositoryId: repositoryIds.length === 1 ? repositoryIds[0] : null,
+            target: operationTarget,
+          },
+        });
+        const reportId = `report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const report: BatchCommitReport = { id: reportId, message, push, targets, results, workspaceId: workspace_id };
+
+        set((state) => ({
+          batchCommitReports: { ...state.batchCommitReports, [reportId]: report },
         }));
-      }
-      clearCommittedSelections(results.filter((result) => result.committed).map((result) => result.repoId), workspace_id);
-      await Promise.all(results.filter((result) => result.committed).map(async (result) => {
-        await notifyDetachedCommit(result.repoId, workspace_id).catch(() => undefined);
-        if (result.pushed) await get().notifyPushSuccess(result.repoId, workspace_id);
-      }));
-      notifyBatchFailures(results, report, workspace_id);
-      return results;
+
+        if (get().snapshot?.workspace.id === workspace_id) {
+          set({ batchCommitReport: report });
+        } else {
+          set((state) => ({
+            sessions: {
+              ...state.sessions,
+              [workspace_id]: state.sessions[workspace_id]
+                ? { ...state.sessions[workspace_id], batchCommitReport: report }
+                : state.sessions[workspace_id],
+            },
+          }));
+        }
+        clearCommittedSelections(results.filter((result) => result.committed).map((result) => result.repoId), workspace_id);
+        await Promise.all(results.filter((result) => result.committed).map(async (result) => {
+          await notifyDetachedCommit(result.repoId, workspace_id).catch(() => undefined);
+          if (result.pushed && targets.length === 1) await get().notifyPushSuccess(result.repoId, workspace_id);
+        }));
+        if (push && targets.length > 1 && results.length === targets.length && results.every(result => result.committed && !result.error && (result.pushed || repositories.find(repo => repo.meta.id === result.repoId)?.meta.kind === 'svn'))) {
+          get().addNotification({ type: 'success', title: 'Push completed', workspaceId: workspace_id,
+            message: { key: 'VersionDock: Commits committed and pushed successfully across {0} repositories.', args: [results.length] },
+          });
+        }
+        notifyBatchFailures(results, report, workspace_id);
+        return results;
+      } finally { progress?.finish(); }
     }, 'commit', {
+      workspaceId: targetWorkspaceId ?? get().snapshot?.workspace.id,
       repositoryId: targets.length === 1 ? targets[0].repoId : null,
       target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(targets.map((target) => target.repoId))}`,
     }),
@@ -3631,6 +3694,84 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
     },
 
+    pushRepositories: async (repoIds, options = {}, targetWorkspaceId) => {
+      const wid = targetWorkspaceId ?? get().snapshot?.workspace.id;
+      if (!wid) return [];
+      const source = get().snapshot?.workspace.id === wid ? get() : get().sessions[wid];
+      const available = source?.allRepositories?.length ? source.allRepositories : source?.snapshot?.repositories ?? [];
+      const repositories = available.filter(repo => repoIds.includes(repo.meta.id) && repo.meta.kind === 'git').sort((a, b) => b.meta.depth - a.meta.depth);
+      if (!repositories.length) return [];
+      if (repositories.length === 1) {
+        try { await get().sync(repositories[0].meta.id, 'push', true, { ...options, rethrow: true }, wid); return [repositories[0].meta.id]; }
+        catch { return []; }
+      }
+      return await withBusy(async () => {
+        const taskProgress = useTaskProgressStore.getState();
+        const taskId = taskProgress.beginGroup('Push', wid, source?.snapshot?.workspace.name ?? 'VersionDock', repositories.map(repo => ({ id: repo.meta.id, name: repo.meta.name })));
+        const progress = showBatchProgress({ key: 'VersionDock: Pushing {0} repositories…', args: [repositories.length] }, wid, repositories.map(repo => ({ id: repo.meta.id, name: repo.meta.name })));
+        progress.followTask(taskId);
+        const succeeded: string[] = [];
+        const failed: Array<{ repoId: string; name: string; error: string; code?: string }> = [];
+        const isDescendant = (childId: string, parentId: string) => {
+          let child = available.find(repo => repo.meta.id === childId);
+          const visited = new Set<string>();
+          while (child?.meta.parentRepoId && !visited.has(child.meta.id)) {
+            visited.add(child.meta.id);
+            if (child.meta.parentRepoId === parentId) return true;
+            child = available.find(repo => repo.meta.id === child?.meta.parentRepoId);
+          }
+          return false;
+        };
+        try {
+          for (const repo of repositories) {
+            if (taskProgress.isStopped(taskId)) break;
+            if (get().snapshot?.workspace.id !== wid && !get().sessions[wid] && !get().tabs.some(tab => tab.id === wid)) { await taskProgress.cancel(taskId); break; }
+            try {
+              const failedChild = failed.find(child => isDescendant(child.repoId, repo.meta.id));
+              if (failedChild) throw new Error(createTranslator(resolveLanguage(settings().language))('Skipped because child submodule "{0}" failed to push.', failedChild.name));
+              await get().sync(repo.meta.id, 'push', false, {
+                ...options, rethrow: true, notifyError: false, showProgress: false,
+                onOperationId: id => {
+                  if (taskProgress.isStopped(taskId)) throw new DOMException('Operation cancelled', 'AbortError');
+                  taskProgress.bindChild(taskId, repo.meta.id, id);
+                },
+              }, wid);
+              succeeded.push(repo.meta.id);
+              taskProgress.completeChild(taskId, repo.meta.id, 'succeeded');
+            } catch (error) {
+              taskProgress.completeChild(taskId, repo.meta.id, isAbortError(error) ? 'cancelled' : 'failed', isAbortError(error) ? undefined : errorText(error));
+              failed.push({ repoId: repo.meta.id, name: repo.meta.name, error: errorText(error), code: error instanceof BridgeError ? error.code : undefined });
+            }
+          }
+          if (!taskProgress.isStopped(taskId)) {
+            if (failed.length) get().addNotification({ type: 'error', title: 'Push failed', workspaceId: wid,
+              message: { key: 'VersionDock: {0} repositories pushed, {1} failed. {2}', args: [succeeded.length, failed.length, failed.map(item => `${item.name}: ${item.error}`).join('; ')] },
+              details: failed.map(item => `${item.name}: ${item.error}`).join('\n'),
+              actions: failed.flatMap((item): AppNotificationAction[] => {
+                if (/\[rejected\]|non-fast-forward|fetch first|PUSH_REJECTED/i.test(`${item.error} ${item.code}`) && settings().onPushRejected !== 'error') {
+                  const merge = settings().updateProjectMethod === 'merge';
+                  const t = createTranslator(resolveLanguage(settings().language));
+                  return [
+                    { type: 'recoverPush', label: { raw: `${item.name}: ${t(merge ? 'Merge & Push' : 'Rebase & Push')}` }, repoId: item.repoId, strategy: merge ? 'merge' : 'rebase' },
+                    { type: 'recoverPush', label: { raw: `${item.name}: ${t('Force Push')}` }, repoId: item.repoId, strategy: 'force' },
+                  ];
+                }
+                return /CONFLICT|conflicts|冲突/i.test(item.error) ? [{ type: 'openConflicts', label: 'Resolve Conflicts' }] : [];
+              }),
+            });
+            else if (succeeded.length === 1) await get().notifyPushSuccess(succeeded[0], wid);
+            else if (succeeded.length > 1) get().addNotification({ type: 'success', title: 'Push completed', workspaceId: wid,
+              message: { key: 'VersionDock: Commits pushed successfully across {0} repositories.', args: [succeeded.length] },
+            });
+          }
+          return succeeded;
+        } finally {
+          progress.finish();
+          taskProgress.finishGroup(taskId);
+        }
+      }, 'sync', { workspaceId: wid, target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(repositories.map(repo => repo.meta.id))}` }) ?? [];
+    },
+
     fetchRepositories: async (repoIds, notifyCompletion = true, targetWorkspaceId) => {
       const wid = targetWorkspaceId ?? get().snapshot?.workspace.id;
       if (!wid) return;
@@ -3668,61 +3809,71 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     sync: async (repoId, action, notify = true, options = {}, targetWorkspaceId) => {
       const wid = targetWorkspaceId ?? get().snapshot?.workspace.id ?? workspaceId();
-      return withBusy(async () => {
-        const capability = action === 'fetch' ? 'syncFetch' : action === 'push' || action === 'pushTags' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
-        if (!ensureRepositoryCapability(repoId, capability, wid)) {
-          if (options.rethrow) throw new Error(`Capability ${capability} unavailable`);
-          return undefined;
-        }
-        let result: SyncResult;
-        // Manual fetch keeps its existing silent notification behavior, while the
-        // independent task entry still tracks the foreground operation.
-        const onOperationId = options.onOperationId ?? (action === 'fetch' && notify && options.showProgress !== false
-          ? (id: string) => useTaskProgressStore.getState().trackForegroundRequest(id) : undefined);
-        try {
-          result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null, force: options.force ?? false } }, { timeoutMs: 600_000, showProgress: action === 'fetch' ? false : (options.showProgress ?? notify), onOperationId });
-        } catch (error) {
-          if (error instanceof BridgeError) await notifyUpdateRestoreWarning(error.restoreWarning, wid, repoId);
-          if (await handlePullAutoStashError(error, wid)) {
-            if (options.rethrow) throw error;
+      const source = get().snapshot?.workspace.id === wid ? get().snapshot : get().sessions[wid]?.snapshot;
+      const repoName = source?.repositories.find(repo => repo.meta.id === repoId)?.meta.name ?? repoId;
+      const progress = action === 'push' && notify && options.showProgress !== false
+        ? showBatchProgress({ key: 'VersionDock [{0}]: Pushing changes…', args: [repoName] }, wid, [{ id: repoId, name: repoName }]) : undefined;
+      try {
+        return await withBusy(async () => {
+          const capability = action === 'fetch' ? 'syncFetch' : action === 'push' || action === 'pushTags' ? 'syncPush' : action === 'update' ? 'sync' : 'syncPull';
+          if (!ensureRepositoryCapability(repoId, capability, wid)) {
+            if (options.rethrow) throw new Error(`Capability ${capability} unavailable`);
             return undefined;
           }
-          throw error;
-        }
-        await notifyUpdateRestoreWarning(result.restoreWarning, wid, repoId);
-        if (notify && action === 'fetch') {
-          const refs = await bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false }).catch(() => []);
-          notifyGoneBranches(repoId, refs, wid);
-        }
-        if (notify && action === 'push') await get().notifyPushSuccess(repoId, wid, options.remote, options.branch);
-        if (notify && result.update) {
-          const summary = result.update.summary;
-          const commitCount = summary?.commitCount ?? 0;
-          const fileCount = summary?.fileCount ?? 0;
-          const message: NotificationText = result.update.summaryError
-            ? { key: 'VersionDock: Update completed, but update details could not be calculated for {0} repositories.', args: [1] }
-            : summary?.kind === 'noChanges'
-              ? 'VersionDock: Already up to date. No files updated.'
-              : { key: 'VersionDock: Updated {0} files in {1} commits.', args: [fileCount, commitCount] };
-          get().addNotification({
-            type: result.update.summaryError ? 'warning' : 'success',
-            title: 'Repository update',
-            message,
-            workspaceId: wid,
-            actions: commitCount ? [{ type: 'viewUpdateDetails', label: 'View update details', result: result.update }] : [],
-          });
-        }
-        if (action !== 'update') {
-          await Promise.all([get().loadUnpushedCommits(repoId, wid), get().loadIncomingCommits(repoId, wid)]);
-        }
-        return result.update ?? undefined;
-      }, `sync:${repoId}`, { workspaceId: wid, repositoryId: repoId, remote: options.remote, branch: options.branch }, {
-        rethrow: options.rethrow,
-        notifyError: action !== 'fetch' || notify || Boolean(options.rethrow),
-        // Automatic fetch runs silently, as in the plugin, without disabling
-        // sync or commit actions. Manual fetch and all writes retain their guard.
-        trackBusy: action !== 'fetch' || notify,
-      });
+          let result: SyncResult;
+          // Manual fetch keeps its existing silent notification behavior, while the
+          // independent task entry still tracks the foreground operation.
+          const onOperationId = progress ? (id: string) => {
+            useTaskProgressStore.getState().trackForegroundRequest(id, true);
+            progress.followTask(id);
+            options.onOperationId?.(id);
+          } : options.onOperationId ?? (action === 'fetch' && notify && options.showProgress !== false
+            ? (id: string) => useTaskProgressStore.getState().trackForegroundRequest(id) : undefined);
+          try {
+            result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null, force: options.force ?? false } }, { timeoutMs: 600_000, showProgress: progress || action === 'fetch' ? false : (options.showProgress ?? notify), onOperationId });
+          } catch (error) {
+            if (error instanceof BridgeError) await notifyUpdateRestoreWarning(error.restoreWarning, wid, repoId);
+            if (await handlePullAutoStashError(error, wid)) {
+              if (options.rethrow) throw error;
+              return undefined;
+            }
+            throw error;
+          }
+          await notifyUpdateRestoreWarning(result.restoreWarning, wid, repoId);
+          if (notify && action === 'fetch') {
+            const refs = await bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false }).catch(() => []);
+            notifyGoneBranches(repoId, refs, wid);
+          }
+          if (notify && action === 'push') await get().notifyPushSuccess(repoId, wid, options.remote, options.branch);
+          if (notify && result.update) {
+            const summary = result.update.summary;
+            const commitCount = summary?.commitCount ?? 0;
+            const fileCount = summary?.fileCount ?? 0;
+            const message: NotificationText = result.update.summaryError
+              ? { key: 'VersionDock: Update completed, but update details could not be calculated for {0} repositories.', args: [1] }
+              : summary?.kind === 'noChanges'
+                ? 'VersionDock: Already up to date. No files updated.'
+                : { key: 'VersionDock: Updated {0} files in {1} commits.', args: [fileCount, commitCount] };
+            get().addNotification({
+              type: result.update.summaryError ? 'warning' : 'success',
+              title: 'Repository update',
+              message,
+              workspaceId: wid,
+              actions: commitCount ? [{ type: 'viewUpdateDetails', label: 'View update details', result: result.update }] : [],
+            });
+          }
+          if (action !== 'update') {
+            await Promise.all([get().loadUnpushedCommits(repoId, wid), get().loadIncomingCommits(repoId, wid)]);
+          }
+          return result.update ?? undefined;
+        }, `sync:${repoId}`, { workspaceId: wid, repositoryId: repoId, remote: options.remote, branch: options.branch }, {
+          rethrow: options.rethrow,
+          notifyError: options.notifyError ?? (action !== 'fetch' || notify || Boolean(options.rethrow)),
+          // Automatic fetch runs silently, as in the plugin, without disabling
+          // sync or commit actions. Manual fetch and all writes retain their guard.
+          trackBusy: action !== 'fetch' || notify,
+        });
+      } finally { progress?.finish(); }
     },
 
     updateProject: async (strategy) => {

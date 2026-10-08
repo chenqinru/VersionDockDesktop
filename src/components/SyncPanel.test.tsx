@@ -385,6 +385,10 @@ describe('SyncPanel footer parity with plugin', () => {
       branchesByRepo: Object.fromEntries(repos.map(repo => [repo.meta.id, [{ name: 'main', current: true, remote: false, remoteName: null, upstream, ahead, behind, detachedTag: null, detachedHash: null, lastCommitMessage: null, lastCommitDate: null }]])),
       loadIncomingCommits: vi.fn().mockResolvedValue(undefined), loadUnpushedCommits: vi.fn().mockResolvedValue(undefined),
       fetchRepositories: fetch,
+      pushRepositories: vi.fn(async (ids, options, wid) => {
+        for (const id of ids) await sync(id, 'push', false, options, wid);
+        return ids;
+      }),
       updateRepositories: vi.fn(async (ids, strategy, wid) => {
         const completed: string[] = [];
         for (const id of ids) if (await sync(id, strategy === 'rebase' ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull', false, undefined, wid)) completed.push(id);
@@ -489,6 +493,20 @@ describe('SyncPanel footer parity with plugin', () => {
     await vi.waitFor(() => expect(view.sync).toHaveBeenCalledTimes(1));
     expect(update).toHaveBeenCalledWith(['repo-1', 'repo-2'], 'rebase', 'workspace-1');
     expect(view.sync).toHaveBeenCalledWith('repo-1', 'push', undefined, undefined, 'workspace-1');
+  });
+
+  it.each([false, true])('uses a shared push task for selected repositories (force=%s)', async force => {
+    const view = setup(1, 0, 'origin/main', true);
+    const push = vi.fn().mockResolvedValue(['repo-1', 'repo-2']);
+    useAppStore.setState({ pushRepositories: push });
+    vi.spyOn(dialogService, 'confirmDialog').mockResolvedValue(true);
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+    if (force) {
+      fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Safe Force Push...' }));
+    } else fireEvent.click(screen.getByRole('button', { name: 'Push (2)' }));
+    await vi.waitFor(() => expect(push).toHaveBeenCalledWith(['repo-1', 'repo-2'], force ? { force: true } : {}, 'workspace-1'));
+    expect(view.sync).not.toHaveBeenCalled();
   });
 
   it('retains selection while outgoing commits or an unpublished branch still need work', async () => {
