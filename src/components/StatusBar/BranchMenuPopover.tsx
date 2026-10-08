@@ -1466,7 +1466,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           <button
                             key={`recent-${b.name}`}
                             type="button"
-                            className={`statusbar-menu-item branch-reference-row ${isSelected ? 'selected' : ''}`}
+                            className={`statusbar-menu-item has-submenu branch-reference-row ${isSelected ? 'selected' : ''}`}
                             onClick={(e) =>
                               handleOpenBranchActionMenu(
                                 activeSubmenuRepo.meta.id,
@@ -1496,6 +1496,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                                 </div>
                               )}
                             </div>
+                            <Codicon name="chevron-right" className="submenu-arrow" />
                           </button>
                         );
                       })}
@@ -1523,7 +1524,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           <button
                             key={b.name}
                             type="button"
-                            className={`statusbar-menu-item branch-reference-row ${isHead ? 'active-ref' : ''} ${isSelected ? 'selected' : ''}`}
+                            className={`statusbar-menu-item has-submenu branch-reference-row ${isHead ? 'active-ref' : ''} ${isSelected ? 'selected' : ''}`}
                             onClick={(e) =>
                               handleOpenBranchActionMenu(
                                 activeSubmenuRepo.meta.id,
@@ -1554,6 +1555,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                                 </div>
                               )}
                             </div>
+                            <Codicon name="chevron-right" className="submenu-arrow" />
                           </button>
                         );
                       })}
@@ -1576,7 +1578,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                           <button
                             key={b.name}
                             type="button"
-                            className={`statusbar-menu-item branch-reference-row ${isSelected ? 'selected' : ''}`}
+                            className={`statusbar-menu-item has-submenu branch-reference-row ${isSelected ? 'selected' : ''}`}
                             onClick={(e) =>
                               handleOpenBranchActionMenu(
                                 activeSubmenuRepo.meta.id,
@@ -1600,6 +1602,7 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
                                 </div>
                               )}
                             </div>
+                            <Codicon name="chevron-right" className="submenu-arrow" />
                           </button>
                         );
                       })}
