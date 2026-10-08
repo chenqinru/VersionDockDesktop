@@ -969,8 +969,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         <div
           className={`titlebar-tab-drag-preview ${tabDragPreview.detaching ? 'detaching' : ''}`}
           style={{
-            left: tabDragPreview.screenX - window.screenX + 14,
-            top: tabDragPreview.screenY - window.screenY + 14,
+            left: tabDragPreview.screenX - window.screenX - tabDragPreview.width / 2,
+            top: tabDragPreview.screenY - window.screenY - 14,
             width: tabDragPreview.width,
           }}
           aria-hidden="true"

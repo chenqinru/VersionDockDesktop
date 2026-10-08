@@ -7,17 +7,24 @@
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
     body {
+      position: relative;
+      background: #252526;
+      color: #e5e5e5;
+      font: 500 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .tab-preview-label {
       display: flex;
       align-items: center;
+      width: 100%;
+      height: 28px;
       gap: 7px;
       padding: 0 7px 0 10px;
       border: 1px solid #454545;
       border-radius: 6px;
       background: #252526;
-      color: #e5e5e5;
-      font: 500 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    body.light { border-color: #c9c9c9; background: #f3f3f3; color: #333; }
+    body.light { color: #333; background: #f3f3f3; }
+    body.light .tab-preview-label { border-color: #c9c9c9; background: #f3f3f3; }
     .project-icon {
       position: relative;
       display: inline-flex;
@@ -53,14 +60,18 @@
     i { width: 16px; flex: 0 0 16px; text-align: center; font-style: normal; opacity: .6; }
     .tab-detach-badge {
       display: none;
-      position: relative;
+      position: absolute;
+      left: calc(50% + 6px);
+      top: 28px;
       width: 18px;
       height: 18px;
-      flex: 0 0 18px;
       border-radius: 50%;
       background: #348b43;
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
     }
+    /* macOS uses an opaque preview and a native copy cursor. Only previews
+       with an external badge need transparent space outside the tab. */
+    body.show-detach-badge { background: transparent; }
     body.show-detach-badge .tab-detach-badge { display: block; }
     .tab-detach-badge::before, .tab-detach-badge::after {
       content: '';
@@ -76,10 +87,13 @@
   </style>
 </head>
 <body>
+  <div class="tab-preview-label">
   <span class="project-icon" aria-hidden="true">
     <span class="project-icon-letters"></span>
   </span>
-  <span class="titlebar-tab-title"></span><span class="tab-detach-badge" aria-hidden="true"></span><i>×</i>
+  <span class="titlebar-tab-title"></span><i>×</i>
+  </div>
+  <span class="tab-detach-badge" aria-hidden="true"></span>
   <script src="./tab-drag-preview.js"></script>
 </body>
 </html>

@@ -71,7 +71,10 @@ export class TabDragPreviewWindow {
         x: point.screenX - width / 2,
         y: point.screenY - 14,
         width,
-        height: 28,
+        // The pointer is at (width / 2, 14). Leave transparent space below
+        // the label for the badge beside the pointer, outside the tab itself.
+        height: showDetachBadge ? 48 : 28,
+        transparent: showDetachBadge,
         decorations: false,
         resizable: false,
         focus: false,
@@ -80,7 +83,7 @@ export class TabDragPreviewWindow {
         alwaysOnTop: true,
         skipTaskbar: true,
         shadow: false,
-        backgroundColor: theme === 'light' ? [243, 243, 243, 255] : [37, 37, 38, 255],
+        backgroundColor: showDetachBadge ? [0, 0, 0, 0] : theme === 'light' ? [243, 243, 243, 255] : [37, 37, 38, 255],
         backgroundThrottling: 'disabled' as BackgroundThrottlingPolicy,
       });
       candidate = preview;
