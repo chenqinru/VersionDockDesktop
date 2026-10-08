@@ -39,6 +39,19 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
+  it('rejects a delayed detail request from a previous workspace before invoking the backend', async () => {
+    const commit: CommitNode = { repoId: 'old-repo', hash: 'old-commit', shortHash: 'old', parents: [], author: 'Tester', email: '', authorDate: '', committerDate: '', message: 'Old commit', refs: [] };
+    const request = vi.fn();
+    const current = snapshot('current', 1);
+    current.repositories = [repository('current-repo', 'Current')];
+    useAppStore.setState({ bridge: new MockBridge(request), snapshot: current, selectedCommitLoading: {}, selectedCommitError: {}, selectedCommitDetails: {}, notifications: [] });
+    await expect(useAppStore.getState().loadCommitDetail(commit, false, 'previous')).rejects.toMatchObject({ name: 'AbortError' });
+    expect(request).not.toHaveBeenCalled();
+    expect(useAppStore.getState().selectedCommitLoading).toEqual({});
+    expect(useAppStore.getState().selectedCommitError).toEqual({});
+    expect(useAppStore.getState().notifications).toEqual([]);
+  });
+
   it.each(['select', 'reload'] as const)('keeps an overlapping detail request loading when the earlier %s request is replaced by a hover preview', async (action) => {
     const commit: CommitNode = { repoId: 'repo', hash: 'pending-detail', shortHash: 'pending', parents: [], author: 'Tester', email: '', authorDate: '', committerDate: '', message: 'Pending detail', refs: [] };
     const detail: CommitDetail = { commit, fullMessage: commit.message, files: [], branches: { local: [], remote: [], tags: [] } };

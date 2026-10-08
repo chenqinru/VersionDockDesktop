@@ -8,6 +8,7 @@ import * as dialogService from './dialogService';
 import { BranchSidebar } from './BranchSidebar';
 import { useAppStore } from '../store/appStore';
 import type { BootstrapData, WorkspaceSnapshot } from '../bindings/generated';
+import { MockBridge } from '../platform/bridge';
 
 const snapshot: WorkspaceSnapshot = {
   workspace: { id: 'workspace', name: 'Test', paths: ['/tmp/test'], lastOpenedAt: '', available: true },
@@ -33,6 +34,43 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
+  it('cancels a delayed commit hover when the workspace switches without unmounting the list', async () => {
+    vi.useFakeTimers();
+    const commit = { repoId: 'repo', hash: 'old-commit', shortHash: 'old', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'Old workspace commit', refs: [] };
+    const request = vi.fn(() => ({ commit, fullMessage: commit.message, files: [], branches: { local: [], remote: [], tags: [] } }));
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', bridge: new MockBridge(request), history: [commit], historyLoading: false, selectedCommits: [], selectedCommit: undefined, selectedCommitDetails: {} });
+    render(<HistoryWorkspace />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.mouseEnter(screen.getByText(commit.message).closest('.commit-row')!);
+    act(() => useAppStore.setState({ snapshot: { ...snapshot, workspace: { ...snapshot.workspace, id: 'other' }, repositories: [{ ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'other-repo' } }] }, selectedRepoId: 'other-repo', history: [] }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(request).not.toHaveBeenCalled();
+    expect(document.querySelector('.commit-popover')).toBeNull();
+  });
+
+  it('discards a late hover preview after switching workspaces even when both contain the same commit', async () => {
+    vi.useFakeTimers();
+    const commit = { repoId: 'repo', hash: 'shared-commit', shortHash: 'shared', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'Shared commit', refs: [] };
+    let finish!: (value: unknown) => void;
+    const request = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', bridge: new MockBridge(request), history: [commit], historyLoading: false, selectedCommits: [], selectedCommit: undefined, selectedCommitDetails: {} });
+    render(<HistoryWorkspace />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.mouseEnter(screen.getByText(commit.message).closest('.commit-row')!);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(request).toHaveBeenCalledOnce();
+    act(() => useAppStore.setState({ snapshot: { ...snapshot, workspace: { ...snapshot.workspace, id: 'other' } }, history: [commit] }));
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.mouseEnter(screen.getByText(commit.message).closest('.commit-row')!);
+    await act(async () => {
+      finish({ commit, fullMessage: 'Old workspace detail', files: [], branches: { local: [], remote: [], tags: [] } });
+      await Promise.resolve();
+    });
+    expect(document.querySelector('.commit-popover')).toBeNull();
+    expect(useAppStore.getState().selectedCommitDetails).toEqual({});
+    expect(request).toHaveBeenCalledOnce();
+  });
+
   it('keeps the author placeholder and All selected until an SVN author is explicitly chosen', async () => {
     const svnSnapshot: WorkspaceSnapshot = {
       ...snapshot,

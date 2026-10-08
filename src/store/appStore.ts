@@ -518,7 +518,7 @@ export interface AppStore {
   clearHistoryPath: () => Promise<void>;
   setHistoryScope: (scope: HistoryScope) => void;
   selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
-  loadCommitDetail: (commit: CommitNode, force?: boolean) => Promise<CommitDetail>;
+  loadCommitDetail: (commit: CommitNode, force?: boolean, requestedWorkspaceId?: string) => Promise<CommitDetail>;
   reloadSelectedCommits: (targetWorkspaceId?: string) => Promise<void>;
   loadMergeCommits: (commit: CommitNode) => Promise<void>;
   loadMergeParentFiles: (repoId: string, revision: string, parentHash: string) => Promise<CommitFile[]>;
@@ -2844,7 +2844,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           })();
         }
         for (const commit of cachedSession.selectedCommits) {
-          if (cachedSession.selectedCommitDetails[commitKey(commit.repoId, commit.hash)]?.branchesPending) void get().loadCommitDetail(commit).catch(() => undefined);
+          if (cachedSession.selectedCommitDetails[commitKey(commit.repoId, commit.hash)]?.branchesPending) void get().loadCommitDetail(commit, false, workspaceId).catch(() => undefined);
         }
         drainPendingWorkspaceEvents(workspaceId);
         try {
@@ -3916,7 +3916,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const targetWorkspaceId = workspaceId();
       const generation = ++commitSelectionGeneration;
       const current = () => generation === commitSelectionGeneration && get().snapshot?.workspace.id === targetWorkspaceId;
-      const details = await mapWithConcurrency(commits, 4, (commit) => current() ? get().loadCommitDetail(commit) : Promise.resolve(undefined));
+      const details = await mapWithConcurrency(commits, 4, (commit) => current() ? get().loadCommitDetail(commit, false, targetWorkspaceId) : Promise.resolve(undefined));
       if (!current()) return;
       const byKey = Object.fromEntries(details.flatMap(detail => {
         if (!detail) return [];
@@ -4158,9 +4158,13 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     setHistoryScope: (historyScope) => set({ historyScope }),
 
-    loadCommitDetail: async (commit, force = false) => {
+    loadCommitDetail: async (commit, force = false, requestedWorkspaceId) => {
+      const state = get();
+      if (requestedWorkspaceId && state.snapshot?.workspace.id !== requestedWorkspaceId) {
+        throw new DOMException('Commit detail context changed', 'AbortError');
+      }
       const key = commitKey(commit.repoId, commit.hash);
-      const targetWorkspaceId = workspaceId();
+      const targetWorkspaceId = requestedWorkspaceId ?? workspaceId();
       if (!force) {
         const isCurrent = (get().snapshot?.workspace.id ?? get().activeTabId ?? '') === targetWorkspaceId;
         const cached = isCurrent ? get().selectedCommitDetails[key] : get().sessions[targetWorkspaceId]?.selectedCommitDetails[key];
@@ -4391,7 +4395,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const results = await mapWithConcurrency(missing, 4, async (item) => {
         if (generation !== commitSelectionGeneration || get().snapshot?.workspace.id !== targetWorkspaceId) return null;
         try {
-          const detail = await get().loadCommitDetail(item);
+          const detail = await get().loadCommitDetail(item, false, targetWorkspaceId);
           return { key: commitKey(item.repoId, item.hash), detail };
         } catch {
           return null;
@@ -4434,7 +4438,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const results = await mapWithConcurrency(selected, 4, async (item) => {
         if (generation !== commitSelectionGeneration || get().snapshot?.workspace.id !== targetWorkspaceId) return null;
         try {
-          const detail = await get().loadCommitDetail(item, true);
+          const detail = await get().loadCommitDetail(item, true, targetWorkspaceId);
           return { key: commitKey(item.repoId, item.hash), detail };
         } catch {
           return null;

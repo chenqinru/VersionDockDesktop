@@ -267,7 +267,24 @@ function CommitList({
   const closeTimer = useRef<ReturnType<typeof setTimeout>>();
   const popoverActive = useRef(false);
 
-  useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+  useEffect(() => {
+    let active = true;
+    hoveredKeyRef.current = undefined;
+    popoverActive.current = false;
+    queueMicrotask(() => {
+      if (!active) return;
+      setHoveredKey(undefined);
+      setPopover(undefined);
+      setContext(undefined);
+      setBranchOptions(undefined);
+    });
+    return () => {
+      active = false;
+      hoveredKeyRef.current = undefined;
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    };
+  }, [workspaceId]);
   useLayoutEffect(() => {
     const element = parent.current;
     if (!element) return;
@@ -292,9 +309,16 @@ function CommitList({
     setPopover(undefined);
     const row = event.currentTarget;
     const mouseX = event.clientX;
+    const currentContext = () => {
+      const state = useAppStore.getState();
+      return Boolean(workspaceId && state.snapshot?.workspace.id === workspaceId
+        && row.isConnected && hoveredKeyRef.current === key
+        && [...(state.snapshot?.repositories ?? []), ...state.allRepositories].some(repo => repo.meta.id === commit.repoId));
+    };
     hoverTimer.current = setTimeout(() => {
-      void loadCommitDetail(commit).then((detail) => {
-        if (hoveredKeyRef.current === key) {
+      if (!currentContext()) return;
+      void loadCommitDetail(commit, false, workspaceId).then((detail) => {
+        if (currentContext()) {
           const rect = row.getBoundingClientRect();
           const listRect = parent.current?.getBoundingClientRect();
           if (!listRect) return;
@@ -540,7 +564,7 @@ function CommitList({
     }
     if (id === 'ai-composer') useAiStore.getState().openComposer({ repoId: commit.repoId, paths: [], stagedOnly: false, hashes: newestFirst.map((c) => c.hash) });
     if (id === 'edit') {
-      const detail = await useAppStore.getState().loadCommitDetail(commit);
+      const detail = await useAppStore.getState().loadCommitDetail(commit, false, workspaceId);
       const name = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
       await editorDialog({ title: t('Edit Commit Message'), message: `${name} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, generate: (signal, onMessage) => generateHistoricalMessage([{ repoId: commit.repoId, hash: commit.hash }], signal, onMessage), confirmLabel: t('Save'), submit: async (message) => {
         const ok = await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message });
