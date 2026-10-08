@@ -385,6 +385,11 @@ describe('SyncPanel footer parity with plugin', () => {
       branchesByRepo: Object.fromEntries(repos.map(repo => [repo.meta.id, [{ name: 'main', current: true, remote: false, remoteName: null, upstream, ahead, behind, detachedTag: null, detachedHash: null, lastCommitMessage: null, lastCommitDate: null }]])),
       loadIncomingCommits: vi.fn().mockResolvedValue(undefined), loadUnpushedCommits: vi.fn().mockResolvedValue(undefined),
       fetchRepositories: fetch,
+      updateRepositories: vi.fn(async (ids, strategy, wid) => {
+        const completed: string[] = [];
+        for (const id of ids) if (await sync(id, strategy === 'rebase' ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull', false, undefined, wid)) completed.push(id);
+        return completed;
+      }),
     });
     const view = render(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
     return { ...view, fetch, sync, repos };
@@ -437,6 +442,53 @@ describe('SyncPanel footer parity with plugin', () => {
       expect(screen.getByRole('checkbox', { name: 'Repo 1' })).not.toBeChecked();
       expect(screen.getByRole('checkbox', { name: 'Repo 2' })).toBeChecked();
     });
+  });
+
+  it.each(['primary', 'rebase', 'merge', 'ff-only'] as const)('aggregates three selected updates from the %s entry into one notification and details action', async (entry) => {
+    const view = setup(0, 1, 'origin/main', true);
+    const repos = [...view.repos, ...['repo-3', 'unchecked'].map(id => ({ ...view.repos[0], meta: { ...view.repos[0].meta, id, name: id } }))];
+    const requests: string[] = [];
+    useAppStore.setState({
+      snapshot: { ...snapshot, repositories: repos }, allRepositories: repos,
+      notifications: [], toastNotificationIds: [], updateRepositories: initial.updateRepositories,
+      refresh: vi.fn().mockResolvedValue(undefined),
+      bridge: new MockBridge(command => {
+        if (command.type !== 'sync') return [];
+        requests.push(command.payload.repo_id);
+        expect(command.payload.action).toBe(entry === 'merge' ? 'pull' : entry === 'ff-only' ? 'pullFfOnly' : 'pullRebase');
+        const repoId = command.payload.repo_id;
+        return { output: '', update: { repoId, summaryError: null, summary: { kind: 'updated', commitCount: 1, fileCount: 1, detail: { commits: [{ repoId, hash: repoId }], files: [] } } } };
+      }),
+    });
+    view.rerender(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
+    for (const checkbox of screen.getAllByRole('checkbox').slice(0, 3)) fireEvent.click(checkbox);
+    if (entry === 'primary') fireEvent.click(screen.getByRole('button', { name: 'Update (3)' }));
+    else {
+      fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: `Update Strategy: ${entry === 'rebase' ? 'Rebase' : entry === 'merge' ? 'Merge' : 'Fast-Forward Only'}` }));
+    }
+    await vi.waitFor(() => {
+      expect(requests).toEqual(['repo-1', 'repo-2', 'repo-3']);
+      expect(useAppStore.getState().notifications).toHaveLength(1);
+      expect(useAppStore.getState().notifications[0].message).toEqual({ key: 'VersionDock: {0} repositories updated {1} files in {2} commits.', args: [3, 3, 3] });
+    });
+    const notification = useAppStore.getState().notifications[0];
+    expect(notification.actions).toEqual([{ type: 'viewUpdateResults', label: 'View update details', results: requests.map(repoId => expect.objectContaining({ repoId })) }]);
+    expect(view.sync).not.toHaveBeenCalled();
+  });
+
+  it('pushes only successful pull targets after the batch has finished', async () => {
+    const view = setup(1, 1, 'origin/main', true);
+    const update = vi.fn(async () => {
+      expect(view.sync).not.toHaveBeenCalled();
+      return ['repo-1'];
+    });
+    useAppStore.setState({ updateRepositories: update });
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: /Sync.*↓2.*↑2/ }));
+    await vi.waitFor(() => expect(view.sync).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith(['repo-1', 'repo-2'], 'rebase', 'workspace-1');
+    expect(view.sync).toHaveBeenCalledWith('repo-1', 'push', undefined, undefined, 'workspace-1');
   });
 
   it('retains selection while outgoing commits or an unpublished branch still need work', async () => {

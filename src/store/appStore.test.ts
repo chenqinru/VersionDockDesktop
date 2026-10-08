@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BootstrapData, DesktopSettings, BridgeCommand, CommitDetail, CommitNode, HistoryPage, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, RepositoryUpdateResult, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
+import { resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
 import { currentDialog, publishDialog } from '../components/dialogService';
 import { commitKey } from '../history/commitDetails';
 import { interleaveHistory, isOperationActive, isOperationActiveForRepositories, resolveNotificationText, useAppStore, workspacePathsEqual, type WorkingChangeTarget } from './appStore';
@@ -3372,6 +3373,79 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().historyScope).toEqual({ repoIds: ['b'], revisionsByRepo: {} });
     expect(useAppStore.getState().historyQuery).toMatchObject({ path: null, author: 'Ada', text: 'needle' });
   });
+  it.each(['partial', 'failed', 'summary', 'noChanges', 'hidden'] as const)('aggregates selected repository updates with %s results', async (scenario) => {
+    const current = snapshot('batch-updates', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B'), repository('c', 'C')];
+    const requests: string[] = [];
+    const bridge = new MockBridge(command => {
+      if (command.type === 'workspaceRefresh') return current;
+      if (command.type !== 'sync') return [];
+      const id = command.payload.repo_id;
+      requests.push(id);
+      if (scenario === 'failed' || (scenario === 'partial' && id === 'b')) throw new Error('offline');
+      const result = updateResult(id, scenario === 'noChanges' ? [] : [updatedCommit(id, 'shared-hash')]);
+      if (scenario === 'summary' && id === 'b') { result.summary = null; result.summaryError = { code: 'SUMMARY_FAILED', message: 'summary unavailable', recoverable: false, command: null, stderr: null, exitCode: null }; }
+      return { output: '', update: result };
+    });
+    useAppStore.setState({ bridge, bootstrap: { ...bootstrap, state: { ...bootstrap.state, settings: { updateProjectShowNotification: scenario !== 'hidden' } as DesktopSettings } }, snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const refresh = vi.spyOn(useAppStore.getState(), 'refresh').mockResolvedValue(undefined);
+    const completed = await useAppStore.getState().updateRepositories(['a', 'b', 'a'], 'merge');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    refresh.mockRestore();
+    expect(requests).toEqual(['a', 'b']);
+    expect(completed).toEqual(scenario === 'failed' ? [] : scenario === 'partial' ? ['a'] : ['a', 'b']);
+    const notifications = useAppStore.getState().notifications;
+    expect(notifications).toHaveLength(scenario === 'hidden' ? 0 : 1);
+    if (scenario === 'hidden') return;
+    expect(notifications[0].type).toBe(scenario === 'failed' ? 'error' : scenario === 'partial' || scenario === 'summary' ? 'warning' : 'info');
+    const action = notifications[0].actions.find(item => item.type === 'viewUpdateResults');
+    if (scenario === 'failed' || scenario === 'noChanges') expect(action).toBeUndefined();
+    else expect(action).toMatchObject({ results: (scenario === 'partial' || scenario === 'summary' ? ['a'] : ['a', 'b']).map(repoId => expect.objectContaining({ repoId })) });
+    if (scenario === 'partial' || scenario === 'failed') expect(notifications[0].details).toContain('B: offline');
+  });
+
+  it('keeps batch requests and notifications in the originating workspace during a tab switch', async () => {
+    const current = snapshot('batch-origin', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const requests: BridgeCommand[] = [];
+    const bridge = new MockBridge(command => {
+      if (command.type === 'workspaceRefresh') return current;
+      if (command.type !== 'sync') return [];
+      requests.push(command);
+      if (command.payload.repo_id === 'a') useAppStore.setState({ snapshot: snapshot('other', 2), allRepositories: [repository('other', 'Other')] });
+      return { output: '', update: updateResult(command.payload.repo_id, [updatedCommit(command.payload.repo_id, 'shared-hash')]) };
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, sessions: { 'batch-origin': { snapshot: current, allRepositories: current.repositories } as any }, notifications: [], toastNotificationIds: [] });
+    await useAppStore.getState().updateRepositories(['a', 'b'], 'ff-only', 'batch-origin');
+    expect(requests).toEqual(['a', 'b'].map(repoId => expect.objectContaining({ payload: expect.objectContaining({ workspace_id: 'batch-origin', repo_id: repoId, action: 'pullFfOnly' }) })));
+    expect(useAppStore.getState().notifications).toHaveLength(1);
+    expect(useAppStore.getState().notifications[0].workspaceId).toBe('batch-origin');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('other');
+  });
+
+  it('stops remaining batch updates on cancellation without leaving progress notifications or busy state', async () => {
+    resetTaskProgress();
+    const current = snapshot('batch-cancel', 1);
+    current.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const requests: string[] = [];
+    const bridge = new MockBridge(async command => {
+      if (command.type === 'workspaceRefresh') return current;
+      if (command.type !== 'sync') return [];
+      requests.push(command.payload.repo_id);
+      const group = Object.values(useTaskProgressStore.getState().tasks).find(task => task.title === 'Update Project')!;
+      await useTaskProgressStore.getState().cancel(group.id);
+      return { output: '', update: updateResult('a', [updatedCommit('a', '1')]) };
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories, notifications: [], toastNotificationIds: [] });
+    const refresh = vi.spyOn(useAppStore.getState(), 'refresh').mockResolvedValue(undefined);
+    try {
+      expect(await useAppStore.getState().updateRepositories(['a', 'b'], 'merge')).toEqual([]);
+      expect(requests).toEqual(['a']);
+      expect(useAppStore.getState().notifications).toEqual([]);
+      expect(useAppStore.getState().operations).toEqual({});
+    } finally { refresh.mockRestore(); resetTaskProgress(); }
+  });
+
   it('keeps per-repository facts when Update Project partially fails', async () => {
     const current = snapshot('workspace', 1); current.repositories = [repository('a', 'A'), repository('b', 'B')];
     const bridge = new MockBridge((command) => {

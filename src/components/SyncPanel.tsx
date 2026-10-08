@@ -636,21 +636,31 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
     }
     const store = useAppStore.getState();
     if (!isWorkspaceOpen(store, wid)) return;
-    for (const repo of selectedRepos) {
-      const canPull = direction !== 'outgoing' && pullableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
-      const canPush = direction !== 'incoming' && pushableRepos.some((candidate) => candidate.meta.id === repo.meta.id);
-      if (canPull) {
-        const action = effectiveStrategy === 'rebase' ? 'pullRebase' : effectiveStrategy === 'ff-only' ? 'pullFfOnly' : 'pull';
-        if (!await sync(repo.meta.id, action, undefined, undefined, wid)) continue;
+    const pullTargets = direction === 'outgoing' ? [] : pullableRepos;
+    const action = effectiveStrategy === 'rebase' ? 'pullRebase' : effectiveStrategy === 'ff-only' ? 'pullFfOnly' : 'pull';
+    let pulled: string[] = [];
+    if (pullTargets.length > 1) {
+      pulled = await store.updateRepositories(pullTargets.map(repo => repo.meta.id), effectiveStrategy, wid);
+    } else if (pullTargets.length && await sync(pullTargets[0].meta.id, action, undefined, undefined, wid)) {
+      pulled = [pullTargets[0].meta.id];
+    }
+    if (direction !== 'incoming') {
+      for (const repo of pushableRepos) {
+        if (pullTargets.some(target => target.meta.id === repo.meta.id) && !pulled.includes(repo.meta.id)) continue;
+        if (!isWorkspaceOpen(useAppStore.getState(), wid)) break;
+        await sync(repo.meta.id, 'push', undefined, undefined, wid);
       }
-      if (canPush) await sync(repo.meta.id, 'push', undefined, undefined, wid);
     }
     await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
   const pullSelected = async (strategy: 'merge' | 'rebase' | 'ff-only', targetWid?: string) => {
     const action = strategy === 'rebase' ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull';
     const wid = targetWid ?? useAppStore.getState().snapshot?.workspace.id;
-    await Promise.allSettled(pullableRepos.map((repo) => sync(repo.meta.id, action, undefined, undefined, wid)));
+    if (pullableRepos.length > 1) {
+      await useAppStore.getState().updateRepositories(pullableRepos.map(repo => repo.meta.id), strategy, wid);
+    } else {
+      await Promise.allSettled(pullableRepos.map(repo => sync(repo.meta.id, action, undefined, undefined, wid)));
+    }
     await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
   const toggleChecked = (repoId: string) => setChecked((current) => {

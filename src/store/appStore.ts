@@ -504,6 +504,7 @@ export interface AppStore {
   fetchRepositories: (repoIds: string[], notifyCompletion?: boolean, targetWorkspaceId?: string) => Promise<void>;
   notifyPushSuccess: (repoId: string, workspaceId: string, remote?: string, branch?: string) => Promise<void>;
   updateProject: (strategy?: 'merge' | 'rebase') => Promise<void>;
+  updateRepositories: (repoIds: string[], strategy?: 'merge' | 'rebase' | 'ff-only', targetWorkspaceId?: string) => Promise<string[]>;
   openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
   openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
   recentCommitMessages: (repoIds: string[], signal?: AbortSignal) => Promise<RecentCommitMessage[]>;
@@ -3738,8 +3739,17 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     updateProject: async (strategy) => {
       const repositories = (get().allRepositories.length ? get().allRepositories : (get().snapshot?.repositories ?? [])).filter((repo) => !repo.meta.isWorktree);
-      const wid = get().snapshot?.workspace.id;
-      if (!wid || !repositories.length) return;
+      await get().updateRepositories(repositories.map(repo => repo.meta.id), strategy);
+    },
+    updateRepositories: async (repoIds, strategy, targetWorkspaceId) => {
+      const wid = targetWorkspaceId ?? get().snapshot?.workspace.id;
+      if (!wid) return [];
+      const state = get();
+      const source = state.snapshot?.workspace.id === wid ? state : state.sessions[wid];
+      const available = source?.allRepositories?.length ? source.allRepositories : source?.snapshot?.repositories ?? [];
+      const targets = new Set(repoIds);
+      const repositories = available.filter(repo => targets.has(repo.meta.id));
+      if (!repositories.length) return [];
       const currentSettings = settings();
       const t = createTranslator(resolveLanguage(currentSettings.language));
       if (!strategy && repositories.some((repo) => repo.meta.kind === 'git')) {
@@ -3753,157 +3763,162 @@ export const useAppStore = create<AppStore>((set, get) => {
               { id: 'merge', label: t('Merge incoming changes into the current branch'), icon: 'git-merge' },
             ],
           });
-          if (!selected) return;
+          if (!selected) return [];
           strategy = selected === 'rebase' ? 'rebase' : 'merge';
         } else {
           strategy = configuredMethod;
         }
       }
-      if (get().snapshot?.workspace.id !== wid) return;
-      const releaseStableRefresh = holdWorkingTreeRefresh(wid);
-      const gitAction: 'pull' | 'pullRebase' = strategy === 'rebase' ? 'pullRebase' : 'pull';
-      const count = repositories.length;
-      const progressTitle: NotificationText = count === 1
-        ? { key: 'VersionDock [{0}]: Updating project…', args: [repositories[0].meta.name] }
-        : 'VersionDock: Updating all projects…';
+      if (get().snapshot?.workspace.id !== wid && !get().sessions[wid] && !get().tabs.some(tab => tab.id === wid)) return [];
+      return await withBusy(async () => {
+        const releaseStableRefresh = holdWorkingTreeRefresh(wid);
+        const gitAction = strategy === 'rebase' ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull';
+        const count = repositories.length;
+        const progressTitle: NotificationText = count === 1
+          ? { key: 'VersionDock [{0}]: Updating project…', args: [repositories[0].meta.name] }
+          : 'VersionDock: Updating all projects…';
 
-      const progressId = get().addNotification({
-        type: 'info',
-        title: 'Updating Project',
-        message: progressTitle,
-        workspaceId: wid,
-        progress: true,
-        progressValue: 0,
-      });
-
-      const taskProgress = useTaskProgressStore.getState();
-      const taskId = taskProgress.beginGroup('Update Project', wid, get().snapshot!.workspace.name, repositories.map((repo) => ({ id: repo.meta.id, name: repo.meta.name })));
-      let completedCount = 0;
-      const reportProgress = (repoName: string, complete = false) => {
-        if (complete) completedCount++;
-        const progressMsg: NotificationText = {
-          key: '({0}/{1}) {2}',
-          args: [Math.min(completedCount + (complete ? 0 : 1), count), count, repoName],
-        };
-        const progressValue = count > 0 ? Math.round((completedCount / count) * 100) : 100;
-        set((state) => ({
-          notifications: state.notifications.map((n) =>
-            n.id === progressId ? { ...n, progressMessage: progressMsg, progressValue } : n
-          ),
-        }));
-      };
-
-      const settled: Array<{ repoId: string; repoName: string; result?: RepositoryUpdateResult; output?: string; error?: string; details?: string; conflict?: boolean }> = [];
-      try {
-        for (const repo of repositories) {
-          if (taskProgress.isStopped(taskId)) break;
-          reportProgress(repo.meta.name);
-          try {
-            const value = await bridge().request<SyncResult>({
-              type: 'sync',
-              payload: {
-                workspace_id: wid,
-                repo_id: repo.meta.id,
-                action: repo.meta.kind === 'git' ? gitAction : 'update',
-                remote: null,
-                branch: null,
-              },
-            }, { timeoutMs: 45_000, timeoutGraceMs: 1_000, onOperationId: (id) => taskProgress.bindChild(taskId, repo.meta.id, id) });
-            await notifyUpdateRestoreWarning(value.restoreWarning, wid, repo.meta.id);
-            taskProgress.completeChild(taskId, repo.meta.id, 'succeeded');
-            reportProgress(repo.meta.name, true);
-            settled.push({ repoId: repo.meta.id, repoName: repo.meta.name, result: value.update ?? undefined, output: value.output, error: undefined });
-          }
-          catch (error) {
-            if (error instanceof BridgeError) await notifyUpdateRestoreWarning(error.restoreWarning, wid, repo.meta.id);
-            taskProgress.completeChild(taskId, repo.meta.id, isAbortError(error) ? 'cancelled' : 'failed', isAbortError(error) ? undefined : errorText(error));
-            reportProgress(repo.meta.name, true);
-            if (taskProgress.isStopped(taskId) && isAbortError(error)) break;
-            await handlePullAutoStashError(error, wid);
-            const timedOut = error instanceof BridgeError && error.code === 'REQUEST_TIMEOUT';
-            // Raw command output matches the plugin's failure message. Semantic
-            // errors (conflicts/recovery) retain their actionable message.
-            const message = timedOut
-              ? [t('Operation timed out after 45 seconds.'), error.stderr?.trim()].filter(Boolean).join('\n')
-              : error instanceof BridgeError && error.stderr?.trim() && error.message === error.stderr.split('\n')[0]
-                ? error.stderr.trim() : errorText(error);
-            settled.push({ repoId: repo.meta.id, repoName: repo.meta.name, conflict: error instanceof BridgeError && error.restoreWarning?.conflicted === true, error: message, details: errorDetails(error) });
-          }
-        }
-        releaseStableRefresh();
-        if (get().snapshot?.workspace.id === wid) await get().refresh();
-        if (taskProgress.isStopped(taskId)) return;
-
-        // 移除临时进度通知，避免污染通知历史
-        get().dismissToast(progressId);
-        set((state) => ({
-          notifications: state.notifications.filter((n) => n.id !== progressId),
-        }));
-        const updated = settled.filter((item) => !repositories.find((repo) => repo.meta.id === item.repoId)?.meta.isSubmodule).flatMap((item) => item.result ? [item.result] : []);
-        const commits = updated.reduce((sum, item) => sum + (item.summary?.commitCount ?? 0), 0);
-        const files = updated.reduce((sum, item) => sum + (item.summary?.fileCount ?? 0), 0);
-        const failedItems = settled.filter((item) => item.error);
-        const failed = failedItems.length;
-        const summaryFailures = updated.filter((item) => item.summaryError).length;
-        const failureDescription = failedItems.map((item) => `${item.repoName}: ${item.error}`).join('; ');
-        const updatedRepoCount = new Set(updated.flatMap((item) => item.summary?.detail.commits.map((commit) => commit.repoId) ?? [])).size;
-        const updatedRepoId = updated.flatMap((item) => item.summary?.detail.commits ?? [])[0]?.repoId;
-        const singleRepoName = settled.length === 1 ? settled[0]?.repoName : updatedRepoCount === 1
-          ? repositories.find((repo) => repo.meta.id === updatedRepoId)?.meta.name ?? updatedRepoId
-          : undefined;
-        const isNoUpstream = (item: { output?: string; error?: string }) =>
-          /no remote tracking branch|no upstream|tracking information/i.test(item.output ?? '') ||
-          /no remote tracking branch|no upstream|tracking information/i.test(item.error ?? '');
-        const noUpstreamItem = settled.find((item) => !repositories.find((repo) => repo.meta.id === item.repoId)?.meta.isSubmodule && isNoUpstream(item));
-        const message: NotificationText = updated.length === 0 && failed > 0
-          ? (settled.length === 1 && failedItems[0]
-              ? { key: 'VersionDock [{0}]: Update failed: {1}', args: [failedItems[0].repoName, failedItems[0].error ?? ''] }
-              : { key: 'VersionDock: Update failed: {0}', args: [failureDescription] })
-          : failed > 0
-            ? { key: 'VersionDock: {0} repositories updated, {1} failed; {2} files changed in {3} commits. {4}', args: [updated.length, failed, files, commits, failureDescription] }
-          : summaryFailures > 0
-            ? commits > 0
-              ? { key: 'VersionDock: Updated {0} files in {1} commits; details could not be calculated for {2} repositories.', args: [files, commits, summaryFailures] }
-              : { key: 'VersionDock: Update completed, but update details could not be calculated for {0} repositories.', args: [summaryFailures] }
-            : commits > 0
-              ? updatedRepoCount > 1
-                ? { key: 'VersionDock: {0} repositories updated {1} files in {2} commits.', args: [updatedRepoCount, files, commits] }
-                : singleRepoName
-                  ? { key: 'VersionDock [{0}]: Updated {1} files in {2} commits.', args: [singleRepoName, files, commits] }
-                  : { key: 'VersionDock: Updated {0} files in {1} commits.', args: [files, commits] }
-              : noUpstreamItem
-                ? (settled.length === 1
-                    ? { key: 'VersionDock [{0}]: Update skipped because the current branch has no remote tracking branch.', args: [noUpstreamItem.repoName] }
-                    : 'VersionDock: Update skipped because the current branch has no remote tracking branch.')
-                : settled.length === 1
-                  ? { key: 'VersionDock [{0}]: Already up to date. No files updated.', args: [settled[0].repoName] }
-                  : 'VersionDock: Already up to date. No files updated.';
-        const detailed = updated.filter((item) => (item.summary?.commitCount ?? 0) > 0);
-        if (failed === 0 && summaryFailures === 0 && commits > 0 && (currentSettings.updateProjectShowNotification ?? true) === false) {
-          return;
-        }
-        const hasConflict = failedItems.some((r) => r.conflict || /conflict|冲突/i.test(r.error ?? ''));
-
-        const actions: AppNotificationAction[] = [
-          ...(hasConflict ? [{ type: 'openConflicts' as const, label: 'Resolve Conflicts' }] : []),
-          ...(noUpstreamItem && failed === 0 && summaryFailures === 0 && commits === 0 ? [{ type: 'pushToRemote' as const, label: 'Push to Remote', repoId: noUpstreamItem.repoId }] : []),
-          ...(detailed.length ? [{ type: 'viewUpdateResults' as const, label: 'View update details', results: detailed }] : []),
-        ];
-
-        get().addNotification({
-          type: updated.length === 0 && failed > 0 ? 'error' : failed || summaryFailures || (noUpstreamItem && commits === 0) ? 'warning' : 'info',
-          urgent: failed > 0,
-          title: message,
-          message,
-          details: failed ? failedItems.map((item) => `${item.repoName}: ${item.details ?? item.error}`).join('\n\n') : undefined,
+        const progressId = get().addNotification({
+          type: 'info',
+          title: 'Updating Project',
+          message: progressTitle,
           workspaceId: wid,
-          actions,
+          progress: true,
+          progressValue: 0,
         });
-      } finally {
-        get().removeNotification(progressId);
-        taskProgress.finishGroup(taskId);
-        releaseStableRefresh();
-      }
+
+        const taskProgress = useTaskProgressStore.getState();
+        const taskId = taskProgress.beginGroup('Update Project', wid, source?.snapshot?.workspace.name ?? 'VersionDock', repositories.map((repo) => ({ id: repo.meta.id, name: repo.meta.name })));
+        let completedCount = 0;
+        const reportProgress = (repoName: string, complete = false) => {
+          if (complete) completedCount++;
+          const progressMsg: NotificationText = {
+            key: '({0}/{1}) {2}',
+            args: [Math.min(completedCount + (complete ? 0 : 1), count), count, repoName],
+          };
+          const progressValue = count > 0 ? Math.round((completedCount / count) * 100) : 100;
+          set((state) => ({
+            notifications: state.notifications.map((n) =>
+              n.id === progressId ? { ...n, progressMessage: progressMsg, progressValue } : n
+            ),
+          }));
+        };
+
+        const settled: Array<{ repoId: string; repoName: string; result?: RepositoryUpdateResult; output?: string; error?: string; details?: string; conflict?: boolean }> = [];
+        try {
+          for (const repo of repositories) {
+            if (taskProgress.isStopped(taskId)) break;
+            if (get().snapshot?.workspace.id !== wid && !get().sessions[wid] && !get().tabs.some(tab => tab.id === wid)) return [];
+            reportProgress(repo.meta.name);
+            try {
+              const value = await bridge().request<SyncResult>({
+                type: 'sync',
+                payload: {
+                  workspace_id: wid,
+                  repo_id: repo.meta.id,
+                  action: repo.meta.kind === 'git' ? gitAction : 'update',
+                  remote: null,
+                  branch: null,
+                },
+              }, { timeoutMs: 45_000, timeoutGraceMs: 1_000, showProgress: false, onOperationId: (id) => taskProgress.bindChild(taskId, repo.meta.id, id) });
+              await notifyUpdateRestoreWarning(value.restoreWarning, wid, repo.meta.id);
+              taskProgress.completeChild(taskId, repo.meta.id, 'succeeded');
+              reportProgress(repo.meta.name, true);
+              settled.push({ repoId: repo.meta.id, repoName: repo.meta.name, result: value.update ?? undefined, output: value.output, conflict: value.restoreWarning?.conflicted === true, error: undefined });
+            }
+            catch (error) {
+              if (error instanceof BridgeError) await notifyUpdateRestoreWarning(error.restoreWarning, wid, repo.meta.id);
+              taskProgress.completeChild(taskId, repo.meta.id, isAbortError(error) ? 'cancelled' : 'failed', isAbortError(error) ? undefined : errorText(error));
+              reportProgress(repo.meta.name, true);
+              if (taskProgress.isStopped(taskId) && isAbortError(error)) break;
+              await handlePullAutoStashError(error, wid);
+              const timedOut = error instanceof BridgeError && error.code === 'REQUEST_TIMEOUT';
+              // Raw command output matches the plugin's failure message. Semantic
+              // errors (conflicts/recovery) retain their actionable message.
+              const message = timedOut
+                ? [t('Operation timed out after 45 seconds.'), error.stderr?.trim()].filter(Boolean).join('\n')
+                : error instanceof BridgeError && error.stderr?.trim() && error.message === error.stderr.split('\n')[0]
+                  ? error.stderr.trim() : errorText(error);
+              settled.push({ repoId: repo.meta.id, repoName: repo.meta.name, conflict: error instanceof BridgeError && error.restoreWarning?.conflicted === true, error: message, details: errorDetails(error) });
+            }
+          }
+          releaseStableRefresh();
+          if (get().snapshot?.workspace.id === wid) await get().refresh();
+          if (taskProgress.isStopped(taskId)) return [];
+          const succeededRepoIds = settled.filter(item => !item.error && !item.conflict).map(item => item.repoId);
+
+          // 移除临时进度通知，避免污染通知历史
+          get().dismissToast(progressId);
+          set((state) => ({
+            notifications: state.notifications.filter((n) => n.id !== progressId),
+          }));
+          const updated = settled.filter((item) => !repositories.find((repo) => repo.meta.id === item.repoId)?.meta.isSubmodule).flatMap((item) => item.result ? [item.result] : []);
+          const commits = updated.reduce((sum, item) => sum + (item.summary?.commitCount ?? 0), 0);
+          const files = updated.reduce((sum, item) => sum + (item.summary?.fileCount ?? 0), 0);
+          const failedItems = settled.filter((item) => item.error);
+          const failed = failedItems.length;
+          const summaryFailures = updated.filter((item) => item.summaryError).length;
+          const failureDescription = failedItems.map((item) => `${item.repoName}: ${item.error}`).join('; ');
+          const updatedRepoCount = new Set(updated.flatMap((item) => item.summary?.detail.commits.map((commit) => commit.repoId) ?? [])).size;
+          const updatedRepoId = updated.flatMap((item) => item.summary?.detail.commits ?? [])[0]?.repoId;
+          const singleRepoName = settled.length === 1 ? settled[0]?.repoName : updatedRepoCount === 1
+            ? repositories.find((repo) => repo.meta.id === updatedRepoId)?.meta.name ?? updatedRepoId
+            : undefined;
+          const isNoUpstream = (item: { output?: string; error?: string }) =>
+            /no remote tracking branch|no upstream|tracking information/i.test(item.output ?? '') ||
+            /no remote tracking branch|no upstream|tracking information/i.test(item.error ?? '');
+          const noUpstreamItem = settled.find((item) => !repositories.find((repo) => repo.meta.id === item.repoId)?.meta.isSubmodule && isNoUpstream(item));
+          const message: NotificationText = updated.length === 0 && failed > 0
+            ? (settled.length === 1 && failedItems[0]
+                ? { key: 'VersionDock [{0}]: Update failed: {1}', args: [failedItems[0].repoName, failedItems[0].error ?? ''] }
+                : { key: 'VersionDock: Update failed: {0}', args: [failureDescription] })
+            : failed > 0
+              ? { key: 'VersionDock: {0} repositories updated, {1} failed; {2} files changed in {3} commits. {4}', args: [updated.length, failed, files, commits, failureDescription] }
+            : summaryFailures > 0
+              ? commits > 0
+                ? { key: 'VersionDock: Updated {0} files in {1} commits; details could not be calculated for {2} repositories.', args: [files, commits, summaryFailures] }
+                : { key: 'VersionDock: Update completed, but update details could not be calculated for {0} repositories.', args: [summaryFailures] }
+              : commits > 0
+                ? updatedRepoCount > 1
+                  ? { key: 'VersionDock: {0} repositories updated {1} files in {2} commits.', args: [updatedRepoCount, files, commits] }
+                  : singleRepoName
+                    ? { key: 'VersionDock [{0}]: Updated {1} files in {2} commits.', args: [singleRepoName, files, commits] }
+                    : { key: 'VersionDock: Updated {0} files in {1} commits.', args: [files, commits] }
+                : noUpstreamItem
+                  ? (settled.length === 1
+                      ? { key: 'VersionDock [{0}]: Update skipped because the current branch has no remote tracking branch.', args: [noUpstreamItem.repoName] }
+                      : 'VersionDock: Update skipped because the current branch has no remote tracking branch.')
+                  : settled.length === 1
+                    ? { key: 'VersionDock [{0}]: Already up to date. No files updated.', args: [settled[0].repoName] }
+                    : 'VersionDock: Already up to date. No files updated.';
+          const detailed = updated.filter((item) => (item.summary?.commitCount ?? 0) > 0);
+          if (failed === 0 && summaryFailures === 0 && commits > 0 && (currentSettings.updateProjectShowNotification ?? true) === false) {
+            return succeededRepoIds;
+          }
+          const hasConflict = failedItems.some((r) => r.conflict || /conflict|冲突/i.test(r.error ?? ''));
+
+          const actions: AppNotificationAction[] = [
+            ...(hasConflict ? [{ type: 'openConflicts' as const, label: 'Resolve Conflicts' }] : []),
+            ...(noUpstreamItem && failed === 0 && summaryFailures === 0 && commits === 0 ? [{ type: 'pushToRemote' as const, label: 'Push to Remote', repoId: noUpstreamItem.repoId }] : []),
+            ...(detailed.length ? [{ type: 'viewUpdateResults' as const, label: 'View update details', results: detailed }] : []),
+          ];
+
+          get().addNotification({
+            type: updated.length === 0 && failed > 0 ? 'error' : failed || summaryFailures || (noUpstreamItem && commits === 0) ? 'warning' : 'info',
+            urgent: failed > 0,
+            title: message,
+            message,
+            details: failed ? failedItems.map((item) => `${item.repoName}: ${item.details ?? item.error}`).join('\n\n') : undefined,
+            workspaceId: wid,
+            actions,
+          });
+          return succeededRepoIds;
+        } finally {
+          get().removeNotification(progressId);
+          taskProgress.finishGroup(taskId);
+          releaseStableRefresh();
+        }
+      }, 'sync', { workspaceId: wid, target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify(repositories.map(repo => repo.meta.id))}` }) ?? [];
     },
 
     openUpdateDetails: async (result) => {
