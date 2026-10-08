@@ -27,7 +27,7 @@ import { createTranslator, resolveLanguage } from '../i18n';
 import { mergeEditorIdentity, type MergeResolution, type NonConflictScope } from '../components/mergeEditorModel';
 import type { Resolution, NormalEdits, NonConflictingSelections, NonConflictingChangeScope } from '../components/mergeEngine';
 
-export type WorkspaceMode = 'ai-review' | 'ai-composer' | 'history' | 'commit-detail' | 'diff' | 'changes' | 'conflicts' | 'merge';
+export type WorkspaceMode = 'ai-review' | 'ai-composer' | 'history' | 'commit-detail' | 'update-details' | 'diff' | 'changes' | 'conflicts' | 'merge';
 export type CommitSelectionMode = 'single' | 'toggle' | 'range';
 export type DiffRange = { fromRevision: string; toRevision: string };
 export type RepositoryCheckoutOutcome = { succeeded: boolean; authenticationRequired: boolean };
@@ -3907,36 +3907,21 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     openUpdateDetails: async (result) => {
-      const commits = result.summary?.detail.commits ?? [];
-      if (!commits.length) return;
-      const details = await mapWithConcurrency(commits, 4, (commit) => get().loadCommitDetail(commit));
-      const byKey = Object.fromEntries(details.map(detail => {
-        const key = commitKey(detail.commit.repoId, detail.commit.hash);
-        return [key, get().selectedCommitDetails[key] ?? detail];
-      }));
-      const { hadPathFilter, historyScope, historyQuery, historyFilter } = resetHistoryPathFilterState(get());
-      set({
-        selectedCommits: commits,
-        selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash),
-        commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash),
-        selectedCommit: byKey[commitKey(commits[0].repoId, commits[0].hash)],
-        selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey },
-        historyScope,
-        historyQuery,
-        historyFilter,
-      });
-      if (hadPathFilter) {
-        void get().loadHistory(true);
-      }
-      if (commits.length === 1) get().openCommitDetail(); else get().openCommitChanges();
+      await get().openUpdateResults([result]);
     },
     openUpdateResults: async (results) => {
-      const commits = results.flatMap((result) => result.summary?.detail.commits ?? []);
+      const commits = [...new Map(results.flatMap((result) => result.summary?.detail.commits ?? [])
+        .map((commit) => [commitKey(commit.repoId, commit.hash), commit])).values()];
       if (!commits.length) return;
-      const details = await mapWithConcurrency(commits, 4, (commit) => get().loadCommitDetail(commit));
-      const byKey = Object.fromEntries(details.map(detail => {
+      const targetWorkspaceId = workspaceId();
+      const generation = ++commitSelectionGeneration;
+      const current = () => generation === commitSelectionGeneration && get().snapshot?.workspace.id === targetWorkspaceId;
+      const details = await mapWithConcurrency(commits, 4, (commit) => current() ? get().loadCommitDetail(commit) : Promise.resolve(undefined));
+      if (!current()) return;
+      const byKey = Object.fromEntries(details.flatMap(detail => {
+        if (!detail) return [];
         const key = commitKey(detail.commit.repoId, detail.commit.hash);
-        return [key, get().selectedCommitDetails[key] ?? detail];
+        return [[key, get().selectedCommitDetails[key] ?? detail]];
       }));
       const { hadPathFilter, historyScope, historyQuery, historyFilter } = resetHistoryPathFilterState(get());
       set({
@@ -3945,6 +3930,10 @@ export const useAppStore = create<AppStore>((set, get) => {
         commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash),
         selectedCommit: byKey[commitKey(commits[0].repoId, commits[0].hash)],
         selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey },
+        selectedCommitLoading: {}, selectedCommitError: {}, selectedFile: undefined,
+        diff: undefined, diffReturnMode: undefined, changes: undefined, changesDiff: undefined,
+        comparison: undefined, comparisonTarget: undefined,
+        mode: 'update-details',
         historyScope,
         historyQuery,
         historyFilter,
@@ -3952,7 +3941,6 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (hadPathFilter) {
         void get().loadHistory(true);
       }
-      get().openCommitChanges();
     },
 
     recentCommitMessages: async (repoIds, signal) => bridge().request<RecentCommitMessage[]>({ type: 'recentCommitMessages', payload: { workspace_id: workspaceId(), repo_ids: repoIds, limit: 50 } }, { signal, showProgress: false }),

@@ -166,7 +166,7 @@ function openTarget(target: DetailFileTarget, openDiff: AppStore['openDiff'], on
   void openDiff(target.repoId, target.path, false, range ? undefined : target.commitHash, range);
 }
 
-function DetailFileContextMenu({ position, file, close, openDiff, workspaceView }: { workspaceView: boolean; position: { x: number; y: number }; file: DetailFileTarget; close: () => void; openDiff: AppStore['openDiff'] }) {
+function DetailFileContextMenu({ position, file, close, openDiff, workspaceView, updateDetails }: { workspaceView: boolean; updateDetails: boolean; position: { x: number; y: number }; file: DetailFileTarget; close: () => void; openDiff: AppStore['openDiff'] }) {
   const { t } = useI18n();
   const systemOpen = useAppStore((state) => state.systemOpen);
   const historyOperation = useAppStore((state) => state.historyOperation);
@@ -175,7 +175,7 @@ function DetailFileContextMenu({ position, file, close, openDiff, workspaceView 
   const repoKind = useAppStore((state) => state.snapshot?.repositories.find((repo) => repo.meta.id === file.repoId)?.meta.kind);
   const isMergeParent = Boolean(file.isMergeParentDiff || file.comparisonBaseHash);
   const selectionWorkspaceId = useAppStore((state) => state.snapshot?.workspace.id);
-  const canRevert = repoKind === 'git' && !isMergeParent && (!workspaceView || selectedCommits.length === 1);
+  const canRevert = repoKind === 'git' && !isMergeParent && !updateDetails && (!workspaceView || selectedCommits.length === 1);
   const canCherryPick = canRevert && !workspaceView;
   const items: ContextMenuEntry[] = [
     { id: 'diff', label: t('Show Diff'), icon: 'diff' },
@@ -775,6 +775,7 @@ function ExtendedCommitSummary({
   selectedDetails,
   loading,
   repoMap,
+  updateDetails = false,
 }: {
   explanation?: React.ReactNode;
   detail?: CommitDetail;
@@ -782,24 +783,26 @@ function ExtendedCommitSummary({
   selectedDetails: Record<string, CommitDetail>;
   loading: boolean;
   repoMap: Map<string, RepositoryStatus>;
+  updateDetails?: boolean;
 }) {
   const { t } = useI18n();
   const selectedCommitError = useAppStore((state) => state.selectedCommitError);
   const selectedCommitLoading = useAppStore((state) => state.selectedCommitLoading);
   const reloadSelectedCommits = useAppStore((state) => state.reloadSelectedCommits);
-  const multiple = selectedCommits.length > 1;
+  const multiple = selectedCommits.length > 1 || updateDetails;
+  const summaryTitle = t(updateDetails ? 'Update details' : 'Aggregated commit selection');
 
   if (multiple) {
     const oldest = selectedCommits[selectedCommits.length - 1];
     const newest = selectedCommits[0];
     return (
-      <section className="extended-commit-summary" aria-label={t('Aggregated commit selection')}>
+      <section className="extended-commit-summary" aria-label={summaryTitle}>
         {explanation}
         <div className="extended-detail-block">
           <h3>{t('Details')}</h3>
           <dl className="extended-detail-grid">
-            <dt>{t('Aggregated commit selection')}</dt>
-            <dd>{t('{0} commits selected', selectedCommits.length)}</dd>
+            <dt>{summaryTitle}</dt>
+            <dd>{t(selectedCommits.length === 1 ? '{0} commit selected' : '{0} commits selected', selectedCommits.length)}</dd>
             <dt>{t('Repository')}</dt>
             <dd>{t('{0} repositories involved', new Set(selectedCommits.map((commit) => commit.repoId)).size)}</dd>
             <dt>{t('Selected time range')}</dt>
@@ -807,7 +810,7 @@ function ExtendedCommitSummary({
           </dl>
         </div>
         <div className="extended-detail-block">
-          <h3>{t('Aggregated commit selection')}</h3>
+          <h3>{summaryTitle}</h3>
           <div className="extended-commit-list">
             {selectedCommits.map((commit) => {
               const key = commitKey(commit.repoId, commit.hash);
@@ -906,7 +909,7 @@ function AuthorMeta({ commit }: { commit: CommitNode }) {
   );
 }
 
-export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }: { onCollapse: () => void; variant?: 'sidebar' | 'workspace'; aiToolbar?: HTMLElement | null }) {
+export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, updateDetails = false }: { onCollapse: () => void; variant?: 'sidebar' | 'workspace'; aiToolbar?: HTMLElement | null; updateDetails?: boolean }) {
   const detail = useAppStore((state) => state.selectedCommit);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const selectedCommits = useAppStore((state) => state.selectedCommits);
@@ -1002,7 +1005,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
     [selectedCommits, selectedDetails, repositories, historyPath, variant],
   );
 
-  const isMultiSelection = selectedCommits.length > 1;
+  const isMultiSelection = selectedCommits.length > 1 || updateDetails;
   const singleCommit = !isMultiSelection ? selectedCommits[0] : undefined;
   const selectedPrimary = detail?.commit ?? singleCommit;
   const singleKey = selectedPrimary ? commitKey(selectedPrimary.repoId, selectedPrimary.hash) : '';
@@ -1484,7 +1487,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
       </section>
 
       {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={minInfoHeight} aria-valuemax={maxInfoHeight} aria-valuenow={Math.round(infoHeight ?? 220)} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setInfoHeight((value) => clampInfoHeight((value ?? 220) + (event.key === 'ArrowUp' ? 10 : -10))); } }}><i /></div>}
-      {workspaceView ? <ExtendedCommitSummary explanation={!loading && selectedCommits.length > 0 ? <AiExplanation commits={selectedCommits.map(c => ({ repoId: c.repoId, hash: c.hash }))} toolbar={aiToolbar} /> : undefined} detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section ref={summaryRef} className="detail-summary" style={infoHeight !== undefined ? { flex: `0 0 ${infoHeight}px`, minHeight: 0, maxHeight: 'none' } : undefined}>
+      {workspaceView ? <ExtendedCommitSummary updateDetails={updateDetails} explanation={!loading && selectedCommits.length > 0 ? <AiExplanation commits={selectedCommits.map(c => ({ repoId: c.repoId, hash: c.hash }))} toolbar={aiToolbar} /> : undefined} detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section ref={summaryRef} className="detail-summary" style={infoHeight !== undefined ? { flex: `0 0 ${infoHeight}px`, minHeight: 0, maxHeight: 'none' } : undefined}>
         <header className="detail-toolbar">
           <span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}>
             <Codicon name={selectedCommits.length > 1 ? 'git-commit' : 'repo'} />
@@ -1566,6 +1569,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar }
       </section>}
       {fileContextMenu && (
         <DetailFileContextMenu
+          updateDetails={updateDetails}
           position={fileContextMenu.position}
           file={fileContextMenu.file}
           openDiff={openDiff}

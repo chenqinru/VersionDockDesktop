@@ -44,6 +44,8 @@ export function DiffWorkspace() {
   const { oldRevision, newRevision } = resolveDiffRevisions(kind, file ?? {}, commit);
   const backLabel = diffReturnMode === 'ai-review' ? t('Back to AI review') : comparisonTarget
     ? t('Back to compare')
+    : diffReturnMode === 'update-details'
+      ? t('Back to update details')
     : diffReturnMode === 'commit-detail'
       ? t('Back to commit details')
       : diffReturnMode === 'changes'

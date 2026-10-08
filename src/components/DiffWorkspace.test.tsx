@@ -4,6 +4,8 @@ import { DiffWorkspace } from './DiffWorkspace';
 import { useAppStore } from '../store/appStore';
 import type { DiffDocument } from '../bindings/generated';
 
+const originalBackToHistory = useAppStore.getState().backToHistory;
+
 const dummyDiff: DiffDocument = {
   path: 'src/example.ts',
   content: 'diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -1 +1 @@\n-old\n+new',
@@ -21,10 +23,17 @@ afterEach(() => {
     comparisonTarget: undefined,
     selectedFile: undefined,
     mode: 'history',
+    backToHistory: originalBackToHistory,
   });
 });
 
 describe('DiffWorkspace back navigation', () => {
+  it('returns from a file diff to the update details view', () => {
+    useAppStore.setState({ diff: dummyDiff, diffReturnMode: 'update-details', backToHistory: originalBackToHistory });
+    render(<DiffWorkspace />);
+    fireEvent.click(screen.getByRole('button', { name: 'Back to update details' }));
+    expect(useAppStore.getState().mode).toBe('update-details');
+  });
   it('renders "Back to commit details" when opened from commit-detail mode and invokes backToHistory on click', () => {
     const backToHistory = vi.fn();
     useAppStore.setState({

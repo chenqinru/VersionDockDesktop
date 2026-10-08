@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { BootstrapData, DesktopSettings, BridgeCommand, CommitDetail, CommitNode, HistoryPage, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
+import type { BootstrapData, DesktopSettings, BridgeCommand, CommitDetail, CommitNode, HistoryPage, ConflictFile, DiffDocument, OperationEvent, RepositoryStatus, RepositoryUpdateResult, SubtreeEntry, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeError, MockBridge, type BridgeEvent, type RequestOptions } from '../platform/bridge';
 import { currentDialog, publishDialog } from '../components/dialogService';
 import { commitKey } from '../history/commitDetails';
@@ -39,6 +39,61 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
+  const updatedCommit = (repoId: string, hash: string): CommitNode => ({ repoId, hash, shortHash: hash, parents: [], author: 'Tester', email: 'test@example.test', authorDate: '2026-10-08T10:00:00Z', committerDate: '2026-10-08T10:00:00Z', message: `Update ${hash}`, refs: [] });
+  const updateResult = (repoId: string, commits: CommitNode[]): RepositoryUpdateResult => ({
+    repoId, beforeRevision: 'before', afterRevision: 'after', beforeStatus: '', afterStatus: '', summaryError: null,
+    summary: { kind: 'updated', commitCount: commits.length, fileCount: 0, containsMerge: false, detail: { commits, files: [] } },
+  });
+
+  it.each(['single', 'multiple', 'repositories'] as const)('opens %s updates from notifications in the Update details view even without file changes', async (variant) => {
+    const commits = variant === 'single' ? [updatedCommit('a', '1')]
+      : [updatedCommit('a', '1'), updatedCommit(variant === 'repositories' ? 'b' : 'a', '2')];
+    const workspace = snapshot('updates', 1);
+    workspace.repositories = [repository('a', 'A'), repository('b', 'B')];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') {
+        const commit = commits.find((item) => item.repoId === command.payload.repo_id && item.hash === command.payload.revision)!;
+        return { commit, fullMessage: commit.message, files: [], branches: { local: [], remote: [], tags: [] } };
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, tabs: [workspace.workspace], activeTabId: 'updates', comparisonTarget: { repoId: 'a', target: 'other' } });
+    const result = updateResult('a', commits);
+    const id = useAppStore.getState().addNotification({ type: 'info', title: 'Updated', message: 'Updated', workspaceId: 'updates', actions: [variant === 'repositories'
+      ? { type: 'viewUpdateResults', label: 'View update details', results: [updateResult('a', [commits[0]]), updateResult('b', [commits[1]])] }
+      : { type: 'viewUpdateDetails', label: 'View update details', result }] });
+    await useAppStore.getState().performNotificationAction(id, 0);
+    expect(useAppStore.getState().mode).toBe('update-details');
+    expect(useAppStore.getState().selectedCommits).toEqual(commits);
+    expect(useAppStore.getState().changes).toBeUndefined();
+    expect(useAppStore.getState().comparisonTarget).toBeUndefined();
+    expect(useAppStore.getState().diffReturnMode).toBeUndefined();
+    useAppStore.getState().backToHistory();
+    expect(useAppStore.getState().mode).toBe('history');
+  });
+
+  it('does not open update details or continue its queued requests after switching workspace', async () => {
+    const commits = Array.from({ length: 5 }, (_, i) => updatedCommit('a', `${i}`));
+    const gate = deferred<CommitDetail>();
+    const requests: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'commitDetail') { requests.push(command); return gate.promise; }
+      return [];
+    });
+    const workspace = snapshot('updates', 1);
+    workspace.repositories = [repository('a', 'A')];
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, mode: 'history' });
+    const pending = useAppStore.getState().openUpdateResults([updateResult('a', commits)]);
+    await vi.waitFor(() => expect(requests).toHaveLength(4));
+    useAppStore.setState({ snapshot: snapshot('other', 2), selectedCommits: [] });
+    gate.resolve({ commit: commits[0], fullMessage: commits[0].message, files: [], branches: { local: [], remote: [], tags: [] } });
+    await pending;
+    expect(requests).toHaveLength(4);
+    expect(useAppStore.getState().mode).toBe('history');
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('other');
+    expect(useAppStore.getState().selectedCommits).toEqual([]);
+  });
+
   it('still reports a repository lookup failure for the current commit detail request', async () => {
     const current = snapshot('current', 1);
     current.repositories = [repository('repo', 'Repository')];
@@ -2648,7 +2703,7 @@ describe('appStore async lifecycle', () => {
     });
 
     expect(useAppStore.getState().historyQuery.path).toBeNull();
-    expect(useAppStore.getState().mode).toBe('commit-detail');
+    expect(useAppStore.getState().mode).toBe('update-details');
 
     await vi.waitFor(() => {
       expect(useAppStore.getState().history).toEqual([fullCommit]);
