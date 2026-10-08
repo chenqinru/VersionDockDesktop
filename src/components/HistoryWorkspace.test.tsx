@@ -33,6 +33,40 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
+  it('keeps the author placeholder and All selected until an SVN author is explicitly chosen', async () => {
+    const svnSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      repositories: ['api', 'web'].map((id) => ({
+        ...snapshot.repositories[0],
+        meta: { ...snapshot.repositories[0].meta, id, name: id, kind: 'svn' },
+      })),
+    };
+    const history = ['api', 'web'].map((repoId) => ({ repoId, hash: '100', shortHash: 'r100', parents: [], author: 'chenqr', email: '', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'SVN commit', refs: [] }));
+    const loadHistory = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot: svnSnapshot, selectedRepoId: 'api', history,
+      historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, loadHistory });
+    try {
+      render(<HistoryWorkspace />);
+      const trigger = screen.getByRole('button', { name: /Author…/ });
+      expect(trigger).not.toHaveClass('active');
+      fireEvent.click(trigger);
+      expect(screen.getByRole('radio', { name: 'All authors' })).toBeChecked();
+      expect(screen.getByRole('radio', { name: 'chenqr' })).not.toBeChecked();
+      expect(useAppStore.getState().historyQuery.author).toBeNull();
+      expect(loadHistory).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('radio', { name: 'chenqr' }));
+      await waitFor(() => expect(useAppStore.getState().historyQuery.author).toBe('chenqr'));
+      fireEvent.click(screen.getByRole('button', { name: /^chenqr$/ }));
+      expect(screen.getByRole('radio', { name: 'chenqr' })).toBeChecked();
+      fireEvent.click(screen.getByRole('radio', { name: 'All authors' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: /Author…/ })).not.toHaveClass('active'));
+      expect(useAppStore.getState().historyQuery.author).toBeNull();
+    } finally {
+      cleanup();
+      useAppStore.setState({ historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null } });
+    }
+  });
+
   it('switches edge padding while keeping graph rows contiguous and preserving selection', () => {
     const data = bootstrap(true, true);
     data.state.settings = { layoutDensity: 'comfortable' } as any;

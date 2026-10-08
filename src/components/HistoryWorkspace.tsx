@@ -732,7 +732,9 @@ export function HistoryWorkspace() {
     : undefined;
 
   const authorOptions = useMemo(() => buildHistoryAuthorOptions(allHistory), [allHistory]);
-  const selectedAuthor = authorOptions.find((option) => option.id === filters.author || option.label === filters.author || option.sublabel === filters.author);
+  const selectedAuthor = filters.author
+    ? authorOptions.find((option) => option.id === filters.author || option.label === filters.author || (Boolean(option.sublabel) && option.sublabel === filters.author))
+    : undefined;
   const mixedKinds = hasMixedRepositoryKinds(snapshotRepos);
   const repoOptions = snapshotRepos.map((repo) => ({ id: repo.meta.id, label: repositoryLabel(repo, mixedKinds).toUpperCase(), color: repo.meta.color, detail: repo.meta.kind.toUpperCase() }));
   const allRefOptions = useMemo(

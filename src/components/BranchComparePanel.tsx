@@ -52,7 +52,9 @@ function ComparePane({
   const [menu, setMenu] = useState<'authors' | 'dates' | null>(null);
   const activeFilter = useRef<HTMLDivElement>(null);
   const selectedAuthor = useMemo(
-    () => authors.find((item) => item.id === filters.author || item.label === filters.author || item.sublabel === filters.author),
+    () => filters.author
+      ? authors.find((item) => item.id === filters.author || item.label === filters.author || (Boolean(item.sublabel) && item.sublabel === filters.author))
+      : undefined,
     [authors, filters.author]
   );
 

@@ -134,7 +134,9 @@ export function FilterPopover({
         : t('All branches & tags')
   );
 
-  const active = values.find((value) => value.id === selected || (kind === 'author' && (value.label === selected || value.sublabel === selected)));
+  const active = selected
+    ? values.find((value) => value.id === selected || (kind === 'author' && (value.label === selected || (Boolean(value.sublabel) && value.sublabel === selected))))
+    : undefined;
   const mergedValues = kind === 'author' && selected && !active
     ? [{ id: selected, label: selected, avatarName: selected }, ...values]
     : values;

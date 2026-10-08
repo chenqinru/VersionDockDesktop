@@ -110,6 +110,26 @@ describe('Filter pickers', () => {
     expect(onSelect).toHaveBeenCalledTimes(2);
   });
 
+  it('selects only All authors for unfiltered SVN authors with empty emails', () => {
+    const values = [
+      { id: 'chenqr', label: 'chenqr', sublabel: '', avatarName: 'chenqr' },
+      { id: 'alice', label: 'alice', sublabel: '', avatarName: 'alice' },
+    ];
+    const onSelect = vi.fn();
+    const { rerender } = render(<FilterPopover kind="author" values={values} selected="" onSelect={onSelect} />);
+    expect(screen.getByRole('radio', { name: 'All authors' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'chenqr' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'alice' })).not.toBeChecked();
+    expect(document.querySelectorAll('.filter-option-check')).toHaveLength(1);
+    expect(onSelect).not.toHaveBeenCalled();
+    rerender(<FilterPopover kind="author" values={values} selected="chenqr" onSelect={onSelect} />);
+    expect(screen.getByRole('radio', { name: 'chenqr' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'All authors' })).not.toBeChecked();
+    rerender(<FilterPopover kind="author" values={values} selected="" onSelect={onSelect} />);
+    expect(screen.getByRole('radio', { name: 'chenqr' })).not.toBeChecked();
+    expect(document.querySelectorAll('.filter-option-check')).toHaveLength(1);
+  });
+
   it('keeps radio groups independent when both compare panes have author menus', () => {
     const values = [{ id: 'a', label: 'Ada' }];
     render(<><FilterPopover kind="author" values={values} selected="a" onSelect={() => undefined} /><FilterPopover kind="author" values={values} selected="a" onSelect={() => undefined} /></>);
