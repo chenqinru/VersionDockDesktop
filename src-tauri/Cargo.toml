@@ -1,6 +1,6 @@
 [package]
 name = "versiondock-desktop"
-version = "0.1.11"
+version = "0.1.12"
 description = "Independent Git and SVN desktop workbench built with Tauri 2, Rust and React"
 authors = ["chenqinru"]
 edition = "2021"

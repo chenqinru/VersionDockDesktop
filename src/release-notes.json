@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.12",
+    "date": "2026-10-09",
+    "highlights": {
+      "zh-CN": [
+        "同步面板支持批量更新和推送多个仓库，统一显示任务进度；更新失败的仓库不会继续执行后续推送。",
+        "更新详情使用独立的提交列表，避免浏览历史或切换选择时覆盖更新结果，并支持重新加载更新详情。",
+        "修复切换工作区期间提交详情请求回写错误上下文的问题，保留各工作区的详情状态。",
+        "SVN 本机凭据匹配兼容省略或显式指定默认端口 3690 的地址，修复已有账号无法识别的问题。",
+        "改善状态栏分支、账号和任务菜单的关闭及焦点恢复，避免重复点击触发意外重开。",
+        "统一提交详情页标题布局，并修正单个提交和多提交摘要的图标显示。"
+      ],
+      "en": [
+        "Update and push multiple repositories as batch tasks in the Sync panel with unified progress, skipping subsequent pushes for repositories whose updates fail.",
+        "Keep a separate commit list for update details so browsing history or changing selections does not overwrite update results, with support for reloading update details.",
+        "Fix commit-detail requests writing back to the wrong context when switching workspaces, preserving each workspace's detail state.",
+        "Match native SVN credentials for addresses that omit or explicitly specify the default port 3690, fixing failures to recognize existing accounts.",
+        "Improve closing and focus restoration for status bar branch, account and task menus, preventing unexpected reopening on repeated clicks.",
+        "Use a consistent header layout for commit details and correct icons for single-commit and multiple-commit summaries."
+      ]
+    }
+  },
+  {
     "version": "0.1.11",
     "date": "2026-10-08",
     "highlights": {
