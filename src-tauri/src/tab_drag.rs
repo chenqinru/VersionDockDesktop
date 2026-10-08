@@ -1,4 +1,50 @@
+use crate::models::DesktopError;
 use tauri::{AppHandle, Manager, WebviewWindow};
+
+pub async fn prepare_preview(app: &AppHandle, label: &str) -> Result<(), DesktopError> {
+    if !label.starts_with("tab-drag-preview-") {
+        return Err(DesktopError::new(
+            "TAB_PREVIEW_INVALID",
+            "Invalid tab preview window",
+            false,
+        ));
+    }
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    let label = label.to_string();
+    app.run_on_main_thread(move || {
+        let result = (|| {
+            let preview = handle.get_webview_window(&label).ok_or_else(|| {
+                DesktopError::new(
+                    "TAB_PREVIEW_NOT_FOUND",
+                    "Tab preview window was closed",
+                    true,
+                )
+            })?;
+            #[cfg(target_os = "linux")]
+            {
+                let window = preview.gtk_window().map_err(|error| {
+                    DesktopError::new("TAB_PREVIEW_PREPARE_FAILED", error.to_string(), true)
+                })?;
+                // Tao 0.35 unwraps a missing GdkWindow when ignoring cursor events.
+                // Realize the hidden surface and configure it on the GTK thread.
+                crate::gtk_preview::prepare_cursor_passthrough(&window).map_err(|message| {
+                    DesktopError::new("TAB_PREVIEW_PREPARE_FAILED", message, true)
+                })?;
+            }
+            #[cfg(not(target_os = "linux"))]
+            preview.set_ignore_cursor_events(true).map_err(|error| {
+                DesktopError::new("TAB_PREVIEW_PREPARE_FAILED", error.to_string(), true)
+            })?;
+            Ok(())
+        })();
+        let _ = send.send(result);
+    })
+    .map_err(|error| DesktopError::new("TAB_PREVIEW_PREPARE_FAILED", error.to_string(), true))?;
+    receive
+        .await
+        .map_err(|error| DesktopError::new("TAB_PREVIEW_PREPARE_FAILED", error.to_string(), true))?
+}
 
 pub struct TabDropTarget {
     pub label: String,

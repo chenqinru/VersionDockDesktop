@@ -184,7 +184,7 @@ jobs:
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf subversion
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf subversion xvfb xauth
 
       - name: Install macOS SVN tools
         if: runner.os == 'macOS'
@@ -289,6 +289,10 @@ jobs:
         run: cargo nextest run --lib --locked --manifest-path src-tauri/Cargo.toml --config-file .config/nextest.toml --profile ci
         env:
           VERSIONDOCK_REQUIRE_VCS_TESTS: "1"
+
+      - name: Verify hidden Linux tab preview input surface
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo test --lib --locked --manifest-path src-tauri/Cargo.toml hidden_preview_cursor_passthrough_preserves_visibility -- --ignored --test-threads=1
 
       - name: Save Windows test report
         if: always() && runner.os == 'Windows'

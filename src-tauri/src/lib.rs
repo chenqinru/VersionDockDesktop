@@ -11,6 +11,8 @@ mod changelist;
 mod cli;
 mod commands;
 mod diff_content;
+#[cfg(target_os = "linux")]
+mod gtk_preview;
 mod http_client;
 mod identity;
 mod interactions;

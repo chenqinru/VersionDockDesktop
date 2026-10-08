@@ -27,7 +27,7 @@ pub async fn bridge_cancel(
 }
 
 #[tauri::command]
-pub fn follow_tab_drag_preview(
+pub async fn follow_tab_drag_preview(
     app: AppHandle,
     window: tauri::WebviewWindow,
     label: String,
@@ -35,7 +35,8 @@ pub fn follow_tab_drag_preview(
     tab_name: String,
     tab_width: f64,
     paths: Vec<String>,
-) {
+) -> Result<(), DesktopError> {
+    crate::tab_drag::prepare_preview(&app, &label).await?;
     let source_window_label = window.label().to_string();
     tauri::async_runtime::spawn(async move {
         let mut last_broadcast = std::time::Instant::now()
@@ -77,6 +78,7 @@ pub fn follow_tab_drag_preview(
             tokio::time::sleep(std::time::Duration::from_millis(8)).await;
         }
     });
+    Ok(())
 }
 
 #[tauri::command]

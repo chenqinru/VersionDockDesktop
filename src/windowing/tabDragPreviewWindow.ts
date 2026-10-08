@@ -5,7 +5,6 @@ import type { BackgroundThrottlingPolicy } from '@tauri-apps/api/window';
 
 interface NativePreviewWindow {
   close(): Promise<void>;
-  setIgnoreCursorEvents(ignore: boolean): Promise<void>;
   show(): Promise<void>;
   hide(): Promise<void>;
 }
@@ -92,12 +91,13 @@ export class TabDragPreviewWindow {
         return;
       }
       this.preview = preview;
-      await preview.setIgnoreCursorEvents(true);
       await pageReady;
       if (token !== this.token) {
         await preview.close().catch(() => undefined);
         return;
       }
+      // The backend prepares cursor passthrough before tracking; Linux must
+      // first realize the hidden GTK surface to avoid Tao's native panic.
       await invoke('follow_tab_drag_preview', {
         label,
         tabId: drag.tabId,

@@ -4899,6 +4899,7 @@ dependencies = [
  "chrono",
  "dunce",
  "glob",
+ "gtk",
  "hex",
  "keyring",
  "libc",
