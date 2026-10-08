@@ -33,6 +33,8 @@ Choose a package for your system from [GitHub Releases](https://github.com/chenq
 
 For AppImage, use `chmod +x filename.AppImage`. macOS builds currently use ad-hoc signing without Apple Developer ID signing or notarization. If macOS blocks the first launch, verify the source and allow the application through Privacy & Security.
 
+On Wayland desktops with an X11 display available, the application prefers XWayland so floating tab previews can follow global pointer coordinates. GTK can fall back to Wayland if the XWayland connection fails. Explicit `GDK_BACKEND` overrides are preserved; for example, `GDK_BACKEND=wayland` selects native Wayland, where floating preview positioning remains restricted.
+
 Install the tools required for your repositories:
 
 - **Git repositories**: Git 2.23 or newer.

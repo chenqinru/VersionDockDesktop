@@ -38,15 +38,14 @@ afterEach(() => {
 });
 
 describe('native tab preview preparation', () => {
-  it.each([true, false])('configures the native preview detach badge as %s without showing it during prewarming', async (showDetachBadge) => {
+  it.each(['light', 'dark'] as const)('keeps the %s preview compact and opaque during prewarming', async (theme) => {
     const preview = new TabDragPreviewWindow();
-    const pending = preview.prepare(drag, { screenX: 300, screenY: 80 }, 'dark', showDetachBadge);
+    const pending = preview.prepare(drag, { screenX: 300, screenY: 80 }, theme);
     await vi.waitFor(() => expect(mocks.instances).toHaveLength(1));
     const native = mocks.instances[0];
-    expect(new URL(native.options.url, 'https://preview.test').searchParams.get('detachBadge')).toBe(String(showDetachBadge));
-    expect(native.options.height).toBe(showDetachBadge ? 48 : 28);
-    expect(native.options.transparent).toBe(showDetachBadge);
-    if (showDetachBadge) expect(native.options.backgroundColor).toEqual([0, 0, 0, 0]);
+    expect(native.options.height).toBe(28);
+    expect(native.options.transparent).toBe(false);
+    expect(native.options.backgroundColor).toEqual(theme === 'light' ? [243, 243, 243, 255] : [37, 37, 38, 255]);
     mocks.ready?.();
     await pending;
     expect(native.show).not.toHaveBeenCalled();

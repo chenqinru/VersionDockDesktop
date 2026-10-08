@@ -23,7 +23,6 @@ export class TabDragPreviewWindow {
     drag: Omit<TabDragPayload, 'screenX' | 'screenY'>,
     point: ScreenPoint,
     theme: 'light' | 'dark',
-    showDetachBadge = false,
   ): Promise<void> {
     this.active = false;
     this.ready = false;
@@ -64,17 +63,14 @@ export class TabDragPreviewWindow {
         color,
         readyEvent,
         source: drag.sourceWindowLabel,
-        detachBadge: String(showDetachBadge),
       });
       const preview = new WebviewWindow(label, {
         url: `tab-drag-preview.html?${query}`,
         x: point.screenX - width / 2,
         y: point.screenY - 14,
         width,
-        // The pointer is at (width / 2, 14). Leave transparent space below
-        // the label for the badge beside the pointer, outside the tab itself.
-        height: showDetachBadge ? 48 : 28,
-        transparent: showDetachBadge,
+        height: 28,
+        transparent: false,
         decorations: false,
         resizable: false,
         focus: false,
@@ -83,7 +79,7 @@ export class TabDragPreviewWindow {
         alwaysOnTop: true,
         skipTaskbar: true,
         shadow: false,
-        backgroundColor: showDetachBadge ? [0, 0, 0, 0] : theme === 'light' ? [243, 243, 243, 255] : [37, 37, 38, 255],
+        backgroundColor: theme === 'light' ? [243, 243, 243, 255] : [37, 37, 38, 255],
         backgroundThrottling: 'disabled' as BackgroundThrottlingPolicy,
       });
       candidate = preview;

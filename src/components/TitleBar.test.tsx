@@ -49,9 +49,10 @@ describe('TitleBar tab dragging', () => {
     }
   });
 
-  it.each(['macos', 'windows', 'linux'] as const)('shows the detach preview after the threshold on %s and supplies a badge when the system does not', (platform) => {
+  it.each(['macos', 'windows', 'linux'] as const)('uses the native copy cursor when detaching on %s', (platform) => {
     const platformBridge = new MockBridge(() => []);
     vi.spyOn(platformBridge, 'platform').mockReturnValue(platform);
+    const setCursorIcon = vi.spyOn(platformBridge.window, 'setCursorIcon');
     Object.defineProperties(window, {
       screenX: { configurable: true, value: 100 },
       screenY: { configurable: true, value: 80 },
@@ -78,11 +79,12 @@ describe('TitleBar tab dragging', () => {
     fireEvent.pointerMove(window, { pointerId: 1, screenX: 420, screenY: 180, clientX: 320, clientY: 100 });
     expect(document.body).toHaveClass('is-detaching-tab');
     expect(document.querySelector('.titlebar-tab-drag-preview')).toHaveClass('detaching');
-    expect(Boolean(document.querySelector('.tab-detach-badge'))).toBe(platform !== 'macos');
+    expect(setCursorIcon).toHaveBeenLastCalledWith('copy');
 
     fireEvent.pointerCancel(window, { pointerId: 1, screenX: 420, screenY: 180, clientX: 320, clientY: 100 });
     expect(document.body).not.toHaveClass('is-dragging-tab', 'is-detaching-tab');
     expect(document.querySelector('.titlebar-tab-drag-preview')).not.toBeInTheDocument();
+    expect(setCursorIcon).toHaveBeenLastCalledWith('default');
   });
 
   it('reorders tabs inside the same title bar without showing either plus affordance', () => {

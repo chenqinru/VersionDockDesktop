@@ -16,6 +16,8 @@ mod gtk_preview;
 mod http_client;
 mod identity;
 mod interactions;
+#[cfg(any(target_os = "linux", test))]
+mod linux_display;
 pub mod logger;
 mod models;
 mod protection;
@@ -84,6 +86,10 @@ pub fn run() {
     if update_worker::run_if_worker() {
         return;
     }
+    // Wayland cannot globally position our floating tab previews. Prefer
+    // XWayland before GTK starts, while preserving explicit user overrides.
+    #[cfg(target_os = "linux")]
+    linux_display::configure();
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
     let builder = builder.menu(application_menu);

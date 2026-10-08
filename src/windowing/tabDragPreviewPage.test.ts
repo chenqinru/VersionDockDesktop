@@ -10,35 +10,24 @@ afterEach(() => document.querySelectorAll('iframe[data-preview-test]').forEach((
 
 describe('standalone native tab preview page', () => {
   it.each([
-    ['dark', false, 'rgb(37, 37, 38)'],
-    ['light', false, 'rgb(243, 243, 243)'],
-    ['dark', true, 'rgba(0, 0, 0, 0)'],
-    ['light', true, 'rgba(0, 0, 0, 0)'],
-  ] as const)('uses the %s preview background with detachBadge=%s without exposing white corners', (theme, badge, background) => {
+    ['dark', 'rgb(37, 37, 38)'],
+    ['light', 'rgb(243, 243, 243)'],
+  ] as const)('uses the %s preview background without exposing white corners', (theme, background) => {
     const frame = document.createElement('iframe');
     frame.dataset.previewTest = '';
     document.body.append(frame);
     const page = frame.contentDocument!;
     page.documentElement.innerHTML = html;
-    runInNewContext(script, { document: page, location: { search: `?theme=${theme}&detachBadge=${badge}` }, window: {}, URLSearchParams });
+    runInNewContext(script, { document: page, location: { search: `?theme=${theme}` }, window: {}, URLSearchParams });
     expect(frame.contentWindow!.getComputedStyle(page.body).backgroundColor).toBe(background);
   });
 
-  it.each(['light', 'dark'])('renders the badge with the %s preview and preserves the project name', (theme) => {
+  it.each(['light', 'dark'])('preserves the project name and %s theme', (theme) => {
     const page = document.implementation.createHTMLDocument();
     page.documentElement.innerHTML = html;
-    runInNewContext(script, { document: page, location: { search: `?name=VersionDockDesktop&theme=${theme}&detachBadge=true` }, window: {}, URLSearchParams });
-    expect(page.body.classList.contains('show-detach-badge')).toBe(true);
+    runInNewContext(script, { document: page, location: { search: `?name=VersionDockDesktop&theme=${theme}` }, window: {}, URLSearchParams });
     expect(page.body.classList.contains('light')).toBe(theme === 'light');
-    expect(page.querySelector('.tab-detach-badge')?.getAttribute('aria-hidden')).toBe('true');
     expect(page.querySelector('.titlebar-tab-title')?.textContent).toBe('VersionDockDesktop');
-    expect(page.querySelector('.tab-preview-label')?.contains(page.querySelector('.tab-detach-badge'))).toBe(false);
   });
 
-  it('leaves the badge hidden for the macOS native copy cursor', () => {
-    const page = document.implementation.createHTMLDocument();
-    page.documentElement.innerHTML = html;
-    runInNewContext(script, { document: page, location: { search: '?name=Mac&detachBadge=false' }, window: {}, URLSearchParams });
-    expect(page.body.classList.contains('show-detach-badge')).toBe(false);
-  });
 });

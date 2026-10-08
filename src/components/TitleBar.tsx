@@ -488,7 +488,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         tabName: tab.name,
         tabWidth,
         paths: tab.paths,
-      }, drag.lastPoint, isLightTheme(getEffectiveTheme()) ? 'light' : 'dark', platform !== 'macos');
+      }, drag.lastPoint, isLightTheme(getEffectiveTheme()) ? 'light' : 'dark');
     };
     // No drag mode is selected until enumeration finishes, even for a fast gesture.
     const modeReady = singleTabWindow
@@ -969,8 +969,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         <div
           className={`titlebar-tab-drag-preview ${tabDragPreview.detaching ? 'detaching' : ''}`}
           style={{
-            left: tabDragPreview.screenX - window.screenX - tabDragPreview.width / 2,
-            top: tabDragPreview.screenY - window.screenY - 14,
+            left: tabDragPreview.screenX - window.screenX + 14,
+            top: tabDragPreview.screenY - window.screenY + 14,
             width: tabDragPreview.width,
           }}
           aria-hidden="true"
@@ -983,7 +983,6 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
             className="titlebar-tab-icon"
           />
           <span className="titlebar-tab-title">{tabDragPreview.tabName}</span>
-          {platform !== 'macos' && <span className="tab-detach-badge" aria-hidden="true" />}
           <span className="titlebar-tab-ghost-close"><Codicon name="close" /></span>
         </div>
       )}

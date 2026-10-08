@@ -49,8 +49,7 @@ pub async fn follow_tab_drag_preview(
             if let (Ok(cursor), Ok(size)) = (app.cursor_position(), preview.outer_size()) {
                 let scale = preview.scale_factor().unwrap_or(1.0).max(f64::EPSILON);
                 let x = (cursor.x - f64::from(size.width) / 2.0).round() as i32;
-                // Center the 28px tab label on the pointer; the badge occupies
-                // transparent space below it and must not shift that anchor.
+                // Keep the 28px label centered on the pointer at every DPI scale.
                 let y = (cursor.y - 14.0 * scale).round() as i32;
                 let _ = preview.set_position(tauri::PhysicalPosition::new(x, y));
                 if preview.is_visible().unwrap_or(false)

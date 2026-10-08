@@ -33,6 +33,8 @@ VersionDock Desktop 面向需要同时处理多个仓库的开发者：查看工
 
 Linux AppImage 可使用 `chmod +x 文件名.AppImage` 添加执行权限。macOS 当前采用 ad-hoc 签名，没有 Apple Developer ID 签名或公证；首次打开时如被系统阻止，请在确认来源后通过“隐私与安全性”允许打开。
 
+Linux 在 Wayland 桌面且存在 X11 显示入口时，应用会优先通过 XWayland 运行，以支持标签拖动预览的全局定位；GTK 连接 XWayland 失败时仍可回退到 Wayland。用户显式设置的 `GDK_BACKEND` 会原样保留，例如 `GDK_BACKEND=wayland` 可指定原生 Wayland（浮动预览仍受其定位限制）。
+
 安装前准备好需要使用的工具：
 
 - **Git 仓库**：Git 2.23 或更新版本。
