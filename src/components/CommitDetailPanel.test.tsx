@@ -101,6 +101,19 @@ afterEach(() => {
 });
 
 describe('CommitDetailPanel merge commits', () => {
+  it('orders numbered tag badges naturally while retaining branch priority', () => {
+    const detail: CommitDetail = {
+      ...mergeDetail,
+      commit: { ...mergeCommit, refs: ['refs/tags/v1.10', 'refs/tags/v1.2', 'refs/tags/v1.1'] },
+      branches: { local: ['main'], remote: [], tags: ['v1.10', 'v1.2', 'v1.1', 'v0.5'] },
+    };
+    useAppStore.setState({ snapshot, selectedCommit: detail, selectedCommits: [detail.commit], selectedCommitDetails: { [commitKey(detail.commit.repoId, detail.commit.hash)]: detail } });
+    const { container } = render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    const refs = container.querySelector('.detail-refs')!;
+    expect([...refs.querySelectorAll('[data-ref-badge="tag"]')].map(element => element.textContent)).toEqual(['v0.5', 'v1.1', 'v1.2', 'v1.10']);
+    expect(refs.querySelector('[data-ref-badge]')?.textContent).toBe('main');
+  });
+
   it.each([
     ['zh-CN', '折叠提交详情'],
     ['en', 'Collapse commit detail'],

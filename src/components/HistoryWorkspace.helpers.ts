@@ -86,7 +86,7 @@ export function buildHistoryRefOptions(
   }
 
   const sortedBranches = [...branchValues.values()].sort((left, right) => left.label.localeCompare(right.label));
-  const sortedTags = [...tagValues.values()].sort((left, right) => left.label.localeCompare(right.label));
+  const sortedTags = [...tagValues.values()].sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true }));
   return [...sortedBranches, ...sortedTags];
 }
 
@@ -180,7 +180,7 @@ function mergeSidebarTags(
       }
     }
   }
-  return [...values.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return [...values.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
 }
 
 export function buildSidebarModel(

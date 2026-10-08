@@ -227,7 +227,7 @@ export function groupRefs(
     if (leftRank !== rightRank) return leftRank - rightRank;
     const leftName = a.isRemote && a.remoteName ? `${a.remoteName}/${a.label}` : a.label;
     const rightName = b.isRemote && b.remoteName ? `${b.remoteName}/${b.label}` : b.label;
-    return leftName.localeCompare(rightName);
+    return leftName.localeCompare(rightName, undefined, { numeric: a.isTag && b.isTag });
   });
 
   return groups;
@@ -272,7 +272,7 @@ export function mergeLocalRemote(groups: RefGroup[]): RefGroup[] {
     if (ra !== rb) return ra - rb;
     const leftName = a.isRemote && a.remoteName ? `${a.remoteName}/${a.label}` : a.label;
     const rightName = b.isRemote && b.remoteName ? `${b.remoteName}/${b.label}` : b.label;
-    return leftName.localeCompare(rightName);
+    return leftName.localeCompare(rightName, undefined, { numeric: a.isTag && b.isTag });
   });
   return merged;
 }

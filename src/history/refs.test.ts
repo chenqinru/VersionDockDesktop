@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { branchRevisionRef, classifyRef, commitRefs, groupRefs, isPrimaryBranch, mergeLocalRemote, primaryBranchRef } from './refs';
 
 describe('history refs', () => {
+  it('sorts tag numbers naturally while retaining branch ranks and lexical branch order', () => {
+    const raw = ['refs/tags/v1.10', 'refs/heads/feature2', 'refs/tags/v1.2', 'refs/tags/v1.1', 'refs/heads/feature10', 'refs/heads/main', 'refs/remotes/origin/main'];
+    const groups = groupRefs(raw, 'git', ['origin']);
+    expect(groups.map(group => group.label)).toEqual(['main', 'feature10', 'feature2', 'main', 'v1.1', 'v1.2', 'v1.10']);
+    expect(mergeLocalRemote(groups).map(group => group.label)).toEqual(['main', 'feature10', 'feature2', 'v1.1', 'v1.2', 'v1.10']);
+  });
+
   it('classifies local, remote, tag and HEAD refs', () => {
     expect(classifyRef('HEAD -> main')).toMatchObject({ label: 'main', kind: 'head', isHead: true });
     expect(classifyRef('origin/main')).toMatchObject({ label: 'origin/main', kind: 'remote', isRemote: true });

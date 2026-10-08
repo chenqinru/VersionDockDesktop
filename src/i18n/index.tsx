@@ -2362,7 +2362,7 @@ const desktopZh: Messages = {
   'Push this repository': '推送此仓库',
   'COMMON LOCAL BRANCHES': '公共本地分支',
   'COMMON REMOTE BRANCHES': '公共远程分支',
-  'COMMON TAGS': '公共标签',
+  'COMMON TAGS': '共有标签',
   'LOCAL BRANCHES': '本地分支',
   'REMOTE BRANCHES': '远程分支',
   'TAGS': '标签',

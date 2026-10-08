@@ -54,12 +54,12 @@ export function commonRepositoryRefs(
   tags: Record<string, TagInfo[] | undefined>,
 ) {
   const git = repositories.filter((r) => r.meta.kind === 'git');
-  const intersection = (values: string[][]) => values.length
-    ? [...new Set(values[0])].filter((name) => values.every((items) => items.includes(name))).sort((a, b) => a.localeCompare(b)) : [];
+  const intersection = (values: string[][], numeric = false) => values.length
+    ? [...new Set(values[0])].filter((name) => values.every((items) => items.includes(name))).sort((a, b) => a.localeCompare(b, undefined, { numeric })) : [];
   return {
     commonLocalBranches: intersection(git.map((r) => (branches[r.meta.id] ?? []).filter((b) => !b.remote && b.name !== 'HEAD').map((b) => b.name))),
     commonRemoteBranches: intersection(git.map((r) => (branches[r.meta.id] ?? []).filter((b) => b.remote && !b.name.endsWith('/HEAD')).map((b) => b.name))),
-    commonTags: intersection(git.map((r) => (tags[r.meta.id] ?? []).map((tag) => tag.name))),
+    commonTags: intersection(git.map((r) => (tags[r.meta.id] ?? []).map((tag) => tag.name)), true),
   };
 }
 

@@ -714,7 +714,8 @@ export function BranchMenuPopover({ anchorRect, onClose, initialRepoId, repoOnly
   const activeSubmoduleParent = activeSubmoduleTarget?.parent;
   const activeSubmodulePath = activeSubmoduleTarget?.path;
   const activeRepoBranches = activeSubmenuRepoId ? branchesByRepo[activeSubmenuRepoId] ?? [] : [];
-  const activeRepoTags = activeSubmenuRepoId ? tagsByRepo[activeSubmenuRepoId] ?? [] : [];
+  const activeRepoTags = [...(activeSubmenuRepoId ? tagsByRepo[activeSubmenuRepoId] ?? [] : [])]
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   const actionRepo = repositories.find((r) => r.meta.id === (activeBranchAction?.repoId ?? activeTagAction?.repoId)) ?? activeSubmenuRepo;
   const currentRepoBranch = actionRepo ? getRepoEffectiveRef(actionRepo, branchesByRepo) : 'HEAD';
   const actionBranches = actionRepo ? branchesByRepo[actionRepo.meta.id] ?? [] : [];

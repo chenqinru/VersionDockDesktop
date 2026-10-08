@@ -9,6 +9,7 @@ import { BranchStatusBarItem } from './BranchStatusBarItem';
 import { commonRepositoryRefs, deriveBranchStatus, relativeBranchDate, truncateBranchName } from './branchStatus';
 import { positionBranchSubmenu } from './branchMenuPosition';
 import { choiceDialog, confirmDialog, multiChoiceDialog, promptDialog } from '../dialogService';
+import { createTranslator } from '../../i18n';
 
 vi.mock('../dialogService', () => ({ promptDialog: vi.fn(), choiceDialog: vi.fn(), confirmDialog: vi.fn(), multiChoiceDialog: vi.fn(), currentDialog: () => null }));
 
@@ -32,13 +33,32 @@ beforeEach(() => {
 afterEach(() => { cleanup(); useAppStore.setState(original, true); vi.useRealTimers(); });
 
 function renderMenu(props: Partial<Parameters<typeof BranchMenuPopover>[0]> = {}) {
-  const bridge = new MockBridge((command) => command.type === 'branches' ? useAppStore.getState().branchesByRepo[command.payload.repo_id] ?? [] : command.type === 'tags' ? [] : command.type === 'svnIgnoreEntries' ? [{ directory: 'nested', source: 'svn:ignore', patterns: ['cache', 'keep'] }] : true);
+  const bridge = new MockBridge((command) => command.type === 'branches' ? useAppStore.getState().branchesByRepo[command.payload.repo_id] ?? [] : command.type === 'tags' ? useAppStore.getState().tagsByRepo[command.payload.repo_id] ?? [] : command.type === 'svnIgnoreEntries' ? [{ directory: 'nested', source: 'svn:ignore', patterns: ['cache', 'keep'] }] : true);
   const close = vi.fn();
   render(<BridgeContext.Provider value={bridge}><BranchMenuPopover anchorRect={new DOMRect(10, 700, 80, 20)} onClose={close} placement="bottomLeft" {...props} /></BridgeContext.Provider>);
   return close;
 }
 
 describe('branch menu interactions', () => {
+  it('orders common and repository tags naturally without mutating loaded tags', async () => {
+    const names = ['v1.10', 'v1.2', 'v1.1'];
+    const tags = names.map(name => ({ name, hash: 'abc', date: '' }));
+    useAppStore.setState({ tagsByRepo: { alpha: tags, beta: [...tags, { name: 'only-beta', hash: 'def', date: '' }] } });
+    const common = commonRepositoryRefs([repo('alpha'), repo('beta')], refs, useAppStore.getState().tagsByRepo);
+    expect(common.commonTags).toEqual(['v1.1', 'v1.2', 'v1.10']);
+    renderMenu();
+    const root = screen.getByRole('dialog', { name: 'VersionDock: Git/SVN Menu' });
+    const tagSection = within(root).getByText('COMMON TAGS').parentElement!;
+    expect([...tagSection.querySelectorAll('.statusbar-menu-item-title')].map(element => element.textContent)).toEqual(['v1.1', 'v1.2', 'v1.10']);
+    fireEvent.click(within(root).getByText('alpha'));
+    const sub = screen.getByRole('dialog', { name: 'alpha — Branches' });
+    const subTags = within(sub).getByText('TAGS').parentElement!;
+    expect([...subTags.querySelectorAll('.statusbar-menu-item-title')].map(element => element.textContent)).toEqual(['v1.1', 'v1.2', 'v1.10']);
+    await waitFor(() => expect(useAppStore.getState().tagsByRepo.alpha).toEqual(tags));
+    expect(tags.map(tag => tag.name)).toEqual(names);
+    expect(createTranslator('zh-CN')('COMMON TAGS')).toBe('共有标签');
+  });
+
   it('opens at bottom left, filters by details, and supports keyboard entry and Back', async () => {
     renderMenu();
     const root = screen.getByRole('dialog', { name: 'VersionDock: Git/SVN Menu' });

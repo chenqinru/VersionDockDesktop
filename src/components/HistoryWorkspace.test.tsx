@@ -347,6 +347,17 @@ describe('HistoryWorkspace capabilities', () => {
 });
 
 describe('HistoryWorkspace data helpers', () => {
+  it('uses natural tag order in the sidebar and ref picker without changing branch order or source arrays', () => {
+    const names = ['v1.10', 'v1.2', 'v1.1'];
+    const tags = names.map(name => ({ name, hash: 'abc', date: '' }));
+    const branches = ['feature2', 'feature10'].map(name => ({ name, remote: false, current: false, upstream: null, ahead: 0, behind: 0 }));
+    const options = buildHistoryRefOptions(snapshot.repositories, { repo: branches }, { repo: tags });
+    expect(options.map(option => option.label)).toEqual(['feature10', 'feature2', 'v1.1', 'v1.2', 'v1.10']);
+    const model = buildSidebarModel(snapshot.repositories, { repo: branches }, { repo: tags });
+    expect(model.tags.map(tag => tag.name)).toEqual(['v1.1', 'v1.2', 'v1.10']);
+    expect(tags.map(tag => tag.name)).toEqual(names);
+  });
+
   it('maps local, remote, and tag filters to unambiguous full Git refs, excluding remote branches from dropdown', () => {
     const options = buildHistoryRefOptions(snapshot.repositories, {
       repo: [

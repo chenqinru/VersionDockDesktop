@@ -82,7 +82,7 @@ function refsFor(detail: CommitDetail, repoKind?: 'git' | 'svn'): DetailRef[] {
     }
     return 7;
   };
-  return unique.sort((left, right) => rank(left) - rank(right) || left.label.localeCompare(right.label));
+  return unique.sort((left, right) => rank(left) - rank(right) || left.label.localeCompare(right.label, undefined, { numeric: left.kind === 'tag' && right.kind === 'tag' }));
 }
 
 function sortTreeNodes(nodes: DetailTreeNode[]): DetailTreeNode[] {
