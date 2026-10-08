@@ -4,6 +4,17 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Keep in tray when closing windows': 'Keep in tray when closing windows',
+  'Show shortcuts in the system tray while the app is running.': 'Show shortcuts in the system tray while the app is running.',
+  'The tray icon stays visible while closing windows to the tray is enabled.': 'The tray icon stays visible while closing windows to the tray is enabled.',
+  'Hide closed windows and keep project sessions in the tray. Automatically enables the tray icon. Use Quit to exit (Cmd+Q on macOS).': 'Hide closed windows and keep project sessions in the tray. Automatically enables the tray icon. Use Quit to exit (Cmd+Q on macOS).',
+  'The tray is unavailable. Windows will close normally.': 'The tray is unavailable. Windows will close normally.',
+
+  'Show tray icon': 'Show tray icon',
+  'Show shortcuts in the system tray while the app is running. Closing windows keeps the current behavior.': 'Show shortcuts in the system tray while the app is running. Closing windows keeps the current behavior.',
+  'Tray shortcuts are unavailable in browser demo mode.': 'Tray shortcuts are unavailable in browser demo mode.',
+  'Tray shortcuts could not be initialized. Turn this setting off and on to retry.': 'Tray shortcuts could not be initialized. Turn this setting off and on to retry.',
+
   'Collapse commit detail': 'Collapse commit detail',
   'Account authentication failed. Please reauthenticate.': 'Account authentication failed. Please reauthenticate.',
   'This token does not have the required permissions.': 'This token does not have the required permissions.',
@@ -1377,6 +1388,17 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Keep in tray when closing windows': '关闭窗口后保留在托盘',
+  'Show shortcuts in the system tray while the app is running.': '应用运行时在系统托盘中显示快捷入口。',
+  'The tray icon stays visible while closing windows to the tray is enabled.': '启用关闭后保留在托盘时，托盘图标始终显示。',
+  'Hide closed windows and keep project sessions in the tray. Automatically enables the tray icon. Use Quit to exit (Cmd+Q on macOS).': '关闭窗口时隐藏并保留项目会话，同时自动显示托盘图标。使用“退出”或 ⌘Q 退出应用。',
+  'The tray is unavailable. Windows will close normally.': '托盘不可用，窗口会按正常方式关闭。',
+
+  'Show tray icon': '显示托盘图标',
+  'Show shortcuts in the system tray while the app is running. Closing windows keeps the current behavior.': '应用运行时在系统托盘中显示快捷入口，关闭窗口仍保持当前行为。',
+  'Tray shortcuts are unavailable in browser demo mode.': '浏览器演示不支持原生托盘快捷入口。',
+  'Tray shortcuts could not be initialized. Turn this setting off and on to retry.': '托盘快捷入口初始化失败，可关闭后重新开启以重试。',
+
   'Collapse commit detail': '折叠提交详情',
   'Account authentication failed. Please reauthenticate.': '账号认证失败，请重新认证。',
   'This token does not have the required permissions.': '此令牌没有所需权限。',

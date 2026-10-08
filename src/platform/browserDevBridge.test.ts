@@ -7,7 +7,8 @@ describe('BrowserDevBridge', () => {
     const bridge = new BrowserDevBridge();
     const bootstrap = await bridge.request<BootstrapData>({ type: 'bootstrap' });
     const snapshot = await bridge.request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths: ['/browser-demo'] } });
-    expect(bootstrap.capabilities).toMatchObject({ ai: false, subtree: true, worktree: true });
+    expect(bootstrap.capabilities).toMatchObject({ ai: false, subtree: true, worktree: true, availability: { trayIcon: { available: false, reasonCode: 'BROWSER_DEMO' } } });
+    expect(bootstrap.runtime?.trayIcon).toMatchObject({ available: false, reasonCode: 'BROWSER_DEMO' });
     expect(snapshot.repositories.length).toBeGreaterThanOrEqual(5);
     expect(snapshot.repositories.every((repo) => repo.meta.rootPath.startsWith('/browser-demo/'))).toBe(true);
   });

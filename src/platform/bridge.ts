@@ -81,6 +81,7 @@ export interface VersionDockBridge {
     toggleMaximize(): Promise<void>;
     minimize(): Promise<void>;
     close(): Promise<void>;
+    destroy(): Promise<void>;
     show(): Promise<void>;
     isMaximized(): Promise<boolean>;
     dragGeometry(): Promise<WindowDragGeometry | null>;
@@ -260,6 +261,7 @@ export class TauriBridge implements VersionDockBridge {
     toggleMaximize: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().toggleMaximize(),
     minimize: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().minimize(),
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
+    destroy: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().destroy(),
     show: async () => {
       const currentWindow = (await import('@tauri-apps/api/window')).getCurrentWindow();
       const background = getComputedStyle(document.documentElement).getPropertyValue('--versiondock-bg').trim();
@@ -277,8 +279,8 @@ export class TauriBridge implements VersionDockBridge {
           console.warn('Unable to set startup background', error);
         }
       }
-      await currentWindow.show();
-      await currentWindow.setFocus();
+      // The native close policy rejects a delayed startup reveal after a window was hidden.
+      await this.request({ type: 'windowReveal' }, { showProgress: false });
     },
     isMaximized: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().isMaximized(),
     setPosition: async (x: number, y: number) => {
@@ -772,7 +774,7 @@ export class MockBridge implements VersionDockBridge {
     this.logHandlers.forEach((handler) => handler(entry));
   }
   readonly window = {
-    startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined, show: async () => undefined,
+    startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined, destroy: async () => undefined, show: async () => undefined,
     hasOtherWorkspaceWindows: async () => false,
     isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined, onDragDrop: async () => () => undefined,
   };

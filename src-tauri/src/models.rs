@@ -318,6 +318,7 @@ pub enum BridgeCommand {
         workspace_paths: Vec<Vec<String>>,
         active_workspace_id: Option<String>,
     },
+    WindowReveal,
     WindowFocusWorkspace {
         paths: Vec<String>,
     },
@@ -1813,6 +1814,12 @@ pub struct DesktopSettings {
     #[serde(default = "default_true")]
     #[cfg_attr(test, specta(optional))]
     pub show_profile_status_bar: bool,
+    #[serde(default = "default_true")]
+    #[cfg_attr(test, specta(optional))]
+    pub show_tray_icon: bool,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub close_to_tray: bool,
     pub reset_view_locations_on_startup: bool,
     pub notify_incoming_commits: bool,
     pub notify_unpushed_commits: bool,
@@ -1940,6 +1947,8 @@ impl Default for DesktopSettings {
             auto_fetch_on_focus: true,
             auto_fetch_interval_minutes: 15,
             show_profile_status_bar: true,
+            show_tray_icon: true,
+            close_to_tray: false,
             reset_view_locations_on_startup: false,
             notify_incoming_commits: true,
             notify_unpushed_commits: true,
@@ -1988,6 +1997,9 @@ impl Default for DesktopSettings {
 impl DesktopSettings {
     pub fn normalize(mut self) -> Self {
         self.ai_config = self.ai_config.normalize();
+        if self.close_to_tray {
+            self.show_tray_icon = true;
+        }
         self.repository_scan_depth = self.repository_scan_depth.min(10);
         self.maximum_graph_commits = self.maximum_graph_commits.clamp(100, 10_000);
         self.auto_fetch_interval_minutes = self.auto_fetch_interval_minutes.min(1440);
@@ -2348,6 +2360,9 @@ pub struct SecureCredentialCapability {
 #[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCapabilities {
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub tray_icon: Option<CapabilityStatus>,
     pub system_notifications: CapabilityStatus,
     pub notification_permission: NotificationPermissionState,
     pub secure_credentials: SecureCredentialCapability,

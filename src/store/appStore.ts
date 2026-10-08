@@ -1775,6 +1775,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       settingsWriter = { bridge: owner, writer };
     }
     await settingsWriter.writer.update(patch);
+    if ('showTrayIcon' in patch || 'closeToTray' in patch || 'language' in patch) await get().refreshRuntimeCapabilities();
   };
 
   const updateLayout = (next: LayoutState) => {
@@ -2501,7 +2502,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       }));
       void value.onFocusTab((focusPaths) => {
         const targetTab = get().tabs.find((tab) =>
-          tab.paths.length === focusPaths.length && tab.paths.every((p, i) => p === focusPaths[i])
+          workspacePathsEqual(tab.paths, focusPaths)
         );
         if (targetTab) {
           void get().switchTab(targetTab.id);
@@ -2868,7 +2869,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           // Recheck after enumeration: another tab may have arrived in the meantime.
           if (get().transferringTabIds[workspaceId]) return;
           if (hasOtherWindows && get().tabs.length === 1 && get().tabs[0].id === workspaceId) {
-            await bridge().window.close();
+            await bridge().window.destroy();
             return;
           }
         } catch (error) {
@@ -5537,6 +5538,7 @@ export const useAppStore = create<AppStore>((set, get) => {
                 ...(state.bootstrap.capabilities.availability ?? {}),
                 secureCredentials: runtime.secureCredentials.status,
                 systemNotifications: runtime.systemNotifications,
+                ...(runtime.trayIcon ? { trayIcon: runtime.trayIcon } : {}),
               },
             },
           },

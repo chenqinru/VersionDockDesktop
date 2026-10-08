@@ -48,6 +48,45 @@ afterEach(() => {
 });
 
 describe('SettingsPanel', () => {
+  it('keeps sessions in the tray only when enabled, forcing its recovery icon visible', async () => {
+    const { commands } = renderPanel();
+    const closeToTray = screen.getByRole('checkbox', { name: 'Keep in tray when closing windows' });
+    expect(closeToTray).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show tray icon' }));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.showTrayIcon).toBe(false));
+    fireEvent.click(closeToTray);
+    await waitFor(() => expect(commands.some(command => command.type === 'updateSettings' && command.payload.settings.closeToTray && command.payload.settings.showTrayIcon)).toBe(true));
+    expect(screen.getByRole('checkbox', { name: 'Show tray icon' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Show tray icon' })).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'close to tray' } });
+    expect(screen.getByRole('checkbox', { name: 'Keep in tray when closing windows' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore default: Keep in tray when closing windows' }));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.closeToTray).toBe(false));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: '' } });
+    expect(screen.getByRole('checkbox', { name: 'Show tray icon' })).toBeEnabled();
+  });
+
+  it('persists tray visibility, exposes search and restores the default', async () => {
+    const { commands, bridge } = renderPanel();
+    const toggle = screen.getByRole('checkbox', { name: 'Show tray icon' });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(commands.some(command => command.type === 'updateSettings' && command.payload.changed_fields?.includes('showTrayIcon') && command.payload.settings.showTrayIcon === false)).toBe(true));
+    await expect(bridge.request<BootstrapData>({ type: 'bootstrap' })).resolves.toMatchObject({ state: { settings: { showTrayIcon: false } } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'tray' } });
+    expect(screen.getByRole('checkbox', { name: 'Show tray icon' })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore default: Show tray icon' }));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.showTrayIcon).toBe(true));
+  });
+
+  it('clearly marks the native tray as unavailable in browser demo', () => {
+    renderPanel();
+    act(() => useAppStore.setState({ bootstrap: { ...bootstrap(), capabilities: { ...bootstrap().capabilities, availability: { trayIcon: { available: false, reasonCode: 'BROWSER_DEMO', detail: null } } } } }));
+    expect(screen.getByRole('checkbox', { name: 'Show tray icon' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Keep in tray when closing windows' })).toBeDisabled();
+    expect(screen.getAllByText('Tray shortcuts are unavailable in browser demo mode.')).toHaveLength(2);
+  });
+
   it('persists scrollbar mode from appearance and makes it searchable and resettable', async () => {
     const { commands } = renderPanel();
     const select = screen.getByRole('combobox', { name: 'Scrollbar visibility' });

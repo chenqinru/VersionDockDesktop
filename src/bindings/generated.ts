@@ -357,7 +357,7 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 } } | { type: "windowSyncTabs"; payload: {
 	workspace_paths: string[][],
 	active_workspace_id: string | null,
-} } | { type: "windowFocusWorkspace"; payload: {
+} } | { type: "windowReveal" } | { type: "windowFocusWorkspace"; payload: {
 	paths: string[],
 } } | { type: "windowTabDrop"; payload: {
 	transfer: WindowTabTransfer,
@@ -907,6 +907,8 @@ export type DesktopSettings = {
 	autoFetchOnFocus?: boolean,
 	autoFetchIntervalMinutes?: number,
 	showProfileStatusBar?: boolean,
+	showTrayIcon?: boolean,
+	closeToTray?: boolean,
 	resetViewLocationsOnStartup: boolean,
 	notifyIncomingCommits: boolean,
 	notifyUnpushedCommits: boolean,
@@ -1436,6 +1438,7 @@ export type RevisionChanges = {
 };
 
 export type RuntimeCapabilities = {
+	trayIcon?: CapabilityStatus | null,
 	systemNotifications: CapabilityStatus,
 	notificationPermission: NotificationPermissionState,
 	secureCredentials: SecureCredentialCapability,

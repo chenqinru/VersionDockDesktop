@@ -23,7 +23,7 @@ function fields(category: SettingsCategoryId, items: ReadonlyArray<readonly [Set
 export const settingDefinitions: ReadonlyArray<{ path: SettingPath; label: string; category: SettingsCategoryId }> = [
   ...fields('settings-section-appearance-title', [
     ['theme', 'Theme'], ['fileIconTheme', 'File icon theme'], ['language', 'Language'],
-    ['uiFontSize', 'UI font size'], ['layoutDensity', 'Layout density'], ['scrollbarVisibility', 'Scrollbar visibility'],
+    ['uiFontSize', 'UI font size'], ['layoutDensity', 'Layout density'], ['scrollbarVisibility', 'Scrollbar visibility'], ['showTrayIcon', 'Show tray icon'], ['closeToTray', 'Keep in tray when closing windows'],
   ]),
   ...fields('settings-section-ai-title', [
     ['aiConfig.executionMode', 'Execution mode'], ['aiConfig.provider', 'Provider'],

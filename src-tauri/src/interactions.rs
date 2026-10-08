@@ -149,6 +149,7 @@ pub async fn ask(
             },
         )
         .map_err(|e| DesktopError::new("PROMPT_FAILED", e.to_string(), true))?;
+    crate::tray::reveal_for_interaction(&reporter.app, &reporter.window_label);
     let window_closed = async {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;

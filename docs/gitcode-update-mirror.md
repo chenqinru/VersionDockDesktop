@@ -61,6 +61,15 @@ command -v gh
 
 服务器必须能访问 GitHub Actions、API、artifacts 和 Releases 下载地址，以及 GitCode API、附件上传和下载地址。GitHub 下载可沿用原有代理；发布步骤设置 `NO_PROXY` 和 `no_proxy`，让 `gitcode.com`、其子域和 `myhuaweicloud.com` 子域直接访问，避免安装包上传再绕经境外代理。代理环境仅供传输使用，不关闭 TLS 校验。
 
+使用 Clash Verge 的规则模式时，还需核对代理内部的路由。Actions artifact 存储位于 `productionresults*.blob.core.windows.net`；若订阅含有 `DOMAIN-SUFFIX,windows.net,DIRECT`，即使 runner 配置了代理，artifact 下载仍会直连。可在当前订阅的规则覆写文件中前置以下规则，策略组名应使用服务器现有的代理组；不要只修改生成的运行配置，以免订阅刷新后丢失：
+
+```yaml
+prepend:
+  - 'DOMAIN-REGEX,^productionresults.*\.blob\.core\.windows\.net$,🚀节点选择'
+```
+
+2026-10-08 在 `versiondock-release` 服务器核验：`0.1.10` 发布下载 181,717,827 字节的 prepared artifact 耗时 27 分 59 秒。上述规则生效后，同一 artifact 经 curl 完整下载耗时 39.9 秒，SHA-256 与 GitHub artifact digest 一致。该结果是服务器下载实测，下一次正式工作流仍需确认实际耗时；GitHub 与 GitCode 发布继续并行，上传代码无需更改。
+
 runner 在 GitHub 仓库中的自定义标签需为 `gitcode-publish`，无需重新注册或安装 GitLab。它与两条工作流共用一个镜像并发组，防止同时发布时改写固定清单。
 
 ## 使用修正后的脚本补发镜像

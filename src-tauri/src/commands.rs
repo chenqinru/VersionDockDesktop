@@ -575,8 +575,9 @@ fn system_notification_capability() -> CapabilityStatus {
     )
 }
 
-async fn runtime_capabilities() -> RuntimeCapabilities {
+async fn runtime_capabilities(app: Option<&AppHandle>) -> RuntimeCapabilities {
     RuntimeCapabilities {
+        tray_icon: app.map(crate::tray::capability),
         notification_permission: NotificationPermissionState::Unavailable,
         system_notifications: system_notification_capability(),
         secure_credentials: svn_account::secure_store_capability().await,
@@ -1099,12 +1100,15 @@ async fn dispatch(
             let snapshot = state.app.read().await.clone();
             let tools = workspace::tool_availability(token).await;
             state.cache_tools(tools.clone()).await;
-            let runtime = runtime_capabilities().await;
+            let runtime = runtime_capabilities(Some(app)).await;
             let secure_credentials = runtime.secure_credentials.clone();
             let notification_status = runtime.system_notifications.clone();
             let notifications_available = notification_status.available;
             let mut availability = std::collections::BTreeMap::new();
             availability.insert("systemNotifications".into(), notification_status);
+            if let Some(status) = runtime.tray_icon.clone() {
+                availability.insert("trayIcon".into(), status);
+            }
             availability.insert(
                 "secureCredentials".into(),
                 secure_credentials.status.clone(),
@@ -1352,7 +1356,7 @@ async fn dispatch(
             crate::ai::reset_cli_session();
             json(true)
         }
-        BridgeCommand::RuntimeCapabilities => json(runtime_capabilities().await),
+        BridgeCommand::RuntimeCapabilities => json(runtime_capabilities(Some(app)).await),
         BridgeCommand::SaveAppState { state: snapshot } => {
             state.save_app_state(snapshot).await?;
             json(true)
@@ -1375,11 +1379,20 @@ async fn dispatch(
         BridgeCommand::UpdateSettings {
             settings,
             changed_fields,
-        } => json(
-            state
+        } => {
+            let refresh_tray = changed_fields.as_ref().is_none_or(|fields| {
+                fields.iter().any(|field| {
+                    field == "showTrayIcon" || field == "closeToTray" || field == "language"
+                })
+            });
+            let result = state
                 .update_settings(settings, changed_fields.as_deref())
-                .await?,
-        ),
+                .await?;
+            if refresh_tray {
+                crate::tray::refresh(app).await;
+            }
+            json(result)
+        }
         BridgeCommand::UpdateLayout { mut layout } => {
             if layout.file_view_mode != "list" {
                 layout.file_view_mode = "tree".into();
@@ -1913,89 +1926,17 @@ async fn dispatch(
                     false,
                 ));
             }
-            let label = format!("window-{}", uuid::Uuid::new_v4().simple());
-            let mut query = vec!["window=new".to_string()];
-            if let Some(paths) = &paths {
-                if !paths.is_empty() {
-                    let encoded = serde_json::to_string(paths).unwrap_or_default();
-                    query.push(format!("workspacePaths={}", url_encode(&encoded)));
-                }
-            }
-            if let Some(transfer) = &transfer {
-                let encoded = serde_json::to_string(transfer).unwrap_or_default();
-                query.push(format!("tabTransfer={}", url_encode(&encoded)));
-            }
-            let query_suffix = format!("?{}", query.join("&"));
-
-            let main_url = app
-                .get_webview_window("main")
-                .and_then(|window| window.url().ok())
-                .or_else(|| invoking_window.url().ok());
-            let webview_url = match main_url {
-                Some(mut url) if matches!(url.scheme(), "http" | "https") => {
-                    url.set_path("/");
-                    url.set_query(Some(query_suffix.trim_start_matches('?')));
-                    url.set_fragment(None);
-                    tauri::WebviewUrl::External(url)
-                }
-                _ => {
-                    let url_path = format!("index.html{}", query_suffix);
-                    tauri::WebviewUrl::App(url_path.into())
-                }
-            };
-
-            let builder = tauri::WebviewWindowBuilder::new(app, &label, webview_url)
-                .title(
-                    app.config()
-                        .product_name
-                        .as_deref()
-                        .unwrap_or("VersionDock Desktop"),
-                )
-                .inner_size(width.unwrap_or(880.0), height.unwrap_or(540.0))
-                .min_inner_size(800.0, 480.0)
-                // The frontend reveals the themed shell before repository loading
-                // finishes. Transfers can immediately show their initial tab.
-                .visible(false)
-                .focused(false)
-                .background_color(tauri::window::Color(18, 19, 20, 255))
-                .resizable(true);
-
-            #[cfg(target_os = "macos")]
-            let builder = builder
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .hidden_title(true);
-
-            #[cfg(target_os = "linux")]
-            let builder = builder.decorations(false);
-
-            #[cfg(target_os = "windows")]
-            let builder = builder.decorations(true);
-
-            let builder = if let (Some(x), Some(y)) = (x, y) {
-                builder.position(x, y)
-            } else {
-                builder.center()
-            };
-
-            // Bind before building: the new webview may immediately request its session.
-            if let Some(transfer) = &transfer {
-                state.bind_tab_session(transfer, &label)?;
-            }
-            let _window = builder.build().map_err(|err| {
-                DesktopError::new(
-                    "WINDOW_CREATE_FAILED",
-                    format!("Failed to create window: {err}"),
-                    true,
-                )
-            })?;
-
-            #[cfg(target_os = "windows")]
-            {
-                use tauri_plugin_window_controls::WindowControlsExt;
-                let _ = _window.set_title_bar_height(38);
-                let _ = _window.set_title_bar_overlay(true);
-            }
-
+            let label = crate::windowing::create_window(
+                app,
+                state,
+                Some(invoking_window),
+                paths,
+                x,
+                y,
+                width,
+                height,
+                transfer,
+            )?;
             json(label)
         }
         BridgeCommand::WindowSyncTabs {
@@ -2031,43 +1972,20 @@ async fn dispatch(
                 snapshot.last_workspace_id = snapshot.active_workspace_id.clone();
                 state.save_app_state(snapshot).await?;
             }
+            crate::tray::refresh(app).await;
             json(true)
         }
+        BridgeCommand::WindowReveal => {
+            json(crate::tray::reveal_startup_window(app, invoking_window).await?)
+        }
         BridgeCommand::WindowFocusWorkspace { paths } => {
-            use tauri::{Emitter, Manager};
-            let current_window_label = invoking_window.label().to_string();
-            let mut target_window_label: Option<String> = None;
-            {
-                let mut map = state.window_workspaces.lock().unwrap();
-                // 清理已经销毁的窗口
-                map.retain(|label, _| app.get_webview_window(label).is_some());
-
-                for (label, workspaces) in map.iter() {
-                    if label != &current_window_label {
-                        for ws in workspaces {
-                            if paths_match(ws, &paths) {
-                                target_window_label = Some(label.clone());
-                                break;
-                            }
-                        }
-                        if target_window_label.is_some() {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if let Some(target_label) = target_window_label {
-                if let Some(window) = app.get_webview_window(&target_label) {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = window.emit("versiondock://focus-tab", &paths);
-                    return json(true);
-                }
-            }
-
-            json(false)
+            let focus_order = crate::tray::focus_order(app);
+            json(crate::windowing::focus_workspace(
+                app,
+                &paths,
+                Some(invoking_window.label()),
+                &focus_order,
+            )?)
         }
         BridgeCommand::WindowSyncBounds {
             x,
@@ -4557,32 +4475,6 @@ fn json<T: serde::Serialize>(value: T) -> Result<serde_json::Value, DesktopError
         .map_err(|error| DesktopError::new("SERIALIZATION_FAILED", error.to_string(), false))
 }
 
-fn url_encode(input: &str) -> String {
-    let mut encoded = String::new();
-    for byte in input.bytes() {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char);
-            }
-            _ => {
-                encoded.push_str(&format!("%{:02X}", byte));
-            }
-        }
-    }
-    encoded
-}
-
-fn paths_match(a: &[String], b: &[String]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut a_sorted = a.to_vec();
-    let mut b_sorted = b.to_vec();
-    a_sorted.sort();
-    b_sorted.sort();
-    a_sorted == b_sorted
-}
-
 const TAB_SNAP_MARGIN: f64 = 40.0;
 const TAB_BAR_HEIGHT: f64 = 42.0;
 
@@ -4616,7 +4508,7 @@ mod tests {
 
     #[tokio::test]
     async fn notifications_are_in_app_only_on_every_platform() {
-        let runtime = runtime_capabilities().await;
+        let runtime = runtime_capabilities(None).await;
         assert!(!runtime.system_notifications.available);
         assert_eq!(
             runtime.system_notifications.reason_code.as_deref(),

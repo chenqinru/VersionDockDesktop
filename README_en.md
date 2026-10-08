@@ -58,6 +58,8 @@ Tauri verifies update signatures separately from operating-system application si
 
 Projects use tabs and can be opened in multiple windows. Recent projects are available from the welcome screen. The interface supports Simplified Chinese and English, light and dark themes, compact and comfortable layouts, and adjustable fonts and panel sizes.
 
+The app shows system tray shortcuts by default (in the menu bar on macOS) to restore a window, switch between open projects, and quit. Turn off **Show tray icon** under **Settings → Appearance → Interface** to hide it. Closing the last window exits by default. Enable **Keep in tray when closing windows** to hide windows while preserving project sessions; this also enables the tray icon. Disabling it restores hidden windows. **Quit** and macOS **Cmd+Q** always exit the application and remove the icon. Linux display depends on the desktop environment providing a tray host. Development builds show `Dev` next to the icon on macOS and a `D` badge on Windows/Linux; the tooltip and menu also include `Dev` to distinguish simultaneous development and production instances.
+
 ## Features
 
 | Area | Capabilities |

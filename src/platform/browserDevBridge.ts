@@ -18,6 +18,7 @@ const workspace = {
 const browserDemoMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sidebar') === 'mixed' ? 'mixed' : 'git';
 
 const unavailableRuntime: RuntimeCapabilities = {
+  trayIcon: { available: false, reasonCode: 'BROWSER_DEMO', detail: 'Tray shortcuts are unavailable in browser demo mode' },
   systemNotifications: { available: false, reasonCode: 'BROWSER_DEMO', detail: 'System notifications are unavailable in browser demo mode' },
   notificationPermission: 'unavailable',
   secureCredentials: {
@@ -326,6 +327,7 @@ export class BrowserDevBridge implements VersionDockBridge {
     toggleMaximize: async () => undefined,
     minimize: async () => undefined,
     close: async () => undefined,
+    destroy: async () => undefined,
     show: async () => undefined,
     isMaximized: async () => false,
     dragGeometry: async () => null,
@@ -493,7 +495,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'bootstrap': return {
         state: this.state, tools: { git: true, svn: true, svnadmin: true },
         applicationSessionId: 'browser-demo-session',
-        capabilities: { ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: true, submodule: true, compare: true, remoteManagement: true },
+        capabilities: { availability: { trayIcon: unavailableRuntime.trayIcon! }, ai: false, stash: true, shelf: true, changelist: true, worktree: true, subtree: true, submodule: true, compare: true, remoteManagement: true },
         runtime: unavailableRuntime,
       } satisfies BootstrapData;
       case 'runtimeCapabilities': return unavailableRuntime;
@@ -640,7 +642,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'tagResolveCommit': case 'tagPreflight': return (activeHistories[command.payload.repo_id] ?? [])[0]?.hash ?? 'browser-demo-commit';
       case 'tagOperation': case 'stashOperation': case 'shelfOperation':
       case 'changelistOperation': case 'worktreeOperation': case 'remoteOperation': case 'svnOperation': case 'submoduleOperation': case 'historyOperation': case 'systemOpen':
-      case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'windowSetSize': return true;
+      case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'windowSetSize': case 'windowReveal': return true;
       case 'changelists': return [];
     }
   }

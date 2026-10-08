@@ -1,6 +1,7 @@
 import { scrollbarContains } from '../scrollbars/ownership';
 import { DialogSurface } from './DialogSurface';
 import { LayoutDensitySetting } from './LayoutDensitySetting';
+import { TrayIconSetting, CloseToTraySetting } from './TrayIconSetting';
 import { ScrollbarVisibilitySetting } from './ScrollbarVisibilitySetting';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber, SettingToggle } from './SettingsControls';
@@ -255,6 +256,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       />
                       <LayoutDensitySetting />
                       <ScrollbarVisibilitySetting />
+                      <TrayIconSetting />
+                      <CloseToTraySetting />
                     </SettingsCard>
                   </SettingsSection>
                 )}
@@ -1343,6 +1346,14 @@ function SearchResults({
   }
   if ([t('Scrollbar visibility'), t('Follow system'), t('Auto-hide'), t('Always visible'), t('Control scrollbars across all panels and pages. Changes take effect immediately.'), 'scrollbar'].some(match)) {
     appearanceItems.push(<ScrollbarVisibilitySetting key="scrollbars" />);
+  }
+
+  if ([t('Show tray icon'), t('Show shortcuts in the system tray while the app is running.'), 'tray', 'menu bar', '托盘', '菜单栏'].some(match)) {
+    appearanceItems.push(<TrayIconSetting key="tray" />);
+  }
+
+  if ([t('Keep in tray when closing windows'), t('Hide closed windows and keep project sessions in the tray. Automatically enables the tray icon. Use Quit to exit (Cmd+Q on macOS).'), 'close to tray', 'closing', 'tray', '关闭', '托盘'].some(match)) {
+    appearanceItems.push(<CloseToTraySetting key="close-to-tray" />);
   }
 
   // 2. 更改与提交匹配项

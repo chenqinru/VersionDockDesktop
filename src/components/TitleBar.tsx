@@ -395,7 +395,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
       if (remainingTabs.length === 1 && remainingTabs[0].id === tab.id) {
         // Close the native window before clearing its last tab, so it cannot
         // briefly render and resize into the welcome screen.
-        await bridge.window.close();
+        await bridge.window.destroy();
       }
       useAppStore.getState().endTabTransfer(tab.id);
       await closeTab(tab.id, { closeWindowIfLast: false });

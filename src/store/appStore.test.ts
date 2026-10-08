@@ -39,6 +39,18 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
+  it('destroys the source window when explicitly closing its last project in multi-window mode', async () => {
+    const bridge = new MockBridge(() => []);
+    const workspace = snapshot('last-project', 1);
+    vi.spyOn(bridge.window, 'hasOtherWorkspaceWindows').mockResolvedValue(true);
+    const destroy = vi.spyOn(bridge.window, 'destroy');
+    const close = vi.spyOn(bridge.window, 'close');
+    useAppStore.setState({ bridge, snapshot: workspace, tabs: [workspace.workspace], activeTabId: workspace.workspace.id });
+    await useAppStore.getState().closeTab(workspace.workspace.id);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it('shows long foreground operation progress, cancels without switching workspace, and removes it on completion', async () => {
     vi.useFakeTimers();
     let listener: ((event: BridgeEvent) => void) | undefined;

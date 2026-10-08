@@ -24,8 +24,10 @@ mod shelf;
 mod state;
 mod svn_account;
 mod tab_drag;
+mod tray;
 mod update_worker;
 mod vcs;
+mod windowing;
 mod workspace;
 
 #[cfg(test)]
@@ -105,6 +107,8 @@ pub fn run() {
             let logger = logger::init_global_logger(log_dir);
             logger.set_app_handle(app.handle().clone());
             app.manage(AppState::load(config_dir));
+            app.manage(tray::TrayState::default());
+            tray::schedule_refresh(app.handle());
 
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_fullscreen(false);
@@ -125,6 +129,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                tray::close_requested(window, api);
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let state = window.state::<AppState>();
                 let _ = state.unregister_window(window.label());
@@ -135,6 +142,7 @@ pub fn run() {
                     });
                 }
             }
+            tray::window_event(window.app_handle(), window.label(), event);
         })
         .invoke_handler(tauri::generate_handler![
             commands::bridge_request,
@@ -144,8 +152,17 @@ pub fn run() {
             app_updater::check_update_mirror,
             app_updater::restart_app
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running VersionDock Desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building VersionDock Desktop")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                tray::mark_exiting(app);
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    app.state::<AppState>().cancel_all().await;
+                });
+            }
+        });
     if let Some(logger) = logger::get_logger() {
         let _ = logger.flush();
     }

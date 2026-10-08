@@ -30,3 +30,13 @@ it('uses a settings-specific modified label without changing diff labels', () =>
   const t = createTranslator('zh-CN');
   expect(t('Setting modified')).toBe('已修改'); expect(t('Modified')).toBe('修改后');
 });
+
+it('defaults legacy tray settings to visible and resets an explicit disabled preference', () => {
+  expect(DEFAULT_SETTINGS.showTrayIcon).toBe(true);
+  expect(DEFAULT_SETTINGS.closeToTray).toBe(false);
+  const legacy = effectiveSettings({ theme: 'system' } as typeof DEFAULT_SETTINGS);
+  expect(legacy.showTrayIcon).toBe(true);
+  const settings = effectiveSettings({ ...legacy, showTrayIcon: false });
+  expect(isSettingModified('showTrayIcon', settings)).toBe(true);
+  expect(defaultSettingPatch('showTrayIcon', settings)).toEqual({ showTrayIcon: true });
+});
