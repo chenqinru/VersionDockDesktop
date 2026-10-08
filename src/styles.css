@@ -3806,6 +3806,18 @@ button.danger:not(:disabled):hover,
 .app-dialog label.dialog-check { display: flex; align-items: center; gap: 6px; }
 .app-dialog label.dialog-check > input { width: auto; flex: 0 0 auto; }
 .checkout-auth-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.workspace-slot > .workspace-empty {
+  height: 100%;
+  min-height: 0;
+  padding: 24px;
+  justify-content: flex-start;
+  overflow: auto;
+  text-align: center;
+}
+.workspace-slot > .workspace-empty > * { flex: 0 0 auto; max-width: 100%; }
+/* Keep the message slightly above center; spacers collapse in short windows. */
+.workspace-slot > .workspace-empty::before { content: ''; flex: 9 0 0; }
+.workspace-slot > .workspace-empty::after { content: ''; flex: 11 0 0; }
 .workspace-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 .workspace-empty-actions > button { display: inline-flex; align-items: center; gap: 5px; }
 .workspace-empty-actions > button .codicon { font-size: inherit; opacity: 1; }
