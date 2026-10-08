@@ -1941,7 +1941,7 @@ impl Default for DesktopSettings {
             language: LanguagePreference::System,
             ui_font_size: UiFontSizePreference::Standard,
             layout_density: LayoutDensity::Comfortable,
-            scrollbar_visibility: ScrollbarVisibility::System,
+            scrollbar_visibility: ScrollbarVisibility::Auto,
             file_icon_theme: FileIconThemePreference::Material,
             changes_display_mode: ChangesDisplayMode::Simplified,
             default_commit_action: DefaultCommitAction::Commit,
@@ -2242,8 +2242,8 @@ pub enum LayoutDensity {
 #[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ScrollbarVisibility {
-    #[default]
     System,
+    #[default]
     Auto,
     Visible,
 }

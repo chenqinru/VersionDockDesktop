@@ -1,5 +1,6 @@
 import { useLayoutDensity } from './layoutDensity';
 import { useGlobalScrollbars } from './scrollbars/useGlobalScrollbars';
+import { DEFAULT_SETTINGS } from './settings/defaults';
 import { AiComposerWorkspace } from './components/AiComposerWorkspace';
 import { AiCodeReviewWorkspace } from './components/AiCodeReviewWorkspace';
 import { aiWorkspaceChanged } from './ai/aiStore';
@@ -84,7 +85,7 @@ export function App() {
   const layoutDensity = useLayoutDensity();
   const uiFontSize = bootstrap?.state.settings?.uiFontSize ?? bootstrap?.state.uiFontSize ?? 'standard';
   const language = resolveLanguage(languagePreference);
-  useGlobalScrollbars(bootstrap?.state.settings?.scrollbarVisibility ?? 'system', layoutDensity === 'comfortable', language);
+  useGlobalScrollbars(bootstrap?.state.settings?.scrollbarVisibility ?? DEFAULT_SETTINGS.scrollbarVisibility!, layoutDensity === 'comfortable', language);
   const t = useMemo(() => createTranslator(language, pluginMessages), [language, pluginMessages]);
   const commitWidth = bootstrap?.state.layout?.panelSizes.commit ?? bootstrap?.state.panelSizes?.commit ?? 360;
   const missingTools = snapshot && !snapshot.tools.git && !snapshot.tools.svn;

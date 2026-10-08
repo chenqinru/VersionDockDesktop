@@ -90,15 +90,15 @@ describe('SettingsPanel', () => {
   it('persists scrollbar mode from appearance and makes it searchable and resettable', async () => {
     const { commands } = renderPanel();
     const select = screen.getByRole('combobox', { name: 'Scrollbar visibility' });
-    expect(select).toHaveValue('system');
+    expect(select).toHaveValue('auto');
     fireEvent.change(select, { target: { value: 'visible' } });
     await vi.waitFor(() => expect(commands.some(command => command.type === 'updateSettings' && command.payload.settings.scrollbarVisibility === 'visible')).toBe(true));
     expect(useAppStore.getState().bootstrap?.state.settings?.scrollbarVisibility).toBe('visible');
     fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'auto-hide' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Scrollbar visibility' }), { target: { value: 'auto' } });
-    await vi.waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.scrollbarVisibility).toBe('auto'));
-    fireEvent.click(screen.getByRole('button', { name: 'Restore default: Scrollbar visibility' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Scrollbar visibility' }), { target: { value: 'system' } });
     await vi.waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.scrollbarVisibility).toBe('system'));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore default: Scrollbar visibility' }));
+    await vi.waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.scrollbarVisibility).toBe('auto'));
   });
 
   it('changes layout density immediately and persists it from settings search', async () => {

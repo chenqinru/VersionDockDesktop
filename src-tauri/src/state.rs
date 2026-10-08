@@ -1165,6 +1165,24 @@ mod tests {
         let state = AppState::load(root.path().to_path_buf());
         assert_eq!(
             state.app.read().await.settings.scrollbar_visibility,
+            ScrollbarVisibility::Auto
+        );
+        let mut old_settings = serde_json::to_value(DesktopSettings::default()).unwrap();
+        old_settings
+            .as_object_mut()
+            .unwrap()
+            .remove("scrollbarVisibility");
+        assert_eq!(
+            serde_json::from_value::<DesktopSettings>(old_settings.clone())
+                .unwrap()
+                .scrollbar_visibility,
+            ScrollbarVisibility::Auto
+        );
+        old_settings["scrollbarVisibility"] = serde_json::json!("system");
+        assert_eq!(
+            serde_json::from_value::<DesktopSettings>(old_settings)
+                .unwrap()
+                .scrollbar_visibility,
             ScrollbarVisibility::System
         );
         let before_layout = serde_json::to_value(&state.app.read().await.layout).unwrap();
