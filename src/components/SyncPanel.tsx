@@ -571,6 +571,18 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
     return repo.ahead > 0 || repo.behind > 0 || (outgoing[repo.meta.id]?.length ?? 0) > 0 || (incoming[repo.meta.id]?.length ?? 0) > 0 || Boolean(branch && !branch.upstream);
   }).map((repo) => repo.meta.id), [branchesByRepo, incoming, outgoing, repos]);
   useEffect(() => {
+    let active = true;
+    const selectable = new Set(selectableRepoIds);
+    queueMicrotask(() => {
+      if (!active) return;
+      setChecked(current => {
+        const next = new Set([...current].filter(repoId => selectable.has(repoId)));
+        return next.size === current.size ? current : next;
+      });
+    });
+    return () => { active = false; };
+  }, [selectableRepoIds]);
+  useEffect(() => {
     if (!expansionCommand || expansionCommand.sequence === lastExpansionSequence.current) return;
     lastExpansionSequence.current = expansionCommand.sequence;
     queueMicrotask(() => setCollapsedRepoIds(expansionCommand.expanded ? new Set() : new Set(repos.map((repo) => repo.meta.id))));

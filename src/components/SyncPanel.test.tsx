@@ -387,8 +387,77 @@ describe('SyncPanel footer parity with plugin', () => {
       fetchRepositories: fetch,
     });
     const view = render(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
-    return { ...view, fetch, sync };
+    return { ...view, fetch, sync, repos };
   };
+
+  it.each(['primary', 'strategy'] as const)('clears completed repository checks and footer pills after $entry updates', async (entry) => {
+    const view = setup(0, 1, 'origin/main', true);
+    let repos = view.repos;
+    view.sync.mockImplementation(async (repoId: string) => {
+      repos = repos.map(repo => repo.meta.id === repoId ? { ...repo, behind: 0 } : repo);
+      const state = useAppStore.getState();
+      useAppStore.setState({
+        snapshot: { ...snapshot, repositories: repos },
+        incomingCommits: { ...state.incomingCommits, [repoId]: [] },
+        branchesByRepo: { ...state.branchesByRepo, [repoId]: state.branchesByRepo[repoId].map(branch => ({ ...branch, behind: 0 })) },
+      });
+      view.rerender(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
+      return true;
+    });
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+    expect(view.container.querySelectorAll('.sync-selected-pill')).toHaveLength(2);
+    if (entry === 'primary') fireEvent.click(screen.getByRole('button', { name: 'Update (2)' }));
+    else {
+      fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Update Strategy: Rebase' }));
+    }
+    await vi.waitFor(() => {
+      expect(view.sync).toHaveBeenCalledTimes(2);
+      expect(view.container.querySelector('.sync-selected-repositories')).toBeNull();
+      for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).not.toBeChecked();
+    });
+    expect(screen.getByRole('button', { name: 'Fetch All' })).toBeEnabled();
+  });
+
+  it('clears only completed repositories and keeps failed or cancelled targets selected', async () => {
+    const view = setup(0, 1, 'origin/main', true);
+    const repos = view.repos.map((repo, index) => index === 0 ? { ...repo, behind: 0 } : repo);
+    view.sync.mockImplementation(async (repoId: string) => {
+      if (repoId !== 'repo-1') return undefined;
+      const state = useAppStore.getState();
+      useAppStore.setState({ incomingCommits: { ...state.incomingCommits, 'repo-1': [] }, branchesByRepo: { ...state.branchesByRepo, 'repo-1': state.branchesByRepo['repo-1'].map(branch => ({ ...branch, behind: 0 })) } });
+      view.rerender(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
+      return true;
+    });
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Update (2)' }));
+    await vi.waitFor(() => {
+      expect(view.sync).toHaveBeenCalledTimes(2);
+      expect(view.container.querySelectorAll('.sync-selected-pill')).toHaveLength(1);
+      expect(screen.getByRole('checkbox', { name: 'Repo 1' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Repo 2' })).toBeChecked();
+    });
+  });
+
+  it('retains selection while outgoing commits or an unpublished branch still need work', async () => {
+    const view = setup(1, 1, 'origin/main', true);
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+    const repos = view.repos.map(repo => ({ ...repo, behind: 0 }));
+    await act(async () => {
+      const state = useAppStore.getState();
+      useAppStore.setState({ incomingCommits: { 'repo-1': [], 'repo-2': [] }, branchesByRepo: Object.fromEntries(repos.map(repo => [repo.meta.id, state.branchesByRepo[repo.meta.id].map(branch => ({ ...branch, behind: 0 }))])) });
+      view.rerender(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos} /></BridgeContext.Provider>);
+    });
+    expect(view.container.querySelectorAll('.sync-selected-pill')).toHaveLength(2);
+    await act(async () => {
+      const state = useAppStore.getState();
+      useAppStore.setState({ unpushedCommits: { 'repo-1': [], 'repo-2': [] }, branchesByRepo: Object.fromEntries(repos.map(repo => [repo.meta.id, state.branchesByRepo[repo.meta.id].map(branch => ({ ...branch, ahead: 0, upstream: repo.meta.id === 'repo-1' ? null : 'origin/main' }))])) });
+      view.rerender(<BridgeContext.Provider value={bridge}><SyncPanel repos={repos.map(repo => ({ ...repo, ahead: 0 }))} /></BridgeContext.Provider>);
+    });
+    expect(view.container.querySelectorAll('.sync-selected-pill')).toHaveLength(1);
+    expect(screen.getByRole('checkbox', { name: 'Repo 1' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Repo 2' })).not.toBeChecked();
+  });
 
   it('keeps the footer enabled throughout read-only commit detail loading', async () => {
     const { container } = setup(1, 0);
