@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.10",
+    "date": "2026-10-08",
+    "highlights": {
+      "zh-CN": [
+        "改善 AI 流式响应与 CLI 输出兼容性，保留完整生成内容，并提供更明确的服务端错误提示。",
+        "优化 AI 输入输出预算及提交拆分截断后的重试，切换仓库或所选文件时避免旧生成结果覆盖当前提交草稿。",
+        "输出与日志新增 AI 通道，可查看请求阶段、预算、耗时及脱敏错误详情，便于排查生成失败。",
+        "优化新窗口启动时的主题与显示时机，初始化失败时仍显示应用界面和错误提示。",
+        "完善 Linux 标签拖拽预览，调整预览位置与样式，并在 Windows 和 Linux 上显示标签分离徽标。",
+        "改善 macOS 更新后的应用重启，支持带空格和中文的安装路径，并通过系统启动更新后的应用。"
+      ],
+      "en": [
+        "Improve compatibility with AI streaming responses and CLI output, preserving complete generated content and showing clearer server errors.",
+        "Improve AI input and output budgets and retries for truncated commit-splitting results, preventing stale generations from overwriting the current commit draft when switching repositories or selected files.",
+        "Add an AI channel to Output and Logs for request stages, budgets, timing and redacted error details to help diagnose generation failures.",
+        "Improve startup theme and visibility handling for new windows, keeping the application interface and error messages visible if initialization fails.",
+        "Improve tab drag previews on Linux, adjust preview placement and styling, and show a tab-detachment badge on Windows and Linux.",
+        "Improve application restarts after updates on macOS, supporting installation paths with spaces and Chinese characters and launching the updated app through the system."
+      ]
+    }
+  },
+  {
     "version": "0.1.9",
     "date": "2026-10-08",
     "highlights": {
