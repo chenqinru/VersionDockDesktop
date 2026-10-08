@@ -360,11 +360,18 @@ fn parse_auth_cache_output(
     Ok(parse_native_credentials(output, root))
 }
 
+fn authentication_port(url: &url::Url) -> Option<u16> {
+    // `svn info` omits :3690, while native auth realms include it. The URL
+    // library knows HTTP defaults but does not define SVN's default port.
+    url.port_or_known_default()
+        .or_else(|| (url.scheme() == "svn").then_some(3690))
+}
+
 fn parse_native_credentials(output: &str, root: &str) -> Vec<SvnNativeCredential> {
     let root_url = url::Url::parse(root).ok();
-    let root_port = root_url.as_ref().and_then(url::Url::port_or_known_default);
-    let host = url::Url::parse(root)
-        .ok()
+    let root_port = root_url.as_ref().and_then(authentication_port);
+    let host = root_url
+        .as_ref()
         .and_then(|url| url.host_str().map(String::from))
         .unwrap_or_default();
     let mut values = Vec::new();
@@ -383,8 +390,12 @@ fn parse_native_credentials(output: &str, root: &str) -> Vec<SvnNativeCredential
             .and_then(|value| value.split('>').next())
             .and_then(|value| url::Url::parse(value).ok());
         let realm_host = realm_url.as_ref().and_then(|value| value.host_str());
-        let realm_port = realm_url.as_ref().and_then(url::Url::port_or_known_default);
-        if host.is_empty() || realm_host != Some(host.as_str()) || realm_port != root_port {
+        let realm_port = realm_url.as_ref().and_then(authentication_port);
+        if host.is_empty()
+            || realm_host != Some(host.as_str())
+            || realm_port != root_port
+            || realm_url.as_ref().map(url::Url::scheme) != root_url.as_ref().map(url::Url::scheme)
+        {
             continue;
         }
         let username = field("Username:")
@@ -966,6 +977,33 @@ mod tests {
             .lock()
             .unwrap()
             .remove(&repo.root_path);
+    }
+
+    #[test]
+    fn native_cache_matches_svn_default_port_whether_explicit_or_omitted() {
+        let output = "Credential kind: svn.simple\r\nAuthentication realm: <svn://svn.example.test:3690> test-realm\r\nUsername: cached-user\r\n";
+        for root in [
+            "svn://svn.example.test/repo",
+            "svn://svn.example.test:3690/repo",
+        ] {
+            let values = parse_auth_cache_output(output, root).unwrap();
+            assert_eq!(values.len(), 1, "account must match {root}");
+            assert_eq!(values[0].username.as_deref(), Some("cached-user"));
+        }
+        let implicit = output.replace(":3690", "");
+        assert_eq!(
+            parse_auth_cache_output(&implicit, "svn://svn.example.test:3690/repo")
+                .unwrap()
+                .len(),
+            1
+        );
+        for root in [
+            "svn://svn.example.test:3691/repo",
+            "svn://other.example.test/repo",
+            "https://svn.example.test:3690/repo",
+        ] {
+            assert!(parse_auth_cache_output(output, root).unwrap().is_empty());
+        }
     }
 
     #[test]
