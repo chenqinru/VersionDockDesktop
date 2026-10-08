@@ -30,6 +30,7 @@ export interface ProviderPanelProps {
 type ActiveView = 'none' | 'detail' | 'github_flow' | 'github_form' | 'gitlab_form' | 'gitee_form';
 
 const providerErrorKeys: Record<string, string> = {
+  PROVIDER_KEY_ACCESS_FAILED: 'Unable to read the account token from secure storage. Retry access in account management.',
   PROVIDER_AUTH_REQUIRED: 'Account authentication failed. Please reauthenticate.',
   PROVIDER_FORBIDDEN: 'This token does not have the required permissions.',
   PROVIDER_RATE_LIMITED: 'The platform rate limit was reached. Please try again later.',
@@ -51,6 +52,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id ?? '');
   const providerAvailability = useAppStore((state) => state.bootstrap?.capabilities.availability);
   const authController = useRef<AbortController | null>(null);
+  const retryController = useRef<AbortController | null>(null);
 
   const isGithubDeviceFlowAvailable = providerAvailability?.githubDeviceFlow?.available === true;
   const isGithubAvailable = providerAvailability?.githubProvider?.available !== false;
@@ -59,8 +61,10 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
 
   const [accounts, setAccounts] = useState<RemoteProviderAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
+  useEffect(() => () => retryController.current?.abort(), [selectedAccountId]);
   const [activeView, setActiveView] = useState<ActiveView>('none');
   const [busy, setBusy] = useState(false);
+  const [retryingAccountId, setRetryingAccountId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [editingAccountId, setEditingAccountId] = useState<string>();
   const [copiedCode, setCopiedCode] = useState(false);
@@ -317,6 +321,27 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
       if (!isAbortError(reason)) setError(formatProviderError(reason, t));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const retryAccess = async (id: string) => {
+    retryController.current?.abort();
+    const controller = new AbortController();
+    retryController.current = controller;
+    setRetryingAccountId(id);
+    setError('');
+    try {
+      await bridge.request({ type: 'providerRetryAccess', payload: { account_id: id } }, { signal: controller.signal, showProgress: false });
+      if (controller.signal.aborted) return;
+      clearAvatarCache();
+      window.dispatchEvent(new Event('versiondock-provider-accounts-changed'));
+    } catch (reason) {
+      if (!controller.signal.aborted && !isAbortError(reason)) setError(formatProviderError(reason, t));
+    } finally {
+      if (retryController.current === controller) {
+        retryController.current = null;
+        setRetryingAccountId(null);
+      }
     }
   };
 
@@ -607,6 +632,15 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
                       </div>
                     ) : (
                       <div className="provider-detail-actions">
+                        <button
+                          type="button"
+                          className="settings-action-btn"
+                          disabled={busy || retryingAccountId !== null}
+                          onClick={() => void retryAccess(selectedAccount.id)}
+                        >
+                          <Codicon name="key" />
+                          <span>{t('Retry secure storage access')}</span>
+                        </button>
                         <button
                           type="button"
                           className="settings-action-btn primary"

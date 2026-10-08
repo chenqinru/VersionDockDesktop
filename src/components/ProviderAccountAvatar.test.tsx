@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BridgeCommand, RemoteProviderAccount } from '../bindings/generated';
 import { BridgeContext } from '../platform/context';
@@ -11,6 +12,40 @@ beforeEach(() => window.dispatchEvent(new Event('versiondock-avatar-cache-clear'
 afterEach(cleanup);
 
 describe('provider account avatars', () => {
+  it('shares an in-flight request across StrictMode and multiple mounted avatars', async () => {
+    let resolve!: (value: string) => void;
+    const request = vi.fn(() => new Promise<string>((done) => { resolve = done; }));
+    const bridge = new MockBridge(request);
+    render(<StrictMode><BridgeContext.Provider value={bridge}><ProviderAccountAvatar account={account('gitee')} /><ProviderAccountAvatar account={account('gitee')} /></BridgeContext.Provider></StrictMode>);
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    resolve(avatar);
+    expect(await screen.findAllByRole('img')).toHaveLength(2);
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it('does not automatically retry failed access on remount and ignores responses before cache clearing', async () => {
+    let resolve!: (value: string) => void;
+    const request = vi.fn().mockRejectedValueOnce(new Error('access denied'))
+      .mockImplementationOnce(() => new Promise<string>((done) => { resolve = done; }))
+      .mockResolvedValueOnce(null);
+    const bridge = new MockBridge(request);
+    const ui = <BridgeContext.Provider value={bridge}><ProviderAccountAvatar account={account('gitee')} /></BridgeContext.Provider>;
+    const first = render(ui);
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    await new Promise((done) => setTimeout(done, 0));
+    first.unmount();
+    render(ui);
+    await new Promise((done) => setTimeout(done, 0));
+    expect(request).toHaveBeenCalledOnce();
+    fireEvent(window, new Event('versiondock-avatar-cache-clear'));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    fireEvent(window, new Event('versiondock-avatar-cache-clear'));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+    resolve(avatar);
+    await new Promise((done) => setTimeout(done, 0));
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
   it.each(['github', 'gitlab', 'gitee'] as const)('uses the authenticated %s profile with a single centered image', async (provider) => {
     const request = vi.fn((command: BridgeCommand) => command.type === 'providerAccountAvatar' ? avatar : null);
     const bridge = new MockBridge(request);

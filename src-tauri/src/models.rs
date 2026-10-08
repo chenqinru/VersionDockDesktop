@@ -245,6 +245,9 @@ pub enum BridgeCommand {
         password: Option<String>,
     },
     ProviderAccounts,
+    ProviderRetryAccess {
+        account_id: String,
+    },
     ProviderAccountAvatar {
         account_id: String,
     },

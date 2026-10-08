@@ -1655,8 +1655,10 @@ async fn dispatch(
             let target = state::safe_relative(&parent, &target_name, true)?;
             let lock_key = format!("path:{}", target.to_string_lossy());
             let credentials = match provider_account_id.as_deref() {
-                Some(id) => Some(provider::credentials_for_url(&state.config_dir, id, &url)?),
-                None => provider::credentials_for_url_if_unambiguous(&state.config_dir, &url)?,
+                Some(id) => Some(provider::credentials_for_url(&state.config_dir, id, &url).await?),
+                None => {
+                    provider::credentials_for_url_if_unambiguous(&state.config_dir, &url).await?
+                }
             };
             let recurse = state.app.read().await.settings.clone_recursive_submodules;
             let path = with_write(state, &lock_key, token, async {
@@ -1712,6 +1714,11 @@ async fn dispatch(
             })
         }
         BridgeCommand::ProviderAccounts => json(provider::accounts(&state.config_dir)),
+        BridgeCommand::ProviderRetryAccess { account_id } => {
+            let value = provider::retry_access(&state.config_dir, &account_id).await?;
+            state.protection.clear();
+            json(value)
+        }
         BridgeCommand::ProviderAccountAvatar { account_id } => {
             json(provider::account_avatar(&state.config_dir, &account_id, token).await?)
         }
@@ -1751,7 +1758,7 @@ async fn dispatch(
             json(value)
         }
         BridgeCommand::ProviderRemove { account_id } => {
-            let value = provider::remove(&state.config_dir, &account_id)?;
+            let value = provider::remove(&state.config_dir, &account_id).await?;
             state.protection.clear();
             json(value)
         }
@@ -1858,7 +1865,8 @@ async fn dispatch(
                         &state.config_dir,
                         &account_id,
                         &created.clone_url,
-                    )?;
+                    )
+                    .await?;
                     crate::protection::enforce_push(
                         state,
                         &repo,

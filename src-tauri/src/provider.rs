@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
+use crate::credentials::CredentialCache;
 use crate::models::{
     DesktopError, GithubDeviceFlow, RemoteNamespace, RemoteProviderAccount, RemoteProviderKind,
     RemoteRepository, RemoteRepositoryPage, RemoteVisibility,
@@ -38,6 +39,9 @@ struct PendingFlow {
     account_id: Option<String>,
 }
 static FLOWS: OnceLock<Mutex<HashMap<String, PendingFlow>>> = OnceLock::new();
+// Credential writes now await blocking secure-storage work. Serialize metadata
+// mutations as well so concurrent accounts cannot overwrite one another.
+static ACCOUNT_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn client() -> Result<Client, DesktopError> {
     crate::http_client::builder()
@@ -70,10 +74,36 @@ fn entry(reference: &str) -> Result<keyring::Entry, DesktopError> {
     keyring::Entry::new(SERVICE, reference)
         .map_err(|e| DesktopError::new("SECURE_STORAGE_FAILED", e.to_string(), true))
 }
-fn token(account: &RemoteProviderAccount) -> Result<String, DesktopError> {
-    entry(&account.secure_storage_ref)?
-        .get_password()
-        .map_err(|e| DesktopError::new("PROVIDER_AUTH_REQUIRED", e.to_string(), true))
+fn credential_error() -> DesktopError {
+    DesktopError::new(
+        "PROVIDER_KEY_ACCESS_FAILED",
+        "Unable to read the account token from secure storage. Retry access in account management.",
+        true,
+    )
+}
+fn credential_cache() -> &'static CredentialCache {
+    static CACHE: OnceLock<CredentialCache> = OnceLock::new();
+    CACHE.get_or_init(|| CredentialCache::new(credential_error))
+}
+fn read_token(reference: &str) -> Result<String, DesktopError> {
+    entry(reference)
+        .and_then(|entry| entry.get_password().map_err(|_| credential_error()))
+        .map_err(|_| credential_error())
+}
+async fn token(account: &RemoteProviderAccount) -> Result<String, DesktopError> {
+    let reference = account.secure_storage_ref.clone();
+    let key = reference.clone();
+    credential_cache()
+        .read_with(&reference, false, move || read_token(&key))
+        .await
+}
+pub async fn retry_access(config_dir: &Path, id: &str) -> Result<bool, DesktopError> {
+    let reference = account(config_dir, id)?.secure_storage_ref;
+    let key = reference.clone();
+    credential_cache()
+        .retry_failed_with(&reference, move || read_token(&key))
+        .await?;
+    Ok(true)
 }
 fn account(config_dir: &Path, id: &str) -> Result<RemoteProviderAccount, DesktopError> {
     load(config_dir)
@@ -125,7 +155,7 @@ pub async fn account_avatar(
     cancel: &CancellationToken,
 ) -> Result<Option<String>, DesktopError> {
     let account = account(config_dir, id)?;
-    let secret = token(&account)?;
+    let secret = token(&account).await?;
     let user = send(
         authenticated(
             client()?.get(current_user_endpoint(&account)),
@@ -397,7 +427,8 @@ pub async fn github_complete(
                 user["login"].as_str().unwrap_or("github").into(),
                 user["name"].as_str().map(String::from),
                 access,
-            )?;
+            )
+            .await?;
             FLOWS
                 .get_or_init(Default::default)
                 .lock()
@@ -465,6 +496,7 @@ pub async fn github_save(
         user["name"].as_str().map(String::from),
         secret.trim(),
     )
+    .await
 }
 
 fn normalize_gitlab_host(value: &str) -> Result<String, DesktopError> {
@@ -533,6 +565,7 @@ pub async fn gitlab_save(
         user["name"].as_str().map(String::from),
         secret.trim(),
     )
+    .await
 }
 
 pub async fn gitee_save(
@@ -569,9 +602,10 @@ pub async fn gitee_save(
         user["name"].as_str().map(String::from),
         secret.trim(),
     )
+    .await
 }
 
-fn persist_account(
+async fn persist_account(
     config_dir: &Path,
     id: Option<String>,
     provider: RemoteProviderKind,
@@ -580,6 +614,7 @@ fn persist_account(
     display_name: Option<String>,
     secret: &str,
 ) -> Result<RemoteProviderAccount, DesktopError> {
+    let _guard = ACCOUNT_WRITES.lock().await;
     let mut file = load(config_dir);
     let existing = id
         .as_deref()
@@ -596,21 +631,42 @@ fn persist_account(
             .map(|a| a.secure_storage_ref.clone())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
     };
-    entry(&account.secure_storage_ref)?
-        .set_password(secret)
-        .map_err(|e| DesktopError::new("SECURE_STORAGE_FAILED", e.to_string(), true))?;
+    let reference = account.secure_storage_ref.clone();
+    let key = reference.clone();
+    let value = secret.to_string();
+    credential_cache()
+        .write_with(&reference, value.clone(), move || {
+            entry(&key)?
+                .set_password(&value)
+                .map_err(|e| DesktopError::new("SECURE_STORAGE_FAILED", e.to_string(), true))
+        })
+        .await?;
     file.accounts.retain(|a| a.id != account.id);
     file.accounts.push(account.clone());
     save(config_dir, file)?;
     Ok(account)
 }
 
-pub fn remove(config_dir: &Path, id: &str) -> Result<bool, DesktopError> {
+pub async fn remove(config_dir: &Path, id: &str) -> Result<bool, DesktopError> {
+    let _guard = ACCOUNT_WRITES.lock().await;
     let mut file = load(config_dir);
     let Some(account) = file.accounts.iter().find(|a| a.id == id).cloned() else {
         return Ok(false);
     };
-    let _ = entry(&account.secure_storage_ref)?.delete_credential();
+    let reference = account.secure_storage_ref;
+    let key = reference.clone();
+    credential_cache()
+        .remove_with(&reference, credential_error(), move || {
+            match entry(&key)?.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(DesktopError::new(
+                    "SECURE_STORAGE_FAILED",
+                    e.to_string(),
+                    true,
+                )),
+            }
+        })
+        .await?;
     file.accounts.retain(|a| a.id != id);
     save(config_dir, file)?;
     if let Ok(mut flows) = FLOWS.get_or_init(Default::default).lock() {
@@ -642,7 +698,7 @@ pub async fn repositories(
     cancel: &CancellationToken,
 ) -> Result<RemoteRepositoryPage, DesktopError> {
     let account = account(config_dir, id)?;
-    let secret = token(&account)?;
+    let secret = token(&account).await?;
     let page = page.max(1);
     let per_page = per_page.clamp(1, 100);
     let needle = query.as_deref().unwrap_or("").trim().to_lowercase();
@@ -810,7 +866,7 @@ pub async fn namespaces(
     cancel: &CancellationToken,
 ) -> Result<Vec<RemoteNamespace>, DesktopError> {
     let account = account(config_dir, id)?;
-    let secret = token(&account)?;
+    let secret = token(&account).await?;
     let url = if account.provider == RemoteProviderKind::Github {
         format!("{GITHUB_API}/user")
     } else if account.provider == RemoteProviderKind::Gitlab {
@@ -946,7 +1002,7 @@ pub async fn create_repository(
         ));
     }
     let account = account(config_dir, id)?;
-    let secret = token(&account)?;
+    let secret = token(&account).await?;
     let (url, body) = match account.provider {
         RemoteProviderKind::Github => {
             let private = visibility == RemoteVisibility::Private;
@@ -997,7 +1053,7 @@ pub async fn create_repository(
     })
 }
 
-pub fn credentials_for_url(
+pub async fn credentials_for_url(
     config_dir: &Path,
     id: &str,
     url_value: &str,
@@ -1026,11 +1082,11 @@ pub fn credentials_for_url(
         } else {
             "oauth2".into()
         },
-        token(&account)?,
+        token(&account).await?,
     ))
 }
 
-pub fn credentials_for_url_if_unambiguous(
+pub async fn credentials_for_url_if_unambiguous(
     config_dir: &Path,
     url_value: &str,
 ) -> Result<Option<(String, String)>, DesktopError> {
@@ -1053,7 +1109,9 @@ pub fn credentials_for_url_if_unambiguous(
     if candidates.len() != 1 {
         return Ok(None);
     }
-    credentials_for_url(config_dir, &candidates[0].id, url_value).map(Some)
+    credentials_for_url(config_dir, &candidates[0].id, url_value)
+        .await
+        .map(Some)
 }
 
 fn remote_hostname(remote: &str) -> Option<String> {
@@ -1257,7 +1315,7 @@ async fn resolve_author_avatar_on_host(
         }
         return Ok(None);
     };
-    let secret = token(account)?;
+    let secret = token(account).await?;
     let candidate = avatar_candidate(email, author_name, provider_kind);
     let normalized_email = email.trim().to_lowercase();
     let value = match provider_kind {
@@ -1717,7 +1775,7 @@ async fn protected_branches_for_account(
     if project.is_empty() || project.split('/').count() < 2 {
         return Ok(Vec::new());
     }
-    let secret = token(account)?;
+    let secret = token(account).await?;
     let endpoint = protection_endpoint(account, project)?;
     read_protected_branches(account, &secret, &endpoint, cancel).await
 }

@@ -8,6 +8,54 @@ import { createTranslator, I18nContext } from '../i18n';
 
 afterEach(cleanup);
 describe('ProviderPanel', () => {
+  it('discards a late access error after switching accounts', async () => {
+    let reject!: (reason: Error) => void;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'providerAccounts') return ['alice', 'bob'].map(id => ({ id, provider: 'gitee', host: 'https://gitee.com', login: id, displayName: id, secureStorageRef: id }));
+      if (command.type === 'providerRetryAccess') return new Promise((_, fail) => { reject = fail; });
+      return null;
+    });
+    render(<BridgeContext.Provider value={bridge}><ProviderPanel mode="manage" close={vi.fn()} /></BridgeContext.Provider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry secure storage access' }));
+    await waitFor(() => expect(reject).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: /bob \(bob\)/ }));
+    expect(screen.getByText('@bob')).toBeInTheDocument();
+    reject(new Error('late authorization error'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry secure storage access' })).not.toBeDisabled());
+    expect(screen.queryByText('late authorization error')).toBeNull();
+  });
+
+  it('retries secure storage only on an explicit click and refreshes avatars after success', async () => {
+    let allowed = false;
+    const requests = vi.fn((command) => {
+      if (command.type === 'providerAccounts') return [{ id: 'gitee', provider: 'gitee', host: 'https://gitee.com', login: 'alice', displayName: null, secureStorageRef: 'unused' }];
+      if (command.type === 'providerRetryAccess') {
+        if (!allowed) throw new BridgeError({ code: 'PROVIDER_KEY_ACCESS_FAILED', message: 'Access denied', command: null, stderr: null, exitCode: null, recoverable: true });
+        return true;
+      }
+      return null;
+    });
+    const listener = vi.fn();
+    window.addEventListener('versiondock-avatar-cache-clear', listener);
+    try {
+      const t = createTranslator('zh-CN');
+      render(<I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t }}><BridgeContext.Provider value={new MockBridge(requests)}><ProviderPanel mode="manage" close={vi.fn()} /></BridgeContext.Provider></I18nContext.Provider>);
+      const button = await screen.findByRole('button', { name: '重试安全存储访问' });
+      expect(requests.mock.calls.filter(([command]) => command.type === 'providerRetryAccess')).toHaveLength(0);
+      fireEvent.click(button);
+      expect(await screen.findByText('无法读取安全存储中的账号令牌，请在账号管理中重试访问。')).toBeInTheDocument();
+      expect(listener).not.toHaveBeenCalled();
+      await waitFor(() => expect(button).not.toBeDisabled());
+      allowed = true;
+      fireEvent.click(button);
+      await waitFor(() => expect(listener).toHaveBeenCalledOnce());
+      expect(requests.mock.calls.filter(([command]) => command.type === 'providerRetryAccess').map(([command]) => command.payload)).toEqual([{ account_id: 'gitee' }, { account_id: 'gitee' }]);
+      expect(screen.queryByText('无法读取安全存储中的账号令牌，请在账号管理中重试访问。')).toBeNull();
+    } finally {
+      window.removeEventListener('versiondock-avatar-cache-clear', listener);
+    }
+  });
+
   it('localizes invalid-token errors in the Chinese account connection form', async () => {
     const bridge = new MockBridge((command) => {
       if (command.type === 'providerAccounts') return [];

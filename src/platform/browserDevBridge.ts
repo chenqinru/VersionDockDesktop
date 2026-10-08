@@ -517,6 +517,7 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'restoreConflicts': return { restoredPaths: [], failures: [] };
       case 'providerAccounts': return [];
       case 'providerAccountAvatar': return null;
+      case 'providerRetryAccess': return true;
       case 'providerGithubBegin': return { flowId: 'demo-flow', userCode: 'DEMO-CODE', verificationUri: 'https://github.com/login/device', expiresAt: new Date(Date.now() + 900000).toISOString(), interval: 5 };
       case 'providerGithubComplete': throw new Error('GitHub OAuth is unavailable in browser demo');
       case 'providerGithubSave': return { id: command.payload.account_id ?? 'github-demo', provider: 'github', host: 'https://github.com', login: 'github-demo-user', displayName: 'Demo GitHub User', secureStorageRef: 'browser-demo' };

@@ -1,83 +1,13 @@
 use super::transport::error;
+use crate::credentials::CredentialCache;
 use crate::models::DesktopError;
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex, OnceLock,
-    },
-};
+use std::sync::OnceLock;
 
 type KeyResult = Result<String, DesktopError>;
-#[derive(Default)]
-struct CredentialSlot {
-    value: Arc<tokio::sync::Mutex<Option<KeyResult>>>,
-    revision: AtomicU64,
-}
-type CachedKey = Arc<CredentialSlot>;
-
-// Shared by all windows in this process. Secrets never leave the native backend.
-#[derive(Default)]
-pub(super) struct CredentialCache {
-    entries: Mutex<HashMap<String, CachedKey>>,
-}
-
-impl CredentialCache {
-    fn entry(&self, reference: &str) -> Result<CachedKey, DesktopError> {
-        let mut entries = self.entries.lock().map_err(|_| storage_error())?;
-        Ok(entries.entry(reference.into()).or_default().clone())
-    }
-
-    async fn read_with<F>(&self, reference: &str, refresh: bool, read: F) -> KeyResult
-    where
-        F: FnOnce() -> KeyResult + Send + 'static,
-    {
-        let entry = self.entry(reference)?;
-        let observed = entry.revision.load(Ordering::Acquire);
-        let mut cached = entry.value.clone().lock_owned().await;
-        if !refresh || entry.revision.load(Ordering::Acquire) != observed {
-            if let Some(result) = &*cached {
-                return result.clone();
-            }
-        }
-        // The blocking worker owns the lock, even if its caller is cancelled.
-        // A queued refresh shares any read/write completed while it was waiting.
-        tokio::task::spawn_blocking(move || {
-            let result = read();
-            *cached = Some(result.clone());
-            entry.revision.fetch_add(1, Ordering::Release);
-            result
-        })
-        .await
-        .unwrap_or_else(|_| Err(storage_error()))
-    }
-
-    async fn write_with<F>(
-        &self,
-        reference: &str,
-        value: String,
-        write: F,
-    ) -> Result<(), DesktopError>
-    where
-        F: FnOnce() -> Result<(), DesktopError> + Send + 'static,
-    {
-        let entry = self.entry(reference)?;
-        let mut cached = entry.value.clone().lock_owned().await;
-        tokio::task::spawn_blocking(move || {
-            write()?;
-            // Cache changes only after persistence succeeds, atomically with reads.
-            *cached = Some(Ok(value));
-            entry.revision.fetch_add(1, Ordering::Release);
-            Ok(())
-        })
-        .await
-        .map_err(|_| storage_error())?
-    }
-}
 
 fn cache() -> &'static CredentialCache {
     static CACHE: OnceLock<CredentialCache> = OnceLock::new();
-    CACHE.get_or_init(CredentialCache::default)
+    CACHE.get_or_init(|| CredentialCache::new(storage_error))
 }
 
 fn storage_error() -> DesktopError {

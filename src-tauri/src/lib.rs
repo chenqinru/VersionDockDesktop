@@ -10,6 +10,7 @@ mod app_updater;
 mod changelist;
 mod cli;
 mod commands;
+mod credentials;
 mod diff_content;
 #[cfg(target_os = "linux")]
 mod gtk_preview;
