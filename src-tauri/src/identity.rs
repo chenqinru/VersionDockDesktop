@@ -342,11 +342,17 @@ mod tests {
         let repository = root.path().join("repo");
         std::fs::create_dir_all(&repository).unwrap();
         run(&["init", "-b", "main"], &repository);
-        let git_dir = repository
-            .canonicalize()
+        // Git's includeIf matches its own path spelling. Windows canonicalize
+        // adds a verbatim prefix that does not match Git's C:/... repository path.
+        let output = Command::new("git")
+            .args(["rev-parse", "--absolute-git-dir"])
+            .current_dir(&repository)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let git_dir = String::from_utf8(output.stdout)
             .unwrap()
-            .join(".git")
-            .to_string_lossy()
+            .trim()
             .replace('\\', "/");
         std::fs::write(
             root.path().join("global.config"),
