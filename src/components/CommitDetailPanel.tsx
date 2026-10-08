@@ -794,7 +794,7 @@ function ExtendedCommitSummary({
   const { t } = useI18n();
   const selectedCommitError = useAppStore((state) => state.selectedCommitError);
   const selectedCommitLoading = useAppStore((state) => state.selectedCommitLoading);
-  const reloadSelectedCommits = useAppStore((state) => state.reloadSelectedCommits);
+  const reloadSelectedCommits = useAppStore((state) => updateDetails ? state.reloadUpdateDetails : state.reloadSelectedCommits);
   const multiple = selectedCommits.length > 1 || updateDetails;
   const summaryTitle = t(updateDetails ? 'Update details' : 'Aggregated commit selection');
 
@@ -916,15 +916,18 @@ function AuthorMeta({ commit }: { commit: CommitNode }) {
 }
 
 export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, updateDetails = false }: { onCollapse: () => void; variant?: 'sidebar' | 'workspace'; aiToolbar?: HTMLElement | null; updateDetails?: boolean }) {
-  const detail = useAppStore((state) => state.selectedCommit);
+  const detail = useAppStore((state) => {
+    const primary = updateDetails ? state.updateDetailCommits[0] : undefined;
+    return updateDetails ? primary && state.selectedCommitDetails[commitKey(primary.repoId, primary.hash)] : state.selectedCommit;
+  });
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
-  const selectedCommits = useAppStore((state) => state.selectedCommits);
+  const selectedCommits = useAppStore((state) => updateDetails ? state.updateDetailCommits : state.selectedCommits);
   const selectedDetails = useAppStore((state) => state.selectedCommitDetails);
   const selectedCommitError = useAppStore((state) => state.selectedCommitError);
   const selectedCommitLoading = useAppStore((state) => state.selectedCommitLoading);
-  const reloadSelectedCommits = useAppStore((state) => state.reloadSelectedCommits);
+  const reloadSelectedCommits = useAppStore((state) => updateDetails ? state.reloadUpdateDetails : state.reloadSelectedCommits);
   const selectedFile = useAppStore((state) => state.selectedFile);
-  const requestedLoading = useAppStore((state) => state.selectedCommits.some((commit) =>
+  const requestedLoading = useAppStore((state) => (updateDetails ? state.updateDetailCommits : state.selectedCommits).some((commit) =>
     state.selectedCommitLoading[commitKey(commit.repoId, commit.hash)] === true
   ));
   const loading = requestedLoading || selectedCommits.some(commit => {

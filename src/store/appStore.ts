@@ -313,6 +313,7 @@ export interface WorkspaceSessionState {
   historyQuery: HistoryQuery;
   selectedCommit?: CommitDetail;
   selectedCommits: CommitNode[];
+  updateDetailCommits?: CommitNode[];
   selectedPrimaryKey?: string;
   commitSelectionAnchorKey?: string;
   selectedCommitDetails: Record<string, CommitDetail>;
@@ -424,6 +425,7 @@ export interface AppStore {
   historyQuery: HistoryQuery;
   selectedCommit?: CommitDetail;
   selectedCommits: CommitNode[];
+  updateDetailCommits: CommitNode[];
   selectedPrimaryKey?: string;
   commitSelectionAnchorKey?: string;
   selectedCommitDetails: Record<string, CommitDetail>;
@@ -507,6 +509,7 @@ export interface AppStore {
   updateRepositories: (repoIds: string[], strategy?: 'merge' | 'rebase' | 'ff-only', targetWorkspaceId?: string) => Promise<string[]>;
   openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
   openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
+  reloadUpdateDetails: () => Promise<void>;
   recentCommitMessages: (repoIds: string[], signal?: AbortSignal) => Promise<RecentCommitMessage[]>;
   lastCommitMessage: (repoId: string, signal?: AbortSignal) => Promise<string | null>;
   loadHistory: (reset?: boolean, silent?: boolean) => Promise<void>;
@@ -643,6 +646,7 @@ let watcherRefreshInFlight = false;
 let watcherRefreshQueued = false;
 const repositoryEventGenerations = new Map<string, number>();
 let commitSelectionGeneration = 0;
+let updateDetailsGeneration = 0;
 let changesDiffGeneration = 0;
 let diffRequestGeneration = 0;
 let historyPageGeneration = 0;
@@ -653,24 +657,6 @@ function abortHistoryRequests() {
   historyTopologyGeneration += 1;
   requestControllers.get('history:page')?.abort();
   requestControllers.get('history:topology')?.abort();
-}
-let historyPathPreviousScope: HistoryScope | undefined;
-let historyPathPreviousQuery: HistoryQuery | undefined;
-
-function resetHistoryPathFilterState(state: AppStore) {
-  const hadPathFilter = Boolean(state.historyQuery.path || state.historyQuery.lineRange);
-  const restoredScope = hadPathFilter ? (historyPathPreviousScope ?? state.historyScope) : state.historyScope;
-  const restoredQuery = hadPathFilter ? (historyPathPreviousQuery ?? state.historyQuery) : state.historyQuery;
-  if (hadPathFilter) {
-    historyPathPreviousScope = undefined;
-    historyPathPreviousQuery = undefined;
-  }
-  return {
-    hadPathFilter,
-    historyScope: restoredScope,
-    historyQuery: { ...restoredQuery, path: null, lineRange: null },
-    historyFilter: hadPathFilter ? (restoredQuery.text ?? '') : state.historyFilter,
-  };
 }
 let comparisonRequestGeneration = 0;
 let branchWorkingDiffGeneration = 0;
@@ -1814,6 +1800,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       historyQuery: state.historyQuery,
       selectedCommit: state.selectedCommit,
       selectedCommits: state.selectedCommits,
+      updateDetailCommits: state.updateDetailCommits,
       selectedPrimaryKey: state.selectedPrimaryKey,
       commitSelectionAnchorKey: state.commitSelectionAnchorKey,
       selectedCommitDetails: state.selectedCommitDetails,
@@ -2079,7 +2066,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
+      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], updateDetailCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     checkStatusNotifications(allRepositories, snapshot.workspace.id);
@@ -2339,7 +2326,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       return get().tabs.some((tab) => tab.id === transfer.tabId)
         && Boolean(get().sessions[transfer.tabId]);
     },
-    ready: false, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', diffReturnMode: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, batchCommitReports: {}, loadErrors: {},
+    ready: false, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', diffReturnMode: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], updateDetailCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, batchCommitReports: {}, loadErrors: {},
     logPanelOpen: false,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
     logEntries: [],
@@ -2796,6 +2783,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           historyQuery: cachedSession.historyQuery ?? { ...EMPTY_HISTORY_QUERY, text: cachedSession.historyFilter || null },
           selectedCommit: cachedSession.selectedCommit ?? (cachedSession.selectedPrimaryKey ? cachedSession.selectedCommitDetails[cachedSession.selectedPrimaryKey] : (cachedSession.selectedCommits[0] ? cachedSession.selectedCommitDetails[commitKey(cachedSession.selectedCommits[0].repoId, cachedSession.selectedCommits[0].hash)] : undefined)),
           selectedCommits: cachedSession.selectedCommits,
+          updateDetailCommits: cachedSession.updateDetailCommits ?? [],
           selectedPrimaryKey: cachedSession.selectedPrimaryKey ?? (cachedSession.selectedCommits[0] ? commitKey(cachedSession.selectedCommits[0].repoId, cachedSession.selectedCommits[0].hash) : undefined),
           commitSelectionAnchorKey: cachedSession.commitSelectionAnchorKey ?? cachedSession.selectedPrimaryKey,
           selectedCommitDetails: cachedSession.selectedCommitDetails,
@@ -2936,7 +2924,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             historyFilter: '',
             historyQuery: { ...EMPTY_HISTORY_QUERY },
             selectedCommit: undefined,
-            selectedCommits: [],
+            selectedCommits: [], updateDetailCommits: [],
             selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined,
             selectedCommitDetails: {},
             selectedCommitLoading: {},
@@ -3025,7 +3013,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         historyFilter: '',
         historyQuery: { ...EMPTY_HISTORY_QUERY },
         selectedCommit: undefined,
-        selectedCommits: [],
+        selectedCommits: [], updateDetailCommits: [],
         selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined,
         selectedCommitDetails: {},
         selectedCommitLoading: {},
@@ -3188,7 +3176,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         selectedRepoId: repoId,
         ...(repoChanged ? {
           selectedCommit: undefined,
-          selectedCommits: [],
+          selectedCommits: [], updateDetailCommits: [],
           selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined,
           selectedCommitLoading: {},
           selectedCommitError: {},
@@ -3929,33 +3917,36 @@ export const useAppStore = create<AppStore>((set, get) => {
         .map((commit) => [commitKey(commit.repoId, commit.hash), commit])).values()];
       if (!commits.length) return;
       const targetWorkspaceId = workspaceId();
-      const generation = ++commitSelectionGeneration;
-      const current = () => generation === commitSelectionGeneration && get().snapshot?.workspace.id === targetWorkspaceId;
-      const details = await mapWithConcurrency(commits, 4, (commit) => current() ? get().loadCommitDetail(commit, false, targetWorkspaceId) : Promise.resolve(undefined));
+      const generation = ++updateDetailsGeneration;
+      const selectionGeneration = commitSelectionGeneration;
+      const current = () => generation === updateDetailsGeneration && selectionGeneration === commitSelectionGeneration && get().snapshot?.workspace.id === targetWorkspaceId;
+      const details = await mapWithConcurrency(commits, 4, (commit) => current() ? get().loadCommitDetail(commit, false, targetWorkspaceId).catch(() => undefined) : Promise.resolve(undefined));
       if (!current()) return;
       const byKey = Object.fromEntries(details.flatMap(detail => {
         if (!detail) return [];
         const key = commitKey(detail.commit.repoId, detail.commit.hash);
         return [[key, get().selectedCommitDetails[key] ?? detail]];
       }));
-      const { hadPathFilter, historyScope, historyQuery, historyFilter } = resetHistoryPathFilterState(get());
       set({
-        selectedCommits: commits,
-        selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash),
-        commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash),
-        selectedCommit: byKey[commitKey(commits[0].repoId, commits[0].hash)],
+        updateDetailCommits: commits,
         selectedCommitDetails: { ...get().selectedCommitDetails, ...byKey },
-        selectedCommitLoading: {}, selectedCommitError: {}, selectedFile: undefined,
+        selectedFile: undefined,
         diff: undefined, diffReturnMode: undefined, changes: undefined, changesDiff: undefined,
         comparison: undefined, comparisonTarget: undefined,
         mode: 'update-details',
-        historyScope,
-        historyQuery,
-        historyFilter,
       });
-      if (hadPathFilter) {
-        void get().loadHistory(true);
-      }
+    },
+
+    reloadUpdateDetails: async () => {
+      const commits = get().updateDetailCommits;
+      if (!commits.length) return;
+      const wid = workspaceId();
+      const generation = ++updateDetailsGeneration;
+      const selectionGeneration = commitSelectionGeneration;
+      await mapWithConcurrency(commits, 4, async commit => {
+        if (generation !== updateDetailsGeneration || selectionGeneration !== commitSelectionGeneration || get().snapshot?.workspace.id !== wid) return;
+        await get().loadCommitDetail(commit, true, wid).catch(() => undefined);
+      });
     },
 
     recentCommitMessages: async (repoIds, signal) => bridge().request<RecentCommitMessage[]>({ type: 'recentCommitMessages', payload: { workspace_id: workspaceId(), repo_ids: repoIds, limit: 50 } }, { signal, showProgress: false }),
@@ -4120,15 +4111,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     setHistoryQuery: (historyQuery) => {
       abortHistoryRequests();
-      if (!historyQuery.path) { historyPathPreviousScope = undefined; historyPathPreviousQuery = undefined; }
       set({ historyQuery, historyFilter: historyQuery.text ?? '', history: [], historyByRepo: {}, historyHasMore: false, historyTopology: [], historyTopologyByRepo: {}, historyLoading: false, historyTopologyLoading: false });
     },
     openHistoryForPath: async (repoId, path) => {
       abortHistoryRequests();
-      if (!get().historyQuery.path) {
-        historyPathPreviousScope = get().historyScope;
-        historyPathPreviousQuery = get().historyQuery;
-      }
       set((state) => ({
         historyScope: { repoIds: [repoId], revisionsByRepo: {} },
         historyQuery: { ...state.historyQuery, path, lineRange: null, revision: null },
@@ -4139,10 +4125,6 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     openHistoryForLineRange: async (repoId, path, lineRange, revision) => {
       abortHistoryRequests();
-      if (!get().historyQuery.path) {
-        historyPathPreviousScope = get().historyScope;
-        historyPathPreviousQuery = get().historyQuery;
-      }
       const targetRevision = normalizeHistoryRevision(revision);
       set((state) => {
         const nextRevisions = targetRevision
@@ -4166,8 +4148,6 @@ export const useAppStore = create<AppStore>((set, get) => {
           if (revision === historyQuery.revision) delete revisionsByRepo[repoId];
         }
       }
-      historyPathPreviousScope = undefined;
-      historyPathPreviousQuery = undefined;
       set({ historyScope: { ...historyScope, revisionsByRepo }, historyQuery: { ...historyQuery, path: null, lineRange: null, revision: null } });
       await get().loadHistory(true);
     },
@@ -4405,7 +4385,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const generation = ++commitSelectionGeneration;
       const targetWorkspaceId = workspaceId();
       const loading = Object.fromEntries(selected.filter((item) => !state.selectedCommitDetails[commitKey(item.repoId, item.hash)]).map((item) => [commitKey(item.repoId, item.hash), true]));
-      set({ selectedCommits: selected, selectedPrimaryKey: primaryKey, commitSelectionAnchorKey: anchorKey, ...(selectionChanged ? { selectedFile: undefined, diff: undefined } : {}), selectedCommit: primaryKey ? state.selectedCommitDetails[primaryKey] : undefined, selectedCommitLoading: loading, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history', diffReturnMode: undefined });
+      set({ selectedCommits: selected, updateDetailCommits: [], selectedPrimaryKey: primaryKey, commitSelectionAnchorKey: anchorKey, ...(selectionChanged ? { selectedFile: undefined, diff: undefined } : {}), selectedCommit: primaryKey ? state.selectedCommitDetails[primaryKey] : undefined, selectedCommitLoading: loading, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history', diffReturnMode: undefined });
       const missing = selected.filter((item) => !state.selectedCommitDetails[commitKey(item.repoId, item.hash)]);
       const results = await mapWithConcurrency(missing, 4, async (item) => {
         if (generation !== commitSelectionGeneration || get().snapshot?.workspace.id !== targetWorkspaceId) return null;
@@ -4657,7 +4637,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     clearCommitSelection: () => {
       commitSelectionGeneration += 1;
-      set({ selectedCommit: undefined, selectedCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommitLoading: {}, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history' });
+      set({ selectedCommit: undefined, selectedCommits: [], updateDetailCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommitLoading: {}, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history' });
     },
 
     branchOperation: async (operation, requestedRepoId) => {
@@ -5438,7 +5418,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       requestControllers.get('branch-comparison')?.abort();
       set({
         comparisonTarget: { repoId, target }, comparison: undefined, diff: undefined, selectedFile: undefined,
-        selectedCommit: undefined, selectedCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommitLoading: {},
+        selectedCommit: undefined, selectedCommits: [], updateDetailCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommitLoading: {},
         selectedCommitError: {},
         mode: 'history',
       });
@@ -5738,8 +5718,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       const restoredFile = targetMode === 'merge' && current.mergeTarget
         ? { repoId: current.mergeTarget.repoId, path: current.mergeTarget.path, staged: false }
         : (targetMode === 'changes' ? current.selectedFile : undefined);
+      if (targetMode === 'history') updateDetailsGeneration++;
       set({
         mode: targetMode,
+        updateDetailCommits: targetMode === 'history' ? [] : current.updateDetailCommits,
         diffReturnMode: undefined,
         diff: undefined,
         selectedFile: restoredFile,

@@ -41,7 +41,7 @@ afterEach(() => {
   useAppStore.setState({
     snapshot: undefined,
     selectedCommit: undefined,
-    selectedCommits: [],
+    selectedCommits: [], updateDetailCommits: [],
     selectedCommitDetails: {},
     selectedCommitLoading: {},
     backToHistory: originalBack,
@@ -54,12 +54,16 @@ describe('CommitDetailWorkspace', () => {
   it('renders even a one-commit update as an aggregated Update details view', () => {
     const selected = commit('update-hash', 'Update commit', '2026-08-27T10:00:00Z');
     const selectedDetail = detail(selected, 'Update full message.', 'updated.txt');
-    useAppStore.setState({ snapshot, selectedCommit: selectedDetail, selectedCommits: [selected], selectedCommitDetails: { [commitKey('repo', selected.hash)]: selectedDetail }, mode: 'update-details' });
+    const original = commit('original-log', 'Original log selection', '2026-08-25T10:00:00Z');
+    useAppStore.setState({ snapshot, selectedCommit: detail(original, 'Original body.', 'original.txt'), selectedCommits: [original], updateDetailCommits: [selected], selectedCommitDetails: { [commitKey('repo', selected.hash)]: selectedDetail }, mode: 'update-details' });
     render(<CommitDetailWorkspace />);
     expect(screen.getByRole('region', { name: 'Update details' })).toBeInTheDocument();
     expect(screen.getAllByText('1 commit selected').length).toBeGreaterThan(0);
     expect(screen.getByText('Selected time range')).toBeInTheDocument();
     expect(screen.getByText('Update full message.')).toBeInTheDocument();
+    expect(screen.queryByText('Original body.')).not.toBeInTheDocument();
+    expect(screen.queryByText('original.txt')).not.toBeInTheDocument();
+    expect(useAppStore.getState().selectedCommits).toEqual([original]);
     fireEvent.contextMenu(screen.getByText('updated.txt').closest('button')!);
     expect(screen.getByRole('menuitem', { name: 'Show Diff' })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Revert Selected Changes' })).not.toBeInTheDocument();

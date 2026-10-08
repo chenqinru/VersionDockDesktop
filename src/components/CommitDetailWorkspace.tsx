@@ -7,7 +7,7 @@ import { useAppStore } from '../store/appStore';
 export function CommitDetailWorkspace() {
   const [aiToolbar, setAiToolbar] = useState<HTMLDivElement | null>(null);
   const workspaceId = useAppStore((state) => state.snapshot?.workspace.id);
-  const selectedCommits = useAppStore((state) => state.selectedCommits);
+  const selectedCommits = useAppStore((state) => state.mode === 'update-details' ? state.updateDetailCommits : state.selectedCommits);
   const updateDetails = useAppStore((state) => state.mode === 'update-details');
   const back = useAppStore((state) => state.backToHistory);
   const { t } = useI18n();

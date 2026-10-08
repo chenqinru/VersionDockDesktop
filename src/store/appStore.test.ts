@@ -36,7 +36,7 @@ afterEach(() => {
   publishDialog(undefined);
   useAppStore.getState().dispose();
   if (typeof localStorage !== 'undefined') localStorage.clear();
-  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], commitSelectionAnchorKey: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', diffReturnMode: undefined, operations: {}, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, ready: false });
+  useAppStore.setState({ bridge: undefined, bootstrap: undefined, snapshot: undefined, tabs: [], activeTabId: null, sessions: {}, selectedRepoId: undefined, history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, historyFilter: '', historyQuery: { text: null, author: null, fromDate: null, toDate: null, path: null, revision: null }, selectedCommits: [], updateDetailCommits: [], commitSelectionAnchorKey: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, selectedCommit: undefined, changes: undefined, changesDiff: undefined, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, worktreeDiff: undefined, subtrees: {}, remotes: {}, comparisonTarget: undefined, comparison: undefined, mode: 'history', diffReturnMode: undefined, operations: {}, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, ready: false });
 });
 
 describe('appStore async lifecycle', () => {
@@ -99,19 +99,54 @@ describe('appStore async lifecycle', () => {
       }
       return [];
     });
-    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, tabs: [workspace.workspace], activeTabId: 'updates', comparisonTarget: { repoId: 'a', target: 'other' } });
+    const original = updatedCommit('a', 'original-log-selection');
+    const originalDetail: CommitDetail = { commit: original, fullMessage: original.message, files: [], branches: { local: [], remote: [], tags: [] } };
+    const query = { text: 'needle', author: 'Tester', fromDate: null, toDate: null, path: 'src/original.ts', revision: null };
+    useAppStore.setState({ selectedCommits: [original], selectedCommit: originalDetail, selectedPrimaryKey: commitKey('a', original.hash), commitSelectionAnchorKey: commitKey('a', original.hash), historyFilter: 'needle', historyQuery: query, bridge, bootstrap, snapshot: workspace, tabs: [workspace.workspace], activeTabId: 'updates', comparisonTarget: { repoId: 'a', target: 'other' } });
     const result = updateResult('a', commits);
     const id = useAppStore.getState().addNotification({ type: 'info', title: 'Updated', message: 'Updated', workspaceId: 'updates', actions: [variant === 'repositories'
       ? { type: 'viewUpdateResults', label: 'View update details', results: [updateResult('a', [commits[0]]), updateResult('b', [commits[1]])] }
       : { type: 'viewUpdateDetails', label: 'View update details', result }] });
     await useAppStore.getState().performNotificationAction(id, 0);
     expect(useAppStore.getState().mode).toBe('update-details');
-    expect(useAppStore.getState().selectedCommits).toEqual(commits);
+    expect(useAppStore.getState().updateDetailCommits).toEqual(commits);
+    expect(useAppStore.getState().selectedCommits).toEqual([original]);
+    expect(useAppStore.getState().selectedCommit).toBe(originalDetail);
+    expect(useAppStore.getState().selectedPrimaryKey).toBe(commitKey('a', original.hash));
+    expect(useAppStore.getState().commitSelectionAnchorKey).toBe(commitKey('a', original.hash));
+    expect(useAppStore.getState().historyQuery).toBe(query);
+    expect(useAppStore.getState().historyFilter).toBe('needle');
     expect(useAppStore.getState().changes).toBeUndefined();
     expect(useAppStore.getState().comparisonTarget).toBeUndefined();
     expect(useAppStore.getState().diffReturnMode).toBeUndefined();
     useAppStore.getState().backToHistory();
     expect(useAppStore.getState().mode).toBe('history');
+    expect(useAppStore.getState().selectedCommits).toEqual([original]);
+    expect(useAppStore.getState().updateDetailCommits).toEqual([]);
+  });
+
+  it('retries update detail failures without reloading or selecting the main log commits', async () => {
+    const workspace = snapshot('updates-retry', 1);
+    workspace.repositories = [repository('a', 'A')];
+    const original = updatedCommit('a', 'original');
+    const updated = updatedCommit('a', 'updated');
+    const requests: string[] = [];
+    const bridge = new MockBridge(command => {
+      if (command.type !== 'commitDetail') return [];
+      requests.push(command.payload.revision);
+      if (requests.length === 1) throw new Error('temporary failure');
+      return { commit: updated, fullMessage: updated.message, files: [], branches: { local: [], remote: [], tags: [] } };
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: workspace, selectedCommits: [original], selectedPrimaryKey: commitKey('a', original.hash), selectedCommitDetails: {}, selectedCommitError: {} });
+    await useAppStore.getState().openUpdateResults([updateResult('a', [updated])]);
+    expect(useAppStore.getState().mode).toBe('update-details');
+    expect(useAppStore.getState().selectedCommitError[commitKey('a', updated.hash)]).toBe('temporary failure');
+    await useAppStore.getState().reloadUpdateDetails();
+    expect(requests).toEqual(['updated', 'updated']);
+    expect(useAppStore.getState().selectedCommits).toEqual([original]);
+    expect(useAppStore.getState().updateDetailCommits).toEqual([updated]);
+    expect(useAppStore.getState().selectedCommitError[commitKey('a', updated.hash)]).toBeUndefined();
+    expect(useAppStore.getState().selectedCommitDetails[commitKey('a', updated.hash)]?.commit).toEqual(updated);
   });
 
   it('does not open update details or continue its queued requests after switching workspace', async () => {
@@ -2659,7 +2694,7 @@ describe('appStore async lifecycle', () => {
     expect(useAppStore.getState().diffReturnMode).toBe('commit-detail');
   });
 
-  it('resets path filter and reloads full history when opening update details', async () => {
+  it('keeps the log path filter and history when opening update details', async () => {
     const testCommit: CommitNode = {
       repoId: 'repo',
       hash: 'hash-update',
@@ -2744,17 +2779,17 @@ describe('appStore async lifecycle', () => {
       },
     });
 
-    expect(useAppStore.getState().historyQuery.path).toBeNull();
+    expect(useAppStore.getState().historyQuery.path).toBe('src/filter.ts');
     expect(useAppStore.getState().mode).toBe('update-details');
 
     await vi.waitFor(() => {
-      expect(useAppStore.getState().history).toEqual([fullCommit]);
+      expect(useAppStore.getState().history).toEqual([pathCommit]);
     });
 
     useAppStore.getState().backToHistory();
     expect(useAppStore.getState().mode).toBe('history');
-    expect(useAppStore.getState().historyQuery.path).toBeNull();
-    expect(useAppStore.getState().history).toEqual([fullCommit]);
+    expect(useAppStore.getState().historyQuery.path).toBe('src/filter.ts');
+    expect(useAppStore.getState().history).toEqual([pathCommit]);
   });
 
 
