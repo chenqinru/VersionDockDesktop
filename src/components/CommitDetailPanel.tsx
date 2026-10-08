@@ -1512,7 +1512,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
       {workspaceView ? <ExtendedCommitSummary updateDetails={updateDetails} explanation={!loading && selectedCommits.length > 0 ? <AiExplanation commits={selectedCommits.map(c => ({ repoId: c.repoId, hash: c.hash }))} toolbar={aiToolbar} /> : undefined} detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section ref={summaryRef} className="detail-summary" style={infoHeight !== undefined ? { flex: `0 0 ${infoHeight}px`, minHeight: 0, maxHeight: 'none' } : undefined}>
         <header className="detail-toolbar">
           <span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}>
-            <Codicon name={selectedCommits.length > 1 ? 'git-commit' : 'repo'} />
+            {selectedCommits.length === 1 && <Codicon name="repo" />}
             {selectedCommits.length > 1 ? t('Aggregated commit selection') : repoMap.get(selectedPrimary?.repoId ?? '')?.meta.name}
           </span>
           <div className="detail-actions">
