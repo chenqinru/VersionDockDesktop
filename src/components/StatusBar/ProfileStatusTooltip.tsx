@@ -6,7 +6,7 @@ import { useAppStore } from '../../store/appStore';
 import { AuthorAvatar } from '../AuthorAvatar';
 import { ProviderAccountAvatar } from '../ProviderAccountAvatar';
 import { Codicon } from '../Codicon';
-import { gitAccountName, providerLabel, repositoryPlatforms, svnAccountName } from './profileStatus';
+import { profileStatusName, providerLabel, repositoryPlatforms } from './profileStatus';
 import type { useProfileStatus } from './useProfileStatus';
 
 export function ProfileStatusTooltip({ data, repo, repositories, anchor, onManage, onLeave }: { data: ReturnType<typeof useProfileStatus>; repo?: RepositoryStatus; repositories: RepositoryStatus[]; anchor: DOMRect; onManage: () => void; onLeave: () => void }) {
@@ -25,11 +25,12 @@ export function ProfileStatusTooltip({ data, repo, repositories, anchor, onManag
   return createPortal(<div ref={ref} onMouseLeave={onLeave} role="tooltip" id="profile-status-tooltip" className="branch-status-tooltip profile-status-tooltip" style={{ left, bottom: window.innerHeight - anchor.top + 6 }}>
     <div className="profile-tooltip-heading">
       {online && primary?.account ? <ProviderAccountAvatar account={primary.account} size={32} /> : online && identity ? <AuthorAvatar name={identity.effective.userName} email={identity.effective.email} repoId={repo?.meta.id} size={32} /> : <Codicon name="account" />}
-      <div><strong>{repo?.meta.kind === 'svn' ? `SVN: ${svnAccountName(account || undefined, t)}` : gitAccountName(identity, t)}</strong>
+      <div><strong>{`${repo?.meta.kind === 'svn' ? 'SVN' : 'Git'}: ${profileStatusName(repo?.meta.kind ?? 'git', repo?.meta.id ?? '', data, t)}`}</strong>
         {identity && identity.selectedProfileId !== `__${identity.effective.source}__` && ['local', 'global'].includes(identity.effective.source) && <span> ({t(identity.effective.source)})</span>}
         {primary?.provider && <span> · {t('{0} Repository ({1})', providerLabel(primary.provider), primary.remote.name)}</span>}
         {identity?.effective.email && <p><code>{identity.effective.email}</code></p>}
         {account && <p>{account.nativeCredentials?.[0]?.realm ?? account.repositoryRoot}</p>}
+        {data.errors[repo?.meta.id ?? ''] && <p>{data.errors[repo?.meta.id ?? '']}</p>}
         {identity?.effective.source === 'missing' && <p>{t('VersionDock: No Git identity configured — click to set one')}</p>}
       </div>
     </div>

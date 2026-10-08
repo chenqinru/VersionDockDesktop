@@ -33,7 +33,18 @@ export function svnAccountName(account: SvnAccountState | undefined, t: (key: st
 
 export function gitAccountName(identity: GitIdentityState | undefined, t: (key: string) => string) {
   return identity?.effective.userName.trim() || (identity?.effective.source === 'custom' ? identity.profiles.find((profile) => profile.id === identity.effective.profileId)?.label : undefined)
-    || (identity?.effective.source === 'local' ? t('Local') : identity?.effective.source === 'global' ? t('Global') : t('No profile'));
+    || (identity?.effective.source === 'local' ? t('Local') : identity?.effective.source === 'global' ? t('Global')
+      : identity?.effective.source === 'system' ? t('System Git configuration')
+      : identity?.effective.source === 'worktree' ? t('Worktree Git configuration')
+      : identity?.effective.source === 'environment' ? t('Environment Git configuration') : t('No profile'));
+}
+
+export function profileStatusName(kind: 'git' | 'svn', repoId: string, data: {
+  loading: boolean; errors: Record<string, string>; git: Record<string, GitIdentityState>; svn: Record<string, SvnAccountState>;
+}, t: (key: string) => string) {
+  if (data.loading) return t('Loading…');
+  if (data.errors[repoId]) return t(kind === 'svn' ? 'Account read failed' : 'Identity read failed');
+  return kind === 'svn' ? svnAccountName(data.svn[repoId], t) : gitAccountName(data.git[repoId], t);
 }
 
 export function announceIdentityChange() { window.dispatchEvent(new Event(IDENTITY_CHANGED)); }

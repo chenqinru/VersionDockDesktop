@@ -8,7 +8,8 @@ export function useProfileStatus(workspaceId: string | undefined, repositories: 
   const repositoryKey = JSON.stringify(repositories.map((repo) => repo.meta));
   const targets = useMemo(() => JSON.parse(repositoryKey) as RepositoryStatus['meta'][], [repositoryKey]);
   const [revision, setRevision] = useState(0);
-  const [value, setValue] = useState<{ git: Record<string, GitIdentityState>; svn: Record<string, SvnAccountState>; remotes: Record<string, RemoteInfo[]>; accounts: RemoteProviderAccount[]; errors: Record<string, string>; loading: boolean }>({ git: {}, svn: {}, remotes: {}, accounts: [], errors: {}, loading: true });
+  const requestKey = JSON.stringify([workspaceId, repositoryKey, revision]);
+  const [value, setValue] = useState<{ requestKey: string; git: Record<string, GitIdentityState>; svn: Record<string, SvnAccountState>; remotes: Record<string, RemoteInfo[]>; accounts: RemoteProviderAccount[]; errors: Record<string, string>; loading: boolean }>({ requestKey: '', git: {}, svn: {}, remotes: {}, accounts: [], errors: {}, loading: true });
   const reload = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
     window.addEventListener('focus', reload);
@@ -26,7 +27,7 @@ export function useProfileStatus(workspaceId: string | undefined, repositories: 
     const controller = new AbortController();
     const options = { showProgress: false, signal: controller.signal };
     if (!workspaceId) return;
-    const next: typeof value = { git: {}, svn: {}, remotes: {}, accounts: [], errors: {}, loading: false };
+    const next: typeof value = { requestKey, git: {}, svn: {}, remotes: {}, accounts: [], errors: {}, loading: false };
     const jobs = (targets.length ? targets : [undefined]).map(async (repo) => {
       const repoId = repo?.id ?? '';
       try {
@@ -39,6 +40,10 @@ export function useProfileStatus(workspaceId: string | undefined, repositories: 
     jobs.push(bridge.request<RemoteProviderAccount[]>({ type: 'providerAccounts' }, options).then((accounts) => { next.accounts = Array.isArray(accounts) ? accounts : []; }).catch(() => undefined));
     void Promise.all(jobs).then(() => { if (active) setValue(next); });
     return () => { active = false; controller.abort(); };
-  }, [bridge, workspaceId, targets, revision]);
-  return { ...value, reload };
+  }, [bridge, workspaceId, targets, revision, requestKey]);
+  const current = value.requestKey === requestKey;
+  return {
+    git: current ? value.git : {}, svn: current ? value.svn : {}, remotes: current ? value.remotes : {},
+    accounts: current ? value.accounts : [], errors: current ? value.errors : {}, loading: !current || value.loading, reload,
+  };
 }

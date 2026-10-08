@@ -11,7 +11,7 @@ import { ProviderPanel } from '../ProviderPanel';
 import { choiceDialog, confirmDialog, currentDialog, multiChoiceDialog, promptDialog } from '../dialogService';
 import { StatusBarQuickMenu } from './StatusBarQuickMenu';
 import { positionBranchSubmenu, type BranchMenuPosition } from './branchMenuPosition';
-import { announceIdentityChange, GLOBAL_PROFILE_ID, LOCAL_PROFILE_ID, providerLabel, repositoryPlatforms, svnAccountName } from './profileStatus';
+import { announceIdentityChange, GLOBAL_PROFILE_ID, LOCAL_PROFILE_ID, profileStatusName, providerLabel, repositoryPlatforms, svnAccountName } from './profileStatus';
 import type { useProfileStatus } from './useProfileStatus';
 
 function ProfileMenuItem({ label, icon, onClick, description, detail, active = false, disabled = false, busy }: { label: string; icon: string; onClick: (event: MouseEvent<HTMLButtonElement>) => void; description?: string; detail?: string; active?: boolean; disabled?: boolean; busy: boolean }) {
@@ -174,6 +174,7 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
     </>)}
   </>;
   const repositoryDescription = (target: RepositoryStatus) => {
+    if (data.loading || data.errors[target.meta.id]) return profileStatusName(target.meta.kind, target.meta.id, data, t);
     if (target.meta.kind === 'svn') return svnAccountName(data.svn[target.meta.id], t);
     const identity = data.git[target.meta.id];
     const platform = repositoryPlatforms(data.remotes[target.meta.id] ?? [], branchesByRepo[target.meta.id] ?? [], data.accounts).find((item) => item.primary);
@@ -191,8 +192,8 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
   const activeLabel = customProfile?.label ?? t(profileId === LOCAL_PROFILE_ID ? 'Local' : 'Global');
   return <StatusBarPopoverPortal>
     <StatusBarQuickMenu key={`${repoId}:${page}`} ref={popoverRef} title={rootTitle} active={!profileId && !provider && !busy} className="profile-menu-popover" style={mainStyle} onSearch={back} onBack={page === 'repositories' ? () => setPage('identity') : undefined}>
-      {data.loading ? <div className="statusbar-popover-loading"><Codicon name="loading codicon-modifier-spin" />{t('Loading files...')}</div> : page === 'repositories' ? repositoryItems : <>
-        {repo?.meta.kind === 'svn' ? svnItems : gitItems}
+      {data.loading ? <div className="statusbar-popover-loading"><Codicon name="loading codicon-modifier-spin" />{t('Loading…')}</div> : page === 'repositories' ? repositoryItems : <>
+        {!data.errors[repoId] && (repo?.meta.kind === 'svn' ? svnItems : gitItems)}
         {repositories.length > 1 && <div className="statusbar-menu-section"><ProfileMenuItem busy={busy} label={t('Switch to another repository…')} icon="arrow-swap" onClick={() => { back(); setPage('repositories'); }} description={t('Current: {0}  ·  {1} repositories in workspace', repo?.meta.name ?? '', repositories.length)} /></div>}
         {remoteItems}
       </>}

@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/appStore';
 import { useI18n } from '../../i18n';
 import { ProfileMenuPopover } from './ProfileMenuPopover';
 import { ProfileStatusTooltip } from './ProfileStatusTooltip';
-import { gitAccountName, svnAccountName } from './profileStatus';
+import { profileStatusName } from './profileStatus';
 import { useProfileStatus } from './useProfileStatus';
 import { useStatusTooltip } from './useStatusTooltip';
 
@@ -28,9 +28,8 @@ export function ProfileStatusBarItem() {
     if (!open && anchorRef.current) setAnchorRect(anchorRef.current.getBoundingClientRect());
     setOpen((prev) => !prev);
   };
-  const identityText = currentRepo?.meta.kind === 'svn'
-    ? `SVN: ${svnAccountName(data.svn[currentRepo.meta.id], t)}`
-    : `Git: ${gitAccountName(data.git[currentRepo?.meta.id ?? ''], t)}`;
+  const kind = currentRepo?.meta.kind ?? 'git';
+  const identityText = `${kind === 'svn' ? 'SVN' : 'Git'}: ${profileStatusName(kind, currentRepo?.meta.id ?? '', data, t)}`;
   const label = `${identityText} · ${t('Click to manage accounts and identities')}`;
   return <>
     <button ref={anchorRef} type="button" className={`statusbar-item profile-status-item ${open ? 'active' : ''}`}

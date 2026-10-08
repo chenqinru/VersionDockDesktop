@@ -153,6 +153,37 @@ afterEach(() => {
 });
 
 describe('StatusBar', () => {
+  it.each(['git', 'svn'] as const)('shows %s loading and read failure separately from missing credentials and permits retry', async (kind) => {
+    let fail!: (error: Error) => void;
+    const pending = new Promise<never>((_, reject) => { fail = reject; });
+    let missing = false;
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'gitIdentity' || command.type === 'svnAccount') {
+        if (!missing) return pending;
+        return kind === 'git'
+          ? { effective: { userName: '', email: '', source: 'missing', valid: false }, local: null, global: null, profiles: [], selectedProfileId: null }
+          : { username: null, source: 'none', passwordStored: false, nativeCredentials: [] };
+      }
+      return [];
+    });
+    const workspace = snapshot();
+    workspace.repositories[0].meta.kind = kind;
+    useAppStore.setState({ bridge, bootstrap: bootstrap(), snapshot: workspace, ready: true, selectedRepoId: 'repo1', operations: {} });
+    render(<BridgeContext.Provider value={bridge}><I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><StatusBar /></I18nContext.Provider></BridgeContext.Provider>);
+    const prefix = kind === 'git' ? 'Git' : 'SVN';
+    expect(screen.getByRole('button', { name: new RegExp(`${prefix}: Loading`) })).toBeInTheDocument();
+    await act(async () => { fail(new Error('Cannot read configuration')); });
+    const failureText = kind === 'git' ? 'Identity read failed' : 'Account read failed';
+    const item = await screen.findByRole('button', { name: new RegExp(`${prefix}: ${failureText}`) });
+    expect(item).not.toHaveTextContent(kind === 'git' ? 'No profile' : 'No account detected');
+    fireEvent.click(item);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cannot read configuration');
+    missing = true;
+    fireEvent.click(screen.getByRole('option', { name: /^Retry$/ }));
+    const missingText = kind === 'git' ? 'No profile' : 'No account detected';
+    expect(await screen.findByRole('button', { name: new RegExp(`${prefix}: ${missingText}`) })).toBeInTheDocument();
+  });
+
   it('hides the entire welcome status bar during update checks and after their results', () => {
     renderStatusBar();
     act(() => useAppStore.setState({ snapshot: undefined, updateAvailableInfo: null, updateChecking: true }));

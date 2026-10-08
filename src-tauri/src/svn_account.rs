@@ -143,10 +143,26 @@ pub async fn state(
     let password_stored = stored_username
         .as_ref()
         .is_some_and(|value| SYSTEM_STORE.get(&root, value).is_ok());
-    let native_credentials = native_credentials(repo, &root, token)
-        .await
-        .unwrap_or_default();
     let session = cached_auth(repo);
+    let native_credentials = match native_credentials(repo, &root, token).await {
+        Ok(credentials) => credentials,
+        Err(error)
+            if error.code != "REQUEST_CANCELLED"
+                && (session.is_some() || stored_username.is_some()) =>
+        {
+            // An optional native-cache failure must not invalidate a known session account.
+            crate::logger::log_entry(
+                crate::logger::LogLevel::Warn,
+                crate::logger::LogChannel::Svn,
+                "Could not read the native SVN authentication cache",
+                Some(format!("{}: {}", error.code, error.message)),
+                None,
+                None,
+            );
+            Vec::new()
+        }
+        Err(error) => return Err(error),
+    };
     let source = if session.is_some() {
         SvnCredentialSource::Session
     } else if password_stored {
@@ -309,17 +325,39 @@ async fn native_credentials(
     root: &str,
     token: &CancellationToken,
 ) -> Result<Vec<SvnNativeCredential>, DesktopError> {
-    let output = cli::run(
+    let output = cli::run_with_env(
         "svn",
         &["auth".into()],
         Path::new(&repo.root_path),
         None,
         cli::DEFAULT_TIMEOUT,
         token,
+        &[
+            ("LANGUAGE".into(), "en".into()),
+            ("LC_MESSAGES".into(), "C".into()),
+        ],
     )
     .await?
     .stdout_text();
-    Ok(parse_native_credentials(&output, root))
+    parse_auth_cache_output(&output, root)
+}
+
+fn parse_auth_cache_output(
+    output: &str,
+    root: &str,
+) -> Result<Vec<SvnNativeCredential>, DesktopError> {
+    let text = output.trim();
+    if !text.is_empty()
+        && !output.contains("Authentication realm:")
+        && !(text.starts_with("Credentials cache") && text.ends_with("is empty"))
+    {
+        return Err(DesktopError::new(
+            "SVN_AUTH_CACHE_OUTPUT_INVALID",
+            "Could not parse SVN authentication cache",
+            true,
+        ));
+    }
+    Ok(parse_native_credentials(output, root))
 }
 
 fn parse_native_credentials(output: &str, root: &str) -> Vec<SvnNativeCredential> {
@@ -330,7 +368,8 @@ fn parse_native_credentials(output: &str, root: &str) -> Vec<SvnNativeCredential
         .and_then(|url| url.host_str().map(String::from))
         .unwrap_or_default();
     let mut values = Vec::new();
-    for record in output.split("\n\n") {
+    let normalized = output.replace("\r\n", "\n");
+    for record in normalized.split("\n\n") {
         let field = |name: &str| {
             record
                 .lines()
@@ -370,17 +409,21 @@ pub async fn auth(
     if let Some(credentials) = cached_auth(repo) {
         return Ok(Some(credentials));
     }
-    let value = state(config_dir, repo, token).await?;
-    let (Some(username), true, true) = (
-        value.username,
-        value.password_stdin_supported,
-        value.password_stored,
-    ) else {
+    // Repository operations let SVN use its native cache directly. Inspecting
+    // that cache is only needed for the account UI, not for authentication.
+    let root = repository_root(repo, token).await?;
+    if let Ok(mut roots) = AUTH_ROOTS.get_or_init(Default::default).lock() {
+        roots.insert(repo.root_path.clone(), root.clone());
+    }
+    let Some(username) = load(config_dir).usernames.remove(&root) else {
         return Ok(None);
     };
-    let password = SYSTEM_STORE
-        .get(&value.repository_root, &username)
-        .map_err(|error| DesktopError::new("SECURE_STORAGE_FAILED", error, true))?;
+    if !svn_password_stdin_supported(repo, token).await {
+        return Ok(None);
+    }
+    let Ok(password) = SYSTEM_STORE.get(&root, &username) else {
+        return Ok(None);
+    };
     Ok(Some((username, password)))
 }
 
@@ -729,6 +772,42 @@ mod tests {
         assert_eq!(values.len(), 1);
         assert_eq!(values[0].username.as_deref(), Some("alice"));
         assert!(!format!("{values:?}").contains("secret"));
+    }
+
+    #[test]
+    fn native_cache_parser_handles_windows_line_endings_and_multiple_realms() {
+        let output = "Authentication realm: <https://other.test> Other\r\nUsername: wrong\r\n\r\nAuthentication realm: <https://svn.example.test:443> Project\r\nUsername: alice\r\nPassword: secret\r\n\r\nAuthentication realm: <https://svn.example.test:8443> Other port\r\nUsername: bob\r\n";
+        let values = parse_native_credentials(output, "https://svn.example.test/repo");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].username.as_deref(), Some("alice"));
+        assert!(!format!("{values:?}").contains("secret"));
+        let lf = parse_native_credentials(
+            &output.replace("\r\n", "\n"),
+            "https://svn.example.test/repo",
+        );
+        assert_eq!(lf[0].id, values[0].id);
+    }
+
+    #[test]
+    fn native_cache_read_distinguishes_empty_cache_from_unrecognized_output() {
+        assert!(parse_auth_cache_output(
+            "Credentials cache in 'C:\\Users\\Test\\AppData\\Roaming\\Subversion' is empty\r\n",
+            "https://svn.example.test/repo"
+        )
+        .unwrap()
+        .is_empty());
+        assert!(parse_auth_cache_output("", "https://svn.example.test/repo")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            parse_auth_cache_output(
+                "认证域: <https://svn.example.test>\r\n用户名: alice",
+                "https://svn.example.test/repo"
+            )
+            .unwrap_err()
+            .code,
+            "SVN_AUTH_CACHE_OUTPUT_INVALID"
+        );
     }
     #[tokio::test]
     async fn session_switch_verifies_remote_authentication_and_preserves_working_copy() {

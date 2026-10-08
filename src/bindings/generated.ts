@@ -1018,7 +1018,7 @@ export type FileRevisionDocument = {
 	truncated: boolean,
 };
 
-export type GitIdentitySource = "custom" | "local" | "global" | "missing";
+export type GitIdentitySource = "custom" | "local" | "global" | "system" | "environment" | "worktree" | "missing";
 
 export type GitIdentityState = {
 	profiles: GitProfile[],

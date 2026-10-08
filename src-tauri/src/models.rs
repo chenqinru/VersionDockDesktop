@@ -1446,6 +1446,9 @@ pub enum GitIdentitySource {
     Custom,
     Local,
     Global,
+    System,
+    Environment,
+    Worktree,
     Missing,
 }
 

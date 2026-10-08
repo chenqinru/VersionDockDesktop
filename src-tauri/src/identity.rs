@@ -22,6 +22,9 @@ struct ProfileFile {
     selected_by_repository: BTreeMap<String, String>,
 }
 
+#[cfg(test)]
+tokio::task_local! { static TEST_CONFIG_ENV: Vec<(String, String)>; }
+
 pub async fn state(
     config_dir: &Path,
     workspace_id: &str,
@@ -36,17 +39,22 @@ pub async fn state(
         .filter(|id| !id.is_empty())
         .cloned();
     let local = if let Some(repo) = repo {
-        read_identity(Path::new(&repo.root_path), true, token).await?
+        read_identity(Path::new(&repo.root_path), Some("--local"), token).await?
     } else {
         None
     };
     let global = read_identity(
         repo.map(|repo| Path::new(&repo.root_path))
             .unwrap_or_else(|| Path::new(".")),
-        false,
+        Some("--global"),
         token,
     )
     .await?;
+    let native = if let Some(repo) = repo {
+        read_identity(Path::new(&repo.root_path), None, token).await?
+    } else {
+        global.clone()
+    };
     let effective = selected_profile_id
         .as_ref()
         .and_then(|id| match id.as_str() {
@@ -64,8 +72,7 @@ pub async fn state(
                     valid: valid_identity(&profile.user_name, &profile.email),
                 }),
         })
-        .or_else(|| local.clone())
-        .or_else(|| global.clone())
+        .or(native)
         .unwrap_or_else(missing_identity);
     Ok(GitIdentityState {
         profiles: file.profiles,
@@ -176,46 +183,11 @@ fn save(config_dir: &Path, value: &ProfileFile) -> Result<(), DesktopError> {
 
 async fn read_identity(
     root: &Path,
-    local: bool,
+    scope: Option<&str>,
     token: &CancellationToken,
 ) -> Result<Option<EffectiveGitIdentity>, DesktopError> {
-    #[cfg(test)]
-    if !local {
-        return Ok(None);
-    }
-    let scope = if local { "--local" } else { "--global" };
-    let name = cli::run(
-        "git",
-        &[
-            "config".into(),
-            scope.into(),
-            "--get".into(),
-            "user.name".into(),
-        ],
-        root,
-        None,
-        cli::DEFAULT_TIMEOUT,
-        token,
-    )
-    .await
-    .map(|output| output.stdout_text().trim().to_string())
-    .unwrap_or_default();
-    let email = cli::run(
-        "git",
-        &[
-            "config".into(),
-            scope.into(),
-            "--get".into(),
-            "user.email".into(),
-        ],
-        root,
-        None,
-        cli::DEFAULT_TIMEOUT,
-        token,
-    )
-    .await
-    .map(|output| output.stdout_text().trim().to_string())
-    .unwrap_or_default();
+    let (name, name_source) = read_config_value(root, scope, "user.name", token).await?;
+    let (email, email_source) = read_config_value(root, scope, "user.email", token).await?;
     if name.is_empty() && email.is_empty() {
         return Ok(None);
     }
@@ -223,13 +195,96 @@ async fn read_identity(
         valid: valid_identity(&name, &email),
         user_name: name,
         email,
-        source: if local {
-            GitIdentitySource::Local
-        } else {
-            GitIdentitySource::Global
-        },
+        source: [name_source, email_source]
+            .into_iter()
+            .flatten()
+            .max_by_key(identity_scope_rank)
+            .unwrap_or(GitIdentitySource::Missing),
         profile_id: None,
     }))
+}
+
+async fn read_config_value(
+    root: &Path,
+    scope: Option<&str>,
+    key: &str,
+    token: &CancellationToken,
+) -> Result<(String, Option<GitIdentitySource>), DesktopError> {
+    let mut args = vec!["config".into(), "--includes".into(), "--show-scope".into()];
+    if let Some(scope) = scope {
+        args.push(scope.into());
+    }
+    args.extend(["--get".into(), key.into()]);
+    #[cfg(not(test))]
+    let env = Vec::new();
+    #[cfg(test)]
+    let env = TEST_CONFIG_ENV.try_with(Clone::clone).unwrap_or_else(|_| {
+        vec![
+            (
+                "GIT_CONFIG_GLOBAL".into(),
+                root.join(".versiondock-test-no-global")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+        ]
+    });
+    let output = match cli::run_with_env(
+        "git",
+        &args,
+        root,
+        None,
+        cli::DEFAULT_TIMEOUT,
+        token,
+        &env,
+    )
+    .await
+    {
+        Ok(output) => output.stdout_text(),
+        Err(error)
+            if error.exit_code == Some(1)
+                && error
+                    .stderr
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty()) =>
+        {
+            return Ok((String::new(), None))
+        }
+        Err(error) => return Err(error),
+    };
+    let (scope, value) = output.split_once('\t').ok_or_else(|| {
+        DesktopError::new(
+            "GIT_IDENTITY_OUTPUT_INVALID",
+            "Could not parse Git identity configuration",
+            true,
+        )
+    })?;
+    let source = match scope.trim() {
+        "local" => GitIdentitySource::Local,
+        "worktree" => GitIdentitySource::Worktree,
+        "global" => GitIdentitySource::Global,
+        "system" => GitIdentitySource::System,
+        "command" => GitIdentitySource::Environment,
+        _ => {
+            return Err(DesktopError::new(
+                "GIT_IDENTITY_OUTPUT_INVALID",
+                "Unknown Git configuration scope",
+                true,
+            ))
+        }
+    };
+    Ok((value.trim().to_string(), Some(source)))
+}
+
+fn identity_scope_rank(source: &GitIdentitySource) -> u8 {
+    match source {
+        GitIdentitySource::Missing => 0,
+        GitIdentitySource::System => 1,
+        GitIdentitySource::Global => 2,
+        GitIdentitySource::Local => 3,
+        GitIdentitySource::Worktree => 4,
+        GitIdentitySource::Environment | GitIdentitySource::Custom => 5,
+    }
 }
 
 fn valid_identity(name: &str, email: &str) -> bool {
@@ -264,6 +319,167 @@ mod tests {
             .status()
             .unwrap()
             .success());
+    }
+
+    fn isolated_config_env(root: &Path) -> Vec<(String, String)> {
+        vec![
+            (
+                "GIT_CONFIG_GLOBAL".into(),
+                root.join("global.config").to_string_lossy().into_owned(),
+            ),
+            (
+                "GIT_CONFIG_SYSTEM".into(),
+                root.join("system.config").to_string_lossy().into_owned(),
+            ),
+            ("GIT_CONFIG_NOSYSTEM".into(), "0".into()),
+            ("GIT_CONFIG_COUNT".into(), "0".into()),
+        ]
+    }
+
+    #[tokio::test]
+    async fn effective_identity_inherits_conditional_global_email_with_local_name() {
+        let root = tempdir().unwrap();
+        let repository = root.path().join("repo");
+        std::fs::create_dir_all(&repository).unwrap();
+        run(&["init", "-b", "main"], &repository);
+        let git_dir = repository
+            .canonicalize()
+            .unwrap()
+            .join(".git")
+            .to_string_lossy()
+            .replace('\\', "/");
+        std::fs::write(
+            root.path().join("global.config"),
+            format!("[includeIf \"gitdir:{git_dir}\"]\npath = identity.config\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("identity.config"),
+            "[user]\nname = Included User\nemail = included@example.test\n",
+        )
+        .unwrap();
+        TEST_CONFIG_ENV
+            .scope(isolated_config_env(root.path()), async {
+                let token = CancellationToken::new();
+                let global = read_identity(&repository, Some("--global"), &token)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(global.user_name, "Included User");
+                assert_eq!(global.email, "included@example.test");
+                let effective = read_identity(&repository, None, &token)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(effective.valid);
+                assert!(matches!(effective.source, GitIdentitySource::Global));
+                run(
+                    &["config", "--local", "user.name", "Local User"],
+                    &repository,
+                );
+                let effective = read_identity(&repository, None, &token)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(effective.user_name, "Local User");
+                assert_eq!(effective.email, "included@example.test");
+                assert!(effective.valid);
+                assert!(matches!(effective.source, GitIdentitySource::Local));
+                let unrelated = root.path().join("unrelated");
+                std::fs::create_dir_all(&unrelated).unwrap();
+                run(&["init", "-b", "main"], &unrelated);
+                assert!(read_identity(&unrelated, None, &token)
+                    .await
+                    .unwrap()
+                    .is_none());
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn effective_identity_reads_system_worktree_and_environment_scopes() {
+        let root = tempdir().unwrap();
+        run(&["init", "-b", "main"], root.path());
+        std::fs::write(
+            root.path().join("system.config"),
+            "[user]\nname = System User\nemail = system@example.test\n",
+        )
+        .unwrap();
+        let env = isolated_config_env(root.path());
+        TEST_CONFIG_ENV
+            .scope(env.clone(), async {
+                let token = CancellationToken::new();
+                let effective = read_identity(root.path(), None, &token)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(effective.user_name, "System User");
+                assert!(matches!(effective.source, GitIdentitySource::System));
+                assert!(read_identity(root.path(), Some("--global"), &token)
+                    .await
+                    .unwrap()
+                    .is_none());
+                run(
+                    &["config", "extensions.worktreeConfig", "true"],
+                    root.path(),
+                );
+                run(
+                    &["config", "--worktree", "user.name", "Worktree User"],
+                    root.path(),
+                );
+                let effective = read_identity(root.path(), None, &token)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(effective.user_name, "Worktree User");
+                assert_eq!(effective.email, "system@example.test");
+                assert!(matches!(effective.source, GitIdentitySource::Worktree));
+            })
+            .await;
+        let mut env = env;
+        env.extend([
+            ("GIT_CONFIG_COUNT".into(), "1".into()),
+            ("GIT_CONFIG_KEY_0".into(), "user.name".into()),
+            ("GIT_CONFIG_VALUE_0".into(), "Environment User".into()),
+        ]);
+        TEST_CONFIG_ENV
+            .scope(env, async {
+                let effective = read_identity(root.path(), None, &CancellationToken::new())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(effective.user_name, "Environment User");
+                assert!(matches!(effective.source, GitIdentitySource::Environment));
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn identity_read_reports_malformed_config_and_cancellation_instead_of_missing() {
+        let root = tempdir().unwrap();
+        run(&["init", "-b", "main"], root.path());
+        std::fs::write(root.path().join("global.config"), "[invalid config\n").unwrap();
+        TEST_CONFIG_ENV
+            .scope(isolated_config_env(root.path()), async {
+                let error = read_identity(root.path(), None, &CancellationToken::new())
+                    .await
+                    .unwrap_err();
+                assert!(error
+                    .stderr
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("bad config"));
+                let token = CancellationToken::new();
+                token.cancel();
+                assert_eq!(
+                    read_identity(root.path(), None, &token)
+                        .await
+                        .unwrap_err()
+                        .code,
+                    "REQUEST_CANCELLED"
+                );
+            })
+            .await;
     }
 
     #[tokio::test]
@@ -486,6 +702,7 @@ mod tests {
     #[tokio::test]
     async fn legacy_selection_and_concurrent_profile_writes_are_preserved() {
         let config = tempdir().unwrap();
+        run(&["init", "-b", "main"], config.path());
         let token = CancellationToken::new();
         let profile = GitProfile {
             id: "legacy".into(),

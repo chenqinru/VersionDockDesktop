@@ -136,6 +136,12 @@ function GitIdentity({
         return t('from ~/.gitconfig');
       case 'custom':
         return t('Custom Profile');
+      case 'system':
+        return t('System Git configuration');
+      case 'worktree':
+        return t('Worktree Git configuration');
+      case 'environment':
+        return t('Environment Git configuration');
       default:
         return source;
     }
