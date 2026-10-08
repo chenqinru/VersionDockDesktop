@@ -19,6 +19,9 @@ for (const [platform, window] of [['base', mainWindow], ['Windows', windowsMain]
   if (window?.title !== base.productName) {
     throw new Error(`${platform} main window must use the product name as its native title for system window listings.`);
   }
+  if (window.visible !== false || !window.backgroundColor) {
+    throw new Error(`${platform} main window must start hidden with a background color until the themed frontend is ready.`);
+  }
 }
 
 if (!mainWindow || mainWindow.decorations !== true) {

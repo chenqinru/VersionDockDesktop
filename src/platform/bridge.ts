@@ -262,6 +262,21 @@ export class TauriBridge implements VersionDockBridge {
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
     show: async () => {
       const currentWindow = (await import('@tauri-apps/api/window')).getCurrentWindow();
+      const background = getComputedStyle(document.documentElement).getPropertyValue('--versiondock-bg').trim();
+      if (background) {
+        try {
+          if (this.currentPlatform === 'macos') {
+            // WKWebView does not support changing its native background at runtime.
+            await currentWindow.setBackgroundColor(background);
+          } else {
+            // Match both the window and webview to the committed theme.
+            const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+            await getCurrentWebviewWindow().setBackgroundColor(background);
+          }
+        } catch (error) {
+          console.warn('Unable to set startup background', error);
+        }
+      }
       await currentWindow.show();
       await currentWindow.setFocus();
     },

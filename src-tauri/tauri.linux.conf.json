@@ -11,6 +11,8 @@
         "minHeight": 480,
         "decorations": false,
         "transparent": false,
+        "visible": false,
+        "backgroundColor": "#121314",
         "resizable": true,
         "center": true,
         "dragDropEnabled": true

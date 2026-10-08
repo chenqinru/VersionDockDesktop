@@ -31,6 +31,7 @@ import { OutputPanel } from './components/OutputPanel/OutputPanel';
 import { choiceDialog } from './components/dialogService';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './components/RepositoryCheckoutDialog';
 import { startupTransferTab } from './windowing/startupTabTransfer';
+import { useStartupWindowReveal } from './windowing/useStartupWindowReveal';
 
 const UI_FONT_SIZE = {
   minimum: { pixels: '11px', scale: '0.8461538462' },
@@ -100,12 +101,9 @@ export function App() {
   const checkoutTarget = splitCheckoutTarget(snapshot?.workspace.paths[0] ?? '');
   const resizeCommit = useResizable(commitWidth, 280, 620, (value) => setPanelSize('commit', value));
 
-  useEffect(() => {
-    if (!startupTab) return;
-    // The first render already contains the transferred tab. Repository loading
-    // continues independently of revealing the native window.
-    void bridge.window.show().catch((error) => console.warn('Unable to show transferred window', error));
-  }, [bridge, startupTab]);
+  // Reveal the window after preferences load, without waiting for repository scans.
+  // Transfers retain their immediate tab/loading view on every platform.
+  useStartupWindowReveal(bridge, Boolean(bootstrap) || ready, Boolean(startupTab));
 
   useEffect(() => {
     if (!ready || bootstrap?.state.settings?.autoCheckUpdates === false) return;
@@ -142,7 +140,7 @@ export function App() {
     document.documentElement.dataset.density = layoutDensity;
   }, [layoutDensity]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
     const update = () => applyTheme(resolveTheme(themePreference, media.matches));
     update(); media.addEventListener('change', update); return () => media.removeEventListener('change', update);

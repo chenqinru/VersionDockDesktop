@@ -1949,10 +1949,11 @@ async fn dispatch(
                 )
                 .inner_size(width.unwrap_or(880.0), height.unwrap_or(540.0))
                 .min_inner_size(800.0, 480.0)
-                // The frontend reveals a transfer after rendering its initial tab,
-                // without waiting for the workspace scan and repository panels.
-                .visible(transfer.is_none())
-                .focused(transfer.is_none())
+                // The frontend reveals the themed shell before repository loading
+                // finishes. Transfers can immediately show their initial tab.
+                .visible(false)
+                .focused(false)
+                .background_color(tauri::window::Color(18, 19, 20, 255))
                 .resizable(true);
 
             #[cfg(target_os = "macos")]
@@ -1976,7 +1977,7 @@ async fn dispatch(
             if let Some(transfer) = &transfer {
                 state.bind_tab_session(transfer, &label)?;
             }
-            let window = builder.build().map_err(|err| {
+            let _window = builder.build().map_err(|err| {
                 DesktopError::new(
                     "WINDOW_CREATE_FAILED",
                     format!("Failed to create window: {err}"),
@@ -1987,13 +1988,8 @@ async fn dispatch(
             #[cfg(target_os = "windows")]
             {
                 use tauri_plugin_window_controls::WindowControlsExt;
-                let _ = window.set_title_bar_height(38);
-                let _ = window.set_title_bar_overlay(true);
-            }
-
-            if transfer.is_none() {
-                let _ = window.show();
-                let _ = window.set_focus();
+                let _ = _window.set_title_bar_height(38);
+                let _ = _window.set_title_bar_overlay(true);
             }
 
             json(label)

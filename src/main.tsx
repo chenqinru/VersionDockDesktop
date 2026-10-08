@@ -40,6 +40,9 @@ async function start() {
 void start().catch((error) => {
   console.error('VersionDock Desktop startup failed', error);
   document.body.dataset.startupError = error instanceof Error ? error.message : String(error);
+  // A failed initialization must still reveal the shell and its error message.
+  useAppStore.setState({ ready: true });
+  useAppStore.getState().addNotification({ type: 'error', title: 'Application operation failed', message: { raw: document.body.dataset.startupError } });
 });
 
 window.addEventListener('beforeunload', () => {
