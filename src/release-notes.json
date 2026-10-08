@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.11",
+    "date": "2026-10-08",
+    "highlights": {
+      "zh-CN": [
+        "新增系统托盘快捷入口，可恢复窗口、切换已打开项目和退出；支持关闭窗口后保留项目会话，并可在设置中调整托盘行为。",
+        "改善安全存储凭据缓存，读取失败后可重试访问，减少多个窗口重复请求凭据授权的问题。",
+        "完善提交和更新详情的加载、错误及重试显示，文件加载时保留提交摘要，并按自然顺序排列版本标签。",
+        "修复同步后已完成仓库的勾选状态清理，保留仍需推送的仓库选择，并修正历史和分支比较中的全部作者筛选状态。",
+        "AI 内置提示词正确跟随中文系统语言，同时保留用户明确选择的语言和自定义提示词。",
+        "默认使用自动显示滚动条，简化标签拖拽预览并移除分离徽标；Linux 在可用时优先使用 XWayland，改善预览定位。"
+      ],
+      "en": [
+        "Add system tray shortcuts to restore windows, switch between open projects and quit, with settings to keep project sessions running when windows are closed and control tray behavior.",
+        "Improve secure-storage credential caching and allow retrying failed access, reducing repeated authorization requests across multiple windows.",
+        "Improve loading, error and retry states in commit and update details, keep commit summaries visible while files load, and sort version tags naturally.",
+        "Clear completed repository selections after synchronization while retaining repositories that still need pushing, and fix the All authors filter state in history and branch comparisons.",
+        "Make built-in AI prompts follow Chinese system locales correctly while preserving explicitly selected languages and custom prompts.",
+        "Use automatically displayed scrollbars by default, simplify tab drag previews and remove the detachment badge, and prefer XWayland when available on Linux for better preview positioning."
+      ]
+    }
+  },
+  {
     "version": "0.1.10",
     "date": "2026-10-08",
     "highlights": {
