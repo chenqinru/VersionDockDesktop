@@ -4407,7 +4407,6 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({
           selectedCommitDetails: details,
           selectedCommit: primaryKey ? details[primaryKey] : undefined,
-          selectedCommitLoading: {},
         });
         if (primary?.parents.length && primary.parents.length >= 2) void get().loadMergeCommits(primary);
       }
@@ -4452,7 +4451,6 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({
           selectedCommitDetails: details,
           selectedCommit: primaryKey ? details[primaryKey] : undefined,
-          selectedCommitLoading: {},
         });
         if (primary && primary.parents.length >= 2) void get().loadMergeCommits(primary);
       }

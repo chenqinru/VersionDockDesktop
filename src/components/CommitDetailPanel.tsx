@@ -1281,18 +1281,25 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
 
   const hasAnyDetail = Boolean(detail) || selectedCommits.some((c) => Boolean(selectedDetails[commitKey(c.repoId, c.hash)]));
 
-  if (!hasAnyDetail && !loading) {
-    const errorMsg = (!isMultiSelection && singleKey ? selectedCommitError[singleKey] : '') || t('Failed to load commit details');
+  const detailError = selectedCommits.map((commit) => selectedCommitError[commitKey(commit.repoId, commit.hash)]).find(Boolean);
+  if (!hasAnyDetail && !loading && detailError) {
     return (
       <aside className="commit-detail empty-detail">
         <Codicon name="error" />
-        <span>{errorMsg}</span>
+        <span>{isMultiSelection ? t('Failed to load commit details') : detailError}</span>
         <button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
           <Codicon name="refresh" />
           <span>{t('Retry')}</span>
         </button>
       </aside>
     );
+  }
+
+  if (!hasAnyDetail) {
+    return <aside className="commit-detail empty-detail" role="status">
+      <Codicon name="loading codicon-modifier-spin" />
+      <span>{t('Loading...')}</span>
+    </aside>;
   }
 
   return (

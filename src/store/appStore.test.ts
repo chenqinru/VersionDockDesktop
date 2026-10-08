@@ -39,6 +39,34 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
+  it.each(['select', 'reload'] as const)('keeps an overlapping detail request loading when the earlier %s request is replaced by a hover preview', async (action) => {
+    const commit: CommitNode = { repoId: 'repo', hash: 'pending-detail', shortHash: 'pending', parents: [], author: 'Tester', email: '', authorDate: '', committerDate: '', message: 'Pending detail', refs: [] };
+    const detail: CommitDetail = { commit, fullMessage: commit.message, files: [], branches: { local: [], remote: [], tags: [] } };
+    const pendingDetail = deferred<CommitDetail>();
+    let count = 0;
+    const bridge = new MockBridge((command, options) => {
+      if (command.type !== 'commitDetail') return [];
+      count += 1;
+      if (count > 1) return pendingDetail.promise;
+      return new Promise<CommitDetail>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('Operation aborted', 'AbortError')), { once: true }));
+    });
+    const current = snapshot('workspace', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, selectedCommits: action === 'reload' ? [commit] : [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, selectedPrimaryKey: commitKey(commit.repoId, commit.hash) });
+    const selected = action === 'select' ? useAppStore.getState().selectCommit(commit) : useAppStore.getState().reloadSelectedCommits();
+    await vi.waitFor(() => expect(count).toBe(1));
+    const hovered = useAppStore.getState().loadCommitDetail(commit);
+    await selected;
+    const key = commitKey(commit.repoId, commit.hash);
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBe(true);
+    expect(useAppStore.getState().selectedCommitError[key]).toBeFalsy();
+    pendingDetail.resolve(detail);
+    await hovered;
+    expect(useAppStore.getState().selectedCommitDetails[key]).toEqual(detail);
+    expect(useAppStore.getState().selectedCommitLoading[key]).toBeUndefined();
+    expect(useAppStore.getState().notifications).toEqual([]);
+  });
+
   const updatedCommit = (repoId: string, hash: string): CommitNode => ({ repoId, hash, shortHash: hash, parents: [], author: 'Tester', email: 'test@example.test', authorDate: '2026-10-08T10:00:00Z', committerDate: '2026-10-08T10:00:00Z', message: `Update ${hash}`, refs: [] });
   const updateResult = (repoId: string, commits: CommitNode[]): RepositoryUpdateResult => ({
     repoId, beforeRevision: 'before', afterRevision: 'after', beforeStatus: '', afterStatus: '', summaryError: null,

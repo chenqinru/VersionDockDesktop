@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommitDetailPanel } from './CommitDetailPanel';
 import { DialogHost } from './DialogHost';
@@ -90,6 +90,7 @@ afterEach(() => {
     selectedCommits: [],
     selectedCommitDetails: {},
     selectedCommitLoading: {},
+    selectedCommitError: {},
     mergeParentFiles: {},
     mergeParentFilesLoading: {},
     mergeParentFilesError: {},
@@ -135,6 +136,22 @@ describe('CommitDetailPanel merge commits', () => {
     fireEvent.click(screen.getByRole('button', { name: '+1 more' }));
     expect(screen.getByText('v1.0.0')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
+  });
+
+  it('shows loading instead of a failure before detail data arrives and renders genuine failures with retry', () => {
+    const key = commitKey(directoryCommit.repoId, directoryCommit.hash);
+    useAppStore.setState({ snapshot, selectedCommit: undefined, selectedCommits: [directoryCommit], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {} });
+    render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading...');
+    expect(screen.queryByText('Failed to load commit details')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ selectedCommitLoading: { [key]: true } }));
+    expect(screen.getByRole('status')).toHaveTextContent('Loading...');
+    act(() => useAppStore.setState({ selectedCommit: directoryDetail, selectedCommitDetails: { [key]: directoryDetail }, selectedCommitLoading: {} }));
+    expect(screen.getByText('alpha.ts')).toBeInTheDocument();
+    act(() => useAppStore.setState({ selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitError: { [key]: 'Cannot read this commit' } }));
+    expect(screen.getByText('Cannot read this commit')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toHaveClass('detail-retry-button');
   });
 
   it('keeps the selected detail visible while an unrelated hover preview loads', () => {
@@ -1204,7 +1221,10 @@ describe('CommitDetailPanel merge commits', () => {
       selectedCommits: [mergeCommit, directoryCommit],
       selectedCommitDetails: {},
       selectedCommitLoading: {},
-      selectedCommitError: {},
+      selectedCommitError: {
+        [commitKey(mergeCommit.repoId, mergeCommit.hash)]: 'Cannot read merge commit',
+        [commitKey(directoryCommit.repoId, directoryCommit.hash)]: 'Cannot read directory commit',
+      },
       reloadSelectedCommits,
     });
 
