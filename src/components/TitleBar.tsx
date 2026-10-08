@@ -488,7 +488,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
         tabName: tab.name,
         tabWidth,
         paths: tab.paths,
-      }, drag.lastPoint, isLightTheme(getEffectiveTheme()) ? 'light' : 'dark');
+      }, drag.lastPoint, isLightTheme(getEffectiveTheme()) ? 'light' : 'dark', platform !== 'macos');
     };
     // No drag mode is selected until enumeration finishes, even for a fast gesture.
     const modeReady = singleTabWindow
@@ -983,6 +983,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
             className="titlebar-tab-icon"
           />
           <span className="titlebar-tab-title">{tabDragPreview.tabName}</span>
+          {platform !== 'macos' && <span className="tab-detach-badge" aria-hidden="true" />}
           <span className="titlebar-tab-ghost-close"><Codicon name="close" /></span>
         </div>
       )}

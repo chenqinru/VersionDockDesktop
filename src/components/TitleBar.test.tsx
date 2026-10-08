@@ -49,7 +49,9 @@ describe('TitleBar tab dragging', () => {
     }
   });
 
-  it('avoids native HTML dragging and only uses the copy cursor after the detach threshold with multiple tabs', () => {
+  it.each(['macos', 'windows', 'linux'] as const)('shows the detach preview after the threshold on %s and supplies a badge when the system does not', (platform) => {
+    const platformBridge = new MockBridge(() => []);
+    vi.spyOn(platformBridge, 'platform').mockReturnValue(platform);
     Object.defineProperties(window, {
       screenX: { configurable: true, value: 100 },
       screenY: { configurable: true, value: 80 },
@@ -57,7 +59,7 @@ describe('TitleBar tab dragging', () => {
       outerHeight: { configurable: true, value: 800 },
     });
     useAppStore.setState({ tabs: [workspace, { ...workspace, id: 'other', paths: ['/tmp/other'] }], activeTabId: workspace.id, });
-    render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+    render(<BridgeContext.Provider value={platformBridge}><TitleBar /></BridgeContext.Provider>);
 
     const tab = screen.getAllByRole('tab')[0];
     Object.assign(tab, {
@@ -76,6 +78,7 @@ describe('TitleBar tab dragging', () => {
     fireEvent.pointerMove(window, { pointerId: 1, screenX: 420, screenY: 180, clientX: 320, clientY: 100 });
     expect(document.body).toHaveClass('is-detaching-tab');
     expect(document.querySelector('.titlebar-tab-drag-preview')).toHaveClass('detaching');
+    expect(Boolean(document.querySelector('.tab-detach-badge'))).toBe(platform !== 'macos');
 
     fireEvent.pointerCancel(window, { pointerId: 1, screenX: 420, screenY: 180, clientX: 320, clientY: 100 });
     expect(document.body).not.toHaveClass('is-dragging-tab', 'is-detaching-tab');

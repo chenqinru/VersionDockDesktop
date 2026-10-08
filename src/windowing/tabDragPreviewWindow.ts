@@ -23,6 +23,7 @@ export class TabDragPreviewWindow {
     drag: Omit<TabDragPayload, 'screenX' | 'screenY'>,
     point: ScreenPoint,
     theme: 'light' | 'dark',
+    showDetachBadge = false,
   ): Promise<void> {
     this.active = false;
     this.ready = false;
@@ -63,6 +64,7 @@ export class TabDragPreviewWindow {
         color,
         readyEvent,
         source: drag.sourceWindowLabel,
+        detachBadge: String(showDetachBadge),
       });
       const preview = new WebviewWindow(label, {
         url: `tab-drag-preview.html?${query}`,

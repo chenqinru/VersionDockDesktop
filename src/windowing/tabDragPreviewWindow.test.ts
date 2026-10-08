@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TabDragPreviewWindow } from './tabDragPreviewWindow';
 
 const mocks = vi.hoisted(() => ({
-  instances: [] as Array<{ label: string; show: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn>; setIgnoreCursorEvents: ReturnType<typeof vi.fn> }>,
+  instances: [] as Array<{ label: string; options: { url: string }; show: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn>; setIgnoreCursorEvents: ReturnType<typeof vi.fn> }>,
   invoke: vi.fn(),
   ready: undefined as (() => void) | undefined,
   unlisten: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
     close = vi.fn(async () => undefined);
     // This is precisely the unsafe Tao API on a hidden Linux window.
     setIgnoreCursorEvents = vi.fn(() => { throw new Error('Unrealized GTK surface'); });
-    constructor(public label: string) { mocks.instances.push(this); }
+    constructor(public label: string, public options: { url: string }) { mocks.instances.push(this); }
     async once(event: string, ready: () => void) {
       if (event === 'tauri://created') queueMicrotask(ready);
     }
@@ -38,6 +38,18 @@ afterEach(() => {
 });
 
 describe('native tab preview preparation', () => {
+  it.each([true, false])('configures the native preview detach badge as %s without showing it during prewarming', async (showDetachBadge) => {
+    const preview = new TabDragPreviewWindow();
+    const pending = preview.prepare(drag, { screenX: 300, screenY: 80 }, 'dark', showDetachBadge);
+    await vi.waitFor(() => expect(mocks.instances).toHaveLength(1));
+    const native = mocks.instances[0];
+    expect(new URL(native.options.url, 'https://preview.test').searchParams.get('detachBadge')).toBe(String(showDetachBadge));
+    mocks.ready?.();
+    await pending;
+    expect(native.show).not.toHaveBeenCalled();
+    preview.hide();
+  });
+
   it('prepares input on the backend before revealing an activated preview', async () => {
     let prepared!: () => void;
     mocks.invoke.mockImplementation(() => new Promise<void>((resolve) => { prepared = resolve; }));

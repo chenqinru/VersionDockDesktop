@@ -6,6 +6,7 @@ const initials = params.get('initials');
 const color = params.get('color');
 
 document.body.classList.toggle('light', theme === 'light');
+document.body.classList.toggle('show-detach-badge', params.get('detachBadge') === 'true');
 const titleEl = document.querySelector('span.titlebar-tab-title');
 if (titleEl) {
   titleEl.textContent = name;
