@@ -37,6 +37,13 @@ pub async fn with_log_context<F: std::future::Future>(context: LogContext, futur
     LOG_CONTEXT.scope(context, future).await
 }
 
+pub(crate) fn current_log_context() -> Option<LogContext> {
+    LOG_CONTEXT
+        .try_with(Clone::clone)
+        .ok()
+        .or_else(crate::state::current_log_context)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +74,7 @@ pub enum LogChannel {
     Git,
     Svn,
     Core,
+    Ai,
     Ui,
 }
 
@@ -76,6 +84,7 @@ impl LogChannel {
             Self::Git => "GIT",
             Self::Svn => "SVN",
             Self::Core => "CORE",
+            Self::Ai => "AI",
             Self::Ui => "UI",
         }
     }
@@ -121,6 +130,17 @@ pub struct LogManager {
 
 static GLOBAL_LOGGER: std::sync::OnceLock<Arc<LogManager>> = std::sync::OnceLock::new();
 
+#[cfg(test)]
+tokio::task_local! { static TEST_LOGGER: Arc<LogManager>; }
+
+#[cfg(test)]
+pub(crate) async fn with_test_logger<F: std::future::Future>(
+    logger: Arc<LogManager>,
+    future: F,
+) -> F::Output {
+    TEST_LOGGER.scope(logger, future).await
+}
+
 pub fn init_global_logger(log_dir: PathBuf) -> Arc<LogManager> {
     GLOBAL_LOGGER
         .get_or_init(|| Arc::new(LogManager::new(log_dir)))
@@ -128,6 +148,10 @@ pub fn init_global_logger(log_dir: PathBuf) -> Arc<LogManager> {
 }
 
 pub fn get_logger() -> Option<Arc<LogManager>> {
+    #[cfg(test)]
+    if let Ok(logger) = TEST_LOGGER.try_with(Arc::clone) {
+        return Some(logger);
+    }
     GLOBAL_LOGGER.get().cloned()
 }
 

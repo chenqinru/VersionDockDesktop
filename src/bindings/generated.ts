@@ -1135,7 +1135,7 @@ export type LineRange = {
 	end: number,
 };
 
-export type LogChannel = "git" | "svn" | "core" | "ui";
+export type LogChannel = "git" | "svn" | "core" | "ai" | "ui";
 
 export type LogContext = {
 	workspaceId: string | null,

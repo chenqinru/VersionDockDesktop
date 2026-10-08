@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { AiCandidate } from '../bindings/generated';
 import { aiRequest, useAiStore } from '../ai/aiStore';
 import { useAppStore } from '../store/appStore';
@@ -44,7 +44,16 @@ export function AiCommitActions({ candidates, busy }: { candidates: AiCandidate[
 export function AiCommitGenerator({ candidates, busy }: { candidates: AiCandidate[]; busy: boolean }) {
   const { t } = useI18n();
   const run = useAiStore((s) => s.runs['commit-message']);
-  useEffect(() => () => useAiStore.getState().cancel('commit-message'), []);
+  const workspaceId = useAppStore((s) => s.snapshot?.workspace.id);
+  const scope = JSON.stringify([workspaceId, candidates]);
+  const currentScope = useRef(scope);
+  useLayoutEffect(() => {
+    currentScope.current = scope;
+    return () => {
+      currentScope.current = '';
+      useAiStore.getState().cancel('commit-message');
+    };
+  }, [scope]);
   const generate = async () => {
     const ai = useAiStore.getState();
     if (run?.running) {
@@ -57,10 +66,11 @@ export function AiCommitGenerator({ candidates, busy }: { candidates: AiCandidat
     state.setCommitMessage('');
     const request = aiRequest('commit-message', { candidates, userPrompt: draft });
     const result = await ai.generate('commit-message', request, (text) => {
-      if (useAppStore.getState().snapshot?.workspace.id === workspace) useAppStore.getState().setCommitMessage(text);
+      if (currentScope.current === scope && useAppStore.getState().snapshot?.workspace.id === workspace) useAppStore.getState().setCommitMessage(text);
     });
     if (
       !result &&
+      currentScope.current === scope &&
       useAiStore.getState().runs['commit-message']?.id === request.requestId &&
       useAppStore.getState().snapshot?.workspace.id === workspace
     )

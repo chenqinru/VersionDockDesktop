@@ -59,10 +59,7 @@ pub async fn prompt_root(state: &AppState, request: &AiRequest) -> Option<std::p
         None
     }
 }
-pub fn tokens(text: &str) -> usize {
-    let ascii = text.bytes().filter(u8::is_ascii).count();
-    ascii.div_ceil(4) + text.chars().filter(|c| !c.is_ascii()).count() * 2
-}
+pub use super::budget::tokens;
 fn prefix_chars(text: &str, budget: usize) -> (&str, bool) {
     let end = text
         .char_indices()

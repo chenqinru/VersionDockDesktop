@@ -139,7 +139,14 @@ pub async fn runtime(config: &AiConfig) -> AiRuntime {
             "--include-partial-messages",
             "--add-dir",
         ],
-        "codex" => &["--ephemeral", "--json", "--sandbox", "--output-schema"],
+        "codex" => &[
+            "--ephemeral",
+            "--json",
+            "--sandbox",
+            "--output-schema",
+            "--cd",
+            "--skip-git-repo-check",
+        ],
         "antigravity" => &[
             "--input-format",
             "--output-format",
@@ -508,6 +515,12 @@ pub async fn generate(
     let mut child = command
         .spawn()
         .map_err(|_| error("AI_CLI_START_FAILED", "Unable to start Agent CLI"))?;
+    super::logging::record(
+        crate::logger::LogLevel::Info,
+        "AI CLI process started",
+        json!({"provider":provider,"executable":executable,"repositoryCount":roots.len(),"structuredOutput":schema.is_some(),"timeoutSeconds":config.cli_timeout_seconds}),
+        None,
+    );
     #[cfg(unix)]
     let _group = GroupGuard(child.id().unwrap_or_default() as i32);
     if let Some(mut pipe) = child.stdin.take() {
@@ -585,12 +598,13 @@ pub async fn generate(
             text.push_str(&chunk);
             delta(&chunk);
         }
-        if let Some(result) = final_text(&v) {
+        if let Some(result) = final_text(&v).filter(|_| provider == "claude" || provider == "antigravity") {
             final_result = Some(result);
         }
     }
     let status = tokio::select! {_=token.cancelled()=>return Err(error("CANCELLED","AI request cancelled")),_=&mut deadline=>return Err(error("AI_CLI_TIMEOUT","Agent CLI timed out")),r=child.wait()=>r.map_err(|_|error("AI_CLI_FAILED","Unable to finish Agent CLI"))?};
     let stderr_bytes = (&mut stderr_task).await.unwrap_or_default();
+    super::logging::record(if status.success() && !failed {crate::logger::LogLevel::Info} else {crate::logger::LogLevel::Error}, "AI CLI process exited", json!({"provider":provider,"exitCode":status.code(),"failedEvent":failed,"outputTruncated":truncated,"stdoutBytes":total,"stderrBytes":stderr_bytes.len()}), None);
     let diagnostic = String::from_utf8_lossy(&stderr_bytes).to_lowercase();
     retry_conversation |= resumed_conversation && !status.success() && diagnostic.contains("conversation") && ["not found","missing","invalid"].iter().any(|term|diagnostic.contains(term));
     if truncated { return Err(error("AI_OUTPUT_TRUNCATED", "Agent CLI output was truncated")); }
@@ -665,6 +679,12 @@ pub async fn generate(
         }
     }
     if retry_conversation && !token.is_cancelled() {
+        super::logging::record(
+            crate::logger::LogLevel::Warn,
+            "AI CLI conversation invalid; retrying with a new session",
+            json!({"provider":provider}),
+            None,
+        );
         if let Ok(mut values) = conversations().lock() {
             values.remove(cwd);
             persist("antigravity.json", &*values);
@@ -765,7 +785,16 @@ mod invocation_tests {
                 }
                 _ => json!({"type":"result","result":"fix(qa): 合成提交"}),
             };
-            let script=format!("#!/bin/sh\ncase \"$*\" in\n*--help*) echo '--print --no-session-persistence --permission-mode --tools --output-format --json-schema --include-partial-messages --ephemeral --json --sandbox --output-schema --input-format --mode --conversation --format --dir --agent --title --add-dir --max-count delete'; exit 0;;\n*--version*) echo fixture; exit 0;;\nsession\\ delete*) printf '%s' \"$*\" > '{}'; exit 0;;\nesac\nprintf '%s\\n' \"$@\" > '{}'\ncat > '{}'\nprintf '%s\\n' '{}'\n",removed.display(),args.display(),input.display(),response);
+            let response = if provider == "codex" {
+                format!(
+                    "{}\n{}",
+                    json!({"type":"item.completed","item":{"type":"agent_message","text":"first part\n"}}),
+                    response
+                )
+            } else {
+                response.to_string()
+            };
+            let script=format!("#!/bin/sh\ncase \"$*\" in\n*--help*) echo '--print --no-session-persistence --permission-mode --tools --output-format --json-schema --include-partial-messages --ephemeral --json --sandbox --output-schema --cd --skip-git-repo-check --input-format --mode --conversation --format --dir --agent --title --add-dir --max-count delete'; exit 0;;\n*--version*) echo fixture; exit 0;;\nsession\\ delete*) printf '%s' \"$*\" > '{}'; exit 0;;\nesac\nprintf '%s\\n' \"$@\" > '{}'\ncat > '{}'\nprintf '%s\\n' '{}'\n",removed.display(),args.display(),input.display(),response);
             std::fs::write(&path, script).unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             let mut config = AiConfig {
@@ -787,7 +816,14 @@ mod invocation_tests {
             )
             .await
             .unwrap();
-            assert_eq!(text, "fix(qa): 合成提交");
+            assert_eq!(
+                text,
+                if provider == "codex" {
+                    "first part\nfix(qa): 合成提交"
+                } else {
+                    "fix(qa): 合成提交"
+                }
+            );
             let actual = std::fs::read_to_string(args).unwrap();
             match provider {
                 "claude" => assert!(
@@ -818,7 +854,7 @@ mod invocation_tests {
     async fn cancellation_kills_cli_process_group() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("agent");
-        std::fs::write(&path,"#!/bin/sh\ncase \"$*\" in\n*--help*) echo '--ephemeral --json --sandbox --output-schema';exit 0;;\n*--version*) echo fixture;exit 0;;\nesac\ncat >/dev/null\nsleep 30\n").unwrap();
+        std::fs::write(&path,"#!/bin/sh\ncase \"$*\" in\n*--help*) echo '--ephemeral --json --sandbox --output-schema --cd --skip-git-repo-check';exit 0;;\n*--version*) echo fixture;exit 0;;\nesac\ncat >/dev/null\nsleep 30\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut config = AiConfig {
             execution_mode: "agent-cli".into(),

@@ -87,6 +87,18 @@ describe('OutputPanel & LogStatusBarItem', () => {
     expect(screen.getByText(/Failed to connect to remote repository/)).toBeInTheDocument();
   });
 
+  it('filters the AI channel and displays provider diagnostics for the current project', () => {
+    useAppStore.setState({logEntries:[...sampleLogs,{...sampleLogs[2],id:'ai-error',channel:'ai',message:'AI request failed',details:'HTTP 400: input must be an array',context:{workspaceId:'ai-workspace',operationId:'ai-request',repositoryId:null,workspaceName:null,repositoryName:null}}]});
+    renderWithProviders(<OutputPanel />,bridge);
+    fireEvent.click(screen.getByLabelText('Filter by channel'));
+    fireEvent.click(screen.getByRole('option',{name:'AI'}));
+    expect(useAppStore.getState().activeLogChannel).toBe('ai');
+    expect(screen.getByText('AI request failed')).toBeInTheDocument();
+    expect(screen.queryByText('git status --porcelain')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Expand details'));
+    expect(screen.getByText('HTTP 400: input must be an array')).toBeInTheDocument();
+  });
+
   it('filters logs by channel', () => {
     renderWithProviders(<OutputPanel />, bridge);
     const channelTrigger = screen.getByLabelText(/Filter by channel/i);

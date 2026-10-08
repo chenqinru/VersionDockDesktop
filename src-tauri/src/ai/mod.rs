@@ -1,13 +1,16 @@
 mod agent_cli;
+mod budget;
 mod composer;
 mod context;
 mod credentials;
 mod diff_context;
+mod logging;
 pub mod models;
 mod prompts;
 mod transport;
 mod validation;
 use crate::{
+    logger::LogLevel,
     models::{DesktopError, LanguagePreference},
     state::AppState,
     vcs,
@@ -19,6 +22,14 @@ use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
 use transport::error;
 fn emit(app: &AppHandle, id: &str, phase: &str, delta: &str) {
+    if delta.is_empty() {
+        logging::record(
+            LogLevel::Info,
+            "AI task phase",
+            json!({"phase":phase}),
+            None,
+        );
+    }
     let _ = app.emit(
         "versiondock://event",
         AiEvent {
@@ -120,12 +131,88 @@ pub async fn prepare(
     hashes: Vec<String>,
     token: &CancellationToken,
 ) -> Result<AiComposerSource, DesktopError> {
+    let started = Instant::now();
+    logging::record(
+        LogLevel::Info,
+        "AI change-unit preparation started",
+        json!({"pathCount":paths.len(),"commitCount":hashes.len(),"stagedOnly":staged}),
+        None,
+    );
+    let result = prepare_inner(state, workspace, repo_id, paths, staged, hashes, token).await;
+    match &result {
+        Ok(source) => logging::record(
+            LogLevel::Info,
+            "AI change-unit preparation completed",
+            json!({"unitCount":source.units.len()}),
+            Some(logging::elapsed(started)),
+        ),
+        Err(err) => logging::record(
+            if err.code == "CANCELLED" {
+                LogLevel::Info
+            } else {
+                LogLevel::Error
+            },
+            "AI change-unit preparation stopped",
+            json!({"errorCode":err.code}),
+            Some(logging::elapsed(started)),
+        ),
+    }
+    result
+}
+
+async fn prepare_inner(
+    state: &AppState,
+    workspace: &str,
+    repo_id: &str,
+    paths: Vec<String>,
+    staged: bool,
+    hashes: Vec<String>,
+    token: &CancellationToken,
+) -> Result<AiComposerSource, DesktopError> {
     let repo = context::repository(state, workspace, repo_id).await?;
     let lock = state.write_lock(repo_id).await;
     let _guard = tokio::select! {_=token.cancelled()=>return Err(error("CANCELLED","AI preparation cancelled")),g=lock.lock()=>g};
     composer::prepare(workspace, &repo, &paths, staged, &hashes, token).await
 }
 pub async fn apply(
+    state: &AppState,
+    workspace: &str,
+    repo_id: &str,
+    id: &str,
+    groups: Vec<AiGroup>,
+    no_verify: bool,
+    token: &CancellationToken,
+) -> Result<AiApplyResult, DesktopError> {
+    let started = Instant::now();
+    logging::record(
+        LogLevel::Info,
+        "AI commit-plan application started",
+        json!({"groupCount":groups.len()}),
+        None,
+    );
+    let result = apply_inner(state, workspace, repo_id, id, groups, no_verify, token).await;
+    match &result {
+        Ok(_) => logging::record(
+            LogLevel::Info,
+            "AI commit-plan application completed",
+            json!({}),
+            Some(logging::elapsed(started)),
+        ),
+        Err(err) => logging::record(
+            if err.code == "CANCELLED" {
+                LogLevel::Info
+            } else {
+                LogLevel::Error
+            },
+            "AI commit-plan application stopped",
+            json!({"errorCode":err.code}),
+            Some(logging::elapsed(started)),
+        ),
+    }
+    result
+}
+
+async fn apply_inner(
     state: &AppState,
     workspace: &str,
     repo_id: &str,
@@ -198,11 +285,36 @@ pub async fn generate(
     request: AiRequest,
     token: &CancellationToken,
 ) -> Result<AiResult, DesktopError> {
+    let context = request.clone();
+    logging::with_request(&context, async {
+        let start = Instant::now();
+        logging::record(LogLevel::Info, "AI task started", json!({"candidateCount":request.candidates.len(),"commitCount":request.commits.len(),"conflictCount":request.conflict_indexes.len()}), None);
+        let result = generate_inner(state, app, request, token).await;
+        match &result {
+            Ok(result) => logging::record(LogLevel::Info, "AI task completed", json!({"provider":result.provider,"model":result.model,"promptSource":result.prompt_source,"fileCount":result.file_count,"repositoryCount":result.repository_count,"inputTruncated":result.input_truncated,"outputCharCount":result.text.chars().count(),"findingCount":result.review.as_ref().map(|review|review.findings.len()),"groupCount":result.groups.len(),"resolutionCount":result.resolutions.len()}), Some(logging::elapsed(start))),
+            Err(err) => logging::record(if err.code == "CANCELLED" {LogLevel::Info} else {LogLevel::Error}, if err.code == "CANCELLED" {"AI task cancelled"} else {"AI task failed"}, json!({"errorCode":err.code,"providerDetails":err.hint}), Some(logging::elapsed(start))),
+        }
+        result
+    }).await
+}
+
+async fn generate_inner(
+    state: &AppState,
+    app: &AppHandle,
+    request: AiRequest,
+    token: &CancellationToken,
+) -> Result<AiResult, DesktopError> {
     agent_cli::initialize(&state.config_dir);
     let start = Instant::now();
     let settings = state.app.read().await.settings.clone();
     let config = settings.ai_config;
     let chinese = is_chinese(settings.language);
+    logging::record(
+        LogLevel::Info,
+        "AI execution configuration",
+        logging::config(&config),
+        None,
+    );
     emit(
         app,
         &request.request_id,
@@ -270,21 +382,31 @@ pub async fn generate(
         system.push_str("\n</commit-message-prompt>\n# Final output priority\nReturn only the Composer JSON contract. Include every input unit ID exactly once. Do not output a standalone commit message or text outside the JSON.");
     }
     let input_tokens = context::tokens(&evidence.text) + context::tokens(&system);
-    if input_tokens > config.max_input_tokens as usize {
+    if input_tokens > budget::input(config.max_input_tokens) {
         return Err(error(
             "AI_CONTEXT_TOO_LARGE",
             "Input exceeds the AI token budget. Reduce the selection or increase the input budget.",
         ));
     }
-    let estimate = match request.task {
-        AiTask::MergeConflict => input_tokens.saturating_mul(2).saturating_add(2048),
-        AiTask::CommitComposer => 4096 + source.as_ref().map_or(0, |s| s.units.len() * 160),
-        AiTask::CodeReview => 4096 + evidence.file_count as usize * 768,
-        AiTask::CommitExplanation => 2048 + evidence.file_count as usize * 384,
-        AiTask::CommitMessage => 4096,
-    };
-    let output = (estimate.min(u32::MAX as usize) as u32).clamp(1024, config.max_output_tokens);
+    let unit_ids: Vec<_> = source
+        .as_ref()
+        .map(|source| source.units.iter().map(|unit| unit.id.as_str()).collect())
+        .unwrap_or_default();
+    let output = budget::output(
+        request.task,
+        &format!("{system}\n{}", evidence.text),
+        request.commits.len(),
+        evidence.file_count as usize,
+        &unit_ids,
+        config.max_output_tokens,
+    );
     let structured = schema(request.task);
+    logging::record(
+        LogLevel::Info,
+        "AI context prepared",
+        json!({"promptSource":prompt.source,"inputTokenCount":input_tokens,"inputTokenBudget":budget::input(config.max_input_tokens),"maxOutputTokens":output,"fileCount":evidence.file_count,"repositoryCount":evidence.roots.len(),"inputTruncated":evidence.truncated,"unitCount":unit_ids.len(),"structuredOutput":structured.is_some()}),
+        None,
+    );
     let key = if config.execution_mode == "agent-cli" {
         String::new()
     } else {
@@ -301,6 +423,9 @@ pub async fn generate(
         "",
     );
     let delta = |text: &str| {
+        if request.task == AiTask::CommitComposer {
+            return;
+        }
         emit(
             app,
             &request.request_id,
@@ -312,7 +437,7 @@ pub async fn generate(
             text,
         )
     };
-    let mut text = transport::generate(
+    let mut text = transport::generate_for_task(
         &config,
         &key,
         &system,
@@ -320,6 +445,7 @@ pub async fn generate(
         &evidence.roots,
         structured.as_ref(),
         output,
+        request.task,
         token,
         &delta,
     )
@@ -342,6 +468,12 @@ pub async fn generate(
             .as_ref()
             .is_err_and(|err| err.code == "AI_JSON_INVALID")
         {
+            logging::record(
+                LogLevel::Warn,
+                "AI invalid JSON; attempting format repair",
+                json!({"responseCharCount":text.chars().count()}),
+                None,
+            );
             emit(app, &request.request_id, "repairing", "");
             let repair=format!("Repair only JSON syntax of this response. Do not invent findings, indexes, IDs, messages or replacement code. Return only the repaired JSON.\n{text}");
             text = transport::generate(
@@ -351,12 +483,35 @@ pub async fn generate(
                 &repair,
                 &evidence.roots,
                 structured.as_ref(),
-                config.max_output_tokens,
+                budget::repair(
+                    &repair,
+                    &text,
+                    if request.task == AiTask::MergeConflict {
+                        8192
+                    } else {
+                        2048
+                    },
+                    config.max_output_tokens,
+                ),
                 token,
                 &|_| {},
             )
             .await?;
             json = parse(&text);
+            logging::record(
+                if json.is_ok() {
+                    LogLevel::Info
+                } else {
+                    LogLevel::Error
+                },
+                if json.is_ok() {
+                    "AI JSON format repair completed"
+                } else {
+                    "AI JSON format repair failed"
+                },
+                json!({"responseCharCount":text.chars().count()}),
+                None,
+            );
         }
         let value = json?;
         match request.task {
@@ -510,6 +665,12 @@ async fn repair_coverage(
         .collect();
     validation::validate_groups(&groups, &assigned)?;
     emit(app, id, "repairing", "");
+    logging::record(
+        LogLevel::Warn,
+        "AI incomplete unit coverage; attempting repair",
+        json!({"missingUnitCount":missing.len(),"unitCount":units.len(),"groupCount":groups.len()}),
+        None,
+    );
     let input = json!({"existingGroups":groups,"requiredUnitIds":missing,"units":units.iter().filter(|u| missing.contains(&u.id)).map(|u| json!({"id":u.id,"filePath":u.file_path,"title":u.title})).collect::<Vec<_>>()}).to_string();
     let text = transport::generate(config,key,"Assign each requiredUnitId exactly once to the closest existing group. Do not change messages or return other IDs. Return JSON only: {\"assignments\":[{\"unitId\":\"u1\",\"groupId\":\"group-1\"}]}",&input,roots,None,output,token,&|_|{}).await?;
     let repair = validation::json_response(&text)?;
@@ -533,5 +694,11 @@ async fn repair_coverage(
         group.unit_ids.push(unit.into());
     }
     validation::validate_groups(&groups, units)?;
+    logging::record(
+        LogLevel::Info,
+        "AI unit coverage repair completed",
+        json!({"repairedUnitCount":repaired.len(),"groupCount":groups.len()}),
+        None,
+    );
     Ok(json!({"groups":groups}))
 }

@@ -14,6 +14,7 @@ const LOG_CHANNELS: Array<{ id: LogChannel | 'all'; label: string }> = [
   { id: 'all', label: 'All Channels' },
   { id: 'git', label: 'Git' },
   { id: 'svn', label: 'SVN' },
+  { id: 'ai', label: 'AI' },
   { id: 'core', label: 'Core / System' },
   { id: 'ui', label: 'UI' },
 ];

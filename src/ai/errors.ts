@@ -40,5 +40,11 @@ const messages: Record<string, string> = {
 export function aiErrorText(error: unknown): string {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
   const text = error instanceof Error ? error.message : String(error);
-  return t(messages[code] ?? text);
+  const message = t(messages[code] ?? text);
+  if (['AI_HTTP_REJECTED', 'AI_PROVIDER_ERROR'].includes(code)
+    && error && typeof error === 'object' && 'hint' in error
+    && typeof error.hint === 'string' && error.hint.trim()) {
+    return `${message}\n${t('Provider details: {0}', error.hint)}`;
+  }
+  return message;
 }
