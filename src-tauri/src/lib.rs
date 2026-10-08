@@ -16,6 +16,7 @@ mod gtk_preview;
 mod http_client;
 mod identity;
 mod interactions;
+mod language;
 #[cfg(any(target_os = "linux", test))]
 mod linux_display;
 pub mod logger;

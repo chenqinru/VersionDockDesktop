@@ -9,12 +9,7 @@ pub mod models;
 mod prompts;
 mod transport;
 mod validation;
-use crate::{
-    logger::LogLevel,
-    models::{DesktopError, LanguagePreference},
-    state::AppState,
-    vcs,
-};
+use crate::{logger::LogLevel, models::DesktopError, state::AppState, vcs};
 use models::*;
 use serde_json::{json, Value};
 use std::{collections::HashSet, time::Instant};
@@ -97,7 +92,7 @@ pub async fn prompt(
     action: String,
     text: Option<String>,
 ) -> Result<AiPrompt, DesktopError> {
-    let chinese = is_chinese(state.app.read().await.settings.language.clone());
+    let chinese = crate::language::is_chinese(&state.app.read().await.settings.language);
     let request = AiRequest {
         request_id: String::new(),
         task,
@@ -308,7 +303,7 @@ async fn generate_inner(
     let start = Instant::now();
     let settings = state.app.read().await.settings.clone();
     let config = settings.ai_config;
-    let chinese = is_chinese(settings.language);
+    let chinese = crate::language::is_chinese(&settings.language);
     logging::record(
         LogLevel::Info,
         "AI execution configuration",
@@ -604,33 +599,6 @@ async fn generate_inner(
         file_count: evidence.file_count,
         repository_count: evidence.roots.len() as u32,
     })
-}
-
-fn is_chinese(language: LanguagePreference) -> bool {
-    match language {
-        LanguagePreference::ZhCn => true,
-        LanguagePreference::En => false,
-        LanguagePreference::System => {
-            #[cfg(target_os = "macos")]
-            if let Ok(out) = std::process::Command::new("defaults")
-                .args(["read", "-g", "AppleLanguages"])
-                .output()
-            {
-                let text = String::from_utf8_lossy(&out.stdout);
-                if let Some(first) = text
-                    .lines()
-                    .map(str::trim)
-                    .find(|s| *s != "(" && !s.is_empty())
-                {
-                    return first.trim_matches('"').starts_with("zh");
-                }
-            }
-            ["LC_ALL", "LC_MESSAGES", "LANG"]
-                .iter()
-                .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
-                .is_some_and(|value| value.starts_with("zh"))
-        }
-    }
 }
 
 async fn repair_coverage(

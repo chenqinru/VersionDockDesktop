@@ -1,7 +1,8 @@
 //! Optional process-wide shortcut menu. Window closing and background work stay unchanged.
 use crate::{
+    language::is_chinese_for_locale as chinese,
     logger::{self, LogChannel, LogLevel},
-    models::{CapabilityStatus, LanguagePreference, WorkspaceDescriptor},
+    models::{CapabilityStatus, WorkspaceDescriptor},
     state::AppState,
     windowing,
 };
@@ -313,17 +314,6 @@ fn project_entries(
     entries
 }
 
-fn chinese(preference: &LanguagePreference, locale: Option<&str>) -> bool {
-    match preference {
-        LanguagePreference::ZhCn => true,
-        LanguagePreference::En => false,
-        LanguagePreference::System => locale
-            .unwrap_or("en")
-            .to_ascii_lowercase()
-            .starts_with("zh"),
-    }
-}
-
 fn menu(app: &AppHandle, entries: &[ProjectEntry], zh: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let open = MenuItem::with_id(
         app,
@@ -588,6 +578,7 @@ async fn open_window(app: &AppHandle) -> Result<(), crate::models::DesktopError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::LanguagePreference;
     fn windows(values: &[(&str, &[&str])]) -> HashMap<String, Vec<Vec<String>>> {
         values
             .iter()

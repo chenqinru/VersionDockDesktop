@@ -127,6 +127,62 @@ pub fn edit(
 mod tests {
     use super::*;
     #[test]
+    fn native_chinese_locale_selects_chinese_defaults_and_reset_preserves_other_scopes() {
+        let config = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let chinese = crate::language::is_chinese_for_locale(
+            &crate::models::LanguagePreference::System,
+            Some("zh-CN"),
+        );
+        for task in [
+            AiTask::CommitMessage,
+            AiTask::CommitExplanation,
+            AiTask::CodeReview,
+            AiTask::CommitComposer,
+            AiTask::MergeConflict,
+        ] {
+            let prompt = edit(
+                config.path(),
+                Some(workspace.path()),
+                task,
+                chinese,
+                "global",
+                "read",
+                None,
+            )
+            .unwrap();
+            assert_eq!(prompt.text, builtin(task, true));
+            assert_ne!(prompt.text, builtin(task, false));
+        }
+        let task = AiTask::CommitMessage;
+        edit(
+            config.path(),
+            Some(workspace.path()),
+            task,
+            chinese,
+            "global",
+            "save",
+            Some("Custom English prompt".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve(config.path(), Some(workspace.path()), task, chinese).text,
+            "Custom English prompt"
+        );
+        let reset = edit(
+            config.path(),
+            Some(workspace.path()),
+            task,
+            chinese,
+            "global",
+            "reset",
+            None,
+        )
+        .unwrap();
+        assert_eq!(reset.text, builtin(task, true));
+        assert!(!global_path(config.path(), task).exists());
+    }
+    #[test]
     fn workspace_global_builtin_priority_and_scoped_reset() {
         let config = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
