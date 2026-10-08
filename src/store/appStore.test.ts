@@ -39,6 +39,74 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
+  it('still reports a repository lookup failure for the current commit detail request', async () => {
+    const current = snapshot('current', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    const commit: CommitNode = { repoId: 'repo', hash: 'hash', shortHash: 'hash', parents: [], author: 'Alice', email: '', authorDate: '', committerDate: '', message: 'Commit', refs: [] };
+    const error = new BridgeError({ code: 'REPOSITORY_NOT_FOUND', message: 'Repository is no longer part of the workspace', workspaceId: 'current', repositoryId: 'repo', recoverable: true, command: null, stderr: null, exitCode: null });
+    const bridge = new MockBridge(() => { throw error; });
+    useAppStore.setState({ bridge, snapshot: current });
+    await expect(useAppStore.getState().loadCommitDetail(commit)).rejects.toBe(error);
+    expect(useAppStore.getState().selectedCommitError[commitKey('repo', 'hash')]).toBe(error.message);
+    expect(useAppStore.getState().notifications).toEqual([expect.objectContaining({ type: 'error', workspaceId: 'current', message: { raw: error.message } })]);
+  });
+
+  it('does not replace a newly opened workspace when an earlier tab registration finishes late', async () => {
+    const first = snapshot('first', 1);
+    const second = snapshot('second', 2);
+    const registration = deferred<void>();
+    const bridge = new MockBridge((command) => command.type === 'workspaceOpen'
+      ? command.payload.paths[0] === '/tmp/first' ? first : second
+      : []);
+    const syncTabs = vi.spyOn(bridge, 'syncWindowTabs').mockImplementation(async (_paths, id) => {
+      if (id === 'first') await registration.promise;
+    });
+    useAppStore.setState({ bridge, bootstrap });
+    const openingFirst = useAppStore.getState().openWorkspace(['/tmp/first']);
+    await vi.waitFor(() => expect(syncTabs).toHaveBeenCalledWith([['/tmp/first']], 'first'));
+    await useAppStore.getState().openWorkspace(['/tmp/second']);
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('second');
+    registration.resolve();
+    expect(await openingFirst).toBe(true);
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('second');
+    expect(useAppStore.getState().activeTabId).toBe('second');
+  });
+
+  it.each(['select', 'reload'] as const)('stops queued commit detail %s requests after opening another workspace', async (action) => {
+    const first = snapshot('first', 1);
+    first.repositories = [repository('repo-first', 'First')];
+    const second = snapshot('second', 2);
+    const commits: CommitNode[] = Array.from({ length: 5 }, (_, index) => ({
+      repoId: 'repo-first', hash: `hash-${index}`, shortHash: `hash-${index}`, parents: [],
+      author: 'Alice', email: 'alice@example.com', authorDate: '', committerDate: '', message: `${index}`, refs: [],
+    }));
+    const gates = commits.map(() => deferred<CommitDetail>());
+    const requests: BridgeCommand[] = [];
+    const bridge = new MockBridge((command) => {
+      if (command.type === 'workspaceOpen') return second;
+      if (command.type === 'commitDetail') {
+        requests.push(command);
+        if (command.payload.workspace_id !== 'first') throw new BridgeError({ code: 'REPOSITORY_NOT_FOUND', message: 'Repository is no longer part of the workspace', recoverable: true, command: null, stderr: null, exitCode: null });
+        return gates[commits.findIndex((commit) => commit.hash === command.payload.revision)].promise;
+      }
+      return [];
+    });
+    useAppStore.setState({ bridge, bootstrap, snapshot: first, allRepositories: first.repositories,
+      tabs: [first.workspace], activeTabId: 'first', history: commits, selectedCommits: action === 'reload' ? commits : [],
+      selectedPrimaryKey: commitKey(commits[0].repoId, commits[0].hash), commitSelectionAnchorKey: commitKey(commits[0].repoId, commits[0].hash) });
+    const pending = action === 'reload'
+      ? useAppStore.getState().reloadSelectedCommits('first')
+      : useAppStore.getState().selectCommit(commits[4], 'range', commits);
+    await vi.waitFor(() => expect(requests).toHaveLength(4));
+    await useAppStore.getState().openWorkspace(['/tmp/second']);
+    commits.forEach((commit, index) => gates[index].resolve({ commit, fullMessage: commit.message, branches: { local: [], remote: [], tags: [] }, files: [] }));
+    await pending;
+    expect(requests).toHaveLength(4);
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe('second');
+    expect(useAppStore.getState().selectedCommits).toEqual([]);
+    expect(useAppStore.getState().notifications).toEqual([]);
+  });
+
   it('destroys the source window when explicitly closing its last project in multi-window mode', async () => {
     const bridge = new MockBridge(() => []);
     const workspace = snapshot('last-project', 1);

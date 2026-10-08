@@ -2060,6 +2060,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true, silent = false) => {
+    const requestGeneration = workspaceRequestGeneration;
     if (updatingWorkingTree(snapshot.workspace.id)) {
       queueStableRefresh(snapshot.workspace.id);
       return;
@@ -2083,6 +2084,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     checkStatusNotifications(allRepositories, snapshot.workspace.id);
     notifyResolvedOperations(allRepositories, snapshot.workspace.id);
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
+    if (requestGeneration !== workspaceRequestGeneration || get().snapshot?.workspace.id !== snapshot.workspace.id) return;
     const requests: Promise<void>[] = [get().loadConflicts(silent)];
     if (workspaceChanged || reloadRepository) requests.push(get().loadStashes(), get().loadShelves(), get().loadWorktrees(), get().loadSubtrees(), get().loadSubmodules(), get().loadUnpushedCommits(), get().loadIncomingCommits());
     await Promise.all(requests);
@@ -2628,6 +2630,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
 
       cancelRequests();
+      commitSelectionGeneration += 1;
       const controller = beginRequest('workspace');
       const requestGeneration = ++workspaceRequestGeneration;
       const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths } }, { signal: controller.signal });
@@ -2660,6 +2663,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
 
       await persistTabs(nextTabs, workspaceDescriptor.id);
+      opened = get().tabs.some((tab) => tab.id === workspaceDescriptor.id);
+      if (requestGeneration !== workspaceRequestGeneration || get().activeTabId !== workspaceDescriptor.id) return;
       await applySnapshot(snapshot);
       opened = get().tabs.some((tab) => tab.id === workspaceDescriptor.id);
       }, 'workspace');
@@ -2855,6 +2860,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           if (requestGeneration !== workspaceRequestGeneration) return;
           set({ activeTabId: workspaceId, unreadErrorCount: nextUnreadErrors, batchCommitReport: undefined });
           await persistTabs(get().tabs, workspaceId);
+          if (requestGeneration !== workspaceRequestGeneration || get().activeTabId !== workspaceId) return;
           await applySnapshot(snapshot, true);
         }, 'workspace');
       }
@@ -4395,6 +4401,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ selectedCommits: selected, selectedPrimaryKey: primaryKey, commitSelectionAnchorKey: anchorKey, ...(selectionChanged ? { selectedFile: undefined, diff: undefined } : {}), selectedCommit: primaryKey ? state.selectedCommitDetails[primaryKey] : undefined, selectedCommitLoading: loading, selectedCommitError: {}, changes: undefined, changesDiff: undefined, mode: 'history', diffReturnMode: undefined });
       const missing = selected.filter((item) => !state.selectedCommitDetails[commitKey(item.repoId, item.hash)]);
       const results = await mapWithConcurrency(missing, 4, async (item) => {
+        if (generation !== commitSelectionGeneration || get().snapshot?.workspace.id !== targetWorkspaceId) return null;
         try {
           const detail = await get().loadCommitDetail(item);
           return { key: commitKey(item.repoId, item.hash), detail };
@@ -4438,6 +4445,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ selectedCommitLoading: loading, selectedCommitError: errorMap });
 
       const results = await mapWithConcurrency(selected, 4, async (item) => {
+        if (generation !== commitSelectionGeneration || get().snapshot?.workspace.id !== targetWorkspaceId) return null;
         try {
           const detail = await get().loadCommitDetail(item, true);
           return { key: commitKey(item.repoId, item.hash), detail };

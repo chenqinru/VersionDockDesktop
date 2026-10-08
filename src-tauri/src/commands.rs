@@ -151,7 +151,7 @@ pub async fn bridge_request(
         },
     };
     let mut result = crate::logger::with_log_context(
-        log_context,
+        log_context.clone(),
         state::with_operation_reporter(reporter, async {
             if !waits_for_coordinator {
                 state::emit_current_operation(OperationStatus::Running, phase, message);
@@ -191,6 +191,25 @@ pub async fn bridge_request(
         }
         if error.subject.is_none() {
             error.subject = error_context.3.clone();
+        }
+        if error.code == "REPOSITORY_NOT_FOUND" {
+            crate::logger::with_log_context(log_context, async {
+                crate::logger::log_entry(
+                    crate::logger::LogLevel::Error,
+                    crate::logger::LogChannel::Core,
+                    "REPOSITORY_NOT_FOUND: requested repository is absent from the workspace",
+                    Some(format!(
+                        "request={} operation={} workspace={} repository={}",
+                        request_id,
+                        error.operation.as_deref().unwrap_or("unknown"),
+                        error.workspace_id.as_deref().unwrap_or("unknown"),
+                        error.repository_id.as_deref().unwrap_or("unknown"),
+                    )),
+                    None,
+                    None,
+                );
+            })
+            .await;
         }
     }
     state.finish_request(&request_id).await;
@@ -762,7 +781,15 @@ fn subtree_phase(operation: &crate::models::SubtreeOperation) -> (&'static str, 
 fn command_error_context(
     command: &BridgeCommand,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
-    let operation = command_progress(command).0.to_string();
+    let operation = match command {
+        BridgeCommand::CommitDetail { .. } => "commitDetail",
+        BridgeCommand::CommitBranches { .. } => "commitBranches",
+        BridgeCommand::CommitMergeCommits { .. } => "commitMergeCommits",
+        BridgeCommand::CommitMergeParentFiles { .. } => "commitMergeParentFiles",
+        BridgeCommand::IncomingCommits { .. } => "incomingCommits",
+        _ => command_progress(command).0,
+    }
+    .to_string();
     match command {
         BridgeCommand::WorkspaceRemoveRecent { workspace_id }
         | BridgeCommand::WorkspaceRefresh { workspace_id }
@@ -789,6 +816,40 @@ fn command_error_context(
             repo_id,
         }
         | BridgeCommand::Branches {
+            workspace_id,
+            repo_id,
+        }
+        | BridgeCommand::History {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::HistoryTopology {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::CommitDetail {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::CommitBranches {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::CommitMergeCommits {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::CommitMergeParentFiles {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::IncomingCommits {
             workspace_id,
             repo_id,
         }
@@ -4204,11 +4265,14 @@ pub(crate) async fn resolve_repo(
             .into_iter()
             .find(|repository| repository.id == repo_id)
             .ok_or_else(|| {
-                DesktopError::new(
+                let mut error = DesktopError::new(
                     "REPOSITORY_NOT_FOUND",
                     "Repository is no longer part of the workspace",
                     true,
-                )
+                );
+                error.workspace_id = Some(workspace_id.into());
+                error.repository_id = Some(repo_id.into());
+                error
             })?;
         state
             .cache_repository(workspace_id, repository.clone())
@@ -4504,6 +4568,67 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+
+    #[test]
+    fn commit_loads_preserve_repository_context_and_reject_mismatched_targets() {
+        let commands = [
+            BridgeCommand::CommitDetail {
+                workspace_id: "workspace".into(),
+                repo_id: "repo".into(),
+                revision: "HEAD".into(),
+            },
+            BridgeCommand::CommitBranches {
+                workspace_id: "workspace".into(),
+                repo_id: "repo".into(),
+                revision: "HEAD".into(),
+            },
+            BridgeCommand::CommitMergeCommits {
+                workspace_id: "workspace".into(),
+                repo_id: "repo".into(),
+                revision: "HEAD".into(),
+                parents: vec![],
+            },
+            BridgeCommand::CommitMergeParentFiles {
+                workspace_id: "workspace".into(),
+                repo_id: "repo".into(),
+                revision: "HEAD".into(),
+                parent_hash: "HEAD^".into(),
+            },
+            BridgeCommand::IncomingCommits {
+                workspace_id: "workspace".into(),
+                repo_id: "repo".into(),
+            },
+        ];
+        for command in commands {
+            let target = command_error_context(&command);
+            assert_ne!(target.0, "running");
+            assert_eq!(target.1.as_deref(), Some("workspace"));
+            assert_eq!(target.2.as_deref(), Some("repo"));
+            let mut context = crate::models::RequestContext {
+                domain: crate::models::OperationDomain::History,
+                workspace_id: Some("other-workspace".into()),
+                repository_id: Some("repo".into()),
+                generation: 1,
+                visibility: crate::models::OperationVisibility::Background,
+                target: None,
+            };
+            assert_eq!(
+                validate_request_context(&context, &target)
+                    .unwrap_err()
+                    .code,
+                "REQUEST_CONTEXT_MISMATCH"
+            );
+            context.workspace_id = Some("workspace".into());
+            assert!(validate_request_context(&context, &target).is_ok());
+            context.repository_id = Some("other-repo".into());
+            assert_eq!(
+                validate_request_context(&context, &target)
+                    .unwrap_err()
+                    .code,
+                "REQUEST_CONTEXT_MISMATCH"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn notifications_are_in_app_only_on_every_platform() {

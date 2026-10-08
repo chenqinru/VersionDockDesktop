@@ -28,6 +28,44 @@ fn available(program: &str) -> bool {
 }
 
 #[tokio::test]
+async fn real_git_repository_lookup_recovers_cold_cache_and_reports_wrong_workspace() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let root = directory.path().join("repository");
+    let other_root = directory.path().join("other-workspace");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&other_root).unwrap();
+    command("git", &["init", "-b", "main"], &root);
+    let state = crate::state::AppState::load(directory.path().join("config"));
+    let descriptor = workspace::descriptor(vec![root.to_string_lossy().into_owned()]).unwrap();
+    let other = workspace::descriptor(vec![other_root.to_string_lossy().into_owned()]).unwrap();
+    state.upsert_workspace(descriptor.clone()).await.unwrap();
+    state.upsert_workspace(other.clone()).await.unwrap();
+    let settings = state.app.read().await.settings.clone();
+    let repository = workspace::scan(&descriptor, &settings).unwrap().remove(0);
+    assert!(state
+        .cached_repository(&descriptor.id, &repository.id)
+        .await
+        .is_none());
+    let resolved = crate::commands::resolve_repo(&state, &descriptor.id, &repository.id)
+        .await
+        .unwrap();
+    assert_eq!(resolved.id, repository.id);
+    assert!(state
+        .cached_repository(&descriptor.id, &repository.id)
+        .await
+        .is_some());
+    let error = crate::commands::resolve_repo(&state, &other.id, &repository.id)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "REPOSITORY_NOT_FOUND");
+    assert_eq!(error.workspace_id.as_deref(), Some(other.id.as_str()));
+    assert_eq!(error.repository_id.as_deref(), Some(repository.id.as_str()));
+}
+
+#[tokio::test]
 async fn real_git_avatar_platform_prioritizes_tracking_remote_then_origin() {
     if !available("git") {
         return;
