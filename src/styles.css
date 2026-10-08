@@ -3511,6 +3511,7 @@ button.conflict-action-item {
 .aggregate-repo > .codicon { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .aggregate-item .detail-message-card { margin-top: 5px; }
 .detail-loading { padding: 12px 8px; color: var(--versiondock-loading-foreground); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
+.detail-files > .detail-loading { padding: 8px; }
 .detail-loading.detail-error { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--versiondock-warning, #cca700); }
 .detail-retry-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 24px; background: var(--versiondock-button-secondary-bg, rgba(255, 255, 255, 0.08)); color: var(--versiondock-text); border: 1px solid var(--versiondock-border); border-radius: 2px; padding: 1px 6px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.4; cursor: pointer; }
 .detail-retry-button > .codicon { flex: 0 0 auto; font-size: inherit; line-height: 1; opacity: 1; }

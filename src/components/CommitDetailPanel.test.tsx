@@ -154,17 +154,36 @@ describe('CommitDetailPanel merge commits', () => {
   it('shows loading instead of a failure before detail data arrives and renders genuine failures with retry', () => {
     const key = commitKey(directoryCommit.repoId, directoryCommit.hash);
     useAppStore.setState({ snapshot, selectedCommit: undefined, selectedCommits: [directoryCommit], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {} });
-    render(<CommitDetailPanel onCollapse={vi.fn()} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Loading...');
+    const { container } = render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading files...');
+    expect(container.querySelector('.empty-detail')).toBeNull();
+    expect(container.querySelector('.detail-files-title')).toBeInTheDocument();
+    expect(screen.getByText(directoryCommit.message)).toBeInTheDocument();
+    expect(screen.getByText(directoryCommit.author)).toBeInTheDocument();
+    expect(screen.getByText(directoryCommit.shortHash)).toBeInTheDocument();
     expect(screen.queryByText('Failed to load commit details')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     act(() => useAppStore.setState({ selectedCommitLoading: { [key]: true } }));
-    expect(screen.getByRole('status')).toHaveTextContent('Loading...');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading files...');
     act(() => useAppStore.setState({ selectedCommit: directoryDetail, selectedCommitDetails: { [key]: directoryDetail }, selectedCommitLoading: {} }));
     expect(screen.getByText('alpha.ts')).toBeInTheDocument();
     act(() => useAppStore.setState({ selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitError: { [key]: 'Cannot read this commit' } }));
     expect(screen.getByText('Cannot read this commit')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toHaveClass('detail-retry-button');
+  });
+
+  it('keeps all selected commit summaries visible while their files are loading', () => {
+    const commits = [directoryCommit, mergeCommit];
+    useAppStore.setState({ snapshot, selectedCommit: undefined, selectedCommits: commits, selectedCommitDetails: {}, selectedCommitLoading: Object.fromEntries(commits.map(commit => [commitKey(commit.repoId, commit.hash), true])), selectedCommitError: {} });
+    const { container } = render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading files...');
+    for (const commit of commits) {
+      expect(screen.getByText(commit.message)).toBeInTheDocument();
+      expect(screen.getByText(commit.shortHash)).toBeInTheDocument();
+    }
+    expect(container.querySelectorAll('.aggregate-item')).toHaveLength(2);
+    expect(screen.queryByText('Failed to load commit details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open Changes' })).toBeDisabled();
   });
 
   it('keeps the selected detail visible while an unrelated hover preview loads', () => {

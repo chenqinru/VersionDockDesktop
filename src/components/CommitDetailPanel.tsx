@@ -45,7 +45,13 @@ type DetailRef = {
   isSvnRevision?: boolean;
 };
 
-function refsFor(detail: CommitDetail, repoKind?: 'git' | 'svn'): DetailRef[] {
+type CommitSummary = Pick<CommitDetail, 'commit' | 'fullMessage' | 'branches'>;
+function summaryFor(commit: CommitNode, detail?: CommitDetail): CommitSummary {
+  // History already supplies the summary; files and containing refs load separately.
+  return detail ?? { commit, fullMessage: commit.message, branches: { local: [], remote: [], tags: [] } };
+}
+
+function refsFor(detail: CommitSummary, repoKind?: 'git' | 'svn'): DetailRef[] {
   const local = new Set(detail.branches.local);
   const remote = new Set(detail.branches.remote.filter((branch) => !branch.endsWith('/HEAD')));
   const tags = new Set(detail.branches.tags);
@@ -662,7 +668,7 @@ function MergeParentChangeGroup({
   );
 }
 
-function RefBadges({ detail, repoKind, collapsible = false }: { detail: CommitDetail; repoKind?: 'git' | 'svn'; collapsible?: boolean }) {
+function RefBadges({ detail, repoKind, collapsible = false }: { detail: CommitSummary; repoKind?: 'git' | 'svn'; collapsible?: boolean }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const refs = refsFor(detail, repoKind);
@@ -706,7 +712,7 @@ function RefBadges({ detail, repoKind, collapsible = false }: { detail: CommitDe
   );
 }
 
-function splitCommitMessage(detail: CommitDetail): { subject: string; body: string } {
+function splitCommitMessage(detail: Pick<CommitDetail, 'commit' | 'fullMessage'>): { subject: string; body: string } {
   const messageLines = detail.fullMessage.replace(/\r\n/g, '\n').split('\n');
   const subject = messageLines[0]?.trim() || detail.commit.message.trim();
   const body = messageLines[0]?.trim() === detail.commit.message.trim()
@@ -720,7 +726,7 @@ function CommitMessage({
   expanded,
   toggle,
 }: {
-  detail: CommitDetail;
+  detail: Pick<CommitDetail, 'commit' | 'fullMessage'>;
   expanded: boolean;
   toggle: () => void;
 }) {
@@ -918,9 +924,14 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
   const selectedCommitLoading = useAppStore((state) => state.selectedCommitLoading);
   const reloadSelectedCommits = useAppStore((state) => state.reloadSelectedCommits);
   const selectedFile = useAppStore((state) => state.selectedFile);
-  const loading = useAppStore((state) => state.selectedCommits.some((commit) =>
+  const requestedLoading = useAppStore((state) => state.selectedCommits.some((commit) =>
     state.selectedCommitLoading[commitKey(commit.repoId, commit.hash)] === true
   ));
+  const loading = requestedLoading || selectedCommits.some(commit => {
+    const key = commitKey(commit.repoId, commit.hash);
+    return !selectedDetails[key] && !selectedCommitError[key]
+      && !(detail?.commit.repoId === commit.repoId && detail.commit.hash === commit.hash);
+  });
   const repositories = useAppStore((state) => state.snapshot?.repositories ?? []);
   const openDiff = useAppStore((state) => state.openDiff);
   const openCommitDetail = useAppStore((state) => state.openCommitDetail);
@@ -1008,6 +1019,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
   const isMultiSelection = selectedCommits.length > 1 || updateDetails;
   const singleCommit = !isMultiSelection ? selectedCommits[0] : undefined;
   const selectedPrimary = detail?.commit ?? singleCommit;
+  const summaryDetail = selectedPrimary ? summaryFor(selectedPrimary, detail) : undefined;
   const singleKey = selectedPrimary ? commitKey(selectedPrimary.repoId, selectedPrimary.hash) : '';
   const isMergeCommit = !isMultiSelection && Boolean(detail && detail.commit.parents.length >= 2);
   const mergeParentChanges = useMemo(
@@ -1295,7 +1307,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
     );
   }
 
-  if (!hasAnyDetail) {
+  if (!hasAnyDetail && workspaceView) {
     return <aside className="commit-detail empty-detail" role="status">
       <Codicon name="loading codicon-modifier-spin" />
       <span>{t('Loading...')}</span>
@@ -1303,7 +1315,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
   }
 
   return (
-    <aside ref={containerRef} className={`commit-detail ${workspaceView ? 'commit-detail-expanded' : ''}`}>
+    <aside ref={containerRef} className={`commit-detail ${workspaceView ? 'commit-detail-expanded' : ''}`} aria-busy={loading}>
       <section className="detail-file-section">
         <div className="detail-files-title">
           <strong>{t(targets.length === 1 ? '{0} file' : '{0} files', targets.length)}</strong>
@@ -1320,7 +1332,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
         </div>
         <FileSearchWidget variant={workspaceView ? 'files' : 'speed'} query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length }} onNavigate={handleNavigateMatch} />
         <div className="detail-files" ref={fileListRef}>
-          {loading && !targets.length && <div className="detail-loading">{t('Loading files...')}</div>}
+          {loading && !targets.length && <div className="detail-loading" role="status">{t('Loading files...')}</div>}
           {!loading && isMergeCommit && targets.length === 0 && (
             <div className="no-merge-conflicts">{t('No merge conflicts')}</div>
           )}
@@ -1525,13 +1537,14 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
               const repo = repoMap.get(commit.repoId);
               const isItemLoading = Boolean(selectedCommitLoading[key]);
               const itemError = selectedCommitError[key];
+              const summary = value ?? (isItemLoading || !itemError ? summaryFor(commit) : undefined);
               return (
                 <article className="aggregate-item" key={key}>
                   <div className="aggregate-repo"><Codicon name="repo" /><span style={{ color: repo?.meta.color }}>{repo?.meta.name ?? commit.repoId}</span></div>
-                  {value ? (
+                  {summary ? (
                     <>
                       <CommitMessage
-                        detail={value}
+                        detail={summary}
                         expanded={expandedMessages.has(key)}
                         toggle={() => setExpandedMessages((current) => {
                           const next = new Set(current);
@@ -1541,10 +1554,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
                         })}
                       />
                       <AuthorMeta commit={commit} />
-                      <RefBadges detail={value} repoKind={repo?.meta.kind} />
+                      <RefBadges detail={summary} repoKind={repo?.meta.kind} />
                     </>
-                  ) : isItemLoading ? (
-                    <div className="detail-loading">{t('Loading...')}</div>
                   ) : (
                     <div className="detail-loading detail-error">
                       <span>{itemError || t('Failed to load commit details')}</span>
@@ -1557,10 +1568,10 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
               );
             })}
           </div>
-        ) : detail && (
+        ) : summaryDetail && (
           <div className="detail-single">
             <CommitMessage
-              detail={detail}
+              detail={summaryDetail}
               expanded={expandedMessages.has(singleKey)}
               toggle={() => setExpandedMessages((current) => {
                 const next = new Set(current);
@@ -1569,8 +1580,8 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
                 return next;
               })}
             />
-            <AuthorMeta commit={detail.commit} />
-            <RefBadges detail={detail} repoKind={repoMap.get(detail.commit.repoId)?.meta.kind} collapsible />
+            <AuthorMeta commit={summaryDetail.commit} />
+            <RefBadges detail={summaryDetail} repoKind={repoMap.get(summaryDetail.commit.repoId)?.meta.kind} collapsible />
           </div>
         )}
       </section>}
