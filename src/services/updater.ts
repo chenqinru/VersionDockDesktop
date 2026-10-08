@@ -1,6 +1,5 @@
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { invoke } from '@tauri-apps/api/core';
-import { relaunch } from '@tauri-apps/plugin-process';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { APP_CURRENT_VERSION } from '../version';
 import type { WorkspaceSnapshot, DesktopSettings } from '../bindings/generated';
@@ -206,7 +205,7 @@ export async function downloadAndInstallAppUpdate(
  */
 export async function restartApp(): Promise<void> {
   // Reloading the webview does not restart the native app or finish an update.
-  await relaunch();
+  await invoke('restart_app');
 }
 
 /**

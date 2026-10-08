@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { invoke } from '@tauri-apps/api/core';
-import { relaunch } from '@tauri-apps/plugin-process';
 import { version } from '../../package.json';
 import { checkAppUpdate as nativeCheck, downloadAndInstallAppUpdate as nativeDownload, restartApp, generateDiagnosticReport, isNewerVersion, APP_CURRENT_VERSION, GITHUB_REPO_URL } from './updater';
 
@@ -17,7 +16,6 @@ async function flushRetries<T>(promise: Promise<T>): Promise<T> {
 }
 const checkAppUpdate = () => flushRetries(nativeCheck());
 const downloadAndInstallAppUpdate = () => flushRetries(nativeDownload());
-vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 
 function updateFixture() {
@@ -31,7 +29,6 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(invoke).mockReset().mockResolvedValue(null);
   vi.mocked(check).mockReset().mockResolvedValue(null);
-  vi.mocked(relaunch).mockReset().mockResolvedValue(undefined);
   vi.stubGlobal('__TAURI_INTERNALS__', {});
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
 });
@@ -91,8 +88,13 @@ describe('updater service', () => {
     expect(update.install).not.toHaveBeenCalled();
   });
   it('propagates native restart failure instead of refreshing the webview as a successful restart', async () => {
-    vi.mocked(relaunch).mockRejectedValueOnce(new Error('restart unavailable'));
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('restart unavailable'));
     await expect(restartApp()).rejects.toThrow('restart unavailable');
+  });
+
+  it('uses the backend restart path after an update', async () => {
+    await restartApp();
+    expect(invoke).toHaveBeenCalledWith('restart_app');
   });
 
   it('uses the package version and public releases repository', () => {

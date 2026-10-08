@@ -141,7 +141,8 @@ pub fn run() {
             commands::bridge_cancel,
             interactions::respond_native_interaction,
             commands::follow_tab_drag_preview,
-            app_updater::check_update_mirror
+            app_updater::check_update_mirror,
+            app_updater::restart_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running VersionDock Desktop");
