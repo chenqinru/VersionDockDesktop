@@ -7280,7 +7280,7 @@ async fn real_git_shelf_storage_failure_restores_before_full_stash_fallback() {
     let (_, working) = update_parity_fixture(root.path());
     let config = root.path().join("config");
     std::fs::create_dir(&config).unwrap();
-    std::fs::write(config.join("shelves"), "not a directory").unwrap();
+    std::fs::write(working.join(".git/versiondock"), "not a directory").unwrap();
     std::fs::write(working.join("local.txt"), "local\n").unwrap();
     std::fs::write(working.join("new.txt"), "untracked\n").unwrap();
     vcs::sync_with_worktree_backup(
@@ -8772,4 +8772,50 @@ async fn real_git_tag_management() {
         .unwrap()
         .iter()
         .any(|tag| tag.name == "release/v1"));
+}
+
+// Invoked by a counterpart's test runner with an explicit temporary fixture.
+// No plugin source or runtime dependency is required by Desktop.
+#[tokio::test]
+#[ignore = "requires an explicit temporary shelf interoperability fixture"]
+async fn shelf_interop_driver() {
+    let request: serde_json::Value =
+        serde_json::from_str(&std::env::var("VERSIONDOCK_SHELF_TEST_REQUEST").unwrap()).unwrap();
+    let root = Path::new(request["root"].as_str().unwrap());
+    let config = Path::new(request["config"].as_str().unwrap());
+    // Guard against accidentally pointing this write-capable driver at a real checkout.
+    assert!(root.parent().unwrap().join("shelf-test-fixture").is_file());
+    let descriptor = workspace::descriptor(vec![root.to_string_lossy().into_owned()]).unwrap();
+    let repository = workspace::scan(&descriptor, &Default::default())
+        .unwrap()
+        .into_iter()
+        .find(|repo| repo.root_path == root.to_string_lossy())
+        .unwrap();
+    let result: Result<serde_json::Value, crate::models::DesktopError> =
+        match request["action"].as_str().unwrap() {
+            "list" => shelf::list(config, &repository)
+                .await
+                .map(|entries| serde_json::to_value(entries).unwrap()),
+            "diff" => shelf::file_diff(
+                config,
+                &repository,
+                request["id"].as_str().unwrap(),
+                request["path"].as_str().unwrap(),
+            )
+            .await
+            .map(|diff| serde_json::to_value(diff).unwrap()),
+            "operate" => shelf::operate(
+                config,
+                &repository,
+                serde_json::from_value(request["operation"].clone()).unwrap(),
+                &CancellationToken::new(),
+            )
+            .await
+            .map(|_| serde_json::Value::Null),
+            _ => panic!("unknown shelf fixture action"),
+        };
+    match result {
+        Ok(result) => println!("SHELF_TEST_RESULT:{}", serde_json::json!({"ok": result})),
+        Err(error) => println!("SHELF_TEST_RESULT:{}", serde_json::json!({"error": error})),
+    }
 }

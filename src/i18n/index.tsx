@@ -4,6 +4,10 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Shelf storage is busy. Wait for the other operation to finish and retry.': 'Shelf storage is busy. Wait for the other operation to finish and retry.',
+  'Unable to restore shelved files safely. Check the destination files and retry.': 'Unable to restore shelved files safely. Check the destination files and retry.',
+  'Shelf metadata is invalid. Preserve the storage files and repair the metadata before retrying.': 'Shelf metadata is invalid. Preserve the storage files and repair the metadata before retrying.',
+
   'Keep in tray when closing windows': 'Keep in tray when closing windows',
   'Show shortcuts in the system tray while the app is running.': 'Show shortcuts in the system tray while the app is running.',
   'The tray icon stays visible while closing windows to the tray is enabled.': 'The tray icon stays visible while closing windows to the tray is enabled.',
@@ -1480,6 +1484,9 @@ const desktopZh: Messages = {
   'Manage Repository Visibility': '仓库可见性管理',
   'Select repositories to display in the panel (uncheck to hide)': '选择要在面板中显示的仓库（取消勾选以隐藏）',
   'VersionDock: At least one repository must remain visible.': 'VersionDock：至少保留一个可见仓库。',
+  'Shelf storage is busy. Wait for the other operation to finish and retry.': '搁置存储正在使用中，请等待其他操作完成后重试。',
+  'Unable to restore shelved files safely. Check the destination files and retry.': '无法安全恢复搁置文件，请检查目标文件后重试。',
+  'Shelf metadata is invalid. Preserve the storage files and repair the metadata before retrying.': '搁置元数据损坏，请保留存储文件并修复元数据后重试。',
   'This SVN account does not have permission to access the requested repository path.': '当前 SVN 账号无权访问请求的仓库路径，请检查目录访问权限。',
   'No upstream branch is configured': '当前分支未配置上游分支',
   'Log write queue is full; logs remain available in memory.': '日志写入队列已满，未写入文件的日志仍可在内存中查看。',

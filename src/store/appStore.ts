@@ -1286,6 +1286,9 @@ const errorText = (error: unknown) => {
     GIT_UPDATE_CONFLICT: 'Update stopped with conflicts or an unfinished version-control operation.',
     SVN_AUTHORIZATION_FAILED: 'This SVN account does not have permission to access the requested repository path.',
     UPSTREAM_MISSING: 'No upstream branch is configured',
+    SHELF_STORAGE_BUSY: 'Shelf storage is busy. Wait for the other operation to finish and retry.',
+    SHELF_RESTORE_FAILED: 'Unable to restore shelved files safely. Check the destination files and retry.',
+    SHELF_INDEX_INVALID: 'Shelf metadata is invalid. Preserve the storage files and repair the metadata before retrying.',
   };
   const message = error instanceof BridgeError ? messages[error.code] : undefined;
   return message

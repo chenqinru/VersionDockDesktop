@@ -16,6 +16,12 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 struct ShelfIndex {
     shelves: Vec<ShelfEntryInternal>,
+    #[serde(default)]
+    migrated_sources: Vec<String>,
+    #[serde(default)]
+    deleted_ids: Vec<String>,
+    #[serde(flatten)]
+    extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -26,14 +32,33 @@ struct ShelfEntryInternal {
     changelist_assignments: Vec<crate::changelist::ShelfAssignment>,
     #[serde(default)]
     name: String,
-    #[serde(alias = "date", default)]
+    #[serde(rename = "date", alias = "createdAt", default)]
     created_at: String,
     #[serde(default)]
     branch: Option<String>,
-    #[serde(alias = "patchFile", default)]
+    #[serde(default)]
     patch_file: Option<String>,
     #[serde(default)]
     files: Vec<ShelfFileItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    binary_files: Vec<ShelfAttachment>,
+    #[serde(flatten)]
+    extra: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ShelfAttachment {
+    repo_rel_path: String,
+    store_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mode: Option<u32>,
+    #[serde(default = "regular_file")]
+    kind: String,
+}
+
+fn regular_file() -> String {
+    "file".into()
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -69,17 +94,19 @@ impl From<ShelfEntryInternal> for ShelfEntry {
 impl From<ShelfEntry> for ShelfEntryInternal {
     fn from(entry: ShelfEntry) -> Self {
         ShelfEntryInternal {
-            id: entry.id,
+            id: entry.id.clone(),
             changelist_assignments: Vec::new(),
             name: entry.name,
             created_at: entry.created_at,
             branch: entry.branch,
-            patch_file: None,
+            patch_file: Some(format!("{}.patch", entry.id)),
             files: entry
                 .files
                 .into_iter()
                 .map(ShelfFileItem::Detailed)
                 .collect(),
+            binary_files: Vec::new(),
+            extra: Default::default(),
         }
     }
 }
@@ -89,11 +116,12 @@ pub async fn list(
     repo: &RepositoryMeta,
 ) -> Result<Vec<ShelfEntry>, DesktopError> {
     ensure_git(repo)?;
+    let _guard = lock_storage(config_dir, repo).await?;
     let mut index = read_index(config_dir, repo).await?;
-    let directory = shelf_dir(config_dir, repo);
+    let directory = shelf_dir(config_dir, repo).await?;
     index
         .shelves
-        .retain(|entry| get_patch_path(&directory, entry).is_file());
+        .retain(|entry| get_patch_path(&directory, entry).is_ok_and(|path| path.is_file()));
     Ok(index.shelves.into_iter().map(Into::into).collect())
 }
 
@@ -131,7 +159,10 @@ pub async fn operate_in_workspace(
             Ok(())
         }
         ShelfOperation::Apply { shelf_id, paths } => {
-            let index = read_index(config_dir, repo).await?;
+            let index = {
+                let _guard = lock_storage(config_dir, repo).await?;
+                read_index(config_dir, repo).await?
+            };
             let entry = index
                 .shelves
                 .iter()
@@ -163,6 +194,7 @@ pub async fn file_diff(
 ) -> Result<DiffDocument, DesktopError> {
     ensure_git(repo)?;
     validate_id(shelf_id)?;
+    let _guard = lock_storage(config_dir, repo).await?;
     safe_relative(Path::new(&repo.root_path), relative_path, false)?;
     let index = read_index(config_dir, repo).await?;
     let entry = index
@@ -180,16 +212,20 @@ pub async fn file_diff(
             true,
         ));
     }
-    let bytes = tokio::fs::read(get_patch_path(&shelf_dir(config_dir, repo), entry))
+    if entry
+        .binary_files
+        .iter()
+        .any(|file| file.repo_rel_path == relative_path)
+    {
+        return crate::vcs::make_diff(
+            relative_path,
+            format!("Binary files /dev/null and b/{relative_path} differ\n").into_bytes(),
+        );
+    }
+    let bytes = tokio::fs::read(get_patch_path(&shelf_dir(config_dir, repo).await?, entry)?)
         .await
         .map_err(storage_error)?;
     let patch = String::from_utf8_lossy(&bytes);
-    let header_a = format!("diff --git a/{relative_path} b/{relative_path}\n");
-    let header_b = format!(
-        "diff --git {} {}\n",
-        quote_patch_path(&format!("a/{relative_path}")),
-        quote_patch_path(&format!("b/{relative_path}"))
-    );
     let boundaries: Vec<_> = patch
         .match_indices("diff --git ")
         .filter(|(offset, _)| *offset == 0 || patch.as_bytes()[offset - 1] == b'\n')
@@ -200,14 +236,7 @@ pub async fn file_diff(
         .enumerate()
         .find_map(|(index, start)| {
             let section = &patch[*start..boundaries.get(index + 1).copied().unwrap_or(patch.len())];
-            let renamed = section
-                .lines()
-                .find_map(|line| line.strip_prefix("rename to "))
-                .map(crate::diff_content::decode_git_path);
-            (section.starts_with(&header_a)
-                || section.starts_with(&header_b)
-                || renamed.as_deref() == Some(relative_path))
-            .then(|| section.to_string())
+            section_touches_path(section, relative_path).then(|| section.to_string())
         })
         .ok_or_else(|| {
             DesktopError::new("SHELF_DIFF_NOT_FOUND", "Shelf diff section not found", true)
@@ -258,11 +287,15 @@ async fn create_with_assignments(
             true,
         ));
     }
+    ensure_git(repo)?;
+    let _guard = lock_storage(config_dir, repo).await?;
+    // Migrate before capturing the worktree so storage errors cannot strand a stash.
+    read_index(config_dir, repo).await?;
     let root = Path::new(&repo.root_path);
     let safe_paths = paths
         .iter()
         .map(|path| {
-            safe_relative(root, path, true)?;
+            safe_relative(root, path, false)?;
             Ok(format!(":(literal){path}"))
         })
         .collect::<Result<Vec<_>, DesktopError>>()?;
@@ -392,7 +425,7 @@ async fn create_with_assignments(
     }
 
     let id = format!("shelf-{}", uuid::Uuid::new_v4().simple());
-    let directory = shelf_dir(config_dir, repo);
+    let directory = shelf_dir(config_dir, repo).await?;
     let patch_path = directory.join(format!("{id}.patch"));
     let temporary = directory.join(format!("{id}.patch.tmp"));
     if let Err(error) = async {
@@ -447,14 +480,15 @@ async fn apply(
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     validate_id(shelf_id)?;
+    let _guard = lock_storage(config_dir, repo).await?;
     let index = read_index(config_dir, repo).await?;
     let entry = index
         .shelves
         .iter()
         .find(|entry| entry.id == shelf_id)
         .ok_or_else(|| DesktopError::new("SHELF_NOT_FOUND", "Shelf not found", true))?;
-    let directory = shelf_dir(config_dir, repo);
-    let patch = get_patch_path(&directory, entry);
+    let directory = shelf_dir(config_dir, repo).await?;
+    let patch = get_patch_path(&directory, entry)?;
     if !patch.is_file() {
         return Err(DesktopError::new(
             "SHELF_PATCH_NOT_FOUND",
@@ -462,6 +496,33 @@ async fn apply(
             true,
         ));
     }
+    let paths = paths.filter(|paths| !paths.is_empty());
+    if let Some(paths) = paths {
+        for path in paths {
+            safe_relative(Path::new(&repo.root_path), path, false)?;
+        }
+    }
+    let attachments = prepare_attachments(&directory, repo, entry, paths)?;
+    let full_patch = tokio::fs::read(&patch).await.map_err(storage_error)?;
+    // git apply --include interprets glob patterns. Extract sections instead so
+    // filenames containing brackets, * or ? remain literal on both clients.
+    let selected_patch = paths.map(|paths| select_patch(&full_patch, paths));
+    let mut temporary = None;
+    let apply_path = if let Some(ref bytes) = selected_patch {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new_in(&directory).map_err(storage_error)?;
+        file.write_all(bytes).map_err(storage_error)?;
+        let path = file.path().to_path_buf();
+        temporary = Some(file);
+        path
+    } else {
+        patch
+    };
+    let has_patch = selected_patch
+        .as_ref()
+        .unwrap_or(&full_patch)
+        .iter()
+        .any(|byte| !byte.is_ascii_whitespace());
     let mut args = vec![
         "apply".into(),
         "--binary".into(),
@@ -470,35 +531,32 @@ async fn apply(
     if three_way {
         args.push("--3way".into());
     }
-    if let Some(paths) = paths {
-        let root = Path::new(&repo.root_path);
-        for path in paths {
-            safe_relative(root, path, true)?;
-            args.push(format!("--include={path}"));
+    args.push(apply_path.to_string_lossy().into_owned());
+    if has_patch {
+        if let Err(error) = git(repo, args.clone(), token).await {
+            if !three_way || token.is_cancelled() {
+                return Err(error);
+            }
+            let conflicts = git(
+                repo,
+                vec![
+                    "diff".into(),
+                    "--name-only".into(),
+                    "--diff-filter=U".into(),
+                    "-z".into(),
+                ],
+                token,
+            )
+            .await?;
+            if !conflicts.stdout.is_empty() {
+                return Err(error);
+            }
+            args.retain(|argument| argument != "--3way");
+            git(repo, args, token).await?;
         }
     }
-    args.push(patch.to_string_lossy().into_owned());
-    if let Err(error) = git(repo, args.clone(), token).await {
-        if !three_way || token.is_cancelled() {
-            return Err(error);
-        }
-        let conflicts = git(
-            repo,
-            vec![
-                "diff".into(),
-                "--name-only".into(),
-                "--diff-filter=U".into(),
-                "-z".into(),
-            ],
-            token,
-        )
-        .await?;
-        if !conflicts.stdout.is_empty() {
-            return Err(error);
-        }
-        args.retain(|argument| argument != "--3way");
-        git(repo, args, token).await?;
-    }
+    restore_attachments(repo, attachments)?;
+    drop(temporary);
     Ok(())
 }
 
@@ -508,6 +566,7 @@ async fn drop_shelf(
     shelf_id: &str,
 ) -> Result<(), DesktopError> {
     validate_id(shelf_id)?;
+    let _guard = lock_storage(config_dir, repo).await?;
     let mut index = read_index(config_dir, repo).await?;
     let before = index.shelves.len();
     let entry_to_remove = index.shelves.iter().find(|e| e.id == shelf_id).cloned();
@@ -519,13 +578,20 @@ async fn drop_shelf(
             true,
         ));
     }
-    write_index(config_dir, repo, &index).await?;
-    let directory = shelf_dir(config_dir, repo);
+    let directory = shelf_dir(config_dir, repo).await?;
+    let mut files_to_remove = Vec::new();
     if let Some(entry) = entry_to_remove {
-        let patch = get_patch_path(&directory, &entry);
-        let _ = tokio::fs::remove_file(patch).await;
+        files_to_remove.push(get_patch_path(&directory, &entry)?);
+        for attachment in entry.binary_files {
+            files_to_remove.push(safe_relative(&directory, &attachment.store_name, true)?);
+        }
     }
-    let _ = tokio::fs::remove_file(directory.join(format!("{shelf_id}.patch"))).await;
+    index.deleted_ids.push(shelf_id.to_string());
+    write_index(config_dir, repo, &index).await?;
+    for file in files_to_remove {
+        // Missing content must not make an already committed deletion appear to fail.
+        let _ = tokio::fs::remove_file(file).await;
+    }
     Ok(())
 }
 
@@ -661,71 +727,177 @@ async fn git(
     .await
 }
 
+// Storage protocol shared with VersionDock: worktree Git dir/versiondock/shelves,
+// shelves.json with plugin fields, atomic replacement and an atomic mkdir .lock.
+struct ShelfStorageGuard(PathBuf);
+
+impl Drop for ShelfStorageGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
+async fn lock_storage(
+    config_dir: &Path,
+    repo: &RepositoryMeta,
+) -> Result<ShelfStorageGuard, DesktopError> {
+    let directory = shelf_dir(config_dir, repo).await?;
+    tokio::fs::create_dir_all(&directory)
+        .await
+        .map_err(storage_error)?;
+    let lock = directory.join(".lock");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match tokio::fs::create_dir(&lock).await {
+            Ok(()) => return Ok(ShelfStorageGuard(lock)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(DesktopError::new(
+                        "SHELF_STORAGE_BUSY",
+                        format!("Shelf storage is busy: {}", lock.display()),
+                        true,
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(error) => return Err(storage_error(error)),
+        }
+    }
+}
+
+async fn load_index(path: &Path) -> Result<ShelfIndex, DesktopError> {
+    if path.exists() {
+        safe_relative(
+            path.parent().unwrap(),
+            path.file_name().unwrap().to_str().unwrap(),
+            true,
+        )?;
+    }
+    match tokio::fs::read(path).await {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|error| DesktopError::new("SHELF_INDEX_INVALID", error.to_string(), true)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ShelfIndex::default()),
+        Err(error) => Err(storage_error(error)),
+    }
+}
+
 async fn read_index(config_dir: &Path, repo: &RepositoryMeta) -> Result<ShelfIndex, DesktopError> {
-    let local_dir = shelf_dir(config_dir, repo);
-    let local_index_path = local_dir.join("index.json");
-    let local_shelves_path = local_dir.join("shelves.json");
-
-    if local_index_path.is_file() {
-        if let Ok(bytes) = tokio::fs::read(&local_index_path).await {
-            if let Ok(index) = serde_json::from_slice::<ShelfIndex>(&bytes) {
-                if !index.shelves.is_empty() {
-                    return Ok(index);
-                }
-            }
+    let directory = shelf_dir(config_dir, repo).await?;
+    let mut index = load_index(&directory.join("shelves.json")).await?;
+    let mut changed = false;
+    // Prefer original plugin entries over incomplete copies made by older Desktop versions.
+    let sources = find_external_shelf_dirs(repo)
+        .into_iter()
+        .chain(std::iter::once(config_dir.join("shelves").join(&repo.id)));
+    for source in sources {
+        let source_key = source.to_string_lossy().into_owned();
+        if index.migrated_sources.contains(&source_key) {
+            continue;
         }
-    } else if local_shelves_path.is_file() {
-        if let Ok(bytes) = tokio::fs::read(&local_shelves_path).await {
-            if let Ok(index) = serde_json::from_slice::<ShelfIndex>(&bytes) {
-                if !index.shelves.is_empty() {
-                    return Ok(index);
-                }
-            }
-        }
-    }
-
-    // Check external IDE storage directories (VS Code / Cursor / Trae)
-    for ext_dir in find_external_shelf_dirs(repo) {
-        let ext_shelves_json = ext_dir.join("shelves.json");
-        let ext_index_json = ext_dir.join("index.json");
-        let candidate_file = if ext_shelves_json.is_file() {
-            Some(ext_shelves_json)
-        } else if ext_index_json.is_file() {
-            Some(ext_index_json)
+        let meta = if source.join("index.json").is_file() {
+            source.join("index.json")
+        } else if source.join("shelves.json").is_file() {
+            source.join("shelves.json")
         } else {
-            None
+            continue;
         };
-
-        if let Some(meta_path) = candidate_file {
-            if let Ok(bytes) = tokio::fs::read(&meta_path).await {
-                if let Ok(mut ext_index) = serde_json::from_slice::<ShelfIndex>(&bytes) {
-                    if !ext_index.shelves.is_empty() {
-                        let _ = tokio::fs::create_dir_all(&local_dir).await;
-                        for entry in &mut ext_index.shelves {
-                            let src_patch = get_patch_path(&ext_dir, entry);
-                            let dst_patch = local_dir.join(format!("{}.patch", entry.id));
-                            if src_patch.is_file() && !dst_patch.is_file() {
-                                let _ = tokio::fs::copy(&src_patch, &dst_patch).await;
-                            }
-                        }
-                        let _ = write_index(config_dir, repo, &ext_index).await;
-                        return Ok(ext_index);
-                    }
+        let legacy = load_index(&meta).await?;
+        for mut entry in legacy.shelves {
+            validate_id(&entry.id)?;
+            if index.deleted_ids.contains(&entry.id) {
+                continue;
+            }
+            let existing = index.shelves.iter().position(|value| value.id == entry.id);
+            if let Some(position) = existing {
+                if !index.shelves[position].binary_files.is_empty() || entry.binary_files.is_empty()
+                {
+                    continue;
                 }
+            }
+            let patch = get_patch_path(&source, &entry)?;
+            if !patch.is_file() {
+                return Err(DesktopError::new(
+                    "SHELF_PATCH_NOT_FOUND",
+                    format!("Shelf patch file not found: {}", patch.display()),
+                    true,
+                ));
+            }
+            for attachment in &mut entry.binary_files {
+                attachment.store_name =
+                    copy_legacy_file(&source, &directory, &entry.id, &attachment.store_name)
+                        .await?;
+            }
+            if let Some(position) = existing {
+                index.shelves[position].binary_files = entry.binary_files;
+            } else {
+                let name = patch
+                    .strip_prefix(&source)
+                    .map_err(|error| {
+                        DesktopError::new("SHELF_STORAGE_FAILED", error.to_string(), true)
+                    })?
+                    .to_string_lossy();
+                entry.patch_file =
+                    Some(copy_legacy_file(&source, &directory, &entry.id, &name).await?);
+                index.shelves.push(entry);
+            }
+        }
+        index.migrated_sources.push(source_key);
+        changed = true;
+    }
+    // Shared metadata uses detailed file objects, including when migrating old string lists.
+    for entry in &mut index.shelves {
+        for file in &mut entry.files {
+            if let ShelfFileItem::Simple(path) = file {
+                *file = ShelfFileItem::Detailed(ShelfFileEntry {
+                    path: path.clone(),
+                    status: "modified".into(),
+                });
+                changed = true;
             }
         }
     }
+    if changed {
+        write_index(config_dir, repo, &index).await?;
+    }
+    Ok(index)
+}
 
-    if local_index_path.is_file() {
-        match tokio::fs::read(&local_index_path).await {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|error| DesktopError::new("SHELF_INDEX_INVALID", error.to_string(), true)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ShelfIndex::default()),
-            Err(error) => Err(storage_error(error)),
+async fn copy_legacy_file(
+    source: &Path,
+    directory: &Path,
+    id: &str,
+    name: &str,
+) -> Result<String, DesktopError> {
+    let from = stored_file(source, name)?;
+    let target_name = format!("{id}-{}.data", hex::encode(Sha1::digest(name.as_bytes())));
+    let target = safe_relative(directory, &target_name, true)?;
+    let bytes = tokio::fs::read(&from).await.map_err(storage_error)?;
+    if target.exists() {
+        let existing = tokio::fs::read(stored_file(directory, &target_name)?)
+            .await
+            .map_err(storage_error)?;
+        if existing != bytes {
+            return Err(DesktopError::new(
+                "SHELF_STORAGE_FAILED",
+                "Shelf content collision",
+                true,
+            ));
         }
     } else {
-        Ok(ShelfIndex::default())
+        let temporary = directory.join(format!("{target_name}.{}.tmp", uuid::Uuid::new_v4()));
+        let result = async {
+            tokio::fs::write(&temporary, &bytes)
+                .await
+                .map_err(storage_error)?;
+            tokio::fs::rename(&temporary, &target)
+                .await
+                .map_err(storage_error)
+        }
+        .await;
+        let _ = tokio::fs::remove_file(temporary).await;
+        result?;
     }
+    Ok(target_name)
 }
 
 async fn write_index(
@@ -733,34 +905,212 @@ async fn write_index(
     repo: &RepositoryMeta,
     index: &ShelfIndex,
 ) -> Result<(), DesktopError> {
-    let directory = shelf_dir(config_dir, repo);
-    tokio::fs::create_dir_all(&directory)
-        .await
-        .map_err(storage_error)?;
-    let target = directory.join("index.json");
-    let temporary = directory.join("index.json.tmp");
+    let directory = shelf_dir(config_dir, repo).await?;
+    let target = directory.join("shelves.json");
+    let temporary = directory.join(format!("shelves.json.{}.tmp", uuid::Uuid::new_v4()));
     let bytes = serde_json::to_vec_pretty(index)
         .map_err(|error| DesktopError::new("SHELF_INDEX_INVALID", error.to_string(), true))?;
-    tokio::fs::write(&temporary, bytes)
-        .await
-        .map_err(storage_error)?;
-    tokio::fs::rename(temporary, target)
-        .await
-        .map_err(storage_error)
+    let result = async {
+        tokio::fs::write(&temporary, bytes)
+            .await
+            .map_err(storage_error)?;
+        tokio::fs::rename(&temporary, &target)
+            .await
+            .map_err(storage_error)
+    }
+    .await;
+    let _ = tokio::fs::remove_file(temporary).await;
+    result
 }
 
-fn shelf_dir(config_dir: &Path, repo: &RepositoryMeta) -> PathBuf {
-    config_dir.join("shelves").join(&repo.id)
+async fn shelf_dir(_config_dir: &Path, repo: &RepositoryMeta) -> Result<PathBuf, DesktopError> {
+    let output = git(
+        repo,
+        vec!["rev-parse".into(), "--absolute-git-dir".into()],
+        &CancellationToken::new(),
+    )
+    .await?;
+    let git_dir = PathBuf::from(output.stdout_text().trim());
+    safe_relative(&git_dir, "versiondock/shelves", true)
 }
 
-fn get_patch_path(directory: &Path, entry: &ShelfEntryInternal) -> PathBuf {
-    if let Some(ref pf) = entry.patch_file {
-        let p = directory.join(pf);
-        if p.is_file() {
-            return p;
+fn stored_file(directory: &Path, name: &str) -> Result<PathBuf, DesktopError> {
+    let file = safe_relative(directory, name, true)?;
+    if file == directory
+        || !std::fs::symlink_metadata(&file)
+            .map_err(storage_error)?
+            .is_file()
+    {
+        return Err(DesktopError::new(
+            "SHELF_STORAGE_FAILED",
+            "Stored content is not a regular file",
+            true,
+        ));
+    }
+    Ok(file)
+}
+
+fn get_patch_path(directory: &Path, entry: &ShelfEntryInternal) -> Result<PathBuf, DesktopError> {
+    validate_id(&entry.id)?;
+    if let Some(ref name) = entry.patch_file {
+        let candidate = safe_relative(directory, name, true)?;
+        if candidate.is_file() {
+            return stored_file(directory, name);
         }
     }
-    directory.join(format!("{}.patch", entry.id))
+    safe_relative(directory, &format!("{}.patch", entry.id), true)
+}
+
+fn select_patch(bytes: &[u8], paths: &[String]) -> Vec<u8> {
+    // Decode only for path matching. Patch bodies may contain non-UTF-8 text or
+    // raw symlink target bytes; copy the original sections without re-encoding.
+    let marker = b"diff --git ";
+    let boundaries: Vec<_> = bytes
+        .windows(marker.len())
+        .enumerate()
+        .filter(|(offset, value)| *value == marker && (*offset == 0 || bytes[offset - 1] == b'\n'))
+        .map(|(offset, _)| offset)
+        .collect();
+    let mut result = Vec::new();
+    for (index, start) in boundaries.iter().enumerate() {
+        let section = &bytes[*start..boundaries.get(index + 1).copied().unwrap_or(bytes.len())];
+        if paths
+            .iter()
+            .any(|path| section_touches_path(&String::from_utf8_lossy(section), path))
+        {
+            result.extend_from_slice(section);
+        }
+    }
+    result
+}
+
+fn section_touches_path(section: &str, path: &str) -> bool {
+    let plain = format!("diff --git a/{path} b/{path}\n");
+    let quoted = format!(
+        "diff --git {} {}\n",
+        quote_patch_path(&format!("a/{path}")),
+        quote_patch_path(&format!("b/{path}"))
+    );
+    section.starts_with(&plain)
+        || section.starts_with(&quoted)
+        || section.lines().any(|line| {
+            if let Some(value) = line
+                .strip_prefix("rename from ")
+                .or_else(|| line.strip_prefix("rename to "))
+            {
+                return crate::diff_content::decode_git_path(value) == path;
+            }
+            if let Some(value) = line
+                .strip_prefix("--- ")
+                .or_else(|| line.strip_prefix("+++ "))
+            {
+                let value = crate::diff_content::decode_git_path(value.trim_end_matches('\t'));
+                return value
+                    .strip_prefix("a/")
+                    .or_else(|| value.strip_prefix("b/"))
+                    == Some(path);
+            }
+            false
+        })
+}
+
+struct AttachmentRestore {
+    attachment: ShelfAttachment,
+    source: std::fs::File,
+    destination: PathBuf,
+}
+
+fn prepare_attachments(
+    directory: &Path,
+    repo: &RepositoryMeta,
+    entry: &ShelfEntryInternal,
+    paths: Option<&[String]>,
+) -> Result<Vec<AttachmentRestore>, DesktopError> {
+    entry
+        .binary_files
+        .iter()
+        .filter(|attachment| {
+            paths.is_none_or(|paths| paths.is_empty() || paths.contains(&attachment.repo_rel_path))
+        })
+        .map(|attachment| {
+            let source = stored_file(directory, &attachment.store_name)?;
+            let destination =
+                safe_relative(Path::new(&repo.root_path), &attachment.repo_rel_path, true)?;
+            match std::fs::symlink_metadata(&destination) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(storage_error(error)),
+                Ok(_) => {
+                    return Err(DesktopError::new(
+                        "SHELF_RESTORE_FAILED",
+                        format!("Destination already exists: {}", attachment.repo_rel_path),
+                        true,
+                    ))
+                }
+            }
+            if attachment.kind != "file" && attachment.kind != "symlink" {
+                return Err(DesktopError::new(
+                    "SHELF_RESTORE_FAILED",
+                    "Unsupported shelf attachment kind",
+                    true,
+                ));
+            }
+            Ok(AttachmentRestore {
+                attachment: attachment.clone(),
+                source: std::fs::File::open(source).map_err(storage_error)?,
+                destination,
+            })
+        })
+        .collect()
+}
+
+fn restore_attachments(
+    repo: &RepositoryMeta,
+    attachments: Vec<AttachmentRestore>,
+) -> Result<(), DesktopError> {
+    use std::io::Read;
+    for mut restore in attachments {
+        let root = Path::new(&repo.root_path);
+        safe_relative(root, &restore.attachment.repo_rel_path, true)?;
+        if let Some(parent) = restore.destination.parent() {
+            std::fs::create_dir_all(parent).map_err(storage_error)?;
+        }
+        safe_relative(root, &restore.attachment.repo_rel_path, true)?;
+        if restore.attachment.kind == "symlink" {
+            let mut bytes = Vec::new();
+            restore
+                .source
+                .read_to_end(&mut bytes)
+                .map_err(storage_error)?;
+            restore_symlink(&bytes, &restore.destination)?;
+        } else {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&restore.destination)
+                .map_err(storage_error)?;
+            std::io::copy(&mut restore.source, &mut file).map_err(storage_error)?;
+            #[cfg(unix)]
+            if let Some(mode) = restore.attachment.mode {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))
+                    .map_err(storage_error)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restore_symlink(bytes: &[u8], destination: &Path) -> Result<(), DesktopError> {
+    use std::os::unix::{ffi::OsStrExt, fs::symlink};
+    symlink(std::ffi::OsStr::from_bytes(bytes), destination).map_err(storage_error)
+}
+
+#[cfg(windows)]
+fn restore_symlink(bytes: &[u8], destination: &Path) -> Result<(), DesktopError> {
+    let target = std::str::from_utf8(bytes)
+        .map_err(|error| DesktopError::new("SHELF_RESTORE_FAILED", error.to_string(), true))?;
+    std::os::windows::fs::symlink_file(target, destination).map_err(storage_error)
 }
 
 fn repo_hash(root_path: &str) -> String {
@@ -879,4 +1229,208 @@ fn ensure_git(repo: &RepositoryMeta) -> Result<(), DesktopError> {
 
 fn storage_error(error: std::io::Error) -> DesktopError {
     DesktopError::new("SHELF_STORAGE_FAILED", error.to_string(), true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shelf_partial_patch_preserves_non_utf8_bytes_and_literal_paths() {
+        let patch = b"diff --git a/link b/link\nnew file mode 120000\n--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+x\xff\n\\ No newline at end of file\ndiff --git a/other b/other\nnew file mode 100644\n";
+        let selected = select_patch(patch, &["link".into()]);
+        assert_eq!(
+            selected,
+            &patch[..patch
+                .windows(b"diff --git a/other".len())
+                .position(|value| value == b"diff --git a/other")
+                .unwrap()]
+        );
+        assert!(selected.contains(&0xff));
+    }
+
+    async fn fixture() -> (tempfile::TempDir, RepositoryMeta, PathBuf) {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let repo = RepositoryMeta {
+            id: "git-test".into(),
+            name: "test".into(),
+            root_path: root.to_string_lossy().into_owned(),
+            color: "#888888".into(),
+            kind: VcsKind::Git,
+            parent_repo_id: None,
+            depth: 0,
+            is_submodule: false,
+            is_worktree: false,
+        };
+        let token = CancellationToken::new();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.name", "Test"],
+            vec!["config", "user.email", "test@example.test"],
+            vec!["config", "commit.gpgsign", "false"],
+        ] {
+            git(&repo, args.into_iter().map(String::from).collect(), &token)
+                .await
+                .unwrap();
+        }
+        std::fs::write(root.join("file.txt"), "original\n").unwrap();
+        git(&repo, vec!["add".into(), ".".into()], &token)
+            .await
+            .unwrap();
+        git(
+            &repo,
+            vec!["commit".into(), "-m".into(), "initial".into()],
+            &token,
+        )
+        .await
+        .unwrap();
+        let config = temporary.path().join("config");
+        (temporary, repo, config)
+    }
+
+    fn legacy_attachment(config: &Path, repo: &RepositoryMeta, patch: &str) -> PathBuf {
+        let legacy = config.join("shelves").join(&repo.id);
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("shelf-legacy.patch"), patch).unwrap();
+        std::fs::write(legacy.join("blob"), [0, 255, 128, 9]).unwrap();
+        let metadata = serde_json::json!({"shelves": [{
+            "id": "shelf-legacy", "name": "legacy", "date": "2026-10-09T00:00:00Z",
+            "files": [{"path": "blob.bin", "status": "untracked"}], "patchFile": "shelf-legacy.patch",
+            "binaryFiles": [{"repoRelPath": "blob.bin", "storeName": "blob", "mode": 493}],
+            "futureField": {"value": true}
+        }], "futureIndexField": "preserve"});
+        std::fs::write(
+            legacy.join("shelves.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        legacy
+    }
+
+    #[tokio::test]
+    async fn shelf_legacy_attachment_only_restore_and_drop_never_reimports() {
+        let (_temporary, repo, config) = fixture().await;
+        let legacy = legacy_attachment(&config, &repo, "");
+        assert_eq!(list(&config, &repo).await.unwrap().len(), 1);
+        let directory = shelf_dir(&config, &repo).await.unwrap();
+        let index = load_index(&directory.join("shelves.json")).await.unwrap();
+        assert_eq!(index.shelves[0].extra["futureField"]["value"], true);
+        apply(
+            &config,
+            &repo,
+            "shelf-legacy",
+            None,
+            true,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let restored = Path::new(&repo.root_path).join("blob.bin");
+        assert_eq!(std::fs::read(&restored).unwrap(), [0, 255, 128, 9]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(restored).unwrap().permissions().mode() & 0o777,
+                0o755
+            );
+        }
+        drop_shelf(&config, &repo, "shelf-legacy").await.unwrap();
+        assert!(list(&config, &repo).await.unwrap().is_empty());
+        assert!(legacy.join("shelves.json").is_file());
+        assert_eq!(std::fs::read_dir(directory).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shelf_symlink_targets_restore_as_raw_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+        let (_temporary, repo, config) = fixture().await;
+        let legacy = legacy_attachment(&config, &repo, "");
+        let target = [b'x', b'\n', 0xff];
+        std::fs::write(legacy.join("link-target"), target).unwrap();
+        let metadata = serde_json::json!({"shelves": [{"id": "shelf-link", "patchFile": "shelf-legacy.patch",
+            "files": ["link"], "binaryFiles": [{"repoRelPath": "link", "storeName": "link-target", "kind": "symlink"}]}]});
+        std::fs::write(
+            legacy.join("shelves.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        apply(
+            &config,
+            &repo,
+            "shelf-link",
+            None,
+            true,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let path = Path::new(&repo.root_path).join("link");
+        assert!(std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read_link(path).unwrap().as_os_str().as_bytes(),
+            target
+        );
+    }
+
+    #[tokio::test]
+    async fn shelf_attachment_preflight_preserves_existing_worktree_and_corrupt_index() {
+        let (_temporary, repo, config) = fixture().await;
+        legacy_attachment(&config, &repo, "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-original\n+changed\n");
+        let root = Path::new(&repo.root_path);
+        std::fs::write(root.join("blob.bin"), "keep").unwrap();
+        assert!(apply(
+            &config,
+            &repo,
+            "shelf-legacy",
+            None,
+            true,
+            &CancellationToken::new()
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.join("file.txt")).unwrap(),
+            "original\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("blob.bin")).unwrap(),
+            "keep"
+        );
+        let directory = shelf_dir(&config, &repo).await.unwrap();
+        std::fs::write(directory.join("shelves.json"), "invalid JSON").unwrap();
+        assert_eq!(
+            list(&config, &repo).await.unwrap_err().code,
+            "SHELF_INDEX_INVALID"
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join("shelves.json")).unwrap(),
+            "invalid JSON"
+        );
+    }
+
+    #[tokio::test]
+    async fn shelf_independent_app_configs_share_records_and_serialize_deletion() {
+        let (_temporary, repo, config) = fixture().await;
+        legacy_attachment(&config, &repo, "");
+        let other = config.with_file_name("other-config");
+        assert_eq!(list(&config, &repo).await.unwrap().len(), 1);
+        assert_eq!(list(&other, &repo).await.unwrap().len(), 1);
+        let (first, second) = tokio::join!(
+            drop_shelf(&config, &repo, "shelf-legacy"),
+            drop_shelf(&other, &repo, "shelf-legacy")
+        );
+        assert_ne!(first.is_ok(), second.is_ok());
+        assert_eq!(
+            first.err().or(second.err()).unwrap().code,
+            "SHELF_NOT_FOUND"
+        );
+        assert!(list(&config, &repo).await.unwrap().is_empty());
+    }
 }
