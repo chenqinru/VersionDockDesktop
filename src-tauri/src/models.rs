@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use specta::Type;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Type))]
@@ -221,6 +221,10 @@ pub enum BridgeCommand {
     WorkspaceOpen {
         paths: Vec<String>,
     },
+    WorkspaceRename {
+        workspace_id: String,
+        name: String,
+    },
     WorkspaceRemoveRecent {
         workspace_id: String,
     },
@@ -288,6 +292,12 @@ pub enum BridgeCommand {
         email: String,
         author_name: String,
     },
+    ResolveAuthorAvatars {
+        workspace_id: String,
+        repo_id: String,
+        authors: Vec<AvatarAuthor>,
+    },
+    ClearAuthorAvatarCache,
     PublishRepository {
         workspace_id: String,
         repo_id: String,
@@ -2457,6 +2467,12 @@ pub struct WorkspaceDescriptor {
     pub paths: Vec<String>,
     pub last_opened_at: String,
     pub available: bool,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub custom_name: Option<String>,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub workspace_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2670,6 +2686,17 @@ pub struct MergeCommitSummary {
 pub struct HistoryPage {
     pub commits: Vec<CommitNode>,
     pub has_more: bool,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub avatars: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarAuthor {
+    pub email: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,3 +1,4 @@
+import { clearAuthorAvatarCache } from '../../avatars/authorAvatarResolver';
 import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
@@ -155,7 +156,7 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
     const tag = match ? ` · ${t(match.primary ? 'Current Project ({0})' : 'Linked Remote ({0})', match.remote.name)}` : '';
     return { provider, accounts, match, tag };
   }).sort((a, b) => Number(Boolean(b.match)) + Number(b.match?.primary ?? false) - Number(Boolean(a.match)) - Number(a.match?.primary ?? false)).map(({ provider, accounts, tag }) => <ProfileMenuItem key={provider} busy={busy} label={providerLabel(provider)} icon={provider === 'github' ? 'github' : 'repo'} onClick={() => setProvider(provider)} description={(accounts.length > 1 ? t('{0} account(s) connected', accounts.length) : accounts.length ? t('Connected') : t('Not connected')) + tag} detail={accounts.length ? accounts.map((account) => `${account.displayName || account.login} (@${account.login}) · ${account.host}`).join(' • ') : t(provider === 'github' ? 'Connect using GitHub authentication or a Personal Access Token' : provider === 'gitlab' ? 'Add, re-authenticate, or remove GitLab Personal Access Tokens' : 'Connect using a Gitee Personal Access Token')} />)}
-    <ProfileMenuItem busy={busy} label={t('Clear Avatar Cache')} icon="trash" onClick={() => { window.dispatchEvent(new Event('versiondock-avatar-cache-clear')); notify(t('VersionDock: Avatar cache cleared.')); }} description={t('Cache')} detail={t('Purge cached avatars and force reload')} /></>);
+    <ProfileMenuItem busy={busy} label={t('Clear Avatar Cache')} icon="trash" onClick={() => void run(async () => { await clearAuthorAvatarCache(bridge); notify(t('VersionDock: Avatar cache cleared.')); })} description={t('Cache')} detail={t('Purge cached avatars and force reload')} /></>);
   const gitItems = <>
     {section(t('PROFILES'), <>{identity?.profiles.map((profile) => <ProfileMenuItem key={profile.id} busy={busy} label={profile.label} icon="account" onClick={(event) => openProfile(profile.id, event)} description={`${profile.userName} <${profile.email}>`} active={identity.selectedProfileId === profile.id} />)}
       <ProfileMenuItem busy={busy} label={t('Local')} icon="home" onClick={(event) => openProfile(LOCAL_PROFILE_ID, event)} description={identity?.local ? `${identity.local.userName} <${identity.local.email}> · ${t('from .git/config')}` : t(repo ? 'No local git identity in this repo' : 'No repo open')} active={identity?.selectedProfileId === LOCAL_PROFILE_ID} />

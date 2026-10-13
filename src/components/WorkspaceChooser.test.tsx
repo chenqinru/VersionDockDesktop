@@ -15,6 +15,24 @@ afterEach(() => {
 });
 
 describe('WorkspaceChooser V5 setup actions', () => {
+  it('opens a selected VS Code workspace file through the existing workspace flow', async () => {
+    const bridge = new MockBridge(() => true);
+    bridge.selectWorkspaceFile = vi.fn().mockResolvedValue('/tmp/team.code-workspace');
+    const openWorkspace = vi.fn().mockResolvedValue(true);
+    useAppStore.setState({ openWorkspace, operations: {}, bootstrap: { state: { recentWorkspaces: [] } } as never });
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: /Open VS Code Workspace/ }));
+    await waitFor(() => expect(openWorkspace).toHaveBeenCalledWith(['/tmp/team.code-workspace']));
+  });
+
+  it('reopens recent file workspaces from their source file rather than the old folder list', () => {
+    const bridge = new MockBridge(() => true);
+    const openWorkspace = vi.fn().mockResolvedValue(true);
+    useAppStore.setState({ openWorkspace, operations: {}, bootstrap: { state: { recentWorkspaces: [{ id: 'team', name: 'Team', workspaceFile: '/tmp/team.code-workspace', paths: ['/tmp/a', '/tmp/b'], available: true }] } } as never });
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: /Team/ }));
+    expect(openWorkspace).toHaveBeenCalledWith(['/tmp/team.code-workspace']);
+  });
   it.each([false, true])('gates SVN checkout on tool availability (%s) and explains the disabled state', (svnAvailable) => {
     const bridge = new MockBridge(() => true);
     useAppStore.setState({

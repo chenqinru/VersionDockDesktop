@@ -344,6 +344,7 @@ export class BrowserDevBridge implements VersionDockBridge {
   send(command: BridgeCommand): void { void this.request(command); }
   async cancelOperation(): Promise<boolean> { return false; }
   async selectWorkspaceFolders(): Promise<string[]> { return workspace.paths; }
+  async selectWorkspaceFile(): Promise<string | null> { return null; }
   async selectDirectory(): Promise<string | null> { return workspace.paths[0] ?? null; }
   async selectExecutable(): Promise<string | null> { return '/usr/local/bin/zed'; }
   async saveFileDialog(): Promise<string | null> { return null; }
@@ -508,7 +509,21 @@ export class BrowserDevBridge implements VersionDockBridge {
         return { settings: structuredClone(this.state.settings), effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: true } };
       }
       case 'updateLayout': this.state.layout = structuredClone(command.payload.layout); return command.payload.layout;
-      case 'workspaceOpen': case 'workspaceRefresh': this.generation += 1; return this.snapshot();
+      case 'workspaceOpen': case 'workspaceRefresh': {
+        this.generation += 1;
+        const value = this.snapshot();
+        const saved = this.state.recentWorkspaces.find(item => item.id === value.workspace.id);
+        if (saved) value.workspace = { ...value.workspace, name: saved.name, customName: saved.customName, workspaceFile: saved.workspaceFile };
+        return value;
+      }
+      case 'workspaceRename': {
+        const saved = this.state.recentWorkspaces.find(item => item.id === command.payload.workspace_id);
+        if (!saved) throw new Error('Workspace is no longer available.');
+        const updated = { ...saved, name: command.payload.name.trim(), customName: command.payload.name.trim() };
+        this.state.recentWorkspaces = this.state.recentWorkspaces.map(item => item.id === updated.id ? updated : item);
+        this.handlers.forEach(handler => handler({ type: 'workspace-renamed', workspace: updated }));
+        return updated;
+      }
       case 'initializeRepository': this.generation += 1; return { snapshot: this.snapshot(), repositoryId: this.repositories[0]?.meta.id ?? 'admin' };
       case 'cloneRepository': return { path: `${command.payload.parent_path}/${command.payload.target_name}` };
       case 'checkoutSvnRepository': return { path: `${command.payload.parent_path}/${command.payload.target_name}` };
@@ -517,6 +532,8 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'restoreConflicts': return { restoredPaths: [], failures: [] };
       case 'providerAccounts': return [];
       case 'providerAccountAvatar': return null;
+      case 'resolveAuthorAvatars': return {};
+      case 'clearAuthorAvatarCache': this.handlers.forEach(handler => handler({ type: 'author-avatar-cache-cleared' })); return true;
       case 'providerRetryAccess': return true;
       case 'providerGithubBegin': return { flowId: 'demo-flow', userCode: 'DEMO-CODE', verificationUri: 'https://github.com/login/device', expiresAt: new Date(Date.now() + 900000).toISOString(), interval: 5 };
       case 'providerGithubComplete': throw new Error('GitHub OAuth is unavailable in browser demo');

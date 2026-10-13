@@ -7,6 +7,7 @@ import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './RepositoryCheckoutDialog';
 import { APP_CURRENT_VERSION } from '../version';
+import { workspaceOpenPaths } from '../workspaces/openPaths';
 
 export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
@@ -29,6 +30,13 @@ export function WorkspaceChooser() {
       } else {
         await openWorkspace(paths);
       }
+    }
+  };
+  const chooseWorkspaceFile = async (openInNew: boolean) => {
+    const path = await bridge.selectWorkspaceFile(t('Open VS Code Workspace'));
+    if (path) {
+      if (openInNew) await bridge.openInNewWindow([path]);
+      else await openWorkspace([path]);
     }
   };
 
@@ -86,6 +94,10 @@ export function WorkspaceChooser() {
                 <span className="welcome-action-title">{t('Open Local Folder')}</span>
                 <span className="welcome-action-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
               </div>
+            </button>
+            <button type="button" className="welcome-action-btn" disabled={busy} onClick={event => void chooseWorkspaceFile(event.metaKey || event.ctrlKey)}>
+              <div className="welcome-action-icon"><Codicon name="file-code" /></div>
+              <div className="welcome-action-text"><span className="welcome-action-title">{t('Open VS Code Workspace')}</span><span className="welcome-action-desc">{t('Open a .code-workspace file and its local folders.')}</span></div>
             </button>
             <button type="button" className="welcome-action-btn" disabled={busy || !cloneAvailable} onClick={() => setCheckoutKind('git')}>
               <div className="welcome-action-icon"><Codicon name="repo-clone" /></div>
@@ -169,7 +181,7 @@ export function WorkspaceChooser() {
                       type="button"
                       className="recent-card-btn"
                       disabled={busy}
-                      onClick={(event) => handleRecentClick(event, workspace.paths)}
+                      onClick={(event) => handleRecentClick(event, workspaceOpenPaths(workspace))}
                     >
                       <ProjectIcon
                         name={workspace.name}
@@ -195,7 +207,7 @@ export function WorkspaceChooser() {
                         disabled={busy}
                         onClick={(e) => {
                           e.stopPropagation();
-                          void bridge.openInNewWindow(workspace.paths);
+                          void bridge.openInNewWindow(workspaceOpenPaths(workspace));
                         }}
                       >
                         <Codicon name="window" />

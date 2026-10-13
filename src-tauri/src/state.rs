@@ -133,19 +133,17 @@ impl AppState {
         while let Some(argument) = arguments.next() {
             if argument == "--workspace" {
                 if let Some(path) = arguments.next().and_then(|value| value.into_string().ok()) {
-                    if let Ok(root) = canonical_directory(&path) {
-                        let paths = vec![root.to_string_lossy().into_owned()];
-                        let descriptor = WorkspaceDescriptor {
-                            id: workspace_id(&paths),
-                            name: root
-                                .file_name()
-                                .and_then(|value| value.to_str())
-                                .unwrap_or("Workspace")
-                                .to_string(),
-                            paths,
-                            last_opened_at: chrono::Utc::now().to_rfc3339(),
-                            available: true,
-                        };
+                    if let Ok(mut descriptor) = crate::workspace::descriptor(vec![path]) {
+                        if let Some(previous) = app
+                            .recent_workspaces
+                            .iter()
+                            .find(|previous| previous.id == descriptor.id)
+                        {
+                            crate::workspace::retain_workspace_preferences(
+                                &mut descriptor,
+                                previous,
+                            );
+                        }
                         app.recent_workspaces
                             .retain(|item| item.id != descriptor.id);
                         app.recent_workspaces.insert(0, descriptor.clone());
@@ -509,7 +507,18 @@ impl AppState {
 
     pub async fn save_app_state(&self, mut snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
         let _state_write = self.state_write_lock.lock().await;
-        snapshot.commit_selections = self.app.read().await.commit_selections.clone();
+        let current = self.app.read().await;
+        snapshot.commit_selections = current.commit_selections.clone();
+        for workspace in &mut snapshot.recent_workspaces {
+            if let Some(previous) = current
+                .recent_workspaces
+                .iter()
+                .find(|previous| previous.id == workspace.id)
+            {
+                crate::workspace::retain_workspace_preferences(workspace, previous);
+            }
+        }
+        drop(current);
         self.save_app_state_locked(snapshot).await
     }
 
@@ -587,10 +596,17 @@ impl AppState {
 
     pub async fn upsert_workspace(
         &self,
-        workspace: WorkspaceDescriptor,
+        mut workspace: WorkspaceDescriptor,
     ) -> Result<(), DesktopError> {
         let _state_write = self.state_write_lock.lock().await;
         let mut snapshot = self.app.read().await.clone();
+        if let Some(previous) = snapshot
+            .recent_workspaces
+            .iter()
+            .find(|previous| previous.id == workspace.id)
+        {
+            crate::workspace::retain_workspace_preferences(&mut workspace, previous);
+        }
         snapshot
             .recent_workspaces
             .retain(|item| item.id != workspace.id);
@@ -598,6 +614,39 @@ impl AppState {
         snapshot.recent_workspaces.truncate(10);
         snapshot.last_workspace_id = Some(workspace.id);
         self.save_app_state_locked(snapshot).await
+    }
+
+    pub async fn rename_workspace(
+        &self,
+        id: &str,
+        name: &str,
+    ) -> Result<WorkspaceDescriptor, DesktopError> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
+            return Err(DesktopError::new(
+                "INVALID_WORKSPACE_NAME",
+                "Workspace name must contain 1 to 100 characters without control characters.",
+                false,
+            ));
+        }
+        let _state_write = self.state_write_lock.lock().await;
+        let mut snapshot = self.app.read().await.clone();
+        let workspace = snapshot
+            .recent_workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == id)
+            .ok_or_else(|| {
+                DesktopError::new(
+                    "WORKSPACE_NOT_FOUND",
+                    "Workspace is no longer available.",
+                    true,
+                )
+            })?;
+        workspace.name = name.to_owned();
+        workspace.custom_name = Some(name.to_owned());
+        let workspace = workspace.clone();
+        self.save_app_state_locked(snapshot).await?;
+        Ok(workspace)
     }
 
     pub fn watch_workspace(

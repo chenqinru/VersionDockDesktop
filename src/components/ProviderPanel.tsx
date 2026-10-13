@@ -1,5 +1,6 @@
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { clearAuthorAvatarCache } from '../avatars/authorAvatarResolver';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type {
   GithubDeviceFlow,
@@ -30,6 +31,7 @@ export interface ProviderPanelProps {
 type ActiveView = 'none' | 'detail' | 'github_flow' | 'github_form' | 'gitlab_form' | 'gitee_form';
 
 const providerErrorKeys: Record<string, string> = {
+  AVATAR_CACHE_CLEAR_FAILED: 'Unable to clear avatar cache',
   PROVIDER_KEY_ACCESS_FAILED: 'Unable to read the account token from secure storage. Retry access in account management.',
   PROVIDER_AUTH_REQUIRED: 'Account authentication failed. Please reauthenticate.',
   PROVIDER_FORBIDDEN: 'This token does not have the required permissions.',
@@ -113,10 +115,14 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
 
   const dialogRef = useRef<HTMLElement>(null);
 
-  const clearAvatarCache = () => {
-    window.dispatchEvent(new Event('versiondock-avatar-cache-clear'));
-    setCacheCleared(true);
-    setTimeout(() => setCacheCleared(false), 2000);
+  const clearAvatarCache = async () => {
+    setBusy(true); setError('');
+    try {
+      await clearAuthorAvatarCache(bridge);
+      setCacheCleared(true);
+      setTimeout(() => setCacheCleared(false), 2000);
+    } catch (reason) { setError(formatProviderError(reason, t)); }
+    finally { setBusy(false); }
   };
 
   const loadAccounts = useCallback(async () => {
@@ -538,6 +544,7 @@ export function ProviderPanel({ mode, repoId, close, onClone, initialProvider }:
               <button
                 type="button"
                 className="provider-cache-btn"
+                disabled={busy}
                 onClick={clearAvatarCache}
                 title={t('Purge cached avatars and force reload')}
               >

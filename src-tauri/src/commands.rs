@@ -1,4 +1,7 @@
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -634,7 +637,9 @@ fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
         | BridgeCommand::ProviderAccountAvatar { .. }
         | BridgeCommand::ProviderRepositories { .. }
         | BridgeCommand::ProviderNamespaces { .. }
-        | BridgeCommand::ResolveAuthorAvatar { .. } => ("provider", "Loading remote provider data"),
+        | BridgeCommand::ResolveAuthorAvatar { .. }
+        | BridgeCommand::ResolveAuthorAvatars { .. }
+        | BridgeCommand::ClearAuthorAvatarCache => ("provider", "Loading remote provider data"),
         BridgeCommand::ProviderGithubBegin { .. }
         | BridgeCommand::ProviderGithubComplete { .. }
         | BridgeCommand::ProviderGithubSave { .. }
@@ -792,6 +797,7 @@ fn command_error_context(
     .to_string();
     match command {
         BridgeCommand::WorkspaceRemoveRecent { workspace_id }
+        | BridgeCommand::WorkspaceRename { workspace_id, .. }
         | BridgeCommand::WorkspaceRefresh { workspace_id }
         | BridgeCommand::SaveCommitSelections { workspace_id, .. }
         | BridgeCommand::InitializeRepository { workspace_id, .. } => {
@@ -820,6 +826,11 @@ fn command_error_context(
             repo_id,
         }
         | BridgeCommand::History {
+            workspace_id,
+            repo_id,
+            ..
+        }
+        | BridgeCommand::ResolveAuthorAvatars {
             workspace_id,
             repo_id,
             ..
@@ -1478,8 +1489,9 @@ async fn dispatch(
                 None,
                 None,
             );
-            let descriptor = workspace::descriptor(paths)?;
+            let mut descriptor = workspace::descriptor(paths)?;
             state.upsert_workspace(descriptor.clone()).await?;
+            descriptor = state.workspace(&descriptor.id).await?;
             let generation = state.next_generation();
             let settings = state.app.read().await.settings.clone();
             emit_operation_phase(
@@ -1515,6 +1527,15 @@ async fn dispatch(
                 .cache_repositories(&descriptor.id, &snapshot.repositories)
                 .await;
             json(snapshot)
+        }
+        BridgeCommand::WorkspaceRename { workspace_id, name } => {
+            let workspace = state.rename_workspace(&workspace_id, &name).await?;
+            let _ = app.emit(
+                "versiondock://event",
+                serde_json::json!({"type": "workspace-renamed", "workspace": workspace}),
+            );
+            crate::tray::refresh(app).await;
+            json(workspace)
         }
         BridgeCommand::WorkspaceRemoveRecent { workspace_id } => {
             state.remove_cached_workspace(&workspace_id).await;
@@ -1806,6 +1827,42 @@ async fn dispatch(
                 .await?,
             )
         }
+        BridgeCommand::ResolveAuthorAvatars {
+            workspace_id,
+            repo_id,
+            authors,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let settings = state.app.read().await.settings.clone();
+            if !settings.online_avatars_enabled {
+                return json(HashMap::<String, Option<String>>::new());
+            }
+            let remotes = if repo.kind == VcsKind::Git {
+                vcs::avatar_remote_urls(&repo, token)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            json(
+                provider::resolve_author_avatars(
+                    &state.config_dir,
+                    authors,
+                    remotes,
+                    settings.avatar_cross_platform_fallback,
+                    token,
+                )
+                .await?,
+            )
+        }
+        BridgeCommand::ClearAuthorAvatarCache => {
+            crate::avatar_cache::cache(&state.config_dir).clear()?;
+            let _ = app.emit(
+                "versiondock://event",
+                serde_json::json!({"type":"author-avatar-cache-cleared"}),
+            );
+            json(true)
+        }
         BridgeCommand::PublishRepository {
             workspace_id,
             repo_id,
@@ -2047,6 +2104,12 @@ async fn dispatch(
             json(crate::tray::reveal_startup_window(app, invoking_window).await?)
         }
         BridgeCommand::WindowFocusWorkspace { paths } => {
+            let paths = if paths.len() == 1 && paths[0].to_lowercase().ends_with(".code-workspace")
+            {
+                workspace::descriptor(paths)?.paths
+            } else {
+                paths
+            };
             let focus_order = crate::tray::focus_order(app);
             json(crate::windowing::focus_workspace(
                 app,
@@ -3118,7 +3181,33 @@ async fn dispatch(
                 None,
                 None,
             );
-            let history = vcs::history(&repo, skip, limit, query, token).await?;
+            let mut history = vcs::history(&repo, skip, limit, query, token).await?;
+            let settings = state.app.read().await.settings.clone();
+            if settings.online_avatars_enabled
+                && crate::avatar_cache::cache(&state.config_dir).has_entries()
+            {
+                let remotes = if repo.kind == VcsKind::Git {
+                    vcs::avatar_remote_urls(&repo, token)
+                        .await
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let authors = history
+                    .commits
+                    .iter()
+                    .map(|commit| crate::models::AvatarAuthor {
+                        email: commit.email.clone(),
+                        name: commit.author.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                history.avatars = provider::cached_author_avatars(
+                    &state.config_dir,
+                    &remotes,
+                    settings.avatar_cross_platform_fallback,
+                    &authors,
+                );
+            }
             emit_operation_phase(
                 app,
                 operation_id,

@@ -413,16 +413,16 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
     if (!effective) return false;
     const store = useAppStore.getState();
     if (!isWorkspaceOpen(store, wid)) return false;
-    const action = effective === 'rebase' ? 'pullRebase' : effective === 'ff-only' ? 'pullFfOnly' : 'pull';
-    return sync(repo.meta.id, action, undefined, undefined, wid);
+    return (await store.updateRepositories([repo.meta.id], effective, wid)).includes(repo.meta.id);
   };
   const syncRepo = async () => {
     const wid = useAppStore.getState().snapshot?.workspace.id;
     if (!wid) return;
-    if (incomingCount > 0 && !await pullRepo(undefined, wid)) return;
+    const strategy = await resolvePullStrategy(t);
+    if (!strategy) return;
     const store = useAppStore.getState();
     if (!isWorkspaceOpen(store, wid)) return;
-    if (outgoingCount > 0) await sync(repo.meta.id, 'push', undefined, undefined, wid);
+    await store.synchronizeRepositories({ pullRepoIds: [repo.meta.id], pushRepoIds: [repo.meta.id], strategy }, wid);
   };
   const headerItems: ContextMenuEntry[] = [
     { id: 'fetch', label: t('Fetch'), icon: 'cloud-download' },
@@ -629,20 +629,21 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
   const syncSelected = async (strategy?: 'merge' | 'rebase' | 'ff-only', direction: 'all' | 'outgoing' | 'incoming' = 'all') => {
     const wid = useAppStore.getState().snapshot?.workspace.id;
     if (!wid) return;
+    const pullTargets = direction === 'outgoing' ? [] : pullableRepos;
     let effectiveStrategy = strategy;
-    if (direction !== 'outgoing' && pullableRepos.length > 0) {
+    if (pullTargets.length > 0) {
       effectiveStrategy = await resolvePullStrategy(t, strategy);
       if (!effectiveStrategy) return;
     }
     const store = useAppStore.getState();
     if (!isWorkspaceOpen(store, wid)) return;
-    const pullTargets = direction === 'outgoing' ? [] : pullableRepos;
-    const action = effectiveStrategy === 'rebase' ? 'pullRebase' : effectiveStrategy === 'ff-only' ? 'pullFfOnly' : 'pull';
+    if (direction === 'all') {
+      await store.synchronizeRepositories({ pullRepoIds: pullTargets.map(repo => repo.meta.id), pushRepoIds: pushableRepos.map(repo => repo.meta.id), strategy: effectiveStrategy }, wid);
+      return;
+    }
     let pulled: string[] = [];
-    if (pullTargets.length > 1) {
+    if (pullTargets.length) {
       pulled = await store.updateRepositories(pullTargets.map(repo => repo.meta.id), effectiveStrategy, wid);
-    } else if (pullTargets.length && await sync(pullTargets[0].meta.id, action, undefined, undefined, wid)) {
-      pulled = [pullTargets[0].meta.id];
     }
     if (direction !== 'incoming') {
       const pushTargets = pushableRepos.filter(repo => !pullTargets.some(target => target.meta.id === repo.meta.id) || pulled.includes(repo.meta.id));
@@ -654,13 +655,8 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
     await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
   const pullSelected = async (strategy: 'merge' | 'rebase' | 'ff-only', targetWid?: string) => {
-    const action = strategy === 'rebase' ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull';
     const wid = targetWid ?? useAppStore.getState().snapshot?.workspace.id;
-    if (pullableRepos.length > 1) {
-      await useAppStore.getState().updateRepositories(pullableRepos.map(repo => repo.meta.id), strategy, wid);
-    } else {
-      await Promise.allSettled(pullableRepos.map(repo => sync(repo.meta.id, action, undefined, undefined, wid)));
-    }
+    await useAppStore.getState().updateRepositories(pullableRepos.map(repo => repo.meta.id), strategy, wid);
     await Promise.all([loadIncoming(undefined, wid), loadOutgoing(undefined, wid)]);
   };
   const toggleChecked = (repoId: string) => setChecked((current) => {

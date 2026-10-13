@@ -162,7 +162,7 @@ describe('identity status menu', () => {
     setup(); const anchor = await screen.findByRole('button', { name: /Git: Local Dev/ });
     fireEvent.mouseEnter(anchor); const tooltip = await screen.findByRole('tooltip');
     expect(within(tooltip).getByText('local@example.test')).toBeInTheDocument(); expect(within(tooltip).getAllByText('Not connected')).toHaveLength(3);
-    fireEvent.click(anchor); fireEvent.click(await screen.findByText('Clear Avatar Cache')); expect(clear).toHaveBeenCalledOnce();
+    fireEvent.click(anchor); fireEvent.click(await screen.findByText('Clear Avatar Cache')); await waitFor(() => expect(clear).toHaveBeenCalledOnce());
     window.removeEventListener('versiondock-avatar-cache-clear', clear);
   });
   it('keeps the identity tooltip available when focusing its manage action', async () => {

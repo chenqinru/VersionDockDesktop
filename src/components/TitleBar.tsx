@@ -14,6 +14,8 @@ import type { WindowTabTransfer, WorkspaceDescriptor } from '../bindings/generat
 import { dragPoint, shouldDetachTab, tabSnapInsertionIndex, type ScreenPoint, type WindowBounds } from '../windowing/tabDrag';
 import { TabStripAutoScroller } from '../windowing/tabStripAutoScroller';
 import { TabDragPreviewWindow } from '../windowing/tabDragPreviewWindow';
+import { promptDialog } from './dialogService';
+import { workspaceOpenPaths } from '../workspaces/openPaths';
 
 interface ActiveTabDrag {
   tab: WorkspaceDescriptor;
@@ -126,6 +128,15 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     if (paths.length) {
       await openWorkspace(paths);
     }
+  };
+  const chooseWorkspaceFile = async () => {
+    setNewTabMenuOpen(false);
+    const path = await bridge.selectWorkspaceFile(t('Open VS Code Workspace'));
+    if (path) await openWorkspace([path]);
+  };
+  const renameWorkspace = async (tab: WorkspaceDescriptor) => {
+    const name = await promptDialog({ title: t('Rename Workspace'), message: t('Workspace name'), initialValue: tab.name, validateInput: value => !value.trim() || [...value.trim()].length > 100 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) ? t('Workspace name must contain 1 to 100 characters without control characters.') : undefined });
+    if (name !== null && name.trim() && name.trim() !== tab.name) await useAppStore.getState().renameWorkspace(tab.id, name.trim());
   };
 
   const handleOpenRecent = async (paths: string[]) => {
@@ -992,6 +1003,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
           x={contextMenu.x}
           y={contextMenu.y}
           items={[
+            { id: 'rename', label: t('Rename Workspace'), icon: 'edit', disabled: Boolean(transferringTabIds[contextMenu.tabId]) },
             { id: 'new-window', label: t('Open in New Window'), icon: 'window', disabled: Boolean(transferringTabIds[contextMenu.tabId]) },
             { separator: true },
             { id: 'close', label: t('Close Tab'), icon: 'close', disabled: Boolean(transferringTabIds[contextMenu.tabId]) },
@@ -999,7 +1011,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
           ]}
           onSelect={(id) => {
             const targetTab = tabs.find((t) => t.id === contextMenu.tabId);
-            if (id === 'new-window' && targetTab) void moveTabToNewWindow(targetTab);
+            if (id === 'rename' && targetTab) void renameWorkspace(targetTab);
+            else if (id === 'new-window' && targetTab) void moveTabToNewWindow(targetTab);
             else if (id === 'close') void closeTab(contextMenu.tabId);
             else if (id === 'close-others') void closeOtherTabs(contextMenu.tabId);
             setContextMenu(null);
@@ -1021,6 +1034,11 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
           }}
         >
           <div className="workspace-menu-primary-wrap">
+            <button type="button" className="workspace-menu-primary-btn" role="menuitem" disabled={busy} onClick={() => void chooseWorkspaceFile()}>
+              <div className="workspace-menu-btn-icon"><Codicon name="file-code" /></div>
+              <div className="workspace-menu-btn-content"><span className="workspace-menu-btn-title">{t('Open VS Code Workspace')}</span><span className="workspace-menu-btn-desc">{t('Open a .code-workspace file and its local folders.')}</span></div>
+              <Codicon name="chevron-right" className="workspace-menu-btn-arrow" />
+            </button>
             <button
               type="button"
               className="workspace-menu-primary-btn"
@@ -1061,10 +1079,10 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                         disabled={!workspace.available || busy}
                         onClick={(event) => {
                           if (event.metaKey || event.ctrlKey) {
-                            void bridge.openInNewWindow(workspace.paths);
+                            void bridge.openInNewWindow(workspaceOpenPaths(workspace));
                             setNewTabMenuOpen(false);
                           } else {
-                            void handleOpenRecent(workspace.paths);
+                            void handleOpenRecent(workspaceOpenPaths(workspace));
                           }
                         }}
                       >
@@ -1098,7 +1116,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                         disabled={!workspace.available || busy}
                         onClick={(event) => {
                           event.stopPropagation();
-                          void bridge.openInNewWindow(workspace.paths);
+                          void bridge.openInNewWindow(workspaceOpenPaths(workspace));
                           setNewTabMenuOpen(false);
                         }}
                       >

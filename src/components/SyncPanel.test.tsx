@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncPanel } from './SyncPanel';
 import { useAppStore } from '../store/appStore';
 import type { CommitDetail, CommitNode, IncomingCommit, RepositoryStatus, UnpushedCommit, WorkspaceSnapshot } from '../bindings/generated';
@@ -79,6 +79,20 @@ afterEach(() => {
 });
 
 describe('SyncPanel error handling', () => {
+  const initial = useAppStore.getState();
+  beforeEach(() => useAppStore.setState({
+    synchronizeRepositories: initial.synchronizeRepositories,
+    updateRepositories: vi.fn(async (ids, strategy, wid) => {
+      const succeeded: string[] = [];
+      for (const id of ids) if (await useAppStore.getState().sync(id, strategy === 'rebase' ? 'pullRebase' : strategy === 'ff-only' ? 'pullFfOnly' : 'pull', undefined, undefined, wid)) succeeded.push(id);
+      return succeeded;
+    }),
+    pushRepositories: vi.fn(async (ids, _options, wid) => {
+      for (const id of ids) await useAppStore.getState().sync(id, 'push', undefined, undefined, wid);
+      return ids;
+    }),
+  }));
+  afterEach(() => useAppStore.setState({ updateRepositories: initial.updateRepositories, pushRepositories: initial.pushRepositories, synchronizeRepositories: initial.synchronizeRepositories }));
   it('renders load errors banner with retry button and updates empty state', () => {
     const mockLoadOutgoing = vi.fn();
     useAppStore.setState({
@@ -491,8 +505,8 @@ describe('SyncPanel footer parity with plugin', () => {
     for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
     fireEvent.click(screen.getByRole('button', { name: /Sync.*↓2.*↑2/ }));
     await vi.waitFor(() => expect(view.sync).toHaveBeenCalledTimes(1));
-    expect(update).toHaveBeenCalledWith(['repo-1', 'repo-2'], 'rebase', 'workspace-1');
-    expect(view.sync).toHaveBeenCalledWith('repo-1', 'push', undefined, undefined, 'workspace-1');
+    expect(update).toHaveBeenCalledWith(['repo-1', 'repo-2'], 'rebase', 'workspace-1', { deferNotification: expect.any(Function), onCancelled: expect.any(Function) });
+    expect(view.sync).toHaveBeenCalledWith('repo-1', 'push', false, { notifySuccess: true }, 'workspace-1');
   });
 
   it.each([false, true])('uses a shared push task for selected repositories (force=%s)', async force => {

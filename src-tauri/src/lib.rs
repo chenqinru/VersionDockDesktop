@@ -7,6 +7,7 @@
 
 mod ai;
 mod app_updater;
+mod avatar_cache;
 mod changelist;
 mod cli;
 mod commands;

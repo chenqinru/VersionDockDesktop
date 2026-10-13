@@ -173,6 +173,11 @@ export type AppStateSnapshot = {
 	branchSidebarCollapsedSections?: string[] | null,
 };
 
+export type AvatarAuthor = {
+	email: string,
+	name: string,
+};
+
 export type BatchCommitTarget = {
 	repoId: string,
 	message: string,
@@ -283,6 +288,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	layout: LayoutState,
 } } | { type: "workspaceOpen"; payload: {
 	paths: string[],
+} } | { type: "workspaceRename"; payload: {
+	workspace_id: string,
+	name: string,
 } } | { type: "workspaceRemoveRecent"; payload: {
 	workspace_id: string,
 } } | { type: "workspaceRefresh"; payload: {
@@ -333,7 +341,11 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	repo_id: string,
 	email: string,
 	author_name: string,
-} } | { type: "publishRepository"; payload: {
+} } | { type: "resolveAuthorAvatars"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	authors: AvatarAuthor[],
+} } | { type: "clearAuthorAvatarCache" } | { type: "publishRepository"; payload: {
 	workspace_id: string,
 	repo_id: string,
 	account_id: string,
@@ -1060,6 +1072,7 @@ export type HistoryOperation = { type: "checkout"; revision: string } | { type: 
 export type HistoryPage = {
 	commits: CommitNode[],
 	hasMore: boolean,
+	avatars?: { [key in string]: string },
 };
 
 export type HistoryQuery = {
@@ -1673,6 +1686,8 @@ export type WorkspaceDescriptor = {
 	paths: string[],
 	lastOpenedAt: string,
 	available: boolean,
+	customName?: string | null,
+	workspaceFile?: string | null,
 };
 
 export type WorkspaceEvent = {

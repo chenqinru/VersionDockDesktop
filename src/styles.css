@@ -810,6 +810,10 @@ body.is-tab-drop-target * {
 }
 
 .workspace-menu-primary-wrap {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 8px;
   margin-bottom: 6px;
 }
 
@@ -2359,6 +2363,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .welcome-left {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: auto;
   padding: 24px 22px;
   border-right: 1px solid var(--versiondock-border-soft);
   gap: 14px;

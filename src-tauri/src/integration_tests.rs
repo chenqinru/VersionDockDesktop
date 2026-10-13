@@ -28,6 +28,108 @@ fn available(program: &str) -> bool {
 }
 
 #[tokio::test]
+async fn workspace_file_open_and_rename_survive_reopen_restart_and_stale_saves() {
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    for name in ["仓库 A", "repository-b"] {
+        std::fs::create_dir(root.join(name)).unwrap();
+    }
+    let uri = url::Url::from_directory_path(root.join("repository-b"))
+        .unwrap()
+        .to_string();
+    let file = root.join("团队.code-workspace");
+    let raw = format!(
+        r#"{{
+      // VS Code workspace with relative paths, a local URI and a duplicate
+      "folders": [{{"path":"仓库 A", "name":"Alias"}}, {{"uri":{}}}, {{"path":"仓库 A"}},],
+      "settings": {{"editor.fontSize":13,}},
+    }}"#,
+        serde_json::to_string(&uri).unwrap()
+    );
+    std::fs::write(&file, &raw).unwrap();
+    let descriptor = workspace::descriptor(vec![file.to_string_lossy().into_owned()]).unwrap();
+    assert_eq!(descriptor.name, "团队");
+    assert_eq!(descriptor.paths.len(), 2);
+    assert_eq!(
+        descriptor.workspace_file.as_deref(),
+        Some(dunce::canonicalize(&file).unwrap().to_str().unwrap())
+    );
+    let folder_descriptor = workspace::descriptor(descriptor.paths.clone()).unwrap();
+    assert_eq!(folder_descriptor.id, descriptor.id);
+    let state = crate::state::AppState::load(root.join("config"));
+    state.upsert_workspace(descriptor.clone()).await.unwrap();
+    let stale = state.app.read().await.clone();
+    let renamed = state
+        .rename_workspace(&descriptor.id, "  我的团队  ")
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "我的团队");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), raw);
+    state.save_app_state(stale).await.unwrap();
+    state.upsert_workspace(folder_descriptor).await.unwrap();
+    assert_eq!(
+        state.workspace(&descriptor.id).await.unwrap().name,
+        "我的团队"
+    );
+    let restarted = crate::state::AppState::load(root.join("config"));
+    let restored = restarted.workspace(&descriptor.id).await.unwrap();
+    assert_eq!(restored.name, "我的团队");
+    assert_eq!(restored.workspace_file, descriptor.workspace_file);
+    for name in ["", "\n", "invalid\nname"] {
+        assert_eq!(
+            restarted
+                .rename_workspace(&descriptor.id, name)
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_WORKSPACE_NAME"
+        );
+    }
+    assert_eq!(
+        restarted
+            .rename_workspace(&descriptor.id, &"a".repeat(101))
+            .await
+            .unwrap_err()
+            .code,
+        "INVALID_WORKSPACE_NAME"
+    );
+    // Two actual repositories are discovered through the expanded folders.
+    if available("git") {
+        for path in &restored.paths {
+            command("git", &["init", "-b", "main"], Path::new(path));
+        }
+        assert_eq!(
+            workspace::scan(&restored, &crate::models::DesktopSettings::default())
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+}
+
+#[test]
+fn workspace_file_rejects_invalid_empty_remote_missing_and_recursive_folders() {
+    let directory = tempdir().unwrap();
+    let file = directory.path().join("test.code-workspace");
+    for raw in [
+        "invalid json",
+        r#"{"folders":[]}"#,
+        r#"{"folders":[{}]}"#,
+        r#"{"folders":[{"uri":"vscode-remote://ssh-remote+host/home/project"}]}"#,
+        r#"{"folders":[{"path":"missing"}]}"#,
+        r#"{"folders":[{"path":"test.code-workspace"}]}"#,
+    ] {
+        std::fs::write(&file, raw).unwrap();
+        assert_eq!(
+            workspace::descriptor(vec![file.to_string_lossy().into_owned()])
+                .unwrap_err()
+                .code,
+            "INVALID_WORKSPACE_FILE"
+        );
+    }
+}
+
+#[tokio::test]
 async fn real_git_repository_lookup_recovers_cold_cache_and_reports_wrong_workspace() {
     if !available("git") {
         return;
@@ -5874,6 +5976,8 @@ async fn test_vscode_shelf_import_and_backward_compatibility() {
         paths: vec![directory.path().to_string_lossy().into_owned()],
         last_opened_at: "2026-08-20T00:00:00Z".into(),
         available: true,
+        custom_name: None,
+        workspace_file: None,
     };
     let repository = workspace::scan(&workspace, &crate::models::DesktopSettings::default())
         .unwrap()

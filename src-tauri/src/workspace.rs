@@ -91,22 +91,38 @@ pub async fn tool_availability(token: &CancellationToken) -> ToolAvailability {
 }
 
 pub fn descriptor(paths: Vec<String>) -> Result<WorkspaceDescriptor, DesktopError> {
+    if paths.len() == 1
+        && Path::new(&paths[0])
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("code-workspace"))
+    {
+        return workspace_file_descriptor(&paths[0]);
+    }
+    if paths.is_empty() {
+        return Err(DesktopError::new(
+            "INVALID_WORKSPACE",
+            "Select at least one workspace folder.",
+            false,
+        ));
+    }
     let canonical = paths
         .iter()
         .map(|path| canonical_directory(path))
         .collect::<Result<Vec<_>, _>>()?;
-    let path_strings = canonical
+    let mut path_strings = canonical
         .iter()
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    let name = if canonical.len() == 1 {
+    let mut seen = HashSet::new();
+    path_strings.retain(|path| seen.insert(path.clone()));
+    let name = if path_strings.len() == 1 {
         canonical[0]
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("Workspace")
             .to_string()
     } else {
-        format!("{} roots", canonical.len())
+        format!("{} roots", path_strings.len())
     };
     Ok(WorkspaceDescriptor {
         id: workspace_id(&path_strings),
@@ -114,7 +130,84 @@ pub fn descriptor(paths: Vec<String>) -> Result<WorkspaceDescriptor, DesktopErro
         paths: path_strings,
         last_opened_at: Utc::now().to_rfc3339(),
         available: true,
+        custom_name: None,
+        workspace_file: None,
     })
+}
+
+fn workspace_file_descriptor(value: &str) -> Result<WorkspaceDescriptor, DesktopError> {
+    let invalid = |message: &str| {
+        DesktopError::new(
+            "INVALID_WORKSPACE_FILE",
+            format!("{message}: {value}"),
+            false,
+        )
+    };
+    let file = dunce::canonicalize(value).map_err(|_| invalid("Workspace file is unavailable"))?;
+    let raw =
+        std::fs::read_to_string(&file).map_err(|_| invalid("Unable to read workspace file"))?;
+    let document: serde_json::Value = json5::from_str(raw.trim_start_matches('\u{feff}'))
+        .map_err(|_| invalid("Workspace file contains invalid JSON"))?;
+    let folders = document["folders"]
+        .as_array()
+        .filter(|folders| !folders.is_empty())
+        .ok_or_else(|| invalid("Workspace file must contain at least one folder"))?;
+    let parent = file
+        .parent()
+        .ok_or_else(|| invalid("Workspace file has no parent directory"))?;
+    let mut paths = Vec::new();
+    for folder in folders {
+        let path = if let Some(path) = folder["path"].as_str() {
+            if path.trim().is_empty() {
+                return Err(invalid("Workspace folder path is empty"));
+            }
+            parent.join(path)
+        } else if let Some(uri) = folder["uri"].as_str() {
+            let uri =
+                url::Url::parse(uri).map_err(|_| invalid("Workspace folder URI is invalid"))?;
+            if uri.scheme() != "file" {
+                return Err(invalid("Only local workspace folder URIs are supported"));
+            }
+            uri.to_file_path()
+                .map_err(|_| invalid("Workspace folder URI is not a local file path"))?
+        } else {
+            return Err(invalid("Workspace folder must contain a path or URI"));
+        };
+        // Folder entries cannot themselves be workspace files (including
+        // self-references); validate them as directories before expansion.
+        let path = canonical_directory(&path.to_string_lossy())
+            .map_err(|_| invalid("Workspace folder is unavailable"))?;
+        paths.push(path.to_string_lossy().into_owned());
+    }
+    let mut workspace = descriptor(paths)?;
+    workspace.name = file
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Workspace")
+        .to_owned();
+    workspace.workspace_file = Some(file.to_string_lossy().into_owned());
+    Ok(workspace)
+}
+
+pub fn retain_workspace_preferences(
+    workspace: &mut WorkspaceDescriptor,
+    previous: &WorkspaceDescriptor,
+) {
+    workspace.custom_name.clone_from(&previous.custom_name);
+    if workspace.workspace_file.is_none() {
+        workspace
+            .workspace_file
+            .clone_from(&previous.workspace_file);
+    }
+    if let Some(name) = &workspace.custom_name {
+        workspace.name = name.clone();
+    } else if let Some(file) = &workspace.workspace_file {
+        workspace.name = Path::new(file)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Workspace")
+            .to_owned();
+    }
 }
 
 pub async fn snapshot(

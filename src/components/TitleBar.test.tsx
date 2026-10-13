@@ -5,6 +5,7 @@ import { BridgeContext } from '../platform/context';
 import { MockBridge, type TabDragPayload, type VersionDockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
 import { I18nContext, createTranslator } from '../i18n';
+import * as dialogService from './dialogService';
 
 const bridge = new MockBridge(() => []);
 const workspace = {
@@ -22,6 +23,19 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it('renames the target workspace from the tab menu using the shared validated dialog', async () => {
+    const prompt = vi.spyOn(dialogService, 'promptDialog').mockResolvedValue('我的团队');
+    const original = useAppStore.getState().renameWorkspace;
+    const rename = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, renameWorkspace: rename });
+    try {
+      const { container } = render(<BridgeContext.Provider value={bridge}><I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t: createTranslator('zh-CN') }}><TitleBar /></I18nContext.Provider></BridgeContext.Provider>);
+      fireEvent.contextMenu(container.querySelector('[data-tab-id]')!);
+      fireEvent.click(await screen.findByText('重命名工作区'));
+      await waitFor(() => expect(rename).toHaveBeenCalledWith(workspace.id, '我的团队'));
+      expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ initialValue: 'Workspace', validateInput: expect.any(Function) }));
+    } finally { prompt.mockRestore(); useAppStore.setState({ renameWorkspace: original }); }
+  });
   it('only synchronizes window bounds when the geometry changes', () => {
     vi.useFakeTimers();
     try {

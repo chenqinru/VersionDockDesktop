@@ -5,7 +5,7 @@ import { formatDemoLogs, logLevelPriority, mergeLogEntries } from '../logs/entri
 import type {
   AiEvent, BridgeCommand, DesktopError, OperationDomain,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
-  WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent,
+  WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent, WorkspaceDescriptor,
   LogEntry, LogLevel, LogChannel, UpdateRestoreWarning,
 } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
@@ -40,7 +40,7 @@ export interface OperationRequestEvent {
   context: RequestContext;
 }
 export interface OperationSettledEvent { progressEvent: true; type: 'operation-settled'; requestId: string; error?: unknown; result?: unknown }
-export type BridgeEvent = AiEvent | OperationEvent | WorkspaceEvent | RepositoryEvent | OperationRequestEvent | OperationSettledEvent | { type: 'native-unavailable' };
+export type BridgeEvent = AiEvent | OperationEvent | WorkspaceEvent | RepositoryEvent | OperationRequestEvent | OperationSettledEvent | { type: 'workspace-renamed'; workspace: WorkspaceDescriptor } | { type: 'author-avatar-cache-cleared' } | { type: 'native-unavailable' };
 
 export interface VersionDockBridge {
   send(command: BridgeCommand): void;
@@ -51,6 +51,7 @@ export interface VersionDockBridge {
   setState<T>(state: T): void;
   platform(): 'macos' | 'windows' | 'linux';
   selectWorkspaceFolders(title: string): Promise<string[]>;
+  selectWorkspaceFile(title: string): Promise<string | null>;
   selectDirectory(title: string): Promise<string | null>;
   selectExecutable(title: string): Promise<string | null>;
   saveFileDialog(options: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<string | null>;
@@ -170,7 +171,7 @@ function requestId(): string {
 const commandDomain = (command: BridgeCommand): OperationDomain => {
   switch (command.type) {
     case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'saveCommitSelections': case 'updateSettings': case 'updateLayout': return 'application';
-    case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent': case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository': return 'workspace';
+    case 'workspaceOpen': case 'workspaceRename': case 'workspaceRefresh': case 'workspaceRemoveRecent': case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository': return 'workspace';
     case 'repositoryStatus': return 'status';
     case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff':
     case 'worktreeFileDiff': case 'branchWorkingDiff': case 'branchWorkingFileDiff': return 'diff';
@@ -190,7 +191,7 @@ const commandDomain = (command: BridgeCommand): OperationDomain => {
     case 'subtrees': case 'subtreeOperation': return 'subtree';
     case 'submodules': case 'submoduleOperation': return 'submodule';
     case 'remotes': case 'remoteOperation': return 'remote';
-    case 'providerAccounts': case 'providerRetryAccess': case 'providerAccountAvatar': case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGithubSave': case 'providerGitlabSave': case 'providerGiteeSave': case 'providerRemove': case 'providerRepositories': case 'providerNamespaces': case 'publishRepository': return 'remote';
+    case 'resolveAuthorAvatar': case 'resolveAuthorAvatars': case 'clearAuthorAvatarCache': case 'providerAccounts': case 'providerRetryAccess': case 'providerAccountAvatar': case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGithubSave': case 'providerGitlabSave': case 'providerGiteeSave': case 'providerRemove': case 'providerRepositories': case 'providerNamespaces': case 'publishRepository': return 'remote';
     case 'gitIdentity': case 'gitProfileOperation': return 'identity';
     case 'svnIgnoreEntries': case 'svnAccount': case 'svnAccountOperation': case 'svnOperation': return 'svnAccount';
     case 'diffLineHistoryTarget': case 'fileHistory': case 'fileRevisionContent': return 'fileHistory';
@@ -492,6 +493,11 @@ export class TauriBridge implements VersionDockBridge {
     const value = await open({ directory: true, multiple: true, title });
     return !value ? [] : Array.isArray(value) ? value : [value];
   }
+  async selectWorkspaceFile(title: string): Promise<string | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const value = await open({ directory: false, multiple: false, title, filters: [{ name: 'VS Code Workspace', extensions: ['code-workspace'] }] });
+    return typeof value === 'string' ? value : null;
+  }
   async selectDirectory(title: string): Promise<string | null> {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const value = await open({ directory: true, multiple: false, title });
@@ -714,6 +720,7 @@ export class MockBridge implements VersionDockBridge {
   setState<T>(state: T): void { this.state = state; }
   platform(): 'macos' | 'windows' | 'linux' { return 'linux'; }
   async selectWorkspaceFolders(): Promise<string[]> { return []; }
+  async selectWorkspaceFile(): Promise<string | null> { return null; }
   async selectDirectory(): Promise<string | null> { return null; }
   async selectExecutable(): Promise<string | null> { return Promise.resolve('/usr/local/bin/mock-editor'); }
   async saveFileDialog(): Promise<string | null> { return null; }

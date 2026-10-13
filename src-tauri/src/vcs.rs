@@ -5979,6 +5979,7 @@ async fn git_history(
                 let resolved = output.stdout_text().trim().to_string();
                 if resolved.is_empty() {
                     return Ok(HistoryPage {
+                        avatars: Default::default(),
                         commits: Vec::new(),
                         has_more: false,
                     });
@@ -5987,6 +5988,7 @@ async fn git_history(
             }
             Err(_) => {
                 return Ok(HistoryPage {
+                    avatars: Default::default(),
                     commits: Vec::new(),
                     has_more: false,
                 });
@@ -5995,6 +5997,7 @@ async fn git_history(
     }
     if resolved_revision.is_some() && skip > 0 {
         return Ok(HistoryPage {
+            avatars: Default::default(),
             commits: Vec::new(),
             has_more: false,
         });
@@ -6021,6 +6024,7 @@ async fn git_history(
         .is_ok();
         if !is_ancestor {
             return Ok(HistoryPage {
+                avatars: Default::default(),
                 commits: Vec::new(),
                 has_more: false,
             });
@@ -6185,7 +6189,11 @@ async fn git_history(
     }
     let has_more = commits.len() > limit as usize;
     commits.truncate(limit as usize);
-    Ok(HistoryPage { commits, has_more })
+    Ok(HistoryPage {
+        commits,
+        has_more,
+        avatars: Default::default(),
+    })
 }
 
 async fn git_history_topology(
@@ -6726,6 +6734,7 @@ async fn svn_history(
                 svn_selection_revisions(repo, path, line_range, query_revision, token).await?;
             if revisions.is_empty() {
                 return Ok(HistoryPage {
+                    avatars: Default::default(),
                     commits: vec![],
                     has_more: false,
                 });
@@ -6860,7 +6869,11 @@ async fn svn_history(
     let mut commits = all.into_iter().skip(skip as usize).collect::<Vec<_>>();
     let has_more = commits.len() > limit as usize;
     commits.truncate(limit as usize);
-    Ok(HistoryPage { commits, has_more })
+    Ok(HistoryPage {
+        commits,
+        has_more,
+        avatars: Default::default(),
+    })
 }
 
 fn validate_history_date(value: &str) -> Result<(), DesktopError> {

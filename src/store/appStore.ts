@@ -1,4 +1,7 @@
 import { runGitTagWorkflow, type TagWorkflowRequest, type TagWorkflowResult } from '../services/gitTagWorkflow';
+import { workspaceOpenPaths } from '../workspaces/openPaths';
+import { primeAuthorAvatars, authorAvatarRemoteScope, authorAvatarEpoch } from '../avatars/authorAvatarResolver';
+import type { WorkspaceDescriptor } from '../bindings/generated';
 import { DEFAULT_SETTINGS, DEFAULT_LAYOUT } from '../settings/defaults';
 import { mergeLogEntries } from '../logs/entries';
 import { configureTaskProgress, isTaskActive, resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
@@ -52,6 +55,18 @@ export interface SyncOptions {
   notifyError?: boolean;
   showProgress?: boolean;
   onOperationId?: (id: string) => void;
+}
+
+export interface SynchronizePlan {
+  pullRepoIds: string[];
+  pushRepoIds: string[];
+  strategy?: 'merge' | 'rebase' | 'ff-only';
+}
+
+interface UpdateRepositoriesOptions {
+  // Synchronize retains the pull summary until pushing and refreshing finish.
+  deferNotification?: (notify: () => void) => void;
+  onCancelled?: () => void;
 }
 
 export function workspacePathsEqual(left: string[], right: string[]): boolean {
@@ -480,6 +495,7 @@ export interface AppStore {
   restoreTabsOnStartup: () => Promise<void>;
   restoreLastWorkspace: () => Promise<void>;
   removeRecent: (workspaceId: string) => Promise<void>;
+  renameWorkspace: (workspaceId: string, name: string) => Promise<void>;
   refresh: (silent?: boolean, options?: { reloadRepository?: boolean; trackBusy?: boolean }) => Promise<void>;
   selectRepo: (repoId: string, reload?: boolean) => Promise<void>;
   openDiff: (repoId: string, path: string, staged: boolean, revision?: string, range?: DiffRange) => Promise<void>;
@@ -504,11 +520,12 @@ export interface AppStore {
   retryBatchResult: (repoId: string, options?: { reportId?: string; workspaceId?: string }) => Promise<void>;
   dismissBatchReport: () => void;
   sync: (repoId: string, action: 'fetch' | 'pull' | 'pullRebase' | 'pullFfOnly' | 'push' | 'pushTags' | 'update', notify?: boolean, options?: SyncOptions & { force?: boolean }, targetWorkspaceId?: string) => Promise<RepositoryUpdateResult | undefined>;
-  pushRepositories: (repoIds: string[], options?: { force?: boolean }, targetWorkspaceId?: string) => Promise<string[]>;
+  pushRepositories: (repoIds: string[], options?: { force?: boolean; notifySuccess?: boolean }, targetWorkspaceId?: string) => Promise<string[]>;
+  synchronizeRepositories: (plan: SynchronizePlan, targetWorkspaceId?: string) => Promise<void>;
   fetchRepositories: (repoIds: string[], notifyCompletion?: boolean, targetWorkspaceId?: string) => Promise<void>;
   notifyPushSuccess: (repoId: string, workspaceId: string, remote?: string, branch?: string) => Promise<void>;
   updateProject: (strategy?: 'merge' | 'rebase') => Promise<void>;
-  updateRepositories: (repoIds: string[], strategy?: 'merge' | 'rebase' | 'ff-only', targetWorkspaceId?: string) => Promise<string[]>;
+  updateRepositories: (repoIds: string[], strategy?: 'merge' | 'rebase' | 'ff-only', targetWorkspaceId?: string, options?: UpdateRepositoriesOptions) => Promise<string[]>;
   openUpdateDetails: (result: RepositoryUpdateResult) => Promise<void>;
   openUpdateResults: (results: RepositoryUpdateResult[]) => Promise<void>;
   reloadUpdateDetails: () => Promise<void>;
@@ -1283,6 +1300,8 @@ function cancelRequests() {
 
 const errorText = (error: unknown) => {
   const messages: Record<string, string> = {
+    INVALID_WORKSPACE_FILE: 'Unable to open this workspace file. Check its folders and paths.',
+    INVALID_WORKSPACE_NAME: 'Workspace name must contain 1 to 100 characters without control characters.',
     GIT_UPDATE_CONFLICT: 'Update stopped with conflicts or an unfinished version-control operation.',
     SVN_AUTHORIZATION_FAILED: 'This SVN account does not have permission to access the requested repository path.',
     UPSTREAM_MISSING: 'No upstream branch is configured',
@@ -1325,6 +1344,20 @@ function queueBranchRecoveryDialog(task: () => Promise<void>): Promise<void> {
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
+  const primeHistoryAvatars = (workspaceId: string, repoId: string, page: HistoryPage) => {
+    if (!get().bootstrap?.state.settings?.onlineAvatarsEnabled || !page.avatars) return;
+    const state = get();
+    primeAuthorAvatars({ bridge: state.bridge ?? null, workspaceId, repoId,
+      remoteScope: authorAvatarRemoteScope(state.allRepositories.find(repo => repo.meta.id === repoId)?.branch, state.branchesByRepo[repoId]?.find(branch => branch.current)?.upstream, state.remotes[repoId]),
+      gravatar: state.bootstrap?.state.settings?.gravatarEnabled ?? false, crossPlatformFallback: state.bootstrap?.state.settings?.avatarCrossPlatformFallback ?? false,
+    }, page.avatars);
+  };
+  const applyWorkspaceName = (workspace: WorkspaceDescriptor) => set(state => ({
+    tabs: state.tabs.map(tab => tab.id === workspace.id ? { ...tab, name: workspace.name, customName: workspace.customName } : tab),
+    snapshot: state.snapshot?.workspace.id === workspace.id ? { ...state.snapshot, workspace: { ...state.snapshot.workspace, name: workspace.name, customName: workspace.customName } } : state.snapshot,
+    sessions: Object.fromEntries(Object.entries(state.sessions).map(([id, session]) => [id, session.snapshot?.workspace.id === workspace.id ? { ...session, snapshot: { ...session.snapshot, workspace: { ...session.snapshot.workspace, name: workspace.name, customName: workspace.customName } } } : session])),
+    bootstrap: state.bootstrap ? { ...state.bootstrap, state: { ...state.bootstrap.state, recentWorkspaces: state.bootstrap.state.recentWorkspaces.map(item => item.id === workspace.id ? { ...item, name: workspace.name, customName: workspace.customName } : item) } } : undefined,
+  }));
   let logSession = 0;
   let logGeneration = 0;
   let logTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1521,7 +1554,9 @@ export const useAppStore = create<AppStore>((set, get) => {
     });
   };
   const ensureRepositoryCapability = (repoId: string, key: string, targetWorkspaceId?: string) => {
-    const repository = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
+    const target = targetWorkspaceId && get().snapshot?.workspace.id !== targetWorkspaceId
+      ? get().sessions[targetWorkspaceId]?.snapshot : get().snapshot;
+    const repository = target?.repositories.find((item) => item.meta.id === repoId);
     if (!repository || capabilityAvailable(repository.capabilities, key, true)) return true;
     get().addNotification({
       type: 'warning',
@@ -2094,6 +2129,8 @@ export const useAppStore = create<AppStore>((set, get) => {
   };
 
   const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true, silent = false) => {
+    const named = get().tabs.find(tab => tab.id === snapshot.workspace.id && tab.customName);
+    if (named) snapshot = { ...snapshot, workspace: { ...snapshot.workspace, name: named.name, customName: named.customName } };
     const requestGeneration = workspaceRequestGeneration;
     if (updatingWorkingTree(snapshot.workspace.id)) {
       queueStableRefresh(snapshot.workspace.id);
@@ -2139,6 +2176,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
   const refreshHistoryRepository = async (workspaceId: string, repoId: string) => {
     const current = get();
+    const avatarEpoch = authorAvatarEpoch();
     const pageGen = historyPageGeneration;
     if (current.historyScope.repoIds && !current.historyScope.repoIds.includes(repoId)) return;
     const repo = current.snapshot?.repositories.find((item) => item.meta.id === repoId);
@@ -2164,6 +2202,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       }, { showProgress: false }).catch(() => []),
     ]);
     if (get().snapshot?.workspace.id !== workspaceId || historyPageGeneration !== pageGen) return;
+    if (avatarEpoch === authorAvatarEpoch()) primeHistoryAvatars(workspaceId, repoId, page);
     set((state) => {
       const historyByRepo = { ...state.historyByRepo, [repoId]: page.commits };
       const historyHasMoreByRepo = { ...state.historyHasMoreByRepo, [repoId]: page.hasMore };
@@ -2423,6 +2462,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       };
       configureTaskProgress((id) => value.cancelOperation(id));
       bridgeSubscriptions.push(value.subscribe((event) => {
+        if ('type' in event && event.type === 'author-avatar-cache-cleared') { window.dispatchEvent(new Event('versiondock-avatar-cache-clear')); return; }
+        if ('workspace' in event && event.type === 'workspace-renamed') { applyWorkspaceName(event.workspace); return; }
         const progress = useTaskProgressStore.getState();
         if ('progressEvent' in event && event.type === 'operation-request') {
           const wid = event.context.workspaceId;
@@ -2562,7 +2603,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (willFetchOnStartup) {
           startupFetchPending = true;
         }
-        if (launchWorkspace) await get().openWorkspace(launchWorkspace.paths, true, { skipCrossWindowFocus: true });
+        if (launchWorkspace) await get().openWorkspace(workspaceOpenPaths(launchWorkspace), true, { skipCrossWindowFocus: true });
         else await get().restoreTabsOnStartup();
         set({ ready: true });
         restartAutoRefresh();
@@ -2630,7 +2671,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       let opened = false;
       await withBusy(async () => {
       if (!paths.length) return;
-      const existingTab = get().tabs.find((tab) => workspacePathsEqual(tab.paths, paths));
+      const existingTab = get().tabs.find((tab) => workspacePathsEqual(workspaceOpenPaths(tab), paths) || workspacePathsEqual(tab.paths, paths));
       if (existingTab) {
         if (options.insertionIndex !== undefined) {
           const currentIndex = get().tabs.findIndex((tab) => tab.id === existingTab.id);
@@ -2893,11 +2934,12 @@ export const useAppStore = create<AppStore>((set, get) => {
         await withBusy(async () => {
           const controller = beginRequest('workspace');
           const requestGeneration = ++workspaceRequestGeneration;
-          const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths: targetTab.paths } }, { signal: controller.signal });
+          const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths: workspaceOpenPaths(targetTab) } }, { signal: controller.signal });
           if (requestGeneration !== workspaceRequestGeneration) return;
-          set({ activeTabId: workspaceId, unreadErrorCount: nextUnreadErrors, batchCommitReport: undefined });
-          await persistTabs(get().tabs, workspaceId);
-          if (requestGeneration !== workspaceRequestGeneration || get().activeTabId !== workspaceId) return;
+          const openedId = snapshot.workspace.id;
+          set(state => ({ tabs: state.tabs.map(tab => tab.id === workspaceId ? snapshot.workspace : tab).filter((tab, index, all) => all.findIndex(item => item.id === tab.id) === index), activeTabId: openedId, unreadErrorCount: nextUnreadErrors, batchCommitReport: undefined }));
+          await persistTabs(get().tabs, openedId);
+          if (requestGeneration !== workspaceRequestGeneration || get().activeTabId !== openedId) return;
           await applySnapshot(snapshot, true);
         }, 'workspace');
       }
@@ -3149,6 +3191,12 @@ export const useAppStore = create<AppStore>((set, get) => {
       await get().restoreTabsOnStartup();
     },
 
+    renameWorkspace: async (id, name) => {
+      await withBusy(async () => {
+        const workspace = await bridge().request<WorkspaceDescriptor>({ type: 'workspaceRename', payload: { workspace_id: id, name } }, { showProgress: false });
+        applyWorkspaceName(workspace);
+      }, 'workspace', { workspaceId: id }, { trackBusy: false });
+    },
     removeRecent: async (id) => withBusy(async () => {
       await bridge().request({ type: 'workspaceRemoveRecent', payload: { workspace_id: id } });
       const current = get().bootstrap;
@@ -3705,7 +3753,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       const repositories = available.filter(repo => repoIds.includes(repo.meta.id) && repo.meta.kind === 'git').sort((a, b) => b.meta.depth - a.meta.depth);
       if (!repositories.length) return [];
       if (repositories.length === 1) {
-        try { await get().sync(repositories[0].meta.id, 'push', true, { ...options, rethrow: true }, wid); return [repositories[0].meta.id]; }
+        try { await get().sync(repositories[0].meta.id, 'push', options.notifySuccess !== false, { showProgress: true, ...options, rethrow: true }, wid); return [repositories[0].meta.id]; }
         catch { return []; }
       }
       return await withBusy(async () => {
@@ -3762,8 +3810,8 @@ export const useAppStore = create<AppStore>((set, get) => {
                 return /CONFLICT|conflicts|冲突/i.test(item.error) ? [{ type: 'openConflicts', label: 'Resolve Conflicts' }] : [];
               }),
             });
-            else if (succeeded.length === 1) await get().notifyPushSuccess(succeeded[0], wid);
-            else if (succeeded.length > 1) get().addNotification({ type: 'success', title: 'Push completed', workspaceId: wid,
+            else if (options.notifySuccess !== false && succeeded.length === 1) await get().notifyPushSuccess(succeeded[0], wid);
+            else if (options.notifySuccess !== false && succeeded.length > 1) get().addNotification({ type: 'success', title: 'Push completed', workspaceId: wid,
               message: { key: 'VersionDock: Commits pushed successfully across {0} repositories.', args: [succeeded.length] },
             });
           }
@@ -3883,7 +3931,28 @@ export const useAppStore = create<AppStore>((set, get) => {
       const repositories = (get().allRepositories.length ? get().allRepositories : (get().snapshot?.repositories ?? [])).filter((repo) => !repo.meta.isWorktree);
       await get().updateRepositories(repositories.map(repo => repo.meta.id), strategy);
     },
-    updateRepositories: async (repoIds, strategy, targetWorkspaceId) => {
+    synchronizeRepositories: async (plan, targetWorkspaceId) => {
+      const wid = targetWorkspaceId ?? get().snapshot?.workspace.id;
+      if (!wid) return;
+      const isOpen = () => get().snapshot?.workspace.id === wid || Boolean(get().sessions[wid]) || get().tabs.some(tab => tab.id === wid);
+      let notifyUpdate: (() => void) | undefined;
+      let cancelled = false;
+      await withBusy(async () => {
+        try {
+          const pulled = plan.pullRepoIds.length
+            ? await get().updateRepositories(plan.pullRepoIds, plan.strategy, wid, { deferNotification: notify => { notifyUpdate = notify; }, onCancelled: () => { cancelled = true; } })
+            : [];
+          if (cancelled || !isOpen()) return;
+          const pushIds = [...new Set(plan.pushRepoIds)].filter(id => !plan.pullRepoIds.includes(id) || pulled.includes(id));
+          if (pushIds.length) await get().pushRepositories(pushIds, { notifySuccess: pushIds.length === 1 }, wid);
+          await Promise.all([get().loadIncomingCommits(undefined, wid), get().loadUnpushedCommits(undefined, wid)]);
+          if (get().snapshot?.workspace.id === wid) await get().refresh();
+        } finally {
+          if (!cancelled && isOpen()) notifyUpdate?.();
+        }
+      }, 'sync', { workspaceId: wid, target: `${REPOSITORY_TARGET_PREFIX}${JSON.stringify([...new Set([...plan.pullRepoIds, ...plan.pushRepoIds])])}` });
+    },
+    updateRepositories: async (repoIds, strategy, targetWorkspaceId, options = {}) => {
       const wid = targetWorkspaceId ?? get().snapshot?.workspace.id;
       if (!wid) return [];
       const state = get();
@@ -3905,7 +3974,7 @@ export const useAppStore = create<AppStore>((set, get) => {
               { id: 'merge', label: t('Merge incoming changes into the current branch'), icon: 'git-merge' },
             ],
           });
-          if (!selected) return [];
+          if (!selected) { options.onCancelled?.(); return []; }
           strategy = selected === 'rebase' ? 'rebase' : 'merge';
         } else {
           strategy = configuredMethod;
@@ -3986,7 +4055,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           }
           releaseStableRefresh();
           if (get().snapshot?.workspace.id === wid) await get().refresh();
-          if (taskProgress.isStopped(taskId)) return [];
+          if (taskProgress.isStopped(taskId)) { options.onCancelled?.(); return []; }
           const succeededRepoIds = settled.filter(item => !item.error && !item.conflict).map(item => item.repoId);
 
           // 移除临时进度通知，避免污染通知历史
@@ -4034,10 +4103,10 @@ export const useAppStore = create<AppStore>((set, get) => {
                     ? { key: 'VersionDock [{0}]: Already up to date. No files updated.', args: [settled[0].repoName] }
                     : 'VersionDock: Already up to date. No files updated.';
           const detailed = updated.filter((item) => (item.summary?.commitCount ?? 0) > 0);
-          if (failed === 0 && summaryFailures === 0 && commits > 0 && (currentSettings.updateProjectShowNotification ?? true) === false) {
+          const hasConflict = settled.some((r) => r.conflict || /conflict|冲突/i.test(r.error ?? ''));
+          if (!hasConflict && failed === 0 && summaryFailures === 0 && commits > 0 && (currentSettings.updateProjectShowNotification ?? true) === false) {
             return succeededRepoIds;
           }
-          const hasConflict = failedItems.some((r) => r.conflict || /conflict|冲突/i.test(r.error ?? ''));
 
           const actions: AppNotificationAction[] = [
             ...(hasConflict ? [{ type: 'openConflicts' as const, label: 'Resolve Conflicts' }] : []),
@@ -4045,8 +4114,8 @@ export const useAppStore = create<AppStore>((set, get) => {
             ...(detailed.length ? [{ type: 'viewUpdateResults' as const, label: 'View update details', results: detailed }] : []),
           ];
 
-          get().addNotification({
-            type: updated.length === 0 && failed > 0 ? 'error' : failed || summaryFailures || (noUpstreamItem && commits === 0) ? 'warning' : 'info',
+          const notify = () => get().addNotification({
+            type: updated.length === 0 && failed > 0 ? 'error' : failed || hasConflict || summaryFailures || (noUpstreamItem && commits === 0) ? 'warning' : 'info',
             urgent: failed > 0,
             title: message,
             message,
@@ -4054,6 +4123,8 @@ export const useAppStore = create<AppStore>((set, get) => {
             workspaceId: wid,
             actions,
           });
+          if (options.deferNotification) options.deferNotification(notify);
+          else notify();
           return succeededRepoIds;
         } finally {
           get().removeNotification(progressId);
@@ -4126,6 +4197,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       const pageGeneration = ++historyPageGeneration;
       const requestWorkspace = workspaceId();
+      const avatarEpoch = authorAvatarEpoch();
       const pageController = beginRequest('history:page');
       const visibleLimit = Math.min((reset ? 0 : get().history.length) + HISTORY_PAGE_SIZE, historyMaxCommits);
       if (!silent) set({ historyLoading: true });
@@ -4176,6 +4248,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         const nextByRepo: Record<string, CommitNode[]> = reset ? {} : { ...get().historyByRepo };
         const nextHasMore: Record<string, boolean> = reset ? {} : { ...get().historyHasMoreByRepo };
         for (const { repoId, page } of pages) {
+          if (avatarEpoch === authorAvatarEpoch()) primeHistoryAvatars(requestWorkspace, repoId, page);
           nextByRepo[repoId] = page.commits;
           nextHasMore[repoId] = page.hasMore;
         }

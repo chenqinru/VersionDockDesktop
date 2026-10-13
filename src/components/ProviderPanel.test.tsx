@@ -138,7 +138,7 @@ describe('ProviderPanel', () => {
     const clearButton = await screen.findByText('Clear Avatar Cache');
     fireEvent.click(clearButton);
 
-    expect(clearListener).toHaveBeenCalled();
+    await waitFor(() => expect(clearListener).toHaveBeenCalled());
     window.removeEventListener('versiondock-avatar-cache-clear', clearListener);
   });
 

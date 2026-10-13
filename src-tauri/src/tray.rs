@@ -703,6 +703,8 @@ mod tests {
             paths: paths.clone(),
             last_opened_at: String::new(),
             available: true,
+            custom_name: None,
+            workspace_file: None,
         };
         let windows = HashMap::from([
             ("main".into(), vec![paths]),

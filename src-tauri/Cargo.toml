@@ -52,6 +52,7 @@ trash = "5.2.3"
 libc = "0.2.177"
 tempfile = "3.23.0"
 dunce = "1.0.5"
+json5 = "0.4.1"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55.0"

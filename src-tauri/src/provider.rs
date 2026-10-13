@@ -1409,6 +1409,60 @@ pub async fn resolve_author_avatar(
     Ok(None)
 }
 
+fn author_avatar_scope(
+    config_dir: &Path,
+    remote_urls: &[String],
+    cross_platform_fallback: bool,
+) -> String {
+    // Account metadata contains no token. Include hosts and credential references
+    // so reconnecting an account cannot reuse a previous account's cache.
+    serde_json::to_string(&(remote_urls, cross_platform_fallback, accounts(config_dir)))
+        .unwrap_or_default()
+}
+
+pub fn cached_author_avatars(
+    config_dir: &Path,
+    remote_urls: &[String],
+    cross_platform_fallback: bool,
+    authors: &[crate::models::AvatarAuthor],
+) -> HashMap<String, String> {
+    crate::avatar_cache::cache(config_dir).cached(
+        &author_avatar_scope(config_dir, remote_urls, cross_platform_fallback),
+        authors,
+    )
+}
+
+pub async fn resolve_author_avatars(
+    config_dir: &Path,
+    authors: Vec<crate::models::AvatarAuthor>,
+    remote_urls: Vec<String>,
+    cross_platform_fallback: bool,
+    cancel: &CancellationToken,
+) -> Result<HashMap<String, Option<String>>, DesktopError> {
+    let scope = author_avatar_scope(config_dir, &remote_urls, cross_platform_fallback);
+    let cache = crate::avatar_cache::cache(config_dir);
+    let (config_dir, cancel_owned) = (config_dir.to_owned(), cancel.clone());
+    crate::avatar_cache::resolve_batch(cache, scope, authors, cancel, move |email, name| {
+        let (config_dir, remotes, cancel) = (
+            config_dir.clone(),
+            remote_urls.clone(),
+            cancel_owned.clone(),
+        );
+        async move {
+            resolve_author_avatar(
+                &config_dir,
+                &email,
+                &name,
+                &remotes,
+                cross_platform_fallback,
+                &cancel,
+            )
+            .await
+        }
+    })
+    .await
+}
+
 async fn resolve_author_avatar_on_host(
     saved_accounts: &[RemoteProviderAccount],
     host: &str,
@@ -1582,6 +1636,63 @@ async fn fetch_private_gitlab_avatar(
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    #[ignore = "Requires an explicitly selected local account and live GitLab access"]
+    async fn live_gitlab_author_batch_and_persistent_cache() {
+        let source = std::env::var("VERSIONDOCK_AVATAR_QA_CONFIG")
+            .expect("Select the local account configuration explicitly");
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            Path::new(&source).join("remote-providers.json"),
+            directory.path().join("remote-providers.json"),
+        )
+        .unwrap();
+        let account = accounts(directory.path())
+            .into_iter()
+            .find(|account| account.provider == RemoteProviderKind::Gitlab)
+            .unwrap();
+        let remote = format!("{}/tongji/nic/api.git", account.host);
+        let authors = vec![
+            crate::models::AvatarAuthor {
+                email: "915860729@qq.com".into(),
+                name: "胡国梁".into(),
+            },
+            crate::models::AvatarAuthor {
+                email: "915860729@qq.com".into(),
+                name: "huguoliang".into(),
+            },
+        ];
+        let result = resolve_author_avatars(
+            directory.path(),
+            authors.clone(),
+            vec![remote.clone()],
+            false,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let image = result["email:915860729@qq.com"].as_deref().unwrap();
+        assert!(image.starts_with("data:image/"));
+        let cached = cached_author_avatars(
+            directory.path(),
+            std::slice::from_ref(&remote),
+            false,
+            &authors,
+        );
+        assert_eq!(cached["email:915860729@qq.com"], image);
+        // The alias that GitLab cannot find directly succeeds from disk cache.
+        let reopened = resolve_author_avatars(
+            directory.path(),
+            vec![authors[1].clone()],
+            vec![remote],
+            false,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(reopened, result);
+    }
 
     async fn gitlab_author_lookup_fixture(
         email: &str,

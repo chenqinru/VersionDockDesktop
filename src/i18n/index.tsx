@@ -4,6 +4,13 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Unable to clear avatar cache': 'Unable to clear avatar cache',
+  'Rename Workspace': 'Rename Workspace',
+  'Workspace name': 'Workspace name',
+  'Open VS Code Workspace': 'Open VS Code Workspace',
+  'Open a .code-workspace file and its local folders.': 'Open a .code-workspace file and its local folders.',
+  'Workspace name must contain 1 to 100 characters without control characters.': 'Workspace name must contain 1 to 100 characters without control characters.',
+  'Unable to open this workspace file. Check its folders and paths.': 'Unable to open this workspace file. Check its folders and paths.',
   'Amend last commit': 'Amend last commit',
   'Amend last commit for {0}': 'Amend last commit for {0}',
   'Shelf storage is busy. Wait for the other operation to finish and retry.': 'Shelf storage is busy. Wait for the other operation to finish and retry.',
@@ -1411,6 +1418,13 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Unable to clear avatar cache': '无法清空头像缓存',
+  'Rename Workspace': '重命名工作区',
+  'Workspace name': '工作区名称',
+  'Open VS Code Workspace': '打开 VS Code 工作区',
+  'Open a .code-workspace file and its local folders.': '打开 .code-workspace 文件及其中的本地目录。',
+  'Workspace name must contain 1 to 100 characters without control characters.': '工作区名称须为 1 至 100 个字符，且不能包含控制字符。',
+  'Unable to open this workspace file. Check its folders and paths.': '无法打开此工作区文件，请检查其中的目录及路径。',
   'Amend last commit': '修订上一次提交',
   'Amend last commit for {0}': '修订 {0} 的上一次提交',
   'Keep in tray when closing windows': '关闭窗口后保留在托盘',
