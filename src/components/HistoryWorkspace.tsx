@@ -10,7 +10,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Codicon } from './Codicon';
-import { capabilityAvailable, capabilityReason, resolveNotificationText, useAppStore } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, mapWithConcurrency, resolveNotificationText, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useResizable } from '../hooks/useResizable';
 import { BranchSidebar } from './BranchSidebar';
@@ -25,7 +25,8 @@ import { formatRefLabel, groupRefs, mergeLocalRemote, type RefGroup } from '../h
 import { branchColor, headColor, tagColor } from './branchColor';
 import type { CommitDetail, CommitNode, GraphCommitNode } from '../bindings/generated';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
-import { choiceDialog, confirmDialog, editorDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { openCommitMessageEditor } from './commitMessageEditor';
 import { CommitSearch, DateFilter, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
 import { AuthorAvatar } from './AuthorAvatar';
 import { hasMixedRepositoryKinds, repositoryLabel } from './repoLabel';
@@ -563,25 +564,34 @@ function CommitList({
       }
     }
     if (id === 'ai-composer') useAiStore.getState().openComposer({ repoId: commit.repoId, paths: [], stagedOnly: false, hashes: newestFirst.map((c) => c.hash) });
-    if (id === 'edit') {
-      const detail = await useAppStore.getState().loadCommitDetail(commit, false, workspaceId);
-      const name = useAppStore.getState().snapshot?.repositories.find((repo) => repo.meta.id === commit.repoId)?.meta.name ?? commit.repoId;
-      await editorDialog({ title: t('Edit Commit Message'), message: `${name} · ${commit.shortHash}`, inputLabel: t('Commit message'), initialValue: detail.fullMessage, generate: (signal, onMessage) => generateHistoricalMessage([{ repoId: commit.repoId, hash: commit.hash }], signal, onMessage), confirmLabel: t('Save'), submit: async (message) => {
-        const ok = await unpushedOperation(commit.repoId, { type: 'editMessage', hash: commit.hash, message });
-        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t, latest.repositoryCount) : t('Operation failed')); }
-        return true;
-      } });
+    if (id === 'edit' || id === 'squash-multi') {
+      const editing = id === 'edit';
+      const targets = editing ? [commit] : oldestFirst;
+      let details: CommitDetail[];
+      try {
+        details = await mapWithConcurrency(targets, 4, (item) => useAppStore.getState().loadCommitDetail(item, false, workspaceId));
+      } catch (error) {
+        if (useAppStore.getState().snapshot?.workspace.id === workspaceId && !(error instanceof DOMException && error.name === 'AbortError')) {
+          useAppStore.getState().addNotification({ type: 'error', title: t('Failed to load commit details'), message: { raw: error instanceof Error ? error.message : String(error) }, workspaceId });
+        }
+        return;
+      }
+      if (useAppStore.getState().snapshot?.workspace.id !== workspaceId) return;
+      await openCommitMessageEditor({
+        mode: editing ? 'edit' : 'squash', repositoryName: repoName, t,
+        commits: targets.map((item, index) => ({ hash: item.hash, shortHash: item.shortHash, fullMessage: details[index].fullMessage })),
+        generate: (signal, onMessage) => generateHistoricalMessage((editing ? [commit] : newestFirst).map((item) => ({ repoId: item.repoId, hash: item.hash })), signal, onMessage),
+        submit: async (message) => {
+          if (useAppStore.getState().snapshot?.workspace.id !== workspaceId) return false;
+          const ok = await unpushedOperation(commit.repoId, editing ? { type: 'editMessage', hash: commit.hash, message } : { type: 'squash', hashes: newestFirst.map((item) => item.hash), message });
+          if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t, latest.repositoryCount) : t('Operation failed')); }
+          return true;
+        },
+      });
     }
     if (id === 'undo' && await confirmDialog({ title: t('Undo Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('Changes remain staged.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'undoHead', expectedHash: commit.hash });
     if (id === 'drop' && await confirmDialog({ title: t('Drop Commit?'), message: `${commit.shortHash} ${commit.message}\n\n${t('This rewrites local history and may require force push.')}`, danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: [commit.hash] });
     if (id === 'drop-multi' && await confirmDialog({ title: t('Drop Commits'), message: newestFirst.map((item) => `${item.shortHash} ${item.message}`).join('\n'), danger: true })) await unpushedOperation(commit.repoId, { type: 'drop', hashes: newestFirst.map((item) => item.hash) });
-    if (id === 'squash-multi') {
-      await editorDialog({ title: t('Squash {0} Commits...', selection.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: oldestFirst.map((item) => item.message).join('\n\n'), generate: (signal, onMessage) => generateHistoricalMessage(newestFirst.map((c) => ({ repoId: c.repoId, hash: c.hash })), signal, onMessage), items: oldestFirst.map((item) => ({ id: item.shortHash, label: item.message, description: item.author })), confirmLabel: t('Squash'), submit: async (message) => {
-        const ok = await unpushedOperation(commit.repoId, { type: 'squash', hashes: newestFirst.map((item) => item.hash), message });
-        if (!ok) { const latest = useAppStore.getState().notifications.find((item) => item.type === 'error'); throw new Error(latest ? resolveNotificationText(latest.message, t, latest.repositoryCount) : t('Operation failed')); }
-        return true;
-      } });
-    }
     setContext(undefined);
   };
 

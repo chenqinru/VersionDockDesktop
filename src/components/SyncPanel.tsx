@@ -11,7 +11,8 @@ import { BranchRefBadge } from './BranchRefBadge';
 import { Codicon } from './Codicon';
 import { AuthorAvatar } from './AuthorAvatar';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
-import { choiceDialog, confirmDialog, editorDialog, promptDialog } from './dialogService';
+import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { openCommitMessageEditor } from './commitMessageEditor';
 import { SyncFileList, type SyncFileViewMode } from './SyncFileList';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import { SelectionCheckbox } from './SelectionCheckbox';
@@ -132,7 +133,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   }, [expanded, currentDetail, detailRetry, bridge, workspaceId, repo.meta.id, item.commit.hash, onDetailLoaded, searching]);
 
   const commit = item.commit;
-  const fullMessage = commit.fullMessage || (commit.body ? `${commit.message}\n\n${commit.body}` : commit.message);
+  const fullMessage = currentDetail?.fullMessage || commit.fullMessage || (commit.body ? `${commit.message}\n\n${commit.body}` : commit.message);
   const isMerge = (commit.parents?.length ?? 0) >= 2;
   const key = `${item.kind}:${commit.hash}`;
   const toggle = () => setExpanded((current) => !current);
@@ -170,12 +171,13 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   const rewrite = async (action: 'revert' | 'drop' | 'squash' | 'undoHead' | 'editMessage') => {
     if (item.kind !== 'outgoing') return;
     if (action === 'editMessage') {
-      await editorDialog({ title: t('Edit Commit Message…'), message: commit.shortHash, inputLabel: t('Commit message'), initialValue: fullMessage, generate: (signal, onMessage) => generateHistoricalMessage([{ repoId: repo.meta.id, hash: commit.hash }], signal, onMessage), confirmLabel: t('Save'), submit: (message) => submitRewrite({ type: 'editMessage', hash: commit.hash, message }) });
+      await openCommitMessageEditor({ mode: 'edit', repositoryName: repo.meta.name, t, commits: [{ hash: commit.hash, shortHash: commit.shortHash, fullMessage }], generate: (signal, onMessage) => generateHistoricalMessage([{ repoId: repo.meta.id, hash: commit.hash }], signal, onMessage), submit: (message) => submitRewrite({ type: 'editMessage', hash: commit.hash, message }) });
       return;
     }
     if (action === 'squash') {
-      const outgoingCommits = sameKindSelection.filter((candidate): candidate is Extract<TimelineCommit, { kind: 'outgoing' }> => candidate.kind === 'outgoing');
-      await editorDialog({ title: t('Squash {0} commits…', outgoingCommits.length), message: t('The selection must be contiguous and include HEAD.'), inputLabel: t('Combined commit message'), initialValue: outgoingCommits.map((candidate) => candidate.commit.fullMessage || candidate.commit.message).reverse().join('\n\n'), generate: (signal, onMessage) => generateHistoricalMessage(selectedHashes.map((hash) => ({ repoId: repo.meta.id, hash })), signal, onMessage), confirmLabel: t('Squash'), submit: (message) => submitRewrite({ type: 'squash', hashes: selectedHashes, message }) });
+      const hashes = new Set(selectedHashes);
+      const outgoingCommits = (useAppStore.getState().unpushedCommits[repo.meta.id] ?? []).filter((candidate) => hashes.has(candidate.hash)).reverse();
+      await openCommitMessageEditor({ mode: 'squash', repositoryName: repo.meta.name, t, commits: outgoingCommits.map((candidate) => ({ hash: candidate.hash, shortHash: candidate.shortHash, fullMessage: candidate.fullMessage || (candidate.body ? `${candidate.message}\n\n${candidate.body}` : candidate.message) })), generate: (signal, onMessage) => generateHistoricalMessage(selectedHashes.map((hash) => ({ repoId: repo.meta.id, hash })), signal, onMessage), submit: (message) => submitRewrite({ type: 'squash', hashes: selectedHashes, message }) });
       return;
     }
     if (!await confirmDialog({ title: action === 'drop' ? t('Drop {0} commits', selectedHashes.length) : action === 'revert' ? t('Revert {0} commits', selectedHashes.length) : t('Undo Commit'), message: sameKindSelection.map((candidate) => `${candidate.commit.shortHash} ${candidate.commit.message}`).join('\n') || `${commit.shortHash} ${commit.message}`, danger: action !== 'revert' })) return;

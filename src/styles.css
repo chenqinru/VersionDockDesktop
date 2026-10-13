@@ -7601,10 +7601,14 @@ button.notification-item-action-btn:focus-visible {
   border-radius: var(--ai-input-radius, 3px); pointer-events: none;
   box-shadow: 0 0 8px color-mix(in srgb, var(--vscode-focusBorder) 32%, transparent);
 }
-.ai-generation-track {
+.ai-generation-outline, .ai-generation-track {
   x: .5px; y: .5px; width: calc(100% - 1px); height: calc(100% - 1px);
-  rx: var(--ai-marquee-radius, 2.5px); ry: var(--ai-marquee-radius, 2.5px);
-  fill: none; stroke-width: 1px; stroke-linecap: round;
+  rx: var(--ai-marquee-radius, calc(var(--ai-input-radius, 3px) - .5px)); ry: var(--ai-marquee-radius, calc(var(--ai-input-radius, 3px) - .5px));
+  fill: none; stroke-width: 1px;
+}
+.ai-generation-outline { stroke: var(--ai-generation-outline-color, var(--vscode-input-border, var(--versiondock-border))); }
+.ai-generation-track {
+  stroke-linecap: round;
   stroke-dasharray: 22 78; animation: ai-marquee-run 1.45s linear infinite;
 }
 @keyframes ai-marquee-run { to { stroke-dashoffset: -100; } }

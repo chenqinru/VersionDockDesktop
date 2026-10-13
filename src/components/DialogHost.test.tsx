@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DialogHost } from './DialogHost';
 import { editorDialog, promptDialog, publishDialog } from './dialogService';
+import { openCommitMessageEditor } from './commitMessageEditor';
+import { createTranslator, I18nContext } from '../i18n';
 
 afterEach(() => {
   publishDialog(undefined);
@@ -9,6 +11,67 @@ afterEach(() => {
 });
 
 describe('DialogHost editor', () => {
+  it('shows the translated generation placeholder before streaming and keeps streamed content on an empty completion', async () => {
+    const t = createTranslator('zh-CN');
+    render(<I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t }}><DialogHost /></I18nContext.Provider>);
+    let update!: (message: string) => void;
+    let complete!: (message: string) => void;
+    await act(async () => { void openCommitMessageEditor({ mode: 'squash', repositoryName: 'repo', t, commits: [{ hash: 'old', shortHash: 'old', fullMessage: 'old subject' }, { hash: 'new', shortHash: 'new', fullMessage: 'new subject' }], submit: async () => true, generate: (_signal, onMessage) => { update = onMessage; return new Promise((resolve) => { complete = resolve; }); } }); });
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('压缩 2 个提交');
+    expect(screen.getByText('正在压缩的提交')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('使用 AI 生成提交信息'));
+    expect(screen.getByText('确认压缩')).toBeDisabled();
+    const input = screen.getByRole('textbox', { name: '提交信息' });
+    expect(input).toHaveValue('');
+    expect(input).toHaveAttribute('placeholder', '正在生成提交信息…');
+    expect(screen.getByTitle('停止生成提交信息')).toBeInTheDocument();
+    await act(async () => { update('subject\n\n第一行正文\n第二行正文'); });
+    expect(input).toHaveValue('subject\n\n第一行正文\n第二行正文');
+    await act(async () => { complete(''); });
+    expect(input).toHaveValue('subject\n\n第一行正文\n第二行正文');
+    expect(input).toHaveAttribute('placeholder', '');
+    expect(input).not.toHaveAttribute('readonly');
+    expect(screen.getByText('确认压缩')).not.toBeDisabled();
+  });
+
+  it('keeps the original message readable while editing and places AI inside the input', async () => {
+    render(<DialogHost />);
+    const submit = vi.fn().mockResolvedValue(true);
+    await act(async () => { void openCommitMessageEditor({ mode: 'edit', repositoryName: 'repo', t: (key) => key, commits: [{ hash: 'abc1234', shortHash: 'abc1234', fullMessage: 'subject\n\noriginal body' }], submit, generate: async () => 'generated' }); });
+    const editor = screen.getByRole('textbox', { name: 'Commit message' });
+    fireEvent.change(editor, { target: { value: 'changed\n\nnew body' } });
+    expect(document.querySelector('.dialog-original-message')).toHaveTextContent('original body');
+    expect(document.querySelector('.dialog-original-message')?.textContent).toBe('subject\n\noriginal body');
+    expect(screen.getByTitle('Generate commit message with AI').closest('.ai-input-surface')).toContainElement(editor);
+    expect(screen.getByRole('dialog').querySelector('header .codicon-edit')).not.toBeNull();
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith('changed\n\nnew body'));
+  });
+
+  it('shows complete squash messages separately from the editable combined draft', async () => {
+    render(<DialogHost />);
+    await act(async () => { void openCommitMessageEditor({ mode: 'squash', repositoryName: 'repo', t: (key) => key, commits: [{ hash: 'old-full-hash', shortHash: 'old', fullMessage: 'first\n\nfirst body' }, { hash: 'new-full-hash', shortHash: 'new', fullMessage: 'second\n\nsecond body' }], submit: async () => true, generate: async () => '' }); });
+    const list = screen.getByRole('region', { name: 'Commits being squashed' });
+    expect([...list.querySelectorAll('code')].map((code) => code.textContent)).toEqual(['old', 'new']);
+    expect(list.querySelector('code')).toHaveAttribute('title', 'old-full-hash');
+    expect([...list.querySelectorAll('.dialog-commit-list span')].map((span) => span.textContent)).toEqual(['first\n\nfirst body', 'second\n\nsecond body']);
+    expect(screen.getByRole('textbox')).toHaveValue('first\n\nfirst body\n\nsecond\n\nsecond body');
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'new combined message' } });
+    expect(list).toHaveTextContent('first body');
+    expect(screen.getByRole('dialog').querySelector('header .codicon-fold')).not.toBeNull();
+    expect(screen.getByText('Confirm Squash')).toBeInTheDocument();
+  });
+
+  it('does not submit an empty editor through Cmd/Ctrl+Enter', async () => {
+    render(<DialogHost />);
+    const submit = vi.fn().mockResolvedValue(true);
+    await act(async () => { void editorDialog({ title: 'Edit Commit Message', message: '', inputLabel: 'Commit message', submit }); });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: ' \n ' } });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    expect(submit).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('uses the shared border during historical message generation and restores the draft when stopped', async () => {
     render(<DialogHost />);
     let abort!: () => void;
@@ -25,7 +88,7 @@ describe('DialogHost editor', () => {
     expect(editor).toHaveAttribute('readonly');
     expect(editor.closest('.ai-input-surface')?.querySelector('.ai-generation-border')).not.toBeNull();
     expect(editor).toHaveValue('partial output');
-    fireEvent.click(screen.getByTitle('Stop generating'));
+    fireEvent.click(screen.getByTitle('Stop generating commit message'));
     await waitFor(() => expect(editor).toHaveValue('original draft'));
     expect(editor).not.toHaveAttribute('readonly');
     expect(editor.closest('.ai-input-surface')?.querySelector('.ai-generation-border')).toBeNull();

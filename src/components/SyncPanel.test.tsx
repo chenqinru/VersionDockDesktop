@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncPanel } from './SyncPanel';
 import { useAppStore } from '../store/appStore';
@@ -380,6 +380,38 @@ describe('SyncPanel error handling', () => {
       { repoId: 'repo-1', action: 'push', targetWid: 'workspace-1' },
     ]);
     choiceSpy.mockRestore();
+  });
+});
+
+describe('SyncPanel commit message editors', () => {
+  it('opens the edit dialog with an independent copy of the full original message', async () => {
+    const editor = vi.spyOn(dialogService, 'editorDialog').mockResolvedValue(undefined);
+    try {
+      useAppStore.setState({ bridge, snapshot, unpushedCommits: { 'repo-1': [{ ...sampleOutgoing[0], fullMessage: 'outgoing commit\n\noriginal body' }] } });
+      render(<SyncPanel repos={[gitRepo]} />);
+      fireEvent.contextMenu(screen.getByText('outgoing commit').closest('[data-sync-commit-row]')!);
+      fireEvent.click(screen.getByText('Edit Commit Message…'));
+      await waitFor(() => expect(editor).toHaveBeenCalled());
+      expect(editor.mock.calls[0][0]).toMatchObject({ icon: 'edit', originalMessage: 'outgoing commit\n\noriginal body', initialValue: 'outgoing commit\n\noriginal body', message: 'Repo 1 · out1' });
+    } finally { editor.mockRestore(); }
+  });
+
+  it('shows all selected squash messages in repository order even when selection starts at the oldest commit', async () => {
+    const editor = vi.spyOn(dialogService, 'editorDialog').mockResolvedValue(undefined);
+    const newer = { ...sampleOutgoing[0], hash: 'new', shortHash: 'new', message: 'new subject', fullMessage: 'new subject\n\nnew body' };
+    const older = { ...sampleOutgoing[0], hash: 'old', shortHash: 'old', message: 'old subject', body: 'old body' };
+    try {
+      useAppStore.setState({ bridge, snapshot, unpushedCommits: { 'repo-1': [newer, older] } });
+      render(<SyncPanel repos={[gitRepo]} />);
+      const oldRow = screen.getByText('old subject').closest('[data-sync-commit-row]')!;
+      const newRow = screen.getByText('new subject').closest('[data-sync-commit-row]')!;
+      fireEvent.click(oldRow, { ctrlKey: true });
+      fireEvent.click(newRow, { ctrlKey: true });
+      fireEvent.contextMenu(newRow);
+      fireEvent.click(screen.getByText('Squash 2 commits…'));
+      await waitFor(() => expect(editor).toHaveBeenCalled());
+      expect(editor.mock.calls[0][0]).toMatchObject({ icon: 'fold', confirmLabel: 'Confirm Squash', initialValue: 'old subject\n\nold body\n\nnew subject\n\nnew body', items: [{ id: 'old', displayId: 'old', label: 'old subject\n\nold body' }, { id: 'new', displayId: 'new', label: 'new subject\n\nnew body' }] });
+    } finally { editor.mockRestore(); }
   });
 });
 

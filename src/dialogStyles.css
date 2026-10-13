@@ -89,6 +89,26 @@
 .vd-dialog.clone-dialog > footer { margin-top: 10px; }
 .vd-dialog.ignore-dialog textarea { min-height: 220px; max-height: 45vh; resize: vertical; font-family: var(--versiondock-code); }
 .vd-dialog .dialog-editor { min-height: 190px; max-height: 45vh; width: 100%; box-sizing: border-box; resize: vertical; }
+.vd-dialog.commit-message-dialog { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.vd-dialog.commit-message-dialog > header { flex-shrink: 0; padding: 16px 24px 12px; margin: 0; border-bottom: 1px solid var(--versiondock-border-soft); }
+.vd-dialog.commit-message-dialog > header > .codicon { background: transparent; color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--versiondock-warning)); width: 20px; flex-basis: 20px; }
+.commit-message-body { min-height: 0; overflow: auto; padding: 20px 24px; display: grid; gap: 16px; }
+.commit-message-body .commit-message-description { margin: 0; color: var(--versiondock-muted); font-size: inherit; }
+.commit-message-body .commit-message-label { display: block; margin-bottom: 6px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; letter-spacing: .04em; text-transform: uppercase; }
+.dialog-original-message, .commit-message-body .dialog-commit-list { max-height: 180px; overflow: auto; border: 1px solid var(--versiondock-border); border-radius: 7px; background: var(--versiondock-input); }
+.dialog-original-message { padding: 9px 11px; font-family: var(--versiondock-code); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.commit-message-body .dialog-commit-list > div { display: flex; align-items: flex-start; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.commit-message-body .dialog-commit-list > div:last-child { border-bottom: 0; }
+.commit-message-body .dialog-commit-list code { flex-shrink: 0; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.6; }
+.commit-message-body .dialog-commit-list span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.commit-message-body .dialog-commit-list small { display: block; color: var(--versiondock-muted); }
+.vd-dialog.commit-message-dialog .ai-input-surface { --ai-input-radius: 3px; --ai-marquee-radius: 2.5px; --ai-generation-outline-color: var(--dialog-input-border); }
+.vd-dialog.commit-message-dialog .dialog-editor { display: block; padding: 10px 38px 10px 12px; font-family: var(--versiondock-code); font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); line-height: 1.6; border-radius: 3px; }
+.vd-dialog.commit-message-dialog .dialog-editor:focus { border-color: var(--vscode-focusBorder); box-shadow: none; }
+.vd-dialog .dialog-editor-ai { position: absolute; z-index: 3; top: 7px; right: 7px; padding: 3px; color: var(--versiondock-text); background: transparent; border: 0; border-radius: 4px; }
+.vd-dialog .dialog-editor-ai:not(:disabled):hover { background: var(--versiondock-hover); }
+.vd-dialog.commit-message-dialog > footer { flex-shrink: 0; margin: 0; padding: 12px 24px 20px; border-top: 1px solid var(--versiondock-border-soft); }
+.vd-dialog.commit-message-dialog > footer > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .vd-dialog.identity-panel { padding: 0; overflow: hidden; }
 .vd-dialog.identity-panel > .modal-header { min-height: 52px; height: auto; flex-basis: auto; padding: 10px 16px; margin-bottom: 0; border-bottom: 1px solid var(--versiondock-border-soft); }
 .vd-dialog .modal-header-title { font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }

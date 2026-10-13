@@ -34,6 +34,40 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
+  it('loads complete messages for squash and preserves oldest-first display order', async () => {
+    const editor = vi.spyOn(dialogService, 'editorDialog').mockResolvedValue(undefined);
+    const commits = ['new', 'old'].map((hash, index) => ({ repoId: 'repo', hash, shortHash: hash, parents: index === 0 ? ['old'] : ['base'], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `${hash} subject`, refs: index === 0 ? ['HEAD -> main'] : [], unpushed: true }));
+    const originalLoadDetail = useAppStore.getState().loadCommitDetail;
+    const loadDetail = vi.spyOn(useAppStore.getState(), 'loadCommitDetail').mockImplementation(async (commit) => ({ commit, fullMessage: `${commit.message}\n\n${commit.hash} body`, files: [], branches: { local: [], remote: [], tags: [] } }));
+    try {
+      useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: commits, selectedCommits: commits });
+      render(<HistoryWorkspace />);
+      fireEvent.contextMenu(screen.getByText('new subject', { selector: '.commit-subject-text' }).closest('.commit-row')!);
+      fireEvent.click(screen.getByText('Squash 2 Commits...'));
+      await waitFor(() => expect(editor).toHaveBeenCalled());
+      expect(loadDetail).toHaveBeenCalledWith(commits[1], false, 'workspace');
+      expect(editor.mock.calls[0][0]).toMatchObject({ icon: 'fold', initialValue: 'old subject\n\nold body\n\nnew subject\n\nnew body', items: [{ id: 'old', displayId: 'old', label: 'old subject\n\nold body' }, { id: 'new', displayId: 'new', label: 'new subject\n\nnew body' }] });
+    } finally { editor.mockRestore(); loadDetail.mockRestore(); useAppStore.setState({ selectedCommits: [], loadCommitDetail: originalLoadDetail }); }
+  });
+
+  it('does not open a squash dialog if the workspace changes while messages load', async () => {
+    const editor = vi.spyOn(dialogService, 'editorDialog').mockResolvedValue(undefined);
+    const commits = ['new', 'old'].map((hash, index) => ({ repoId: 'repo', hash, shortHash: hash, parents: index === 0 ? ['old'] : ['base'], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `${hash} subject`, refs: index === 0 ? ['HEAD -> main'] : [], unpushed: true }));
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const originalLoadDetail = useAppStore.getState().loadCommitDetail;
+    const loadDetail = vi.spyOn(useAppStore.getState(), 'loadCommitDetail').mockImplementation(async (commit) => { await pending; return { commit, fullMessage: commit.message, files: [], branches: { local: [], remote: [], tags: [] } }; });
+    try {
+      useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: commits, selectedCommits: commits });
+      render(<HistoryWorkspace />);
+      fireEvent.contextMenu(screen.getByText('new subject', { selector: '.commit-subject-text' }).closest('.commit-row')!);
+      fireEvent.click(screen.getByText('Squash 2 Commits...'));
+      await waitFor(() => expect(loadDetail).toHaveBeenCalledTimes(2));
+      await act(async () => { useAppStore.setState({ snapshot: { ...snapshot, workspace: { ...snapshot.workspace, id: 'other' } } }); release(); await pending; });
+      expect(editor).not.toHaveBeenCalled();
+    } finally { editor.mockRestore(); loadDetail.mockRestore(); useAppStore.setState({ selectedCommits: [], loadCommitDetail: originalLoadDetail }); }
+  });
+
   it('cancels a delayed commit hover when the workspace switches without unmounting the list', async () => {
     vi.useFakeTimers();
     const commit = { repoId: 'repo', hash: 'old-commit', shortHash: 'old', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'Old workspace commit', refs: [] };

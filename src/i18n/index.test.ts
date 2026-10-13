@@ -20,6 +20,15 @@ describe('i18n', () => {
     expect(t('Rebase & Push')).toBe('变基并推送');
   });
 
+  it('uses consistent squash terminology for both menus, the editor, and completion notifications', () => {
+    const t = createTranslator('zh-CN');
+    expect(t('Squash {0} Commits...', 2)).toBe('压缩 2 个提交...');
+    expect(t('Squash {0} commits…', 2)).toBe('压缩 2 个提交…');
+    expect(t('Squash {0} commits', 2)).toBe('压缩 2 个提交');
+    expect(t('VersionDock [{0}]: squash completed.', 'repo')).toBe('VersionDock [repo]：压缩提交已完成。');
+    expect(createTranslator('en')('VersionDock [{0}]: squash completed.', 'repo')).toBe('VersionDock [repo]: Squash completed.');
+  });
+
   it.each([
     ['Reading repository data', '正在读取仓库数据'],
     ['Waiting for a repository read slot', '正在等待仓库读取许可'],

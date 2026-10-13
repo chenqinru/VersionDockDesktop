@@ -53,12 +53,13 @@ export function DialogHost() {
     if (generating) { generation.current?.abort(); return; }
     if (!request.generate) return;
     const control = new AbortController(); const previous = value; generation.current = control; setGenerating(true); setValue(''); setSubmitError('');
-    try { const text = await request.generate(control.signal, (text) => { if (!control.signal.aborted && generation.current === control) setValue(text); }); if (!control.signal.aborted && generation.current === control) setValue(text); }
+    try { const text = await request.generate(control.signal, (text) => { if (!control.signal.aborted && generation.current === control) setValue(text); }); if (!control.signal.aborted && generation.current === control) setValue((current) => text || current); }
     catch (error) { if (generation.current === control) { setValue(previous); if (!control.signal.aborted) setSubmitError(String(error)); } }
     finally { if (generation.current === control) { if (control.signal.aborted) setValue(previous); generation.current = undefined; setGenerating(false); } }
   };
   const submit = async () => {
     if (generating || submitting) return;
+    if (request.kind === 'editor' && !request.allowEmpty && !value.trim()) return;
     if (request.kind === 'multiChoice') {
       finish(selectedChoiceIds);
       return;
@@ -83,13 +84,20 @@ export function DialogHost() {
       finally { setSubmitting(false); }
     } else finish(true);
   };
-  return <DialogSurface ref={dialog} size={request.kind === 'editor' || request.items?.length ? 'medium' : 'small'} className="app-dialog" onClose={() => finish(false)} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
-      <header><Codicon name={request.danger ? 'warning' : request.kind === 'prompt' ? 'edit' : request.kind === 'editor' ? 'git-commit' : 'question'} /><strong id="app-dialog-title">{request.title}</strong><IconButton title={t('Close')} disabled={submitting} onClick={() => finish(false)}><Codicon name="close" /></IconButton></header>
-      <p>{request.message}</p>
+  const isEditor = request.kind === 'editor';
+  return <DialogSurface ref={dialog} size={isEditor || request.items?.length ? 'medium' : 'small'} className={`app-dialog${isEditor ? ' commit-message-dialog' : ''}`} onClose={() => finish(false)} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
+      <header><Codicon name={request.icon ?? (request.danger ? 'warning' : request.kind === 'prompt' ? 'edit' : isEditor ? 'git-commit' : 'question')} /><strong id="app-dialog-title">{request.title}</strong><IconButton title={t('Close')} disabled={submitting} onClick={() => finish(false)}><Codicon name="close" /></IconButton></header>
+      {!isEditor && request.message && <p>{request.message}</p>}
       {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus disabled={submitting} aria-label={request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
-      {request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
-      {request.kind === 'editor' && <label><span>{request.inputLabel}</span><div className="ai-input-surface"><AiGenerationBorder active={generating} /><textarea readOnly={generating} autoFocus className={`dialog-editor${generating ? ' ai-input-generating' : ''}`} value={value} onChange={(event) => setValue(event.target.value)} /></div></label>}
-      {submitError && <p className="dialog-error" role="alert">{submitError}</p>}
+      {!isEditor && request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
+      {isEditor && <div className="commit-message-body">
+        {request.message && <p className="commit-message-description">{request.message}</p>}
+        {request.originalMessage !== undefined && <section aria-labelledby="original-message-label"><div id="original-message-label" className="commit-message-label">{t('Original commit message')}</div><div className="dialog-original-message">{request.originalMessage}</div></section>}
+        {request.items?.length ? <section aria-labelledby="squash-commits-label"><div id="squash-commits-label" className="commit-message-label">{request.itemsLabel ?? t('Commits being squashed')}</div><div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code title={item.id}>{item.displayId ?? item.id}</code><span>{item.label}{item.description && <small>{item.description}</small>}</span></div>)}</div></section> : null}
+        <div><label className="commit-message-label" htmlFor="commit-message-input">{request.inputLabel}</label><div className="ai-input-surface"><AiGenerationBorder active={generating} /><textarea id="commit-message-input" placeholder={generating ? t('Generating commit message…') : ''} readOnly={generating || submitting} autoFocus spellCheck={false} className={`dialog-editor${generating ? ' ai-input-generating' : ''}`} value={value} onChange={(event) => setValue(event.target.value)} />{request.generate && <IconButton className="dialog-editor-ai" title={t(generating ? 'Stop generating commit message' : 'Generate commit message with AI')} disabled={submitting} onClick={() => void generate()}><Codicon name={generating ? 'stop-circle' : 'sparkle'} /></IconButton>}</div></div>
+        {submitError && <p className="dialog-error" role="alert">{submitError}</p>}
+      </div>}
+      {!isEditor && submitError && <p className="dialog-error" role="alert">{submitError}</p>}
       {request.kind === 'choice' && <div className="dialog-choices">{request.choices?.map((choice) => <button key={choice.id} className={choice.danger ? 'danger-choice' : ''} onClick={() => finish(choice.id)}>{choice.icon && <Codicon name={choice.icon} />}<span><strong>{choice.label}</strong>{choice.description && <small>{choice.description}</small>}</span></button>)}</div>}
       {request.kind === 'multiChoice' && (
         <div className="dialog-choices dialog-multi-choices">
@@ -117,6 +125,6 @@ export function DialogHost() {
           })}
         </div>
       )}
-      <footer>{request.generate && <IconButton className="ai-generate" title={t(generating ? 'Stop generating' : 'Generate commit message with AI')} disabled={submitting} onClick={() => void generate()}><Codicon name={generating ? 'stop-circle' : 'sparkle'} /></IconButton>}<button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={generating || submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || request.kind === 'editor') && !request.allowEmpty && !value.trim())} onClick={() => void submit()}>{request.confirmLabel ?? t('Confirm')}</button>}</footer>
+      <footer>{!isEditor && request.generate && <IconButton className="ai-generate" title={t(generating ? 'Stop generating commit message' : 'Generate commit message with AI')} disabled={submitting} onClick={() => void generate()}><Codicon name={generating ? 'stop-circle' : 'sparkle'} /></IconButton>}<button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{isEditor && <Codicon name="close" />}{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={generating || submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || isEditor) && !request.allowEmpty && !value.trim())} onClick={() => void submit()}>{isEditor && <Codicon name="check" />}{request.confirmLabel ?? t('Confirm')}</button>}</footer>
   </DialogSurface>;
 }
