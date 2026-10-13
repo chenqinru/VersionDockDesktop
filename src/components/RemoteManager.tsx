@@ -285,7 +285,7 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
           />
         )}
     </DialogSurface>
-      {publishOpen && <ProviderPanel mode="publish" repoId={repoId} close={() => { setPublishOpen(false); void load(repoId); }} />}
+      {publishOpen && <ProviderPanel mode="publish" repoId={repoId} close={() => { setPublishOpen(false); }} />}
     </>
   );
 }

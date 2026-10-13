@@ -87,6 +87,14 @@
 .vd-dialog.clone-dialog { --dialog-width: 480px; gap: 14px; }
 .vd-dialog.clone-dialog > header { margin-bottom: 4px; }
 .vd-dialog.clone-dialog > footer { margin-top: 10px; }
+.vd-dialog.clone-dialog.clone-dialog-accounts { gap: 8px; }
+.vd-dialog.clone-dialog.clone-dialog-accounts > footer { margin-top: 0; }
+.vd-dialog.clone-dialog-accounts .clone-fields label { gap: 4px; }
+.vd-dialog.clone-dialog-accounts .clone-fields input:not([type="checkbox"]) {
+  min-height: 32px;
+  height: 32px;
+  padding: 5px 8px;
+}
 .vd-dialog.ignore-dialog textarea { min-height: 220px; max-height: 45vh; resize: vertical; font-family: var(--versiondock-code); }
 .vd-dialog .dialog-editor { min-height: 190px; max-height: 45vh; width: 100%; box-sizing: border-box; resize: vertical; }
 .vd-dialog.commit-message-dialog { display: flex; flex-direction: column; padding: 0; overflow: hidden; }

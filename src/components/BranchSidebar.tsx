@@ -348,8 +348,6 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         repoId={publishRepoId}
         close={() => {
           setPublishRepoId(null);
-          void useAppStore.getState().loadRemotes(publishRepoId);
-          void useAppStore.getState().refresh(true);
         }}
       />
     )}

@@ -28,6 +28,7 @@ import { StatusMark } from './ChangelistGroup';
 import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
+import { RepositoryCheckoutDialog } from './RepositoryCheckoutDialog';
 import { ProviderPanel } from './ProviderPanel';
 import { InvertSelectionIcon, SelectAllIcon, WarningConflictIcon } from './CustomIcons';
 import { performCommitSafetyCheck } from '../history/safetyCheck';
@@ -449,6 +450,8 @@ export function CommitPanel() {
   const [syncSelectionCommand, setSyncSelectionCommand] = useState<{ sequence: number; action: 'selectAll' | 'invert' }>({ sequence: 0, action: 'selectAll' });
   const [syncHasSelectable, setSyncHasSelectable] = useState(false);
   const [syncAllSelected, setSyncAllSelected] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const cloneAvailable = useAppStore(state => state.bootstrap?.capabilities?.availability?.cloneRepository?.available ?? state.bootstrap?.tools?.git ?? false);
   const [providersOpen, setProvidersOpen] = useState(false);
   const [expandedByTab, setExpandedByTab] = useState<Record<'changes' | 'shelf' | 'stash' | 'sync', boolean | null>>({ changes: true, shelf: false, stash: false, sync: true });
   const [manualTextareaHeight, setManualTextareaHeight] = useState<number | null>(loadPersistedTextareaHeight);
@@ -1874,6 +1877,7 @@ export function CommitPanel() {
         {currentTabIsAllSelected ? <InvertSelectionIcon /> : <SelectAllIcon />}
       </IconButton>
     )}
+    <IconButton disabled={workspaceBusy || !cloneAvailable} title={t('Clone Git Repository')} aria-label={t('Clone Git Repository')} onClick={() => setCloneOpen(true)}><Codicon name="repo-clone" /></IconButton>
     <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Update Project')} aria-label={t('VersionDock: Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></IconButton>
     <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Refresh Commit Panel')} aria-label={t('VersionDock: Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></IconButton>
     <IconButton
@@ -1909,7 +1913,7 @@ export function CommitPanel() {
       </div>}
     </div>
   </div>;
-  const panelOverlays = <>{providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
+  const panelOverlays = <>{cloneOpen && <RepositoryCheckoutDialog kind="git" close={() => setCloneOpen(false)} />}{providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
 

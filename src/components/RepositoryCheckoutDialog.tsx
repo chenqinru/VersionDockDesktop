@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { RemoteRepository } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { DialogSurface } from './DialogSurface';
@@ -6,7 +6,8 @@ import { IconButton } from './IconButton';
 import { useBridge } from '../platform/context';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
-import { ProviderPanel } from './ProviderPanel';
+import { RepositoryTaskProgress } from './RepositoryTaskProgress';
+import { ProviderContent } from './ProviderContent';
 
 export type RepositoryCheckoutKind = 'git' | 'svn';
 
@@ -45,7 +46,13 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
   const [targetName, setTargetName] = useState(defaultTargetName);
   const [openInNewWindow, setOpenInNewWindow] = useState(false);
   const [providerAccountId, setProviderAccountId] = useState<string>();
-  const [providerOpen, setProviderOpen] = useState(false);
+  const [operationId, setOperationId] = useState<string>();
+  const [accountFormOpen, setAccountFormOpen] = useState(false);
+  const [source, setSource] = useState<'url' | 'account'>('url');
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const clearAccountSelection = useCallback(() => { setProviderAccountId(undefined); }, []);
+  const locked = busy || submitting;
   const [showAuthentication, setShowAuthentication] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -67,14 +74,19 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
   };
 
   const submit = async () => {
+    if (submittingRef.current || busy) return;
     const name = targetName.trim();
     if (!validTargetName(targetName)) {
       setValidationError(t('Invalid folder name. Use one directory name without path separators or special characters.'));
       return;
     }
     setValidationError('');
+    submittingRef.current = true;
+    setSubmitting(true);
+    setOperationId(undefined);
+    try {
     const outcome = git
-      ? { succeeded: await cloneRepository(url.trim(), parent.trim(), name, openInNewWindow, providerAccountId), authenticationRequired: false }
+      ? { succeeded: await cloneRepository(url.trim(), parent.trim(), name, openInNewWindow, providerAccountId, setOperationId), authenticationRequired: false }
       : await checkoutSvnRepository(
           url.trim(),
           parent.trim(),
@@ -89,19 +101,37 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
       return;
     }
     if (outcome.succeeded) close();
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
   const ready = Boolean(url.trim() && parent.trim() && targetName.trim())
     && validTargetName(targetName)
+    && (!git || source === 'url' || Boolean(providerAccountId))
     && (git || !showAuthentication || Boolean(username.trim() && password));
 
   return <>
-      <DialogSurface className="app-dialog clone-dialog" onClose={close} closeDisabled={busy} aria-label={t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}>
-        <header><Codicon name={git ? 'repo-clone' : 'cloud-download'} /><strong>{t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}</strong><IconButton title={t('Close')} disabled={busy} onClick={close}><Codicon name="close" /></IconButton></header>
-        {git && <button type="button" onClick={() => setProviderOpen(true)}><Codicon name="cloud" />{t('Browse Remote Providers')}</button>}
-        <label><span>{t(git ? 'Git URL' : 'SVN URL')}</span><input autoFocus value={url} placeholder={git ? 'https://github.com/user/repository.git' : 'https://svn.example.com/project/trunk'} onChange={(event) => changeUrl(event.target.value)} /></label>
+      <DialogSurface className={`app-dialog clone-dialog ${git && source === 'account' ? 'clone-dialog-accounts' : ''}`} onClose={close} closeDisabled={locked} aria-label={t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}>
+        <header><Codicon name={git ? 'repo-clone' : 'cloud-download'} /><strong>{t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}</strong><IconButton title={t('Close')} disabled={locked} onClick={close}><Codicon name="close" /></IconButton></header>
+        {git && <div className="clone-source-tabs" role="tablist" aria-label={t('Clone source')}>
+          <button type="button" role="tab" aria-selected={source === 'url'} disabled={locked} onClick={() => setSource('url')}>{t('Repository URL')}</button>
+          <button type="button" role="tab" aria-selected={source === 'account'} disabled={locked} onClick={() => setSource('account')}>{t('Remote Accounts')}</button>
+        </div>}
+        {git && source === 'account' && <ProviderContent mode="browse" disabled={locked} close={() => setSource('url')} selectedRepositoryUrl={providerAccountId ? url : undefined} onAccountFormChange={setAccountFormOpen} onAccountChange={clearAccountSelection} onClone={(repository: RemoteRepository, accountId) => {
+          setUrl(repository.cloneUrl);
+          setTargetName(repository.name);
+          inferredNameRef.current = repository.name;
+          setProviderAccountId(accountId);
+        }} />}
+        <fieldset className="clone-fields" disabled={locked} hidden={git && source === 'account' && accountFormOpen}>
+        <label><span>{t(git ? 'Git URL' : 'SVN URL')}</span><input autoFocus={!git || source === 'url'} value={url} placeholder={git ? 'https://github.com/user/repository.git' : 'https://svn.example.com/project/trunk'} onChange={(event) => changeUrl(event.target.value)} /></label>
+        {git && source === 'url' && <small>{t('SSH URLs use your Git SSH configuration. Platform accounts authenticate HTTPS repositories.')}</small>}
+        <div className="checkout-destination-fields">
         <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={parent} onChange={(event) => setParent(event.target.value)} /><button type="button" onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}>{t('Browse…')}</button></div></label>
         <label><span>{t('Folder name')}</span><input value={targetName} onChange={(event) => { inferredNameRef.current = ''; setTargetName(event.target.value); }} /></label>
+        </div>
         {validationError && <p className="dialog-error">{validationError}</p>}
         {!git && <>
           <label className="dialog-check"><input type="checkbox" checked={showAuthentication} onChange={(event) => setShowAuthentication(event.target.checked)} />{t('SVN authentication')}</label>
@@ -110,15 +140,11 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
             <label><span>{t('Password')}</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
           </div>}
         </>}
-        <label className="dialog-check"><input type="checkbox" checked={openInNewWindow} onChange={(event) => setOpenInNewWindow(event.target.checked)} />{t('Open in New Window')}</label>
-        <footer><button type="button" onClick={close}>{t('Cancel')}</button><button type="button" className="primary" disabled={busy || !ready} onClick={() => void submit()}>{t(git ? 'Clone' : 'Checkout')}</button></footer>
+        {(!git || source === 'url') && <label className="dialog-check"><input type="checkbox" checked={openInNewWindow} onChange={(event) => setOpenInNewWindow(event.target.checked)} />{t('Open in New Window')}</label>}
+        </fieldset>
+        <RepositoryTaskProgress operationId={operationId} />
+        <footer>{git && source === 'account' && !accountFormOpen && <label className="dialog-check clone-new-window-option"><input type="checkbox" disabled={locked} checked={openInNewWindow} onChange={event => setOpenInNewWindow(event.target.checked)} />{t('Open in New Window')}</label>}<button type="button" disabled={locked} onClick={close}>{t('Cancel')}</button><button type="button" className="primary" disabled={locked || !ready || (source === 'account' && accountFormOpen)} onClick={() => void submit()}>{t(git ? 'Clone' : 'Checkout')}</button></footer>
       </DialogSurface>
-    {providerOpen && <ProviderPanel mode="browse" close={() => setProviderOpen(false)} onClone={(repository: RemoteRepository, accountId) => {
-      setUrl(repository.cloneUrl);
-      setTargetName(repository.name);
-      inferredNameRef.current = repository.name;
-      setProviderAccountId(accountId);
-      setProviderOpen(false);
-    }} />}
+
   </>;
 }

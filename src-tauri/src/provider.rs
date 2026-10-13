@@ -1638,6 +1638,157 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
+    async fn gitlab_repository_browse_namespaces_and_creation_use_real_http_contracts() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let fixture = json!({
+            "id": 42, "name": "secret", "path_with_namespace": "team/secret",
+            "http_url_to_repo": "https://gitlab.example.test/team/secret.git",
+            "web_url": "https://gitlab.example.test/team/secret", "visibility": "private",
+            "default_branch": "main", "namespace": {"id": 10, "name": "team", "full_path": "team", "kind": "group"}
+        });
+        let response_repository = fixture.clone();
+        let server = tokio::spawn(async move {
+            for step in 0..4 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut chunk = [0_u8; 4096];
+                    let size = socket.read(&mut chunk).await.unwrap();
+                    assert!(size > 0);
+                    request.extend_from_slice(&chunk[..size]);
+                    if let Some(end) = request.windows(4).position(|value| value == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                        let length = headers
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length: "))
+                            .and_then(|value| value.parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if request.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request
+                    .to_lowercase()
+                    .contains("private-token: fixture-secret"));
+                let target = request.split_whitespace().nth(1).unwrap();
+                let url = url::Url::parse(&format!("http://localhost{target}")).unwrap();
+                let body = match step {
+                    0 => {
+                        assert_eq!(url.path(), "/api/v4/projects");
+                        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                        assert_eq!(query.get("search").map(String::as_str), Some("secret"));
+                        assert_eq!(query.get("page").map(String::as_str), Some("2"));
+                        json!([response_repository.clone()])
+                    }
+                    1 => {
+                        assert_eq!(url.path(), "/api/v4/namespaces");
+                        json!([{"id":10,"name":"team","full_path":"team","kind":"group"}])
+                    }
+                    _ => {
+                        assert!(request.starts_with("POST "));
+                        assert_eq!(url.path(), "/api/v4/projects");
+                        let input: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+                        assert_eq!(input, json!({"name":"secret","description":"description","visibility":"private","namespace_id":10}));
+                        if step == 3 { json!({"message":"Forbidden"}) } else { response_repository.clone() }
+                    }
+                }.to_string();
+                let status = if step == 3 { "403 Forbidden" } else { "200 OK" };
+                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let config = tempfile::tempdir().unwrap();
+        let reference = uuid::Uuid::new_v4().to_string();
+        let account = RemoteProviderAccount {
+            id: reference.clone(),
+            provider: RemoteProviderKind::Gitlab,
+            host,
+            login: "ada".into(),
+            display_name: None,
+            secure_storage_ref: reference.clone(),
+        };
+        save(
+            config.path(),
+            AccountFile {
+                schema_version: 1,
+                accounts: vec![account.clone()],
+            },
+        )
+        .unwrap();
+        // Seed the process-only credential cache with a fixture secret; never access the system keychain.
+        credential_cache()
+            .write_with(&reference, "fixture-secret".into(), || Ok(()))
+            .await
+            .unwrap();
+        let cancel = CancellationToken::new();
+        let page = repositories(
+            config.path(),
+            &account.id,
+            Some("secret".into()),
+            2,
+            1,
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(page.page, 2);
+        assert!(page.has_more && page.items[0].private);
+        let scopes = namespaces(config.path(), &account.id, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(scopes[0].id, "10");
+        let created = create_repository(
+            config.path(),
+            &account.id,
+            Some("10"),
+            "secret",
+            "description",
+            RemoteVisibility::Private,
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            created.clone_url,
+            fixture["http_url_to_repo"].as_str().unwrap()
+        );
+        assert_eq!(
+            create_repository(
+                config.path(),
+                &account.id,
+                Some("10"),
+                "secret",
+                "description",
+                RemoteVisibility::Private,
+                &cancel
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "PROVIDER_FORBIDDEN"
+        );
+        assert_eq!(
+            create_repository(
+                config.path(),
+                &account.id,
+                Some("10"),
+                "bad/name",
+                "description",
+                RemoteVisibility::Private,
+                &cancel
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_REPOSITORY_NAME"
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     #[ignore = "Requires an explicitly selected local account and live GitLab access"]
     async fn live_gitlab_author_batch_and_persistent_cache() {
         let source = std::env::var("VERSIONDOCK_AVATAR_QA_CONFIG")

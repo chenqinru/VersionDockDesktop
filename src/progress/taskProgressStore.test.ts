@@ -143,3 +143,11 @@ describe('aggregate repository operations', () => {
   });
 
 });
+
+
+it('marks remote-created publish failures as partial even without a native terminal event', () => {
+  const store = useTaskProgressStore.getState();
+  store.requested(createOperationRequestEvent({ type: 'publishRepository', payload: { workspace_id: 'workspace', repo_id: 'repo', account_id: 'account', namespace_id: null, name: 'demo', description: '', visibility: 'private', push: true } }, {}, 'publish'), metadata);
+  store.settled({ type: 'operation-settled', progressEvent: true, requestId: 'publish', result: { remoteCreated: true, remoteConfigured: true, pushed: false, error: { message: 'Push failed' } } });
+  expect(useTaskProgressStore.getState().tasks.publish).toMatchObject({ status: 'partial', error: 'Push failed' });
+});

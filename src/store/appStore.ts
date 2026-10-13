@@ -485,7 +485,7 @@ export interface AppStore {
   dispose: () => void;
   openWorkspace: (paths: string[], focus?: boolean, options?: OpenWorkspaceOptions) => Promise<boolean>;
   initializeRepository: (targetPath: string) => Promise<void>;
-  cloneRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, providerAccountId?: string) => Promise<boolean>;
+  cloneRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, providerAccountId?: string, onOperationId?: (operationId: string) => void) => Promise<boolean>;
   checkoutSvnRepository: (url: string, parentPath: string, targetName: string, openInNewWindow?: boolean, username?: string, password?: string) => Promise<RepositoryCheckoutOutcome>;
   switchTab: (workspaceId: string) => Promise<void>;
   closeTab: (workspaceId: string, options?: { closeWindowIfLast?: boolean }) => Promise<void>;
@@ -2756,8 +2756,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       }, 'workspace', { target: targetPath });
     },
 
-    cloneRepository: async (url, parentPath, targetName, openInNewWindow = false, providerAccountId) => (await withBusy(async () => {
-        const result = await bridge().request<CloneRepositoryResult>({ type: 'cloneRepository', payload: { url, parent_path: parentPath, target_name: targetName, provider_account_id: providerAccountId ?? null } }, { timeoutMs: 600_000 });
+    cloneRepository: async (url, parentPath, targetName, openInNewWindow = false, providerAccountId, onOperationId) => (await withBusy(async () => {
+        const result = await bridge().request<CloneRepositoryResult>({ type: 'cloneRepository', payload: { url, parent_path: parentPath, target_name: targetName, provider_account_id: providerAccountId ?? null } }, { timeoutMs: 600_000, onOperationId });
         if (openInNewWindow) {
           if (!await bridge().focusWorkspaceAcrossWindows([result.path])) await bridge().openInNewWindow([result.path]);
         } else {

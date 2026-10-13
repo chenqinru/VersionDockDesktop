@@ -245,3 +245,82 @@ describe('ProviderPanel', () => {
     useAppStore.setState(originalState);
   });
 });
+
+describe('remote workflows', () => {
+  const accounts = ['alice', 'bob'].map(id => ({ id, provider: 'gitlab', host: 'https://gitlab.com', login: id, displayName: null, secureStorageRef: id }));
+  const remote = (name: string) => ({ id: name, provider: 'gitlab', host: 'https://gitlab.com', name, fullName: `team/${name}`, cloneUrl: `https://gitlab.com/team/${name}.git`, webUrl: null, defaultBranch: 'main', namespace: null, private: true });
+
+  it('discards late repositories after account changes and searches only on explicit submit', async () => {
+    let resolveAlice!: (value: unknown) => void;
+    const requests = vi.fn(command => {
+      if (command.type === 'providerAccounts') return accounts;
+      if (command.type === 'providerRepositories') {
+        if (command.payload.account_id === 'alice') return new Promise(resolve => { resolveAlice = resolve; });
+        return { items: [remote(command.payload.query || 'bob')], page: 1, hasMore: false };
+      }
+      return [];
+    });
+    render(<BridgeContext.Provider value={new MockBridge(requests)}><ProviderPanel mode="browse" close={vi.fn()} /></BridgeContext.Provider>);
+    await waitFor(() => expect(resolveAlice).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: /bob.*gitlab.com/ }));
+    await screen.findByText('team/bob');
+    resolveAlice({ items: [remote('old-alice')], page: 1, hasMore: false });
+    fireEvent.change(screen.getByPlaceholderText('Search repositories…'), { target: { value: 'needle' } });
+    expect(requests.mock.calls.filter(([command]) => command.type === 'providerRepositories' && command.payload.query === 'needle')).toHaveLength(0);
+    fireEvent.keyDown(screen.getByPlaceholderText('Search repositories…'), { key: 'Enter' });
+    await screen.findByText('team/needle');
+    expect(screen.queryByText('team/old-alice')).toBeNull();
+  });
+
+  it('deduplicates appended repository pages', async () => {
+    const bridge = new MockBridge(command => command.type === 'providerAccounts' ? [accounts[0]] : command.type === 'providerRepositories' ? { items: command.payload.page === 1 ? [remote('one')] : [remote('one'), remote('two')], page: command.payload.page, hasMore: command.payload.page === 1 } : []);
+    render(<BridgeContext.Provider value={bridge}><ProviderPanel mode="browse" close={vi.fn()} /></BridgeContext.Provider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+    await screen.findByText('team/two');
+    expect(screen.getAllByText('team/one')).toHaveLength(1);
+  });
+
+  it('keeps the publish target after changing workspaces and prevents recreation after partial success', async () => {
+    const previousSnapshot = useAppStore.getState().snapshot;
+    const close = vi.fn();
+    const repository = { meta: { id: 'repo-a', name: 'local-a', rootPath: '/tmp/local-a', kind: 'git' }, branch: 'main', revision: 'abc123', files: [], ahead: 0, behind: 0, conflicts: 0, operation: null };
+    useAppStore.setState({ snapshot: { workspace: { id: 'workspace-a' }, repositories: [repository] } as any });
+    const requests = vi.fn(command => {
+      if (command.type === 'providerAccounts') return [accounts[0]];
+      if (command.type === 'providerNamespaces') return [{ id: '10', fullPath: 'team', name: 'team', kind: 'group', host: 'https://gitlab.com' }];
+      if (command.type === 'repositoryStatus') return repository;
+      if (command.type === 'remotes') return [];
+      if (command.type === 'publishRepository') return { repository: remote('local-a'), remoteCreated: true, remoteConfigured: true, pushAttempted: true, pushed: false, failedStage: 'push', recoveryHint: remote('local-a').cloneUrl, error: { code: 'PROVIDER_FORBIDDEN', message: 'Push rejected' } };
+      return [];
+    });
+    try {
+      render(<BridgeContext.Provider value={new MockBridge(requests)}><ProviderPanel mode="publish" repoId="repo-a" close={close} /></BridgeContext.Provider>);
+      const publish = await screen.findByRole('button', { name: 'Publish' });
+      await waitFor(() => expect(publish).not.toBeDisabled());
+      expect(screen.getByLabelText('Repository name')).toHaveValue('local-a');
+      useAppStore.setState({ snapshot: { workspace: { id: 'workspace-b' }, repositories: [] } as any });
+      fireEvent.click(publish);
+      await screen.findByText('This token does not have the required permissions.');
+      expect(requests.mock.calls.filter(([command]) => command.type === 'publishRepository').map(([command]) => command.payload)).toEqual([expect.objectContaining({ workspace_id: 'workspace-a', repo_id: 'repo-a', name: 'local-a', visibility: 'private', push: true })]);
+      expect(publish).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Copy Remote URL' })).toBeInTheDocument();
+      expect(screen.getByText(/Origin configured:/)).toBeInTheDocument();
+    } finally { useAppStore.setState({ snapshot: previousSnapshot }); }
+  });
+
+  it('does not apply late namespaces from the previously selected account', async () => {
+    let resolveAlice!: (value: unknown) => void;
+    const requests = vi.fn(command => {
+      if (command.type === 'providerAccounts') return accounts;
+      if (command.type === 'providerNamespaces') return command.payload.account_id === 'alice' ? new Promise(resolve => { resolveAlice = resolve; }) : [{ id: '20', name: 'bob-group', fullPath: 'bob-group', kind: 'group', host: 'https://gitlab.com' }];
+      return [];
+    });
+    render(<BridgeContext.Provider value={new MockBridge(requests)}><ProviderPanel mode="publish" repoId="unused" close={vi.fn()} /></BridgeContext.Provider>);
+    await waitFor(() => expect(resolveAlice).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: /bob.*gitlab.com/ }));
+    await screen.findByRole('option', { name: 'bob-group' });
+    resolveAlice([{ id: '10', name: 'alice-group', fullPath: 'alice-group', kind: 'group' }]);
+    await waitFor(() => expect(screen.getByLabelText('Namespace')).toHaveValue('20'));
+    expect(screen.queryByRole('option', { name: 'alice-group' })).toBeNull();
+  });
+});

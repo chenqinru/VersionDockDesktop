@@ -25,6 +25,7 @@ pub mod logger;
 mod models;
 mod protection;
 mod provider;
+mod publishing;
 mod shelf;
 mod state;
 mod svn_account;

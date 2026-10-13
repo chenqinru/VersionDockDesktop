@@ -9023,3 +9023,363 @@ async fn shelf_interop_driver() {
         Err(error) => println!("SHELF_TEST_RESULT:{}", serde_json::json!({"error": error})),
     }
 }
+
+fn published_remote(path: &Path) -> crate::models::RemoteRepository {
+    crate::models::RemoteRepository {
+        id: "remote-test".into(),
+        provider: crate::models::RemoteProviderKind::Gitlab,
+        host: "https://gitlab.example.test".into(),
+        name: "published".into(),
+        full_name: "team/published".into(),
+        clone_url: path.to_string_lossy().into_owned(),
+        web_url: Some("https://gitlab.example.test/team/published".into()),
+        default_branch: Some("main".into()),
+        namespace: None,
+        private: true,
+    }
+}
+
+fn publication_fixture() -> (
+    tempfile::TempDir,
+    crate::state::AppState,
+    RepositoryMeta,
+    crate::models::RemoteRepository,
+) {
+    let root = tempdir().unwrap();
+    let working = root.path().join("发布 仓库");
+    let remote_path = root.path().join("remote.git");
+    std::fs::create_dir(&working).unwrap();
+    command("git", &["init", "-b", "main"], &working);
+    command("git", &["config", "user.name", "Ada"], &working);
+    command(
+        "git",
+        &["config", "user.email", "ada@example.test"],
+        &working,
+    );
+    std::fs::write(working.join("文件.txt"), "initial\n").unwrap();
+    command("git", &["add", "."], &working);
+    command("git", &["commit", "-m", "Initial"], &working);
+    command(
+        "git",
+        &["init", "--bare", remote_path.to_str().unwrap()],
+        root.path(),
+    );
+    let repository = repo(&working, VcsKind::Git);
+    let remote = published_remote(&remote_path);
+    let state = crate::state::AppState::load(root.path().join("config"));
+    (root, state, repository, remote)
+}
+
+#[tokio::test]
+async fn publish_real_git_configures_origin_and_pushes_with_upstream() {
+    if !available("git") {
+        return;
+    }
+    let (_root, state, repository, remote) = publication_fixture();
+    let token = CancellationToken::new();
+    let result = crate::publishing::publish_repository(
+        &state,
+        &repository,
+        true,
+        &token,
+        || async { Ok(remote) },
+        |branch, head, created| {
+            let repository = &repository;
+            let token = &token;
+            async move {
+                vcs::push_published(
+                    repository,
+                    &branch,
+                    &head,
+                    &created.clone_url,
+                    &("test".into(), "test".into()),
+                    token,
+                )
+                .await
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        result.remote_created && result.remote_configured && result.push_attempted && result.pushed
+    );
+    assert!(result.error.is_none());
+    assert_eq!(
+        command_output(
+            "git",
+            &["rev-parse", "--abbrev-ref", "@{upstream}"],
+            Path::new(&repository.root_path)
+        )
+        .trim(),
+        "origin/main"
+    );
+    let remote_revision = command_output(
+        "git",
+        &["rev-parse", "refs/heads/main"],
+        Path::new(&result.repository.clone_url),
+    );
+    assert_eq!(
+        remote_revision.trim(),
+        vcs::publish_head(&repository, &token).await.unwrap().1
+    );
+    assert_eq!(
+        vcs::publish_preflight(&repository, &token)
+            .await
+            .unwrap_err()
+            .code,
+        "REMOTE_ALREADY_EXISTS"
+    );
+}
+
+#[tokio::test]
+async fn publish_preflight_rejects_initial_commit_missing_and_detached_head() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    command("git", &["init", "-b", "main"], directory.path());
+    let token = CancellationToken::new();
+    let empty = repo(directory.path(), VcsKind::Git);
+    assert_eq!(
+        vcs::publish_preflight(&empty, &token)
+            .await
+            .unwrap_err()
+            .code,
+        "HEAD_MISSING"
+    );
+    let (_root, _state, repository, _remote) = publication_fixture();
+    command(
+        "git",
+        &["checkout", "--detach"],
+        Path::new(&repository.root_path),
+    );
+    assert_eq!(
+        vcs::publish_preflight(&repository, &token)
+            .await
+            .unwrap_err()
+            .code,
+        "DETACHED_HEAD"
+    );
+}
+
+#[tokio::test]
+async fn publish_preserves_remote_after_branch_change_push_failure_and_cancel() {
+    if !available("git") {
+        return;
+    }
+    for scenario in [
+        "branch",
+        "commit",
+        "remote",
+        "push",
+        "cancel",
+        "create-only",
+    ] {
+        let (_root, state, repository, remote) = publication_fixture();
+        let token = CancellationToken::new();
+        let path = Path::new(&repository.root_path);
+        let result = crate::publishing::publish_repository(
+            &state,
+            &repository,
+            scenario != "create-only",
+            &token,
+            || async {
+                match scenario {
+                    "branch" => {
+                        command("git", &["checkout", "-b", "other"], path);
+                    }
+                    "commit" => {
+                        command(
+                            "git",
+                            &["commit", "--allow-empty", "-m", "Concurrent commit"],
+                            path,
+                        );
+                    }
+                    "remote" => {
+                        command(
+                            "git",
+                            &["remote", "add", "other", "https://example.test/other.git"],
+                            path,
+                        );
+                    }
+                    "cancel" => token.cancel(),
+                    _ => {}
+                }
+                Ok(remote.clone())
+            },
+            |_, _, _| async {
+                Err(crate::models::DesktopError::new(
+                    "PUSH_REJECTED",
+                    "Rejected",
+                    true,
+                ))
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.remote_created);
+        assert!(!result.pushed);
+        assert!(Path::new(&remote.clone_url).exists());
+        if scenario == "create-only" {
+            assert!(result.remote_configured);
+            assert!(!result.push_attempted);
+            assert!(result.error.is_none());
+        } else if scenario == "push" {
+            assert!(result.remote_configured && result.push_attempted);
+            assert_eq!(result.failed_stage.as_deref(), Some("push"));
+            assert_eq!(result.error.unwrap().code, "PUSH_REJECTED");
+        } else {
+            assert!(!result.remote_configured && !result.push_attempted);
+            assert_eq!(result.failed_stage.as_deref(), Some("localRemote"));
+            assert!(result.error.is_some());
+        }
+    }
+}
+
+#[tokio::test]
+async fn publish_serializes_remote_creation_for_same_path_across_workspace_aliases() {
+    if !available("git") {
+        return;
+    }
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (_root, state, repository, remote) = publication_fixture();
+    let mut alias = repository.clone();
+    alias.id = "second-workspace-alias".into();
+    alias.root_path = format!("{}/.", repository.root_path);
+    let token = CancellationToken::new();
+    let created = AtomicUsize::new(0);
+    let first = crate::publishing::publish_repository(
+        &state,
+        &repository,
+        false,
+        &token,
+        || async {
+            created.fetch_add(1, Ordering::SeqCst);
+            tokio::task::yield_now().await;
+            Ok(remote.clone())
+        },
+        |_, _, _| async { Ok(()) },
+    );
+    let second = crate::publishing::publish_repository(
+        &state,
+        &alias,
+        false,
+        &token,
+        || async {
+            created.fetch_add(1, Ordering::SeqCst);
+            Ok(remote.clone())
+        },
+        |_, _, _| async { Ok(()) },
+    );
+    let (first, second) = tokio::join!(first, second);
+    assert!(first.is_ok() || second.is_ok());
+    assert_eq!(created.load(Ordering::SeqCst), 1);
+    let failure = first.err().or_else(|| second.err()).unwrap();
+    assert_eq!(failure.code, "PUBLISH_IN_PROGRESS");
+}
+
+#[tokio::test]
+async fn publish_final_push_rejects_branch_changes_and_extra_destinations() {
+    if !available("git") {
+        return;
+    }
+    for extra_destination in [false, true] {
+        let (_root, _state, repository, remote) = publication_fixture();
+        let token = CancellationToken::new();
+        let (branch, head) = vcs::publish_preflight(&repository, &token).await.unwrap();
+        let path = Path::new(&repository.root_path);
+        command("git", &["remote", "add", "origin", &remote.clone_url], path);
+        if extra_destination {
+            command(
+                "git",
+                &[
+                    "config",
+                    "--add",
+                    "remote.origin.pushurl",
+                    &remote.clone_url,
+                ],
+                path,
+            );
+            command(
+                "git",
+                &[
+                    "config",
+                    "--add",
+                    "remote.origin.pushurl",
+                    "https://example.test/unexpected.git",
+                ],
+                path,
+            );
+        } else {
+            command("git", &["checkout", "-b", "other"], path);
+        }
+        let error = vcs::push_published(
+            &repository,
+            &branch,
+            &head,
+            &remote.clone_url,
+            &("fixture".into(), "fixture".into()),
+            &token,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.code,
+            if extra_destination {
+                "REMOTE_APPEARED"
+            } else {
+                "PUBLISH_STATE_CHANGED"
+            }
+        );
+        assert!(command_output(
+            "git",
+            &["for-each-ref", "refs/heads"],
+            Path::new(&remote.clone_url)
+        )
+        .is_empty());
+    }
+}
+
+#[tokio::test]
+async fn publish_concurrent_request_does_not_create_again_after_partial_publication() {
+    if !available("git") {
+        return;
+    }
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (_root, state, repository, remote) = publication_fixture();
+    let token = CancellationToken::new();
+    let created = AtomicUsize::new(0);
+    let first = crate::publishing::publish_repository(
+        &state,
+        &repository,
+        false,
+        &token,
+        || async {
+            created.fetch_add(1, Ordering::SeqCst);
+            command(
+                "git",
+                &["checkout", "-b", "other"],
+                Path::new(&repository.root_path),
+            );
+            Ok(remote.clone())
+        },
+        |_, _, _| async { Ok(()) },
+    );
+    let concurrent = crate::publishing::publish_repository(
+        &state,
+        &repository,
+        false,
+        &token,
+        || async {
+            created.fetch_add(1, Ordering::SeqCst);
+            Ok(remote.clone())
+        },
+        |_, _, _| async { Ok(()) },
+    );
+    let (partial, denied) = tokio::join!(first, concurrent);
+    let partial = partial.unwrap();
+    assert!(partial.remote_created && !partial.remote_configured && partial.error.is_some());
+    assert_eq!(denied.unwrap_err().code, "PUBLISH_IN_PROGRESS");
+    assert_eq!(created.load(Ordering::SeqCst), 1);
+}

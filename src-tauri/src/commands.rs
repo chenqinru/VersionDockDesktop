@@ -218,7 +218,9 @@ pub async fn bridge_request(
     state.finish_request(&request_id).await;
     let status = match &result {
         Ok(value)
-            if value.get("status").and_then(|item| item.as_str()) == Some("partialFailure")
+            if (value.get("remoteCreated").and_then(|v| v.as_bool()) == Some(true)
+                && value.get("error").is_some_and(|v| !v.is_null()))
+                || value.get("status").and_then(|item| item.as_str()) == Some("partialFailure")
                 || value
                     .get("failures")
                     .and_then(|item| item.as_array())
@@ -242,7 +244,14 @@ pub async fn bridge_request(
         }
         Err(_) => OperationStatus::Failed,
     };
-    let event_error = result.as_ref().err().cloned();
+    let event_error = result.as_ref().err().cloned().or_else(|| {
+        result
+            .as_ref()
+            .ok()
+            .and_then(|value| value.get("error"))
+            .filter(|error| !error.is_null())
+            .and_then(|error| serde_json::from_value(error.clone()).ok())
+    });
     let result_summary = match &result {
         Ok(value) if value.as_array().is_some() => {
             let items = value.as_array().expect("array checked");
@@ -531,8 +540,13 @@ fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
             RefreshScope::Unpushed,
             RefreshScope::Submodules,
         ],
+        BridgeCommand::PublishRepository { .. } => vec![
+            RefreshScope::Status,
+            RefreshScope::Refs,
+            RefreshScope::History,
+            RefreshScope::Unpushed,
+        ],
         BridgeCommand::RemoteOperation { .. }
-        | BridgeCommand::PublishRepository { .. }
         | BridgeCommand::GitProfileOperation { .. }
         | BridgeCommand::SvnAccountOperation { .. } => vec![RefreshScope::Status],
         BridgeCommand::SvnOperation { .. } => vec![
@@ -1878,80 +1892,54 @@ async fn dispatch(
                 crate::protection::enforce_push(state, &repo, None, false, push_approvals, token)
                     .await?;
             }
-            let branch = vcs::publish_preflight(&repo, token).await?;
-            let created = provider::create_repository(
-                &state.config_dir,
-                &account_id,
-                namespace_id.as_deref(),
-                &name,
-                &description,
-                visibility,
+            let result = crate::publishing::publish_repository(
+                state,
+                &repo,
+                push,
                 token,
-            )
-            .await?;
-            let mut result = crate::models::PublishRepositoryResult {
-                repository: created.clone(),
-                remote_created: true,
-                remote_configured: false,
-                push_attempted: push,
-                pushed: false,
-                failed_stage: None,
-                recovery_hint: None,
-                error: None,
-            };
-            let local = with_write(state, &repo_id, token, async {
-                if !vcs::remotes(&repo, token).await?.is_empty() {
-                    return Err(DesktopError::new(
-                        "REMOTE_APPEARED",
-                        "A remote appeared while publishing",
-                        true,
-                    ));
-                }
-                vcs::remote_operation(
-                    &repo,
-                    crate::models::RemoteOperation::Add {
-                        name: "origin".into(),
-                        url: created.clone_url.clone(),
-                    },
-                    token,
-                )
-                .await?;
-                result.remote_configured = true;
-                if push {
-                    let credentials = provider::credentials_for_url(
+                || {
+                    provider::create_repository(
                         &state.config_dir,
                         &account_id,
-                        &created.clone_url,
-                    )
-                    .await?;
-                    crate::protection::enforce_push(
-                        state,
-                        &repo,
-                        Some(&branch),
-                        false,
-                        push_approvals,
+                        namespace_id.as_deref(),
+                        &name,
+                        &description,
+                        visibility,
                         token,
                     )
-                    .await?;
-                    vcs::push_published(&repo, &branch, &credentials, token).await?;
-                    result.pushed = true;
-                }
-                Ok::<(), DesktopError>(())
-            })
-            .await;
-            if let Err(error) = local {
-                result.failed_stage = Some(
-                    if result.remote_configured {
-                        "push"
-                    } else {
-                        "localRemote"
+                },
+                |branch, head, created| {
+                    let repo = &repo;
+                    let account_id = &account_id;
+                    async move {
+                        let credentials = provider::credentials_for_url(
+                            &state.config_dir,
+                            account_id,
+                            &created.clone_url,
+                        )
+                        .await?;
+                        crate::protection::enforce_push(
+                            state,
+                            repo,
+                            Some(&branch),
+                            false,
+                            push_approvals,
+                            token,
+                        )
+                        .await?;
+                        vcs::push_published(
+                            repo,
+                            &branch,
+                            &head,
+                            &created.clone_url,
+                            &credentials,
+                            token,
+                        )
+                        .await
                     }
-                    .into(),
-                );
-                result.recovery_hint =
-                    Some(created.web_url.clone().unwrap_or(created.clone_url.clone()));
-                result.error = Some(error);
-            }
+                },
+            )
+            .await?;
             json(result)
         }
         BridgeCommand::WindowStoreTabSession { transfer, session } => {
@@ -4587,7 +4575,7 @@ pub(crate) async fn push_with_recovery(
     Ok(pushed)
 }
 
-async fn with_write<T, F>(
+pub(crate) async fn with_write<T, F>(
     state: &AppState,
     repo_id: &str,
     token: &tokio_util::sync::CancellationToken,

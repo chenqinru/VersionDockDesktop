@@ -884,7 +884,7 @@ pub async fn checkout_svn_repository(
 pub async fn publish_preflight(
     repo: &RepositoryMeta,
     token: &CancellationToken,
-) -> Result<String, DesktopError> {
+) -> Result<(String, String), DesktopError> {
     ensure_git(repo)?;
     if !remotes(repo, token).await?.is_empty() {
         return Err(DesktopError::new(
@@ -893,19 +893,33 @@ pub async fn publish_preflight(
             false,
         ));
     }
-    git(
+    publish_head(repo, token).await
+}
+
+pub async fn publish_head(
+    repo: &RepositoryMeta,
+    token: &CancellationToken,
+) -> Result<(String, String), DesktopError> {
+    ensure_git(repo)?;
+    let head = git(
         vec!["rev-parse".into(), "--verify".into(), "HEAD".into()],
         repo,
         token,
     )
     .await
-    .map_err(|_| {
+    .map_err(|error| {
+        if error.code != "COMMAND_FAILED" {
+            return error;
+        }
         DesktopError::new(
             "HEAD_MISSING",
             "Create the initial commit before publishing",
             false,
         )
-    })?;
+    })?
+    .stdout_text()
+    .trim()
+    .to_string();
     let branch = git(
         vec![
             "symbolic-ref".into(),
@@ -916,7 +930,17 @@ pub async fn publish_preflight(
         repo,
         token,
     )
-    .await?
+    .await
+    .map_err(|error| {
+        if error.code != "COMMAND_FAILED" {
+            return error;
+        }
+        DesktopError::new(
+            "DETACHED_HEAD",
+            "Check out a local branch before publishing",
+            false,
+        )
+    })?
     .stdout_text()
     .trim()
     .to_string();
@@ -927,16 +951,45 @@ pub async fn publish_preflight(
             false,
         ));
     }
-    Ok(branch)
+    Ok((branch, head))
 }
 
 pub async fn push_published(
     repo: &RepositoryMeta,
     branch: &str,
+    expected_head: &str,
+    expected_url: &str,
     credentials: &(String, String),
     token: &CancellationToken,
 ) -> Result<(), DesktopError> {
     validate_ref(branch)?;
+    if publish_head(repo, token).await? != (branch.to_string(), expected_head.to_string()) {
+        return Err(DesktopError::new(
+            "PUBLISH_STATE_CHANGED",
+            "The current branch changed while publishing",
+            true,
+        ));
+    }
+    let destinations = git(
+        vec![
+            "remote".into(),
+            "get-url".into(),
+            "--push".into(),
+            "--all".into(),
+            "origin".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    if destinations.lines().map(str::trim).collect::<Vec<_>>() != vec![expected_url] {
+        return Err(DesktopError::new(
+            "REMOTE_APPEARED",
+            "A remote appeared while publishing",
+            true,
+        ));
+    }
     let askpass = create_askpass()?;
     let environment = vec![
         ("GIT_ASKPASS".into(), askpass.to_string_lossy().into_owned()),

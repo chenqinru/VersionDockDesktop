@@ -220,8 +220,8 @@ export const useTaskProgressStore = create<TaskProgressState>((set, get) => {
             return { ...child, status: childStatus, message: taskStatusKey(childStatus), error: result?.error?.message };
           }) });
         } else if (event.result && typeof event.result === 'object') {
-          const result = event.result as { status?: string; failures?: Array<{ message?: string }>; error?: { message?: string } };
-          if (result.status === 'partialFailure' || result.failures?.length) {
+          const result = event.result as { remoteCreated?: boolean; status?: string; failures?: Array<{ message?: string }>; error?: { message?: string } };
+          if (result.status === 'partialFailure' || result.failures?.length || (result.remoteCreated && result.error)) {
             status = 'partial'; error = result.error?.message || result.failures?.map((failure) => failure.message).filter(Boolean).join('\n') || error;
           }
         }

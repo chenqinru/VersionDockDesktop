@@ -119,7 +119,7 @@ describe('WorkspaceChooser V5 setup actions', () => {
     fireEvent.change(screen.getByLabelText('Parent folder'), { target: { value: '/tmp/repos' } });
     expect(screen.getByLabelText('Folder name')).toHaveValue('demo');
     fireEvent.click(screen.getByRole('button', { name: 'Clone' }));
-    await waitFor(() => expect(cloneRepository).toHaveBeenCalledWith('https://example.test/acme/demo.git', '/tmp/repos', 'demo', false, undefined));
+    await waitFor(() => expect(cloneRepository).toHaveBeenCalledWith('https://example.test/acme/demo.git', '/tmp/repos', 'demo', false, undefined, expect.any(Function)));
   });
 
   it('renders JetBrains-style project initials in recent workspaces list', () => {
@@ -154,4 +154,21 @@ describe('WorkspaceChooser V5 setup actions', () => {
     expect(icons[0]).toHaveTextContent('YC');
     expect(icons[1]).toHaveTextContent('A');
   });
+});
+
+it('manages remote accounts without opening a workspace and refreshes the welcome count', async () => {
+  let connected = false;
+  const bridge = new MockBridge(command => {
+    if (command.type === 'providerAccounts') return connected ? [{ id: 'gitee', provider: 'gitee', host: 'https://gitee.com', login: 'ada', displayName: null, secureStorageRef: 'test' }] : [];
+    if (command.type === 'providerGiteeSave') { connected = true; return { id: 'gitee', provider: 'gitee', host: 'https://gitee.com', login: 'ada', displayName: null, secureStorageRef: 'test' }; }
+    return [];
+  });
+  useAppStore.setState({ bootstrap: { state: { recentWorkspaces: [] }, tools: {} } as any, snapshot: undefined });
+  render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: /Connect Remote Accounts/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add Gitee Account' }));
+  fireEvent.change(screen.getByPlaceholderText('Personal Access Token'), { target: { value: 'test-only-token' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  await screen.findByText('1 connected accounts');
+  expect(useAppStore.getState().snapshot).toBeUndefined();
 });
