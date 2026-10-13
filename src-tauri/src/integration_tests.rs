@@ -443,6 +443,127 @@ async fn real_git_history_author_email_filter_is_case_insensitive() {
 }
 
 #[tokio::test]
+async fn real_git_branch_tracking_stays_fresh_after_merge_push_fetch_and_upstream_changes() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let working = directory.path().join("working");
+    let remote = directory.path().join("remote.git");
+    std::fs::create_dir(&working).unwrap();
+    command("git", &["init", "-b", "main"], &working);
+    command("git", &["config", "user.name", "Branch QA"], &working);
+    command(
+        "git",
+        &["config", "user.email", "branch@example.test"],
+        &working,
+    );
+    command("git", &["commit", "--allow-empty", "-m", "base"], &working);
+    command(
+        "git",
+        &["init", "--bare", remote.to_str().unwrap()],
+        directory.path(),
+    );
+    command(
+        "git",
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+        &working,
+    );
+    command("git", &["push", "-u", "origin", "main"], &working);
+    let repository = repo(&working, VcsKind::Git);
+    let token = CancellationToken::new();
+    async fn assert_tracking(
+        repository: &RepositoryMeta,
+        token: &CancellationToken,
+        ahead: u32,
+        behind: u32,
+    ) {
+        let current = vcs::branches(repository, token)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|branch| branch.current)
+            .unwrap();
+        assert_eq!((current.ahead, current.behind), (ahead, behind));
+        assert_eq!(current.upstream.as_deref(), Some("origin/main"));
+        let status = workspace::git_status(repository.clone(), token)
+            .await
+            .unwrap();
+        assert_eq!((status.ahead, status.behind), (ahead, behind));
+    }
+    assert_tracking(&repository, &token, 0, 0).await;
+    command("git", &["switch", "-c", "topic"], &working);
+    command("git", &["commit", "--allow-empty", "-m", "topic"], &working);
+    command("git", &["switch", "main"], &working);
+    command(
+        "git",
+        &["merge", "--no-ff", "topic", "-m", "merge"],
+        &working,
+    );
+    assert_tracking(&repository, &token, 2, 0).await;
+    let head = command_output("git", &["rev-parse", "HEAD"], &working);
+    command("git", &["push"], &working);
+    assert_tracking(&repository, &token, 0, 0).await;
+    assert_eq!(
+        command_output("git", &["rev-parse", "HEAD"], &working),
+        head
+    );
+    let other = directory.path().join("other");
+    command(
+        "git",
+        &[
+            "clone",
+            "-b",
+            "main",
+            remote.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+        directory.path(),
+    );
+    command("git", &["config", "user.name", "Remote QA"], &other);
+    command(
+        "git",
+        &["config", "user.email", "remote@example.test"],
+        &other,
+    );
+    command("git", &["commit", "--allow-empty", "-m", "remote"], &other);
+    command("git", &["push"], &other);
+    command("git", &["fetch"], &working);
+    assert_tracking(&repository, &token, 0, 1).await;
+    assert_eq!(
+        command_output("git", &["rev-parse", "HEAD"], &working),
+        head
+    );
+    command("git", &["branch", "--unset-upstream"], &working);
+    let current = vcs::branches(&repository, &token)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.current)
+        .unwrap();
+    assert_eq!(current.upstream, None);
+    assert_eq!((current.ahead, current.behind), (0, 0));
+    command(
+        "git",
+        &["branch", "--set-upstream-to=origin/main"],
+        &working,
+    );
+    command(
+        "git",
+        &["update-ref", "-d", "refs/remotes/origin/main"],
+        &working,
+    );
+    let current = vcs::branches(&repository, &token)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.current)
+        .unwrap();
+    assert_eq!(current.upstream.as_deref(), Some("origin/main"));
+    assert_eq!((current.ahead, current.behind), (0, 0));
+}
+
+#[tokio::test]
 async fn real_git_upstream_metadata_avoids_false_errors_and_preserves_tracking() {
     use crate::logger::LogLevel;
     if !available("git") {

@@ -741,6 +741,48 @@ impl AppState {
                 })?;
             workspace_watchers.push(watcher);
         }
+        // Linked worktrees and submodules store Git metadata outside the
+        // checkout. Attribute those events to this repository, including refs
+        // shared through commondir, even when the main checkout is not open.
+        for repository in repositories {
+            if repository.meta.kind != crate::models::VcsKind::Git {
+                continue;
+            }
+            let root = Path::new(&repository.meta.root_path);
+            let dirs = git_metadata_dirs(root)
+                .into_iter()
+                .filter(|dir| !dir.starts_with(root))
+                .collect::<Vec<_>>();
+            if dirs.is_empty() {
+                continue;
+            }
+            let workspace_id = workspace.id.clone();
+            let repo_id = repository.meta.id.clone();
+            let last_emit = last_emit.clone();
+            let app = app.clone();
+            workspace_watchers.push(watch_git_metadata(root, dirs, move |scopes| {
+                let key = format!("{:?}:{:?}", Some(&repo_id), scopes);
+                let Ok(mut last) = last_emit.lock() else {
+                    return;
+                };
+                if last.get(&key).is_some_and(|instant| {
+                    instant.elapsed() < std::time::Duration::from_millis(300)
+                }) {
+                    return;
+                }
+                last.insert(key, std::time::Instant::now());
+                let _ = app.emit(
+                    "versiondock://event",
+                    RepositoryEvent {
+                        workspace_id: workspace_id.clone(),
+                        repo_id: Some(repo_id.clone()),
+                        generation,
+                        source: RepositoryEventSource::Watcher,
+                        scopes,
+                    },
+                );
+            })?);
+        }
         watchers.insert(workspace.id.clone(), workspace_watchers);
         Ok(())
     }
@@ -788,6 +830,75 @@ impl AppState {
     }
 }
 
+fn git_metadata_dirs(root: &Path) -> Vec<PathBuf> {
+    let marker = root.join(".git");
+    let git_dir = if marker.is_dir() {
+        marker
+    } else {
+        let Ok(value) = std::fs::read_to_string(marker) else {
+            return Vec::new();
+        };
+        let Some((prefix, target)) = value.trim().split_once(':') else {
+            return Vec::new();
+        };
+        if !prefix.eq_ignore_ascii_case("gitdir") {
+            return Vec::new();
+        }
+        root.join(target.trim())
+    };
+    let mut dirs = vec![git_dir.clone()];
+    if let Ok(value) = std::fs::read_to_string(git_dir.join("commondir")) {
+        dirs.push(git_dir.join(value.trim()));
+    }
+    let mut resolved = Vec::new();
+    for dir in dirs {
+        if let Ok(dir) = dunce::canonicalize(dir) {
+            if !resolved.contains(&dir) {
+                resolved.push(dir);
+            }
+        }
+    }
+    resolved
+}
+
+fn watch_git_metadata(
+    root: &Path,
+    dirs: Vec<PathBuf>,
+    on_change: impl Fn(Vec<RefreshScope>) + Send + 'static,
+) -> Result<RecommendedWatcher, DesktopError> {
+    let root = root.to_path_buf();
+    let event_dirs = dirs.clone();
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else { return };
+        if matches!(event.kind, notify::EventKind::Access(_)) {
+            return;
+        }
+        // Project external paths onto the existing metadata filter/classifier;
+        // do not apply working-tree ignored folders to the actual Git directory.
+        let paths = event
+            .paths
+            .iter()
+            .filter_map(|path| {
+                event_dirs
+                    .iter()
+                    .find_map(|dir| path.strip_prefix(dir).ok())
+                    .map(|suffix| root.join(".git").join(suffix))
+            })
+            .filter(|path| !watcher_ignored_path(path, &root, &[]))
+            .collect::<Vec<_>>();
+        if !paths.is_empty() {
+            on_change(watcher_scopes(&paths, true));
+        }
+    })
+    .map_err(|error| DesktopError::new("WATCHER_START_FAILED", error.to_string(), true))?;
+    for dir in dirs {
+        watcher
+            .watch(&dir, RecursiveMode::Recursive)
+            .map_err(|error| DesktopError::new("WATCHER_START_FAILED", error.to_string(), true))?;
+    }
+    Ok(watcher)
+}
+
 fn watcher_ignored_path(path: &Path, workspace_root: &Path, ignored: &[String]) -> bool {
     let Ok(relative) = path.strip_prefix(workspace_root) else {
         return true;
@@ -810,6 +921,7 @@ fn watcher_ignored_path(path: &Path, workspace_root: &Path, ignored: &[String]) 
                         | "HEAD"
                         | "packed-refs"
                         | "config"
+                        | "config.worktree"
                         | "FETCH_HEAD"
                         | "ORIG_HEAD"
                         | "shallow"
@@ -852,9 +964,11 @@ fn watcher_scopes(paths: &[PathBuf], repository_known: bool) -> Vec<RefreshScope
     if paths.iter().any(|path| {
         let value = path.to_string_lossy().replace('\\', "/");
         value.ends_with("/.git/HEAD")
+            || value.ends_with("/.git/refs")
             || value.contains("/.git/refs/")
             || value.ends_with("/.git/packed-refs")
             || value.ends_with("/.git/config")
+            || value.ends_with("/.git/config.worktree")
             || value.ends_with("/.git/FETCH_HEAD")
             || value.ends_with("/.git/ORIG_HEAD")
             || value.ends_with("/.git/shallow")
@@ -1447,6 +1561,7 @@ mod tests {
             ".git/packed-refs",
             ".git/FETCH_HEAD",
             ".git/config",
+            ".git/config.worktree",
             ".git/rebase-merge/done",
             ".svn/wc.db",
             ".svn/wc.db-wal",
@@ -1481,6 +1596,104 @@ mod tests {
             root,
             &ignored
         ));
+    }
+
+    #[tokio::test]
+    async fn real_watcher_detects_linked_worktree_and_shared_metadata() {
+        use std::process::Command;
+        let temp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(temp.path()).unwrap();
+        let main = root.join("main");
+        let linked = root.join("linked");
+        std::fs::create_dir(&main).unwrap();
+        let run = |cwd: &Path, args: &[&str]| {
+            let result = Command::new(crate::cli::resolve_executable("git"))
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        };
+        run(&main, &["init", "-b", "main"]);
+        run(&main, &["config", "user.name", "Watcher QA"]);
+        run(&main, &["config", "user.email", "watcher@example.test"]);
+        std::fs::write(main.join("file.txt"), "base\n").unwrap();
+        run(&main, &["add", "."]);
+        run(&main, &["commit", "-m", "base"]);
+        run(
+            &main,
+            &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+        );
+        let dirs = git_metadata_dirs(&linked);
+        assert_eq!(dirs.len(), 2);
+        assert!(dirs.contains(&main.join(".git")));
+        assert!(dirs.iter().all(|dir| !dir.starts_with(&linked)));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let _watcher = watch_git_metadata(&linked, dirs, move |scopes| {
+            let _ = sender.send(scopes);
+        })
+        .unwrap();
+        let wait_for = |expected: RefreshScope| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            loop {
+                let scopes = receiver
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("external worktree metadata must reach the watcher");
+                if scopes.contains(&expected) {
+                    break;
+                }
+            }
+        };
+        let drain = || {
+            while receiver.try_recv().is_ok() {}
+        };
+        std::fs::write(linked.join("file.txt"), "linked change\n").unwrap();
+        run(&linked, &["add", "."]);
+        wait_for(RefreshScope::Index);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        drain();
+        run(&linked, &["commit", "-m", "linked commit"]);
+        wait_for(RefreshScope::Refs);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        drain();
+        // A non-current branch changes in the shared common directory.
+        run(&main, &["branch", "external"]);
+        wait_for(RefreshScope::History);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        drain();
+        run(&main, &["pack-refs", "--all", "--prune"]);
+        wait_for(RefreshScope::Refs);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        drain();
+        run(&linked, &["config", "branch.linked.remote", "origin"]);
+        wait_for(RefreshScope::Unpushed);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        drain();
+        run(&main, &["config", "extensions.worktreeConfig", "true"]);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        drain();
+        run(
+            &linked,
+            &[
+                "config",
+                "--worktree",
+                "branch.linked.merge",
+                "refs/heads/main",
+            ],
+        );
+        wait_for(RefreshScope::Refs);
+
+        // Submodule-style relative gitdir markers resolve without .git directories.
+        let submodule = main.join("module");
+        let submodule_metadata = main.join(".git/modules/module");
+        std::fs::create_dir_all(&submodule_metadata).unwrap();
+        std::fs::create_dir(&submodule).unwrap();
+        std::fs::write(submodule.join(".git"), "gitdir: ../.git/modules/module\n").unwrap();
+        assert_eq!(git_metadata_dirs(&submodule), vec![submodule_metadata]);
     }
 
     #[tokio::test]

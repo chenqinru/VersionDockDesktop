@@ -1654,6 +1654,34 @@ export const useAppStore = create<AppStore>((set, get) => {
     return value;
   };
 
+  const refreshRepositoryRefs = async (wid: string, repoId: string, includeRemotes = false) => {
+    const requestKey = `refs:${wid}:${repoId}`;
+    const controller = beginRequest(requestKey);
+    const generation = workspaceRequestGeneration;
+    const epoch = updateEpoch(wid);
+    try {
+      const options = { signal: controller.signal, showProgress: false, timeoutMs: 12_000 };
+      const [branchesResult, tagsResult, remotesResult] = await Promise.allSettled([
+        bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: wid, repo_id: repoId } }, options),
+        bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: wid, repo_id: repoId } }, options),
+        includeRemotes && get().allRepositories.find(repo => repo.meta.id === repoId)?.meta.kind === 'git'
+          ? bridge().request<RemoteInfo[]>({ type: 'remotes', payload: { workspace_id: wid, repo_id: repoId } }, options)
+          : Promise.resolve(undefined),
+      ]);
+      if (controller.signal.aborted || !isCurrentRequest(requestKey, controller)
+        || generation !== workspaceRequestGeneration || get().snapshot?.workspace.id !== wid
+        || updatingWorkingTree(wid) || epoch !== updateEpoch(wid)
+        || !get().allRepositories.some(repo => repo.meta.id === repoId)) return;
+      set(state => ({
+        branchesByRepo: branchesResult.status === 'fulfilled' ? { ...state.branchesByRepo, [repoId]: branchesResult.value } : state.branchesByRepo,
+        tagsByRepo: tagsResult.status === 'fulfilled' ? { ...state.tagsByRepo, [repoId]: tagsResult.value } : state.tagsByRepo,
+        remotes: remotesResult.status === 'fulfilled' && Array.isArray(remotesResult.value) ? { ...state.remotes, [repoId]: remotesResult.value } : state.remotes,
+        branches: state.selectedRepoId === repoId && branchesResult.status === 'fulfilled' ? branchesResult.value : state.branches,
+        tags: state.selectedRepoId === repoId && tagsResult.status === 'fulfilled' ? tagsResult.value : state.tags,
+      }));
+    } finally { endRequest(requestKey, controller); }
+  };
+
   const enrichCommitBranches = async (wid: string, key: string, detail: CommitDetail) => {
     const requestKey = `commit-branches:${wid}:${key}`;
     if (requestControllers.has(requestKey)) return;
@@ -2140,6 +2168,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     if (current?.workspace.id === snapshot.workspace.id && current.generation > snapshot.generation) return;
     const workspaceChanged = current?.workspace.id !== snapshot.workspace.id;
     const allRepositories = snapshot.repositories;
+    if (!workspaceChanged && !reloadRepository) {
+      for (const status of allRepositories) {
+        const previous = get().allRepositories.find(repo => repo.meta.id === status.meta.id);
+        if (previous) queueChangedBranchStatus(snapshot.workspace.id, previous, status);
+      }
+    }
     if (!workspaceChanged) notifyNewUntrackedFiles(get().allRepositories, allRepositories, snapshot.workspace.id);
     const visibleSnapshot = projectSnapshot(snapshot, allRepositories, settings());
     const storedSelections = workspaceChanged
@@ -2219,6 +2253,14 @@ export const useAppStore = create<AppStore>((set, get) => {
     });
   };
 
+  const queueChangedBranchStatus = (wid: string, previous: RepositoryStatus, status: RepositoryStatus) => {
+    const headChanged = previous.branch !== status.branch || previous.revision !== status.revision;
+    if (!headChanged && previous.ahead === status.ahead && previous.behind === status.behind) return;
+    requestControllers.get(`refs:${wid}:${status.meta.id}`)?.abort();
+    recordPendingWorkspaceEvent(wid, status.meta.id, headChanged ? ['refs', 'history', 'unpushed'] : ['refs', 'unpushed']);
+    drainPendingWorkspaceEvents(wid);
+  };
+
   const refreshFromWatcher = async () => {
     const workspaceId = get().snapshot?.workspace.id;
     if (!workspaceId || updatingWorkingTree(workspaceId)) return;
@@ -2264,6 +2306,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           if (interrupted()) return;
           if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
           const previous = get().allRepositories.find((repo) => repo.meta.id === repoId);
+          if (previous && !scopes.has('refs') && !scopes.has('history')) queueChangedBranchStatus(workspaceId, previous, status);
           if (previous) notifyNewUntrackedFiles([previous], [status], workspaceId);
           set((state) => {
             const allRepositories = state.allRepositories.map((repo) => repo.meta.id === repoId ? status : repo);
@@ -2275,23 +2318,10 @@ export const useAppStore = create<AppStore>((set, get) => {
           checkStatusNotifications(get().allRepositories, workspaceId);
         }
         if (scopes.has('refs') || scopes.has('history')) {
-          const [branchesResult, tagsResult, remotesResult] = await Promise.allSettled([
-            bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
-            bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }),
-            // Config changes use refs events too. Refresh the shared avatar scope
-            // once, keeping the same workspace/generation guard as branch results.
-            scopes.has('refs') && get().allRepositories.find((repo) => repo.meta.id === repoId)?.meta.kind === 'git' ? bridge().request<RemoteInfo[]>({ type: 'remotes', payload: { workspace_id: workspaceId, repo_id: repoId } }, { showProgress: false, timeoutMs: 12_000 }) : Promise.resolve(undefined),
-          ]);
+          await refreshRepositoryRefs(workspaceId, repoId, scopes.has('refs'));
           if (interrupted()) return;
           if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
-          set((state) => ({
-            branchesByRepo: branchesResult.status === 'fulfilled' ? { ...state.branchesByRepo, [repoId]: branchesResult.value } : state.branchesByRepo,
-            tagsByRepo: tagsResult.status === 'fulfilled' ? { ...state.tagsByRepo, [repoId]: tagsResult.value } : state.tagsByRepo,
-            remotes: remotesResult.status === 'fulfilled' && Array.isArray(remotesResult.value) ? { ...state.remotes, [repoId]: remotesResult.value } : state.remotes,
-            branches: state.selectedRepoId === repoId && branchesResult.status === 'fulfilled' ? branchesResult.value : state.branches,
-            tags: state.selectedRepoId === repoId && tagsResult.status === 'fulfilled' ? tagsResult.value : state.tags,
-          }));
-          if (!get().historyLoading) await refreshHistoryRepository(workspaceId, repoId);
+          if (scopes.has('history') && !get().historyLoading) await refreshHistoryRepository(workspaceId, repoId);
         }
         if (interrupted()) return;
         if (scopes.has('unpushed') || scopes.has('refs')) {
@@ -2571,6 +2601,12 @@ export const useAppStore = create<AppStore>((set, get) => {
             const previousGeneration = repositoryEventGenerations.get(generationKey) ?? 0;
             if (event.generation < previousGeneration) return;
             repositoryEventGenerations.set(generationKey, event.generation);
+            if (event.scopes.some(scope => scope === 'refs' || scope === 'history' || scope === 'workspaceSnapshot')) {
+              const prefix = `refs:${event.workspaceId}:`;
+              requestControllers.forEach((controller, key) => {
+                if (key.startsWith(prefix) && (!event.repoId || key === `${prefix}${event.repoId}`)) controller.abort();
+              });
+            }
             recordPendingWorkspaceEvent(event.workspaceId, event.repoId, event.scopes);
             if (watcherTimer) clearTimeout(watcherTimer);
             watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
@@ -3298,20 +3334,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (repo.meta.kind === 'git' && get().bootstrap?.capabilities.subtree && repo.capabilities?.subtree !== false) requests.push(get().loadSubtrees(repoId));
         const currentWorkspace = workspaceId();
         for (const item of get().snapshot?.repositories ?? []) {
-          refRequests.push(bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }, { showProgress: false, timeoutMs: 12_000 }).then((branches) => {
-            if (get().snapshot?.workspace.id !== currentWorkspace) return;
-            set((state) => ({
-              branchesByRepo: { ...state.branchesByRepo, [item.meta.id]: branches },
-              branches: item.meta.id === get().selectedRepoId ? branches : state.branches,
-            }));
-          }).catch(() => undefined));
-          refRequests.push(bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: currentWorkspace, repo_id: item.meta.id } }, { showProgress: false, timeoutMs: 12_000 }).then((tags) => {
-            if (get().snapshot?.workspace.id !== currentWorkspace) return;
-            set((state) => ({
-              tagsByRepo: { ...state.tagsByRepo, [item.meta.id]: tags },
-              tags: item.meta.id === get().selectedRepoId ? tags : state.tags,
-            }));
-          }).catch(() => undefined));
+          refRequests.push(refreshRepositoryRefs(currentWorkspace, item.meta.id));
         }
         const otherResults = Promise.allSettled(requests);
         try { await Promise.all(refRequests); }
@@ -4965,14 +4988,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           refresh: async (repoIds) => {
             if (get().snapshot?.workspace.id !== wid) return;
             await get().refresh(true, { reloadRepository: false });
-            await Promise.allSettled(repoIds.map(async (repoId) => {
-              const [branches, tags] = await Promise.all([
-                bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false }),
-                bridge().request<TagInfo[]>({ type: 'tags', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false }),
-              ]);
-              if (get().snapshot?.workspace.id !== wid) return;
-              set(state => ({ branchesByRepo: { ...state.branchesByRepo, [repoId]: branches }, tagsByRepo: { ...state.tagsByRepo, [repoId]: tags }, ...(state.selectedRepoId === repoId ? { branches, tags } : {}) }));
-            }));
+            await Promise.allSettled(repoIds.map(repoId => refreshRepositoryRefs(wid, repoId)));
             if (get().snapshot?.workspace.id === wid) await get().loadHistory(true, true);
           },
         });

@@ -1,5 +1,5 @@
 import { IconButton } from './IconButton';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { RepositoryGroup } from './RepositoryGroup';
 import { BranchRefBadge } from './BranchRefBadge';
@@ -108,8 +108,26 @@ function ctxItems(entry: NormalizedWorktreeEntry, t: (key: string, ...args: Arra
 
 // ── Single worktree row ───────────────────────────────────────────────────────
 
+// The name is already visible; use the shortest unique parent suffix for peers
+// with the same name. Preserve roots and drive letters to disambiguate paths.
+function worktreePathTags(worktrees: NormalizedWorktreeEntry[]): Map<string, string> {
+  const paths = worktrees.map(entry => {
+    const parts = entry.path.replace(/\\/g, '/').replace(/\/+$/, '').split('/');
+    return { path: entry.path, name: parts.pop(), parent: parts };
+  });
+  return new Map(paths.map(current => {
+    const peers = paths.filter(other => other.path !== current.path && other.name === current.name);
+    let depth = 1;
+    while (depth < current.parent.length && peers.some(other =>
+      other.parent.slice(-depth).join('/') === current.parent.slice(-depth).join('/'),
+    )) depth++;
+    return [current.path, current.parent.slice(-depth).join('/') || '/'];
+  }));
+}
+
 function WorktreeRow({
   entry,
+  pathTag,
   repoId,
   onDelete,
   onLock,
@@ -120,6 +138,7 @@ function WorktreeRow({
   onCompare,
 }: {
   entry: NormalizedWorktreeEntry;
+  pathTag: string;
   repoId: string;
   onDelete?: WorktreePanelProps['onDelete'];
   onLock?: WorktreePanelProps['onLock'];
@@ -133,7 +152,7 @@ function WorktreeRow({
   const [hovered, setHovered] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
-  const dirName = entry.path.split(/[\\/]/).pop() ?? entry.path;
+  const dirName = entry.path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || entry.path;
 
   const branchLabel = entry.isDetached
     ? (entry.head ? entry.head.slice(0, 8) : t('detached HEAD'))
@@ -157,6 +176,7 @@ function WorktreeRow({
           <span style={row.name}>
             <span style={row.nameText}>{dirName}</span>
             {entry.isMain && <span style={row.mainBadge}>{t('main')}</span>}
+            {!entry.isMain && <span style={row.pathBadge} title={entry.path}>{pathTag}</span>}
             {!entry.isMain && entry.isInWorkspace && <span style={row.workspaceBadge}>{t('in workspace')}</span>}
             {entry.isLocked && (
               <Codicon name="lock" style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))' }} />
@@ -281,6 +301,7 @@ function RepoSection({
   error?: string | null;
 }) {
   const { t } = useI18n();
+  const pathTags = useMemo(() => worktreePathTags(repo.worktrees), [repo.worktrees]);
   const hasPrunable = repo.worktrees.some((w) => w.isPrunable);
   const projectColor = readableAccentColor(repo.repoColor || '#4EC9B0');
 
@@ -324,6 +345,7 @@ function RepoSection({
           <WorktreeRow
             key={w.path}
             entry={w}
+            pathTag={pathTags.get(w.path) ?? w.path}
             repoId={repo.repoId}
             onDelete={onDelete}
             onLock={onLock}
@@ -613,6 +635,13 @@ const row = {
     fontWeight: 'normal',
     letterSpacing: '0.03em',
     lineHeight: '13px',
+  } as React.CSSProperties,
+  pathBadge: {
+    fontSize: '9px', padding: '1px 5px', borderRadius: '3px', minWidth: 0, maxWidth: '45%',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+    background: 'var(--versiondock-badge-background, #0e639c)',
+    color: 'var(--versiondock-badge-foreground, #ffffff)',
+    fontWeight: 'normal', letterSpacing: '0.03em', lineHeight: '13px',
   } as React.CSSProperties,
   workspaceBadge: {
     fontSize: '9px',

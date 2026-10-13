@@ -111,6 +111,25 @@ describe('WorktreePanel', () => {
     expect(screen.getByText('OtherRepo')).toBeInTheDocument();
   });
 
+  it.each([
+    [['/a/project', '/b/a/project'], ['/a', 'b/a']],
+    [['/one/shared/project', '/two/shared/project/'], ['one/shared', 'two/shared']],
+    [['C:\\a\\project', 'D:\\a\\project\\'], ['C:/a', 'D:/a']],
+    [['/project', '/a/project'], ['/', 'a']],
+  ])('disambiguates same-name worktrees by parent suffix: %j', (paths, labels) => {
+    useAppStore.setState({ worktreeDiff: undefined });
+    render(<WorktreePanel customRepos={[{
+      repoId: 'repo-1', repoName: 'VersionDock', repoColor: '#4ec9b0', isLinkedWorktree: false,
+      worktrees: [
+        { path: '/main/project', head: 'abc', branch: 'main', branchShort: 'main', isMain: true, isDetached: false, isBare: false, isLocked: false, isPrunable: false, isInWorkspace: true },
+        ...paths.map(path => ({ path, head: 'abc', branch: 'topic', branchShort: 'topic', isMain: false, isDetached: false, isBare: false, isLocked: false, isPrunable: false, isInWorkspace: false })),
+      ],
+    }]} />);
+    expect(screen.getAllByText('project')).toHaveLength(3);
+    labels.forEach((label, index) => expect(screen.getByText(label)).toHaveAttribute('title', paths[index]));
+    expect(screen.queryByText('/main')).not.toBeInTheDocument();
+  });
+
   it('renders empty state when no worktrees are loaded', () => {
     const bridge = new MockBridge(() => []);
     useAppStore.setState({
@@ -137,7 +156,7 @@ describe('WorktreePanel', () => {
     });
     useAppStore.setState({ bridge, snapshot, worktrees: { 'repo-1': [sampleWorktrees[0], linked] } });
     render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
-    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    fireEvent.contextMenu(screen.getAllByTitle('/tmp/managed-linked')[0]);
     expect(screen.getByText('Open in New Window')).toBeInTheDocument();
     expect(screen.getByText('Open in File Manager')).toBeInTheDocument();
     expect(screen.getByText('Lock')).toBeInTheDocument();
@@ -153,7 +172,7 @@ describe('WorktreePanel', () => {
     const bridge = new MockBridge((command) => command.type === 'worktrees' ? [sampleWorktrees[0], linked] : true);
     useAppStore.setState({ bridge, snapshot, worktrees: { 'repo-1': [sampleWorktrees[0], linked] }, worktreeOperation });
     render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
-    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    fireEvent.contextMenu(screen.getAllByTitle('/tmp/managed-linked')[0]);
     fireEvent.click(screen.getByText('Remove Worktree'));
 
     await vi.waitFor(() => expect(currentDialog()?.kind).toBe('confirm'));
@@ -164,7 +183,7 @@ describe('WorktreePanel', () => {
     expect(worktreeOperation).not.toHaveBeenCalled();
 
     // 2. 再次触发并确认
-    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    fireEvent.contextMenu(screen.getAllByTitle('/tmp/managed-linked')[0]);
     fireEvent.click(screen.getByText('Remove Worktree'));
     await vi.waitFor(() => expect(currentDialog()?.kind).toBe('confirm'));
     currentDialog()?.resolve(true);
@@ -178,7 +197,7 @@ describe('WorktreePanel', () => {
     const bridge = new MockBridge((command) => command.type === 'worktrees' ? [sampleWorktrees[0], linked] : true);
     useAppStore.setState({ bridge, snapshot, worktrees: { 'repo-1': [sampleWorktrees[0], linked] }, worktreeOperation });
     render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
-    fireEvent.contextMenu(screen.getByTitle('/tmp/managed-linked'));
+    fireEvent.contextMenu(screen.getAllByTitle('/tmp/managed-linked')[0]);
     fireEvent.click(screen.getByText('Force Remove'));
 
     await vi.waitFor(() => expect(currentDialog()?.kind).toBe('confirm'));
