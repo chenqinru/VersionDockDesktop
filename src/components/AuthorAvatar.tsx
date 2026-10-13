@@ -10,6 +10,8 @@ const queue: Array<() => void> = [];
 let active = 0;
 let cacheEpoch = 0;
 const MAX_ACTIVE = 4, MAX_CACHE = 256;
+// Match the plugin's frontend TTLs; transient failures must not hide avatars for a day.
+const POSITIVE_TTL = 24 * 60 * 60 * 1_000, NEGATIVE_TTL = 10 * 60 * 1_000;
 if (typeof window !== 'undefined') window.addEventListener('versiondock-avatar-cache-clear', () => { cacheEpoch += 1; cache.clear(); inFlight.clear(); });
 
 function schedule<T>(task: () => Promise<T>): Promise<T> {
@@ -36,7 +38,7 @@ async function cached(key: string, resolver: () => Promise<string | null>) {
   const task = schedule(() => resolver().catch(() => null)).then((value) => {
     if (epoch === cacheEpoch) {
       cache.delete(key);
-      cache.set(key, { value, expires: Date.now() + (value ? 7 * 86_400_000 : 86_400_000) });
+      cache.set(key, { value, expires: Date.now() + (value ? POSITIVE_TTL : NEGATIVE_TTL) });
       while (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value!);
     }
     return value;

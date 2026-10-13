@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
@@ -8,9 +8,31 @@ import { useAppStore } from '../store/appStore';
 const requested: string[] = [];
 class SuccessfulImage { onload: (() => void) | null = null; onerror: (() => void) | null = null; set src(value: string) { requested.push(value); queueMicrotask(() => this.onload?.()); } }
 const initial = useAppStore.getState();
-afterEach(() => { cleanup(); requested.length = 0; useAppStore.setState(initial, true); window.dispatchEvent(new Event('versiondock-avatar-cache-clear')); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); requested.length = 0; useAppStore.setState(initial, true); window.dispatchEvent(new Event('versiondock-avatar-cache-clear')); });
 
 describe('AuthorAvatar privacy', () => {
+  it('retries a failed provider lookup after ten minutes instead of keeping it for a day', async () => {
+    Object.defineProperty(globalThis, 'Image', { configurable: true, value: SuccessfulImage });
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const resolve = vi.fn().mockResolvedValueOnce(null).mockResolvedValue('data:image/png;base64,recovered');
+    const bridge = new MockBridge(resolve);
+    useAppStore.setState({ bootstrap: { state: { settings: { onlineAvatarsEnabled: true } } } as never, snapshot: { workspace: { id: 'retry-workspace' } } as never });
+    const avatar = <BridgeContext.Provider value={bridge}><AuthorAvatar name="huguoliang" email="915860729@qq.com" repoId="repo" /></BridgeContext.Provider>;
+    let view = render(avatar);
+    await act(async () => { await Promise.resolve(); });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    view.unmount();
+    now += 9 * 60 * 1_000;
+    view = render(avatar);
+    await act(async () => { await Promise.resolve(); });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    view.unmount();
+    now += 60 * 1_000 + 1;
+    view = render(avatar);
+    await waitFor(() => expect(view.container.querySelector('img')?.src).toContain('recovered'));
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
   it('isolates cache by workspace and re-resolves when the same repository remote changes', async () => {
     Object.defineProperty(globalThis, 'Image', { configurable: true, value: SuccessfulImage });
     const resolve = vi.fn((command) => {

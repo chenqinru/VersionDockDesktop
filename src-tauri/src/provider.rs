@@ -1136,9 +1136,16 @@ fn account_hostname(account: &RemoteProviderAccount) -> Option<String> {
         .map(str::to_lowercase)
 }
 
-fn avatar_candidate(email: &str, author_name: &str, provider: RemoteProviderKind) -> String {
+fn avatar_candidates(email: &str, author_name: &str, provider: RemoteProviderKind) -> Vec<String> {
     let normalized = email.trim().to_lowercase();
     let local = normalized.split('@').next().unwrap_or("");
+    let author = author_name.trim().to_lowercase();
+    let mut candidates = Vec::new();
+    let mut push = |value: &str| {
+        if !value.is_empty() && !candidates.iter().any(|candidate| candidate == value) {
+            candidates.push(value.to_string());
+        }
+    };
     let noreply = match provider {
         RemoteProviderKind::Github => normalized.ends_with("@users.noreply.github.com"),
         RemoteProviderKind::Gitee => {
@@ -1151,32 +1158,142 @@ fn avatar_candidate(email: &str, author_name: &str, provider: RemoteProviderKind
         }
     };
     if noreply {
-        return match provider {
-            RemoteProviderKind::Github => local.split('+').next_back().unwrap_or(local).to_string(),
+        let candidate = match provider {
+            RemoteProviderKind::Github => local.split('+').next_back().unwrap_or(local),
             RemoteProviderKind::Gitee => local
-                .split('+')
-                .next_back()
-                .unwrap_or(local)
-                .split('_')
-                .next_back()
-                .unwrap_or(local)
-                .to_string(),
-            RemoteProviderKind::Gitlab => local
-                .split_once('-')
+                .split_once('+')
+                .or_else(|| local.split_once('_'))
                 .map(|(_, name)| name)
-                .unwrap_or(local)
-                .to_string(),
+                .unwrap_or(local),
+            RemoteProviderKind::Gitlab => {
+                local.split_once('-').map(|(_, name)| name).unwrap_or(local)
+            }
         };
+        push(candidate);
     }
-    if provider == RemoteProviderKind::Github {
-        return String::new();
+    match provider {
+        RemoteProviderKind::Github => {}
+        RemoteProviderKind::Gitlab => {
+            if !local.is_empty() && !local.chars().all(|c| c.is_ascii_digit()) {
+                push(local);
+            }
+            if author
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c))
+            {
+                push(&author);
+            }
+        }
+        RemoteProviderKind::Gitee => {
+            for value in [local, author.as_str()] {
+                if value.chars().count() >= 2 {
+                    push(value);
+                    let stripped = value.trim_end_matches(|c: char| c.is_ascii_digit());
+                    if stripped.chars().count() >= 2 {
+                        push(stripped);
+                    }
+                }
+            }
+        }
     }
-    let prefix = local.trim_end_matches(|c: char| c.is_ascii_digit());
-    if prefix.len() >= 2 {
-        prefix.into()
-    } else {
-        author_name.trim().into()
+    candidates
+}
+
+fn has_profile_avatar(user: &Value) -> bool {
+    user["avatar_url"]
+        .as_str()
+        .is_some_and(|value| !value.trim().is_empty() && !value.contains("no_portrait"))
+}
+
+// GitLab can hide email fields even when /users?search finds the right user.
+// Search by email and author name, then try each exact username candidate.
+// Unlike the plugin's first-result fallback, require an identity match so an
+// ambiguous search cannot display another person's avatar.
+async fn resolve_gitlab_author_profile(
+    account: &RemoteProviderAccount,
+    secret: &str,
+    email: &str,
+    author_name: &str,
+    cancel: &CancellationToken,
+) -> Result<Option<Value>, DesktopError> {
+    let email = email.trim().to_lowercase();
+    let author = author_name.trim().to_lowercase();
+    let mut terms = Vec::new();
+    for term in [&email, &author] {
+        if !term.is_empty() && !terms.contains(term) {
+            terms.push(term.clone());
+        }
     }
+    for term in terms {
+        let result = send(
+            authenticated(
+                client()?
+                    .get(format!("{}/api/v4/users", account.host))
+                    .query(&[("search", term)]),
+                account,
+                secret,
+            ),
+            "GitLab avatar",
+            cancel,
+        )
+        .await;
+        match result {
+            Ok(result) => {
+                if let Some(user) = result.as_array().and_then(|items| {
+                    items.iter().find(|user| {
+                        has_profile_avatar(user)
+                            && ((!email.is_empty()
+                                && ["email", "public_email"].iter().any(|field| {
+                                    user[*field].as_str().is_some_and(|value| {
+                                        value.trim().eq_ignore_ascii_case(&email)
+                                    })
+                                }))
+                                || (!author.is_empty()
+                                    && ["name", "username"].iter().any(|field| {
+                                        user[*field].as_str().is_some_and(|value| {
+                                            value.trim().eq_ignore_ascii_case(&author)
+                                        })
+                                    })))
+                    })
+                }) {
+                    return Ok(Some(user.clone()));
+                }
+            }
+            Err(error) if error.code == "REQUEST_CANCELLED" => return Err(error),
+            _ => {}
+        }
+    }
+    for candidate in avatar_candidates(&email, &author, RemoteProviderKind::Gitlab) {
+        let result = send(
+            authenticated(
+                client()?
+                    .get(format!("{}/api/v4/users", account.host))
+                    .query(&[("username", &candidate)]),
+                account,
+                secret,
+            ),
+            "GitLab avatar",
+            cancel,
+        )
+        .await;
+        match result {
+            Ok(result) => {
+                if let Some(user) = result.as_array().and_then(|items| {
+                    items.iter().find(|user| {
+                        has_profile_avatar(user)
+                            && user["username"]
+                                .as_str()
+                                .is_some_and(|value| value.eq_ignore_ascii_case(&candidate))
+                    })
+                }) {
+                    return Ok(Some(user.clone()));
+                }
+            }
+            Err(error) if error.code == "REQUEST_CANCELLED" => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(None)
 }
 
 fn github_avatar_url(username: &str) -> Option<String> {
@@ -1310,13 +1427,14 @@ async fn resolve_author_avatar_on_host(
                 .to_lowercase()
                 .ends_with("@users.noreply.github.com")
         {
-            let candidate = avatar_candidate(email, author_name, provider_kind);
-            return Ok(github_avatar_url(&candidate));
+            return Ok(avatar_candidates(email, author_name, provider_kind)
+                .first()
+                .and_then(|candidate| github_avatar_url(candidate)));
         }
         return Ok(None);
     };
     let secret = token(account).await?;
-    let candidate = avatar_candidate(email, author_name, provider_kind);
+    let candidates = avatar_candidates(email, author_name, provider_kind);
     let normalized_email = email.trim().to_lowercase();
     let value = match provider_kind {
         RemoteProviderKind::Github => {
@@ -1331,13 +1449,15 @@ async fn resolve_author_avatar_on_host(
             )
             .await
             .ok();
-            if current
-                .as_ref()
-                .is_some_and(|user| profile_matches_author(user, provider_kind, email, author_name))
-            {
+            if current.as_ref().is_some_and(|user| {
+                has_profile_avatar(user)
+                    && profile_matches_author(user, provider_kind, email, author_name)
+            }) {
                 current
             } else if normalized_email.ends_with("@users.noreply.github.com") {
-                return Ok(github_avatar_url(&candidate));
+                return Ok(candidates
+                    .first()
+                    .and_then(|candidate| github_avatar_url(candidate)));
             } else if normalized_email.contains('@') {
                 let search = send(
                     authenticated(
@@ -1370,27 +1490,36 @@ async fn resolve_author_avatar_on_host(
             )
             .await
             .ok();
-            if current
-                .as_ref()
-                .is_some_and(|user| profile_matches_author(user, provider_kind, email, author_name))
-            {
+            if current.as_ref().is_some_and(|user| {
+                has_profile_avatar(user)
+                    && profile_matches_author(user, provider_kind, email, author_name)
+            }) {
                 current
-            } else if !candidate.is_empty() {
-                let encoded =
-                    url::form_urlencoded::byte_serialize(candidate.as_bytes()).collect::<String>();
-                send(
-                    authenticated(
-                        client()?.get(format!("{GITEE_API}/users/{encoded}")),
-                        account,
-                        &secret,
-                    ),
-                    "Gitee avatar",
-                    cancel,
-                )
-                .await
-                .ok()
             } else {
-                None
+                let mut matched = None;
+                for candidate in &candidates {
+                    let encoded = url::form_urlencoded::byte_serialize(candidate.as_bytes())
+                        .collect::<String>();
+                    let result = send(
+                        authenticated(
+                            client()?.get(format!("{GITEE_API}/users/{encoded}")),
+                            account,
+                            &secret,
+                        ),
+                        "Gitee avatar",
+                        cancel,
+                    )
+                    .await;
+                    match result {
+                        Ok(user) if has_profile_avatar(&user) => {
+                            matched = Some(user);
+                            break;
+                        }
+                        Err(error) if error.code == "REQUEST_CANCELLED" => return Err(error),
+                        _ => {}
+                    }
+                }
+                matched
             }
         }
         RemoteProviderKind::Gitlab => {
@@ -1405,57 +1534,13 @@ async fn resolve_author_avatar_on_host(
             )
             .await
             .ok();
-            if current
-                .as_ref()
-                .is_some_and(|user| profile_matches_author(user, provider_kind, email, author_name))
-            {
+            if current.as_ref().is_some_and(|user| {
+                has_profile_avatar(user)
+                    && profile_matches_author(user, provider_kind, email, author_name)
+            }) {
                 current
             } else {
-                let search = send(
-                    authenticated(
-                        client()?
-                            .get(format!("{}/api/v4/users", account.host))
-                            .query(&[("search", normalized_email.as_str())]),
-                        account,
-                        &secret,
-                    ),
-                    "GitLab avatar",
-                    cancel,
-                )
-                .await
-                .ok();
-                let matched = search.and_then(|result| {
-                    result
-                        .as_array()
-                        .and_then(|items| {
-                            items.iter().find(|item| {
-                                item["email"].as_str().is_some_and(|value| {
-                                    value.eq_ignore_ascii_case(&normalized_email)
-                                })
-                            })
-                        })
-                        .cloned()
-                });
-                if matched.is_some() {
-                    matched
-                } else if !candidate.is_empty() {
-                    send(
-                        authenticated(
-                            client()?
-                                .get(format!("{}/api/v4/users", account.host))
-                                .query(&[("username", candidate.as_str())]),
-                            account,
-                            &secret,
-                        ),
-                        "GitLab avatar",
-                        cancel,
-                    )
-                    .await
-                    .ok()
-                    .and_then(|result| result.as_array().and_then(|items| items.first()).cloned())
-                } else {
-                    None
-                }
+                resolve_gitlab_author_profile(account, &secret, email, author_name, cancel).await?
             }
         }
     };
@@ -1497,6 +1582,166 @@ async fn fetch_private_gitlab_avatar(
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn gitlab_author_lookup_fixture(
+        email: &str,
+        author: &str,
+        replies: Vec<(&'static str, &'static str, Value)>,
+    ) -> Option<Value> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for (key, term, body) in replies {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0_u8; 4096];
+                let size = socket.read(&mut bytes).await.unwrap();
+                let request = String::from_utf8_lossy(&bytes[..size]);
+                let target = request.split_whitespace().nth(1).unwrap();
+                let url = url::Url::parse(&format!("http://localhost{target}")).unwrap();
+                assert_eq!(url.path(), "/api/v4/users");
+                assert_eq!(
+                    url.query_pairs().collect::<Vec<_>>(),
+                    vec![(key.into(), term.into())]
+                );
+                assert!(request
+                    .to_lowercase()
+                    .contains("private-token: test-secret"));
+                let body = body.to_string();
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let account = RemoteProviderAccount {
+            id: "test".into(),
+            provider: RemoteProviderKind::Gitlab,
+            host,
+            login: "other-user".into(),
+            display_name: None,
+            secure_storage_ref: "unused".into(),
+        };
+        let result = resolve_gitlab_author_profile(
+            &account,
+            "test-secret",
+            email,
+            author,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        result
+    }
+
+    #[tokio::test]
+    async fn gitlab_avatar_resolves_hidden_email_by_chinese_name_or_login() {
+        let user = json!({"username":"huguoliang", "name":"胡国梁", "email":null, "avatar_url":"/uploads/avatar.png"});
+        // The search endpoint may return a user while omitting their private email.
+        let result = gitlab_author_lookup_fixture(
+            "915860729@qq.com",
+            "胡国梁",
+            vec![("search", "915860729@qq.com", json!([user.clone()]))],
+        )
+        .await;
+        assert_eq!(result, Some(user.clone()));
+        // Both Chinese names and logins must work when email search is empty.
+        for author in ["胡国梁", "huguoliang"] {
+            let result = gitlab_author_lookup_fixture(
+                "915860729@qq.com",
+                author,
+                vec![
+                    ("search", "915860729@qq.com", json!([])),
+                    ("search", author, json!([user.clone()])),
+                ],
+            )
+            .await;
+            assert_eq!(result, Some(user.clone()));
+        }
+    }
+
+    #[tokio::test]
+    async fn gitlab_avatar_tries_raw_prefix_then_author_username() {
+        let user = json!({"username":"huguoliang", "avatar_url":"/uploads/avatar.png"});
+        let result = gitlab_author_lookup_fixture(
+            "developer123@example.test",
+            "huguoliang",
+            vec![
+                ("search", "developer123@example.test", json!([])),
+                ("search", "huguoliang", json!([])),
+                ("username", "developer123", json!([])),
+                ("username", "huguoliang", json!([user.clone()])),
+            ],
+        )
+        .await;
+        assert_eq!(result, Some(user));
+    }
+
+    #[tokio::test]
+    async fn gitlab_avatar_rejects_unrelated_search_results() {
+        let unrelated =
+            json!([{"username":"other", "name":"胡国梁的同事", "avatar_url":"/other.png"}]);
+        let result = gitlab_author_lookup_fixture(
+            "915860729@qq.com",
+            "胡国梁",
+            vec![
+                ("search", "915860729@qq.com", unrelated.clone()),
+                ("search", "胡国梁", unrelated),
+            ],
+        )
+        .await;
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn avatar_username_candidates_preserve_provider_specific_fallbacks() {
+        assert_eq!(
+            avatar_candidates("915860729@qq.com", "胡国梁", RemoteProviderKind::Gitlab),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            avatar_candidates(
+                "developer123@example.test",
+                "huguoliang",
+                RemoteProviderKind::Gitlab
+            ),
+            ["developer123", "huguoliang"]
+        );
+        assert_eq!(
+            avatar_candidates(
+                "developer123@example.test",
+                "author456",
+                RemoteProviderKind::Gitee
+            ),
+            ["developer123", "developer", "author456", "author"]
+        );
+        assert_eq!(
+            avatar_candidates(
+                "123+user_name@user.noreply.gitee.com",
+                "user_name",
+                RemoteProviderKind::Gitee
+            )[0],
+            "user_name"
+        );
+        assert_eq!(
+            avatar_candidates(
+                "123-user-name@users.noreply.gitlab.com",
+                "user-name",
+                RemoteProviderKind::Gitlab
+            )[0],
+            "user-name"
+        );
+        assert_eq!(
+            avatar_candidates(
+                "123+octocat@users.noreply.github.com",
+                "Other",
+                RemoteProviderKind::Github
+            ),
+            ["octocat"]
+        );
+        assert!(
+            avatar_candidates("ordinary@example.test", "Other", RemoteProviderKind::Github)
+                .is_empty()
+        );
+    }
 
     #[test]
     fn github_private_email_matches_login_before_cross_platform_fallback() {

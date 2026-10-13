@@ -62,6 +62,8 @@ GitHub 清单默认使用 macOS universal `.app.tar.gz`、Windows NSIS `.exe`、
 
 工作流按固定标签源码中可用的脚本启用优化。新标签包含 helper 时使用 macOS 并行构建和 CI 复用；GitCode 镜像接入需要标签源码包含新镜像脚本与构建配置。直接重跑历史任务仍使用当时的工作流。
 
+GitHub Release 正文会自动在更新说明后追加 `Full diff`，链接到上一版已公开的正式 Release 标签与当前标签的比较页面。首次发布没有上一版时省略；重试未公开草稿时在正式发布时同步正文。链接在 GitHub 发布阶段追加，应用内历史与 `latest.json` 保留原有更新说明。
+
 ## 失败与重试
 
 | 情况 | 处理方式 |

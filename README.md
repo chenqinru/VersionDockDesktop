@@ -93,6 +93,12 @@ GitHub 支持 Personal Access Token，以及构建配置允许时的 OAuth Devic
 
 托管平台账号用于平台 API；Git 的 Fetch / Pull / Push 仍使用本机 Git 的 SSH、HTTPS 和凭据配置。应用将托管平台 Token、SVN 密码和 AI API 密钥保存在系统安全存储中，普通设置与工作区状态保存在应用配置目录。在线作者头像可在设置中关闭。
 
+## 推荐：VersionDock 扩展
+
+如果主要在 VS Code 中开发，推荐使用独立维护的 [VersionDock 扩展](https://github.com/chenqinru/VersionDock)。它将 Git / SVN 更改管理、提交、分支与历史、冲突处理和可选 AI 工作流放进编辑器中，适合在编写代码时直接处理版本管理。
+
+扩展与 Desktop 分别安装，可独立使用，也可搭配使用。查看[扩展项目](https://github.com/chenqinru/VersionDock)和[安装说明](https://github.com/chenqinru/VersionDock/blob/main/README_zh.md#安装与开始使用)，选择适合自己的使用方式。
+
 ## 本地开发
 
 ### 环境
@@ -159,8 +165,6 @@ docs/         发布与 GitCode 镜像维护说明
 ## 参与贡献
 
 使用问题和功能建议请提交 [Issue](https://github.com/chenqinru/VersionDockDesktop/issues)。报告问题时请附上应用版本、系统、Git / SVN 版本、复现步骤和相关错误信息；提交日志前移除凭据及私人仓库信息。代码贡献见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。
-
-如果希望在 VS Code 内使用类似工作流，可以使用独立的 [VersionDock 扩展](https://github.com/chenqinru/VersionDock)。Desktop 是单独构建和运行的应用。
 
 ## 许可证
 

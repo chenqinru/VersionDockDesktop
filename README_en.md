@@ -93,6 +93,12 @@ GitHub supports Personal Access Tokens and OAuth Device Flow when enabled in the
 
 Platform accounts authorize platform API calls. Git Fetch / Pull / Push continue to use your local Git SSH, HTTPS, and credential configuration. Platform Tokens, SVN passwords, and AI API keys use system secure storage. Regular settings and workspace state use the application's configuration directory. Online author avatars can be disabled in settings.
 
+## Recommended: VersionDock extension
+
+If you primarily develop in VS Code, try the independently maintained [VersionDock extension](https://github.com/chenqinru/VersionDock). It brings Git/SVN changes, commits, branches and history, conflict handling, and optional AI workflows into the editor so you can manage version control while writing code.
+
+The extension and Desktop are installed separately and can be used independently or together. See the [extension project](https://github.com/chenqinru/VersionDock) and its [installation guide](https://github.com/chenqinru/VersionDock#install-and-start) to choose the workflow that suits you.
+
 ## Development
 
 ### Requirements
@@ -159,8 +165,6 @@ docs/         Publishing and GitCode mirror maintenance guides
 ## Contributing
 
 Report problems and feature requests through [Issues](https://github.com/chenqinru/VersionDockDesktop/issues). Include the application version, operating system, Git / SVN versions, reproduction steps, and relevant errors. Remove credentials and private repository details from logs before sharing them. See [CONTRIBUTING.md](CONTRIBUTING.md) for code contributions and [SECURITY.md](SECURITY.md) for vulnerability reports.
-
-For a similar workflow inside VS Code, see the separate [VersionDock extension](https://github.com/chenqinru/VersionDock). Desktop is built and runs as an independent application.
 
 ## License
 

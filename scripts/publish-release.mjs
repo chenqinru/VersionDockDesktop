@@ -128,7 +128,7 @@ export function createGitHubClient({ run = execFileSync, sleep = sleepSync, envi
         });
       }
     },
-    publish: (id) => api(`repos/${RELEASE_REPOSITORY}/releases/${id}`, 'PATCH', { draft: false, prerelease: false, make_latest: 'true' }),
+    publish: (id, body) => api(`repos/${RELEASE_REPOSITORY}/releases/${id}`, 'PATCH', { body, draft: false, prerelease: false, make_latest: 'true' }),
   };
 }
 
@@ -149,10 +149,13 @@ export function publishRelease({ directory, version, sourceSha, github = createG
   };
   assertSourceTag();
   const existing = github.release(tag);
-  assertPublishable(version, github.latest(), existing);
+  const previous = github.latest();
+  assertPublishable(version, previous, existing);
+  const notes = fs.readFileSync(path.join(directory, 'release-notes.md'), 'utf8').trimEnd();
+  const releaseBody = (latest) => `${notes}${latest ? `\n\n**Full diff**: https://github.com/${RELEASE_REPOSITORY}/compare/${encodeURIComponent(latest.tag_name)}...${tag}` : ''}\n`;
   const draft = existing || github.create({
     tag_name: tag, target_commitish: sourceSha, name: `VersionDock Desktop ${tag}`,
-    body: fs.readFileSync(path.join(directory, 'release-notes.md'), 'utf8'), draft: true, prerelease: false,
+    body: releaseBody(previous), draft: true, prerelease: false,
   });
   for (const asset of draft.assets || []) {
     if (!names.includes(asset.name)) github.deleteAsset(asset.id);
@@ -180,8 +183,9 @@ export function publishRelease({ directory, version, sourceSha, github = createG
   }
   // 上传期间可能有人在网页发布其他版本，公开前再检查一次。
   assertSourceTag();
-  assertPublishable(version, github.latest(), github.releaseById(draft.id));
-  const published = github.publish(draft.id);
+  const latest = github.latest();
+  assertPublishable(version, latest, github.releaseById(draft.id));
+  const published = github.publish(draft.id, releaseBody(latest));
   if (published.draft || published.prerelease || github.latest()?.tag_name !== tag) {
     throw new Error('版本已提交发布，但 latest 状态未确认；请检查公开仓库，不要覆盖已公开版本');
   }

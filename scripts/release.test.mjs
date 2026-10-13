@@ -290,7 +290,8 @@ test('清单与公开 Release 共用版本更新内容，缺失说明时不准�
   assert.equal(fs.readFileSync(path.join(input.outputDir, 'release-notes.md'), 'utf8').trim(), manifest.notes);
   const { state, github } = githubFixture();
   publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github });
-  assert.equal(state.draft.body.trim(), manifest.notes);
+  assert.equal(state.draft.body.trim(), `${manifest.notes}\n\n**Full diff**: https://github.com/${RELEASE_REPOSITORY}/compare/v0.1.0...v0.1.1`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(input.outputDir, 'assets/latest.json'), 'utf8')).notes, manifest.notes);
   const missing = fixture();
   assert.throws(() => prepareRelease({ ...missing, releaseNotes: [{ ...releaseNotes[0], version: '0.1.2' }] }), /缺少/);
   assert.equal(fs.existsSync(missing.outputDir), false);
@@ -362,8 +363,9 @@ function githubFixture() {
     download: (_tag, directory) => {
       for (const [name, data] of state.packages) fs.writeFileSync(path.join(directory, name), state.corruptDownload ? 'corrupted' : data);
     },
-    publish: () => {
+    publish: (_id, body) => {
       state.publications++;
+      state.draft.body = body;
       state.draft.draft = false;
       state.latest = { tag_name: state.draft.tag_name };
       return state.draft;
@@ -658,6 +660,41 @@ test('上传全部附件并核对远程内容后才公开，已公开版本重�
   assert.throws(() => publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github }), /禁止覆盖/);
 });
 
+test('首次 GitHub Release 无上一版时省略 Full diff，版本跳号使用实际公开标签', () => {
+  const input = fixture(); prepareRelease(input);
+  const notes = fs.readFileSync(path.join(input.outputDir, 'release-notes.md'), 'utf8').trimEnd();
+  for (const previous of [null, { tag_name: 'v0.0.9' }]) {
+    const { state, github } = githubFixture();
+    state.latest = previous;
+    publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github });
+    const suffix = previous ? `\n\n**Full diff**: https://github.com/${RELEASE_REPOSITORY}/compare/v0.0.9...v0.1.1` : '';
+    assert.equal(state.draft.body, `${notes}${suffix}\n`);
+    assert.equal(fs.readFileSync(path.join(input.outputDir, 'release-notes.md'), 'utf8').trimEnd(), notes);
+  }
+});
+
+test('上传期间出现较低的新版本时 Full diff 使用公开前重新确认的 latest', () => {
+  const input = fixture(); prepareRelease(input);
+  const { state, github } = githubFixture();
+  state.latest = { tag_name: 'v0.0.9' };
+  const download = github.download;
+  github.download = (...args) => { download(...args); state.latest = { tag_name: 'v0.1.0' }; };
+  publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github });
+  assert.ok(state.draft.body.endsWith(`/compare/v0.1.0...v0.1.1\n`));
+  assert.doesNotMatch(state.draft.body, /v0\.0\.9/);
+});
+
+test('公开 Release 的 PATCH 同时提交更新说明与正式发布状态', () => {
+  const body = 'VersionDock Desktop v0.1.1\n\n**Full diff**: https://github.com/chenqinru/VersionDockDesktop/compare/v0.1.0...v0.1.1\n';
+  const client = createGitHubClient({ run: (_command, args, options) => {
+    assert.equal(args[1], `repos/${RELEASE_REPOSITORY}/releases/12`);
+    assert.ok(args.includes('PATCH'));
+    assert.deepEqual(JSON.parse(options.input), { body, draft: false, prerelease: false, make_latest: 'true' });
+    return JSON.stringify({ id: 12, body, draft: false });
+  } });
+  assert.equal(client.publish(12, body).body, body);
+});
+
 test('上传失败保留草稿和上一 latest，可清除多余附件后重试', () => {
   const input = fixture(); prepareRelease(input);
   const { state, github } = githubFixture();
@@ -667,10 +704,14 @@ test('上传失败保留草稿和上一 latest，可清除多余附件后重试'
   assert.equal(state.latest.tag_name, 'v0.1.0');
   state.packages.set('obsolete.txt', Buffer.from('old draft'));
   state.draft.assets.push({ id: 99, name: 'obsolete.txt' });
+  state.draft.body = '旧草稿说明';
   state.failUpload = false;
   publishRelease({ directory: input.outputDir, version: input.version, sourceSha: SOURCE_SHA, github });
   assert.equal(state.packages.has('obsolete.txt'), false);
   assert.equal(state.publications, 1);
+  assert.doesNotMatch(state.draft.body, /旧草稿说明/);
+  assert.equal(state.draft.body.match(/\*\*Full diff\*\*/g).length, 1);
+  assert.ok(state.draft.body.endsWith(`/compare/v0.1.0...v0.1.1\n`));
 });
 
 test('远程内容损坏不公开，上传过程中更高版本发布时也不回退 latest', () => {
