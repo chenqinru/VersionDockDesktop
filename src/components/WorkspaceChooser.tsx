@@ -8,6 +8,7 @@ import { useBridge } from '../platform/context';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './RepositoryCheckoutDialog';
 import { APP_CURRENT_VERSION } from '../version';
 import { workspaceOpenPaths } from '../workspaces/openPaths';
+import { selectWorkspacePaths } from '../workspaces/selectWorkspace';
 
 export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
@@ -23,20 +24,13 @@ export function WorkspaceChooser() {
   const [checkoutKind, setCheckoutKind] = useState<RepositoryCheckoutKind>();
 
   const choose = async (openInNew = false) => {
-    const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
+    const paths = await selectWorkspacePaths(bridge, t);
     if (paths.length) {
       if (openInNew) {
         await bridge.openInNewWindow(paths);
       } else {
         await openWorkspace(paths);
       }
-    }
-  };
-  const chooseWorkspaceFile = async (openInNew: boolean) => {
-    const path = await bridge.selectWorkspaceFile(t('Open VS Code Workspace'));
-    if (path) {
-      if (openInNew) await bridge.openInNewWindow([path]);
-      else await openWorkspace([path]);
     }
   };
 
@@ -91,13 +85,9 @@ export function WorkspaceChooser() {
                 <Codicon name="folder-opened" />
               </div>
               <div className="welcome-action-text">
-                <span className="welcome-action-title">{t('Open Local Folder')}</span>
-                <span className="welcome-action-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
+                <span className="welcome-action-title">{t('Open Workspace')}</span>
+                <span className="welcome-action-desc">{t('Open local folders or a .code-workspace file.')}</span>
               </div>
-            </button>
-            <button type="button" className="welcome-action-btn" disabled={busy} onClick={event => void chooseWorkspaceFile(event.metaKey || event.ctrlKey)}>
-              <div className="welcome-action-icon"><Codicon name="file-code" /></div>
-              <div className="welcome-action-text"><span className="welcome-action-title">{t('Open VS Code Workspace')}</span><span className="welcome-action-desc">{t('Open a .code-workspace file and its local folders.')}</span></div>
             </button>
             <button type="button" className="welcome-action-btn" disabled={busy || !cloneAvailable} onClick={() => setCheckoutKind('git')}>
               <div className="welcome-action-icon"><Codicon name="repo-clone" /></div>

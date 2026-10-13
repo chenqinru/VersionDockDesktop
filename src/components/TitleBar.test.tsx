@@ -23,6 +23,25 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it('offers a single workspace action and opens a workspace file from it', async () => {
+    const choice = vi.spyOn(dialogService, 'choiceDialog').mockResolvedValue('file');
+    const picker = vi.spyOn(bridge, 'selectWorkspaceFile').mockResolvedValue('/tmp/team.code-workspace');
+    const original = useAppStore.getState().openWorkspace;
+    const openWorkspace = vi.fn().mockResolvedValue(true);
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, operations: {}, openWorkspace });
+    try {
+      render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+      fireEvent.click(screen.getByRole('button', { name: 'New Tab' }));
+      expect(screen.getAllByRole('menuitem')).toHaveLength(1);
+      fireEvent.click(screen.getByRole('menuitem', { name: /Open Workspace/ }));
+      await waitFor(() => expect(openWorkspace).toHaveBeenCalledWith(['/tmp/team.code-workspace']));
+      expect(picker).toHaveBeenCalledWith('Open Workspace');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    } finally {
+      choice.mockRestore(); picker.mockRestore(); useAppStore.setState({ openWorkspace: original });
+    }
+  });
+
   it('renames the target workspace from the tab menu using the shared validated dialog', async () => {
     const prompt = vi.spyOn(dialogService, 'promptDialog').mockResolvedValue('我的团队');
     const original = useAppStore.getState().renameWorkspace;

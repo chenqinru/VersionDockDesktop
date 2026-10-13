@@ -16,6 +16,7 @@ import { TabStripAutoScroller } from '../windowing/tabStripAutoScroller';
 import { TabDragPreviewWindow } from '../windowing/tabDragPreviewWindow';
 import { promptDialog } from './dialogService';
 import { workspaceOpenPaths } from '../workspaces/openPaths';
+import { selectWorkspacePaths } from '../workspaces/selectWorkspace';
 
 interface ActiveTabDrag {
   tab: WorkspaceDescriptor;
@@ -124,15 +125,10 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
 
   const chooseWorkspace = async () => {
     setNewTabMenuOpen(false);
-    const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
+    const paths = await selectWorkspacePaths(bridge, t);
     if (paths.length) {
       await openWorkspace(paths);
     }
-  };
-  const chooseWorkspaceFile = async () => {
-    setNewTabMenuOpen(false);
-    const path = await bridge.selectWorkspaceFile(t('Open VS Code Workspace'));
-    if (path) await openWorkspace([path]);
   };
   const renameWorkspace = async (tab: WorkspaceDescriptor) => {
     const name = await promptDialog({ title: t('Rename Workspace'), message: t('Workspace name'), initialValue: tab.name, validateInput: value => !value.trim() || [...value.trim()].length > 100 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) ? t('Workspace name must contain 1 to 100 characters without control characters.') : undefined });
@@ -942,7 +938,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
               className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null || remoteInsertionActive ? 'drag-hidden' : ''}`}
               aria-label={t('New Tab')}
               aria-hidden={draggingTabId !== null || remoteInsertionActive}
-              title={t('Open Another Workspace')}
+              title={t('Open Workspace')}
               disabled={busy || Boolean(startupTab)}
               tabIndex={draggingTabId !== null || remoteInsertionActive ? -1 : undefined}
               onClick={toggleNewTabMenu}
@@ -1034,11 +1030,6 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
           }}
         >
           <div className="workspace-menu-primary-wrap">
-            <button type="button" className="workspace-menu-primary-btn" role="menuitem" disabled={busy} onClick={() => void chooseWorkspaceFile()}>
-              <div className="workspace-menu-btn-icon"><Codicon name="file-code" /></div>
-              <div className="workspace-menu-btn-content"><span className="workspace-menu-btn-title">{t('Open VS Code Workspace')}</span><span className="workspace-menu-btn-desc">{t('Open a .code-workspace file and its local folders.')}</span></div>
-              <Codicon name="chevron-right" className="workspace-menu-btn-arrow" />
-            </button>
             <button
               type="button"
               className="workspace-menu-primary-btn"
@@ -1050,8 +1041,8 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                 <Codicon name="folder-opened" />
               </div>
               <div className="workspace-menu-btn-content">
-                <span className="workspace-menu-btn-title">{t('Open Another Workspace')}</span>
-                <span className="workspace-menu-btn-desc">{t('Open a folder to discover Git and SVN repositories.')}</span>
+                <span className="workspace-menu-btn-title">{t('Open Workspace')}</span>
+                <span className="workspace-menu-btn-desc">{t('Open local folders or a .code-workspace file.')}</span>
               </div>
               <Codicon name="chevron-right" className="workspace-menu-btn-arrow" />
             </button>

@@ -5,24 +5,51 @@ import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
 import { version } from '../../package.json';
+import { DialogHost } from './DialogHost';
+import { publishDialog } from './dialogService';
 
 const originalCloneRepository = useAppStore.getState().cloneRepository;
 const originalOpenWorkspace = useAppStore.getState().openWorkspace;
 
 afterEach(() => {
   cleanup();
+  publishDialog(undefined);
   useAppStore.setState({ bootstrap: undefined, operations: {}, cloneRepository: originalCloneRepository, openWorkspace: originalOpenWorkspace });
 });
 
 describe('WorkspaceChooser V5 setup actions', () => {
-  it('opens a selected VS Code workspace file through the existing workspace flow', async () => {
+  it.each([
+    { kind: 'Open Local Folder', paths: ['/tmp/a', '/tmp/b'], newWindow: false },
+    { kind: 'Open VS Code Workspace', paths: ['/tmp/team.code-workspace'], newWindow: false },
+    { kind: 'Open Local Folder', paths: ['/tmp/a', '/tmp/b'], newWindow: true },
+    { kind: 'Open VS Code Workspace', paths: ['/tmp/team.code-workspace'], newWindow: true },
+  ])('opens $kind from the single action (new window: $newWindow)', async ({ kind, paths, newWindow }) => {
     const bridge = new MockBridge(() => true);
+    bridge.selectWorkspaceFolders = vi.fn().mockResolvedValue(['/tmp/a', '/tmp/b']);
     bridge.selectWorkspaceFile = vi.fn().mockResolvedValue('/tmp/team.code-workspace');
+    bridge.openInNewWindow = vi.fn().mockResolvedValue('new-window');
     const openWorkspace = vi.fn().mockResolvedValue(true);
     useAppStore.setState({ openWorkspace, operations: {}, bootstrap: { state: { recentWorkspaces: [] } } as never });
-    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
-    fireEvent.click(screen.getByRole('button', { name: /Open VS Code Workspace/ }));
-    await waitFor(() => expect(openWorkspace).toHaveBeenCalledWith(['/tmp/team.code-workspace']));
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /><DialogHost /></BridgeContext.Provider>);
+    expect(screen.queryByRole('button', { name: /Open Local Folder/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open VS Code Workspace/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Open Workspace/ }), { metaKey: newWindow });
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(kind) }));
+    await waitFor(() => expect(newWindow ? bridge.openInNewWindow : openWorkspace).toHaveBeenCalledWith(paths));
+    expect(newWindow ? openWorkspace : bridge.openInNewWindow).not.toHaveBeenCalled();
+  });
+
+  it('cancels the type choice without opening a native picker', async () => {
+    const bridge = new MockBridge(() => true);
+    const folderPicker = vi.spyOn(bridge, 'selectWorkspaceFolders');
+    const filePicker = vi.spyOn(bridge, 'selectWorkspaceFile');
+    useAppStore.setState({ operations: {}, bootstrap: { state: { recentWorkspaces: [] } } as never });
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /><DialogHost /></BridgeContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: /Open Workspace/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(folderPicker).not.toHaveBeenCalled();
+    expect(filePicker).not.toHaveBeenCalled();
   });
 
   it('reopens recent file workspaces from their source file rather than the old folder list', () => {

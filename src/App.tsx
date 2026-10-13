@@ -33,6 +33,7 @@ import { choiceDialog } from './components/dialogService';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './components/RepositoryCheckoutDialog';
 import { startupTransferTab } from './windowing/startupTabTransfer';
 import { useStartupWindowReveal } from './windowing/useStartupWindowReveal';
+import { selectWorkspacePaths } from './workspaces/selectWorkspace';
 
 const UI_FONT_SIZE = {
   minimum: { pixels: '11px', scale: '0.8461538462' },
@@ -203,7 +204,7 @@ export function App() {
       } else if (isCmdOrCtrl && event.shiftKey && event.key.toLowerCase() === 'o' && !event.altKey) {
         event.preventDefault();
         void (async () => {
-          const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
+          const paths = await selectWorkspacePaths(bridge, t);
           if (paths.length) {
             await bridge.openInNewWindow(paths);
           }
@@ -214,7 +215,7 @@ export function App() {
       } else if (isCmdOrCtrl && event.key.toLowerCase() === 'o' && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         void (async () => {
-          const paths = await bridge.selectWorkspaceFolders(t('Open Workspace'));
+          const paths = await selectWorkspacePaths(bridge, t);
           if (paths.length) await openWorkspace(paths);
         })();
       }
