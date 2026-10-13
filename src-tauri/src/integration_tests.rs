@@ -6215,7 +6215,7 @@ async fn real_git_history_with_line_range_on_lines_beyond_file_length_returns_em
 }
 
 #[tokio::test]
-async fn real_git_unpushed_operations_reject_concurrent_push_from_other_clone() {
+async fn real_git_unpushed_edit_rejects_concurrent_push_from_other_clone() {
     let remote_dir = tempfile::tempdir().unwrap();
     command("git", &["init", "--bare"], remote_dir.path());
 
@@ -6282,11 +6282,12 @@ async fn real_git_unpushed_operations_reject_concurrent_push_from_other_clone() 
     let repository2 = repo(clone2_dir.path(), VcsKind::Git);
     let token = CancellationToken::new();
 
-    // Clone 2 tries to undo commit A, which was pushed by Clone 1
+    // Message editing still refreshes remote state before rewriting history.
     let err = vcs::unpushed_operation(
         &repository2,
-        UnpushedOperation::UndoHead {
-            expected_hash: Some(commit_a.clone()),
+        UnpushedOperation::EditMessage {
+            hash: commit_a.clone(),
+            message: "edited commit A".into(),
         },
         &token,
     )
@@ -6302,7 +6303,7 @@ async fn real_git_unpushed_operations_reject_concurrent_push_from_other_clone() 
 }
 
 #[tokio::test]
-async fn real_git_unpushed_operations_reject_when_remote_unreachable() {
+async fn real_git_undo_head_works_offline_and_preserves_staged_and_working_changes() {
     let directory = tempfile::tempdir().unwrap();
     command("git", &["init", "-b", "main"], directory.path());
     command(
@@ -6318,6 +6319,18 @@ async fn real_git_unpushed_operations_reject_when_remote_unreachable() {
     std::fs::write(directory.path().join("base.txt"), "base\n").unwrap();
     command("git", &["add", "."], directory.path());
     command("git", &["commit", "-m", "base"], directory.path());
+    let base = command_output("git", &["rev-parse", "HEAD"], directory.path());
+    command(
+        "git",
+        &["update-ref", "refs/remotes/origin/main", &base],
+        directory.path(),
+    );
+    std::fs::write(directory.path().join("base.txt"), "committed\n").unwrap();
+    command("git", &["add", "."], directory.path());
+    command("git", &["commit", "-m", "local change"], directory.path());
+    std::fs::write(directory.path().join("base.txt"), "working change\n").unwrap();
+    std::fs::write(directory.path().join("staged.txt"), "staged\n").unwrap();
+    command("git", &["add", "staged.txt"], directory.path());
 
     // Add an unreachable remote
     command(
@@ -6335,7 +6348,7 @@ async fn real_git_unpushed_operations_reject_when_remote_unreachable() {
     let repository = repo(directory.path(), VcsKind::Git);
     let token = CancellationToken::new();
 
-    let err = vcs::unpushed_operation(
+    vcs::unpushed_operation(
         &repository,
         UnpushedOperation::UndoHead {
             expected_hash: Some(head),
@@ -6343,12 +6356,99 @@ async fn real_git_unpushed_operations_reject_when_remote_unreachable() {
         &token,
     )
     .await
-    .unwrap_err();
+    .unwrap();
+    assert_eq!(
+        command_output("git", &["rev-parse", "HEAD"], directory.path()),
+        base
+    );
+    assert_eq!(
+        command_output("git", &["rev-parse", "origin/main"], directory.path()),
+        base
+    );
+    assert_eq!(
+        command_output("git", &["show", ":base.txt"], directory.path()),
+        "committed"
+    );
+    assert_eq!(
+        command_output("git", &["show", ":staged.txt"], directory.path()),
+        "staged"
+    );
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("base.txt")).unwrap(),
+        "working change\n"
+    );
+}
 
-    assert_eq!(err.code, "CANNOT_VERIFY_REMOTE_STATE");
-    assert!(err
-        .message
-        .contains("Cannot verify remote tracking state for 'origin'"));
+#[tokio::test]
+async fn real_git_undo_head_returns_first_commit_to_unborn_without_deleting_files() {
+    if !available("git") {
+        return;
+    }
+    for empty in [false, true] {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        command("git", &["init", "-b", "main"], root);
+        command("git", &["config", "user.name", "Test"], root);
+        command("git", &["config", "user.email", "test@example.test"], root);
+        if !empty {
+            std::fs::write(root.join("file.txt"), "initial\n").unwrap();
+            command("git", &["add", "."], root);
+        }
+        command("git", &["commit", "--allow-empty", "-m", "initial"], root);
+        let head = command_output("git", &["rev-parse", "HEAD"], root);
+        if !empty {
+            std::fs::write(root.join("file.txt"), "staged\n").unwrap();
+            command("git", &["add", "."], root);
+            std::fs::write(root.join("file.txt"), "working\n").unwrap();
+        }
+        command("git", &["checkout", "--detach"], root);
+        let index_before = command_output("git", &["ls-files", "--stage"], root);
+        assert!(vcs::unpushed_operation(
+            &repo(root, VcsKind::Git),
+            UnpushedOperation::UndoHead {
+                expected_hash: Some(head.clone())
+            },
+            &CancellationToken::new(),
+        )
+        .await
+        .is_err());
+        assert_eq!(command_output("git", &["rev-parse", "HEAD"], root), head);
+        assert_eq!(
+            command_output("git", &["ls-files", "--stage"], root),
+            index_before
+        );
+        command("git", &["checkout", "main"], root);
+        vcs::unpushed_operation(
+            &repo(root, VcsKind::Git),
+            UnpushedOperation::UndoHead {
+                expected_hash: Some(head),
+            },
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            command_output("git", &["symbolic-ref", "HEAD"], root),
+            "refs/heads/main"
+        );
+        assert!(command_output(
+            "git",
+            &["for-each-ref", "--format=%(refname)", "refs/heads"],
+            root
+        )
+        .is_empty());
+        assert!(command_output("git", &["ls-files"], root).is_empty());
+        if !empty {
+            assert_eq!(
+                std::fs::read_to_string(root.join("file.txt")).unwrap(),
+                "working\n"
+            );
+            assert_eq!(
+                command_output("git", &["status", "--porcelain"], root),
+                "?? file.txt"
+            );
+        }
+    }
 }
 
 #[tokio::test]

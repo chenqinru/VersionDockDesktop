@@ -5497,13 +5497,11 @@ export const useAppStore = create<AppStore>((set, get) => {
     unpushedOperation: async (repoId, operation) => (await withBusy(async () => {
       if (!ensureRepositoryCapability(repoId, 'historyRewrite')) return false;
       const wid = workspaceId();
+      const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
       await bridge().request({ type: 'unpushedOperation', payload: { workspace_id: wid, repo_id: repoId, operation } }, { timeoutMs: 600_000 });
       await get().loadUnpushedCommits(repoId, wid);
-      const repoName = get().snapshot?.repositories.find((item) => item.meta.id === repoId)?.meta.name ?? repoId;
       let message: NotificationText | undefined;
-      if (operation.type === 'undoHead') {
-        message = { key: 'VersionDock [{0}]: undid last commit. Changes remain staged.', args: [repoName] };
-      } else if (operation.type === 'drop') {
+      if (operation.type === 'drop') {
         const count = operation.hashes.length;
         message = count === 1
           ? { key: 'VersionDock [{0}]: dropped commit {1}.', args: [repoName, operation.hashes[0].slice(0, 7)] }
@@ -5514,10 +5512,12 @@ export const useAppStore = create<AppStore>((set, get) => {
         message = { key: 'VersionDock [{0}]: commit message updated.', args: [repoName] };
       }
       if (message) {
-        get().addNotification({ type: 'success', title: 'History operation completed', message, workspaceId: get().snapshot?.workspace.id });
+        get().addNotification({ type: 'success', title: 'History operation completed', message, workspaceId: wid });
       }
-      await get().refresh();
-      await get().loadHistory(true);
+      if (get().snapshot?.workspace.id === wid) {
+        await get().refresh();
+        if (get().snapshot?.workspace.id === wid) await get().loadHistory(true);
+      }
       return true;
     }, `history:${repoId}`)) ?? false,
     historyOperation: async (repoId, operation) => (await withBusy(async () => {

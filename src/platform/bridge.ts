@@ -210,13 +210,15 @@ const commandIdentifiers = (command: BridgeCommand) => {
 
 export const commandShowsProgressByDefault = (command: BridgeCommand): boolean => {
   switch (command.type) {
+    case 'unpushedOperation':
+      return command.payload.operation.type !== 'undoHead';
     case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent':
     case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository':
     case 'stage': case 'unstage': case 'discard': case 'deletePaths': case 'addIgnore': case 'updateIgnoreRules':
     case 'aiComposerApply': case 'commit': case 'batchCommit': case 'sync': case 'branchOperation': case 'branchRecovery': case 'gitUnlockIndex': case 'tagOperation':
     case 'conflictSave': case 'conflictAccept': case 'abortRepositoryOperation': case 'continueRepositoryOperation': case 'restoreConflicts':
     case 'stashOperation': case 'shelfOperation': case 'changelistOperation': case 'worktreeOperation':
-    case 'subtreeOperation': case 'submoduleOperation': case 'unpushedOperation': case 'historyOperation':
+    case 'subtreeOperation': case 'submoduleOperation': case 'historyOperation':
     case 'svnOperation': case 'remoteOperation': case 'gitProfileOperation': case 'svnAccountOperation':
     case 'providerGithubBegin': case 'providerGithubComplete': case 'providerGithubSave': case 'providerGitlabSave': case 'providerGiteeSave': case 'providerRemove': case 'publishRepository':
       return true;

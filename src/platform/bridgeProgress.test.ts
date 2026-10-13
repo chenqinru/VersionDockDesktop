@@ -19,6 +19,18 @@ afterEach(() => vi.useRealTimers());
 const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 describe('native progress bridge contract', () => {
+  it('keeps undo commit silent in native requests while other history rewrites keep progress', async () => {
+    invoke.mockImplementation((_name, args) => Promise.resolve({ requestId: args.envelope.requestId, result: true, error: null }));
+    const bridge = new TauriBridge(); await bridge.initialize();
+    const events: BridgeEvent[] = []; bridge.subscribe((event) => events.push(event));
+    await bridge.request({ type: 'unpushedOperation', payload: { workspace_id: 'workspace', repo_id: 'repo', operation: { type: 'undoHead', expectedHash: 'head' } } });
+    expect(invoke.mock.calls[0][1].envelope.context.visibility).toBe('background');
+    expect(events[0]).toMatchObject({ type: 'operation-request', context: { visibility: 'background' } });
+    await bridge.request({ type: 'unpushedOperation', payload: { workspace_id: 'workspace', repo_id: 'repo', operation: { type: 'editMessage', hash: 'head', message: 'new' } } });
+    expect(invoke.mock.calls[1][1].envelope.context.visibility).toBe('foreground');
+    bridge.dispose();
+  });
+
   it('preserves native stderr and recovery warnings when timeout cancellation settles within the grace period', async () => {
     let resolve!: (value: ResponseEnvelope) => void;
     invoke.mockImplementation((name) => name === 'bridge_cancel' ? Promise.resolve(true) : new Promise((done) => { resolve = done; }));

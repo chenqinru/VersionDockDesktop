@@ -40,6 +40,33 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
+  it.each([false, true])('refreshes undo commit silently and respects a workspace switch (switched: %s)', async (switched) => {
+    const current = snapshot('undo-workspace', 1);
+    current.repositories = [repository('repo', 'Repository')];
+    const pending = deferred<boolean>();
+    const request = vi.fn((command: BridgeCommand) => command.type === 'unpushedOperation' ? pending.promise : []);
+    const bridge = new MockBridge(request);
+    const original = useAppStore.getState();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const loadHistory = vi.fn().mockResolvedValue(undefined);
+    const loadUnpushedCommits = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, refresh, loadHistory, loadUnpushedCommits, notifications: [] });
+    try {
+      const result = useAppStore.getState().unpushedOperation('repo', { type: 'undoHead', expectedHash: 'head' });
+      expect(request).toHaveBeenCalledOnce();
+      if (switched) useAppStore.setState({ snapshot: snapshot('other-workspace', 1) });
+      pending.resolve(true);
+      expect(await result).toBe(true);
+      expect(loadUnpushedCommits).toHaveBeenCalledWith('repo', 'undo-workspace');
+      expect(refresh).toHaveBeenCalledTimes(switched ? 0 : 1);
+      expect(loadHistory).toHaveBeenCalledTimes(switched ? 0 : 1);
+      expect(useAppStore.getState().notifications).toEqual([]);
+      expect(useAppStore.getState().operations).toEqual({});
+    } finally {
+      useAppStore.setState({ refresh: original.refresh, loadHistory: original.loadHistory, loadUnpushedCommits: original.loadUnpushedCommits });
+    }
+  });
+
   it('rejects a delayed detail request from a previous workspace before invoking the backend', async () => {
     const commit: CommitNode = { repoId: 'old-repo', hash: 'old-commit', shortHash: 'old', parents: [], author: 'Tester', email: '', authorDate: '', committerDate: '', message: 'Old commit', refs: [] };
     const request = vi.fn();

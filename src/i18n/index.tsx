@@ -4,6 +4,8 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Amend last commit': 'Amend last commit',
+  'Amend last commit for {0}': 'Amend last commit for {0}',
   'Shelf storage is busy. Wait for the other operation to finish and retry.': 'Shelf storage is busy. Wait for the other operation to finish and retry.',
   'Unable to restore shelved files safely. Check the destination files and retry.': 'Unable to restore shelved files safely. Check the destination files and retry.',
   'Shelf metadata is invalid. Preserve the storage files and repair the metadata before retrying.': 'Shelf metadata is invalid. Preserve the storage files and repair the metadata before retrying.',
@@ -1409,6 +1411,8 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Amend last commit': '修订上一次提交',
+  'Amend last commit for {0}': '修订 {0} 的上一次提交',
   'Keep in tray when closing windows': '关闭窗口后保留在托盘',
   'Show shortcuts in the system tray while the app is running.': '应用运行时在系统托盘中显示快捷入口。',
   'The tray icon stays visible while closing windows to the tray is enabled.': '启用关闭后保留在托盘时，托盘图标始终显示。',

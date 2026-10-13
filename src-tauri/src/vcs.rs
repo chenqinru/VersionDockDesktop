@@ -5121,6 +5121,19 @@ async fn ensure_unpushed_commits(
         }
     }
 
+    ensure_locally_unpushed_commits(repo, hashes, token).await
+}
+
+// Undo is a local operation, like the plugin. Use the remote-tracking refs
+// already available on disk instead of requiring network access before reset.
+async fn ensure_locally_unpushed_commits(
+    repo: &RepositoryMeta,
+    hashes: &[String],
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    for hash in hashes {
+        validate_revision(hash)?;
+    }
     if let Some(upstream) = git_upstream(repo, token).await? {
         for hash in hashes {
             let is_ancestor = git(
@@ -5147,29 +5160,27 @@ async fn ensure_unpushed_commits(
         }
     }
 
-    if !remote_names.is_empty() {
-        for hash in hashes {
-            let containing_remotes = git(
-                vec![
-                    "branch".into(),
-                    "-r".into(),
-                    "--contains".into(),
-                    hash.clone(),
-                ],
-                repo,
-                token,
-            )
-            .await?
-            .stdout_text();
+    for hash in hashes {
+        let containing_remotes = git(
+            vec![
+                "branch".into(),
+                "-r".into(),
+                "--contains".into(),
+                hash.clone(),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text();
 
-            if containing_remotes.lines().any(|l| !l.trim().is_empty()) {
-                let short = if hash.len() > 7 { &hash[..7] } else { hash };
-                return Err(DesktopError::new(
-                    "COMMIT_ALREADY_PUSHED",
-                    format!("Commit {short} has already been pushed to a remote branch"),
-                    false,
-                ));
-            }
+        if containing_remotes.lines().any(|l| !l.trim().is_empty()) {
+            let short = if hash.len() > 7 { &hash[..7] } else { hash };
+            return Err(DesktopError::new(
+                "COMMIT_ALREADY_PUSHED",
+                format!("Commit {short} has already been pushed to a remote branch"),
+                false,
+            ));
         }
     }
 
@@ -5205,13 +5216,48 @@ pub async fn unpushed_operation(
                     ));
                 }
             }
-            ensure_unpushed_commits(repo, &[head], token).await?;
-            git(
-                vec!["reset".into(), "--soft".into(), "HEAD^".into()],
+            ensure_locally_unpushed_commits(repo, std::slice::from_ref(&head), token).await?;
+            let parents = git(
+                vec![
+                    "rev-list".into(),
+                    "--parents".into(),
+                    "-n1".into(),
+                    head.clone(),
+                ],
                 repo,
                 token,
             )
-            .await?;
+            .await?
+            .stdout_text();
+            if parents.split_whitespace().count() == 1 {
+                // A root commit has no HEAD~1. Clear the index while retaining
+                // every working file, then return the branch to unborn state.
+                // Require a branch before touching the index: deleting a
+                // detached HEAD would make the repository invalid.
+                let branch_ref = git(
+                    vec!["symbolic-ref".into(), "--quiet".into(), "HEAD".into()],
+                    repo,
+                    token,
+                )
+                .await?
+                .stdout_text()
+                .trim()
+                .to_string();
+                git(vec!["read-tree".into(), "--empty".into()], repo, token).await?;
+                git(
+                    vec!["update-ref".into(), "-d".into(), branch_ref, head],
+                    repo,
+                    token,
+                )
+                .await?;
+            } else {
+                git(
+                    vec!["reset".into(), "--soft".into(), "HEAD~1".into()],
+                    repo,
+                    token,
+                )
+                .await?;
+            }
         }
         UnpushedOperation::EditMessage { hash, message } => {
             ensure_clean_worktree(repo, token).await?;
