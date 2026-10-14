@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import Markdown from 'react-markdown';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -47,11 +48,11 @@ export function AiExplanation({ commits, toolbar }: { commits: AiCommit[]; toolb
     }
     else void useAiStore.getState().generate(key, aiRequest('commit-explanation', { commits }));
   };
-  const button = <button type="button" className="ai-generate ai-explain-button" data-busy={busy} aria-busy={busy}
+  const button = <Button variant="primary" size="xs" type="button" data-busy={busy} aria-busy={busy}
     title={t(busy ? 'Stop AI commit explanation' : run ? 'Explain commits again with AI' : 'Explain commit with AI')} onClick={generate}>
     <Codicon name={busy ? 'stop-circle' : 'sparkle-filled'} />
     <span>{t(busy ? 'Stop' : run ? 'Explain again' : 'AI Explain')}</span>
-  </button>;
+  </Button>;
   return <>
     {toolbar ? createPortal(button, toolbar) : button}
     {run && <section className="ai-explanation" data-state={state} aria-label={t('AI Commit Explanation')}>

@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { useEffect, useState } from 'react';
 import type { IgnoreRules } from '../bindings/generated';
 import { useBridge } from '../platform/context';
@@ -101,9 +102,9 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
               style={{ flex: 1, padding: '3px 6px', fontSize: 12 }}
             />
           </label>
-          <button type="button" onClick={handleSwitchDir} style={{ padding: '3px 8px', fontSize: 11 }}>
+          <Button size="xs" type="button" onClick={handleSwitchDir}>
             {t('Switch')}
-          </button>
+          </Button>
         </div>
         <p>{isRulesValid && rules ? `${rules.source}${rules.directory ? ` · ${rules.directory}` : ''}` : t('Loading…')}</p>
         <label>
@@ -118,8 +119,8 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
         </label>
         {error && <div className="error-row" role="alert">{error}</div>}
         <footer>
-          <button onClick={close}>{t('Close')}</button>
-          <button className="primary" disabled={!isRulesValid || saving} onClick={() => void save()}>{t('Save')}</button>
+          <Button onClick={close}>{t('Close')}</Button>
+          <Button variant="primary" loading={saving} disabled={!isRulesValid || saving} onClick={() => void save()}>{t('Save')}</Button>
         </footer>
     </DialogSurface>
   );

@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComposerApplyResult, ComposerChangeUnit, ComposerCommitGroup, ComposerPreparedSource } from '../ai/viewTypes';
@@ -43,20 +44,12 @@ const css = `
     --composer-hunk-location-border: color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 42%, var(--vscode-editor-background));
   }
   .ai-composer-page button, .ai-composer-page textarea { font: inherit; }
-  .ai-composer-page button:focus-visible, .ai-composer-page textarea:focus-visible { outline: 1px solid var(--versiondock-selection-border); outline-offset: 2px; }
+  .ai-composer-page button:not(.vd-button):focus-visible, .ai-composer-page textarea:focus-visible { outline: 1px solid var(--versiondock-selection-border); outline-offset: 2px; }
   @keyframes composer-scan { from { transform: translateX(-110%); } to { transform: translateX(410%); } }
   @keyframes composer-pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
-  @keyframes composer-ai-slash-edge { 0% { transform: translate3d(0, 0, 0) skewX(-22deg); opacity: 0; } 22% { opacity: .35; } 48% { opacity: 1; } 100% { transform: translate3d(1550%, 0, 0) skewX(-22deg); opacity: 0; } }
   .composer-status[data-active='true']::after { content: ''; position: absolute; left: 0; bottom: 0; width: 26%; height: 1px; background: linear-gradient(90deg, transparent, #7c5cff, #2f9bff, transparent); animation: composer-scan 1.7s ease-in-out infinite; }
   .composer-group { transition: transform .16s ease, background .16s ease; }
   .composer-group[data-drag='true'] { background: color-mix(in srgb, #7457ff 9%, var(--vscode-editor-background)); }
-  .composer-ai { position: relative; isolation: isolate; overflow: hidden; background: linear-gradient(125deg, #7657ff, #2f8fff); color: #fff; border: none; box-shadow: none; transition: filter 140ms ease, transform 140ms ease; }
-  .composer-ai > * { position: relative; z-index: 2; }
-  .composer-ai::after { content: ''; position: absolute; pointer-events: none; opacity: 0; z-index: 1; top: -55%; left: -28%; width: 10%; height: 210%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.96), transparent); box-shadow: 0 0 5px rgba(222,239,255,.7); }
-  .composer-ai:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
-  .composer-ai:hover:not(:disabled)::after { animation: composer-ai-slash-edge 880ms cubic-bezier(.22,.7,.22,1) both; }
-  .composer-ai:active:not(:disabled) { filter: brightness(.98); transform: translateY(0); }
-  .composer-ai:disabled { cursor: default !important; opacity: .5; }
   .composer-icon-action { transition: background-color 120ms ease, transform 120ms ease, opacity 120ms ease; }
   .composer-icon-action:hover:not(:disabled) { --composer-icon-button-background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); transform: translateY(-1px); }
   .composer-icon-action:active:not(:disabled) { --composer-icon-button-background: var(--vscode-toolbar-activeBackground, var(--vscode-list-activeSelectionBackground)); transform: translateY(0); }
@@ -65,18 +58,13 @@ const css = `
   .composer-message-ai:hover:not(:disabled) { --composer-message-ai-background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); opacity: 1 !important; }
   .composer-message-ai:active:not(:disabled) { --composer-message-ai-background: var(--vscode-toolbar-activeBackground, var(--vscode-list-activeSelectionBackground)); }
   .composer-message-ai:disabled { cursor: not-allowed !important; }
-  .composer-add-group { transition: background-color 120ms ease, color 120ms ease, transform 120ms ease, opacity 120ms ease; }
-  .composer-add-group:hover:not(:disabled) { --composer-add-group-background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); transform: translateY(-1px); }
-  .composer-add-group:active:not(:disabled) { --composer-add-group-background: var(--vscode-toolbar-activeBackground, var(--vscode-list-activeSelectionBackground)); transform: translateY(0); }
-  .composer-add-group:disabled { cursor: default !important; opacity: .42; }
   .composer-unit:hover { background: var(--vscode-list-hoverBackground); }
   .composer-hunk:hover > div:first-child { background: var(--vscode-list-hoverBackground); }
   .composer-diff-line[data-kind='add'] { color: var(--vscode-gitDecoration-addedResourceForeground); background: var(--composer-diff-add-background, color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground) 7%, transparent)); }
   .composer-diff-line[data-kind='remove'] { color: var(--vscode-gitDecoration-deletedResourceForeground); background: var(--composer-diff-remove-background, color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground) 7%, transparent)); }
   @media (prefers-reduced-motion: reduce) {
-    .composer-ai,.composer-icon-action,.composer-message-ai,.composer-add-group { transition:none !important; }
-    .composer-ai:hover:not(:disabled),.composer-icon-action:hover:not(:disabled),.composer-add-group:hover:not(:disabled) { transform:none; }
-    .composer-ai::after { animation:none !important; }
+    .composer-icon-action,.composer-message-ai { transition:none !important; }
+    .composer-icon-action:hover:not(:disabled) { transform:none; }
   }
 `;
 
@@ -448,7 +436,7 @@ export function AiComposerWorkspace() {
             : t('{0} commits were created successfully.', result.commitCount)}</p>
           {result.commitHashes.length > 0 && <div style={styles.hashList}>{result.commitHashes.map((commitHash, index) => <code key={commitHash}>{index + 1}. {commitHash.slice(0, 12)}</code>)}</div>}
           {source?.mode !== 'history' && result.recoveryCommand && <div style={styles.recovery}><span>{t('Recovery command')}</span><code>{result.recoveryCommand}</code></div>}
-          <button className="composer-ai" style={styles.primaryButton} onClick={() => send({ type: 'COMPOSER_CLOSE' })}><span>{t('Done')}</span></button>
+          <Button variant="primary" onClick={() => send({ type: 'COMPOSER_CLOSE' })}><span>{t('Done')}</span></Button>
         </div>
       </main>
     );
@@ -467,7 +455,7 @@ export function AiComposerWorkspace() {
 
       <section style={styles.workspace}>
         {busy && phase !== 'applying' && <div style={styles.centerState}><div style={styles.orbit}><Codicon name="sparkle-filled" /></div><strong>{phaseDetail}</strong><span>{t('The repository will not be changed until you confirm the plan.')}</span></div>}
-        {phase === 'error' && <div style={styles.centerState}><Codicon name="warning" style={{ fontSize: 30, color: 'var(--vscode-errorForeground)' }} /><strong>{t('Composer could not finish')}</strong><span>{error}</span><button style={styles.secondaryButton} onClick={retry}>{t('Analyze again')}</button></div>}
+        {phase === 'error' && <div style={styles.centerState}><Codicon name="warning" style={{ fontSize: 30, color: 'var(--vscode-errorForeground)' }} /><strong>{t('Composer could not finish')}</strong><span>{error}</span><Button onClick={retry}>{t('Analyze again')}</Button></div>}
         {(phase === 'review' || phase === 'applying') && source && (
           <div style={styles.timeline}>
             <div style={styles.rail} />
@@ -591,7 +579,7 @@ export function AiComposerWorkspace() {
                 </div>
               </article>
             ))}
-            <button className="composer-add-group" style={styles.addGroup} disabled={typing || !!messageGeneration || phase === 'applying'} onClick={addGroup}><Codicon name="add" /> {t('Add commit group')}</button>
+            <Button variant="ghost" disabled={typing || !!messageGeneration || phase === 'applying'} onClick={addGroup}><Codicon name="add" /> {t('Add commit group')}</Button>
           </div>
         )}
       </section>
@@ -599,9 +587,8 @@ export function AiComposerWorkspace() {
       <footer style={styles.footer}>
         <div style={styles.footerHint}>{source && t('Every change must belong to exactly one commit.')}</div>
         <div style={styles.footerActions}>
-          <button style={styles.secondaryButton} disabled={busy || typing} onClick={retry}><Codicon name="refresh" /> {t('Analyze again')}</button>
-          <button
-            style={styles.secondaryButton}
+          <Button disabled={busy || typing} onClick={retry}><Codicon name="refresh" /> {t('Analyze again')}</Button>
+          <Button
             disabled={typing || phase === 'applying'}
             onClick={() => {
               if (busy) {
@@ -616,15 +603,15 @@ export function AiComposerWorkspace() {
             }}
           >
             {busy ? t('Stop') : t('Cancel')}
-          </button>
-          <button className="composer-ai" style={styles.primaryButton} disabled={!valid || phase !== 'review'} onClick={() => setConfirming(true)}><Codicon name="git-commit" /><span>{source?.mode === 'history' ? t('Reorganize into {0} commits', groups.length) : t('Create {0} commits', groups.length)}</span></button>
+          </Button>
+          <Button variant="primary" disabled={!valid || phase !== 'review'} onClick={() => setConfirming(true)}><Codicon name="git-commit" /><span>{source?.mode === 'history' ? t('Reorganize into {0} commits', groups.length) : t('Create {0} commits', groups.length)}</span></Button>
         </div>
       </footer>
 
       {confirming && <DialogSurface className="composer-confirm-dialog" onClose={() => setConfirming(false)} aria-labelledby="composer-confirm-title">
         <header><span className="composer-confirm-icon"><AiCommitComposerIcon size={19} /></span><strong id="composer-confirm-title">{t('Apply this commit plan?')}</strong><IconButton title={t('Close')} onClick={() => setConfirming(false)}><Codicon name="close" /></IconButton></header>
         <p>{source?.mode === 'history' ? t('VersionDock will create a recovery reference before updating the branch.') : source?.vcsKind === 'svn' ? t('SVN groups are committed sequentially and cannot be rolled back atomically.') : t('VersionDock will create a recovery reference before updating the branch.')}</p>
-        <footer><button onClick={() => setConfirming(false)}>{t('Keep reviewing')}</button><button className="primary" onClick={() => { setConfirming(false); send({ type: 'COMPOSER_APPLY', groups }); }}>{t(source?.mode === 'history' ? 'Confirm and reorganize commits' : 'Confirm and create commits')}</button></footer>
+        <footer><Button size="md" onClick={() => setConfirming(false)}>{t('Keep reviewing')}</Button><Button variant="primary" size="md" onClick={() => { setConfirming(false); send({ type: 'COMPOSER_APPLY', groups }); }}>{t(source?.mode === 'history' ? 'Confirm and reorganize commits' : 'Confirm and create commits')}</Button></footer>
       </DialogSurface>}
 
     </main>
@@ -669,9 +656,8 @@ const styles: Record<string, React.CSSProperties> = {
   diffPrefix: { display: 'block', textAlign: 'center', userSelect: 'none' },
   diffCode: { display: 'block', paddingRight: 12 },
   emptyDiff: { padding: '12px 38px', color: 'var(--vscode-descriptionForeground)', background: 'var(--composer-code-background, var(--vscode-textCodeBlock-background))', fontSize: 11 },
-  dropHint: { marginTop: 8, padding: 14, textAlign: 'center', border: '1px dashed var(--vscode-panel-border)', color: 'var(--vscode-descriptionForeground)' }, addGroup: { display: 'flex', alignItems: 'center', gap: 6, marginLeft: -7, padding: '6px 9px', border: 'none', borderRadius: 4, background: 'var(--composer-add-group-background, transparent)', color: 'var(--vscode-textLink-foreground)', cursor: 'pointer' },
+  dropHint: { marginTop: 8, padding: 14, textAlign: 'center', border: '1px dashed var(--vscode-panel-border)', color: 'var(--vscode-descriptionForeground)' },
   footer: { flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, padding: '11px 18px', borderTop: '1px solid var(--vscode-panel-border)', background: 'var(--vscode-sideBar-background,var(--vscode-editor-background))' }, footerHint: { color: 'var(--vscode-descriptionForeground)', fontSize: 11 }, footerActions: { marginLeft: 'auto', display: 'flex', gap: 8 },
-  secondaryButton: { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 4, border: '1px solid var(--vscode-button-border,var(--vscode-panel-border))', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', cursor: 'pointer' }, primaryButton: { minHeight: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '6px 14px', borderRadius: 6, boxSizing: 'border-box', cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' },
 
   completed: { flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 30, textAlign: 'center' }, completedMark: { width: 58, height: 58, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', background: 'linear-gradient(135deg,#7657ff,#2f8fff)', fontSize: 24 }, completedTitle: { margin: '8px 0 0', fontSize: 22 }, completedCopy: { margin: 0, color: 'var(--vscode-descriptionForeground)' }, hashList: { display: 'flex', flexDirection: 'column', gap: 5, padding: 12, color: 'var(--vscode-descriptionForeground)' }, recovery: { width: 'min(680px,100%)', display: 'flex', flexDirection: 'column', gap: 7, margin: '8px 0', padding: 13, textAlign: 'left', border: '1px solid var(--vscode-panel-border)', background: 'var(--vscode-textCodeBlock-background)' },
 };

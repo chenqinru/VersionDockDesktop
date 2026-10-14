@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
@@ -124,26 +125,23 @@ export function SubmoduleDiffModal({
         </div>
 
         <footer>
-          <button
+          <Button
             type="button"
             onClick={() => {
               onClose();
               onRevealPanel();
             }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
             <Codicon name="link-external" />
             {t('View in Submodule Panel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary"
             type="button"
-            className="primary"
             onClick={() => void handleAlign()}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
             <Codicon name="refresh" />
             {t('Align Submodule with Parent')}
-          </button>
+          </Button>
         </footer>
     </DialogSurface>
   );

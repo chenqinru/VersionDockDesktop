@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { confirmDialog } from './dialogService';
 import { IconButton } from './IconButton';
@@ -161,14 +162,13 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                     <strong>{t('Software Update')}</strong>
                   </div>
                   {!checking && !downloading && !readyToRestart && (
-                    <button
+                    <Button variant="link" size="xs"
                       type="button"
-                      className="about-action-link"
                       onClick={() => void handleCheckUpdate()}
                     >
                       <Codicon name="refresh" />
                       <span>{t('Check for Updates')}</span>
-                    </button>
+                    </Button>
                   )}
                 </div>
 
@@ -205,14 +205,13 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                         </span>
                       </div>
                       <div className="update-error-actions">
-                        <button
+                        <Button size="xs"
                           type="button"
-                          className="about-inline-btn"
                           onClick={() => void openExternalLink(GITHUB_RELEASES_URL)}
                         >
                           <Codicon name="link-external" />
                           <span>{t('View Releases on GitHub')}</span>
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -260,9 +259,8 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
 
                       {readyToRestart ? (
                         <div className="update-actions">
-                          <button
+                          <Button variant="primary"
                             type="button"
-                            className="about-btn primary"
                             disabled={phase === 'restarting'}
                             onClick={() => void restart().catch((error: unknown) => {
                               void confirmDialog({ title: t('Software Update'), message: t('Restart failed: {0}', error instanceof Error ? error.message : String(error)) });
@@ -270,13 +268,12 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                           >
                             <Codicon name="refresh" />
                             <span>{t(phase === 'restarting' ? 'Restarting…' : 'Restart to Install Update')}</span>
-                          </button>
+                          </Button>
                         </div>
                       ) : (
                         <div className="update-actions">
-                          <button
+                          <Button variant="primary"
                             type="button"
-                            className="about-btn primary"
                             disabled={downloading || !checkResult.canInstall}
                             onClick={() => void handleDownloadAndInstall()}
                           >
@@ -286,16 +283,15 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                                 ? t('Downloading…')
                                 : t('Download and Install Update')}
                             </span>
-                          </button>
+                          </Button>
                           {checkResult.latestVersion && (
-                            <button
+                            <Button
                               type="button"
-                              className="about-btn secondary"
                               disabled={downloading}
                               onClick={() => handleSkipVersion(checkResult.latestVersion!)}
                             >
                               <span>{t('Skip this version')}</span>
-                            </button>
+                            </Button>
                           )}
                         </div>
                       )}
@@ -316,14 +312,13 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                   <div className="author-grid">
                     <div className="author-item">
                       <span className="author-label">{t('Author')}:</span>
-                      <button
+                      <Button variant="link" size="xs"
                         type="button"
-                        className="about-link-btn"
                         onClick={() => void openExternalLink(AUTHOR_GITHUB_URL)}
                       >
                         <Codicon name="github" />
                         <span>{AUTHOR_NAME}</span>
-                      </button>
+                      </Button>
                     </div>
                     <div className="author-item">
                       <span className="author-label">{t('License')}:</span>
@@ -331,30 +326,27 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                     </div>
                   </div>
                   <div className="about-quick-links">
-                    <button
+                    <Button size="xs"
                       type="button"
-                      className="about-pill-btn"
                       onClick={() => void openExternalLink(GITHUB_REPO_URL)}
                     >
                       <Codicon name="repo" />
                       <span>{t('GitHub Repository')}</span>
-                    </button>
-                    <button
+                    </Button>
+                    <Button size="xs"
                       type="button"
-                      className="about-pill-btn"
                       onClick={() => void openExternalLink(GITHUB_ISSUES_URL)}
                     >
                       <Codicon name="feedback" />
                       <span>{t('Submit Issue / Feedback')}</span>
-                    </button>
-                    <button
+                    </Button>
+                    <Button size="xs"
                       type="button"
-                      className="about-pill-btn sponsor"
                       onClick={() => void openExternalLink(SPONSOR_URL)}
                     >
                       <Codicon name="heart" />
                       <span>{t('Sponsor Project')}</span>
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </section>
@@ -366,14 +358,13 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                     <Codicon name="server-process" />
                     <strong>{t('Environment & Diagnostics')}</strong>
                   </div>
-                  <button
+                  <Button variant="link" size="xs"
                     type="button"
-                    className={`about-action-link ${copiedDiag ? 'copied' : ''}`}
                     onClick={() => void handleCopyDiagnostics()}
                   >
                     <Codicon name={copiedDiag ? 'check' : 'copy'} />
                     <span>{copiedDiag ? t('Copied to Clipboard!') : t('Copy Diagnostics')}</span>
-                  </button>
+                  </Button>
                 </div>
                 <div className="about-card-content diag-grid">
                   <div className="diag-item">
@@ -416,9 +407,8 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                   </div>
                 </div>
                 <div className="about-diag-actions">
-                  <button
+                  <Button size="xs"
                     type="button"
-                    className="about-pill-btn"
                     onClick={() => {
                       onClose();
                       useAppStore.getState().setLogPanelOpen(true);
@@ -426,15 +416,14 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                   >
                     <Codicon name="output" />
                     <span>{t('View Output & Logs')}</span>
-                  </button>
-                  <button
+                  </Button>
+                  <Button size="xs"
                     type="button"
-                    className="about-pill-btn"
                     onClick={() => void useAppStore.getState().openLogFolder()}
                   >
                     <Codicon name="folder-opened" />
                     <span>{t('Open Log Folder')}</span>
-                  </button>
+                  </Button>
                 </div>
               </section>
             </div>
@@ -444,14 +433,13 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
             <div className="about-content-scroll changelog-tab">
               <div className="changelog-header-row">
                 <h3>{t('VersionDock Release History')}</h3>
-                <button
+                <Button variant="link" size="xs"
                   type="button"
-                  className="about-action-link"
                   onClick={() => void openExternalLink(GITHUB_RELEASES_URL)}
                 >
                   <Codicon name="link-external" />
                   <span>{t('View All Releases on GitHub')}</span>
-                </button>
+                </Button>
               </div>
 
               <div className="changelog-list">

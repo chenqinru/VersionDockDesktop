@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { useCallback, useRef, useState } from 'react';
 import type { RemoteRepository } from '../bindings/generated';
 import { useI18n } from '../i18n';
@@ -136,7 +137,7 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
         <label><span>{t(git ? 'Git URL' : 'SVN URL')}</span><input autoFocus={!git || source === 'url'} value={url} placeholder={git ? 'https://github.com/user/repository.git' : 'https://svn.example.com/project/trunk'} onChange={(event) => changeUrl(event.target.value)} /></label>
         {git && source === 'url' && <small>{t('SSH URLs use your Git SSH configuration. Platform accounts authenticate HTTPS repositories.')}</small>}
         <div className="checkout-destination-fields">
-        <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={parent} onChange={(event) => setParent(event.target.value)} /><button type="button" className="dialog-secondary-button" onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}><Codicon name="folder-opened" /><span>{t('Browse…')}</span></button></div></label>
+        <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={parent} onChange={(event) => setParent(event.target.value)} /><Button type="button"  onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}><Codicon name="folder-opened" /><span>{t('Browse…')}</span></Button></div></label>
         <label><span>{t('Folder name')}</span><input value={targetName} onChange={(event) => { inferredNameRef.current = ''; setTargetName(event.target.value); }} /></label>
         </div>
         {validationError && <p className="dialog-error">{validationError}</p>}
@@ -150,7 +151,7 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
         {(!git || source === 'url') && <label className="dialog-check"><SelectionCheckbox label={t('Open in New Window')} checked={openInNewWindow} disabled={locked} onChange={() => setOpenInNewWindow(value => !value)} />{t('Open in New Window')}</label>}
         </fieldset>
         <RepositoryTaskProgress operationId={operationId} />
-        <footer>{git && source === 'account' && !accountFormOpen && <label className="dialog-check clone-new-window-option"><SelectionCheckbox label={t('Open in New Window')} checked={openInNewWindow} disabled={locked} onChange={() => setOpenInNewWindow(value => !value)} />{t('Open in New Window')}</label>}<button type="button" disabled={locked} onClick={close}>{t('Cancel')}</button><button type="button" className="primary" disabled={locked || !ready || (source === 'account' && accountFormOpen)} onClick={() => void submit()}>{t(git ? 'Clone' : 'Checkout')}</button></footer>
+        <footer>{git && source === 'account' && !accountFormOpen && <label className="dialog-check clone-new-window-option"><SelectionCheckbox label={t('Open in New Window')} checked={openInNewWindow} disabled={locked} onChange={() => setOpenInNewWindow(value => !value)} />{t('Open in New Window')}</label>}<Button size="md" type="button" disabled={locked} onClick={close}>{t('Cancel')}</Button><Button variant="primary" size="md" type="button" disabled={locked || !ready || (source === 'account' && accountFormOpen)} onClick={() => void submit()}>{t(git ? 'Clone' : 'Checkout')}</Button></footer>
       </DialogSurface>
 
   </>;

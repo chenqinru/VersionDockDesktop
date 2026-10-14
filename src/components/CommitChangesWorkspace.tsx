@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useState } from 'react';
@@ -151,7 +152,7 @@ export function CommitChangesWorkspace() {
   const title = changes.kind === 'workingTree' ? t('Working Tree Changes') : changes.commits.length === 1 ? changes.commits[0]?.message : `${changes.commits.length} ${t('commits')}`;
   return <section className="changes-workspace">
     <header>
-      <button onClick={back}><Codicon name="arrow-left" />{t('Back to history')}</button>
+      <Button onClick={back}><Codicon name="arrow-left" />{t('Back to history')}</Button>
       <span title={title}><Codicon name="diff-multiple" />{title}</span>
       <b>{changes.files.length} {t('files')}</b>
       {selected && externalEditor && <IconButton title={t('Open in external editor')} onClick={() => void systemOpen(selected.repoId, selected.path, false, true)}><Codicon name="code" /></IconButton>}

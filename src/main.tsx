@@ -5,6 +5,7 @@ import './styles.css';
 import './historyLog.css';
 import './layoutDensity.css';
 import './dialogStyles.css';
+import './buttons.css';
 import { App } from './App';
 import { BridgeContext } from './platform/context';
 import type { VersionDockBridge } from './platform/bridge';

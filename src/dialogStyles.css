@@ -47,13 +47,8 @@
   border-color: var(--versiondock-selection-border); outline: 0;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--versiondock-text) 7%, transparent);
 }
-.vd-dialog button:focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
+.vd-dialog button:not(.vd-button):focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
 .vd-dialog > footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding: 0; border: 0; }
-.vd-dialog > footer > button, .vd-dialog .vd-dialog-footer-actions > button { min-height: 32px; padding: 6px 14px; border: 1px solid var(--versiondock-border); border-radius: 7px; background: var(--versiondock-surface-alt); color: var(--versiondock-text); font-size: inherit; }
-.vd-dialog > footer > button:not(:disabled):hover, .vd-dialog .vd-dialog-footer-actions > button:not(:disabled):hover { background: var(--versiondock-hover); }
-.vd-dialog > footer > button.primary, .vd-dialog .vd-dialog-footer-actions > button.primary { color: var(--vscode-button-foreground); background: var(--versiondock-accent-bg); border-color: transparent; }
-.vd-dialog > footer > button.primary:not(:disabled):hover, .vd-dialog .vd-dialog-footer-actions > button.primary:not(:disabled):hover { background: var(--vscode-button-hoverBackground); }
-.vd-dialog > footer > button.danger { background: var(--versiondock-danger); border-color: transparent; color: #fff; }
 .vd-dialog button:disabled { opacity: .45; cursor: default; }
 .vd-dialog .dialog-error { margin: 12px 0 0; color: var(--versiondock-danger); }
 .vd-dialog .dialog-choices { gap: 8px; }

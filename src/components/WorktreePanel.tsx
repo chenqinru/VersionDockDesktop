@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { promptBranchName } from './promptBranchName';
 import { IconButton } from './IconButton';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -355,7 +356,7 @@ function RepoSection({
         <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }}>
           <Codicon name="error" style={{ marginRight: '6px' }} />
           {error}
-          <button style={css.actionBtn} disabled={busy} onClick={onRefresh}>{t('Retry')}</button>
+          <Button disabled={busy} onClick={onRefresh}>{t('Retry')}</Button>
         </div>
       )}
       {repo.worktrees.length === 0 && !error ? (
@@ -381,16 +382,16 @@ function RepoSection({
       {!multiRepo && (
         <div style={css.singleRepoActions}>
           {hasPrunable && onPrune && (
-            <button data-secondary-action-btn="" style={css.actionBtn} disabled={busy} onClick={() => onPrune(repo.repoId)}>
+            <Button data-secondary-action-btn="" disabled={busy} onClick={() => onPrune(repo.repoId)}>
               <Codicon name="git-compare" style={{ marginRight: '4px', fontSize: '12px' }} />
               {t('Prune stale')}
-            </button>
+            </Button>
           )}
           {onRequestCreate && (
-            <button data-secondary-action-btn="" style={css.actionBtn} disabled={busy} onClick={() => onRequestCreate(repo.repoId)}>
+            <Button data-secondary-action-btn="" disabled={busy} onClick={() => onRequestCreate(repo.repoId)}>
               <Codicon name="add" style={{ marginRight: '4px', fontSize: '12px' }} />
               {t('New Worktree')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -630,17 +631,6 @@ const css = {
     gap: '4px',
     padding: '6px 8px',
     borderTop: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))',
-  } as React.CSSProperties,
-  actionBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    fontSize: '11px',
-    background: 'var(--vscode-button-secondaryBackground, var(--versiondock-surface-alt))',
-    color: 'var(--vscode-button-secondaryForeground, var(--versiondock-text))',
-    border: 'none',
-    borderRadius: '3px',
-    padding: '3px 8px',
-    cursor: 'pointer',
   } as React.CSSProperties,
   empty: {
     padding: '16px 12px',

@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -925,19 +926,18 @@ export function UnifiedDiffView({
   }}>
     <div className="diff-toolbar">
       <div className="diff-toolbar-left">
-        <button
+        <Button variant="ghost" size="xs"
           type="button"
-          className="diff-toolbar-btn"
           title={view === 'split' ? t('Inline view') : t('Split view')}
           onClick={() => setManualView(view === 'split' ? 'inline' : 'split')}
         >
           <Codicon name={view === 'split' ? 'list-flat' : 'split-horizontal'} />
           <span>{view === 'split' ? t('Inline view') : t('Split view')}</span>
-        </button>
-        <button
+        </Button>
+        <Button variant="ghost" size="xs"
           type="button"
-          className={`diff-toolbar-btn ${!collapsed ? 'active' : ''}`}
           title={collapsed ? t('Expand differences') : t('Collapse differences')}
+          aria-pressed={!collapsed}
           onClick={() => {
             setCollapsed((prev) => !prev);
             setExpandedFolds({});
@@ -945,7 +945,7 @@ export function UnifiedDiffView({
         >
           <Codicon name={collapsed ? 'unfold' : 'fold'} />
           <span>{collapsed ? t('Expand differences') : t('Collapse differences')}</span>
-        </button>
+        </Button>
       </div>
       <div className="diff-toolbar-right">
         <IconButton title={t('Find in file')} aria-label={t('Find in file')} onClick={openSearch}><Codicon name="search" /></IconButton>
@@ -956,9 +956,8 @@ export function UnifiedDiffView({
         ) : (
           <span className="diff-change-count">{t(parsed.rows.some((row) => row.kind === 'meta') ? 'Metadata changes' : 'No changes')}</span>
         )}
-        <button
+        <Button variant="ghost" size="xs"
           type="button"
-          className="diff-toolbar-btn"
           disabled={changeRanges.length === 0}
           title={t('Previous change')}
           aria-label={t('Previous change')}
@@ -966,10 +965,9 @@ export function UnifiedDiffView({
         >
           <Codicon name="arrow-up" />
           <span>{t('Previous change')}</span>
-        </button>
-        <button
+        </Button>
+        <Button variant="ghost" size="xs"
           type="button"
-          className="diff-toolbar-btn"
           disabled={changeRanges.length === 0}
           title={t('Next change')}
           aria-label={t('Next change')}
@@ -977,7 +975,7 @@ export function UnifiedDiffView({
         >
           <Codicon name="arrow-down" />
           <span>{t('Next change')}</span>
-        </button>
+        </Button>
       </div>
     </div>
     <FileSearchWidget placeholder={t('Find in file')} query={searchQuery} isOpen={searchOpen} inputRef={searchInput} onChange={(query) => { setSearchQuery(query); setSearchIndex(0); }} onClose={closeSearch} count={{ current: searchMatches.length ? selectedSearchIndex + 1 : 0, total: searchMatches.length }} onNavigate={navigateSearch} />

@@ -1,0 +1,60 @@
+/* One action-button surface. Page classes may position buttons, but do not repaint them. */
+.vd-button[data-variant] {
+  --button-foreground: var(--versiondock-text);
+  --button-background: var(--versiondock-surface-alt);
+  --button-border: var(--versiondock-border);
+  --button-hover: var(--versiondock-hover);
+  box-sizing: border-box;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 6px;
+  min-height: calc(28px * var(--versiondock-ui-font-scale, 1));
+  padding: 3px 10px;
+  border: 1px solid var(--button-border);
+  border-radius: 4px;
+  background: var(--button-background);
+  color: var(--button-foreground);
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.vd-button[data-variant="primary"] {
+  --button-foreground: var(--vscode-button-foreground, #fff);
+  --button-background: var(--versiondock-accent-bg);
+  --button-border: transparent;
+  --button-hover: var(--vscode-button-hoverBackground);
+}
+.vd-button:is([data-variant="ghost"], [data-variant="link"]) {
+  --button-background: transparent;
+  --button-border: transparent;
+}
+.vd-button[data-variant="link"] { --button-foreground: var(--versiondock-accent); padding-inline: 4px; }
+.vd-button[data-danger] { --button-foreground: var(--versiondock-danger); --button-hover: color-mix(in srgb, var(--versiondock-danger) 14%, var(--versiondock-surface)); }
+.vd-button[data-danger][data-variant="primary"] {
+  --button-background: var(--versiondock-danger);
+  --button-foreground: #fff;
+  --button-hover: color-mix(in srgb, var(--versiondock-danger) 88%, var(--versiondock-text));
+}
+.vd-button[data-size="xs"] { min-height: calc(22px * var(--versiondock-ui-font-scale, 1)); padding: 1px 6px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); gap: 4px; }
+.vd-button[data-size="md"] { min-height: calc(32px * var(--versiondock-ui-font-scale, 1)); padding: 5px 14px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.vd-button[data-variant]:not(:disabled):is(:hover, :focus-visible) { color: var(--button-foreground); background: var(--button-hover); }
+.vd-button[data-variant="link"]:not(:disabled):is(:hover, :focus-visible) { text-decoration: underline; }
+.vd-button[data-variant="ghost"][aria-pressed="true"] { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); }
+.vd-button[data-variant]:not(:disabled):active { background: color-mix(in srgb, var(--button-hover) 80%, var(--button-foreground)); }
+.vd-button[data-variant]:focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
+.vd-button[data-variant]:disabled { opacity: .45; cursor: default; }
+.vd-button > .codicon, .vd-button-loading-label > .codicon { flex-shrink: 0; font-size: 13px; }
+.vd-button-loading-label { display: inline-flex; align-items: center; justify-content: center; gap: inherit; opacity: 0; }
+.vd-button > .vd-button-loader { position: absolute; left: calc(50% - 6.5px); top: calc(50% - 6.5px); }
+
+/* A split action owns one surface, including its native main Button. */
+.action-split > .vd-button[data-variant] { min-height: 0; background: transparent; color: inherit; border: 0; border-radius: 0; }
+.action-split > .vd-button[data-variant]:not(:disabled):is(:hover, :focus-visible, :active) { background: transparent; color: inherit; }
+.action-split > .vd-button[data-variant]:disabled { opacity: 1; }

@@ -316,7 +316,7 @@ input, textarea, select, [contenteditable="true"] {
 button, input, textarea, select { font: inherit; color: inherit; }
 button { border: 0; background: transparent; cursor: default; }
 button:not(:disabled) { cursor: pointer; transition: background-color .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
-button:not(:disabled):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+button:where(:not(.vd-button):not(.icon-button)):not(:disabled):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
 button:disabled { opacity: .45; cursor: default; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px solid var(--versiondock-accent); outline-offset: -1px; }
 input:not(:disabled), textarea:not(:disabled), select:not(:disabled) { transition: border-color .12s ease, box-shadow .12s ease, background-color .12s ease; }
@@ -1811,39 +1811,6 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
 }
 
-.settings-tag-add-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 6px;
-  border: 1px solid var(--versiondock-border);
-  background: var(--versiondock-surface);
-  color: var(--versiondock-text);
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.12s ease;
-  flex-shrink: 0;
-}
-
-.settings-tag-add-btn:hover:not(:disabled) {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-  color: var(--versiondock-accent);
-}
-
-.settings-tag-add-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.settings-tag-add-btn .codicon {
-  font-size: 12px;
-}
-
 /* Switch 现代滑动开关 (第一版经典质感) */
 .settings-switch {
   position: relative;
@@ -2143,33 +2110,6 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
   line-height: 1.45;
 }
 
-.settings-search-empty-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 14px;
-  margin-top: 6px;
-  border-radius: 6px;
-  background: var(--versiondock-surface);
-  border: 1px solid var(--versiondock-border);
-  color: var(--versiondock-text);
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.settings-search-empty-btn:hover {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-  color: var(--versiondock-accent);
-}
-
-.settings-search-empty-btn .codicon {
-  font-size: 11px;
-}
-
 .settings-scroll-spacer {
   height: 280px;
   flex-shrink: 0;
@@ -2253,53 +2193,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   margin-left: auto;
   flex-shrink: 0;
 }
-
-.vd-conflict-banner__action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 25px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
-}
-
-.vd-conflict-banner__action:hover {
-  transform: translateY(-1px);
-}
-
-.vd-conflict-banner__action:active {
-  transform: translateY(0);
-}
-
-.vd-conflict-banner__action--primary {
-  color: #ffffff;
-  background: var(--versiondock-accent-bg);
-  border: 1px solid transparent;
-}
-
-.vd-conflict-banner__action--primary:hover {
-  background: var(--versiondock-accent-bg);
-  box-shadow: 0 2px 7px color-mix(in srgb, var(--versiondock-accent-bg) 35%, transparent);
-}
-
-.vd-conflict-banner__action--danger {
-  color: #ffffff;
-  background: var(--versiondock-danger);
-  border: 1px solid transparent;
-}
-
-.vd-conflict-banner__action--danger:hover {
-  background: var(--versiondock-danger);
-  box-shadow: 0 2px 7px color-mix(in srgb, var(--versiondock-danger) 26%, transparent);
-}
 .changes-actions { height: 30px; display: flex; gap: 4px; padding: 3px 6px; border-bottom: 1px solid var(--versiondock-border-soft); }.changes-actions > span { flex: 1; }.changes-actions button { padding: 0 7px; display: flex; align-items: center; gap: 4px; }.changes-actions button:hover, .changes-actions button.selected { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); }
 .changes-scroll { flex: 1; overflow: auto; min-height: 0; }.repo-change-group { border-bottom: 1px solid var(--versiondock-border-soft); }.repo-heading { width: 100%; height: 30px; padding: 0 7px; display: flex; align-items: center; gap: 5px; text-align: left; }.repo-heading:hover { background: var(--versiondock-hover); }.repo-heading i { width: 7px; height: 7px; border-radius: 50%; }.repo-heading strong { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); letter-spacing: .5px; overflow: hidden; text-overflow: ellipsis; }.repo-heading .branch-chip { display: inline-flex; gap: 3px; padding: 1px 4px; border: 1px solid color-mix(in srgb, var(--versiondock-accent) 50%, transparent); color: var(--versiondock-accent); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.repo-heading > b { margin-left: auto; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .file-row { height: 27px; display: flex; align-items: center; padding: 0 7px 0 18px; gap: 5px; }.file-row:hover { background: var(--versiondock-hover); }.file-row input { width: 14px; height: 14px; accent-color: var(--versiondock-muted); margin: 0; }.file-row button { min-width: 0; flex: 1; height: 100%; padding: 0; display: flex; align-items: center; gap: 5px; text-align: left; }.file-row .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.file-row small { color: var(--versiondock-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.status-mark { width: 14px; text-align: center; font-weight: 600; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-file-status-color, var(--versiondock-text)); }.staged-dot { width: 5px; height: 5px; background: var(--versiondock-change-added); border-radius: 50%; }
@@ -2341,7 +2234,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .code-view code { counter-reset: line; }
 .code-view .line { display: inline-block; min-width: 100%; padding: 0 12px; }
 .code-view .line::before { counter-increment: line; content: counter(line); display: inline-block; width: 42px; margin-right: 12px; text-align: right; color: var(--versiondock-faint); user-select: none; }
-.merge-workspace header .primary { background: var(--versiondock-accent-bg); color: white; border-color: transparent; }
 .merge-toolbar { height: 34px; padding: 4px 8px; display: flex; gap: 5px; border-bottom: 1px solid var(--versiondock-border); }
 .merge-toolbar button { border: 1px solid var(--versiondock-border); padding: 0 8px; }
 .merge-columns { min-height: 0; flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; }
@@ -2877,10 +2769,6 @@ button.welcome-update-button {
 .toast-details-row { display: flex; align-items: center; padding-left: 5px; gap: 4px; }
 .toast-source { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-muted); }
 .toast .toast-actions { flex: 0 1 auto; min-width: 0; max-width: 100%; justify-content: flex-end; margin-top: 0; gap: 0; }
-.toast .toast-actions .notification-item-action-btn { height: auto; min-height: 28px; min-width: 0; max-width: calc(100% - 10px); margin: 4px 5px; padding: 4px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-size: var(--versiondock-ui-font-size, 13px); font-weight: 400; line-height: 18px; white-space: normal; overflow-wrap: anywhere; }
-.toast .toast-actions .notification-item-action-btn.secondary { border-color: var(--vscode-button-secondaryBorder); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-.toast .toast-actions .notification-item-action-btn:hover:not(:disabled), .toast .toast-actions .notification-item-action-btn:focus-visible { background: var(--vscode-button-hoverBackground); color: var(--vscode-button-foreground); box-shadow: none; }
-.toast .toast-actions .notification-item-action-btn.secondary:hover:not(:disabled), .toast .toast-actions .notification-item-action-btn.secondary:focus-visible { background: var(--vscode-button-secondaryHoverBackground, var(--versiondock-hover)); color: var(--vscode-button-secondaryForeground); }
 .notification-center-progress { display: block; width: 100%; height: 3px; margin-top: 8px; accent-color: var(--versiondock-accent); }
 .toast-close { flex: 0 0 22px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--versiondock-muted); border-radius: 4px; cursor: pointer; padding: 0; margin: 0 4px; opacity: 1; transition: background 0.1s ease, color 0.1s ease; }
 .toast-close:hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
@@ -3584,9 +3472,6 @@ button.conflict-action-item {
 .detail-loading { padding: 12px 8px; color: var(--versiondock-loading-foreground); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
 .detail-files > .detail-loading { padding: 8px; }
 .detail-loading.detail-error { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--versiondock-warning, #cca700); }
-.detail-retry-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 24px; background: var(--versiondock-button-secondary-bg, rgba(255, 255, 255, 0.08)); color: var(--versiondock-text); border: 1px solid var(--versiondock-border); border-radius: 2px; padding: 1px 6px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.4; cursor: pointer; }
-.detail-retry-button > .codicon { flex: 0 0 auto; font-size: inherit; line-height: 1; opacity: 1; }
-.detail-retry-button:hover { background: var(--versiondock-hover); }
 .no-merge-conflicts { padding: 8px 10px 7px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; text-align: center; opacity: 0.72; }
 .merge-parent-group { margin-top: 4px; border-top: 1px solid var(--versiondock-border-soft); }
 .merge-parent-row { width: 100%; min-height: 24px; height: 24px; display: flex; align-items: center; gap: 5px; padding: 2px 8px; text-align: left; background: transparent; border: none; cursor: pointer; user-select: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
@@ -4467,11 +4352,6 @@ button.danger:not(:disabled):hover,
 .diff-toolbar { height: 28px; min-height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; background: color-mix(in srgb, var(--versiondock-surface) 90%, var(--versiondock-bg)); border-bottom: 1px solid var(--versiondock-border-soft); user-select: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); gap: 6px; z-index: 2; }
 .diff-toolbar-left, .diff-toolbar-right { display: flex; align-items: center; gap: 4px; }
 .diff-view-mode-group { display: flex; align-items: center; gap: 2px; padding: 1px; border-radius: 4px; background: color-mix(in srgb, var(--versiondock-bg) 60%, var(--versiondock-surface)); border: 1px solid var(--versiondock-border-soft); }
-.diff-toolbar-btn { height: 20px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--versiondock-muted); cursor: pointer; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.diff-toolbar-btn:hover:not(:disabled) { background: var(--versiondock-hover); color: var(--versiondock-text); }
-.diff-toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.diff-toolbar-btn.active { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); font-weight: 500; }
-.diff-toolbar-btn .codicon { font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .diff-change-count { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); padding: 0 4px; }
 .unified-diff-scroll { min-width: 0; min-height: 0; flex: 1; overflow: auto; contain: strict; }
 .unified-diff-virtual { position: relative; width: 100%; min-width: 100%; }
@@ -5336,20 +5216,6 @@ button.danger:not(:disabled):hover,
 
 .notification-item > .notification-item-actions { grid-column: 1 / -1; justify-content: flex-end; gap: 0; margin-top: 0; }
 .notification-item .toast-details { margin: 6px 0 0; }
-.notification-item-action-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; margin: 4px 5px; padding: 4px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-size: var(--versiondock-ui-font-size, 13px); font-weight: 400; line-height: 18px; }
-.notification-item-action-btn.secondary { border-color: var(--vscode-button-secondaryBorder); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-.notification-center-popover button.notification-item-action-btn.secondary:hover:not(:disabled), .notification-center-popover button.notification-item-action-btn.secondary:focus-visible { background: var(--vscode-button-secondaryHoverBackground, var(--versiondock-hover)); color: var(--vscode-button-secondaryForeground); }
-
-.notification-item-action-btn:disabled { opacity: 0.55; cursor: default; }
-
-button.notification-item-action-btn:hover:not(:disabled),
-button.notification-item-action-btn:focus-visible {
-  border-color: var(--versiondock-accent);
-  background: var(--versiondock-accent-bg);
-  color: #ffffff;
-  box-shadow: 0 1px 5px color-mix(in srgb, var(--versiondock-accent) 22%, transparent);
-  opacity: 1;
-}
 
 .notification-item-dismiss {
   opacity: 1;
@@ -5559,25 +5425,6 @@ button.notification-item-action-btn:focus-visible {
   color: var(--versiondock-accent);
 }
 
-.about-action-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
-  color: var(--versiondock-accent);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.about-action-link:hover {
-  background: var(--versiondock-hover);
-  text-decoration: underline;
-}
-
-.about-action-link.copied {
-  color: var(--versiondock-success);
-}
-
 .update-simulation-panel .about-muted {
   margin: 0;
 }
@@ -5621,29 +5468,6 @@ button.notification-item-action-btn:focus-visible {
 .update-error-actions {
   display: flex;
   margin-left: 24px;
-}
-
-.about-inline-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
-  border-radius: 4px;
-  background: var(--versiondock-surface-alt);
-  border: 1px solid var(--versiondock-border);
-  color: var(--versiondock-text);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.about-inline-btn:hover {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-}
-
-.about-inline-btn:active {
-  transform: translateY(1px);
 }
 
 .update-available-box {
@@ -5753,36 +5577,6 @@ button.notification-item-action-btn:focus-visible {
   gap: 8px;
 }
 
-.about-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-}
-
-.about-btn.primary {
-  background: color-mix(in srgb, var(--versiondock-accent-bg) 85%, #000000);
-  color: #ffffff;
-}
-
-.about-btn.primary:is(:hover, :focus-visible):not(:disabled) {
-  background: color-mix(in srgb, var(--versiondock-accent-bg) 75%, #000000);
-  color: #ffffff;
-}
-
-.about-btn.secondary {
-  background: var(--versiondock-surface-alt);
-  color: var(--versiondock-text);
-  border: 1px solid var(--versiondock-border);
-}
-
-.about-btn.secondary:hover:not(:disabled) {
-  background: var(--versiondock-hover);
-}
-
 .author-details {
   display: flex;
   flex-direction: column;
@@ -5819,65 +5613,11 @@ button.notification-item-action-btn:focus-visible {
   text-decoration: underline;
 }
 
-.about-link-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: transparent;
-  border: none;
-  padding: 0;
-  color: var(--versiondock-accent);
-  cursor: pointer;
-  font-size: inherit;
-}
-
-.about-link-btn:hover {
-  text-decoration: underline;
-}
-
 .about-quick-links {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 4px;
-}
-
-.about-pill-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 14px;
-  background: var(--versiondock-surface-alt);
-  border: 1px solid var(--versiondock-border);
-  color: var(--versiondock-text);
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.about-pill-btn:hover {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-}
-
-.about-pill-btn:active {
-  transform: scale(0.97);
-}
-
-.about-pill-btn.sponsor {
-  color: var(--versiondock-sponsor-foreground);
-  border-color: color-mix(in srgb, var(--versiondock-sponsor-foreground) 40%, transparent);
-  background: color-mix(in srgb, var(--versiondock-sponsor-foreground) 5%, var(--versiondock-surface-alt));
-}
-
-.about-pill-btn.sponsor:is(:hover, :focus-visible) {
-  color: var(--versiondock-sponsor-foreground);
-  background: color-mix(in srgb, var(--versiondock-sponsor-foreground) 10%, var(--versiondock-surface-alt));
-}
-
-.about-pill-btn.sponsor:active {
-  transform: scale(0.97);
 }
 
 .diag-grid {
@@ -5997,54 +5737,6 @@ button.notification-item-action-btn:focus-visible {
   gap: 8px;
   margin-top: 10px;
   max-width: 100%;
-}
-
-.settings-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  border-radius: 4px;
-  background: var(--versiondock-surface-alt);
-  border: 1px solid var(--versiondock-border);
-  color: var(--versiondock-text);
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
-  user-select: none;
-}
-
-.settings-action-btn:hover {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-  color: var(--versiondock-text);
-}
-
-.settings-action-btn:active {
-  transform: scale(0.98);
-}
-
-.settings-action-btn.primary {
-  background: var(--versiondock-accent-bg);
-  border-color: color-mix(in srgb, var(--versiondock-accent) 40%, var(--versiondock-accent-bg));
-  color: #ffffff;
-}
-
-.settings-action-btn.primary:hover {
-  background: color-mix(in srgb, #ffffff 18%, var(--versiondock-accent-bg));
-  border-color: var(--versiondock-accent);
-  color: #ffffff;
-}
-
-.settings-action-btn.primary:active {
-  background: color-mix(in srgb, #000000 15%, var(--versiondock-accent-bg));
 }
 
 
@@ -6210,35 +5902,6 @@ button.notification-item-action-btn:focus-visible {
 
 .editor-input-with-browse input {
   flex: 1;
-}
-
-.editor-browse-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  border-radius: 4px;
-  background: var(--versiondock-surface);
-  border: 1px solid var(--versiondock-border);
-  color: var(--versiondock-text);
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: all 0.12s ease;
-  user-select: none;
-}
-
-.editor-browse-btn:hover {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-}
-
-.editor-browse-btn:active {
-  transform: scale(0.97);
 }
 
 .repo-open-changes { margin-left: auto; width: 24px; height: 22px; padding: 0; border: 0; background: transparent; }
@@ -6921,8 +6584,6 @@ button.notification-item-action-btn:focus-visible {
 .submodule-row:focus-within .submodule-row-actions { opacity: 1; pointer-events: auto; }
 .submodule-row-actions > button, .submodule-hover-actions > button { min-width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 5px; color: inherit; background: transparent; border: 0; border-radius: 3px; }
 .submodule-row-actions > button:hover, .submodule-hover-actions > button:hover { background: color-mix(in srgb, var(--versiondock-text) 12%, transparent); }
-.submodule-row-actions > button.primary { padding: 2px 8px; height: 22px; font-size: 11px; color: var(--versiondock-button-foreground, #fff); background: var(--versiondock-accent-bg); }
-.submodule-row-actions > button.primary.conflict { color: #000; background: var(--versiondock-warning); }
 .submodule-diff-summary { margin: 7px 0 0 21px; padding: 8px; max-height: 180px; overflow: auto; color: var(--versiondock-muted); background: var(--versiondock-bg); border: 1px solid var(--versiondock-border); border-radius: 4px; font: 11px/1.45 var(--versiondock-code); white-space: pre-wrap; }
 .sync-panel button:disabled:not(.action-split > button),
 .submodule-panel button:disabled { opacity: .45; cursor: default; }
@@ -7078,62 +6739,12 @@ button.notification-item-action-btn:focus-visible {
   gap: 6px;
 }
 
-.provider-add-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 5px;
-  border: 1px dashed var(--versiondock-border);
-  background: transparent;
-  color: var(--versiondock-text);
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 450;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  box-sizing: border-box;
-}
-
-.provider-add-btn:hover:not(:disabled) {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-  border-style: solid;
-}
-
-.provider-add-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .provider-sidebar-footer {
   padding: 6px 10px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   border-top: 1px solid var(--versiondock-border-soft);
-}
-
-.provider-cache-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 4px;
-  border: none;
-  background: transparent;
-  color: var(--versiondock-muted);
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.provider-cache-btn:hover {
-  background: var(--versiondock-hover);
-  color: var(--versiondock-text);
 }
 
 /* 右侧内容主视窗 */
@@ -7496,10 +7107,10 @@ button.notification-item-action-btn:focus-visible {
 .commit-panel {
   --vscode-toolbar-hoverBackground: color-mix(in srgb, var(--versiondock-text) 12%, transparent);
 }
-.commit-panel button:where(:not(.sync-direction-pill):not(.action-split > button):not(:disabled)):is(:hover, :focus-visible) {
+.commit-panel button:where(:not(.vd-button):not(.sync-direction-pill):not(.action-split > button):not(:disabled)):is(:hover, :focus-visible) {
   background: var(--panel-button-hover, var(--vscode-toolbar-hoverBackground, var(--versiondock-hover))) !important;
 }
-.commit-panel button:where(:not(.sync-primary-action):not(.sync-primary-more):not(.sync-direction-pill):not(.commit-tabs button):not(.split-button > button)):is(:hover, :focus-visible) {
+.commit-panel button:where(:not(.vd-button):not(.sync-primary-action):not(.sync-primary-more):not(.sync-direction-pill):not(.commit-tabs button):not(.split-button > button)):is(:hover, :focus-visible) {
   border-radius: 4px;
 }
 .commit-panel .repository-group-main,
@@ -7514,9 +7125,6 @@ button.notification-item-action-btn:focus-visible {
   border-radius: 0;
 }
 .commit-form textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--versiondock-muted)); opacity: 1; }
-.commit-panel button.primary {
-  --panel-button-hover: var(--vscode-button-hoverBackground);
-}
 .commit-panel button.danger { --panel-button-hover: color-mix(in srgb, var(--versiondock-danger) 80%, #fff 20%); }
 .repository-group-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; margin-left: auto; }
 
@@ -7992,15 +7600,17 @@ button.notification-item-action-btn:focus-visible {
 .clone-dialog-accounts .provider-account-card { flex: none; padding: 4px 8px; }
 .clone-dialog-accounts .provider-add-section { flex: none; }
 .provider-add-section.compact { flex-direction: row; padding: 6px 8px; gap: 4px; }
-.provider-add-section.compact .provider-add-btn {
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 4px;
-  border-style: solid;
-  font-size: 10px;
-}
-.provider-add-section.compact .provider-add-btn > .codicon { font-size: 12px; }
 
 .clone-new-window-option { margin-right: auto; color: var(--versiondock-muted); }
+
+.notification-item-action-btn {
+  margin: 4px 5px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: calc(100% - 10px);
+}
+
+.provider-add-btn {
+  width: 100%;
+  justify-content: flex-start;
+}

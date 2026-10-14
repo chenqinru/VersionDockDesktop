@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { useI18n } from '../i18n';
 import { isTaskActive, useTaskProgressStore } from '../progress/taskProgressStore';
 import { TaskProgressBar } from './StatusBar/TaskProgressBar';
@@ -11,7 +12,7 @@ export function RepositoryTaskProgress({ operationId }: { operationId?: string }
   return <div className="repository-task-progress" aria-live="polite">
     <span>{t(task.message || 'Processing')}</span>
     <TaskProgressBar completed={task.completed} total={task.total} active />
-    <button type="button" disabled={!task.cancellable || task.status === 'cancelling'} onClick={() => void cancel(task.id)}>{t(task.status === 'cancelling' ? 'Cancelling…' : 'Cancel Operation')}</button>
+    <Button variant="ghost" size="xs" type="button" disabled={!task.cancellable || task.status === 'cancelling'} onClick={() => void cancel(task.id)}>{t(task.status === 'cancelling' ? 'Cancelling…' : 'Cancel Operation')}</Button>
     {task.cancelError && <small className="dialog-error">{task.cancelError}</small>}
   </div>;
 }

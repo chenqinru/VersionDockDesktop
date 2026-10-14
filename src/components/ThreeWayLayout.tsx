@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { scrollToPosition } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { resolveShikiTheme } from '../theme';
@@ -837,9 +838,9 @@ function MergeCompletionNotice({ onApply }: { onApply: () => void }) {
       <Codicon name="check" style={styles.completionNoticeIcon} />
       <div style={styles.completionNoticeContent}>
         <strong style={styles.completionNoticeTitle}>{t('All conflicts resolved')}</strong>
-        <button type="button" className="versiondock-merge-complete-action" style={styles.completionNoticeAction} onClick={onApply}>
+        <Button variant="primary" type="button" onClick={onApply}>
           {t('Apply changes and complete the merge')}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1542,18 +1543,6 @@ const styles = {
   completionNoticeIcon: { marginTop: 1, flexShrink: 0, fontSize: 15, color: 'var(--vscode-testing-iconPassed, var(--vscode-gitDecoration-addedResourceForeground))' },
   completionNoticeContent: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 } as React.CSSProperties,
   completionNoticeTitle: { fontSize: 12, lineHeight: '16px', whiteSpace: 'nowrap' as const },
-  completionNoticeAction: {
-    width: 'fit-content',
-    margin: 0,
-    padding: 0,
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--vscode-textLink-foreground)',
-    fontFamily: 'var(--vscode-font-family)',
-    fontSize: 12,
-    lineHeight: '16px',
-    cursor: 'pointer',
-  } as React.CSSProperties,
   blockActionBar: {
     position: 'sticky',
     top: 29,

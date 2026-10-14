@@ -1,3 +1,4 @@
+import { Button } from '../Button';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RepositoryStatus } from '../../bindings/generated';
@@ -40,6 +41,6 @@ export function ProfileStatusTooltip({ data, repo, repositories, anchor, onManag
         {match && <em> ({t(match.primary ? 'Current Project ({0})' : 'Linked Remote ({0})', match.remote.name)})</em>}{accounts.length > 0 && <Codicon name="check" />}</div>;
     })}</div>
     {repositories.length > 1 && <p>{t('Multi-repository workspace ({0} repos) · Current: {1}', repositories.length, repo?.meta.name ?? '')}</p>}
-    <button type="button" className="profile-tooltip-manage" onClick={onManage}><Codicon name="settings-gear" />{t('Click to manage accounts and identities')}</button>
+    <Button type="button" className="profile-tooltip-manage" onClick={onManage}><Codicon name="settings-gear" />{t('Click to manage accounts and identities')}</Button>
   </div>, document.body);
 }

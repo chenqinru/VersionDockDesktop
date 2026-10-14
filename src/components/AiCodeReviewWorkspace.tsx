@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { WorkspaceHeader } from './WorkspaceHeader';
 import { Codicon } from './Codicon';
@@ -16,14 +17,7 @@ type ViewState = 'running' | 'completed' | 'cancelled' | 'error';
 
 const css = `
   .review-shell { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--versiondock-bg); }
-  .review-actions { display: flex; align-items: center; gap: 8px; }
-  .review-action { position: relative; isolation: isolate; overflow: hidden; height: 28px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border: none; border-radius: 6px; cursor: pointer; background: linear-gradient(125deg,#7657ff,#2f8fff); color: #fff; font-size: 12px; font-weight: 600; box-shadow: none; transition: filter 140ms ease,transform 140ms ease; }
-  .review-action > * { position: relative; z-index: 2; }
-  .review-action::after { content: ''; position: absolute; pointer-events: none; opacity: 0; z-index: 1; top: -55%; left: -28%; width: 10%; height: 210%; background: linear-gradient(90deg,transparent,rgba(255,255,255,.96),transparent); box-shadow: 0 0 5px rgba(222,239,255,.7); }
-  .review-action:hover { filter: brightness(1.08); transform: translateY(-1px); }
-  .review-action:hover::after { animation: review-button-sweep 880ms cubic-bezier(.22,.7,.22,1) both; }
-  .review-action:active { filter: brightness(.98); transform: translateY(0); }
-  .review-action:focus-visible,.finding-location:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+  .finding-location:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
   .review-notice { position: relative; min-height: 35px; display: flex; align-items: center; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--vscode-panel-border); background: color-mix(in srgb,#6d63ff 5%,var(--vscode-editor-background)); overflow: hidden; flex-shrink: 0; font-size: 12px; }
   .review-notice[data-active='true']::after { content: ''; position: absolute; left: 0; bottom: 0; width: 26%; height: 1px; background: linear-gradient(90deg,transparent,#7c5cff,#2f9bff,transparent); animation: review-status-scan 1.7s ease-in-out infinite; }
   .notice-icon { color: #6f73ff; flex-shrink: 0; }
@@ -72,15 +66,13 @@ const css = `
   .empty h2,.error-state h2 { margin: 12px 0 8px; font-size: 18px; }
   .empty p,.error-state p { margin: 0; color: var(--vscode-descriptionForeground); line-height: 1.6; }
   @keyframes review-status-scan { from { transform:translateX(-110%); } to { transform:translateX(410%); } }
-  @keyframes review-button-sweep { 0% { transform:translate3d(0,0,0) skewX(-22deg); opacity:0; } 22% { opacity:.35; } 48% { opacity:1; } 100% { transform:translate3d(1550%,0,0) skewX(-22deg); opacity:0; } }
   @keyframes review-line { 0%,100% { opacity:.25; transform:scaleX(.72); } 50% { opacity:1; transform:scaleX(1); } }
   @keyframes review-enter { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:translateY(0); } }
   @keyframes review-cursor { 0%,48% { opacity:1; } 49%,100% { opacity:0; } }
-  @media (max-width: 650px) { .review-notice { padding-inline:14px; } .review-workspace { padding-inline:16px; } .review-action span,.notice-provider { display:none; } .finding-grid { grid-template-columns:1fr; gap:4px; } .finding-key { margin-top:6px; } .stage-label { display:none; } }
+  @media (max-width: 650px) { .review-notice { padding-inline:14px; } .review-workspace { padding-inline:16px; } .notice-provider { display:none; } .finding-grid { grid-template-columns:1fr; gap:4px; } .finding-key { margin-top:6px; } .stage-label { display:none; } }
   @media (prefers-reduced-motion: reduce) {
-    .review-action,.stage-dot { transition:none !important; }
-    .review-action:hover { transform:none; }
-    .review-action:hover::after,.summary,.finding { animation:none !important; }
+    .stage-dot { transition:none !important; }
+    .summary,.finding { animation:none !important; }
   }
 `;
 
@@ -195,10 +187,10 @@ export function AiCodeReviewWorkspace() {
     <main className="review-shell" data-running={running ? 'true' : 'false'}>
       <WorkspaceHeader backLabel={t('Back')} onBack={() => send({ type: 'CODE_REVIEW_CLOSE' })} actions={
         <div className="review-actions">
-          <button className="review-action" onClick={action}>
+          <Button variant="primary" size="xs" onClick={action}>
             <Codicon name={running ? 'stop-circle' : 'refresh'} />
             <span>{running ? t('Stop') : t('Review again')}</span>
-          </button>
+          </Button>
         </div>
       }>
         <div className="workspace-page-heading">

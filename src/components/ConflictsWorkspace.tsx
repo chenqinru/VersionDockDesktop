@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { changeStatusColor } from '../theme/changeStatus';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -517,29 +518,16 @@ export function ConflictsWorkspace() {
           flexShrink: 0,
         }}
       >
-        <button
+        <Button
           type="button"
           className="diff-back-button"
           onClick={backToHistory}
           title={t('Back to history')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            height: 27,
-            padding: '0 8px',
-            border: '1px solid var(--vscode-panel-border, var(--versiondock-border))',
-            borderRadius: 3,
-            background: 'transparent',
-            color: 'var(--vscode-foreground)',
-            cursor: 'pointer',
-            fontSize: 12,
-            flexShrink: 0,
-          }}
+          style={{ flexShrink: 0 }}
         >
           <Codicon name="arrow-left" />
           <span>{t('Back to history')}</span>
-        </button>
+        </Button>
         <Codicon name="warning" style={{ color: 'var(--vscode-editorWarning-foreground, #cca700)' }} />
         <span style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {t('Conflicts')}
@@ -610,95 +598,42 @@ export function ConflictsWorkspace() {
                 {continueDetail}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
-                <button
+                <Button variant="primary"
                   type="button"
                   className="conflicts-continue-btn"
                   onClick={() => void handleContinueClick()}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    height: 30,
-                    padding: '0 14px',
-                    borderRadius: 3,
-                    border: 'none',
-                    background: 'var(--vscode-button-background, #0078d4)',
-                    color: 'var(--vscode-button-foreground, #ffffff)',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                    fontWeight: 500,
-                  }}
                 >
                   <Codicon name="play" />
                   <span>{continueLabel}</span>
-                </button>
+                </Button>
                 {abortTargets.length > 0 && (
-                  <button
+                  <Button danger
                     type="button"
                     className="conflicts-abort-btn"
                     onClick={() => void handleAbortClick()}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      height: 30,
-                      padding: '0 12px',
-                      borderRadius: 3,
-                      border: '1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border, #454545))',
-                      background: 'var(--vscode-button-secondaryBackground, #3a3d41)',
-                      color: 'var(--vscode-button-secondaryForeground, #ffffff)',
-                      cursor: 'pointer',
-                      fontSize: 13,
-                    }}
                   >
                     <Codicon name="close" />
                     <span>{abortLabel}</span>
-                  </button>
+                  </Button>
                 )}
-                <button
+                <Button
                   type="button"
                   onClick={backToHistory}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    height: 30,
-                    padding: '0 12px',
-                    borderRadius: 3,
-                    border: '1px solid var(--vscode-panel-border, #333)',
-                    background: 'transparent',
-                    color: 'var(--vscode-foreground)',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                  }}
                 >
                   <Codicon name="arrow-left" />
                   <span>{t('Back to history')}</span>
-                </button>
+                </Button>
               </div>
             </>
           ) : (
-            <button
+            <Button
               type="button"
               onClick={backToHistory}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 30,
-                padding: '0 14px',
-                borderRadius: 3,
-                border: '1px solid var(--vscode-panel-border, #333)',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                cursor: 'pointer',
-                fontSize: 13,
-                marginTop: 4,
-              }}
+              style={{ marginTop: 4 }}
             >
               <Codicon name="arrow-left" />
               <span>{t('Back to history')}</span>
-            </button>
+            </Button>
           )}
         </div>
       ) : (
@@ -740,57 +675,27 @@ export function ConflictsWorkspace() {
           </div>
           {/* 右侧动作按钮栏 */}
           <div className="conflicts-actions-column" style={{ width: 132, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderLeft: '1px solid var(--vscode-panel-border)' }}>
-            <button
+            <Button
               type="button"
               disabled={!hasSelection}
               onClick={() => void accept('mine')}
-              style={{
-                padding: '5px 10px',
-                border: '1px solid var(--vscode-button-border, transparent)',
-                borderRadius: 3,
-                background: 'var(--vscode-button-secondaryBackground, #3a3d41)',
-                color: 'var(--vscode-button-secondaryForeground, #ffffff)',
-                opacity: !hasSelection ? 0.45 : 1,
-                cursor: !hasSelection ? 'default' : 'pointer',
-                fontSize: 12,
-              }}
             >
               {t('Accept Current')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               disabled={!hasSelection}
               onClick={() => void accept('theirs')}
-              style={{
-                padding: '5px 10px',
-                border: '1px solid var(--vscode-button-border, transparent)',
-                borderRadius: 3,
-                background: 'var(--vscode-button-secondaryBackground, #3a3d41)',
-                color: 'var(--vscode-button-secondaryForeground, #ffffff)',
-                opacity: !hasSelection ? 0.45 : 1,
-                cursor: !hasSelection ? 'default' : 'pointer',
-                fontSize: 12,
-              }}
             >
               {t('Accept Incoming')}
-            </button>
-            <button
+            </Button>
+            <Button variant="primary"
               type="button"
               disabled={!canMergeSelected}
               onClick={() => selectedFiles[0] && openMergeEditor(selectedFiles[0])}
-              style={{
-                padding: '5px 10px',
-                border: '1px solid var(--vscode-button-border, transparent)',
-                borderRadius: 3,
-                background: canMergeSelected ? 'var(--vscode-button-background, #0e639c)' : 'var(--vscode-button-secondaryBackground, #3a3d41)',
-                color: canMergeSelected ? 'var(--vscode-button-foreground, #ffffff)' : 'var(--vscode-button-secondaryForeground, #ffffff)',
-                opacity: !canMergeSelected ? 0.45 : 1,
-                cursor: !canMergeSelected ? 'default' : 'pointer',
-                fontSize: 12,
-              }}
             >
               {t('Merge')}...
-            </button>
+            </Button>
           </div>
         </div>
       )}

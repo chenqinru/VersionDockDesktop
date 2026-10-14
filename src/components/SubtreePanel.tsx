@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { IconButton } from './IconButton';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -376,14 +377,14 @@ function RepoSection({
       )}
       {!multiRepo && (
         <div style={css.singleRepoActions}>
-          <button data-secondary-action-btn="" style={css.actionBtn} onClick={() => onAdd?.(meta.id)}>
+          <Button data-secondary-action-btn="" onClick={() => onAdd?.(meta.id)}>
             <Codicon name="add" style={{ marginRight: '4px', fontSize: '12px' }} />
             {t('Add Subtree')}
-          </button>
-          <button data-secondary-action-btn="" style={css.actionBtn} onClick={() => onRegister?.(meta.id)}>
+          </Button>
+          <Button data-secondary-action-btn="" onClick={() => onRegister?.(meta.id)}>
             <Codicon name="list-tree" style={{ marginRight: '4px', fontSize: '12px' }} />
             {t('Register Existing')}
-          </button>
+          </Button>
         </div>
       )}
       </RepositoryGroup>
@@ -721,17 +722,6 @@ const css = {
     gap: '4px',
     padding: '6px 8px',
     borderTop: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))',
-  } as React.CSSProperties,
-  actionBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    fontSize: '11px',
-    background: 'var(--vscode-button-secondaryBackground, var(--versiondock-surface-alt))',
-    color: 'var(--vscode-button-secondaryForeground, var(--versiondock-text))',
-    border: 'none',
-    borderRadius: '3px',
-    padding: '3px 8px',
-    cursor: 'pointer',
   } as React.CSSProperties,
   empty: {
     padding: '16px 12px',

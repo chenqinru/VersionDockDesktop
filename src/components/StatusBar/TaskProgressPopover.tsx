@@ -1,3 +1,4 @@
+import { Button } from '../Button';
 import { scrollbarContains } from '../../scrollbars/ownership';
 import { createPortal } from 'react-dom';
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
@@ -80,7 +81,7 @@ export function TaskProgressPopover({ anchorRef, currentWorkspaceId, onClose }: 
     </li>)}</ul>}
     {task.error && <pre className="task-progress-error selectable-text">{t(task.error)}</pre>}
     {task.cancelError && <p role="alert" className="task-progress-error">{t(task.cancelError)}</p>}
-    {['failed', 'partial', 'timedOut'].includes(task.status) && <button type="button" className="task-progress-log" onClick={() => { onClose(); openLog(true); }}>{t('View Log')}</button>}
+    {['failed', 'partial', 'timedOut'].includes(task.status) && <Button type="button" className="task-progress-log" onClick={() => { onClose(); openLog(true); }}>{t('View Log')}</Button>}
   </article>;
 
   return createPortal(<div ref={panelRef} className="task-progress-popover" role="dialog" tabIndex={-1} aria-label={t('Task progress')}

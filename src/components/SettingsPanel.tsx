@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { DialogSurface } from './DialogSurface';
@@ -618,7 +619,7 @@ export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelPro
                 {selectedCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="account" title={t('Accounts and privacy')}>
                   {profileStatusBarVisible && <SettingsCard title={t('Status bar')}><SettingToggle setting="showProfileStatusBar" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
                     checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} /></SettingsCard>}
-                  <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub, GitLab, and Gitee accounts')}</button></SettingsCard>
+                  <SettingsCard title={t('Remote provider accounts')}><Button type="button" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub, GitLab, and Gitee accounts')}</Button></SettingsCard>
                   <SettingsCard title={t('Author avatars')}>
                     <SettingToggle setting="onlineAvatarsEnabled" label={t('Online author avatars')} description={t('Resolve remote provider addresses to author avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false, avatarCrossPlatformFallback: false } : {}) })} />
                     <SettingToggle setting="avatarCrossPlatformFallback" label={t('Search other connected platforms')} description={t('Try other connected platforms when this repository has no matching author avatar.')} disabled={!settings?.onlineAvatarsEnabled} checked={settings?.avatarCrossPlatformFallback ?? false} onChange={(value) => void updateSettings({ avatarCrossPlatformFallback: value })} />
@@ -668,29 +669,26 @@ export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelPro
                       </div>
 
                       <div className="settings-about-actions">
-                        <button
+                        <Button variant="primary"
                           type="button"
-                          className="settings-action-btn primary"
                           onClick={() => {
                             openAbout('about');
                           }}
                         >
                           <Codicon name="info" />
                           <span>{t('About VersionDock & Check Updates')}</span>
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="settings-action-btn"
                           onClick={() => {
                             openAbout('changelog');
                           }}
                         >
                           <Codicon name="history" />
                           <span>{t('View Release Notes')}</span>
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="settings-action-btn"
                           onClick={() => {
                             onClose();
                             useAppStore.getState().setLogPanelOpen(true);
@@ -698,15 +696,14 @@ export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelPro
                         >
                           <Codicon name="output" />
                           <span>{t('View Output & Logs')}</span>
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="settings-action-btn"
                           onClick={() => void useAppStore.getState().openLogFolder()}
                         >
                           <Codicon name="folder-opened" />
                           <span>{t('Open Log Folder')}</span>
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </SettingsSection>
@@ -901,7 +898,7 @@ function IgnoredFoldersSetting({
               }}
             />
           </div>
-          <button
+          <Button
             type="button"
             className="settings-tag-add-btn"
             disabled={!inputValue.trim()}
@@ -909,7 +906,7 @@ function IgnoredFoldersSetting({
           >
             <Codicon name="add" />
             <span>{t('Add')}</span>
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -989,7 +986,7 @@ function SettingProtectedBranches({
               }}
             />
           </div>
-          <button
+          <Button
             type="button"
             className="settings-tag-add-btn"
             disabled={!inputValue.trim()}
@@ -997,7 +994,7 @@ function SettingProtectedBranches({
           >
             <Codicon name="add" />
             <span>{t('Add branch pattern')}</span>
-          </button>
+          </Button>
 
         </div>
       </div>
@@ -1238,15 +1235,14 @@ function ExternalEditorSettings({
                   placeholder={t('e.g. zed, nvim, or choose application')}
                   autoFocus
                 />
-                <button
+                <Button
                   type="button"
-                  className="editor-browse-btn"
                   title={t('Browse application path')}
                   onClick={() => void handleBrowse()}
                 >
                   <Codicon name="folder-opened" />
                   <span>{t('Browse...')}</span>
-                </button>
+                </Button>
               </div>
             </label>
           </div>
@@ -1889,20 +1885,18 @@ function SearchResults({
           <small>{t('View application details, version information and release notes.')}</small>
         </span>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button
+          <Button
             type="button"
-            className="settings-action-btn"
             onClick={() => openAbout('about')}
           >
             {t('About VersionDock & Check Updates')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="settings-action-btn secondary"
             onClick={() => openAbout('changelog')}
           >
             {t('View Release Notes')}
-          </button>
+          </Button>
         </div>
       </div>,
     );
@@ -1967,14 +1961,14 @@ function SearchResults({
             {t('Try searching with another keyword or check for typos.')}
           </p>
           {onClearSearch && (
-            <button
+            <Button
               type="button"
               className="settings-search-empty-btn"
               onClick={onClearSearch}
             >
               <Codicon name="close" />
               <span>{t('Clear search')}</span>
-            </button>
+            </Button>
           )}
         </div>
       ) : (

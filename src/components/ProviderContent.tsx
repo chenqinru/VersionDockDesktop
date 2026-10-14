@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { RepositoryTaskProgress } from './RepositoryTaskProgress';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -581,7 +582,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
 
             {/* 添加平台入口按钮组 */}
             <div className={`provider-add-section ${compactAccountActions ? 'compact' : ''}`}>
-              <button
+              <Button
                 type="button"
                 className="provider-add-btn"
                 aria-label={t('Add GitHub Account')}
@@ -600,9 +601,9 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
               >
                 <Codicon name="github" />
                 <span>{compactAccountActions ? 'GitHub' : t('Add GitHub Account')}</span>
-              </button>
+              </Button>
 
-              <button
+              <Button
                 type="button"
                 className="provider-add-btn"
                 aria-label={t('Add GitLab Account')}
@@ -618,9 +619,9 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
               >
                 <Codicon name="key" />
                 <span>{compactAccountActions ? 'GitLab' : t('Add GitLab Account')}</span>
-              </button>
+              </Button>
 
-              <button
+              <Button
                 type="button"
                 className="provider-add-btn"
                 aria-label={t('Add Gitee Account')}
@@ -635,21 +636,20 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
               >
                 <Codicon name="cloud" />
                 <span>{compactAccountActions ? 'Gitee' : t('Add Gitee Account')}</span>
-              </button>
+              </Button>
             </div>
 
             {/* 侧边栏底部操作 */}
             <div className="provider-sidebar-footer">
-              <button
+              <Button
                 type="button"
-                className="provider-cache-btn"
                 disabled={busy}
                 onClick={clearAvatarCache}
                 title={t('Purge cached avatars and force reload')}
               >
                 <Codicon name={cacheCleared ? 'check' : 'trash'} />
                 <span>{cacheCleared ? t('Avatar cache cleared') : t('Clear Avatar Cache')}</span>
-              </button>
+              </Button>
             </div>
           </aside>
 
@@ -719,46 +719,41 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                           {t('Are you sure you want to disconnect account {0}?', selectedAccount.login)}
                         </div>
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <button
+                          <Button
                             type="button"
-                            className="settings-action-btn"
-                            style={{ background: 'var(--versiondock-danger)', color: '#fff', borderColor: 'var(--versiondock-danger)' }}
+                            style={{ borderColor: 'var(--versiondock-danger)' }}
                             onClick={() => void removeAccount(selectedAccount.id)}
                           >
                             {t('Disconnect Account')}
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="settings-action-btn"
                             onClick={() => setConfirmRemoveId(null)}
                           >
                             {t('Cancel')}
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     ) : (
                       <div className="provider-detail-actions">
-                        <button
+                        <Button
                           type="button"
-                          className="settings-action-btn"
                           disabled={busy || retryingAccountId !== null}
                           onClick={() => void retryAccess(selectedAccount.id)}
                         >
                           <Codicon name="key" />
                           <span>{t('Retry secure storage access')}</span>
-                        </button>
-                        <button
+                        </Button>
+                        <Button variant="primary"
                           type="button"
-                          className="settings-action-btn primary"
                           onClick={() => void openUrl(getProfileUrl(selectedAccount))}
                         >
                           <Codicon name="globe" />
                           <span>{t('Open Profile')}</span>
-                        </button>
+                        </Button>
 
-                        <button
+                        <Button
                           type="button"
-                          className="settings-action-btn"
                           onClick={() => {
                             if (selectedAccount.provider === 'github') {
                               setEditingAccountId(selectedAccount.id);
@@ -783,16 +778,15 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         >
                           <Codicon name="refresh" />
                           <span>{t('Reauthenticate')}</span>
-                        </button>
+                        </Button>
 
-                        <button
+                        <Button danger
                           type="button"
-                          className="settings-action-btn danger"
                           onClick={() => setConfirmRemoveId(selectedAccount.id)}
                         >
                           <Codicon name="trash" />
                           <span>{t('Disconnect Account')}</span>
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -807,19 +801,17 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                     </div>
 
                     <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-                      <button
+                      <Button variant="primary"
                         type="button"
-                        className="settings-action-btn primary"
-                        style={{ fontSize: '11px', padding: '0 8px', height: 24 }}
+
                         disabled
                       >
                         <Codicon name="github" />
                         <span>{t('Device Authorization (OAuth)')}</span>
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="settings-action-btn"
-                        style={{ fontSize: '11px', padding: '0 8px', height: 24 }}
+
                         onClick={() => {
                           cancelGithubAuth();
                           setGhPat('');
@@ -829,7 +821,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                       >
                         <Codicon name="key" />
                         <span>{t('Personal Access Token (PAT)')}</span>
-                      </button>
+                      </Button>
                     </div>
 
                     <div className="provider-field-hint">
@@ -839,14 +831,13 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                     {flow && (
                       <div className="provider-device-code-box">
                         <span className="provider-device-code">{flow.userCode}</span>
-                        <button
+                        <Button
                           type="button"
-                          className="settings-action-btn"
                           onClick={() => void handleCopyCode()}
                         >
                           <Codicon name={copiedCode ? 'check' : 'copy'} />
                           <span>{copiedCode ? t('Copied') : t('Copy Code')}</span>
-                        </button>
+                        </Button>
                       </div>
                     )}
 
@@ -857,22 +848,20 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
 
                     <div className="provider-form-actions">
                       {flow?.verificationUri && (
-                        <button
+                        <Button variant="primary"
                           type="button"
-                          className="settings-action-btn primary"
                           onClick={() => void openUrl(flow.verificationUri)}
                         >
                           <Codicon name="link-external" />
                           <span>{t('Open Verification Page')}</span>
-                        </button>
+                        </Button>
                       )}
-                      <button
+                      <Button
                         type="button"
-                        className="settings-action-btn"
                         onClick={cancelGithubAuth}
                       >
                         {t('Cancel')}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -887,10 +876,9 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
 
                     {isGithubDeviceFlowAvailable && (
                       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-                        <button
+                        <Button
                           type="button"
-                          className="settings-action-btn"
-                          style={{ fontSize: '11px', padding: '0 8px', height: 24 }}
+
                           onClick={() => {
                             setEditingAccountId(editingAccountId);
                             void startGithubAuth(editingAccountId);
@@ -898,16 +886,15 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         >
                           <Codicon name="github" />
                           <span>{t('Device Authorization (OAuth)')}</span>
-                        </button>
-                        <button
+                        </Button>
+                        <Button variant="primary"
                           type="button"
-                          className="settings-action-btn primary"
-                          style={{ fontSize: '11px', padding: '0 8px', height: 24 }}
+
                           disabled
                         >
                           <Codicon name="key" />
                           <span>{t('Personal Access Token (PAT)')}</span>
-                        </button>
+                        </Button>
                       </div>
                     )}
 
@@ -959,19 +946,17 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                     </div>
 
                     <div className="provider-form-actions">
-                      <button
+                      <Button variant="primary"
                         type="button"
-                        className="settings-action-btn primary"
                         disabled={!ghPat.trim() || busy}
                         onClick={() => void saveGithubToken()}
                       >
                         {busy ? <Codicon name="loading codicon-modifier-spin" /> : <Codicon name="check" />}
                         <span>{t('Connect')}</span>
-                      </button>
+                      </Button>
 
-                      <button
+                      <Button
                         type="button"
-                        className="settings-action-btn"
                         onClick={() => {
                           setGhPat('');
                           setEditingAccountId(undefined);
@@ -981,11 +966,10 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         }}
                       >
                         {t('Cancel')}
-                      </button>
+                      </Button>
 
-                      <button
+                      <Button
                         type="button"
-                        className="settings-action-btn"
                         style={{ marginLeft: 'auto' }}
                         onClick={() =>
                           void openUrl(
@@ -995,7 +979,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                       >
                         <Codicon name="link-external" />
                         <span>{t('Create Token')}</span>
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1046,19 +1030,17 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                     </div>
 
                     <div className="provider-form-actions">
-                      <button
+                      <Button variant="primary"
                         type="button"
-                        className="settings-action-btn primary"
                         disabled={!glPat.trim() || busy}
                         onClick={() => void saveGitlab()}
                       >
                         {busy ? <Codicon name="loading codicon-modifier-spin" /> : <Codicon name="check" />}
                         <span>{t('Connect')}</span>
-                      </button>
+                      </Button>
 
-                      <button
+                      <Button
                         type="button"
-                        className="settings-action-btn"
                         onClick={() => {
                           setGlPat('');
                           authController.current?.abort();
@@ -1067,17 +1049,16 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         }}
                       >
                         {t('Cancel')}
-                      </button>
+                      </Button>
 
-                      <button
+                      <Button
                         type="button"
-                        className="settings-action-btn"
                         style={{ marginLeft: 'auto' }}
                         onClick={() => void openUrl(`${glHost.replace(/\/$/, '')}/-/user_settings/personal_access_tokens`)}
                       >
                         <Codicon name="link-external" />
                         <span>{t('Create Token')}</span>
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1115,19 +1096,17 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                     </div>
 
                     <div className="provider-form-actions">
-                      <button
+                      <Button variant="primary"
                         type="button"
-                        className="settings-action-btn primary"
                         disabled={!gtPat.trim() || busy}
                         onClick={() => void saveGitee()}
                       >
                         {busy ? <Codicon name="loading codicon-modifier-spin" /> : <Codicon name="check" />}
                         <span>{t('Connect')}</span>
-                      </button>
+                      </Button>
 
-                      <button
+                      <Button
                         type="button"
-                        className="settings-action-btn"
                         onClick={() => {
                           setGtPat('');
                           authController.current?.abort();
@@ -1136,17 +1115,16 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         }}
                       >
                         {t('Cancel')}
-                      </button>
+                      </Button>
 
-                      <button
+                      <Button
                         type="button"
-                        className="settings-action-btn"
                         style={{ marginLeft: 'auto' }}
                         onClick={() => void openUrl('https://gitee.com/profile/personal_access_tokens')}
                       >
                         <Codicon name="link-external" />
                         <span>{t('Create Token')}</span>
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1168,15 +1146,14 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                       }}
                     />
                   </div>
-                  <button
+                  <Button
                     type="button"
-                    className="settings-action-btn"
                     onClick={searchRepositories}
                     disabled={repositoriesLoading}
                   >
                     <Codicon name={repositoriesLoading ? 'loading codicon-modifier-spin' : 'refresh'} />
                     <span>{t('Search')}</span>
-                  </button>
+                  </Button>
                 </div>
 
                 <div className="provider-repo-list">
@@ -1209,15 +1186,14 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
 
                 {hasMore && (
                   <div style={{ marginTop: 10, textAlign: 'center' }}>
-                    <button
+                    <Button
                       type="button"
-                      className="settings-action-btn"
                       disabled={repositoriesLoading}
                       onClick={() => void loadRepositories(page + 1, true)}
                     >
                       {repositoriesLoading ? <Codicon name="loading codicon-modifier-spin" /> : null}
                       <span>{t('Load more')}</span>
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -1292,19 +1268,18 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                 </label>
 
                 <div className="provider-form-actions">
-                  <button
+                  <Button variant="primary"
                     type="button"
-                    className="settings-action-btn primary"
                     disabled={busy || !preflightReady || publishUncertain || Boolean(publishPreflightError) || !selectedAccountId || namespacesLoading || namespaceAccountId !== selectedAccountId || !namespace || !/^[A-Za-z0-9._-]+$/.test(publishName.trim()) || Boolean(publishResult?.remoteCreated)}
                     onClick={() => void handlePublish()}
                   >
                     {busy ? <Codicon name="loading codicon-modifier-spin" /> : <Codicon name="cloud-upload" />}
                     <span>{t('Publish')}</span>
-                  </button>
+                  </Button>
 
-                  <button type="button" className="settings-action-btn" disabled={busy} onClick={close}>
+                  <Button type="button" disabled={busy} onClick={close}>
                     {t('Cancel')}
-                  </button>
+                  </Button>
                 </div>
 
                 </fieldset>

@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { AiExplanation } from './AiExplanation';
 import { IconButton } from './IconButton';
@@ -621,9 +622,9 @@ function MergeParentChangeGroup({
           {!loading && error && (
             <div className="detail-loading detail-error">
               <span>{t('Failed to load files')}</span>
-              <button type="button" className="detail-retry-button" onClick={retry}>
+              <Button type="button" className="detail-retry-button" onClick={retry}>
                 {t('Retry')}
-              </button>
+              </Button>
             </div>
           )}
           {!loading && !error && files && files.length === 0 && <div className="detail-loading">{t('No changed files')}</div>}
@@ -841,9 +842,9 @@ function ExtendedCommitSummary({
                     </div>
                     <div className="detail-loading detail-error">
                       <span>{itemError || t('Failed to load commit details')}</span>
-                      <button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
+                      <Button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
                         {t('Retry')}
-                      </button>
+                      </Button>
                     </div>
                   </article>
                 );
@@ -1302,10 +1303,10 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
       <aside className="commit-detail empty-detail">
         <Codicon name="error" />
         <span>{isMultiSelection ? t('Failed to load commit details') : detailError}</span>
-        <button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
+        <Button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
           <Codicon name="refresh" />
           <span>{t('Retry')}</span>
-        </button>
+        </Button>
       </aside>
     );
   }
@@ -1562,9 +1563,9 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
                   ) : (
                     <div className="detail-loading detail-error">
                       <span>{itemError || t('Failed to load commit details')}</span>
-                      <button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
+                      <Button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
                         {t('Retry')}
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </article>

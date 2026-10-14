@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -149,7 +150,7 @@ function SubmoduleRow({ repo, entry, busy, highlighted }: { repo: RepositoryStat
       </div>
       <div className="submodule-row-actions">
         {busy ? <Codicon name="loading~spin" /> : <>
-          {primaryAction && <button className={`primary ${entry.syncStatus === 'conflict' ? 'conflict' : ''}`} title={primaryAction.title} onClick={() => primaryAction.id === 'merge' ? openConflict() : run(primaryAction.id)}><Codicon name={primaryAction.icon} /><span>{primaryAction.label}</span></button>}
+          {primaryAction && <Button variant="primary"  title={primaryAction.title} onClick={() => primaryAction.id === 'merge' ? openConflict() : run(primaryAction.id)}><Codicon name={primaryAction.icon} /><span>{primaryAction.label}</span></Button>}
           {entry.initialized && hovered && <span className="submodule-hover-actions"><IconButton title={t('Reveal in Explorer')} onClick={reveal}><Codicon name="folder-opened" /></IconButton><IconButton title={t('Update from Remote')} onClick={() => run('updateRemote')}><Codicon name="cloud-download" /></IconButton>
           <IconButton title={t('Open in New Window')} onClick={openInNewWindow}><Codicon name="link-external" /></IconButton></span>}
         </>}

@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import React, { useMemo, useState } from 'react';
@@ -241,13 +242,12 @@ export function ChangelistView({
             <div key={item.repoId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Codicon name="error" />
               <span style={{ flex: 1 }}>{item.repoName}: {item.error}</span>
-              <button
+              <Button variant="link"
                 type="button"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', textDecoration: 'underline' }}
                 onClick={() => void loadChangelists(item.repoId)}
               >
                 {t('Retry')}
-              </button>
+              </Button>
             </div>
           ))}
         </div>

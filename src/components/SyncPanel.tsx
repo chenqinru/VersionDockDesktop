@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { SplitButtonMore } from './SplitButtonMore';
 import { generateHistoricalMessage, useAiStore } from '../ai/aiStore';
 import { IconButton } from './IconButton';
@@ -238,7 +239,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
       </span>
     </div>
     {expanded && <div data-density-card-body="" className="sync-commit-detail">
-      {detailError && !currentDetail ? <div className="sync-detail-error" role="alert"><span>{detailError}</span><button type="button" onClick={() => setDetailRetry((current) => current + 1)}>{t('Retry')}</button></div>
+      {detailError && !currentDetail ? <div className="sync-detail-error" role="alert"><span>{detailError}</span><Button type="button" onClick={() => setDetailRetry((current) => current + 1)}>{t('Retry')}</Button></div>
         : isMerge && !loading && currentDetail && currentDetail.files.length === 0
         ? <div className="sync-merge-empty"><Codicon name="info" />{t('No changes relative to first parent')}</div>
         : <SyncFileList
@@ -470,21 +471,20 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
       </div>
     </header>
     {expanded && <div className="sync-repo-body" onClick={(event) => { if (!(event.target as HTMLElement).closest('[data-sync-commit-row]')) setSelectedCommits(new Set()); }}>
-      {needle && searchError && <div className="sync-detail-error" role="alert"><span>{searchError}</span><button type="button" onClick={() => setSearchRetry((current) => current + 1)}>{t('Retry')}</button></div>}
+      {needle && searchError && <div className="sync-detail-error" role="alert"><span>{searchError}</span><Button type="button" onClick={() => setSearchRetry((current) => current + 1)}>{t('Retry')}</Button></div>}
       {(outgoingError || incomingError) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: 'var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1))', color: 'var(--vscode-errorForeground, #f48771)', fontSize: 12 }}>
           <Codicon name="error" />
           <span style={{ flex: 1 }}>{outgoingError || incomingError}</span>
-          <button
+          <Button
             type="button"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', textDecoration: 'underline' }}
             onClick={() => {
               if (outgoingError) void loadOutgoing(repo.meta.id);
               if (incomingError) void loadIncoming(repo.meta.id);
             }}
           >
             {t('Retry')}
-          </button>
+          </Button>
         </div>
       )}
       {!incomingActive && !outgoingActive ? <div className="sync-empty">{t('No commit type selected')}</div> : displayMode === 'changes' ? <>
@@ -761,7 +761,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
         })}
       </div>}
       <div className={`sync-primary-split action-split ${mainAction.tone}`}>
-        <button className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || !mainAction.enabled} onClick={() => void runAction(() => mainAction.fetch ? fetchAll() : syncSelected(undefined, mainAction.direction))}><Codicon name={mainAction.icon} />{mainAction.label}</button>
+        <Button variant={mainAction.tone === "primary" ? "primary" : "secondary"} danger={mainAction.tone === "danger"} size="xs" className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || !mainAction.enabled} onClick={() => void runAction(() => mainAction.fetch ? fetchAll() : syncSelected(undefined, mainAction.direction))}><Codicon name={mainAction.icon} />{mainAction.label}</Button>
         {footerItems.length > 0 && <SplitButtonMore className="sync-primary-more" disabled={actionBusy || !mainAction.enabled} title={t('More Actions')} aria-expanded={Boolean(footerMenu)} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu(current => current ? undefined : rect); }} />}
       </div>
       {footerMenu && footerItems.length > 0 && <ContextMenu x={footerMenu.left} y={footerMenu.top} anchorRect={footerMenu} placement="above" items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}

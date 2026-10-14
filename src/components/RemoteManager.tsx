@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
@@ -132,7 +133,7 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
         </header>
 
         <div className="modal-body remote-manager-body">
-          {repo?.meta.kind === 'git' && values.length === 0 && <button type="button" className="primary" onClick={() => setPublishOpen(true)}><Codicon name="cloud-upload" />{t('Publish Repository')}</button>}
+          {repo?.meta.kind === 'git' && values.length === 0 && <Button variant="primary" type="button" onClick={() => setPublishOpen(true)}><Codicon name="cloud-upload" />{t('Publish Repository')}</Button>}
           {/* 添加远程表单 */}
           <div className="remote-add-card">
             <div className="remote-section-title">{t('Add Remote')}</div>
@@ -152,15 +153,15 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
                   if (event.key === 'Enter') add();
                 }}
               />
-              <button
+              <Button variant="primary"
                 type="button"
-                className="primary remote-add-btn"
+                className="remote-add-btn"
                 disabled={busy || !name.trim() || !url.trim()}
                 onClick={add}
               >
                 <Codicon name="add" />
                 <span>{t('Add')}</span>
-              </button>
+              </Button>
             </div>
           </div>
 

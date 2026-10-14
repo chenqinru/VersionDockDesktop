@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 
@@ -44,10 +45,10 @@ export function DiffPlaceholder({
     {path && <code title={path}>{path}</code>}
     {lineCount !== undefined && lineCount > 0 && <small>{lineCount} {t('Lines')}</small>}
     {kind === 'error' && onRetry && (
-      <button type="button" className="detail-retry-button" onClick={onRetry}>
+      <Button type="button" className="detail-retry-button" onClick={onRetry}>
         <Codicon name="refresh" />
         <span>{t('Retry')}</span>
-      </button>
+      </Button>
     )}
   </div>;
 }

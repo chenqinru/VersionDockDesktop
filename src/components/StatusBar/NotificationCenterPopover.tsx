@@ -1,3 +1,4 @@
+import { Button } from '../Button';
 import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { IconButton } from '../IconButton';
@@ -219,9 +220,9 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                 </IconButton>}
                 {item.actions.length > 0 && <div className="notification-item-actions">
                     {item.actions.map((action, actionIndex) => (
-                      <button
+                      <Button variant={actionIndex > 0 ? "secondary" : "primary"}
                         type="button"
-                        className={`notification-item-action-btn${actionIndex > 0 ? ' secondary' : ''}`}
+                        className="notification-item-action-btn"
                         disabled={item.actionState?.[actionIndex] === 'done' || Object.values(item.actionState ?? {}).includes('running')}
                         key={`${action.type}-${actionIndex}`}
                         onClick={(e) => {
@@ -230,7 +231,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                         }}
                       >
                         <span>{resolveNotificationText(action.label, t, item.repositoryCount)}</span>
-                      </button>
+                      </Button>
                     ))}
                 </div>}
               </article>

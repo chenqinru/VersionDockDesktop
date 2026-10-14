@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { promptBranchName } from './promptBranchName';
 import { scrollbarContains } from '../scrollbars/ownership';
@@ -678,21 +679,12 @@ function CommitList({
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {summaryText}
           </span>
-          <button
-            style={{
-              padding: '2px 8px',
-              background: 'var(--vscode-button-background, #007acc)',
-              color: 'var(--vscode-button-foreground, #ffffff)',
-              border: 'none',
-              borderRadius: '2px',
-              cursor: 'pointer',
-              fontSize: '11px',
-              flexShrink: 0,
-            }}
+          <Button variant="primary"
+            style={{ flexShrink: 0 }}
             onClick={() => void loadHistory(true)}
           >
             {t('Retry')}
-          </button>
+          </Button>
         </div>
       );
     })()}

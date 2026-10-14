@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -63,13 +64,13 @@ function ToastItem({
           <span className="toast-source">{t('Source: {0}', 'VersionDock')}</span>
           <div className="notification-item-actions toast-actions">
             {notification.actions.map((action, index) => (
-              <button
+              <Button variant={index > 0 ? "secondary" : "primary"}
                 type="button"
-                className={`notification-item-action-btn${index > 0 ? ' secondary' : ''}`}
+                className="notification-item-action-btn"
                 disabled={notification.actionState?.[index] === 'done' || Object.values(notification.actionState ?? {}).includes('running')}
                 key={`${action.type}-${index}`}
                 onClick={() => onAction(index)}
-              >{resolveNotificationText(action.label, t, notification.repositoryCount)}</button>
+              >{resolveNotificationText(action.label, t, notification.repositoryCount)}</Button>
             ))}
           </div>
         </div>

@@ -44,9 +44,9 @@ describe('NotificationToast', () => {
       { type: 'updateProject', label: 'Update' }, { type: 'dismiss', label: 'Dismiss' }, { type: 'disableIncoming', label: "Don't show again" },
     ] });
     render(<I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t: createTranslator('zh-CN') }}><NotificationToast /></I18nContext.Provider>);
-    expect(screen.getByRole('button', { name: '更新' })).not.toHaveClass('secondary');
-    expect(screen.getAllByRole('button', { name: '关闭' }).find((button) => button.classList.contains('notification-item-action-btn'))).toHaveClass('secondary');
-    expect(screen.getByRole('button', { name: '不再提示' })).toHaveClass('secondary');
+    expect(screen.getByRole('button', { name: '更新' })).toHaveAttribute('data-variant', 'primary');
+    expect(screen.getAllByRole('button', { name: '关闭' }).find((button) => button.classList.contains('notification-item-action-btn'))).toHaveAttribute('data-variant', 'secondary');
+    expect(screen.getByRole('button', { name: '不再提示' })).toHaveAttribute('data-variant', 'secondary');
   });
 
   it('retires workspace popups on welcome and keeps late background messages in the center', () => {

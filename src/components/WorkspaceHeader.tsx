@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import type { ReactNode } from 'react';
 import { Codicon } from './Codicon';
 
@@ -18,9 +19,9 @@ export function WorkspaceHeader({
 }) {
   return (
     <header className={`workspace-page-header ${className}`}>
-      <button type="button" className="workspace-back-button" disabled={backDisabled} onClick={onBack}>
+      <Button type="button" className="workspace-back-button" disabled={backDisabled} onClick={onBack}>
         <Codicon name="arrow-left" /><span>{backLabel}</span>
-      </button>
+      </Button>
       {children}
       {actions}
     </header>

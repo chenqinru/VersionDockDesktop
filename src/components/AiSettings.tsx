@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber, SettingText } from './SettingsControls';
@@ -95,8 +96,8 @@ export function AiSettings({ focusSetting }: { focusSetting?: SettingPath } = {}
               placeholder={runtime?.keySaved ? t('Key saved in system secure storage') : t('Enter API key')}
               onChange={e => setSecret(e.target.value)}
               actions={<>
-                <button className="settings-action-btn" disabled={busy || !secret.trim()} onClick={() => void saveKey()}>{t('Save key')}</button>
-                <button className="settings-action-btn" disabled={busy || !runtime?.keySaved} onClick={() => void saveKey(true)}>{t('Remove key')}</button>
+                <Button disabled={busy || !secret.trim()} onClick={() => void saveKey()}>{t('Save key')}</Button>
+                <Button disabled={busy || !runtime?.keySaved} onClick={() => void saveKey(true)}>{t('Remove key')}</Button>
               </>} />
           </>
         )}
@@ -117,11 +118,11 @@ export function AiSettings({ focusSetting }: { focusSetting?: SettingPath } = {}
             {runtime && <><Codicon name={runtime.available ? 'check' : 'info'} /><span>{t(runtime.message)}</span>{runtime.version && <small>{runtime.version}</small>}</>}
           </div>
           {config.executionMode === 'provider' && <div className="settings-control-actions">
-            <button className="settings-action-btn" disabled={busy} onClick={() => void check(true)}>{t('Recheck key access')}</button>
+            <Button disabled={busy} onClick={() => void check(true)}>{t('Recheck key access')}</Button>
           </div>}
           {config.executionMode === 'agent-cli' && <div className="settings-control-actions">
-            <button className="settings-action-btn" disabled={busy} onClick={() => void check()}>{t('Check CLI')}</button>
-            {config.cliProvider === 'antigravity' && <button className="settings-action-btn" disabled={busy} onClick={() => void bridge?.request({ type: 'aiResetCliSession' }).catch(e => setError(aiErrorText(e)))}>{t('Reset Antigravity session')}</button>}
+            <Button disabled={busy} onClick={() => void check()}>{t('Check CLI')}</Button>
+            {config.cliProvider === 'antigravity' && <Button disabled={busy} onClick={() => void bridge?.request({ type: 'aiResetCliSession' }).catch(e => setError(aiErrorText(e)))}>{t('Reset Antigravity session')}</Button>}
           </div>}
         </div>
         {error && <div role="alert" className="ai-error ai-settings-error">{error}</div>}
@@ -134,9 +135,9 @@ export function AiSettings({ focusSetting }: { focusSetting?: SettingPath } = {}
         {(['commit-message', 'commit-explanation', 'code-review', 'commit-composer', 'merge-conflict'] as const).map(task => (
           <div className="settings-row" key={task}>
             <span className="settings-label"><strong>{t(task)}</strong></span>
-            <button className="settings-action-btn" aria-label={`${t('Edit AI prompt')}: ${t(task)}`} onClick={() => setPrompt(task)}>
+            <Button aria-label={`${t('Edit AI prompt')}: ${t(task)}`} onClick={() => setPrompt(task)}>
               <Codicon name="edit" />{t('Edit…')}
-            </button>
+            </Button>
           </div>
         ))}
       </SettingsCard>
@@ -248,16 +249,16 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
           </div>
         )}
         <footer>
-          <button className="settings-action-btn" disabled={busy} onClick={() => void apply('reset')}>
+          <Button disabled={busy} onClick={() => void apply('reset')}>
             {t('Reset to default')}
-          </button>
+          </Button>
           <div className="ai-prompt-footer-actions vd-dialog-footer-actions">
-            <button className="settings-action-btn" disabled={saving} onClick={onClose}>
+            <Button disabled={saving} onClick={onClose}>
               {t('Cancel')}
-            </button>
-            <button className="settings-action-btn primary" disabled={busy || !text.trim()} onClick={() => void apply('save')}>
+            </Button>
+            <Button variant="primary" disabled={busy || !text.trim()} onClick={() => void apply('save')}>
               {t('Save')}
-            </button>
+            </Button>
           </div>
         </footer>
     </DialogSurface>

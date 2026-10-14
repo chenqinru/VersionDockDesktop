@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 
@@ -32,15 +33,14 @@ export function ConflictBanner({ title, summary, actions }: ConflictBannerProps)
       </span>
       <span className="vd-conflict-banner__actions">
         {actions.map((action) => (
-          <button
+          <Button variant={action.tone === "primary" ? "primary" : "secondary"} danger={action.tone === "danger"} size="xs"
             key={action.id}
             type="button"
-            className={`vd-conflict-banner__action vd-conflict-banner__action--${action.tone}`}
             title={action.title}
             onClick={action.onClick}
           >
             {action.label}
-          </button>
+          </Button>
         ))}
       </span>
     </section>

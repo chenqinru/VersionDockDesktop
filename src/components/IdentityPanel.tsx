@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useState } from 'react';
@@ -255,14 +256,14 @@ function GitIdentity({
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
-            <button
-              className="primary identity-save-btn"
+            <Button variant="primary"
+              className="identity-save-btn"
               disabled={!label.trim() || !name.trim() || !email.includes('@')}
               type="submit"
             >
               <Codicon name="save" />
               <span>{t('Save')}</span>
-            </button>
+            </Button>
           </div>
         </form>
       </div>
@@ -401,7 +402,7 @@ function SvnAccount({
         <small>{t('Credential source')}: {t(value.source ?? 'none')}</small>
       </div>
 
-      {(value.nativeCredentials?.length ?? 0) > 0 && <div className="identity-sources-card"><strong>{t('SVN Native Cache')}</strong>{value.nativeCredentials?.map((credential) => <div className="identity-source-item" key={credential.id}><span>{credential.realm}{credential.username ? ` · ${credential.username}` : ''}</span><button className="danger" onClick={() => void operate({ type: 'clearNative', credential_id: credential.id })}><Codicon name="trash" />{t('Clear')}</button></div>)}</div>}
+      {(value.nativeCredentials?.length ?? 0) > 0 && <div className="identity-sources-card"><strong>{t('SVN Native Cache')}</strong>{value.nativeCredentials?.map((credential) => <div className="identity-source-item" key={credential.id}><span>{credential.realm}{credential.username ? ` · ${credential.username}` : ''}</span><Button danger onClick={() => void operate({ type: 'clearNative', credential_id: credential.id })}><Codicon name="trash" />{t('Clear')}</Button></div>)}</div>}
 
       <div className="identity-form-row">
         <label className="identity-label-block">
@@ -435,9 +436,8 @@ function SvnAccount({
       </div>
 
       <div className="identity-actions">
-        <button
+        <Button variant="primary"
           type="button"
-          className="primary"
           disabled={!username.trim()}
           onClick={() =>
             void operate({ type: 'save', username, password: password || null })
@@ -445,25 +445,24 @@ function SvnAccount({
         >
           <Codicon name="save" />
           <span>{t('Save')}</span>
-        </button>
+        </Button>
 
-        <button
+        <Button
           type="button"
           onClick={() => void operate({ type: 'test' })}
         >
           <Codicon name="radio-tower" />
           <span>{t('Test connection')}</span>
-        </button>
+        </Button>
 
         {value.username && (
-          <button
+          <Button danger
             type="button"
-            className="danger"
             onClick={() => void operate({ type: 'delete' })}
           >
             <Codicon name="trash" />
             <span>{t('Delete')}</span>
-          </button>
+          </Button>
         )}
       </div>
 

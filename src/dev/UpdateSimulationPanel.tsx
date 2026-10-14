@@ -2,6 +2,7 @@ import { useI18n } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { useAppUpdateStore } from '../store/appUpdateStore';
 import { SettingSelect } from '../components/SettingSelect';
+import { Button } from '../components/Button';
 import { Codicon } from '../components/Codicon';
 import { configureSimulation, useUpdateSimulation, type UpdateScenario } from './updateSimulation';
 
@@ -17,7 +18,7 @@ export default function UpdateSimulationPanel({ onReset }: { onReset: () => void
   return <section className="about-card update-simulation-panel">
     <div className="about-card-header">
       <div className="about-card-title"><Codicon name="beaker" /><strong>{t('Update simulation')}</strong></div>
-      <button type="button" className="about-action-link" onClick={() => reset(scenario)}>{t('Reset simulation')}</button>
+      <Button variant="link" size="xs" onClick={() => reset(scenario)}>{t('Reset simulation')}</Button>
     </div>
     <p className="about-muted">{t('Development only. No real download, installation, restart, or saved preferences.')}</p>
     <SettingSelect label={t('Simulation scenario')} value={scenario} onChange={value => reset(value as UpdateScenario)} options={[

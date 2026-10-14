@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { expandAiResolutionLines, inferAiAcceptedSides, normalEditsEqual, previewDelay } from '../ai/mergePreview';
 import { aiRequest, useAiStore } from '../ai/aiStore';
 import { IconButton } from './IconButton';
@@ -382,36 +383,22 @@ export function MergeWorkspace() {
           flexShrink: 0,
         }}
       >
-        <button
+        <Button
           type="button"
           className="diff-back-button"
           onClick={openConflicts}
           title={t('Back to conflicts')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            height: 27,
-            padding: '0 8px',
-            border: '1px solid var(--vscode-panel-border, var(--versiondock-border))',
-            borderRadius: 3,
-            background: 'transparent',
-            color: 'var(--vscode-foreground)',
-            cursor: 'pointer',
-            fontSize: 12,
-            flexShrink: 0,
-          }}
         >
           <Codicon name="arrow-left" />
           <span>{t('Back to conflicts')}</span>
-        </button>
+        </Button>
         <FileIcon name={fileName} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {merge.path}
         </span>
-        {!merge.binary && <button type="button" className="ai-generate ai-explain-button" data-busy={aiBusy} disabled={busy || !unresolvedConflictIndexes.length && !aiBusy} onClick={() => void resolveWithAi()} title={t(aiBusy ? 'Stop AI conflict resolution' : 'Resolve all remaining conflicts with AI')}>
+        {!merge.binary && <Button variant="primary" size="xs" type="button" data-busy={aiBusy} disabled={busy || !unresolvedConflictIndexes.length && !aiBusy} onClick={() => void resolveWithAi()} title={t(aiBusy ? 'Stop AI conflict resolution' : 'Resolve all remaining conflicts with AI')}>
           <Codicon name={aiBusy ? 'stop-circle' : 'sparkle-filled'} />{t(aiBusy ? 'Stop AI' : unresolvedConflictIndexes.length ? 'Resolve {0} conflicts with AI' : 'AI resolved', unresolvedConflictIndexes.length)}
-        </button>}
+        </Button>}
         {!merge.binary && <IconButton title={t('Edit AI prompt')} disabled={aiBusy} onClick={() => setAiPrompt(true)}><Codicon name="edit" /></IconButton>}
       </div>
 
@@ -425,9 +412,9 @@ export function MergeWorkspace() {
           <strong>{t('Binary conflict cannot be edited')}</strong>
           <span>{t('Choose which complete version to keep.')}</span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button disabled={editingBusy} onClick={() => void handleAccept('mine')}>{t('Keep mine')}</button>
-            <button disabled={editingBusy} onClick={() => void handleAccept('theirs')}>{t('Keep theirs')}</button>
-            <button disabled={editingBusy} onClick={() => void handleAccept('working')}>{t('Keep working')}</button>
+            <Button disabled={editingBusy} onClick={() => void handleAccept('mine')}>{t('Keep mine')}</Button>
+            <Button disabled={editingBusy} onClick={() => void handleAccept('theirs')}>{t('Keep theirs')}</Button>
+            <Button disabled={editingBusy} onClick={() => void handleAccept('working')}>{t('Keep working')}</Button>
           </div>
         </div>
       ) : (
@@ -515,64 +502,27 @@ export function MergeWorkspace() {
               ] as const).map(({ scope: s, label, icon }) => {
                 const active = appliedNonConflictingScope === s;
                 return (
-                  <button
+                  <Button variant="ghost" size="xs"
                     key={s}
+                    aria-pressed={active}
                     type="button"
                     disabled={!canApplyNonConflicting}
                     onClick={() => handleApplyNonConflicting(s)}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      height: 22,
-                      boxSizing: 'border-box',
-                      gap: 4,
-                      border: `1px solid ${active ? 'var(--versiondock-selection-border)' : 'var(--vscode-panel-border, #444444)'}`,
-                      borderRadius: 3,
-                      background: active ? 'var(--vscode-list-activeSelectionBackground, var(--versiondock-selection-background))' : 'transparent',
-                      color: !canApplyNonConflicting ? 'var(--vscode-disabledForeground, #777777)' : active ? 'var(--vscode-list-activeSelectionForeground, var(--versiondock-selection-foreground))' : 'var(--vscode-foreground, #cccccc)',
-                      padding: '0 8px',
-                      fontSize: 12,
-                      lineHeight: '20px',
-                      cursor: canApplyNonConflicting ? 'pointer' : 'default',
-                      opacity: canApplyNonConflicting ? 1 : 0.65,
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0,
-                    }}
                   >
                     <span style={{ color: 'var(--vscode-textLink-foreground, #3794ff)', fontSize: 13, lineHeight: '13px', display: 'inline-flex', alignItems: 'center' }}>{icon}</span>
                     <span>{label}</span>
-                  </button>
+                  </Button>
                 );
               })}
-              <button
+              <Button variant="ghost" size="xs"
                 type="button"
                 disabled={!canCancelNonConflicting}
                 onClick={handleCancelNonConflicting}
                 title={t('Restore non-conflicting changes to Base')}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  height: 22,
-                  boxSizing: 'border-box',
-                  gap: 4,
-                  border: '1px solid var(--vscode-panel-border, #444444)',
-                  borderRadius: 3,
-                  background: 'transparent',
-                  color: !canCancelNonConflicting ? 'var(--vscode-disabledForeground, #777777)' : 'var(--vscode-foreground, #cccccc)',
-                  padding: '0 8px',
-                  fontSize: 12,
-                  lineHeight: '20px',
-                  cursor: canCancelNonConflicting ? 'pointer' : 'default',
-                  opacity: canCancelNonConflicting ? 1 : 0.65,
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                }}
               >
                 <Codicon name="discard" style={{ color: 'var(--vscode-textLink-foreground, #3794ff)', fontSize: 13, lineHeight: '13px' }} />
                 <span>{t('Cancel application')}</span>
-              </button>
+              </Button>
 
               <span style={{ width: 1, height: 16, background: 'var(--vscode-panel-border, #444444)', flexShrink: 0, margin: '0 3px' }} />
 
@@ -645,60 +595,45 @@ export function MergeWorkspace() {
             }}
           >
             <div style={{ display: 'flex', gap: 8 }}>
-              <button
+              <Button
                 type="button"
                 disabled={editingBusy}
                 onClick={() => acceptAllSide('ours')}
-                style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
                 {t('Accept Current')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 disabled={editingBusy}
                 onClick={() => acceptAllSide('theirs')}
-                style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
                 {t('Accept Incoming')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 disabled={editingBusy}
                 onClick={resetAll}
-                style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
                 {t('Reset')}
-              </button>
+              </Button>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button
+              <Button
                 type="button"
                 disabled={editingBusy}
                 onClick={openConflicts}
-                style={{ padding: '6px 14px', borderRadius: 3, border: '1px solid var(--vscode-button-border, transparent)', background: 'var(--vscode-button-secondaryBackground, #3a3d41)', color: 'var(--vscode-button-secondaryForeground, #ffffff)', cursor: 'pointer', fontSize: 12 }}
               >
                 {t('Cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="primary"
                 type="button"
                 aria-label={t('Save resolution')}
                 title={t('Save resolution')}
                 disabled={editingBusy || unresolvedConflictIndexes.length > 0}
                 onClick={() => void handleSaveAndReturn()}
-                style={{
-                  padding: '6px 18px',
-                  borderRadius: 3,
-                  border: '1px solid var(--vscode-button-border, transparent)',
-                  background: 'var(--vscode-button-background, #0e639c)',
-                  color: 'var(--vscode-button-foreground, #ffffff)',
-                  opacity: unresolvedConflictIndexes.length > 0 || editingBusy ? 0.45 : 1,
-                  cursor: unresolvedConflictIndexes.length > 0 || editingBusy ? 'default' : 'pointer',
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
               >
                 {t('Apply')}
-              </button>
+              </Button>
             </div>
           </div>
         </>
