@@ -125,9 +125,44 @@ npm run tauri:dev
 
 仅调试前端时使用 `npm run browser:dev`。该模式使用开发 Bridge 演示界面，真实仓库操作应在 Tauri 应用中验证。
 
+需要查看应用更新效果时，可显式开启更新模拟模式：
+
+```bash
+VITE_UPDATE_SIMULATION=1 npm run tauri:dev
+# 仅查看前端演示
+VITE_UPDATE_SIMULATION=1 npm run browser:dev
+```
+
+Windows PowerShell 可先执行 `$env:VITE_UPDATE_SIMULATION='1'`，再运行上述 npm 命令；退出模拟后用 `Remove-Item Env:VITE_UPDATE_SIMULATION` 清除变量。环境变量在启动时读取，改变后需要重启开发进程。
+
+在右上角“关于与检查更新”弹窗的“更新模拟”中选择场景并查看效果：发现新版本、已是最新版本、检查失败、下载失败后重试、重启失败后重试。模拟下载持续约 5 秒；下载失败场景在 45% 失败一次，再次点击更新可成功；重启失败场景同样失败一次后可重试。“重置模拟”取消当前模拟流程并重新检查，可反复体验，也会清除本次模拟的跳过版本状态。
+
+模拟状态只保留在当前窗口内，更新界面和进度复用真实流程。模拟不会访问更新服务器、下载安装包、重启应用或保存跳过版本配置；普通开发默认关闭，正式构建会排除模拟实现和控制入口。模拟仅验证更新界面与交互，真实更新的签名、安装和重启仍需使用安装包验收。
+
 GitHub OAuth Device Flow 需要在构建时设置 `VERSIONDOCK_GITHUB_CLIENT_ID`；未设置时仍可使用 GitHub PAT、GitLab 和 Gitee。仅 debug / test 构建可设置 `VERSIONDOCK_ALLOW_INSECURE_PROVIDER_HOSTS=1` 测试 HTTP GitLab，HTTPS 的证书校验保持启用。
 
 Windows SVN 客户端如果使用 ANSI 命令行参数，可能无法处理中文等路径。CI 使用包含 Apache Subversion r1935602 Unicode argv 修复的客户端构建并验证这一场景，准备脚本见 [setup-windows-svn.ps1](scripts/setup-windows-svn.ps1)。
+
+### Rust 构建缓存
+
+日常开发、Rust 检查和类型导出命令会在启动前检查本项目 `src-tauri/target/debug` 的实际占用，超过 **30 GiB** 时，通过 `cargo clean --profile dev` 清理后继续执行。下一次编译会重建开发产物；正式发布产物保留。`tauri:build` 只登记构建状态，不触发清理。
+
+```bash
+# 只查看缓存大小，不执行清理
+npm run cache:rust
+
+# 调整自动清理阈值；设为 0 可关闭自动清理
+VERSIONDOCK_RUST_CACHE_LIMIT_GIB=50 npm run tauri:dev
+
+# 验证缓存维护脚本（使用临时 Rust 项目）
+npm run test:rust-cache
+```
+
+Windows PowerShell 使用 `$env:VERSIONDOCK_RUST_CACHE_LIMIT_GIB='50'` 设置阈值。正常构建本身若接近阈值，应调高阈值，避免频繁重编译；阈值是构建前的触发条件，不是构建中的容量限制。
+
+脚本覆盖 `tauri:dev`、`check:rust`、`bindings` 和 `bindings:check`，并保护整段开发会话，包括监听和嵌套命令；同一项目有其他登记任务运行时跳过清理。清理前也会检查本机 Cargo/Rust 进程，无法确认空闲时跳过。直接运行 `cargo`、`npm run tauri -- ...` 或 IDE 自行调用的 Cargo 不参与任务登记，应避免在这些任务运行期间启动自动维护。CI 环境、自定义或共享 Cargo target/build 目录不自动清理，其他架构的 debug 目录也不在默认检查范围内。
+
+异常强制退出可能留下维护锁，脚本会停止并提示锁位置。确认本项目所有登记任务已退出后，只删除 `src-tauri/.rust-cache-guard/gate`，再重试；不要在任务运行时删除它。
 
 ### 检查与构建
 

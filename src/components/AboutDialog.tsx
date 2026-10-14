@@ -1,7 +1,7 @@
 import { DialogSurface } from './DialogSurface';
 import { confirmDialog } from './dialogService';
 import { IconButton } from './IconButton';
-import { useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
@@ -21,8 +21,12 @@ import {
   diagnosticToolStatus,
   generateDiagnosticReport,
   openExternalLink,
-  type AppUpdateCheckResult,
+  skipSimulatedUpdate,
+  UPDATE_SIMULATION_ENABLED,
 } from '../services/updater';
+
+const UpdateSimulationPanel = import.meta.env.DEV && import.meta.env.VITE_UPDATE_SIMULATION === '1'
+  ? lazy(() => import('../dev/UpdateSimulationPanel')) : null;
 
 interface AboutDialogProps {
   onClose: () => void;
@@ -39,7 +43,10 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
 
   const [activeTab, setActiveTab] = useState<'about' | 'changelog'>(initialTab);
   const [checking, setChecking] = useState(false);
-  const [checkResult, setCheckResult] = useState<AppUpdateCheckResult | null>(() => useAppStore.getState().updateAvailableInfo);
+  const checkResult = useAppStore(state => state.updateAvailableInfo);
+  const setCheckResult = useAppStore(state => state.setUpdateAvailableInfo);
+  const checkGeneration = useRef(0);
+  useEffect(() => () => { checkGeneration.current += 1; }, []);
   const { phase, progress: downloadProgress, install, restart } = useAppUpdateStore();
   const downloading = phase === 'downloading';
   const readyToRestart = phase === 'ready' || phase === 'restarting';
@@ -47,26 +54,28 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleCheckUpdate = async () => {
+    const owner = ++checkGeneration.current;
     setChecking(true);
     setCheckResult(null);
     try {
       const result = await checkAppUpdate();
+      if (owner !== checkGeneration.current) return;
       setCheckResult(result);
-      useAppStore.getState().setUpdateAvailableInfo(result);
     } catch (error) {
+      if (owner !== checkGeneration.current || (error instanceof DOMException && error.name === 'AbortError')) return;
       setCheckResult({
         available: false,
         currentVersion: APP_CURRENT_VERSION,
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      setChecking(false);
+      if (owner === checkGeneration.current) setChecking(false);
     }
   };
 
   const handleDownloadAndInstall = async () => {
     try {
-      if (!checkResult?.rawUpdate) {
+      if (!checkResult?.canInstall) {
         throw new Error('No update package available to install.');
       }
       await install(checkResult.latestVersion || checkResult.currentVersion);
@@ -76,9 +85,9 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   };
 
   const handleSkipVersion = (version: string) => {
-    void updateSettings({ skippedUpdateVersion: version });
+    if (UPDATE_SIMULATION_ENABLED) void skipSimulatedUpdate(version);
+    else void updateSettings({ skippedUpdateVersion: version });
     setCheckResult(null);
-    useAppStore.getState().setUpdateAvailableInfo(null);
   };
 
   const handleCopyDiagnostics = async () => {
@@ -143,6 +152,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
         <div className="about-body">
           {activeTab === 'about' && (
             <div className="about-content-scroll">
+              {UpdateSimulationPanel && <Suspense fallback={null}><UpdateSimulationPanel onReset={() => void handleCheckUpdate()} /></Suspense>}
               {/* 更新状态区块 */}
               <section className="about-card update-card">
                 <div className="about-card-header">
@@ -259,7 +269,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                             })}
                           >
                             <Codicon name="refresh" />
-                            <span>{t('Restart to Install Update')}</span>
+                            <span>{t(phase === 'restarting' ? 'Restarting…' : 'Restart to Install Update')}</span>
                           </button>
                         </div>
                       ) : (
@@ -267,7 +277,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                           <button
                             type="button"
                             className="about-btn primary"
-                            disabled={downloading}
+                            disabled={downloading || !checkResult.canInstall}
                             onClick={() => void handleDownloadAndInstall()}
                           >
                             <Codicon name="cloud-download" />

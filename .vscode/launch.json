@@ -16,6 +16,16 @@
       "cwd": "${workspaceFolder}"
     },
     {
+      "name": "VersionDock Desktop Dev: 更新模拟",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run tauri:dev",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "VITE_UPDATE_SIMULATION": "1"
+      }
+    },
+    {
       "name": "VersionDock Desktop: Browser Dev（演示数据）",
       "type": "node-terminal",
       "request": "launch",

@@ -11,7 +11,7 @@ import { AboutDialog } from './AboutDialog';
 import { UpdateStatusBarItem } from './StatusBar/UpdateStatusBarItem';
 import { WorkspaceChooser } from './WorkspaceChooser';
 
-const update = { available: true, currentVersion: APP_CURRENT_VERSION, latestVersion: '0.2.0' };
+const update = { canInstall: true, available: true, currentVersion: APP_CURRENT_VERSION, latestVersion: '0.2.0' };
 
 function renderWelcome(language: 'en' | 'zh-CN' = 'zh-CN') {
   return render(<BridgeContext.Provider value={new MockBridge(() => true)}>
@@ -45,13 +45,16 @@ it('shows the current version as text without opening About when no update is av
   expect(view.container.querySelector('.welcome-update-button')).toBeNull();
 });
 
-it.each([['zh-CN', '更新至 v0.2.0'], ['en', 'Update to v0.2.0']] as const)('opens update details before installation in %s', (language, label) => {
+it.each([['zh-CN', '更新至 v0.2.0'], ['en', 'Update to v0.2.0']] as const)('starts updating directly from the single version capsule in %s', async (language, label) => {
   useAppStore.setState({ updateAvailableInfo: update });
   renderWelcome(language);
-  expect(screen.getByText(`v${APP_CURRENT_VERSION}`)).toBeInTheDocument();
+  expect(screen.queryByText(`v${APP_CURRENT_VERSION}`)).not.toBeInTheDocument();
+  expect(document.querySelectorAll('.welcome-version-badge')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: label })).toHaveTextContent('v0.2.0');
+  expect(document.querySelector('.welcome-version-badge .codicon')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: label }));
-  expect(useAppStore.getState()).toMatchObject({ aboutOpen: true, aboutInitialTab: 'about' });
-  expect(updater.downloadAndInstallAppUpdate).not.toHaveBeenCalled();
+  await waitFor(() => expect(updater.downloadAndInstallAppUpdate).toHaveBeenCalledOnce());
+  expect(useAppStore.getState().aboutOpen).toBe(false);
 });
 
 it('shares native download progress with About and disables the welcome entry until installation finishes', async () => {
@@ -61,7 +64,7 @@ it('shares native download progress with About and disables the welcome entry un
     onProgress?.({ chunkLength: 45, downloadedBytes: 45, totalBytes: 100, percent: 45 });
     await pending;
   });
-  useAppStore.setState({ updateAvailableInfo: { ...update, rawUpdate: {} as never } });
+  useAppStore.setState({ updateAvailableInfo: { ...update, canInstall: true } });
   renderWelcome();
   render(<I18nContext.Provider value={{ language: 'zh-CN', preference: 'zhCn', t: createTranslator('zh-CN') }}>
     <AboutDialog onClose={vi.fn()} />
@@ -69,13 +72,18 @@ it('shares native download progress with About and disables the welcome entry un
   fireEvent.click(screen.getByRole('button', { name: '下载并安装更新' }));
   const progress = screen.getByRole('button', { name: '正在更新 45%' });
   expect(progress).toBeDisabled();
+  expect(progress).toHaveClass('welcome-version-badge');
+  expect(progress.textContent).toBe('45%');
+  expect(progress.querySelector('.codicon')).toBeNull();
+  expect(progress.style.getPropertyValue('--update-progress')).toBe('45%');
+  expect(document.querySelectorAll('.welcome-version-badge')).toHaveLength(1);
   fireEvent.click(progress);
   expect(updater.downloadAndInstallAppUpdate).toHaveBeenCalledOnce();
   expect(screen.getByRole('button', { name: '正在下载…' })).toBeDisabled();
   await act(async () => { finish(); await pending; });
   fireEvent.click(await screen.findByRole('button', { name: '重启并更新' }));
   await waitFor(() => expect(updater.restartApp).toHaveBeenCalledOnce());
-  expect(screen.getByRole('button', { name: '正在重启…' })).toBeDisabled();
+  for (const button of screen.getAllByRole('button', { name: '正在重启…' })) expect(button).toBeDisabled();
 });
 
 it('keeps progress and restart available after switching from the workbench and clearing its notice', async () => {

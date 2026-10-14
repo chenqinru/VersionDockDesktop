@@ -213,7 +213,7 @@ describe('AboutDialog', () => {
 
   it('shows an update endpoint error without claiming the installed version is current', async () => {
     vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
-      available: false, currentVersion: version, latestVersion: '0.2.0', error: '404', rawUpdate: null,
+      available: false, currentVersion: version, latestVersion: '0.2.0', error: '404', canInstall: false,
     });
     renderAboutDialog();
     fireEvent.click(screen.getByRole('button', { name: /Check for Updates/i }));
@@ -223,9 +223,8 @@ describe('AboutDialog', () => {
   });
 
   it('downloads and installs the native package before offering restart', async () => {
-    const rawUpdate = { available: true } as NonNullable<updaterService.AppUpdateCheckResult['rawUpdate']>;
     vi.spyOn(updaterService, 'checkAppUpdate').mockResolvedValue({
-      available: true, currentVersion: version, latestVersion: '0.2.0', rawUpdate,
+      available: true, currentVersion: version, latestVersion: '0.2.0', canInstall: true,
     });
     const install = vi.spyOn(updaterService, 'downloadAndInstallAppUpdate').mockResolvedValue(undefined);
     const open = vi.spyOn(updaterService, 'openExternalLink').mockResolvedValue(undefined);

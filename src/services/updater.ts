@@ -10,9 +10,16 @@ export interface AppUpdateCheckResult {
   latestVersion?: string;
   releaseDate?: string;
   releaseNotes?: string;
-  rawUpdate?: Update | null;
+  canInstall?: boolean;
+  simulated?: boolean;
   error?: string | null;
   isDevelopmentMode?: boolean;
+}
+
+export const UPDATE_SIMULATION_ENABLED = import.meta.env.DEV && import.meta.env.VITE_UPDATE_SIMULATION === '1';
+
+export async function skipSimulatedUpdate(version: string): Promise<void> {
+  if (UPDATE_SIMULATION_ENABLED) (await import('../dev/updateSimulation')).skipUpdate(version);
 }
 
 export interface UpdateDownloadProgress {
@@ -56,6 +63,7 @@ async function checkMirror(): Promise<Update | null> {
  * 检查应用是否有新版本
  */
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
+  if (UPDATE_SIMULATION_ENABLED) return (await import('../dev/updateSimulation')).checkUpdate();
   const currentVersion = APP_CURRENT_VERSION;
   const generation = ++checkGeneration;
   const previous = cachedUpdateInstance;
@@ -67,7 +75,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
       return {
         available: false,
         currentVersion,
-        rawUpdate: null,
+        canInstall: false,
       };
     }
 
@@ -78,7 +86,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
       latestVersion: update.version,
       releaseDate: update.date,
       releaseNotes: update.body || '',
-      rawUpdate: update,
+      canInstall: update.available,
     };
   } catch (error) {
     if (generation === checkGeneration) cachedUpdateInstance = null;
@@ -100,7 +108,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
           latestVersion: latestTag || currentVersion,
           releaseDate: data.published_at,
           releaseNotes: data.body || '',
-          rawUpdate: null,
+          canInstall: false,
           error: message,
           isDevelopmentMode: isDev,
         };
@@ -112,6 +120,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
     return {
       available: false,
       currentVersion,
+      canInstall: false,
       error: message,
       isDevelopmentMode: isDev,
     };
@@ -141,6 +150,7 @@ export async function downloadAndInstallAppUpdate(
   onProgress?: (progress: UpdateDownloadProgress) => void,
   selectedVersion?: string,
 ): Promise<void> {
+  if (UPDATE_SIMULATION_ENABLED) return (await import('../dev/updateSimulation')).downloadUpdate(onProgress, selectedVersion);
   let update = cachedUpdateInstance || (await checkWithRetry());
   if (!update) {
     throw new Error('No update package available to install.');
@@ -204,6 +214,7 @@ export async function downloadAndInstallAppUpdate(
  * 重启应用程序以完成更新
  */
 export async function restartApp(): Promise<void> {
+  if (UPDATE_SIMULATION_ENABLED) return (await import('../dev/updateSimulation')).restartUpdate();
   // Reloading the webview does not restart the native app or finish an update.
   await invoke('restart_app');
 }

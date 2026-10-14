@@ -103,14 +103,14 @@ describe('updater service', () => {
   });
 
   it('reports up to date only after a successful native check', async () => {
-    expect(await checkAppUpdate()).toMatchObject({ available: false, currentVersion: version, rawUpdate: null });
+    expect(await checkAppUpdate()).toMatchObject({ available: false, currentVersion: version, canInstall: false });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it('returns the native update required for installation', async () => {
     const update = updateFixture();
     vi.mocked(check).mockResolvedValue(update);
-    expect(await checkAppUpdate()).toMatchObject({ available: true, latestVersion: '0.1.1', rawUpdate: update });
+    expect(await checkAppUpdate()).toMatchObject({ available: true, latestVersion: '0.1.1', canInstall: true });
   });
 
   it.each(['404', 'Could not fetch a valid release JSON', 'missing platform linux-x86_64', 'request timed out'])(
@@ -127,7 +127,7 @@ describe('updater service', () => {
   it('API fallback preserves the native error and cannot offer a browser download as an installed update', async () => {
     vi.mocked(check).mockRejectedValue(new Error('invalid update manifest'));
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ tag_name: 'v0.2.0', body: 'New version' }) } as Response);
-    expect(await checkAppUpdate()).toMatchObject({ available: false, error: 'invalid update manifest', latestVersion: '0.2.0', rawUpdate: null });
+    expect(await checkAppUpdate()).toMatchObject({ available: false, error: 'invalid update manifest', latestVersion: '0.2.0', canInstall: false });
   });
 
   it('failed checks invalidate previously cached update packages', async () => {

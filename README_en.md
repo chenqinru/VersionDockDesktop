@@ -129,6 +129,27 @@ GitHub OAuth Device Flow requires `VERSIONDOCK_GITHUB_CLIENT_ID` at build time. 
 
 Windows SVN clients that convert command-line arguments to an ANSI code page can fail with paths such as Chinese filenames. CI builds and verifies a client containing the Apache Subversion r1935602 Unicode argv fix. See [setup-windows-svn.ps1](scripts/setup-windows-svn.ps1).
 
+### Rust build cache
+
+Development, Rust checks, and binding commands check the allocated size of this project's `src-tauri/target/debug` before starting. Above **30 GiB**, they run `cargo clean --profile dev` and then continue. The next compilation rebuilds development artifacts; release artifacts are preserved. `tauri:build` registers its active session without triggering cleanup.
+
+```bash
+# Inspect cache size without deleting anything
+npm run cache:rust
+
+# Override the cleanup threshold; use 0 to disable automatic cleanup
+VERSIONDOCK_RUST_CACHE_LIMIT_GIB=50 npm run tauri:dev
+
+# Test cache maintenance using temporary Rust projects
+npm run test:rust-cache
+```
+
+In Windows PowerShell, set `$env:VERSIONDOCK_RUST_CACHE_LIMIT_GIB='50'`. Increase the threshold if a normal build approaches it, to avoid frequent rebuilds. The threshold triggers maintenance before a task; it does not cap disk usage during compilation.
+
+The guard covers `tauri:dev`, `check:rust`, `bindings`, and `bindings:check` for their entire sessions, including watchers and nested commands. Cleanup is skipped when another registered task is active. Before deletion, it also checks for Cargo/Rust processes on the machine and skips cleanup if it cannot establish an idle state. Direct `cargo`, `npm run tauri -- ...`, and IDE-launched Cargo do not register with the guard; avoid starting automatic maintenance during those tasks. CI, custom/shared Cargo target/build directories, and debug directories for other architectures are excluded from automatic cleanup.
+
+An abrupt exit can leave a maintenance gate. The script stops and reports its location. Once every registered task for the project has stopped, remove only `src-tauri/.rust-cache-guard/gate` and retry. Do not remove it while tasks are running.
+
 ### Checks and builds
 
 ```bash

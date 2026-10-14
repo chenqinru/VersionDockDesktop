@@ -2523,8 +2523,9 @@ export const useAppStore = create<AppStore>((set, get) => {
         const result = await checkAppUpdate();
         const currentSettings = get().bootstrap?.state.settings;
         if (!force && currentSettings?.autoCheckUpdates === false) return;
-        set({ updateAvailableInfo: result.available && currentSettings?.skippedUpdateVersion === result.latestVersion ? null : result });
+        set({ updateAvailableInfo: !result.simulated && result.available && currentSettings?.skippedUpdateVersion === result.latestVersion ? null : result });
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         set({ updateAvailableInfo: { available: false, currentVersion: APP_CURRENT_VERSION, error: error instanceof Error ? error.message : String(error) } });
       } finally {
         set({ updateChecking: false });

@@ -72,6 +72,8 @@ specta-typescript = "0.0.12"
 
 [profile.dev]
 opt-level = 1
+debug = 1
+incremental = false
 
 [profile.release]
 strip = "symbols"

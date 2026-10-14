@@ -6,7 +6,6 @@ import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './RepositoryCheckoutDialog';
-import { APP_CURRENT_VERSION } from '../version';
 import { workspaceOpenPaths } from '../workspaces/openPaths';
 import { selectWorkspacePaths } from '../workspaces/selectWorkspace';
 import { WelcomeUpdateButton } from './WelcomeUpdateButton';
@@ -61,9 +60,6 @@ export function WorkspaceChooser() {
             <div className="welcome-brand-text">
               <div className="welcome-title-row">
                 <h1>VersionDock</h1>
-                <span className="welcome-version-badge">
-                  v{APP_CURRENT_VERSION}
-                </span>
                 <WelcomeUpdateButton />
               </div>
               <p className="welcome-tagline">{t('Unified Git & SVN Desktop Client')}</p>

@@ -2445,36 +2445,54 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 
 .welcome-version-badge {
+  --version-badge-color: var(--versiondock-accent);
+  box-sizing: border-box;
+  position: relative;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  line-height: 1.4;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
   font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
   font-weight: 500;
   padding: 2px 7px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--versiondock-accent) 20%, transparent);
-  color: var(--versiondock-accent);
-  border: 1px solid color-mix(in srgb, var(--versiondock-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--version-badge-color) 14%, transparent);
+  color: var(--version-badge-color);
+  border: 1px solid color-mix(in srgb, var(--version-badge-color) 30%, transparent);
 }
 
-.welcome-update-button {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 5px;
-  border: 1px solid color-mix(in srgb, var(--versiondock-update-foreground) 30%, transparent);
-  border-radius: 5px;
-  color: var(--versiondock-update-foreground);
-  background: var(--versiondock-update-background);
-  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 500;
-  line-height: 1.3;
+/* Keep the original version width while the visible update label changes. */
+.welcome-version-badge::before {
+  content: attr(data-current-version);
+  visibility: hidden;
+}
+
+.welcome-version-badge > span {
+  position: absolute;
+  inset: 2px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
+}
+
+button.welcome-update-button {
   cursor: pointer;
 }
 
-.welcome-update-button > .codicon { flex-shrink: 0; font-size: 12px; }
-.welcome-update-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.welcome-update-button:hover:not(:disabled) { background: var(--versiondock-update-hover-background); }
+.welcome-update-button { --version-badge-color: var(--versiondock-success); }
+.welcome-update-button[data-update-state="error"] { --version-badge-color: var(--versiondock-danger); }
+.welcome-update-button:hover:not(:disabled) {
+  color: var(--version-badge-color);
+  background: color-mix(in srgb, var(--version-badge-color) 24%, transparent);
+}
+.welcome-update-button[data-update-progress] {
+  background: linear-gradient(to right, color-mix(in srgb, var(--version-badge-color) 30%, transparent) var(--update-progress), color-mix(in srgb, var(--version-badge-color) 10%, transparent) var(--update-progress));
+}
 .welcome-update-button[data-update-error] {
   color: var(--versiondock-danger);
   background: color-mix(in srgb, var(--versiondock-danger) 12%, var(--versiondock-surface));
@@ -5558,6 +5576,15 @@ button.notification-item-action-btn:focus-visible {
 
 .about-action-link.copied {
   color: var(--versiondock-success);
+}
+
+.update-simulation-panel .about-muted {
+  margin: 0;
+}
+
+.update-simulation-panel .settings-row {
+  padding: 0;
+  border: 0;
 }
 
 .update-status-row {
