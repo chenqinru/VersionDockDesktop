@@ -159,7 +159,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
     if (!newTabMenuOpen && addAnchorRef.current) {
       const rect = addAnchorRef.current.getBoundingClientRect();
       const left = Math.max(12, Math.min(window.innerWidth - 370, rect.left - 8));
-      setMenuPos({ left, top: rect.bottom + 4 });
+      setMenuPos({ left: Math.round(left), top: Math.round(rect.bottom + 4) });
     }
     setNewTabMenuOpen((prev) => !prev);
   };
@@ -1099,7 +1099,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                           </div>
                         )}
                       </button>
-                      <IconButton
+                      {!isOpened && <IconButton
                         type="button"
                         className="workspace-menu-item-open-window"
                         aria-label={t('Open in New Window')}
@@ -1112,7 +1112,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                         }}
                       >
                         <Codicon name="window" />
-                      </IconButton>
+                      </IconButton>}
                     </div>
                   );
                 })}

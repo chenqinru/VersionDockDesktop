@@ -912,6 +912,15 @@ body.is-tab-drop-target * {
   padding-top: 4px;
 }
 
+/* Put overlay bars in the menu inset, outside the aligned row borders. */
+html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scrollbar-visibility="visible"]) .workspace-switcher {
+  padding-right: max(8px, var(--versiondock-scrollbar-size, 10px));
+}
+html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scrollbar-visibility="visible"]) .workspace-menu-scroll {
+  margin-right: calc(-1 * var(--versiondock-scrollbar-size, 10px));
+  padding-right: var(--versiondock-scrollbar-size, 10px);
+}
+
 .workspace-menu-item {
   width: 100%;
   display: flex;
@@ -1057,12 +1066,6 @@ body.is-tab-drop-target * {
 
 .workspace-menu-item-row-wrap:hover .workspace-menu-item-open-window {
   display: flex;
-}
-
-.workspace-menu-item-open-window:hover {
-  background: color-mix(in srgb, var(--versiondock-accent) 20%, transparent);
-  color: var(--versiondock-accent);
-  border-color: color-mix(in srgb, var(--versiondock-accent) 40%, transparent);
 }
 
 /* ===== Tab 右键上下文菜单 ===== */
@@ -2759,17 +2762,6 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   transition: all 0.1s ease;
 }
 
-.recent-card-action-btn:hover {
-  background: var(--versiondock-surface-alt);
-  color: var(--versiondock-text);
-  border-color: var(--versiondock-border);
-}
-
-.recent-card-action-btn.remove:hover {
-  color: var(--versiondock-danger);
-  border-color: color-mix(in srgb, var(--versiondock-danger) 30%, transparent);
-}
-
 .recent-empty {
   height: 200px;
   display: flex;
@@ -3138,14 +3130,15 @@ button.conflict-action-item {
   border-color: var(--versiondock-selection-border);
   background-color: var(--versiondock-selection-background);
 }
-/* Commit-panel checkboxes retain their original blue selection across tabs. */
-.commit-panel .selection-checkbox {
+/* Commit-panel and dialog options share the same blue checkbox selection. */
+.commit-panel .selection-checkbox, .vd-dialog .selection-checkbox {
   border-color: color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border));
 }
-.commit-panel .selection-checkbox.selected {
+.commit-panel .selection-checkbox.selected, .vd-dialog .selection-checkbox.selected {
   border-color: var(--versiondock-accent-bg);
   background-color: var(--versiondock-accent-bg);
 }
+.vd-dialog .selection-checkbox { color: var(--vscode-button-foreground, #fff); }
 .commit-panel input[type="checkbox"] { accent-color: var(--versiondock-accent-bg); }
 .selection-checkbox.disabled { opacity: .3; pointer-events: none; }
 .selection-checkbox input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: default; }
@@ -3168,7 +3161,7 @@ button.conflict-action-item {
 .file-row:hover .change-row-actions, .directory-row:hover .change-row-actions, .change-row-actions:focus-within { opacity: 1; pointer-events: auto; }
 .change-row-actions > button { width: 20px; height: 20px; flex: 0 0 20px; padding: 2px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; }
 .change-row-actions > button > .codicon { font-size: 13px; }
-.commit-panel .change-row-actions > button.conflict-resolve-action { color: var(--vscode-gitDecoration-conflictingResourceForeground, var(--versiondock-danger)); }
+.commit-panel .change-row-actions > button.conflict-resolve-action { --versiondock-icon-foreground: var(--vscode-gitDecoration-conflictingResourceForeground, var(--versiondock-danger)); color: var(--versiondock-icon-foreground); }
 .repo-no-changes { padding: 12px 8px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
 .changelist-group { border-bottom: 0; }
 .changelist-heading {
@@ -4547,9 +4540,9 @@ button.danger:not(:disabled):hover,
   white-space: nowrap;
 }
 
-.statusbar-item:hover, .statusbar-item.active {
+.statusbar-item:not(:disabled):is(:hover, :focus-visible, .active) {
   color: var(--versiondock-text);
-  background: var(--versiondock-hover);
+  background: var(--versiondock-icon-hover-background);
 }
 
 .statusbar-item.branch-status-item {
@@ -4571,8 +4564,9 @@ button.danger:not(:disabled):hover,
 .statusbar-item.branch-status-item.has-ahead { color: var(--branch-push-foreground); }
 .statusbar-item.branch-status-item.needs-sync { color: var(--branch-sync-foreground); }
 .statusbar-item.branch-status-item.has-dirty { color: var(--branch-dirty-foreground); }
-.statusbar-item.branch-status-item:hover,
-.statusbar-item.branch-status-item.active { background: var(--versiondock-hover); }
+.statusbar-item.branch-status-item:not(:disabled):is(:hover, :focus-visible, .active) { background: var(--versiondock-icon-hover-background); }
+.statusbar-item:not(:disabled):active,
+.statusbar-item.branch-status-item:not(:disabled):active { background: var(--versiondock-icon-pressed-background); }
 .statusbar-item.branch-status-item .statusbar-counter,
 .statusbar-item.branch-status-item .statusbar-dirty-dot { color: inherit; }
 
@@ -4837,11 +4831,9 @@ button.danger:not(:disabled):hover,
 .branch-menu-search input:focus-visible { outline: none; }
 .branch-menu-search input::placeholder { color: var(--versiondock-muted); }
 .branch-menu-clear-hidden { visibility: hidden; pointer-events: none; }
-.statusbar-quick-menu .statusbar-menu-item.keyboard-selected,
-.statusbar-quick-menu .statusbar-menu-item.selected,
-.statusbar-quick-menu .statusbar-menu-item:focus-visible { background: var(--versiondock-selection-background); outline: none; }
+.statusbar-quick-menu .statusbar-menu-item:not(:disabled):is(.keyboard-selected, .selected, :focus-visible) { background: var(--versiondock-menu-hover-background); outline: none; }
 .statusbar-quick-menu .statusbar-menu-item.active-ref { background: transparent; font-weight: 500; }
-.statusbar-quick-menu .statusbar-menu-item.active-ref:is(:hover, .selected, .keyboard-selected) { background: var(--versiondock-selection-background); }
+.statusbar-quick-menu .statusbar-menu-item.active-ref:not(:disabled):is(:hover, .selected, .keyboard-selected, :focus-visible) { background: var(--versiondock-menu-hover-background); }
 .statusbar-quick-menu .branch-reference-row { align-items: flex-start; width: calc(100% - 8px); margin-inline: 4px; padding: 4px 6px; border-radius: 4px; }
 .branch-reference-row > .codicon { flex: 0 0 16px; margin-top: 1px; }
 .statusbar-quick-menu .branch-reference-row .statusbar-menu-item-text { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 3px; }
@@ -4959,10 +4951,12 @@ button.danger:not(:disabled):hover,
   transition: all 0.1s ease;
 }
 
-.statusbar-menu-item:hover, .statusbar-menu-item.submenu-open {
-  background: var(--versiondock-hover);
-  color: var(--versiondock-text);
+.statusbar-menu-item:not(:disabled):not(.non-clickable):is(:hover, :focus-visible, .submenu-open) {
+  background: var(--versiondock-menu-hover-background);
 }
+.statusbar-quick-menu .statusbar-menu-item:not(:disabled):not(.non-clickable):active { background: var(--versiondock-menu-pressed-background); }
+.statusbar-menu-item:not(:disabled):not(.non-clickable):is(:hover, :focus-visible, .submenu-open, .keyboard-selected, .selected) :is(.statusbar-menu-item-desc, .statusbar-menu-item-detail) { color: var(--versiondock-text); }
+.statusbar-menu-item:disabled { background: transparent !important; }
 
 .statusbar-menu-item.active-ref {
   background: var(--versiondock-selection-background);
@@ -7469,12 +7463,26 @@ button.notification-item-action-btn:focus-visible {
 .detail-file-search button { display: flex; align-items: center; justify-content: center; min-height: 0; padding: 2px; background: transparent; border: none; opacity: .75; }
 .detail-file-search button:hover { background: var(--versiondock-hover); opacity: 1; }
 
-/* Shared icon actions: the hover is distinct even on an already hovered row.
+/* Shared icon actions use neutral gray even over colored repository headers.
    Important feedback rules also cover legacy caller inline backgrounds. */
-:root {
-  --versiondock-icon-hover-background: color-mix(in srgb, var(--versiondock-text) 18%, var(--versiondock-bg));
-  --versiondock-icon-pressed-background: color-mix(in srgb, var(--versiondock-text) 26%, var(--versiondock-bg));
+:root, .theme-preview-surface {
+  --versiondock-icon-hover-background: #484848;
+  --versiondock-icon-pressed-background: #555555;
+  --versiondock-menu-hover-background: var(--versiondock-icon-hover-background);
+  --versiondock-menu-pressed-background: var(--versiondock-icon-pressed-background);
 }
+:root:is([data-theme="light"], [data-theme="light2026"]),
+.theme-preview-surface:is([data-theme="light"], [data-theme="light2026"]) {
+  --versiondock-icon-hover-background: #dedede;
+  --versiondock-icon-pressed-background: #c8c8c8;
+}
+.vd-context-menu > [role="menuitem"]:not(:disabled):is(:hover, :focus-visible) {
+  background: var(--versiondock-menu-hover-background) !important;
+}
+.vd-context-menu > [role="menuitem"]:not(:disabled):active {
+  background: var(--versiondock-menu-pressed-background) !important;
+}
+.vd-context-menu > [role="menuitem"]:disabled { background: transparent !important; }
 :where(.icon-button) {
   width: var(--versiondock-icon-button-size, 22px);
   height: var(--versiondock-icon-button-size, 22px);
@@ -7488,16 +7496,17 @@ button.notification-item-action-btn:focus-visible {
   border-radius: 3px;
   background: transparent;
 }
-/* Override the global native-button inheritance without changing caller layout. */
+/* Keep semantic and caller colors stable across interaction states. */
 .icon-button { color: var(--versiondock-muted); }
+.icon-button:not(.split-button-more) { color: var(--versiondock-icon-foreground, var(--versiondock-muted)) !important; }
+.icon-button.danger { --versiondock-icon-foreground: var(--versiondock-danger); }
+.icon-button.output-btn.active { --versiondock-icon-foreground: var(--versiondock-selection-foreground); }
 .icon-button:not(.split-button-more):not(:disabled):is(:hover, :focus-visible),
 .icon-button:not(.split-button-more):not(:disabled):is(.selected, .active, [aria-pressed="true"], [aria-expanded="true"]) {
   background: var(--versiondock-icon-hover-background) !important;
-  color: var(--versiondock-selection-foreground) !important;
 }
 .icon-button:not(.split-button-more):not(:disabled):active {
   background: var(--versiondock-icon-pressed-background) !important;
-  color: var(--versiondock-selection-foreground) !important;
 }
 .icon-button:focus-visible {
   outline: 1px solid var(--versiondock-selection-border);
@@ -7584,7 +7593,7 @@ button.notification-item-action-btn:focus-visible {
 .ai-composer-page { --composer-code-background: var(--versiondock-surface); --composer-code-border: var(--versiondock-border); }
 .ai-output { padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.65; }
 .ai-actions { display: flex; align-items: center; gap: 4px; }
-.ai-generate { background: linear-gradient(125deg,#7657ff,#2f8fff); color: #fff; border: none; border-radius: 4px; }
+.ai-generate { --versiondock-icon-foreground: #fff; background: linear-gradient(125deg,#7657ff,#2f8fff); color: #fff; border: none; border-radius: 4px; }
 .ai-generate:not(:disabled):hover { filter: brightness(1.08); color: #fff; }
 
 .merge-ai-actions .ai-generate { display: flex; align-items: center; gap: 6px; padding: 5px 9px; font-size: 11px; }
@@ -7871,12 +7880,6 @@ button.notification-item-action-btn:focus-visible {
 }
 .clone-fields { display: grid; gap: 10px; }
 .clone-fields small { color: var(--versiondock-muted); }
-.clone-source-tabs { display: flex; gap: 6px; }
-.clone-source-tabs [aria-selected="true"] {
-  background: var(--versiondock-sidebar-active);
-  color: var(--versiondock-accent);
-  border-color: var(--versiondock-accent);
-}
 .vd-dialog.clone-dialog-accounts {
   width: min(760px, calc(100vw - 32px));
   height: calc(100vh - 48px);

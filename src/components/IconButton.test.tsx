@@ -32,4 +32,14 @@ describe('IconButton native contract', () => {
     fireEvent.click(button);
     expect(click).not.toHaveBeenCalled();
   });
+
+  it('preserves caller layout and exposes semantic colors to the shared interaction styles', () => {
+    const { rerender } = render(<IconButton title="Remove worktree" style={{ color: 'var(--versiondock-danger)', width: 28, padding: 4 }}><Codicon name="trash" /></IconButton>);
+    const button = screen.getByRole('button', { name: 'Remove worktree' });
+    expect(button.style.getPropertyValue('--versiondock-icon-foreground')).toBe('var(--versiondock-danger)');
+    expect(button.style.width).toBe('28px');
+    expect(button.style.padding).toBe('4px');
+    rerender(<IconButton title="Remove worktree" style={{ width: 28 }}><Codicon name="trash" /></IconButton>);
+    expect(button.style.getPropertyValue('--versiondock-icon-foreground')).toBe('');
+  });
 });

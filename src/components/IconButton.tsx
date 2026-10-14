@@ -1,10 +1,11 @@
-import { forwardRef, type ButtonHTMLAttributes } from 'react';
+import { forwardRef, type ButtonHTMLAttributes, type CSSProperties } from 'react';
 
 export type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement>;
 
-// Keep the native button and caller layout; all icon action feedback lives in CSS.
+// Keep caller layout and colors; CSS owns shared interaction feedback.
+// CSS callers can set --versiondock-icon-foreground; inline colors use it too.
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { className = '', type = 'button', title, 'aria-label': label, ...props },
+  { className = '', type = 'button', title, 'aria-label': label, style, ...props },
   ref,
 ) {
   return <button
@@ -13,6 +14,10 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     type={type}
     title={title}
     aria-label={label ?? title}
+    style={style?.color ? {
+      ...style,
+      '--versiondock-icon-foreground': style.color === 'inherit' || style.color === 'unset' ? 'currentColor' : style.color,
+    } as CSSProperties : style}
     className={`icon-button ${className}`.trim()}
     data-icon-button=""
   />;

@@ -17,6 +17,44 @@ function mount(handler: ConstructorParameters<typeof MockBridge>[0]) {
 }
 
 describe('RepositoryCheckoutDialog', () => {
+  it('preserves the open-in-new-window checkbox when changing clone sources', async () => {
+    mount(() => []);
+    fireEvent.click(screen.getByLabelText('Open in New Window'));
+    expect(screen.getByLabelText('Open in New Window')).toBeChecked();
+    fireEvent.click(screen.getByRole('tab', { name: 'Remote Accounts' }));
+    expect(screen.getByLabelText('Open in New Window')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('Open in New Window'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Repository URL' }));
+    expect(screen.getByLabelText('Open in New Window')).not.toBeChecked();
+  });
+  it('switches source segments with the keyboard and preserves the destination', async () => {
+    mount(() => []);
+    const urlTab = screen.getByRole('tab', { name: 'Repository URL' });
+    const accountTab = screen.getByRole('tab', { name: 'Remote Accounts' });
+    expect(urlTab).toHaveAttribute('tabindex', '0');
+    expect(accountTab).toHaveAttribute('tabindex', '-1');
+    fireEvent.keyDown(urlTab, { key: 'ArrowRight' });
+    expect(accountTab).toHaveFocus();
+    expect(accountTab).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(accountTab, { key: 'Home' });
+    expect(urlTab).toHaveFocus();
+    expect(urlTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Parent folder')).toHaveValue('/tmp/repos');
+  });
+
+  it('updates the parent folder from the browse button and preserves it if the picker is cancelled', async () => {
+    const pickerBridge = new MockBridge(() => []);
+    pickerBridge.selectDirectory = vi.fn().mockResolvedValueOnce('/tmp/selected').mockResolvedValueOnce(null);
+    render(<BridgeContext.Provider value={pickerBridge}><RepositoryCheckoutDialog kind="git" defaultParent="/tmp/repos" close={vi.fn()} /></BridgeContext.Provider>);
+    const browse = screen.getByRole('button', { name: 'Browse…' });
+    fireEvent.click(browse);
+    await waitFor(() => expect(screen.getByLabelText('Parent folder')).toHaveValue('/tmp/selected'));
+    expect(pickerBridge.selectDirectory).toHaveBeenCalledWith('Select clone parent folder');
+    fireEvent.click(browse);
+    await waitFor(() => expect(pickerBridge.selectDirectory).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText('Parent folder')).toHaveValue('/tmp/selected');
+  });
+
   it('clones a selected private repository with its account in the same dialog', async () => {
     const clone = vi.fn(async () => true);
     useAppStore.setState({ cloneRepository: clone, operations: {} });
@@ -75,6 +113,7 @@ describe('RepositoryCheckoutDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clone' }));
     expect(screen.getByLabelText('Parent folder')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByLabelText('Open in New Window')).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Clone' }));
     expect(clone).toHaveBeenCalledOnce();
     finish(false);

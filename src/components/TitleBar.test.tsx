@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TitleBar } from './TitleBar';
 import { BridgeContext } from '../platform/context';
@@ -23,6 +23,27 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it('only offers a new-window action for recent workspaces that are not already open', () => {
+    const otherOpened = { ...workspace, id: 'other-opened', name: 'Other Opened', paths: ['/tmp/other-opened'] };
+    const closed = { ...workspace, id: 'closed', name: 'Closed', paths: ['/tmp/closed'] };
+    const originalBootstrap = useAppStore.getState().bootstrap;
+    useAppStore.setState({
+      tabs: [workspace, otherOpened], activeTabId: workspace.id, operations: {},
+      bootstrap: { state: { recentWorkspaces: [workspace, otherOpened, closed] } } as any,
+    });
+    try {
+      render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+      fireEvent.click(screen.getByRole('button', { name: 'New Tab' }));
+      const menu = screen.getByRole('menu');
+      for (const opened of [workspace, otherOpened]) {
+        const row = within(menu).getByText(opened.name).closest('.workspace-menu-item-row-wrap')!;
+        expect(within(row as HTMLElement).queryByRole('button', { name: 'Open in New Window' })).not.toBeInTheDocument();
+        expect(within(row as HTMLElement).getByText('Open')).toBeInTheDocument();
+      }
+      expect(within(menu).getAllByRole('button', { name: 'Open in New Window' })).toHaveLength(1);
+    } finally { useAppStore.setState({ bootstrap: originalBootstrap }); }
+  });
+
   it('offers a single workspace action and opens a workspace file from it', async () => {
     const choice = vi.spyOn(dialogService, 'choiceDialog').mockResolvedValue('file');
     const picker = vi.spyOn(bridge, 'selectWorkspaceFile').mockResolvedValue('/tmp/team.code-workspace');

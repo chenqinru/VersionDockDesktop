@@ -74,3 +74,30 @@ it('keeps the menu open while using its portalled scrollbar', () => {
   expect(item).not.toHaveFocus();
   viewport.remove(); scrollbarOwners.delete(viewport);
 });
+
+it('skips disabled actions during keyboard navigation and blocks their selection', () => {
+  const select = vi.fn();
+  const close = vi.fn();
+  render(<ContextMenu x={20} y={20} variant="gitLog" items={[
+    { id: 'copy', label: 'Copy Revision Number', icon: 'copy' },
+    { separator: true },
+    { id: 'ai', label: 'AI Explain', icon: 'sparkle', disabled: true, disabledReason: 'Unavailable' },
+    { id: 'drop', label: 'Drop Commit', icon: 'trash', danger: true },
+  ]} onSelect={select} onClose={close} />);
+  const copy = screen.getByRole('menuitem', { name: 'Copy Revision Number' });
+  const disabled = screen.getByRole('menuitem', { name: 'AI Explain' });
+  const drop = screen.getByRole('menuitem', { name: 'Drop Commit' });
+  expect(copy).toHaveFocus();
+  fireEvent.keyDown(copy, { key: 'ArrowDown' });
+  expect(drop).toHaveFocus();
+  fireEvent.keyDown(drop, { key: 'ArrowDown' });
+  expect(copy).toHaveFocus();
+  fireEvent.click(disabled);
+  expect(select).not.toHaveBeenCalled();
+  expect(close).not.toHaveBeenCalled();
+  fireEvent.keyDown(copy, { key: 'End' });
+  expect(drop).toHaveFocus();
+  fireEvent.click(drop);
+  expect(select).toHaveBeenCalledWith('drop', expect.anything());
+  expect(close).toHaveBeenCalledOnce();
+});

@@ -8,6 +8,7 @@ import { isOperationActive, useAppStore } from '../store/appStore';
 import { Codicon } from './Codicon';
 import { RepositoryTaskProgress } from './RepositoryTaskProgress';
 import { ProviderContent } from './ProviderContent';
+import { SelectionCheckbox } from './SelectionCheckbox';
 
 export type RepositoryCheckoutKind = 'git' | 'svn';
 
@@ -115,9 +116,15 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
   return <>
       <DialogSurface className={`app-dialog clone-dialog ${git && source === 'account' ? 'clone-dialog-accounts' : ''}`} onClose={close} closeDisabled={locked} aria-label={t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}>
         <header><Codicon name={git ? 'repo-clone' : 'cloud-download'} /><strong>{t(git ? 'Clone Git Repository' : 'Checkout SVN Repository')}</strong><IconButton title={t('Close')} disabled={locked} onClick={close}><Codicon name="close" /></IconButton></header>
-        {git && <div className="clone-source-tabs" role="tablist" aria-label={t('Clone source')}>
-          <button type="button" role="tab" aria-selected={source === 'url'} disabled={locked} onClick={() => setSource('url')}>{t('Repository URL')}</button>
-          <button type="button" role="tab" aria-selected={source === 'account'} disabled={locked} onClick={() => setSource('account')}>{t('Remote Accounts')}</button>
+        {git && <div className="dialog-segmented-tabs" role="tablist" aria-label={t('Clone source')} onKeyDown={(event) => {
+          if (locked || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === 'Home' ? 'url' : event.key === 'End' ? 'account' : source === 'url' ? 'account' : 'url';
+          setSource(next);
+          event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next === 'url' ? 0 : 1]?.focus();
+        }}>
+          <button type="button" role="tab" aria-selected={source === 'url'} tabIndex={source === 'url' ? 0 : -1} disabled={locked} onClick={() => setSource('url')}><Codicon name="link" /><span>{t('Repository URL')}</span></button>
+          <button type="button" role="tab" aria-selected={source === 'account'} tabIndex={source === 'account' ? 0 : -1} disabled={locked} onClick={() => setSource('account')}><Codicon name="account" /><span>{t('Remote Accounts')}</span></button>
         </div>}
         {git && source === 'account' && <ProviderContent mode="browse" disabled={locked} close={() => setSource('url')} selectedRepositoryUrl={providerAccountId ? url : undefined} onAccountFormChange={setAccountFormOpen} onAccountChange={clearAccountSelection} onClone={(repository: RemoteRepository, accountId) => {
           setUrl(repository.cloneUrl);
@@ -129,21 +136,21 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
         <label><span>{t(git ? 'Git URL' : 'SVN URL')}</span><input autoFocus={!git || source === 'url'} value={url} placeholder={git ? 'https://github.com/user/repository.git' : 'https://svn.example.com/project/trunk'} onChange={(event) => changeUrl(event.target.value)} /></label>
         {git && source === 'url' && <small>{t('SSH URLs use your Git SSH configuration. Platform accounts authenticate HTTPS repositories.')}</small>}
         <div className="checkout-destination-fields">
-        <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={parent} onChange={(event) => setParent(event.target.value)} /><button type="button" onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}>{t('Browse…')}</button></div></label>
+        <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={parent} onChange={(event) => setParent(event.target.value)} /><button type="button" className="dialog-secondary-button" onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}><Codicon name="folder-opened" /><span>{t('Browse…')}</span></button></div></label>
         <label><span>{t('Folder name')}</span><input value={targetName} onChange={(event) => { inferredNameRef.current = ''; setTargetName(event.target.value); }} /></label>
         </div>
         {validationError && <p className="dialog-error">{validationError}</p>}
         {!git && <>
-          <label className="dialog-check"><input type="checkbox" checked={showAuthentication} onChange={(event) => setShowAuthentication(event.target.checked)} />{t('SVN authentication')}</label>
+          <label className="dialog-check"><SelectionCheckbox label={t('SVN authentication')} checked={showAuthentication} disabled={locked} onChange={() => setShowAuthentication(value => !value)} />{t('SVN authentication')}</label>
           {showAuthentication && <div className="checkout-auth-fields">
             <label><span>{t('Username')}</span><input value={username} onChange={(event) => setUsername(event.target.value)} /></label>
             <label><span>{t('Password')}</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
           </div>}
         </>}
-        {(!git || source === 'url') && <label className="dialog-check"><input type="checkbox" checked={openInNewWindow} onChange={(event) => setOpenInNewWindow(event.target.checked)} />{t('Open in New Window')}</label>}
+        {(!git || source === 'url') && <label className="dialog-check"><SelectionCheckbox label={t('Open in New Window')} checked={openInNewWindow} disabled={locked} onChange={() => setOpenInNewWindow(value => !value)} />{t('Open in New Window')}</label>}
         </fieldset>
         <RepositoryTaskProgress operationId={operationId} />
-        <footer>{git && source === 'account' && !accountFormOpen && <label className="dialog-check clone-new-window-option"><input type="checkbox" disabled={locked} checked={openInNewWindow} onChange={event => setOpenInNewWindow(event.target.checked)} />{t('Open in New Window')}</label>}<button type="button" disabled={locked} onClick={close}>{t('Cancel')}</button><button type="button" className="primary" disabled={locked || !ready || (source === 'account' && accountFormOpen)} onClick={() => void submit()}>{t(git ? 'Clone' : 'Checkout')}</button></footer>
+        <footer>{git && source === 'account' && !accountFormOpen && <label className="dialog-check clone-new-window-option"><SelectionCheckbox label={t('Open in New Window')} checked={openInNewWindow} disabled={locked} onChange={() => setOpenInNewWindow(value => !value)} />{t('Open in New Window')}</label>}<button type="button" disabled={locked} onClick={close}>{t('Cancel')}</button><button type="button" className="primary" disabled={locked || !ready || (source === 'account' && accountFormOpen)} onClick={() => void submit()}>{t(git ? 'Clone' : 'Checkout')}</button></footer>
       </DialogSurface>
 
   </>;
