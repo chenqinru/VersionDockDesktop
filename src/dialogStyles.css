@@ -83,6 +83,9 @@
 }
 .vd-dialog .dialog-choices > button > span { min-width: 0; overflow-wrap: anywhere; }
 .vd-dialog .dialog-choices small { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.5; }
+.vd-dialog.compact-choice-dialog .dialog-choices { grid-template-columns: minmax(0, 1fr); }
+.vd-dialog.compact-choice-dialog .dialog-choices > button > span:not(.codicon) { flex: 1; grid-template-columns: minmax(0, 1fr); }
+.vd-dialog.compact-choice-dialog .dialog-choices :is(strong, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vd-dialog .ai-input-surface { --ai-input-radius: 7px; --ai-marquee-radius: 6.5px; }
 .vd-dialog.clone-dialog { --dialog-width: 480px; gap: 14px; }
 .vd-dialog.clone-dialog > header { margin-bottom: 4px; }

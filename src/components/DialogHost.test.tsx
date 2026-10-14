@@ -1,13 +1,36 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DialogHost } from './DialogHost';
-import { editorDialog, promptDialog, publishDialog } from './dialogService';
+import { choiceDialog, editorDialog, promptDialog, publishDialog } from './dialogService';
 import { openCommitMessageEditor } from './commitMessageEditor';
 import { createTranslator, I18nContext } from '../i18n';
 
 afterEach(() => {
   publishDialog(undefined);
   cleanup();
+});
+
+describe('DialogHost compact choices', () => {
+  it.each(['en', 'zh-CN'] as const)('preserves full branch names and paths for compact choices in %s', async (language) => {
+    const t = createTranslator(language);
+    const label = 'codex/sync-plugin-worktree-branch-refresh';
+    const description = t('Already open in {0}', '/Volumes/WorkSSD/Codex/.codex/worktrees/793f/VersionDockDesktop');
+    render(<I18nContext.Provider value={{ language, preference: language === 'en' ? 'en' : 'zhCn', t }}><DialogHost /></I18nContext.Provider>);
+    let selection: string | null = null;
+    await act(async () => { void choiceDialog({ title: t('New Worktree — Branch'), message: t('Select branch for new worktree'), compactChoices: true, choices: [{ id: 'branch:0', label, description, icon: 'git-branch' }] }).then(value => { selection = value; }); });
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-dialog-size', 'medium');
+    expect(screen.getByText(label)).toHaveAttribute('title', label);
+    expect(screen.getByText(description)).toHaveAttribute('title', description);
+    fireEvent.click(screen.getByText(label).closest('button')!);
+    await waitFor(() => expect(selection).toBe('branch:0'));
+  });
+
+  it('keeps explanatory choices at their default size', async () => {
+    render(<DialogHost />);
+    await act(async () => { void choiceDialog({ title: 'Save SVN credentials?', message: '', choices: [{ id: 'session', label: 'Use for this VersionDock session only', description: 'Do not write the password to the system SVN cache' }] }); });
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-dialog-size', 'small');
+    expect(screen.getByRole('dialog')).not.toHaveClass('compact-choice-dialog');
+  });
 });
 
 describe('DialogHost editor', () => {

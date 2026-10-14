@@ -99,7 +99,7 @@ export function DialogHost() {
     } else finish(true);
   };
   const isEditor = request.kind === 'editor';
-  return <DialogSurface ref={dialog} size={isEditor || request.items?.length ? 'medium' : 'small'} className={`app-dialog${isEditor ? ' commit-message-dialog' : ''}`} onClose={() => { if (branchTaskMode && !generating) setBranchTaskMode(false); else finish(false); }} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
+  return <DialogSurface ref={dialog} size={isEditor || request.items?.length || request.compactChoices ? 'medium' : 'small'} className={`app-dialog${isEditor ? ' commit-message-dialog' : ''}${request.compactChoices ? ' compact-choice-dialog' : ''}`} onClose={() => { if (branchTaskMode && !generating) setBranchTaskMode(false); else finish(false); }} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
       <header><Codicon name={request.icon ?? (request.danger ? 'warning' : request.kind === 'prompt' ? 'edit' : isEditor ? 'git-commit' : 'question')} /><strong id="app-dialog-title">{request.title}</strong><IconButton title={t('Close')} disabled={submitting} onClick={() => finish(false)}><Codicon name="close" /></IconButton></header>
       {!isEditor && (branchTaskMode ? <p>{t('Describe your task, or leave empty to generate from current changes.')}</p> : request.message && <p>{request.message}</p>)}
       {request.kind === 'prompt' && <label><span>{branchTaskMode ? t('Task description') : request.inputLabel}</span><input autoFocus disabled={submitting || generating} aria-label={branchTaskMode ? t('Task description') : request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={branchTaskMode ? branchTask : value} placeholder={branchTaskMode ? t('e.g. Fix login timeout') : undefined} onChange={(event) => branchTaskMode ? setBranchTask(event.target.value) : setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submit(); }} /></label>}
@@ -113,7 +113,7 @@ export function DialogHost() {
         {submitError && <p className="dialog-error" role="alert">{submitError}</p>}
       </div>}
       {!isEditor && submitError && <p className="dialog-error" role="alert">{submitError}</p>}
-      {request.kind === 'choice' && <div className="dialog-choices">{request.choices?.map((choice) => <button key={choice.id} className={choice.danger ? 'danger-choice' : ''} onClick={() => finish(choice.id)}>{choice.icon && <Codicon name={choice.icon} />}<span><strong>{choice.label}</strong>{choice.description && <small>{choice.description}</small>}</span></button>)}</div>}
+      {request.kind === 'choice' && <div className="dialog-choices">{request.choices?.map((choice) => <button key={choice.id} className={choice.danger ? 'danger-choice' : ''} onClick={() => finish(choice.id)}>{choice.icon && <Codicon name={choice.icon} />}<span><strong title={request.compactChoices ? choice.label : undefined}>{choice.label}</strong>{choice.description && <small title={request.compactChoices ? choice.description : undefined}>{choice.description}</small>}</span></button>)}</div>}
       {request.kind === 'multiChoice' && (
         <div className="dialog-choices dialog-multi-choices">
           {request.choices?.map((choice) => {

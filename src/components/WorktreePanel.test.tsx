@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorktreePanel } from './WorktreePanel';
 import { useAppStore } from '../store/appStore';
@@ -109,6 +109,34 @@ describe('WorktreePanel', () => {
     );
 
     expect(screen.getByText('OtherRepo')).toBeInTheDocument();
+  });
+
+  it.each([true, false])('keeps the busy indicator in its repository header with multiRepo=%s', (multiRepo) => {
+    const gitRepo2: RepositoryStatus = { ...gitRepo, meta: { ...gitRepo.meta, id: 'repo-2', name: 'OtherRepo' } };
+    useAppStore.setState({
+      snapshot: { ...snapshot, repositories: [gitRepo, gitRepo2] },
+      worktrees: { 'repo-1': sampleWorktrees, 'repo-2': [] },
+      worktreeBusy: { 'workspace-1:repo-1': true },
+    });
+    render(<WorktreePanel repos={[gitRepo, gitRepo2]} multiRepo={multiRepo} />);
+
+    const header = screen.getByRole('button', { name: 'VersionDock' }).parentElement!;
+    const status = within(header).getByRole('status', { name: 'Worktree operation in progress…' });
+    expect(status.querySelector('.codicon-loading.codicon-modifier-spin')).toBeInTheDocument();
+    expect(status).toHaveAttribute('title', 'Worktree operation in progress…');
+    expect(screen.queryByText('Worktree operation in progress…')).not.toBeInTheDocument();
+    const otherHeader = screen.getByRole('button', { name: 'OtherRepo' }).parentElement!;
+    expect(within(otherHeader).queryByRole('status')).not.toBeInTheDocument();
+    const actionName = multiRepo ? 'Add worktree' : 'New Worktree';
+    expect(screen.getAllByRole('button', { name: actionName })[0]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: actionName })[1]).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'VersionDock' }));
+    expect(status).toBeVisible();
+    act(() => useAppStore.setState({ worktreeBusy: {} }));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'VersionDock' }));
+    expect(screen.getAllByRole('button', { name: actionName })[0]).not.toBeDisabled();
   });
 
   it.each([
@@ -227,11 +255,14 @@ describe('WorktreePanel', () => {
     render(<BridgeContext.Provider value={bridge}><WorktreePanel repos={[gitRepo]} /></BridgeContext.Provider>);
     fireEvent.click(screen.getByTitle('Add worktree'));
     await vi.waitFor(() => expect(currentDialog()?.kind).toBe('choice'));
+    expect(currentDialog()?.compactChoices).toBe(true);
+    expect(screen.getByRole('status', { name: 'Worktree operation in progress…' }).closest('.repository-group-header')).toBeInTheDocument();
     currentDialog()?.resolve('branch:1');
     await vi.waitFor(() => expect(currentDialog()?.kind).toBe('prompt'));
     expect(currentDialog()?.initialValue).toContain('--feature-ui');
     currentDialog()?.resolve('/tmp/custom-worktree');
     await vi.waitFor(() => expect(worktreeOperation).toHaveBeenCalledWith('repo-1', { type: 'create', path: '/tmp/custom-worktree', branch: 'feature/ui', new_branch: false, commitish: null, no_track: false }));
+    await vi.waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
   });
 });
 

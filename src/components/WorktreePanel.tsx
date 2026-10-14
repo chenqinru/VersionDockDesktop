@@ -320,8 +320,11 @@ function RepoSection({
 
   return (
     <div data-density-repository="" style={css.repoSection}>
-      {busy && <span role="status" aria-live="polite" style={css.empty}>{t('Worktree operation in progress…')}</span>}
-      <RepositoryGroup name={repo.repoName} color={projectColor} actions={multiRepo ? (
+      <RepositoryGroup name={repo.repoName} color={projectColor} extras={busy && (
+        <span role="status" aria-live="polite" aria-label={t('Worktree operation in progress…')} title={t('Worktree operation in progress…')}>
+          <Codicon name="loading" className="codicon-modifier-spin" />
+        </span>
+      )} actions={multiRepo ? (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '2px' }}>
             {hasPrunable && onPrune && (
               <IconButton
@@ -490,7 +493,7 @@ export function WorktreePanel({ active = true,
     check();
     const localName = (b: BranchInfo) => b.remote ? b.name.slice((b.remoteName?.length ?? b.name.indexOf('/')) + 1) : b.name;
     const branchChoices = new Map(branches.map((branch, index) => [`branch:${index}`, branch]));
-    const selected = await choiceDialog({title:t('New Worktree — Branch'), message:t('Select branch for new worktree'), choices:[
+    const selected = await choiceDialog({title:t('New Worktree — Branch'), message:t('Select branch for new worktree'), compactChoices:true, choices:[
       {id:'new', label:t('Create new branch…'), icon:'add'},
       ...branches.map((branch, index) => {
         const occupied = worktrees.find(w => w.branch === localName(branch));
