@@ -9,6 +9,7 @@ import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './Reposit
 import { APP_CURRENT_VERSION } from '../version';
 import { workspaceOpenPaths } from '../workspaces/openPaths';
 import { selectWorkspacePaths } from '../workspaces/selectWorkspace';
+import { WelcomeUpdateButton } from './WelcomeUpdateButton';
 
 export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
@@ -69,6 +70,7 @@ export function WorkspaceChooser() {
                 >
                   v{APP_CURRENT_VERSION}
                 </button>
+                <WelcomeUpdateButton />
               </div>
               <p className="welcome-tagline">{t('Unified Git & SVN Desktop Client')}</p>
             </div>

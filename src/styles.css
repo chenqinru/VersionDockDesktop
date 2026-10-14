@@ -324,6 +324,7 @@ input:not(:disabled):hover, textarea:not(:disabled):hover, select:not(:disabled)
 input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { cursor: pointer; }
 .codicon, .codicon[class*="codicon-"] { font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }
 .app-shell { height: 100%; display: flex; flex-direction: column; position: relative; }
+.app-shell:focus { outline: none; }
 /* ===== 现代一体化 TitleBar 顶栏与标签栏样式 ===== */
 .titlebar {
   height: 38px;
@@ -2421,6 +2422,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 
 .welcome-brand-text {
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -2434,6 +2436,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 
 .welcome-title-row h1 {
+  flex-shrink: 0;
   font-size: calc(20px * var(--versiondock-ui-font-scale, 1));
   font-weight: 600;
   color: var(--versiondock-text);
@@ -2442,6 +2445,7 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 }
 
 .welcome-version-badge {
+  flex-shrink: 0;
   font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
   font-weight: 500;
   padding: 2px 7px;
@@ -2450,6 +2454,35 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   color: var(--versiondock-accent);
   border: 1px solid color-mix(in srgb, var(--versiondock-accent) 30%, transparent);
 }
+
+.welcome-update-button {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px;
+  border: 1px solid color-mix(in srgb, var(--versiondock-update-foreground) 30%, transparent);
+  border-radius: 5px;
+  color: var(--versiondock-update-foreground);
+  background: var(--versiondock-update-background);
+  font-size: calc(10px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.welcome-update-button > .codicon { flex-shrink: 0; font-size: 12px; }
+.welcome-update-button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.welcome-update-button:hover:not(:disabled) { background: var(--versiondock-update-hover-background); }
+.welcome-update-button[data-update-error] {
+  color: var(--versiondock-danger);
+  background: color-mix(in srgb, var(--versiondock-danger) 12%, var(--versiondock-surface));
+  border-color: color-mix(in srgb, var(--versiondock-danger) 30%, var(--versiondock-border));
+}
+.welcome-update-button[data-update-error]:hover { background: color-mix(in srgb, var(--versiondock-danger) 18%, var(--versiondock-surface)); }
+.welcome-update-button:focus-visible { outline: 2px solid var(--versiondock-accent); outline-offset: 2px; }
+.welcome-update-button:disabled { opacity: 1; cursor: progress; }
 
 .welcome-tagline {
   font-size: calc(12px * var(--versiondock-ui-font-scale, 1));

@@ -105,7 +105,7 @@ export function App() {
 
   // Reveal the window after preferences load, without waiting for repository scans.
   // Transfers retain their immediate tab/loading view on every platform.
-  useStartupWindowReveal(bridge, Boolean(bootstrap) || ready, Boolean(startupTab));
+  const startupFocus = useStartupWindowReveal(bridge, Boolean(bootstrap) || ready, Boolean(startupTab));
 
   useEffect(() => {
     if (!ready || bootstrap?.state.settings?.autoCheckUpdates === false) return;
@@ -244,7 +244,7 @@ export function App() {
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);
 
   return <I18nContext.Provider value={{ language, preference: languagePreference, t }}>
-    <div className="app-shell">
+    <div className="app-shell" ref={startupFocus} tabIndex={-1}>
       <TitleBar startupTab={!ready && !snapshot ? startupTab : undefined} />
       {!ready && !snapshot ? <div className="startup"><Codicon name="loading codicon-modifier-spin" />{t('Loading workspace…')}</div> : !snapshot ? <WorkspaceChooser /> : (
         <main className="main-workspace" ref={(element) => { if (element) element.inert = transferringWorkspace; }} aria-busy={transferringWorkspace || undefined}>
