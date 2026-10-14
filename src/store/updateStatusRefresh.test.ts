@@ -31,6 +31,53 @@ beforeEach(async () => {
 afterEach(() => { useAppStore.getState().dispose(); useAppStore.setState(initial, true); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('stable commit panel during update and restoration', () => {
+  it('prunes disappeared selections atomically and never selects a reappearing file', async () => {
+    const before = useAppStore.getState().allRepositories.find(repo => repo.meta.id === 'api')!;
+    const path = before.files[0].path;
+    let status: RepositoryStatus = { ...before, files: [] };
+    request.mockImplementation((command, options) => command.type === 'repositoryStatus' ? Promise.resolve(status) : original(command, options));
+    const inconsistent: boolean[] = [];
+    const unsubscribe = useAppStore.subscribe(state => {
+      if (!state.allRepositories.find(repo => repo.meta.id === 'api')?.files.length) inconsistent.push(Boolean(state.commitSelections.api?.length));
+    });
+    try {
+      watcher(); await vi.advanceTimersByTimeAsync(500); await tick();
+      expect(useAppStore.getState().commitSelections.api).toBeUndefined();
+      expect(inconsistent).not.toContain(true);
+      expect(useAppStore.getState().bootstrap?.state.commitSelections?.[useAppStore.getState().snapshot!.workspace.id]?.some(selection => selection.repoId === 'api')).toBe(false);
+      status = before;
+      emit({ workspaceId: useAppStore.getState().snapshot!.workspace.id, repoId: 'api', source: 'watcher', generation: 1001, scopes: ['status', 'index'] });
+      await vi.advanceTimersByTimeAsync(500); await tick();
+      expect(useAppStore.getState().allRepositories.find(repo => repo.meta.id === 'api')!.files.some(file => file.path === path)).toBe(true);
+      expect(useAppStore.getState().commitSelections.api).toBeUndefined();
+    } finally { unsubscribe(); }
+  });
+
+  it.each(['watcher', 'snapshot'] as const)('resets only changed HEAD Amend flags via %s', async source => {
+    const before = useAppStore.getState().allRepositories;
+    const api = before.find(repo => repo.meta.id === 'api')!;
+    const other = before.find(repo => repo.meta.kind === 'git' && repo.meta.id !== 'api')!;
+    useAppStore.setState({ amendRepoIds: ['api', other.meta.id] });
+    let status = api;
+    request.mockImplementation((command, options) => {
+      if (command.type === 'repositoryStatus') return Promise.resolve(status);
+      if (command.type === 'workspaceRefresh') return Promise.resolve({ ...useAppStore.getState().snapshot!, repositories: before.map(repo => repo.meta.id === 'api' ? status : repo) });
+      return original(command, options);
+    });
+    const refresh = async (generation: number) => {
+      if (source === 'snapshot') await useAppStore.getState().refresh(true);
+      else {
+        emit({ workspaceId: useAppStore.getState().snapshot!.workspace.id, repoId: 'api', source: 'watcher', generation, scopes: ['status', 'index'] });
+        await vi.advanceTimersByTimeAsync(500); await tick();
+      }
+    };
+    await refresh(1000);
+    expect(useAppStore.getState().amendRepoIds).toEqual(['api', other.meta.id]);
+    status = { ...api, revision: 'new-head' };
+    await refresh(1001);
+    expect(useAppStore.getState().amendRepoIds).toEqual([other.meta.id]);
+  });
+
   it('retains files and selections while refresh events accumulate, then publishes restored data', async () => {
     const before = useAppStore.getState().allRepositories;
     const selection = structuredClone(useAppStore.getState().commitSelections);

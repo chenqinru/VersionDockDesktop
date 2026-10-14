@@ -5026,6 +5026,7 @@ describe('appStore async lifecycle', () => {
           error: null,
         }];
       }
+      if (command.type === 'repositoryStatus') return repository(command.payload.repo_id, 'Repository');
       return [];
     });
 
@@ -5098,6 +5099,7 @@ describe('appStore async lifecycle', () => {
           error: null,
         }];
       }
+      if (command.type === 'repositoryStatus') return repository(command.payload.repo_id, 'Repository');
       return [];
     });
 

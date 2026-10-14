@@ -1128,14 +1128,18 @@ export function CommitPanel() {
         return;
       }
       const failedRepoIds = new Set(results.filter((result) => result.error || !result.committed).map((result) => result.repoId));
+      const committedRepoIds = new Set(results.filter((result) => result.committed).map((result) => result.repoId));
+      const hasCommitted = committedRepoIds.size > 0;
       const isCurrentWorkspace = (useAppStore.getState().snapshot?.workspace.id ?? '') === targetWid;
       if (isCurrentWorkspace) {
-        if (failedRepoIds.size === 0) {
+        // A rejected push does not undo a successful commit. Preserve its retry
+        // report while clearing the submitted draft and Amend flag, as in the plugin.
+        setAmendRepoIds(useAppStore.getState().amendRepoIds.filter((repoId) => !committedRepoIds.has(repoId)));
+        if (failedRepoIds.size === 0) useAppStore.getState().dismissBatchReport();
+        if (hasCommitted) {
           if (useAppStore.getState().commitMessage.trim() === submittedMessage.trim()) setMessage('');
-          setAmendRepoIds([]);
-          useAppStore.getState().dismissBatchReport();
           if (submittedMessage.trim()) {
-            const repoId = commitTargets[0]?.meta.id ?? '';
+            const repoId = results.find((result) => result.committed)!.repoId;
             setHistoryMessages((prev) => [
               {
                 repoId,
@@ -1146,8 +1150,6 @@ export function CommitPanel() {
               ...prev.filter((item) => item.message.trim() !== submittedMessage.trim()),
             ]);
           }
-        } else {
-          setAmendRepoIds(amendRepoIds.filter((repoId) => failedRepoIds.has(repoId)));
         }
       } else {
         useAppStore.setState((state) => {
@@ -1155,15 +1157,13 @@ export function CommitPanel() {
           if (!targetSession) return state;
           const currentDraft = targetSession.commitMessage ?? '';
           const shouldClearMessage = currentDraft.trim() === submittedMessage.trim();
-          const nextAmend = failedRepoIds.size === 0
-            ? []
-            : (targetSession.amendRepoIds ?? []).filter((repoId) => failedRepoIds.has(repoId));
+          const nextAmend = (targetSession.amendRepoIds ?? []).filter((repoId) => !committedRepoIds.has(repoId));
           return {
             sessions: {
               ...state.sessions,
               [targetWid]: {
                 ...targetSession,
-                commitMessage: failedRepoIds.size === 0 && shouldClearMessage ? '' : targetSession.commitMessage,
+                commitMessage: hasCommitted && shouldClearMessage ? '' : targetSession.commitMessage,
                 amendRepoIds: nextAmend,
                 batchCommitReport: failedRepoIds.size === 0 ? undefined : targetSession.batchCommitReport,
               },

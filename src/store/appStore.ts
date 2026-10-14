@@ -1368,6 +1368,22 @@ function pruneCommitSelections(repositories: RepositoryStatus[], selections: Rec
   return result;
 }
 
+function reconcileCommitState(
+  previousRepositories: RepositoryStatus[],
+  repositories: RepositoryStatus[],
+  state: Pick<WorkspaceSessionState, 'commitSelections' | 'amendRepoIds'>,
+) {
+  const previous = new Map(previousRepositories.map(repo => [repo.meta.id, repo]));
+  const amendableIds = new Set(repositories.filter(repo => {
+    const oldHead = previous.get(repo.meta.id)?.revision;
+    return repo.meta.kind === 'git' && !(oldHead && repo.revision && oldHead !== repo.revision);
+  }).map(repo => repo.meta.id));
+  return {
+    commitSelections: pruneCommitSelections(repositories, state.commitSelections ?? {}),
+    amendRepoIds: (state.amendRepoIds ?? []).filter(id => amendableIds.has(id)),
+  };
+}
+
 function queueBranchRecoveryDialog(task: () => Promise<void>): Promise<void> {
   const next = branchRecoveryDialogQueue.then(task, task);
   branchRecoveryDialogQueue = next.catch(() => undefined);
@@ -1767,36 +1783,6 @@ export const useAppStore = create<AppStore>((set, get) => {
     const current = get().bootstrap;
     if (current) set({ bootstrap: { ...current, state: { ...current.state, commitSelections: { ...(current.state.commitSelections ?? {}), [workspaceId]: Object.entries(selections).map(([repoId, paths]) => ({ repoId, paths })) } } } });
   };
-  const clearCommittedSelections = (repoIds: string[], targetWorkspaceId?: string) => {
-    const activeWid = get().snapshot?.workspace.id;
-    const wid = targetWorkspaceId ?? activeWid;
-    if (!wid) return;
-
-    if (activeWid === wid) {
-      const commitSelections = { ...get().commitSelections };
-      repoIds.forEach((repoId) => delete commitSelections[repoId]);
-      set((state) => ({
-        commitSelections,
-        sessions: state.sessions[wid]
-          ? { ...state.sessions, [wid]: { ...state.sessions[wid], commitSelections } }
-          : state.sessions,
-      }));
-      persistCommitSelections(wid, commitSelections);
-    } else {
-      const cached = get().sessions[wid];
-      const selections = { ...(cached?.commitSelections ?? {}) };
-      repoIds.forEach((repoId) => delete selections[repoId]);
-      set((state) => ({
-        sessions: {
-          ...state.sessions,
-          [wid]: state.sessions[wid]
-            ? { ...state.sessions[wid], commitSelections: selections }
-            : { ...cached, commitSelections: selections } as WorkspaceSessionState,
-        },
-      }));
-      persistCommitSelections(wid, selections);
-    }
-  };
 
   let autoFetchController: AbortController | undefined;
   const backgroundFetch = async () => {
@@ -2048,8 +2034,42 @@ export const useAppStore = create<AppStore>((set, get) => {
     });
   };
 
-  const notifyDetachedCommit = async (repoId: string, wid: string) => {
-    const status = await bridge().request<RepositoryStatus>({ type: 'repositoryStatus', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false });
+  const applyRepositoryStatus = (wid: string, status: RepositoryStatus) => {
+    let changedSelections: Record<string, string[]> | undefined;
+    set(state => {
+      const active = state.snapshot?.workspace.id === wid;
+      const source = active ? state : state.sessions[wid];
+      if (!source?.snapshot) return {};
+      const repositories = source.allRepositories?.length ? source.allRepositories : source.snapshot.repositories;
+      if (!repositories.some(repo => repo.meta.id === status.meta.id)) return {};
+      const allRepositories = repositories.map(repo => repo.meta.id === status.meta.id ? status : repo);
+      const commitState = reconcileCommitState(repositories, allRepositories, source);
+      if (JSON.stringify(commitState.commitSelections) !== JSON.stringify(source.commitSelections ?? {})) {
+        changedSelections = commitState.commitSelections;
+      }
+      const patch = {
+        allRepositories,
+        snapshot: projectSnapshot({ ...source.snapshot, repositories: allRepositories }, allRepositories, settings()),
+        ...commitState,
+      };
+      return active ? patch : { sessions: { ...state.sessions, [wid]: { ...state.sessions[wid], ...patch } } };
+    });
+    if (changedSelections) persistCommitSelections(wid, changedSelections);
+  };
+
+  const refreshCommittedRepository = async (repoId: string, wid: string) => {
+    const owner = bridge();
+    const epoch = updateEpoch(wid);
+    const requestKey = `commit-status:${wid}:${repoId}`;
+    const controller = beginRequest(requestKey);
+    let status: RepositoryStatus;
+    try {
+      status = await owner.request<RepositoryStatus>({ type: 'repositoryStatus', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false, signal: controller.signal });
+      if (get().bridge !== owner || !isCurrentRequest(requestKey, controller) || controller.signal.aborted
+        || epoch !== updateEpoch(wid) || updatingWorkingTree(wid)) return;
+      // Hooks may leave changes. Publish their surviving selections with files.
+      applyRepositoryStatus(wid, status);
+    } finally { endRequest(requestKey, controller); }
     if (status.meta?.kind !== 'git' || !(status.branch === 'HEAD' || status.branch.startsWith('HEAD (')) || !status.revision) return;
     get().addNotification({
       type: 'warning', title: 'Detached HEAD', workspaceId: wid,
@@ -2212,12 +2232,16 @@ export const useAppStore = create<AppStore>((set, get) => {
     const storedSelections = workspaceChanged
       ? selectionRecord(get().bootstrap?.state.commitSelections?.[snapshot.workspace.id])
       : get().commitSelections;
-    const commitSelections = pruneCommitSelections(allRepositories, storedSelections);
+    const { commitSelections, amendRepoIds } = reconcileCommitState(
+      get().allRepositories.length ? get().allRepositories : current?.repositories ?? [],
+      allRepositories,
+      { commitSelections: storedSelections, amendRepoIds: workspaceChanged ? [] : get().amendRepoIds },
+    );
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
       ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], updateDetailCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
-      : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections });
+      : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections, amendRepoIds });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     checkStatusNotifications(allRepositories, snapshot.workspace.id);
     notifyResolvedOperations(allRepositories, snapshot.workspace.id);
@@ -2341,13 +2365,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           const previous = get().allRepositories.find((repo) => repo.meta.id === repoId);
           if (previous && !scopes.has('refs') && !scopes.has('history')) queueChangedBranchStatus(workspaceId, previous, status);
           if (previous) notifyNewUntrackedFiles([previous], [status], workspaceId);
-          set((state) => {
-            const allRepositories = state.allRepositories.map((repo) => repo.meta.id === repoId ? status : repo);
-            return {
-              allRepositories,
-              snapshot: state.snapshot ? projectSnapshot({ ...state.snapshot, repositories: allRepositories }, allRepositories, settings()) : undefined,
-            };
-          });
+          applyRepositoryStatus(workspaceId, status);
           checkStatusNotifications(get().allRepositories, workspaceId);
         }
         if (scopes.has('refs') || scopes.has('history')) {
@@ -3547,11 +3565,10 @@ export const useAppStore = create<AppStore>((set, get) => {
     commit: async (repoId, message, amend, paths, push, noVerify, stagedOnly, targetWorkspaceId) => withBusy(async () => {
       const targetWid = targetWorkspaceId ?? workspaceId();
       await bridge().request({ type: 'commit', payload: { workspace_id: targetWid, repo_id: repoId, message, amend, paths, no_verify: Boolean(noVerify), staged_only: Boolean(stagedOnly) } });
-      clearCommittedSelections([repoId], targetWid);
-      await notifyDetachedCommit(repoId, targetWid).catch(() => undefined);
+      await refreshCommittedRepository(repoId, targetWid).catch(() => undefined);
       if (push) await bridge().request({ type: 'sync', payload: { workspace_id: targetWid, repo_id: repoId, action: 'push', remote: null, branch: null, force: false } }, { timeoutMs: 600_000 });
       if (push) await get().notifyPushSuccess(repoId, targetWid);
-    }, `commit:${repoId}`),
+    }, `commit:${repoId}`, { workspaceId: targetWorkspaceId ?? get().snapshot?.workspace.id }),
 
     commitMany: async (targets, message, push, targetWorkspaceId) => withBusy(async () => {
       const workspace_id = targetWorkspaceId ?? workspaceId();
@@ -3609,9 +3626,8 @@ export const useAppStore = create<AppStore>((set, get) => {
             },
           }));
         }
-        clearCommittedSelections(results.filter((result) => result.committed).map((result) => result.repoId), workspace_id);
         await Promise.all(results.filter((result) => result.committed).map(async (result) => {
-          await notifyDetachedCommit(result.repoId, workspace_id).catch(() => undefined);
+          await refreshCommittedRepository(result.repoId, workspace_id).catch(() => undefined);
           if (result.pushed && targets.length === 1) await get().notifyPushSuccess(result.repoId, workspace_id);
         }));
         if (push && targets.length > 1 && results.length === targets.length && results.every(result => result.committed && !result.error && (result.pushed || repositories.find(repo => repo.meta.id === result.repoId)?.meta.kind === 'svn'))) {
@@ -3752,7 +3768,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         },
       }));
       if (next.committed) {
-        clearCommittedSelections([repoId], targetWid);
+        await refreshCommittedRepository(repoId, targetWid).catch(() => undefined);
       }
       if (!remainingFailures.length && report.id) {
         set((state) => ({
@@ -5948,13 +5964,7 @@ export const useAppStore = create<AppStore>((set, get) => {
               { showProgress: false },
             );
             if (get().snapshot?.workspace.id === wid) {
-              set((state) => {
-                const allRepositories = state.allRepositories.map((repo) => repo.meta.id === repoId ? status : repo);
-                return {
-                  allRepositories,
-                  snapshot: state.snapshot ? projectSnapshot({ ...state.snapshot, repositories: allRepositories }, allRepositories, settings()) : undefined,
-                };
-              });
+              applyRepositoryStatus(wid, status);
             }
           })(),
           get().loadConflicts(true, repoId),

@@ -25,8 +25,9 @@ export function BranchStatusBarItem() {
   const bootstrap = useAppStore((state) => state.bootstrap);
   const selectedRepoId = useAppStore((state) => state.selectedRepoId);
   const branchesByRepo = useAppStore((state) => state.branchesByRepo);
+  // Commit/sync lifetimes also cover requests that use their own progress UI.
   const busy = useAppStore((state) => isOperationActive(
-    Object.fromEntries(Object.entries(state.operations).filter(([, op]) => op.context.visibility === 'foreground')),
+    Object.fromEntries(Object.entries(state.operations).filter(([, op]) => op.context.visibility === 'foreground' || op.context.domain === 'commit' || op.context.domain === 'sync')),
     { workspaceId: state.snapshot?.workspace.id, domain: BRANCH_STATUS_DOMAINS },
   ));
 

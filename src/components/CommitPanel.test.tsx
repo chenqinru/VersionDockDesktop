@@ -292,7 +292,7 @@ describe('CommitPanel capabilities and file view', () => {
     const partialBridge = new MockBridge((command) => command.type === 'batchCommit' ? [
       { repoId: 'one', commitAttempted: true, committed: true, revision: 'success123456', pushAttempted: false, pushed: false, failedStage: null, recoveryHint: null, error: null },
       { repoId: 'two', commitAttempted: true, committed: false, revision: null, pushAttempted: false, pushed: false, failedStage: 'identity', recoveryHint: 'Configure an identity', error: { code: 'IDENTITY_REQUIRED', message: 'Identity is missing', command: null, exitCode: null, stderr: null, recoverable: true } },
-    ] : []);
+    ] : command.type === 'repositoryStatus' ? { ...repoOne, files: [], revision: 'success123456' } : []);
     const repoOne = { ...gitRepo, meta: { ...gitRepo.meta, id: 'one', name: 'ONE' }, files: [{ path: 'one.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
     const repoTwo = { ...gitRepo, meta: { ...gitRepo.meta, id: 'two', name: 'TWO' }, files: [{ path: 'two.ts', status: 'modified', staged: false, unstaged: true, conflicted: false }] };
     useAppStore.setState({ bridge: partialBridge, bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories: [repoOne, repoTwo] }, selectedRepoId: 'one' });
@@ -306,9 +306,9 @@ describe('CommitPanel capabilities and file view', () => {
     const failure = useAppStore.getState().notifications.find((item) => item.actions.some((action) => action.type === 'retryBatchResult'));
     expect(failure?.details).toContain('Failed stage: Identity check');
     expect(screen.queryByText('Batch commit results')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('one.ts')).not.toBeChecked();
+    expect(screen.queryByLabelText('one.ts')).not.toBeInTheDocument();
     expect(screen.getByLabelText('two.ts')).toBeChecked();
-    expect(screen.getByPlaceholderText(/Commit message/)).toHaveValue('partial result');
+    expect(screen.getByPlaceholderText(/Commit message/)).toHaveValue('');
   });
 
   it('retries only push after a successful batch commit', async () => {
