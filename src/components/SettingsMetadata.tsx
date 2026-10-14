@@ -49,11 +49,11 @@ export function SettingSummary({ setting, label, children }: { setting: SettingP
     <SettingLabel label={label} setting={setting} />{children}
   </div>;
 }
-export function ModifiedSettings({ query, onEdit }: { query: string; onEdit: (path: SettingPath, label: string) => void }) {
+export function ModifiedSettings({ query, onEdit, definitions = settingDefinitions }: { query: string; onEdit: (path: SettingPath, label: string) => void; definitions?: typeof settingDefinitions }) {
   const { t } = useI18n();
   const state = useContext(SettingsStateContext);
   if (!state) return null;
-  const modified = settingDefinitions.filter(definition => {
+  const modified = definitions.filter(definition => {
     if (!isSettingModified(definition.path, state.settings, state.layout)) return false;
     const category = settingsCategories.find(item => item.id === definition.category)!;
     const value = formatSettingValue(definition.path, settingValue(definition.path, state.settings, state.layout), t);

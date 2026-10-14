@@ -35,18 +35,19 @@ import { EditorIcon } from './EditorIcons';
 import { ThemePreviewSelector, FileIconThemePreviewSelector } from './AppearanceSelectors';
 import { ProviderPanel } from './ProviderPanel';
 import { DEFAULT_LAYOUT, defaultSettingPatch, effectiveSettings, isSettingModified, type SettingPath } from '../settings/defaults';
-import { settingsCategories, settingDefinitions } from '../settings/catalog';
+import { settingsCategories, settingsForScope, type SettingsScope } from '../settings/catalog';
 import { SettingsStateContext, useSettingState } from '../settings/SettingsStateContext';
 import { ModifiedSettings, SettingLabel, SettingSummary } from './SettingsMetadata';
 
 interface SettingsPanelProps {
   onClose: () => void;
+  scope?: SettingsScope;
 }
 
 
 type SettingsCategoryId = typeof settingsCategories[number]['id'];
 
-export function SettingsPanel({ onClose }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelProps) {
   const { t } = useI18n();
   const closeButton = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -56,12 +57,15 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [onlyModified, setOnlyModified] = useState(false);
   const [inspectedSetting, setInspectedSetting] = useState<SettingPath>();
   const [providersOpen, setProvidersOpen] = useState(false);
+  const { categories, definitions } = useMemo(() => settingsForScope(scope), [scope]);
+  const selectedCategory = categories.find(category => category.id === activeCategory)?.id ?? categories[0].id;
+  const profileStatusBarVisible = definitions.some(definition => definition.path === 'showProfileStatusBar');
 
   const storedSettings = useAppStore((state) => state.bootstrap?.state.settings);
   const settings = useMemo(() => effectiveSettings(storedSettings), [storedSettings]);
   const storedLayout = useAppStore((state) => state.bootstrap?.state.layout);
   const layout = useMemo(() => ({ ...DEFAULT_LAYOUT, ...storedLayout }), [storedLayout]);
-  const modified = settingDefinitions.filter(item => isSettingModified(item.path, settings, layout));
+  const modified = definitions.filter(item => isSettingModified(item.path, settings, layout));
   const theme = settings?.theme ?? 'system';
   const language = settings?.language ?? 'system';
   const uiFontSize = settings?.uiFontSize ?? 'standard';
@@ -162,8 +166,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <Codicon name="filter" /><span>{t('Modified settings ({0})', modified.length)}</span>
             </button>
             <nav className="settings-nav" aria-label={t('Settings categories')}>
-              {settingsCategories.map((category) => {
-                const isActive = !isSearching && !onlyModified && activeCategory === category.id;
+              {categories.map((category) => {
+                const isActive = !isSearching && !onlyModified && selectedCategory === category.id;
                 const count = modified.filter(item => item.category === category.id).length;
                 return (
                   <a
@@ -195,11 +199,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
           {/* 右侧内容主视窗：纯正独立分类切换 */}
           <div ref={content} className="settings-content">
-            {onlyModified ? <ModifiedSettings query={searchQuery} onEdit={(path) => {
-              const definition = settingDefinitions.find(item => item.path === path)!;
+            {onlyModified ? <ModifiedSettings query={searchQuery} definitions={definitions} onEdit={(path) => {
+              const definition = definitions.find(item => item.path === path)!;
               setOnlyModified(false); setInspectedSetting(path); setSearchQuery(''); setActiveCategory(definition.category);
             }} /> : isSearching ? (
               <SearchResults
+                scope={scope}
                 query={searchQuery}
                 focusSetting={inspectedSetting}
                 settings={settings}
@@ -223,7 +228,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             ) : (
               <div className="settings-category-pane">
                 {/* 1. 外观 Appearance */}
-                {activeCategory === 'settings-section-appearance-title' && (
+                {selectedCategory === 'settings-section-appearance-title' && (
                   <SettingsSection id="settings-section-appearance" titleId="settings-section-appearance-title" icon="color-mode" title={t('Appearance')}>
                     <SettingsCard setting="theme" title={t('Theme')} description={t('Choose the application color theme')}>
                       <ThemePreviewSelector value={theme} onChange={(val) => void setTheme(val)} />
@@ -265,10 +270,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </SettingsSection>
                 )}
 
-                {activeCategory === 'settings-section-ai-title' && <SettingsSection id="settings-section-ai" titleId="settings-section-ai-title" icon="sparkle" title={t('AI')}><AiSettings focusSetting={inspectedSetting} /></SettingsSection>}
+                {selectedCategory === 'settings-section-ai-title' && <SettingsSection id="settings-section-ai" titleId="settings-section-ai-title" icon="sparkle" title={t('AI')}><AiSettings focusSetting={inspectedSetting} /></SettingsSection>}
 
                 {/* 2. 更改与提交 Changes and commit */}
-                {activeCategory === 'settings-section-changes-title' && (
+                {selectedCategory === 'settings-section-changes-title' && (
                   <SettingsSection id="settings-section-changes" titleId="settings-section-changes-title" icon="source-control" title={t('Changes and commit')}>
                     <SettingsCard title={t('Changes display mode')}>
                       <SettingSelect setting="layout.fileViewMode"
@@ -332,7 +337,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {/* 3. 提交与安全防御 Commit & Safety Guard */}
-                {activeCategory === 'settings-section-guard-title' && (
+                {selectedCategory === 'settings-section-guard-title' && (
                   <SettingsSection id="settings-section-guard" titleId="settings-section-guard-title" icon="shield" title={t('Commit & Safety Guard')}>
                     <SettingsCard title={t('Commit & Safety Guard')}>
                       <SettingToggle setting="noVerify"
@@ -385,7 +390,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {/* 4. 分支与推送防护 Branch & Push Protection */}
-                {activeCategory === 'settings-section-protection-title' && (
+                {selectedCategory === 'settings-section-protection-title' && (
                   <SettingsSection id="settings-section-protection" titleId="settings-section-protection-title" icon="lock" title={t('Branch & Push Protection')}>
                     <SettingsCard title={t('Branch & Push Protection')}>
                       <SettingProtectedBranches
@@ -438,7 +443,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {/* 5. 更新项目与子模块 Update Project & Submodules */}
-                {activeCategory === 'settings-section-update-title' && (
+                {selectedCategory === 'settings-section-update-title' && (
                   <SettingsSection id="settings-section-update" titleId="settings-section-update-title" icon="cloud-download" title={t('Update Project & Submodules')}>
                     <SettingsCard title={t('Update Project & Submodules')}>
                       <SettingSelect setting="updateProjectMethod"
@@ -479,7 +484,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {/* 6. 差异对比与搁置 Diff & Shelve */}
-                {activeCategory === 'settings-section-diff-title' && (
+                {selectedCategory === 'settings-section-diff-title' && (
                   <SettingsSection id="settings-section-diff" titleId="settings-section-diff-title" icon="diff" title={t('Diff & Shelve')}>
                     <SettingsCard title={t('Diff & Shelve')}>
                       <SettingSelect setting="shelveComparisonBase"
@@ -497,7 +502,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {/* 7. 刷新与启动 Refresh and startup */}
-                {activeCategory === 'settings-section-refresh-title' && (
+                {selectedCategory === 'settings-section-refresh-title' && (
                   <SettingsSection id="settings-section-refresh" titleId="settings-section-refresh-title" icon="sync" title={t('Refresh and startup')}>
                     <SettingsCard title={t('Refresh and startup')}>
                       <SettingNumber setting="autoFetchIntervalMinutes" label={t('Automatic fetch interval')} description={t('Fetch remote changes in the background at this interval; 0 disables it.')}
@@ -550,7 +555,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {/* 8. 仓库与历史 Repository and history */}
-                {activeCategory === 'settings-section-repository-title' && (
+                {selectedCategory === 'settings-section-repository-title' && (
                   <SettingsSection id="settings-section-repository" titleId="settings-section-repository-title" icon="repo" title={t('Repository and history')}>
                     <SettingsCard title={t('Repository')}>
                       <SettingNumber setting="repositoryScanDepth"
@@ -610,9 +615,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </SettingsSection>
                 )}
 
-                {activeCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="account" title={t('Accounts and privacy')}>
-                  <SettingsCard title={t('Status bar')}><SettingToggle setting="showProfileStatusBar" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
-                    checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} /></SettingsCard>
+                {selectedCategory === 'settings-section-accounts-title' && <SettingsSection id="settings-section-accounts" titleId="settings-section-accounts-title" icon="account" title={t('Accounts and privacy')}>
+                  {profileStatusBarVisible && <SettingsCard title={t('Status bar')}><SettingToggle setting="showProfileStatusBar" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
+                    checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} /></SettingsCard>}
                   <SettingsCard title={t('Remote provider accounts')}><button type="button" className="settings-action-btn" onClick={() => setProvidersOpen(true)}><Codicon name="account" />{t('Manage GitHub, GitLab, and Gitee accounts')}</button></SettingsCard>
                   <SettingsCard title={t('Author avatars')}>
                     <SettingToggle setting="onlineAvatarsEnabled" label={t('Online author avatars')} description={t('Resolve remote provider addresses to author avatars.')} checked={settings?.onlineAvatarsEnabled ?? false} onChange={(value) => void updateSettings({ onlineAvatarsEnabled: value, ...(!value ? { gravatarEnabled: false, avatarCrossPlatformFallback: false } : {}) })} />
@@ -622,7 +627,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </SettingsSection>}
 
                 {/* 5. 外部编辑器 External editor */}
-                {activeCategory === 'settings-section-external-editor-title' && (
+                {selectedCategory === 'settings-section-external-editor-title' && (
                   <ExternalEditorSettings
                     id="settings-section-external-editor"
                     titleId="settings-section-external-editor-title"
@@ -632,7 +637,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 )}
 
                 {/* 6. 关于与更新 About and updates */}
-                {activeCategory === 'settings-section-about-title' && (
+                {selectedCategory === 'settings-section-about-title' && (
                   <SettingsSection id="settings-section-about" titleId="settings-section-about-title" icon="info" title={t('About and updates')}>
                     <SettingsCard title={t('About and updates')}>
                       <SettingToggle setting="autoCheckUpdates"
@@ -1252,6 +1257,7 @@ function ExternalEditorSettings({
 }
 
 interface SearchResultsProps {
+  scope: SettingsScope;
   query: string;
   focusSetting?: SettingPath;
   settings: DesktopSettings;
@@ -1274,6 +1280,7 @@ interface SearchResultsProps {
 }
 
 function SearchResults({
+  scope,
   query,
   focusSetting,
   settings,
@@ -1295,11 +1302,13 @@ function SearchResults({
 }: SearchResultsProps) {
   const { t } = useI18n();
   const q = query.trim().toLowerCase();
+  const { categories, definitions } = settingsForScope(scope);
+  const categoryVisible = (id: SettingsCategoryId) => categories.some(category => category.id === id);
 
   const match = (text: string) => text.toLowerCase().includes(q);
 
   // 1. 外观匹配项
-  const aiDefinitions = settingDefinitions.filter(item => item.category === 'settings-section-ai-title');
+  const aiDefinitions = definitions.filter(item => item.category === 'settings-section-ai-title');
   const aiMatches = ['AI','Agent CLI','API key','Model','AI prompts','commit-message','commit-explanation','code-review','commit-composer','merge-conflict', ...aiDefinitions.map(item => item.label)].some((label) => `${label} ${t(label)}`.toLowerCase().includes(query.toLowerCase()));
   const aiFocus = focusSetting ?? aiDefinitions.find(item => t(item.label).toLowerCase().includes(q))?.path;
   const appearanceItems: ReactNode[] = [];
@@ -1694,7 +1703,7 @@ function SearchResults({
     description={t('Fetch remote changes in the background at this interval; 0 disables it.')} value={settings?.autoFetchIntervalMinutes ?? 15}
     min={0} max={1440} suffix={t('minutes')} onChange={(value) => void updateSettings({ autoFetchIntervalMinutes: value })} />);
   const accountItems: ReactNode[] = [];
-  if (match(t('Show account and identity status bar')) || match(t('Show or hide the account and identity entry in the status bar.'))) accountItems.push(<SettingToggle setting="showProfileStatusBar" key="show-profile" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
+  if (definitions.some(definition => definition.path === 'showProfileStatusBar') && (match(t('Show account and identity status bar')) || match(t('Show or hide the account and identity entry in the status bar.')))) accountItems.push(<SettingToggle setting="showProfileStatusBar" key="show-profile" label={t('Show account and identity status bar')} description={t('Show or hide the account and identity entry in the status bar.')}
     checked={settings?.showProfileStatusBar ?? true} onChange={(value) => void updateSettings({ showProfileStatusBar: value })} />);
   for (const item of [
     { path:'onlineAvatarsEnabled', label:'Online author avatars', description:'Resolve remote provider addresses to author avatars.' },
@@ -1900,36 +1909,36 @@ function SearchResults({
   }
 
   const sections: ReactNode[] = [];
-  if (match(t('Project colors')) || match(t('Visible repositories'))) sections.push(<RepositoryAppearanceSettings key="repository-appearance" settings={settings} />);
-  if (aiMatches) sections.push(<AiSettings key="sec-ai" focusSetting={aiFocus} />);
-  if (appearanceItems.length > 0) {
+  if (categoryVisible('settings-section-repository-title') && (match(t('Project colors')) || match(t('Visible repositories')))) sections.push(<RepositoryAppearanceSettings key="repository-appearance" settings={settings} />);
+  if (categoryVisible('settings-section-ai-title') && aiMatches) sections.push(<AiSettings key="sec-ai" focusSetting={aiFocus} />);
+  if (categoryVisible('settings-section-appearance-title') && appearanceItems.length > 0) {
     sections.push(<SettingsCard key="sec-appearance" title={t('Appearance')}>{appearanceItems}</SettingsCard>);
   }
-  if (changesItems.length > 0) {
+  if (categoryVisible('settings-section-changes-title') && changesItems.length > 0) {
     sections.push(<SettingsCard key="sec-changes" title={t('Changes and commit')}>{changesItems}</SettingsCard>);
   }
-  if (guardItems.length > 0) {
+  if (categoryVisible('settings-section-guard-title') && guardItems.length > 0) {
     sections.push(<SettingsCard key="sec-guard" title={t('Commit & Safety Guard')}>{guardItems}</SettingsCard>);
   }
-  if (protectionItems.length > 0) {
+  if (categoryVisible('settings-section-protection-title') && protectionItems.length > 0) {
     sections.push(<SettingsCard key="sec-protection" title={t('Branch & Push Protection')}>{protectionItems}</SettingsCard>);
   }
-  if (updateItems.length > 0) {
+  if (categoryVisible('settings-section-update-title') && updateItems.length > 0) {
     sections.push(<SettingsCard key="sec-update" title={t('Update Project & Submodules')}>{updateItems}</SettingsCard>);
   }
-  if (diffItems.length > 0) {
+  if (categoryVisible('settings-section-diff-title') && diffItems.length > 0) {
     sections.push(<SettingsCard key="sec-diff" title={t('Diff & Shelve')}>{diffItems}</SettingsCard>);
   }
-  if (accountItems.length > 0) {
+  if (categoryVisible('settings-section-accounts-title') && accountItems.length > 0) {
     sections.push(<SettingsCard key="sec-accounts" title={t('Accounts and privacy')}>{accountItems}</SettingsCard>);
   }
-  if (refreshItems.length > 0) {
+  if (categoryVisible('settings-section-refresh-title') && refreshItems.length > 0) {
     sections.push(<SettingsCard key="sec-refresh" title={t('Refresh and startup')}>{refreshItems}</SettingsCard>);
   }
-  if (repoItems.length > 0) {
+  if (categoryVisible('settings-section-repository-title') && repoItems.length > 0) {
     sections.push(<SettingsCard key="sec-repo" title={t('Repository and history')}>{repoItems}</SettingsCard>);
   }
-  if (isEditorMatched) {
+  if (categoryVisible('settings-section-external-editor-title') && isEditorMatched) {
     sections.push(
       <ExternalEditorSettings
         key="sec-editor"
@@ -1940,7 +1949,7 @@ function SearchResults({
       />,
     );
   }
-  if (aboutItems.length > 0) {
+  if (categoryVisible('settings-section-about-title') && aboutItems.length > 0) {
     sections.push(<SettingsCard key="sec-about" title={t('About and updates')}>{aboutItems}</SettingsCard>);
   }
 

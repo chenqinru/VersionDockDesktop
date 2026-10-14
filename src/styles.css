@@ -5383,6 +5383,7 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .about-modal {
+  --about-secondary-text: color-mix(in srgb, var(--versiondock-text) 80%, var(--versiondock-muted));
   max-height: min(680px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
@@ -5445,21 +5446,21 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .about-tagline {
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
-  color: var(--versiondock-muted);
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
+  color: var(--about-secondary-text);
 }
 
 .about-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  color: var(--versiondock-muted);
+  color: var(--versiondock-text);
 }
 
-.about-close-btn:hover {
+.about-close-btn:is(:hover, :focus-visible) {
   color: var(--versiondock-text);
   background: var(--versiondock-hover);
 }
@@ -5479,7 +5480,7 @@ button.notification-item-action-btn:focus-visible {
   gap: 6px;
   padding: 6px 12px 8px;
   border-bottom: 2px solid transparent;
-  color: var(--versiondock-muted);
+  color: var(--about-secondary-text);
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
   font-weight: 500;
   cursor: pointer;
@@ -5775,7 +5776,7 @@ button.notification-item-action-btn:focus-visible {
 }
 
 .author-label {
-  color: var(--versiondock-muted);
+  color: var(--about-secondary-text);
 }
 
 .about-link {
@@ -5854,7 +5855,7 @@ button.notification-item-action-btn:focus-visible {
 
 .diag-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -5862,16 +5863,15 @@ button.notification-item-action-btn:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
+  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
 }
 
 .diag-name {
-  color: var(--versiondock-muted);
+  color: var(--about-secondary-text);
 }
 
 .diag-val {
   color: var(--versiondock-text);
-  font-family: var(--versiondock-code);
 }
 
 .changelog-tab {
@@ -6020,15 +6020,7 @@ button.notification-item-action-btn:focus-visible {
   background: color-mix(in srgb, #000000 15%, var(--versiondock-accent-bg));
 }
 
-.welcome-version-badge.clickable {
-  cursor: pointer;
-  transition: transform 0.12s ease, background-color 0.12s ease;
-}
 
-.welcome-version-badge.clickable:hover {
-  transform: scale(1.05);
-  background: color-mix(in srgb, var(--versiondock-accent) 30%, transparent);
-}
 
 /* 外部编辑器下拉选择框组件 */
 .settings-editor-dropdown-field {

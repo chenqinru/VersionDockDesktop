@@ -354,6 +354,26 @@ describe('CommitDetailPanel merge commits', () => {
     expect(screen.getByRole('button', { name: /Click to collapse/ })).toBeInTheDocument();
   });
 
+  it('preserves selected title text without toggling the message and keeps the explicit expand button usable', () => {
+    const detail = { ...directoryDetail, fullMessage: `${directoryCommit.message}\n\nDetailed description` };
+    useAppStore.setState({ snapshot, selectedCommit: detail, selectedCommits: [directoryCommit], selectedCommitDetails: { [commitKey(directoryCommit.repoId, directoryCommit.hash)]: detail } });
+    render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    const title = screen.getByText(directoryCommit.message);
+    expect(title).toHaveClass('selectable-text');
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      fireEvent.click(title);
+      expect(selection.toString()).toBe(directoryCommit.message);
+      expect(title).not.toHaveClass('expanded');
+      fireEvent.click(screen.getByRole('button', { name: /Click to expand/ }));
+      expect(title).toHaveClass('expanded');
+    } finally { selection.removeAllRanges(); }
+  });
+
   it('allows expanding a directory immediately on first click after collapse all', () => {
     useAppStore.setState({
       snapshot: { ...snapshot, repositories: [...snapshot.repositories, { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' } }] },

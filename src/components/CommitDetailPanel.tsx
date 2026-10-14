@@ -750,7 +750,7 @@ function CommitMessage({
         style={{ cursor: canExpand ? 'pointer' : 'default' }}
         onClick={handleTitleClick}
       >
-        <strong className={expanded ? 'expanded' : ''} title={fullMessageTooltip}>
+        <strong className={`selectable-text${expanded ? ' expanded' : ''}`} title={fullMessageTooltip}>
           {subject}
         </strong>
         {canExpand ? (

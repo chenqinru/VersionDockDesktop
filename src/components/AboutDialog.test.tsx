@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nContext, createTranslator } from '../i18n';
 import { useAppStore } from '../store/appStore';
@@ -7,6 +7,7 @@ import { AboutDialog } from './AboutDialog';
 import * as updaterService from '../services/updater';
 import { version } from '../../package.json';
 import releaseHistory from '../release-notes.json';
+import type { BootstrapData } from '../bindings/generated';
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
   check: vi.fn().mockResolvedValue(null),
@@ -23,6 +24,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 const renderAboutDialog = (onClose = vi.fn(), initialTab: 'about' | 'changelog' = 'about', language: 'en' | 'zh-CN' = 'en') => {
   useAppStore.setState({
     ready: true,
+    bootstrap: undefined,
     snapshot: {
       generation: 1,
       workspace: { id: 'ws-1', name: 'Test WS', paths: ['/path/to/repo'], available: true, lastOpenedAt: new Date().toISOString() },
@@ -41,12 +43,62 @@ const renderAboutDialog = (onClose = vi.fn(), initialTab: 'about' | 'changelog' 
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ ready: false, snapshot: undefined, updateAvailableInfo: null });
+  useAppStore.setState({ ready: false, bootstrap: undefined, snapshot: undefined, updateAvailableInfo: null });
   useAppUpdateStore.setState({ phase: 'idle', targetVersion: null, progress: null, error: null });
   vi.restoreAllMocks();
 });
 
 describe('AboutDialog', () => {
+  it.each(['en', 'zh-CN'] as const)('keeps diagnostics and log actions visible in %s', (language) => {
+    renderAboutDialog(vi.fn(), 'about', language);
+    const t = createTranslator(language);
+    expect(screen.getByText(t('Environment & Diagnostics'))).toBeVisible();
+    expect(screen.getAllByText(t('Available'))).toHaveLength(2);
+    expect(screen.getByRole('button', { name: t('View Output & Logs') })).toBeVisible();
+    expect(screen.getByRole('button', { name: t('Open Log Folder') })).toBeVisible();
+    expect(screen.getByRole('button', { name: t('Copy Diagnostics') })).toBeVisible();
+    expect(screen.queryByRole('button', { name: t('Environment & Diagnostics') })).not.toBeInTheDocument();
+  });
+
+  it.each(['en', 'zh-CN'] as const)('uses startup tool detection on welcome and copies the same diagnostic state in %s', async (language) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderAboutDialog(vi.fn(), 'about', language);
+    act(() => useAppStore.setState({
+      snapshot: undefined,
+      bootstrap: { state: {}, tools: { git: true, svn: false, svnadmin: false } } as BootstrapData,
+    }));
+    const t = createTranslator(language);
+    expect(screen.getByText(t('Available'))).toBeVisible();
+    expect(screen.getByText(t('Not detected'))).toBeVisible();
+    expect(screen.getByText(`${t('Workspace')}:`)).toBeVisible();
+    expect(screen.getByText(t('Not opened'))).toBeVisible();
+    expect(screen.queryByText(`${t('Repositories')}:`)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: t('Copy Diagnostics') }));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const report = writeText.mock.calls[0][0];
+    expect(report).toContain('- **Git**: Available');
+    expect(report).toContain('- **SVN**: Not detected');
+    expect(report).toContain('- **Workspace**: Not opened');
+    expect(report).not.toContain('Repositories Loaded');
+  });
+
+  it('does not claim tools are missing before detection completes', () => {
+    renderAboutDialog();
+    act(() => useAppStore.setState({ snapshot: undefined }));
+    expect(screen.getAllByText('Not checked')).toHaveLength(2);
+    expect(screen.queryByText('Not installed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not detected')).not.toBeInTheDocument();
+  });
+
+  it('prefers startup tool detection over workspace snapshots while retaining workspace repository counts', () => {
+    renderAboutDialog();
+    act(() => useAppStore.setState({ bootstrap: { state: {}, tools: { git: false, svn: false, svnadmin: false } } as BootstrapData }));
+    expect(screen.getAllByText('Not detected')).toHaveLength(2);
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
+    expect(screen.getByText('Repositories:').parentElement).toHaveTextContent('0');
+  });
+
   it.each(['en', 'zh-CN'] as const)('shows versioned release history in %s', (language) => {
     const view = renderAboutDialog(vi.fn(), 'changelog', language);
     const entries = view.baseElement.querySelectorAll('.changelog-entry');

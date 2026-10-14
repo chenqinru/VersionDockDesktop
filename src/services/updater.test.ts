@@ -207,9 +207,26 @@ describe('updater service', () => {
 
       const report = generateDiagnosticReport(snapshot, settings);
       expect(report).toContain(`- **App Version**: v${APP_CURRENT_VERSION}`);
-      expect(report).toContain('- **Git**: Available / Installed');
-      expect(report).toContain('- **SVN**: Not installed');
+      expect(report).toContain('- **Git**: Available');
+      expect(report).toContain('- **SVN**: Not detected');
+      expect(report).toContain('- **Repositories Loaded**: 0');
       expect(report).toContain('- **Auto Check Updates**: Enabled');
+    });
+
+    it('reports welcome tools without inventing a repository count', () => {
+      const report = generateDiagnosticReport(undefined, undefined, { git: true, svn: false, svnadmin: false });
+      expect(report).toContain('- **Git**: Available');
+      expect(report).toContain('- **SVN**: Not detected');
+      expect(report).toContain('- **Workspace**: Not opened');
+      expect(report).not.toContain('Repositories Loaded');
+    });
+
+    it('distinguishes unchecked tools from failed detection', () => {
+      const report = generateDiagnosticReport(undefined, undefined);
+      expect(report).toContain('- **Git**: Not checked');
+      expect(report).toContain('- **SVN**: Not checked');
+      expect(report).not.toContain('Not detected');
+      expect(report).not.toContain('Not installed');
     });
   });
 });

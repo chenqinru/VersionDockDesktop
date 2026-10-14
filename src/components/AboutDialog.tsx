@@ -18,6 +18,7 @@ import {
   LICENSE_NAME,
   SPONSOR_URL,
   checkAppUpdate,
+  diagnosticToolStatus,
   generateDiagnosticReport,
   openExternalLink,
   type AppUpdateCheckResult,
@@ -31,6 +32,8 @@ interface AboutDialogProps {
 export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps) {
   const { t, language } = useI18n();
   const snapshot = useAppStore((state) => state.snapshot);
+  const bootstrapTools = useAppStore((state) => state.bootstrap?.tools);
+  const tools = bootstrapTools ?? snapshot?.tools;
   const settings = useAppStore((state) => state.bootstrap?.state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
 
@@ -79,7 +82,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
   };
 
   const handleCopyDiagnostics = async () => {
-    const report = generateDiagnosticReport(snapshot, settings);
+    const report = generateDiagnosticReport(snapshot, settings, tools);
     try {
       await navigator.clipboard.writeText(report);
       setCopiedDiag(true);
@@ -366,18 +369,18 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
                   <div className="diag-item">
                     <span className="diag-name">Git:</span>
                     <span className="diag-val">
-                      {snapshot?.tools.git ? t('Available') : t('Not installed')}
+                      {t(diagnosticToolStatus(tools?.git))}
                     </span>
                   </div>
                   <div className="diag-item">
                     <span className="diag-name">SVN:</span>
                     <span className="diag-val">
-                      {snapshot?.tools.svn ? t('Available') : t('Not installed')}
+                      {t(diagnosticToolStatus(tools?.svn))}
                     </span>
                   </div>
                   <div className="diag-item">
-                    <span className="diag-name">{t('Repositories')}:</span>
-                    <span className="diag-val">{snapshot?.repositories.length ?? 0}</span>
+                    <span className="diag-name">{t(snapshot ? 'Repositories' : 'Workspace')}:</span>
+                    <span className="diag-val">{snapshot ? snapshot.repositories.length : t('Not opened')}</span>
                   </div>
                   <div className="diag-item">
                     <span className="diag-name">{t('Theme')}:</span>

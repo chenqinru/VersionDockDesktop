@@ -2,7 +2,7 @@ import { check, Update } from '@tauri-apps/plugin-updater';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { APP_CURRENT_VERSION } from '../version';
-import type { WorkspaceSnapshot, DesktopSettings } from '../bindings/generated';
+import type { WorkspaceSnapshot, DesktopSettings, ToolAvailability } from '../bindings/generated';
 
 export interface AppUpdateCheckResult {
   available: boolean;
@@ -219,27 +219,26 @@ export async function openExternalLink(url: string): Promise<void> {
   }
 }
 
-/**
- * 生成用于复制的系统环境与诊断信息
- */
+export function diagnosticToolStatus(available: boolean | undefined): 'Available' | 'Not detected' | 'Not checked' {
+  return available === undefined ? 'Not checked' : available ? 'Available' : 'Not detected';
+}
+
+/** 生成用于复制的系统环境与诊断信息。工具检测独立于工作区。 */
 export function generateDiagnosticReport(
   snapshot: WorkspaceSnapshot | null | undefined,
   settings: DesktopSettings | null | undefined,
+  tools: ToolAvailability | null | undefined = snapshot?.tools,
 ): string {
   const osInfo = typeof navigator !== 'undefined' ? `${navigator.userAgent}` : 'Unknown OS';
   const platform = typeof navigator !== 'undefined' && 'platform' in navigator ? (navigator as { platform?: string }).platform : 'Desktop';
-  const tools = snapshot?.tools;
-  const gitVer = tools?.git ? 'Available / Installed' : 'Not installed';
-  const svnVer = tools?.svn ? 'Available / Installed' : 'Not installed';
-  const repoCount = snapshot?.repositories?.length ?? 0;
 
   return [
     '### VersionDock Desktop Diagnostic Information',
     `- **App Version**: v${APP_CURRENT_VERSION}`,
     `- **Platform / User Agent**: ${platform} (${osInfo})`,
-    `- **Git**: ${gitVer}`,
-    `- **SVN**: ${svnVer}`,
-    `- **Repositories Loaded**: ${repoCount}`,
+    `- **Git**: ${diagnosticToolStatus(tools?.git)}`,
+    `- **SVN**: ${diagnosticToolStatus(tools?.svn)}`,
+    ...(snapshot ? [`- **Repositories Loaded**: ${snapshot.repositories.length}`] : ['- **Workspace**: Not opened']),
     `- **Theme**: ${settings?.theme ?? 'system'}`,
     `- **Language**: ${settings?.language ?? 'system'}`,
     `- **Font Size**: ${settings?.uiFontSize ?? 'standard'}`,

@@ -6,6 +6,8 @@ import { MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
 import { SettingsPanel } from './SettingsPanel';
 import { version } from '../../package.json';
+import { DEFAULT_SETTINGS } from '../settings/defaults';
+import type { SettingsScope } from '../settings/catalog';
 
 const state = (): AppStateSnapshot => ({
   schemaVersion: 3,
@@ -22,7 +24,7 @@ const bootstrap = (): BootstrapData => ({
   capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false },
 });
 
-const renderPanel = (onClose = vi.fn()) => {
+const renderPanel = (onClose = vi.fn(), scope: SettingsScope = 'workspace', language: 'en' | 'zh-CN' = 'en') => {
   const commands: BridgeCommand[] = [];
   const persisted = bootstrap();
   const bridge = new MockBridge((command) => {
@@ -34,8 +36,8 @@ const renderPanel = (onClose = vi.fn()) => {
   });
   useAppStore.setState({ bridge, bootstrap: bootstrap(), ready: true });
   const view = render(
-    <I18nContext.Provider value={{ language: 'en', preference: 'system', t: createTranslator('en') }}>
-      <SettingsPanel onClose={onClose} />
+    <I18nContext.Provider value={{ language, preference: 'system', t: createTranslator(language) }}>
+      <SettingsPanel scope={scope} onClose={onClose} />
     </I18nContext.Provider>,
   );
   return { bridge, commands, onClose, ...view };
@@ -48,6 +50,61 @@ afterEach(() => {
 });
 
 describe('SettingsPanel', () => {
+  it.each(['en', 'zh-CN'] as const)('limits welcome categories and search to application settings in %s', (language) => {
+    renderPanel(vi.fn(), 'application', language);
+    const dialog = screen.getByRole('dialog');
+    const t = createTranslator(language);
+    expect(Array.from(screen.getByRole('navigation', { name: t('Settings categories') }).querySelectorAll('a')).map(link => link.textContent)).toEqual([
+      t('Appearance'), t('Accounts and privacy'), t('About and updates'),
+    ]);
+    fireEvent.click(screen.getByRole('link', { name: t('Accounts and privacy') }));
+    expect(screen.getByRole('button', { name: t('Manage GitHub, GitLab, and Gitee accounts') })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: t('Online author avatars') })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: t('Show account and identity status bar') })).not.toBeInTheDocument();
+
+    const search = screen.getByRole('textbox', { name: t('Search settings...') });
+    for (const label of ['Default commit action', 'Bypass hooks (--no-verify)', 'Protected branches', 'Update project method', 'Shelve diff comparison base', 'Automatic fetch interval', 'Repository scan depth', 'Visible repositories', 'Project colors', 'Show account and identity status bar', 'External editor', 'API key']) {
+      const query = t(label);
+      fireEvent.change(search, { target: { value: query } });
+      expect(dialog.querySelector('.settings-search-empty')).toBeInTheDocument();
+      expect(dialog.querySelector('[data-setting]')).toBeNull();
+    }
+    fireEvent.change(search, { target: { value: t('Language') } });
+    expect(screen.getByRole('combobox', { name: t('Language') })).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: t('Check for updates automatically') } });
+    expect(screen.getByRole('checkbox', { name: t('Check for updates automatically') })).toBeInTheDocument();
+  });
+
+  it('counts and resets only visible modified settings on welcome, preserving workspace preferences', async () => {
+    renderPanel(vi.fn(), 'application');
+    const current = useAppStore.getState().bootstrap!;
+    act(() => useAppStore.setState({ bootstrap: { ...current, state: { ...current.state, settings: {
+      ...DEFAULT_SETTINGS, language: 'en', repositoryScanDepth: 4, warnOnDetachedHead: false, showProfileStatusBar: false,
+    } } } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Modified settings (1)' }));
+    expect(screen.getByRole('button', { name: 'Edit setting: Language' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Restore default:/ })).toHaveLength(1);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'scan' } });
+    expect(screen.getByRole('status')).toHaveTextContent('No modified settings match your search.');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit setting: Language' }));
+    expect(screen.getByRole('combobox', { name: 'Language' })).toHaveValue('en');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore default: Language' }));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({
+      language: 'system', repositoryScanDepth: 4, warnOnDetachedHead: false, showProfileStatusBar: false,
+    }));
+    expect(screen.getByRole('button', { name: 'Modified settings (0)' })).toBeInTheDocument();
+  });
+
+  it('falls back to appearance when an open panel changes from workspace to application scope', () => {
+    const { rerender } = renderPanel();
+    fireEvent.click(screen.getByRole('link', { name: 'Repository and history' }));
+    expect(screen.getByRole('spinbutton', { name: 'Repository scan depth' })).toBeInTheDocument();
+    rerender(<SettingsPanel scope="application" onClose={vi.fn()} />);
+    expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Repository scan depth' })).not.toBeInTheDocument();
+  });
+
   it('persists both smooth scrolling preferences independently and supports search and reset', async () => {
     const { commands, bridge } = renderPanel();
     expect(screen.getByRole('checkbox', { name: 'Smooth navigation scrolling' })).toBeChecked();

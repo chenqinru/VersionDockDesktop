@@ -35,11 +35,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it('keeps the current version as the manual update entry when no update is available', () => {
+it('shows the current version as text without opening About when no update is available', () => {
   const view = renderWelcome();
   expect(view.container.querySelector('.welcome-update-button')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: `v${APP_CURRENT_VERSION}` }));
-  expect(useAppStore.getState()).toMatchObject({ aboutOpen: true, aboutInitialTab: 'about' });
+  expect(screen.queryByRole('button', { name: `v${APP_CURRENT_VERSION}` })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText(`v${APP_CURRENT_VERSION}`));
+  expect(useAppStore.getState().aboutOpen).toBe(false);
   act(() => useAppStore.setState({ updateAvailableInfo: { ...update, available: false, error: 'offline' } }));
   expect(view.container.querySelector('.welcome-update-button')).toBeNull();
 });
@@ -47,7 +48,7 @@ it('keeps the current version as the manual update entry when no update is avail
 it.each([['zh-CN', '更新至 v0.2.0'], ['en', 'Update to v0.2.0']] as const)('opens update details before installation in %s', (language, label) => {
   useAppStore.setState({ updateAvailableInfo: update });
   renderWelcome(language);
-  expect(screen.getByRole('button', { name: `v${APP_CURRENT_VERSION}` })).toBeInTheDocument();
+  expect(screen.getByText(`v${APP_CURRENT_VERSION}`)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: label }));
   expect(useAppStore.getState()).toMatchObject({ aboutOpen: true, aboutInitialTab: 'about' });
   expect(updater.downloadAndInstallAppUpdate).not.toHaveBeenCalled();

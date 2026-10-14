@@ -15,7 +15,6 @@ export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const removeRecent = useAppStore((state) => state.removeRecent);
-  const openAbout = useAppStore((state) => state.openAbout);
   const cloneAvailable = useAppStore((state) => state.bootstrap?.capabilities?.availability?.cloneRepository?.available ?? state.bootstrap?.tools?.git ?? false);
   const svnAvailable = useAppStore((state) => state.bootstrap?.tools?.svn ?? false);
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
@@ -62,14 +61,9 @@ export function WorkspaceChooser() {
             <div className="welcome-brand-text">
               <div className="welcome-title-row">
                 <h1>VersionDock</h1>
-                <button
-                  type="button"
-                  className="welcome-version-badge clickable"
-                  title={t('About VersionDock & Check Updates')}
-                  onClick={() => openAbout('about')}
-                >
+                <span className="welcome-version-badge">
                   v{APP_CURRENT_VERSION}
-                </button>
+                </span>
                 <WelcomeUpdateButton />
               </div>
               <p className="welcome-tagline">{t('Unified Git & SVN Desktop Client')}</p>

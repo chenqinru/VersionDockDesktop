@@ -63,6 +63,7 @@ describe('DialogHost editor', () => {
     await act(async () => { void openCommitMessageEditor({ mode: 'edit', repositoryName: 'repo', t: (key) => key, commits: [{ hash: 'abc1234', shortHash: 'abc1234', fullMessage: 'subject\n\noriginal body' }], submit, generate: async () => 'generated' }); });
     const editor = screen.getByRole('textbox', { name: 'Commit message' });
     fireEvent.change(editor, { target: { value: 'changed\n\nnew body' } });
+    expect(document.querySelector('.dialog-original-message')).toHaveClass('selectable-text');
     expect(document.querySelector('.dialog-original-message')).toHaveTextContent('original body');
     expect(document.querySelector('.dialog-original-message')?.textContent).toBe('subject\n\noriginal body');
     expect(screen.getByTitle('Generate commit message with AI').closest('.ai-input-surface')).toContainElement(editor);
@@ -75,6 +76,7 @@ describe('DialogHost editor', () => {
     render(<DialogHost />);
     await act(async () => { void openCommitMessageEditor({ mode: 'squash', repositoryName: 'repo', t: (key) => key, commits: [{ hash: 'old-full-hash', shortHash: 'old', fullMessage: 'first\n\nfirst body' }, { hash: 'new-full-hash', shortHash: 'new', fullMessage: 'second\n\nsecond body' }], submit: async () => true, generate: async () => '' }); });
     const list = screen.getByRole('region', { name: 'Commits being squashed' });
+    expect(list.querySelector('.dialog-commit-list')).toHaveClass('selectable-text');
     expect([...list.querySelectorAll('code')].map((code) => code.textContent)).toEqual(['old', 'new']);
     expect(list.querySelector('code')).toHaveAttribute('title', 'old-full-hash');
     expect([...list.querySelectorAll('.dialog-commit-list span')].map((span) => span.textContent)).toEqual(['first\n\nfirst body', 'second\n\nsecond body']);

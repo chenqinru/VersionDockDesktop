@@ -17,6 +17,23 @@ export const settingsCategories = [
 
 
 export type SettingsCategoryId = typeof settingsCategories[number]['id'];
+export type SettingsScope = 'application' | 'workspace';
+
+const applicationCategoryIds: ReadonlyArray<SettingsCategoryId> = [
+  'settings-section-appearance-title',
+  'settings-section-accounts-title',
+  'settings-section-about-title',
+];
+
+/** Welcome exposes application preferences; workspace exposes the full catalog. */
+export function settingsForScope(scope: SettingsScope) {
+  const categories = settingsCategories.filter(category => scope === 'workspace' || applicationCategoryIds.includes(category.id));
+  const definitions = settingDefinitions.filter(definition =>
+    categories.some(category => category.id === definition.category)
+    && (scope === 'workspace' || definition.path !== 'showProfileStatusBar'));
+  return { categories, definitions };
+}
+
 function fields(category: SettingsCategoryId, items: ReadonlyArray<readonly [SettingPath, string]>) {
   return items.map(([path, label]) => ({ path, label, category }));
 }

@@ -5,10 +5,12 @@ import { MockBridge } from '../platform/bridge';
 import { DEFAULT_SETTINGS } from '../settings/defaults';
 import { useAppStore } from '../store/appStore';
 import { TitleBarActions } from './TitleBarActions';
+import * as updaterService from '../services/updater';
 
 const original = useAppStore.getState();
 beforeEach(() => useAppStore.setState({
   operations: {},
+  aboutOpen: false,
   bootstrap: { state: { settings: DEFAULT_SETTINGS, recentWorkspaces: [] }, tools: { git: true }, capabilities: { availability: {} } } as any,
 }));
 afterEach(() => { cleanup(); useAppStore.setState(original, true); });
@@ -24,6 +26,10 @@ describe('TitleBarActions', () => {
       const button = screen.getByRole('button', { name: action });
       fireEvent.click(button);
       const dialog = screen.getByRole('dialog', { name: dialogName });
+      if (action === 'Settings') {
+        expect(within(dialog).queryByRole('link', { name: 'Changes and commit' }) !== null).toBe(Boolean(workspaceId));
+        expect(within(dialog).getByRole('link', { name: 'Accounts and privacy' })).toBeInTheDocument();
+      }
       expect(button).toHaveAttribute('aria-expanded', 'true');
       fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -32,10 +38,26 @@ describe('TitleBarActions', () => {
     }
   });
 
-  it('keeps clone in the welcome body and exposes only accounts and settings in its title bar', () => {
+  it('keeps clone in the welcome body and exposes accounts, settings, GitHub and about in its title bar', () => {
     render(<BridgeContext.Provider value={new MockBridge(() => [])}><TitleBarActions /></BridgeContext.Provider>);
-    expect(screen.getAllByRole('button')).toHaveLength(2);
+    expect(screen.getAllByRole('button')).toHaveLength(4);
     expect(screen.queryByRole('button', { name: 'Clone Git Repository' })).not.toBeInTheDocument();
+  });
+
+  it.each(['ws', undefined])('opens the product GitHub repository and the shared about dialog with workspace %s', (workspaceId) => {
+    const open = vi.spyOn(updaterService, 'openExternalLink').mockResolvedValue(undefined);
+    render(<BridgeContext.Provider value={new MockBridge(() => [])}><TitleBarActions workspaceId={workspaceId} /></BridgeContext.Provider>);
+    const github = screen.getByRole('button', { name: 'GitHub Repository' });
+    expect(github.querySelector('.codicon-github')).toBeInTheDocument();
+    fireEvent.click(github);
+    expect(open).toHaveBeenCalledWith(updaterService.GITHUB_REPO_URL);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const about = screen.getByRole('button', { name: 'About VersionDock & Check Updates' });
+    fireEvent.click(about);
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(useAppStore.getState()).toMatchObject({ aboutOpen: true, aboutInitialTab: 'about' });
+    expect(about).toHaveAttribute('aria-expanded', 'true');
+    vi.restoreAllMocks();
   });
 
   it('honors clone availability and does not bubble pointer events into the drag region', () => {
