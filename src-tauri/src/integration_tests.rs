@@ -9504,3 +9504,285 @@ async fn publish_concurrent_request_does_not_create_again_after_partial_publicat
     assert_eq!(denied.unwrap_err().code, "PUBLISH_IN_PROGRESS");
     assert_eq!(created.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn worktree_migration_tracks_remote_branches_and_protects_local_storage() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(directory.path());
+    let r = repo(&working, VcsKind::Git);
+    let config = directory.path().join("config");
+    let t = CancellationToken::new();
+    command_output(
+        "git",
+        &["update-ref", "refs/remotes/origin/feature/naming", "HEAD"],
+        &working,
+    );
+    let linked = directory.path().join("工作树 with space");
+    let path = linked.to_string_lossy().into_owned();
+    vcs::worktree_operation(
+        &config,
+        &r,
+        crate::models::WorktreeOperation::Create {
+            path: path.clone(),
+            branch: "origin/feature/naming".into(),
+            new_branch: false,
+            commitish: None,
+            no_track: false,
+        },
+        &t,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        command_output("git", &["symbolic-ref", "--short", "HEAD"], &linked).trim(),
+        "feature/naming"
+    );
+    assert_eq!(
+        command_output(
+            "git",
+            &["rev-parse", "--abbrev-ref", "@{upstream}"],
+            &linked
+        )
+        .trim(),
+        "origin/feature/naming"
+    );
+    let linked_repo = repo(&linked, VcsKind::Git);
+    let entries = vcs::worktrees(&linked_repo, &t).await.unwrap();
+    assert!(entries.first().unwrap().main);
+    assert!(
+        !entries
+            .iter()
+            .find(|e| vcs::same_worktree_path(&e.path, &path))
+            .unwrap()
+            .main
+    );
+    assert!(vcs::validate_new_branch_name(&r, "feature", &t)
+        .await
+        .is_err());
+    assert!(
+        vcs::validate_new_branch_name(&r, "feature/naming/child", &t)
+            .await
+            .is_err()
+    );
+    assert!(vcs::validate_new_branch_name(&r, "HEAD", &t).await.is_err());
+    assert!(vcs::validate_new_branch_name(&r, "refs/heads/new", &t)
+        .await
+        .is_err());
+    assert!(vcs::validate_new_branch_name(&r, "fix/fresh", &t)
+        .await
+        .is_ok());
+    let occupied = directory.path().join("occupied");
+    assert_eq!(
+        vcs::worktree_operation(
+            &config,
+            &r,
+            crate::models::WorktreeOperation::Create {
+                path: occupied.to_string_lossy().into(),
+                branch: "origin/feature/naming".into(),
+                new_branch: false,
+                commitish: None,
+                no_track: false
+            },
+            &t
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "WORKTREE_BRANCH_OCCUPIED"
+    );
+    assert!(!occupied.exists());
+    assert_eq!(
+        vcs::worktree_removal_info(&config, &linked_repo, &path, &t)
+            .await
+            .unwrap_err()
+            .code,
+        "WORKTREE_MAIN"
+    );
+    command_output("git", &["worktree", "lock", &path], &working);
+    assert_eq!(
+        vcs::worktree_operation(
+            &config,
+            &r,
+            crate::models::WorktreeOperation::Remove {
+                path: path.clone(),
+                force: true
+            },
+            &t
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "WORKTREE_LOCKED"
+    );
+    command_output("git", &["worktree", "unlock", &path], &working);
+    std::fs::write(linked.join(".gitignore"), "ignored.txt\n").unwrap();
+    command_output("git", &["add", ".gitignore"], &linked);
+    command_output("git", &["commit", "-m", "ignore fixture"], &linked);
+    std::fs::write(linked.join("ignored.txt"), "preserve ignored data").unwrap();
+    let info = vcs::worktree_removal_info(&config, &r, &path, &t)
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(info.changed_count, 0);
+    assert_eq!(info.ignored_count, 1);
+    assert_eq!(
+        vcs::worktree_operation(
+            &config,
+            &r,
+            crate::models::WorktreeOperation::Remove {
+                path: path.clone(),
+                force: false
+            },
+            &t
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "WORKTREE_DIRTY"
+    );
+    let git_dir = command_output("git", &["rev-parse", "--absolute-git-dir"], &linked);
+    let storage = Path::new(git_dir.trim()).join("versiondock/shelves");
+    std::fs::create_dir_all(&storage).unwrap();
+    std::fs::write(
+        storage.join("shelves.json"),
+        "{\"shelves\":[{\"id\":\"protected\"}]}",
+    )
+    .unwrap();
+    assert_eq!(
+        vcs::worktree_operation(
+            &config,
+            &r,
+            crate::models::WorktreeOperation::Remove {
+                path: path.clone(),
+                force: true
+            },
+            &t
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "WORKTREE_SHELVES"
+    );
+    assert!(linked.join("ignored.txt").exists());
+    std::fs::write(storage.join("shelves.json"), "{}").unwrap();
+    assert_eq!(
+        vcs::worktree_operation(
+            &config,
+            &r,
+            crate::models::WorktreeOperation::Remove {
+                path: path.clone(),
+                force: true
+            },
+            &t
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "SHELF_INDEX_INVALID"
+    );
+    std::fs::write(storage.join("shelves.json"), "{\"shelves\":[]}").unwrap();
+    std::fs::create_dir(storage.join(".lock")).unwrap();
+    assert_eq!(
+        vcs::worktree_removal_info(&config, &r, &path, &t)
+            .await
+            .unwrap_err()
+            .code,
+        "SHELF_STORAGE_BUSY"
+    );
+    std::fs::remove_dir(storage.join(".lock")).unwrap();
+    vcs::worktree_operation(
+        &config,
+        &r,
+        crate::models::WorktreeOperation::Remove { path, force: true },
+        &t,
+    )
+    .await
+    .unwrap();
+    assert!(!linked.exists());
+    assert!(command_output(
+        "git",
+        &["show-ref", "--verify", "refs/heads/feature/naming"],
+        &working
+    )
+    .contains("feature/naming"));
+}
+
+#[tokio::test]
+async fn worktree_migration_protects_detached_commits_and_missing_checkout_shelves() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let (_, working) = update_parity_fixture(directory.path());
+    let r = repo(&working, VcsKind::Git);
+    let config = directory.path().join("config");
+    let t = CancellationToken::new();
+    let linked = directory.path().join("detached\nunicode-树");
+    let path = linked.to_string_lossy().into_owned();
+    command_output(
+        "git",
+        &["worktree", "add", "--detach", &path, "HEAD"],
+        &working,
+    );
+    command_output(
+        "git",
+        &["commit", "--allow-empty", "-m", "detached only"],
+        &linked,
+    );
+    assert!(vcs::worktrees(&r, &t)
+        .await
+        .unwrap()
+        .iter()
+        .any(|e| vcs::same_worktree_path(&e.path, &path)));
+    assert_eq!(
+        vcs::worktree_operation(
+            &config,
+            &r,
+            crate::models::WorktreeOperation::Remove {
+                path: path.clone(),
+                force: true
+            },
+            &t
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "WORKTREE_UNSAVED_COMMITS"
+    );
+    command_output("git", &["branch", "saved-detached"], &linked);
+    let git_dir = command_output("git", &["rev-parse", "--absolute-git-dir"], &linked);
+    let storage = Path::new(git_dir.trim()).join("versiondock/shelves");
+    std::fs::create_dir_all(&storage).unwrap();
+    std::fs::write(
+        storage.join("shelves.json"),
+        "{\"shelves\":[{\"id\":\"missing-checkout\"}]}",
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&linked).unwrap();
+    assert_eq!(
+        vcs::worktree_operation(&config, &r, crate::models::WorktreeOperation::Prune, &t)
+            .await
+            .unwrap_err()
+            .code,
+        "WORKTREE_SHELVES"
+    );
+    assert!(storage.join("shelves.json").exists());
+    assert!(vcs::worktrees(&r, &t)
+        .await
+        .unwrap()
+        .iter()
+        .any(|e| vcs::same_worktree_path(&e.path, &path)));
+    std::fs::write(storage.join("shelves.json"), "{\"shelves\":[]}").unwrap();
+    vcs::worktree_operation(
+        &config,
+        &r,
+        crate::models::WorktreeOperation::Remove { path, force: true },
+        &t,
+    )
+    .await
+    .unwrap();
+    assert_eq!(vcs::worktrees(&r, &t).await.unwrap().len(), 1);
+}

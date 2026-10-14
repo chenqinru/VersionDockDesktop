@@ -6,6 +6,7 @@ use crate::models::DesktopError;
 use std::path::{Path, PathBuf};
 pub fn builtin(task: AiTask, chinese: bool) -> &'static str {
     match (task, chinese) {
+        (AiTask::BranchName, _) => include_str!("prompts/branch-name.md"),
         (AiTask::CommitMessage, true) => include_str!("prompts/commit-message.zh.md"),
         (AiTask::CommitMessage, false) => include_str!("prompts/commit-message.en.md"),
         (AiTask::CommitExplanation, true) => include_str!("prompts/commit-explanation.zh.md"),

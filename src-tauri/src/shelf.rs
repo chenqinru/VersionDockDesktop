@@ -729,12 +729,76 @@ async fn git(
 
 // Storage protocol shared with VersionDock: worktree Git dir/versiondock/shelves,
 // shelves.json with plugin fields, atomic replacement and an atomic mkdir .lock.
-struct ShelfStorageGuard(PathBuf);
+struct ShelfStorageGuard {
+    path: PathBuf,
+    owned: std::fs::Metadata,
+}
 
 impl Drop for ShelfStorageGuard {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir(&self.0);
+        let Ok(current) = std::fs::symlink_metadata(&self.path) else {
+            return;
+        };
+        #[cfg(unix)]
+        let same = {
+            use std::os::unix::fs::MetadataExt;
+            current.dev() == self.owned.dev() && current.ino() == self.owned.ino()
+        };
+        #[cfg(not(unix))]
+        let same = current
+            .created()
+            .ok()
+            .zip(self.owned.created().ok())
+            .is_some_and(|(current, owned)| current == owned);
+        // Git removal can delete storage; never remove a new writer's replacement lock.
+        if same && current.is_dir() {
+            let _ = std::fs::remove_dir(&self.path);
+        }
     }
+}
+
+pub(crate) async fn worktree_shelf_count(git_dir: &Path) -> Result<usize, DesktopError> {
+    let directory = safe_relative(git_dir, "versiondock/shelves", true)?;
+    if directory.join(".lock").exists() {
+        return Err(DesktopError::new(
+            "SHELF_STORAGE_BUSY",
+            "Shelf storage is busy",
+            true,
+        ));
+    }
+    stored_shelf_count(&directory).await
+}
+
+async fn stored_shelf_count(directory: &Path) -> Result<usize, DesktopError> {
+    let path = safe_relative(directory, "shelves.json", true)?;
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => {
+            let value: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| DesktopError::new("SHELF_INDEX_INVALID", e.to_string(), true))?;
+            value
+                .get("shelves")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len())
+                .ok_or_else(|| {
+                    DesktopError::new("SHELF_INDEX_INVALID", "Cannot read worktree shelves", true)
+                })
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) => Err(storage_error(e)),
+    }
+}
+
+pub(crate) async fn guard_worktree_removal(git_dir: &Path) -> Result<impl Drop, DesktopError> {
+    let directory = safe_relative(git_dir, "versiondock/shelves", true)?;
+    let guard = lock_directory(&directory).await?;
+    if stored_shelf_count(&directory).await? > 0 {
+        return Err(DesktopError::new(
+            "WORKTREE_SHELVES",
+            "Restore or move worktree shelves before removing it",
+            true,
+        ));
+    }
+    Ok(guard)
 }
 
 async fn lock_storage(
@@ -742,14 +806,21 @@ async fn lock_storage(
     repo: &RepositoryMeta,
 ) -> Result<ShelfStorageGuard, DesktopError> {
     let directory = shelf_dir(config_dir, repo).await?;
-    tokio::fs::create_dir_all(&directory)
+    lock_directory(&directory).await
+}
+
+async fn lock_directory(directory: &Path) -> Result<ShelfStorageGuard, DesktopError> {
+    tokio::fs::create_dir_all(directory)
         .await
         .map_err(storage_error)?;
     let lock = directory.join(".lock");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         match tokio::fs::create_dir(&lock).await {
-            Ok(()) => return Ok(ShelfStorageGuard(lock)),
+            Ok(()) => {
+                let owned = std::fs::symlink_metadata(&lock).map_err(storage_error)?;
+                return Ok(ShelfStorageGuard { path: lock, owned });
+            }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 if tokio::time::Instant::now() >= deadline {
                     return Err(DesktopError::new(

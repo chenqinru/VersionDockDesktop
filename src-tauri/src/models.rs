@@ -619,6 +619,19 @@ pub enum BridgeCommand {
         workspace_id: String,
         repo_id: String,
     },
+    ValidateBranchName {
+        workspace_id: String,
+        repo_id: String,
+        name: String,
+    },
+    ValidateWorktreePath {
+        path: String,
+    },
+    WorktreeRemovalInfo {
+        workspace_id: String,
+        repo_id: String,
+        path: String,
+    },
     WorktreeOperation {
         workspace_id: String,
         repo_id: String,
@@ -2966,6 +2979,9 @@ pub struct WorktreeEntry {
     pub lock_reason: Option<String>,
     pub prunable: bool,
     pub main: bool,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub current: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3137,4 +3153,14 @@ pub struct CommitSafetyCheckResult {
     pub large_files: Vec<LargeFileInfo>,
     pub invalid_file_names: Vec<InvalidFileNameInfo>,
     pub crlf_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeRemovalInfo {
+    pub entry: WorktreeEntry,
+    pub changed_count: u32,
+    pub ignored_count: u32,
+    pub shelf_count: u32,
 }

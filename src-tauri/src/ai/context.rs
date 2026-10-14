@@ -74,6 +74,18 @@ pub async fn build(
     max_tokens: u32,
     token: &CancellationToken,
 ) -> Result<Context, DesktopError> {
+    if request.task != AiTask::BranchName {
+        return build_existing(state, request, max_tokens, token).await;
+    }
+    super::branch_name::build(state, request, max_tokens, token).await
+}
+
+async fn build_existing(
+    state: &AppState,
+    request: &AiRequest,
+    max_tokens: u32,
+    token: &CancellationToken,
+) -> Result<Context, DesktopError> {
     let mut roots = HashSet::new();
     let mut blocks: Vec<ContextBlock> = Vec::new();
     let mut files = 0u32;
@@ -357,7 +369,7 @@ pub async fn build(
     })
 }
 
-fn sensitive_path(path: &str) -> bool {
+pub(super) fn sensitive_path(path: &str) -> bool {
     let name = Path::new(path)
         .file_name()
         .unwrap_or_default()

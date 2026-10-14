@@ -136,7 +136,7 @@ export type AiRuntime = {
 	version: string | null,
 };
 
-export type AiTask = "commit-message" | "commit-explanation" | "code-review" | "commit-composer" | "merge-conflict";
+export type AiTask = "branch-name" | "commit-message" | "commit-explanation" | "code-review" | "commit-composer" | "merge-conflict";
 
 export type AiUnit = {
 	id: string,
@@ -598,6 +598,16 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 } } | { type: "worktrees"; payload: {
 	workspace_id: string,
 	repo_id: string,
+} } | { type: "validateBranchName"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	name: string,
+} } | { type: "validateWorktreePath"; payload: {
+	path: string,
+} } | { type: "worktreeRemovalInfo"; payload: {
+	workspace_id: string,
+	repo_id: string,
+	path: string,
 } } | { type: "worktreeOperation"; payload: {
 	workspace_id: string,
 	repo_id: string,
@@ -1720,6 +1730,14 @@ export type WorktreeEntry = {
 	lockReason: string | null,
 	prunable: boolean,
 	main: boolean,
+	current?: boolean,
 };
 
 export type WorktreeOperation = { type: "create"; path: string; branch: string; new_branch: boolean; commitish: string | null; no_track: boolean } | { type: "remove"; path: string; force: boolean } | { type: "lock"; path: string; reason: string | null } | { type: "unlock"; path: string } | { type: "prune" };
+
+export type WorktreeRemovalInfo = {
+	entry: WorktreeEntry,
+	changedCount: number,
+	ignoredCount: number,
+	shelfCount: number,
+};

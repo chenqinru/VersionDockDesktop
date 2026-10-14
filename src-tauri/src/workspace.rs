@@ -1487,7 +1487,7 @@ pub fn apply_runtime_capabilities(
     }
 }
 
-fn repo_id(path: &Path, kind: VcsKind) -> String {
+pub(crate) fn repo_id(path: &Path, kind: VcsKind) -> String {
     let hash = Sha256::digest(format!("{}::{kind:?}", path.display()).as_bytes());
     format!(
         "{}-{}",

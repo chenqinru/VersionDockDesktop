@@ -1,22 +1,24 @@
+import { promptBranchName } from './promptBranchName';
 import { IconButton } from './IconButton';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { RepositoryGroup } from './RepositoryGroup';
 import { BranchRefBadge } from './BranchRefBadge';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
-import { choiceDialog, confirmDialog, promptDialog } from './dialogService';
+import { choiceDialog, promptDialog } from './dialogService';
 import { useSpeedSearch } from '../hooks/useSpeedSearch';
 import { SpeedSearchIndicator } from './SpeedSearchIndicator';
 import { branchColor, headColor, readableAccentColor } from './branchColor';
-import { useAppStore } from '../store/appStore';
-import type { RepositoryStatus, WorktreeEntry as BoundWorktreeEntry } from '../bindings/generated';
+import { useAppStore, repositoryErrorText, ensureWorktreeEditorsSaved } from '../store/appStore';
+import type { RepositoryStatus, BranchInfo, WorktreeRemovalInfo, WorktreeEntry as BoundWorktreeEntry } from '../bindings/generated';
 import { WorkingDiffPanel } from './BranchWorkingDiffPanel';
 
 export interface NormalizedWorktreeEntry {
   path: string;
   head: string;
   branch: string;
+  isCurrent?: boolean;
   isMain: boolean;
   isDetached: boolean;
   isBare: boolean;
@@ -33,6 +35,7 @@ export interface RepoWorktrees {
   repoColor: string;
   worktrees: NormalizedWorktreeEntry[];
   isLinkedWorktree: boolean;
+  error?: string;
 }
 
 export interface WorktreePanelProps {
@@ -53,7 +56,7 @@ export interface WorktreePanelProps {
   onRequestCreate?: (repoId: string) => void;
 }
 
-function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry, workspacePaths: string[] = []): NormalizedWorktreeEntry {
+function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry, workspacePaths: string[] = [], currentPath?: string): NormalizedWorktreeEntry {
   const isMain = 'isMain' in entry ? Boolean((entry as NormalizedWorktreeEntry).isMain) : Boolean((entry as BoundWorktreeEntry).main);
   const isDetached = 'isDetached' in entry ? Boolean((entry as NormalizedWorktreeEntry).isDetached) : Boolean((entry as BoundWorktreeEntry).detached);
   const isBare = 'isBare' in entry ? Boolean((entry as NormalizedWorktreeEntry).isBare) : Boolean((entry as BoundWorktreeEntry).bare);
@@ -74,6 +77,7 @@ function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry, wor
     path: entry.path,
     head: entry.head,
     branch: entry.branch,
+    isCurrent: ('isCurrent' in entry ? entry.isCurrent : 'current' in entry ? Boolean(entry.current) : undefined) ?? (currentPath !== undefined && entry.path.replace(/\\/g, '/').replace(/\/+$/, '') === currentPath.replace(/\\/g, '/').replace(/\/+$/, '')),
     isMain,
     isDetached,
     isBare,
@@ -85,22 +89,22 @@ function normalizeEntry(entry: BoundWorktreeEntry | NormalizedWorktreeEntry, wor
   };
 }
 
-function ctxItems(entry: NormalizedWorktreeEntry, t: (key: string, ...args: Array<string | number>) => string): ContextMenuEntry[] {
+function ctxItems(entry: NormalizedWorktreeEntry, t: (key: string, ...args: Array<string | number>) => string, busy: boolean): ContextMenuEntry[] {
   const items: ContextMenuEntry[] = [
     ...(entry.isInWorkspace ? [{ id: 'explorer', label: t('Reveal in Explorer'), icon: 'folder-opened' } as ContextMenuEntry] : []),
     { id: 'open', label: t('Open in New Window'), icon: 'link-external' },
     { id: 'os', label: t('Open in File Manager'), icon: 'folder' },
     ...(!entry.isInWorkspace ? [{ id: 'add-to-workspace', label: t('Add Folder to Workspace'), icon: 'add' } as ContextMenuEntry] : []),
   ];
-  if (!entry.isMain) {
+  if (!entry.isMain && !entry.isCurrent) {
     items.push(
       { separator: true },
       entry.isLocked
-        ? { id: 'unlock', label: t('Unlock'), icon: 'unlock' }
-        : { id: 'lock', label: t('Lock'), icon: 'lock' },
+        ? { id: 'unlock', label: t('Unlock'), icon: 'unlock', disabled: busy }
+        : { id: 'lock', label: t('Lock'), icon: 'lock', disabled: busy },
       { separator: true },
-      { id: 'delete', label: t('Remove Worktree'), icon: 'trash', danger: true },
-      { id: 'force-delete', label: t('Force Remove'), icon: 'trash', danger: true },
+      { id: 'delete', label: t('Remove Worktree'), icon: 'trash', danger: true, disabled: busy || entry.isLocked },
+      { id: 'force-delete', label: t('Force Remove'), icon: 'trash', danger: true, disabled: busy || entry.isLocked },
     );
   }
   return items;
@@ -129,6 +133,7 @@ function WorktreeRow({
   entry,
   pathTag,
   repoId,
+  busy,
   onDelete,
   onLock,
   onUnlock,
@@ -140,6 +145,7 @@ function WorktreeRow({
   entry: NormalizedWorktreeEntry;
   pathTag: string;
   repoId: string;
+  busy: boolean;
   onDelete?: WorktreePanelProps['onDelete'];
   onLock?: WorktreePanelProps['onLock'];
   onUnlock?: WorktreePanelProps['onUnlock'];
@@ -189,7 +195,7 @@ function WorktreeRow({
             )}
           </span>
         </div>
-        {hovered && !entry.isMain && (
+        {hovered && !entry.isMain && !entry.isCurrent && (
           <div style={row.actions}>
             {!entry.isInWorkspace && onAddToWorkspace && (
               <IconButton
@@ -217,6 +223,7 @@ function WorktreeRow({
                   data-action-btn=""
                   style={row.btn}
                   title={t('Unlock worktree')}
+                  disabled={busy}
                   onClick={(e) => { e.stopPropagation(); onUnlock(repoId, entry.path); }}
                 >
                   <Codicon name="unlock" />
@@ -228,6 +235,7 @@ function WorktreeRow({
                   data-action-btn=""
                   style={row.btn}
                   title={t('Lock worktree')}
+                  disabled={busy}
                   onClick={(e) => { e.stopPropagation(); onLock(repoId, entry.path); }}
                 >
                   <Codicon name="lock" />
@@ -239,6 +247,7 @@ function WorktreeRow({
                 data-action-btn=""
                 style={{ ...row.btn, color: 'var(--vscode-errorForeground, var(--versiondock-danger))' }}
                 title={t('Remove worktree')}
+                disabled={busy || entry.isLocked}
                 onClick={(e) => { e.stopPropagation(); onDelete(repoId, entry.path, false); }}
               >
                 <Codicon name="trash" />
@@ -252,7 +261,7 @@ function WorktreeRow({
         <ContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
-          items={ctxItems(entry, t)}
+          items={ctxItems(entry, t, busy)}
           onSelect={(id) => {
             setCtxMenu(null);
             if (id === 'add-to-workspace') onAddToWorkspace?.(entry.path);
@@ -286,6 +295,8 @@ function RepoSection({
   onRequestCreate,
   onCompare,
   error,
+  busy,
+  onRefresh,
 }: {
   repo: RepoWorktrees;
   multiRepo: boolean;
@@ -299,6 +310,8 @@ function RepoSection({
   onRequestCreate?: WorktreePanelProps['onRequestCreate'];
   onCompare?: (repoId: string, entry: NormalizedWorktreeEntry) => void;
   error?: string | null;
+  busy: boolean;
+  onRefresh: () => void;
 }) {
   const { t } = useI18n();
   const pathTags = useMemo(() => worktreePathTags(repo.worktrees), [repo.worktrees]);
@@ -307,6 +320,7 @@ function RepoSection({
 
   return (
     <div data-density-repository="" style={css.repoSection}>
+      {busy && <span role="status" aria-live="polite" style={css.empty}>{t('Worktree operation in progress…')}</span>}
       <RepositoryGroup name={repo.repoName} color={projectColor} actions={multiRepo ? (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '2px' }}>
             {hasPrunable && onPrune && (
@@ -314,16 +328,18 @@ function RepoSection({
                 data-action-btn=""
                 style={css.headerBtn}
                 title={t('Prune stale worktrees')}
+                disabled={busy}
                 onClick={() => onPrune(repo.repoId)}
               >
                 <Codicon name="git-compare" style={{ fontSize: '12px' }} />
               </IconButton>
             )}
-            {!repo.isLinkedWorktree && onRequestCreate && (
+            {onRequestCreate && (
               <IconButton
                 data-action-btn=""
                 style={css.headerBtn}
                 title={t('Add worktree')}
+                disabled={busy}
                 onClick={() => onRequestCreate(repo.repoId)}
               >
                 <Codicon name="add" style={{ fontSize: '12px' }} />
@@ -336,6 +352,7 @@ function RepoSection({
         <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }}>
           <Codicon name="error" style={{ marginRight: '6px' }} />
           {error}
+          <button style={css.actionBtn} disabled={busy} onClick={onRefresh}>{t('Retry')}</button>
         </div>
       )}
       {repo.worktrees.length === 0 && !error ? (
@@ -347,6 +364,7 @@ function RepoSection({
             entry={w}
             pathTag={pathTags.get(w.path) ?? w.path}
             repoId={repo.repoId}
+            busy={busy}
             onDelete={onDelete}
             onLock={onLock}
             onUnlock={onUnlock}
@@ -357,16 +375,16 @@ function RepoSection({
           />
         ))
       )}
-      {!multiRepo && (hasPrunable || !repo.isLinkedWorktree) && (
+      {!multiRepo && (
         <div style={css.singleRepoActions}>
           {hasPrunable && onPrune && (
-            <button data-secondary-action-btn="" style={css.actionBtn} onClick={() => onPrune(repo.repoId)}>
+            <button data-secondary-action-btn="" style={css.actionBtn} disabled={busy} onClick={() => onPrune(repo.repoId)}>
               <Codicon name="git-compare" style={{ marginRight: '4px', fontSize: '12px' }} />
               {t('Prune stale')}
             </button>
           )}
-          {!repo.isLinkedWorktree && onRequestCreate && (
-            <button data-secondary-action-btn="" style={css.actionBtn} onClick={() => onRequestCreate(repo.repoId)}>
+          {onRequestCreate && (
+            <button data-secondary-action-btn="" style={css.actionBtn} disabled={busy} onClick={() => onRequestCreate(repo.repoId)}>
               <Codicon name="add" style={{ marginRight: '4px', fontSize: '12px' }} />
               {t('New Worktree')}
             </button>
@@ -400,7 +418,19 @@ export function WorktreePanel({ active = true,
   const storeWorktrees = useAppStore((state) => state.worktrees);
   const loadWorktrees = useAppStore((state) => state.loadWorktrees);
   const worktreeOperation = useAppStore((state) => state.worktreeOperation);
-  const branchesByRepo = useAppStore((state) => state.branchesByRepo);
+  const operationBusy = useAppStore((state) => state.worktreeBusy);
+  const snapshot = useAppStore((state) => state.snapshot);
+  const pending = useRef(new Set<string>());
+  const [promptBusy, setPromptBusy] = useState<Set<string>>(new Set());
+  const runWorkflow = async (repoId: string, task: () => Promise<void>) => {
+    const state = useAppStore.getState();
+    const key = `${state.snapshot?.workspace.id}:${repoId}`;
+    if (pending.current.has(key) || state.worktreeBusy[key]) return;
+    pending.current.add(key); setPromptBusy(new Set(pending.current));
+    try { await task(); }
+    catch (error) { state.addNotification({ type:'error', title:'Worktree operation failed', message:{raw:repositoryErrorText(error)}, workspaceId:state.snapshot?.workspace.id }); }
+    finally { pending.current.delete(key); setPromptBusy(new Set(pending.current)); }
+  };
   const openWorktree = useAppStore((state) => state.openWorktree);
   const loadWorktreeDiff = useAppStore((state) => state.loadWorktreeDiff);
   const worktreeDiff = useAppStore((state) => state.worktreeDiff);
@@ -414,65 +444,91 @@ export function WorktreePanel({ active = true,
     }
   }, [customRepos, loadWorktrees, repos]);
 
-  const defaultDelete = async (repoId: string, worktreePath: string, force: boolean) => {
-    const title = force ? t('Force Remove Worktree') : t('Remove Worktree');
-    const message = force
-      ? t('Are you sure you want to force remove worktree "{0}"? All uncommitted local changes and untracked files will be permanently lost.', worktreePath)
-      : t('Remove worktree "{0}" from repository?', worktreePath);
-    const confirmed = await confirmDialog({
-      title,
-      message,
-      confirmLabel: force ? t('Force Remove') : t('Remove'),
-      danger: true,
-    });
-    if (!confirmed) return;
-    void worktreeOperation(repoId, { type: 'remove', path: worktreePath, force });
+  const ownerContext = (repoId: string) => {
+    const state = useAppStore.getState();
+    const owner = state.bridge;
+    const wid = state.snapshot?.workspace.id;
+    const tab = state.activeTabId;
+    if (!owner || !wid) throw new Error(t('Repository context changed. Reopen the branch dialog.'));
+    const check = () => {
+      const next = useAppStore.getState();
+      if (next.bridge !== owner || next.snapshot?.workspace.id !== wid || next.activeTabId !== tab || !next.snapshot.repositories.some(r => r.meta.id === repoId)) throw new Error(t('Repository context changed. Reopen the branch dialog.'));
+    };
+    return {owner, wid, check};
   };
-
-  const defaultLock = (repoId: string, worktreePath: string) => {
-    void worktreeOperation(repoId, { type: 'lock', path: worktreePath, reason: null });
-  };
-
-  const defaultUnlock = (repoId: string, worktreePath: string) => {
-    void worktreeOperation(repoId, { type: 'unlock', path: worktreePath });
-  };
-
-  const defaultPrune = (repoId: string) => {
-    void worktreeOperation(repoId, { type: 'prune' });
-  };
-
-  const defaultCreate = async (repoId: string) => {
-    const branches = [...new Map((branchesByRepo[repoId] ?? []).map((branch) => [branch.name, branch])).values()];
-    const branchChoices = new Map(branches.map((branch, index) => [`branch:${index}`, branch]));
+  const defaultDelete = (repoId: string, worktreePath: string, force: boolean) => runWorkflow(repoId, async () => {
+    const {owner, wid, check} = ownerContext(repoId);
+    const info = await owner.request<WorktreeRemovalInfo>({type:'worktreeRemovalInfo', payload:{workspace_id:wid, repo_id:repoId, path:worktreePath}});
+    check();
+    ensureWorktreeEditorsSaved(info.entry.path);
+    if (info.shelfCount > 0) throw new Error(t('This worktree contains {0} shelves. Restore or move them before removing it.', info.shelfCount));
+    const dirty = info.changedCount > 0 || info.ignoredCount > 0;
+    const removeForce = force || dirty;
     const selected = await choiceDialog({
-      title: t('New Worktree — Branch'),
-      message: t('Select branch for new worktree'),
-      choices: [
-        { id: 'new', label: t('Create new branch…'), icon: 'add' },
-        ...branches.map((branch, index) => ({
-          id: `branch:${index}`,
-          label: branch.name,
-          description: branch.current ? t('(current)') : undefined,
-          icon: branch.remote ? 'cloud' : 'git-branch',
-        })),
-      ],
+      title:t(removeForce ? 'Force Remove Worktree' : 'Remove Worktree'),
+      message:removeForce
+        ? t('Permanently remove worktree "{0}" at {1}? It has {2} changed or untracked entries and {3} ignored entries. All files in this directory will be deleted. Existing branches will be kept.', info.entry.branch || info.entry.head.slice(0,8), info.entry.path, info.changedCount, info.ignoredCount)
+        : t('Remove worktree "{0}" at {1}? The directory will be deleted. Existing branches will be kept.', info.entry.branch || info.entry.head.slice(0,8), info.entry.path),
+      danger:true,
+      choices:[{id:'remove', label:t(removeForce ? 'Force Remove' : 'Remove Worktree'), danger:true, icon:'trash'}, {id:'open', label:t('Open in New Window'), icon:'link-external'}],
     });
     if (!selected) return;
-    const isNew = selected === 'new';
-    const branch = isNew
-      ? await promptDialog({ title: t('New Worktree — New Branch Name'), message: t('New branch name'), inputLabel: t('Branch name') })
-      : branchChoices.get(selected)?.name;
+    check();
+    if (selected === 'open') { await openWorktree(repoId, info.entry.path, false); return; }
+    ensureWorktreeEditorsSaved(info.entry.path);
+    await worktreeOperation(repoId, {type:'remove', path:info.entry.path, force:removeForce});
+  });
+  const defaultLock = (repoId: string, path: string) => runWorkflow(repoId, async () => { await worktreeOperation(repoId, {type:'lock', path, reason:null}); });
+  const defaultUnlock = (repoId: string, path: string) => runWorkflow(repoId, async () => { await worktreeOperation(repoId, {type:'unlock', path}); });
+  const defaultPrune = (repoId: string) => runWorkflow(repoId, async () => { await worktreeOperation(repoId, {type:'prune'}); });
+  const defaultCreate = (repoId: string) => runWorkflow(repoId, async () => {
+    const {owner, wid, check} = ownerContext(repoId);
+    const [branches, worktrees] = await Promise.all([
+      owner.request<BranchInfo[]>({type:'branches', payload:{workspace_id:wid, repo_id:repoId}}),
+      owner.request<BoundWorktreeEntry[]>({type:'worktrees', payload:{workspace_id:wid, repo_id:repoId}}),
+    ]);
+    check();
+    const localName = (b: BranchInfo) => b.remote ? b.name.slice((b.remoteName?.length ?? b.name.indexOf('/')) + 1) : b.name;
+    const branchChoices = new Map(branches.map((branch, index) => [`branch:${index}`, branch]));
+    const selected = await choiceDialog({title:t('New Worktree — Branch'), message:t('Select branch for new worktree'), choices:[
+      {id:'new', label:t('Create new branch…'), icon:'add'},
+      ...branches.map((branch, index) => {
+        const occupied = worktrees.find(w => w.branch === localName(branch));
+        return {id:`branch:${index}`, label:branch.name, icon:branch.remote ? 'cloud' : 'git-branch', description:occupied ? t('Already open in {0}', occupied.path) : branch.remote ? t('Create or use local branch {0}', localName(branch)) : undefined};
+      }),
+    ]});
+    if (!selected) return;
+    check();
+    const picked = branchChoices.get(selected);
+    const occupied = picked && worktrees.find(w => w.branch === localName(picked));
+    if (occupied) {
+      const action = await choiceDialog({title:t('New Worktree — Branch'), message:t('Branch "{0}" is already used by worktree at {1}.', occupied.branch, occupied.path), choices:[{id:'open', label:t('Open in New Window')}, {id:'add', label:t('Add Folder to Workspace')}]});
+      if (!action) return;
+      check();
+      if (action === 'open') await openWorktree(repoId, occupied.path, false);
+      else await defaultAddToWorkspace(occupied.path);
+      return;
+    }
+    let commitish: string | null = null;
+    let branch = picked?.name;
+    if (selected === 'new') {
+      const resolve = (revision: string) => owner.request<string>({type:'tagResolveCommit', payload:{workspace_id:wid, repo_id:repoId, revision:revision.trim() || 'HEAD'}}, {showProgress:false});
+      const base = await promptDialog({title:t('New Worktree — Starting Point'), message:t('Branch, tag or commit to start from. Uncommitted changes stay in the original worktree.'), inputLabel:t('Starting point'), initialValue:'HEAD', validateInput:async value => {try {check(); await resolve(value);} catch {return t('Commit reference cannot be resolved to a commit.');}}});
+      if (base === null) return;
+      check(); commitish = await resolve(base); check();
+      branch = await promptBranchName([repoId], {title:t('New Worktree — New Branch Name'), message:t('New branch name'), inputLabel:t('Branch name')}) ?? undefined;
+    }
     if (!branch?.trim()) return;
-    const repo = repos.find((repo) => repo.meta.id === repoId);
+    check();
+    const repo = useAppStore.getState().snapshot?.repositories.find(r => r.meta.id === repoId);
     if (!repo) return;
     const root = repo.meta.rootPath.replace(/[\\/]+$/, '');
     const slash = Math.max(root.lastIndexOf('/'), root.lastIndexOf('\\'));
-    const directory = await promptDialog({
-      title: t('New Worktree — Directory Path'), message: t('Path for the new worktree directory'), inputLabel: t('Directory Path'),
-      initialValue: `${root.slice(0, slash + 1)}${root.slice(slash + 1)}--${branch.trim().replace(/\//g, '-')}`,
-    });
-    if (directory?.trim()) await worktreeOperation(repoId, { type: 'create', path: directory.trim(), branch: branch.trim(), new_branch: isNew, commitish: null, no_track: false });
-  };
+    const directory = await promptDialog({title:t('New Worktree — Directory Path'), message:t('Path for the new worktree directory'), inputLabel:t('Directory Path'), initialValue:`${root.slice(0, slash + 1)}${root.slice(slash + 1)}--${branch.replace(/[\\/:*?"<>|]/g, '-')}`, validateInput:async path => {try {check(); await owner.request({type:'validateWorktreePath', payload:{path}}, {showProgress:false});} catch(error) {return repositoryErrorText(error);}}});
+    if (!directory?.trim()) return;
+    check();
+    await worktreeOperation(repoId, {type:'create', path:directory.trim(), branch:branch.trim(), new_branch:selected === 'new', commitish, no_track:false});
+  });
   const defaultCompare = (repoId: string, entry: NormalizedWorktreeEntry) => {
     void loadWorktreeDiff(repoId, entry.path, 'HEAD');
   };
@@ -497,7 +553,7 @@ export function WorktreePanel({ active = true,
       repoName: r.meta.name,
       repoColor: r.meta.color,
       isLinkedWorktree: Boolean(r.meta.isWorktree),
-      worktrees: list.map((entry) => normalizeEntry(entry, workspacePaths)),
+      worktrees: list.map((entry) => normalizeEntry(entry, workspacePaths, r.meta.rootPath)),
     };
   })).flatMap((repo) => {
     const needle = speedSearch.query.trim().toLocaleLowerCase();
@@ -532,6 +588,8 @@ export function WorktreePanel({ active = true,
             key={repo.repoId}
             repo={repo}
             multiRepo={multiRepo}
+            busy={Boolean(operationBusy[`${snapshot?.workspace.id}:${repo.repoId}`]) || promptBusy.has(`${snapshot?.workspace.id}:${repo.repoId}`)}
+            onRefresh={() => void loadWorktrees(repo.repoId)}
             onDelete={onDelete ?? defaultDelete}
             onLock={onLock ?? defaultLock}
             onUnlock={onUnlock ?? defaultUnlock}
@@ -541,7 +599,7 @@ export function WorktreePanel({ active = true,
             onAddToWorkspace={onAddToWorkspace ?? defaultAddToWorkspace}
             onRequestCreate={onRequestCreate ?? defaultCreate}
             onCompare={defaultCompare}
-            error={loadErrors[`worktrees:${repo.repoId}`]}
+            error={repo.error ?? loadErrors[`worktrees:${repo.repoId}`]}
           />
         ))
       )}

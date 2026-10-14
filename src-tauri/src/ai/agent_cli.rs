@@ -84,6 +84,14 @@ static CONVERSATIONS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new()
 fn conversations() -> &'static Mutex<HashMap<String, String>> {
     CONVERSATIONS.get_or_init(|| Mutex::new(load_session_data("antigravity.json")))
 }
+pub(super) fn forget_conversation(root: &str) {
+    if let Ok(mut entries) = conversations().lock() {
+        if entries.remove(root).is_some() {
+            persist("antigravity.json", &*entries);
+        }
+    }
+}
+
 pub fn reset_sessions() {
     if let Ok(mut values) = conversations().lock() {
         values.clear();

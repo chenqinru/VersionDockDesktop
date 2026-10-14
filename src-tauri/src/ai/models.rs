@@ -71,6 +71,7 @@ impl AiConfig {
 #[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "kebab-case")]
 pub enum AiTask {
+    BranchName,
     CommitMessage,
     CommitExplanation,
     CodeReview,
@@ -80,6 +81,7 @@ pub enum AiTask {
 impl AiTask {
     pub fn name(self) -> &'static str {
         match self {
+            Self::BranchName => "branch-name",
             Self::CommitMessage => "commit-message",
             Self::CommitExplanation => "commit-explanation",
             Self::CodeReview => "code-review",

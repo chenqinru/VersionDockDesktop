@@ -586,6 +586,9 @@ export class BrowserDevBridge implements VersionDockBridge {
       case 'conflicts': return [];
       case 'stashes': return [{ reference: 'stash@{0}', hash: '7e32b010', branch: 'main', message: 'WIP: browser demo', fullMessage: 'WIP: browser demo\n\nDetailed demo body', date: '2026-08-13T08:00:00Z', files: [{ path: 'src/demo.ts', status: 'modified' }] }] satisfies StashEntry[];
       case 'shelves': return [{ id: 'shelf-demo', name: '浏览器演示搁置', createdAt: '2026-08-13T08:00:00Z', branch: 'main', files: [{ path: 'src/demo.ts', status: 'modified' }] }] satisfies ShelfEntry[];
+      case 'validateBranchName':
+      case 'validateWorktreePath': return true;
+      case 'worktreeRemovalInfo': return {entry:{path:command.payload.path, head:'06457b02', branch:'feature/ui', bare:false, detached:false, locked:false, lockReason:null, prunable:false, main:false}, changedCount:0, ignoredCount:0, shelfCount:0};
       case 'worktrees': return [{ path: `/browser-demo/${command.payload.repo_id}`, head: '06457b02', branch: this.repositories.find((repo) => repo.meta.id === command.payload.repo_id)?.branch ?? 'main', bare: false, detached: false, locked: false, lockReason: null, prunable: false, main: true }] satisfies WorktreeEntry[];
       case 'worktreeDiff': return { path: command.payload.path, baseRef: command.payload.base_ref, currentRef: 'main', files: [] };
       case 'worktreeFileDiff': return this.diff(command.payload.relative_path);

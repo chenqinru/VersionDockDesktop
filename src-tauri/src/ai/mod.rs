@@ -1,4 +1,5 @@
 mod agent_cli;
+mod branch_name;
 mod budget;
 mod composer;
 mod context;
@@ -324,7 +325,11 @@ async fn generate_inner(
         emit(app, &request.request_id, "analyzing", "");
     }
     let mut source = None;
-    let evidence = if let Some(id) = &request.session_id {
+    let evidence = if let Some(id) = request
+        .session_id
+        .as_ref()
+        .filter(|_| request.task != AiTask::BranchName)
+    {
         let repo = request
             .repo_id
             .as_deref()
@@ -361,6 +366,10 @@ async fn generate_inner(
     let root = context::prompt_root(state, &request).await;
     let prompt = prompts::resolve(&state.config_dir, root.as_deref(), request.task, chinese);
     let mut system = prompt.text;
+    if request.task == AiTask::BranchName {
+        system.push('\n');
+        system.push_str(prompts::builtin(AiTask::BranchName, false));
+    }
     if request.task == AiTask::CommitComposer {
         system.push_str("\n\n# Active system commit-message prompt\nThe following prompt applies only to each groups[].message field, including its language and format. Its instruction to output only a commit message must not replace the Composer JSON contract.\n<commit-message-prompt>\n");
         system.push_str(
@@ -445,6 +454,18 @@ async fn generate_inner(
         &delta,
     )
     .await?;
+    if request.task == AiTask::BranchName {
+        text = validation::branch_name(&text)?.into();
+        for id in request
+            .candidates
+            .iter()
+            .map(|c| c.repo_id.as_str())
+            .chain(request.repo_id.as_deref())
+        {
+            let repo = context::repository(state, &request.workspace_id, id).await?;
+            vcs::validate_new_branch_name(&repo, &text, token).await?;
+        }
+    }
     let mut report = None;
     let mut resolutions = Vec::new();
     let mut groups = Vec::new();

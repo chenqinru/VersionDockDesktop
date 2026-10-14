@@ -1,3 +1,4 @@
+import { promptBranchName } from '../promptBranchName';
 import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
@@ -457,7 +458,7 @@ export function BranchMenuPopover({ anchorRect, anchorRef, onClose, initialRepoI
   const handleNewBranch = async () => {
     onClose();
     // 步骤 1：分支名
-    const branchName = await promptDialog({
+    const branchName = await promptBranchName(repositories.filter(r => r.meta.kind === 'git').map(r => r.meta.id), {
       title: t('New Branch — Name'),
       message: t('Enter the new branch name:'),
       inputLabel: t('Branch Name'),
@@ -581,7 +582,7 @@ export function BranchMenuPopover({ anchorRect, anchorRef, onClose, initialRepoI
 
   // 单仓库新建分支（对齐插件版 newBranchSingleRepo，支持指定默认 base 或从列表挑选，并询问是否立即检出）
   const handleNewBranchInSingleRepo = async (repo: RepositoryStatus, defaultBase?: string | null) => {
-    const name = await promptDialog({
+    const name = await promptBranchName([repo.meta.id], {
       title: t('New Branch in {0}', repo.meta.name),
       message: t('Enter new branch name:'),
       inputLabel: t('Branch Name'),
@@ -2120,7 +2121,7 @@ export function BranchMenuPopover({ anchorRect, anchorRef, onClose, initialRepoI
                   className="statusbar-menu-item"
                   onClick={async () => {
                     onClose();
-                    const newBranch = await promptDialog({
+                    const newBranch = await promptBranchName([activeBranchAction.repoId], {
                       title: t("New branch from '{0}'…", activeBranchAction.branchName),
                       message: t('Enter new branch name:'),
                       inputLabel: t('Branch Name'),

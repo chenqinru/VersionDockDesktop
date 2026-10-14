@@ -8011,7 +8011,7 @@ pub async fn branch_operation_with_protection(
             from,
             checkout,
         } => {
-            validate_ref(&name)?;
+            validate_new_branch_name(repo, &name, token).await?;
             let should_checkout = checkout.unwrap_or(true);
             let mut args = if should_checkout {
                 vec!["switch".into(), "-c".into(), name]
@@ -9896,8 +9896,6 @@ pub async fn worktrees(
     )
     .await?
     .stdout_text();
-    let main = std::fs::canonicalize(&repo.root_path)
-        .unwrap_or_else(|_| Path::new(&repo.root_path).to_path_buf());
     let mut entries = Vec::new();
     let mut current: Option<WorktreeEntry> = None;
     for field in raw.split('\0').filter(|value| !value.is_empty()) {
@@ -9905,8 +9903,6 @@ pub async fn worktrees(
             if let Some(entry) = current.take() {
                 entries.push(entry);
             }
-            let canonical =
-                std::fs::canonicalize(path).unwrap_or_else(|_| Path::new(path).to_path_buf());
             current = Some(WorktreeEntry {
                 path: path.into(),
                 head: String::new(),
@@ -9916,7 +9912,8 @@ pub async fn worktrees(
                 locked: false,
                 lock_reason: None,
                 prunable: false,
-                main: canonical == main,
+                main: entries.is_empty(),
+                current: same_worktree_path(path, &repo.root_path),
             });
         } else if let Some(entry) = current.as_mut() {
             if let Some(head) = field.strip_prefix("HEAD ") {
@@ -11878,6 +11875,243 @@ pub async fn svn_operation(
     svn(args, repo, token).await.map(|_| ())
 }
 
+pub async fn validate_new_branch_name(
+    repo: &RepositoryMeta,
+    name: &str,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    ensure_git(repo)?;
+    validate_ref(name)
+        .map_err(|_| DesktopError::new("INVALID_BRANCH_NAME", "Invalid branch name", false))?;
+    if name == "HEAD" || name.starts_with("refs/") || name != name.trim() {
+        return Err(DesktopError::new(
+            "INVALID_BRANCH_NAME",
+            "Invalid branch name",
+            false,
+        ));
+    }
+    match git(
+        vec!["check-ref-format".into(), "--branch".into(), name.into()],
+        repo,
+        token,
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(e) if e.code == "COMMAND_FAILED" => {
+            return Err(DesktopError::new(
+                "INVALID_BRANCH_NAME",
+                "Invalid branch name",
+                false,
+            ))
+        }
+        Err(e) => return Err(e),
+    }
+    let raw = git(
+        vec![
+            "for-each-ref".into(),
+            "--format=%(refname)".into(),
+            "refs/heads".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let target = format!("refs/heads/{name}");
+    if raw.lines().any(|existing| {
+        existing == target
+            || existing.starts_with(&format!("{target}/"))
+            || target.starts_with(&format!("{existing}/"))
+    }) {
+        return Err(DesktopError::new(
+            "BRANCH_EXISTS",
+            "Branch name already exists or conflicts with an existing branch",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_worktree_path(path: &str) -> Result<(), DesktopError> {
+    if !Path::new(path).is_absolute() || path.contains('\0') {
+        return Err(DesktopError::new(
+            "INVALID_WORKTREE_PATH",
+            "Choose an absolute worktree directory",
+            false,
+        ));
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Err(DesktopError::new(
+            "WORKTREE_EXISTS",
+            "Worktree directory already exists. Choose a different path.",
+            true,
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(DesktopError::new(
+            "WORKTREE_STORAGE_FAILED",
+            e.to_string(),
+            true,
+        )),
+    }
+}
+
+pub(crate) fn same_worktree_path(a: &str, b: &str) -> bool {
+    let canonical = |p: &str| {
+        let path = Path::new(p);
+        // Resolve existing ancestors so missing registrations still match macOS path aliases.
+        for ancestor in path.ancestors() {
+            if let Ok(root) = dunce::canonicalize(ancestor) {
+                return root.join(path.strip_prefix(ancestor).unwrap_or(Path::new("")));
+            }
+        }
+        path.to_path_buf()
+    };
+    if cfg!(windows) {
+        canonical(a)
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&canonical(b).to_string_lossy())
+    } else {
+        canonical(a) == canonical(b)
+    }
+}
+
+async fn worktree_git_dir(
+    repo: &RepositoryMeta,
+    entry: &WorktreeEntry,
+    token: &CancellationToken,
+) -> Result<PathBuf, DesktopError> {
+    if Path::new(&entry.path).exists() {
+        let raw = worktree_git(
+            Path::new(&entry.path),
+            vec!["rev-parse".into(), "--absolute-git-dir".into()],
+            token,
+        )
+        .await?;
+        return Ok(PathBuf::from(
+            raw.stdout_text().trim_end_matches(['\r', '\n']),
+        ));
+    }
+    let common = git(
+        vec![
+            "rev-parse".into(),
+            "--path-format=absolute".into(),
+            "--git-common-dir".into(),
+        ],
+        repo,
+        token,
+    )
+    .await?
+    .stdout_text();
+    let registrations = Path::new(common.trim_end_matches(['\r', '\n'])).join("worktrees");
+    for candidate in std::fs::read_dir(registrations)
+        .map_err(|e| DesktopError::new("SHELF_INDEX_INVALID", e.to_string(), true))?
+    {
+        let candidate = candidate
+            .map_err(|e| DesktopError::new("SHELF_INDEX_INVALID", e.to_string(), true))?
+            .path();
+        let pointer = std::fs::read_to_string(candidate.join("gitdir"))
+            .map_err(|e| DesktopError::new("SHELF_INDEX_INVALID", e.to_string(), true))?;
+        if Path::new(pointer.trim_end_matches(['\r', '\n']))
+            .parent()
+            .is_some_and(|p| same_worktree_path(&p.to_string_lossy(), &entry.path))
+        {
+            return Ok(candidate);
+        }
+    }
+    Err(DesktopError::new(
+        "SHELF_INDEX_INVALID",
+        "Cannot read worktree shelves",
+        true,
+    ))
+}
+
+pub async fn worktree_removal_info(
+    config_dir: &Path,
+    repo: &RepositoryMeta,
+    path: &str,
+    token: &CancellationToken,
+) -> Result<(crate::models::WorktreeRemovalInfo, PathBuf), DesktopError> {
+    let entry = managed_worktree(config_dir, repo, path, token).await?;
+    if entry.main || same_worktree_path(&entry.path, &repo.root_path) {
+        return Err(DesktopError::new(
+            "WORKTREE_MAIN",
+            "Cannot remove the main or currently opened worktree",
+            false,
+        ));
+    }
+    if entry.locked {
+        return Err(DesktopError::new(
+            "WORKTREE_LOCKED",
+            "Unlock the worktree before removing it",
+            true,
+        ));
+    }
+    if entry.detached && !entry.head.is_empty() {
+        let raw = git(
+            vec![
+                "rev-list".into(),
+                "--count".into(),
+                entry.head.clone(),
+                "--not".into(),
+                "--branches".into(),
+                "--remotes".into(),
+                "--tags".into(),
+            ],
+            repo,
+            token,
+        )
+        .await?
+        .stdout_text();
+        if raw.trim() != "0" {
+            return Err(DesktopError::new(
+                "WORKTREE_UNSAVED_COMMITS",
+                "Create a branch for detached worktree commits before removing it",
+                true,
+            ));
+        }
+    }
+    let git_dir = worktree_git_dir(repo, &entry, token).await?;
+    let shelf_count = crate::shelf::worktree_shelf_count(&git_dir).await? as u32;
+    let (mut changed_count, mut ignored_count) = (0, 0);
+    if Path::new(&entry.path).exists() {
+        let raw = worktree_git(
+            Path::new(&entry.path),
+            vec![
+                "status".into(),
+                "--porcelain=v1".into(),
+                "-z".into(),
+                "--untracked-files=all".into(),
+                "--ignored=matching".into(),
+            ],
+            token,
+        )
+        .await?;
+        let status_text = raw.stdout_text();
+        let mut records = status_text.split('\0').filter(|s| !s.is_empty());
+        while let Some(record) = records.next() {
+            let code = record.get(..2).unwrap_or("");
+            if code == "!!" {
+                ignored_count += 1;
+            } else {
+                changed_count += 1;
+            }
+            if code.contains(['R', 'C']) {
+                records.next();
+            }
+        }
+    }
+    Ok((
+        crate::models::WorktreeRemovalInfo {
+            entry,
+            changed_count,
+            ignored_count,
+            shelf_count,
+        },
+        git_dir,
+    ))
+}
+
 pub async fn worktree_operation(
     config_dir: &Path,
     repo: &RepositoryMeta,
@@ -11897,63 +12131,107 @@ pub async fn worktree_operation(
             if let Some(revision) = &commitish {
                 validate_revision_or_ref(revision)?;
             }
+            validate_worktree_path(&path)?;
             let target = PathBuf::from(&path);
-            if !target.is_absolute() || path.contains('\0') {
-                return Err(DesktopError::new(
-                    "INVALID_WORKTREE_PATH",
-                    "Choose an absolute worktree directory",
-                    false,
-                ));
-            }
-            if target.exists()
-                && (!target.is_dir()
-                    || std::fs::read_dir(&target)
-                        .map_err(|e| {
-                            DesktopError::new("WORKTREE_STORAGE_FAILED", e.to_string(), true)
-                        })?
-                        .next()
-                        .is_some())
-            {
-                return Err(DesktopError::new(
-                    "WORKTREE_EXISTS",
-                    "Worktree directory is not empty",
-                    true,
-                ));
-            }
             if let Some(parent) = target.parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
                     DesktopError::new("WORKTREE_STORAGE_FAILED", e.to_string(), true)
                 })?;
             }
+            let mut branch = branch;
+            let mut new_branch = new_branch;
+            let mut start = commitish;
+            let mut track = false;
+            if !new_branch {
+                let all = branches(repo, token).await?;
+                let selected = all
+                    .iter()
+                    .find(|b| !b.remote && b.name == branch)
+                    .or_else(|| all.iter().find(|b| b.remote && b.name == branch))
+                    .ok_or_else(|| {
+                        DesktopError::new("BRANCH_NOT_FOUND", "Branch not found", true)
+                    })?;
+                if selected.remote {
+                    let remote = selected.remote_name.as_deref().ok_or_else(|| {
+                        DesktopError::new(
+                            "INVALID_REF",
+                            "Cannot determine remote branch name",
+                            true,
+                        )
+                    })?;
+                    let local = selected
+                        .name
+                        .strip_prefix(&format!("{remote}/"))
+                        .filter(|s| !s.is_empty())
+                        .ok_or_else(|| {
+                            DesktopError::new(
+                                "INVALID_REF",
+                                "Cannot determine local branch name",
+                                true,
+                            )
+                        })?
+                        .to_string();
+                    if !all.iter().any(|b| !b.remote && b.name == local) {
+                        new_branch = true;
+                        start = Some(format!("refs/remotes/{}", selected.name));
+                        track = !no_track;
+                    }
+                    branch = local;
+                }
+            }
+            if new_branch {
+                validate_new_branch_name(repo, &branch, token).await?;
+            } else if worktrees(repo, token)
+                .await?
+                .iter()
+                .any(|w| w.branch == branch)
+            {
+                return Err(DesktopError::new(
+                    "WORKTREE_BRANCH_OCCUPIED",
+                    "Branch is already used by another worktree",
+                    true,
+                ));
+            }
             let mut args = vec!["worktree".into(), "add".into()];
             if new_branch {
                 args.extend(["-b".into(), branch.clone()]);
+            }
+            if track {
+                args.push("--track".into());
             }
             if no_track {
                 args.push("--no-track".into());
             }
             args.push(target.to_string_lossy().into_owned());
-            if !new_branch {
-                args.push(branch);
-            } else if let Some(revision) = commitish {
-                args.push(revision);
-            }
+            args.push(if new_branch {
+                start.unwrap_or_else(|| "HEAD".into())
+            } else {
+                branch
+            });
             git(args, repo, token).await?;
         }
         WorktreeOperation::Remove { path, force } => {
-            let entry = managed_worktree(config_dir, repo, &path, token).await?;
-            if entry.main {
+            let (info, git_dir) = worktree_removal_info(config_dir, repo, &path, token).await?;
+            if info.shelf_count > 0 {
                 return Err(DesktopError::new(
-                    "WORKTREE_MAIN",
-                    "The main worktree cannot be removed",
-                    false,
+                    "WORKTREE_SHELVES",
+                    "Restore or move worktree shelves before removing it",
+                    true,
                 ));
             }
+            if !force && (info.changed_count > 0 || info.ignored_count > 0) {
+                return Err(DesktopError::new(
+                    "WORKTREE_DIRTY",
+                    "Worktree contains local files or changes. Explicitly confirm force removal.",
+                    true,
+                ));
+            }
+            let _guard = crate::shelf::guard_worktree_removal(&git_dir).await?;
             let mut args = vec!["worktree".into(), "remove".into()];
             if force {
                 args.push("--force".into());
             }
-            args.push(entry.path);
+            args.push(info.entry.path);
             git(args, repo, token).await?;
         }
         WorktreeOperation::Lock { path, reason } => {
@@ -11975,6 +12253,14 @@ pub async fn worktree_operation(
             .await?;
         }
         WorktreeOperation::Prune => {
+            let mut guards = Vec::new();
+            for entry in worktrees(repo, token).await? {
+                if entry.prunable && !entry.main && !entry.locked {
+                    let (_, git_dir) =
+                        worktree_removal_info(config_dir, repo, &entry.path, token).await?;
+                    guards.push(crate::shelf::guard_worktree_removal(&git_dir).await?);
+                }
+            }
             git(vec!["worktree".into(), "prune".into()], repo, token).await?;
         }
     }
@@ -11994,16 +12280,10 @@ async fn managed_worktree(
             false,
         ));
     }
-    let candidate = std::fs::canonicalize(path).ok();
     worktrees(repo, token)
         .await?
         .into_iter()
-        .find(|entry| {
-            entry.path == path
-                || candidate.as_ref().is_some_and(|candidate| {
-                    std::fs::canonicalize(&entry.path).ok().as_ref() == Some(candidate)
-                })
-        })
+        .find(|entry| same_worktree_path(&entry.path, path))
         .ok_or_else(|| {
             DesktopError::new(
                 "WORKTREE_NOT_FOUND",

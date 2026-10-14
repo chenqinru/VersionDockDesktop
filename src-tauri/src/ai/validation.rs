@@ -315,3 +315,63 @@ pub fn correct_cross_assignments(
     }
     resolutions.sort_by_key(|resolution| resolution.index);
 }
+
+/// Reject explanations and unsafe output instead of silently sanitizing AI text.
+pub fn branch_name(text: &str) -> Result<&str, crate::models::DesktopError> {
+    let name = text.trim();
+    if name == "NEEDS_DESCRIPTION" {
+        return Err(super::transport::error(
+            "AI_BRANCH_DESCRIPTION_REQUIRED",
+            "Describe your task to generate a branch name.",
+        ));
+    }
+    let valid = name.split_once('/').is_some_and(|(kind, phrase)| {
+        [
+            "feat", "fix", "refactor", "perf", "docs", "test", "chore", "style",
+        ]
+        .contains(&kind)
+            && phrase.split('-').all(|word| {
+                !word.is_empty()
+                    && word
+                        .bytes()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            })
+    });
+    if !valid || name.len() > 100 {
+        return Err(super::transport::error(
+            "AI_BRANCH_NAME_INVALID",
+            "AI returned an invalid branch name. Retry or enter a name manually.",
+        ));
+    }
+    Ok(name)
+}
+
+#[cfg(test)]
+mod branch_name_tests {
+    use super::*;
+    #[test]
+    fn requires_one_conventional_english_name() {
+        assert_eq!(
+            branch_name(" fix/login-timeout ").unwrap(),
+            "fix/login-timeout"
+        );
+        for invalid in [
+            "main",
+            "feat/中文",
+            "`fix/login`",
+            "fix/a\nfeat/b",
+            "fix/-bad",
+            "fix/a--b",
+            "feat/a.lock",
+            "fix/A",
+            "feat/",
+            "feat/a/b",
+        ] {
+            assert!(branch_name(invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(
+            branch_name("NEEDS_DESCRIPTION").unwrap_err().code,
+            "AI_BRANCH_DESCRIPTION_REQUIRED"
+        );
+    }
+}

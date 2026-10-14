@@ -55,6 +55,7 @@ pub fn output(
 ) -> u32 {
     let input = tokens(prompt);
     let (estimate, minimum) = match task {
+        AiTask::BranchName => (2048, 2048),
         AiTask::CommitMessage => (1024 + input.div_ceil(40), 2048),
         AiTask::CommitExplanation => (2048 + input.div_ceil(20) + commits * 256 + files * 64, 8192),
         AiTask::CodeReview => (2048 + (input * 6).div_ceil(100) + files * 192, 8192),

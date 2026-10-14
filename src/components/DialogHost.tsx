@@ -13,6 +13,8 @@ export function DialogHost() {
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [branchTaskMode, setBranchTaskMode] = useState(false);
+  const [branchTask, setBranchTask] = useState('');
   const generation = useRef<AbortController>();
   const dialog = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement>();
@@ -25,7 +27,7 @@ export function DialogHost() {
       setRequest(next);
       setValue(next?.initialValue ?? '');
       setSelectedChoiceIds(next?.initialSelected ?? (next?.choices ?? []).map((c) => c.id));
-      setSubmitError(''); setSubmitting(false);
+      setSubmitError(''); setSubmitting(false); setBranchTaskMode(false); setBranchTask('');
     };
     dialogListeners.add(listener);
     return () => { generation.current?.abort(); generation.current = undefined; dialogListeners.delete(listener); };
@@ -40,6 +42,7 @@ export function DialogHost() {
     queueMicrotask(() => returnFocus.current?.focus());
   };
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape' && branchTaskMode && !generating) { event.preventDefault(); event.stopPropagation(); setBranchTaskMode(false); return; }
     if (request.kind === 'editor' && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void submit(); return; }
     if (event.key !== 'Tab') return;
     const focusable = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
@@ -59,7 +62,17 @@ export function DialogHost() {
   };
   const submit = async () => {
     if (generating || submitting) return;
-    if (request.kind === 'editor' && !request.allowEmpty && !value.trim()) return;
+    if (branchTaskMode && request.generateBranchName) {
+      const control = new AbortController(); generation.current = control; setGenerating(true); setSubmitError('');
+      try {
+        const name = await request.generateBranchName(branchTask, control.signal);
+        if (!control.signal.aborted && generation.current === control) { setValue(name); setBranchTaskMode(false); }
+      } catch (error) {
+        if (!control.signal.aborted && generation.current === control) { setBranchTaskMode(false); setSubmitError(error instanceof Error ? error.message : String(error)); }
+      } finally { if (generation.current === control) { generation.current = undefined; setGenerating(false); } }
+      return;
+    }
+    if (request.kind === 'editor' && !branchTaskMode && !request.allowEmpty && !value.trim()) return;
     if (request.kind === 'multiChoice') {
       finish(selectedChoiceIds);
       return;
@@ -78,6 +91,7 @@ export function DialogHost() {
       try {
         const validation = request.validateInput?.(result);
         const error = validation instanceof Promise ? await validation : validation;
+        if (currentDialog() !== request) return;
         if (error) { setSubmitError(error); return; }
         finish(request.allowEmpty ? result : result || null);
       } catch (error) { setSubmitError(error instanceof Error ? error.message : String(error)); }
@@ -85,10 +99,11 @@ export function DialogHost() {
     } else finish(true);
   };
   const isEditor = request.kind === 'editor';
-  return <DialogSurface ref={dialog} size={isEditor || request.items?.length ? 'medium' : 'small'} className={`app-dialog${isEditor ? ' commit-message-dialog' : ''}`} onClose={() => finish(false)} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
+  return <DialogSurface ref={dialog} size={isEditor || request.items?.length ? 'medium' : 'small'} className={`app-dialog${isEditor ? ' commit-message-dialog' : ''}`} onClose={() => { if (branchTaskMode && !generating) setBranchTaskMode(false); else finish(false); }} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
       <header><Codicon name={request.icon ?? (request.danger ? 'warning' : request.kind === 'prompt' ? 'edit' : isEditor ? 'git-commit' : 'question')} /><strong id="app-dialog-title">{request.title}</strong><IconButton title={t('Close')} disabled={submitting} onClick={() => finish(false)}><Codicon name="close" /></IconButton></header>
-      {!isEditor && request.message && <p>{request.message}</p>}
-      {request.kind === 'prompt' && <label><span>{request.inputLabel}</span><input autoFocus disabled={submitting} aria-label={request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} /></label>}
+      {!isEditor && (branchTaskMode ? <p>{t('Describe your task, or leave empty to generate from current changes.')}</p> : request.message && <p>{request.message}</p>)}
+      {request.kind === 'prompt' && <label><span>{branchTaskMode ? t('Task description') : request.inputLabel}</span><input autoFocus disabled={submitting || generating} aria-label={branchTaskMode ? t('Task description') : request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={branchTaskMode ? branchTask : value} placeholder={branchTaskMode ? t('e.g. Fix login timeout') : undefined} onChange={(event) => branchTaskMode ? setBranchTask(event.target.value) : setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submit(); }} /></label>}
+      {request.generateBranchName && generating && <p role="status">{t('Generating branch name…')}</p>}
       {!isEditor && request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
       {isEditor && <div className="commit-message-body">
         {request.message && <p className="commit-message-description">{request.message}</p>}
@@ -125,6 +140,6 @@ export function DialogHost() {
           })}
         </div>
       )}
-      <footer>{!isEditor && request.generate && <IconButton className="ai-generate" title={t(generating ? 'Stop generating commit message' : 'Generate commit message with AI')} disabled={submitting} onClick={() => void generate()}><Codicon name={generating ? 'stop-circle' : 'sparkle'} /></IconButton>}<button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{isEditor && <Codicon name="close" />}{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={generating || submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || isEditor) && !request.allowEmpty && !value.trim())} onClick={() => void submit()}>{isEditor && <Codicon name="check" />}{request.confirmLabel ?? t('Confirm')}</button>}</footer>
+      <footer>{request.generateBranchName && <IconButton title={t(generating ? 'Stop generating branch name' : branchTaskMode ? 'Back' : 'Generate branch name with AI')} disabled={submitting} onClick={() => { if (generating) { generation.current?.abort(); generation.current = undefined; setGenerating(false); setBranchTaskMode(false); } else setBranchTaskMode(!branchTaskMode); setSubmitError(''); }}><Codicon name={generating ? 'stop-circle' : branchTaskMode ? 'arrow-left' : 'sparkle'} /></IconButton>}{!isEditor && request.generate && <IconButton className="ai-generate" title={t(generating ? 'Stop generating commit message' : 'Generate commit message with AI')} disabled={submitting} onClick={() => void generate()}><Codicon name={generating ? 'stop-circle' : 'sparkle'} /></IconButton>}<button disabled={submitting} autoFocus={request.kind === 'confirm' && !request.danger} onClick={() => finish(false)}>{isEditor && <Codicon name="close" />}{request.cancelLabel ?? t('Cancel')}</button>{request.kind !== 'choice' && <button className={request.danger ? 'danger' : 'primary'} disabled={generating || submitting || (request.kind === 'multiChoice' && selectedChoiceIds.length === 0) || ((request.kind === 'prompt' || isEditor) && !branchTaskMode && !request.allowEmpty && !value.trim())} onClick={() => void submit()}>{isEditor && <Codicon name="check" />}{branchTaskMode ? t('Generate branch name with AI') : request.confirmLabel ?? t('Confirm')}</button>}</footer>
   </DialogSurface>;
 }

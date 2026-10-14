@@ -1,3 +1,4 @@
+import { promptBranchName } from './promptBranchName';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { useLayoutDensity, historyDensityMetrics } from '../layoutDensity';
 import { AiCommitComposerIcon } from './AiCommitComposerIcon';
@@ -498,7 +499,7 @@ function CommitList({
         }
       }
     }
-    if (id === 'branch') { const name = await promptDialog({ title: t('New Branch'), message: commit.shortHash, inputLabel: t('Branch name') }); if (name) await branchOperation({ type: 'create', name, from: commit.hash }, commit.repoId); }
+    if (id === 'branch') { const name = await promptBranchName([commit.repoId], { title: t('New Branch'), message: commit.shortHash, inputLabel: t('Branch name') }); if (name) await branchOperation({ type: 'create', name, from: commit.hash }, commit.repoId); }
     const createCommitTag = async () => {
       if (repoKindById[commit.repoId] === 'git') {
         await runTagWorkflow({ action: 'create', repoId: commit.repoId, hash: commit.hash });

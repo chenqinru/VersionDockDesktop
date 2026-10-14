@@ -166,3 +166,49 @@ describe('DialogHost identity prompts', () => {
     await act(async () => { validate(undefined); });
     expect(finished).toHaveBeenCalledWith('v1');
   });
+
+
+describe('AI branch name input', () => {
+  it('keeps the manual name when returning from the task input, and returns generated names for editing', async () => {
+    const generate = vi.fn().mockResolvedValue('fix/login-timeout');
+    const resolve = vi.fn();
+    render(<DialogHost />);
+    act(() => publishDialog({kind:'prompt', title:'New Branch', message:'', inputLabel:'Branch name', initialValue:'manual/name', generateBranchName:generate, resolve}));
+    fireEvent.click(screen.getByTitle('Generate branch name with AI'));
+    fireEvent.change(screen.getByLabelText('Task description'), {target:{value:'修复登录超时'}});
+    fireEvent.click(screen.getByTitle('Back'));
+    expect(screen.getByLabelText('Branch name')).toHaveValue('manual/name');
+    fireEvent.click(screen.getByTitle('Generate branch name with AI'));
+    fireEvent.click(screen.getByText('Generate branch name with AI'));
+    await waitFor(() => expect(screen.getByLabelText('Branch name')).toHaveValue('fix/login-timeout'));
+    expect(generate).toHaveBeenCalledWith('修复登录超时', expect.any(AbortSignal));
+    expect(resolve).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Branch name'), {target:{value:'fix/edited-name'}});
+    fireEvent.click(screen.getByText('Confirm'));
+    expect(resolve).toHaveBeenCalledWith('fix/edited-name');
+  });
+  it('restores manual naming on failure and cancels pending generation on close', async () => {
+    let signal: AbortSignal | undefined;
+    const generate = vi.fn().mockRejectedValueOnce(new Error('provider unavailable')).mockImplementation((_description, current) => {signal=current; return new Promise(() => {});});
+    render(<DialogHost />);
+    act(() => publishDialog({kind:'prompt', title:'New Branch', message:'', inputLabel:'Branch name', initialValue:'manual/name', generateBranchName:generate, resolve:vi.fn()}));
+    fireEvent.click(screen.getByTitle('Generate branch name with AI')); fireEvent.click(screen.getByText('Generate branch name with AI'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('provider unavailable'));
+    expect(screen.getByLabelText('Branch name')).toHaveValue('manual/name');
+    fireEvent.click(screen.getByTitle('Generate branch name with AI')); fireEvent.click(screen.getByText('Generate branch name with AI'));
+    fireEvent.click(screen.getByText('Cancel'));
+    expect(signal?.aborted).toBe(true);
+  });
+});
+
+
+it('allows generating a branch name from changes with both inputs empty', async () => {
+  const generate = vi.fn().mockResolvedValue('feat/current-changes');
+  render(<DialogHost />);
+  act(() => publishDialog({kind:'prompt', title:'New Branch', message:'', inputLabel:'Branch name', generateBranchName:generate, resolve:vi.fn()}));
+  fireEvent.click(screen.getByTitle('Generate branch name with AI'));
+  expect(screen.getByText('Generate branch name with AI')).not.toBeDisabled();
+  fireEvent.click(screen.getByText('Generate branch name with AI'));
+  await waitFor(() => expect(screen.getByLabelText('Branch name')).toHaveValue('feat/current-changes'));
+  expect(generate).toHaveBeenCalledWith('', expect.any(AbortSignal));
+});

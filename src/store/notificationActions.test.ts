@@ -66,7 +66,7 @@ describe('notification button parity', () => {
     await useAppStore.getState().commit('repo', 'message', false, [], false);
     const notification = useAppStore.getState().notifications.find((item) => item.title === 'Detached HEAD')!;
     const pending = useAppStore.getState().performNotificationAction(notification.id, 0);
-    expect(currentDialog()?.title).toBe('Create Branch from Current Commit');
+    await vi.waitFor(() => expect(currentDialog()?.title).toBe('Create Branch from Current Commit'));
     currentDialog()?.resolve('keep-my-work');
     await pending;
     expect(bridge.calls).toContainEqual({ type: 'branchOperation', payload: { workspace_id: 'workspace', repo_id: 'repo', operation: { type: 'create', name: 'keep-my-work', from: 'detached-commit', checkout: true } } });

@@ -1,5 +1,11 @@
 import { t } from './i18n';
 const messages: Record<string, string> = {
+  AI_BRANCH_DESCRIPTION_REQUIRED: "Describe your task to generate a branch name.",
+  AI_BRANCH_NAME_INVALID: "AI returned an invalid branch name. Retry or enter a name manually.",
+  INVALID_BRANCH_NAME: "Invalid branch name",
+  INVALID_REF: "Invalid branch name",
+  BRANCH_EXISTS: "Branch name already exists or conflicts with an existing branch",
+
   AI_KEY_ACCESS_FAILED: 'Unable to read AI API key from system secure storage. Retry access in AI settings.',
   AI_KEY_REQUIRED: 'Configure an AI API key in Settings',
   AI_MODEL_REQUIRED: 'Configure an AI model in Settings',

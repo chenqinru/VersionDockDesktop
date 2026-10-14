@@ -255,10 +255,25 @@ pub async fn generate_for_task(
     token: &CancellationToken,
     delta: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<String, DesktopError> {
+    // Branch naming uses only supplied evidence and must not resume earlier CLI conversations.
+    let isolated = if task == AiTask::BranchName && config.execution_mode == "agent-cli" {
+        Some(tempfile::tempdir().map_err(|e| error("AI_CLI_TEMP_FAILED", e.to_string()))?)
+    } else {
+        None
+    };
+    let isolated_roots = isolated
+        .as_ref()
+        .map(|dir| vec![dir.path().to_string_lossy().into_owned()]);
+    let roots = isolated_roots.as_deref().unwrap_or(roots);
     let result = generate(
         config, key, system, input, roots, schema, max_output, token, delta,
     )
     .await;
+    if let Some(roots) = &isolated_roots {
+        for root in roots {
+            super::agent_cli::forget_conversation(root);
+        }
+    }
     let expanded = super::budget::expanded(max_output, config.max_output_tokens);
     match result {
         Err(err)

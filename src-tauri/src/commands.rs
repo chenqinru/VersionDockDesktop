@@ -3591,12 +3591,100 @@ async fn dispatch(
             let _permit = state.acquire_read(token).await?;
             json(vcs::worktrees(&repo, token).await?)
         }
+        BridgeCommand::ValidateBranchName {
+            workspace_id,
+            repo_id,
+            name,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            vcs::validate_new_branch_name(&repo, &name, token).await?;
+            json(true)
+        }
+        BridgeCommand::ValidateWorktreePath { path } => {
+            vcs::validate_worktree_path(&path)?;
+            json(true)
+        }
+        BridgeCommand::WorktreeRemovalInfo {
+            workspace_id,
+            repo_id,
+            path,
+        } => {
+            let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let _permit = state.acquire_read(token).await?;
+            json(
+                vcs::worktree_removal_info(&state.config_dir, &repo, &path, token)
+                    .await?
+                    .0,
+            )
+        }
         BridgeCommand::WorktreeOperation {
             workspace_id,
             repo_id,
             operation,
         } => {
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
+            let output = crate::cli::run(
+                "git",
+                &[
+                    "rev-parse".into(),
+                    "--path-format=absolute".into(),
+                    "--git-common-dir".into(),
+                ],
+                Path::new(&repo.root_path),
+                None,
+                std::time::Duration::from_secs(30),
+                token,
+            )
+            .await?;
+            let common_key = format!(
+                "worktrees:{}",
+                dunce::canonicalize(output.stdout_text().trim())
+                    .unwrap_or_else(|_| output.stdout_text().trim().into())
+                    .display()
+            );
+            let common_lock = state.write_lock(&common_key).await;
+            let _common = tokio::select! { _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)), g = common_lock.lock_owned() => g };
+            let target_repo = if let crate::models::WorktreeOperation::Remove { path, .. } =
+                &operation
+            {
+                vcs::worktrees(&repo, token)
+                    .await?
+                    .into_iter()
+                    .find(|e| vcs::same_worktree_path(&e.path, path))
+                    .map(|e| {
+                        let mut target = repo.clone();
+                        target.id = workspace::repo_id(
+                            &dunce::canonicalize(&e.path).unwrap_or_else(|_| e.path.clone().into()),
+                            crate::models::VcsKind::Git,
+                        );
+                        target.root_path = e.path;
+                        target
+                    })
+            } else {
+                None
+            };
+            // Acquire the target lock without a second write permit: two concurrent removals
+            // must not each hold one permit while waiting for the other.
+            let _target_guard = if let Some(target) =
+                target_repo.as_ref().filter(|r| r.id != repo_id)
+            {
+                let lock = state.write_lock(&target.id).await;
+                Some(
+                    tokio::select! { _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)), guard = lock.lock_owned() => guard },
+                )
+            } else {
+                None
+            };
+            let _target_transaction =
+                if let Some(target) = target_repo.as_ref().filter(|r| r.id != repo_id) {
+                    Some(
+                        crate::update_worker::repository_lock(&state.config_dir, &target.id, token)
+                            .await?,
+                    )
+                } else {
+                    None
+                };
             with_write(state, &repo_id, token, async {
                 vcs::worktree_operation(&state.config_dir, &repo, operation, token).await
             })

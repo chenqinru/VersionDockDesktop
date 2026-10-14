@@ -24,7 +24,7 @@ import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/b
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
 import { checkAppUpdate, openExternalLink, type AppUpdateCheckResult } from '../services/updater';
 import { APP_CURRENT_VERSION } from '../version';
-import { choiceDialog, promptDialog, multiChoiceDialog, confirmDialog } from '../components/dialogService';
+import { choiceDialog, multiChoiceDialog, confirmDialog } from '../components/dialogService';
 import { buildPullRequestUrl } from '../history/prUrlHelper';
 import { createTranslator, resolveLanguage } from '../i18n';
 import { mergeEditorIdentity, type MergeResolution, type NonConflictScope } from '../components/mergeEditorModel';
@@ -128,6 +128,7 @@ export type AppNotificationAction =
   | { type: 'unlockIndex'; label: NotificationText; repoId: string }
   | { type: 'pruneBranches'; label: NotificationText; repoId: string; branches: string[] }
   | { type: 'openExternal'; label: NotificationText; url: string }
+  | { type: 'openCreatedWorktree' | 'addCreatedWorktree'; label: NotificationText; repoId: string; path: string }
   | { type: 'createBranch'; label: NotificationText; repoId: string; revision: string }
   | { type: 'continueOperation' | 'abortOperation' | 'skipOperation'; label: NotificationText; repoId: string; operation: string; revision?: string }
   | { type: 'dismiss'; label: NotificationText };
@@ -555,6 +556,7 @@ export interface AppStore {
   shelfOperation: (repoId: string, operation: ShelfOperation, targetWorkspaceId?: string) => Promise<boolean>;
   loadChangelists: (repoId?: string) => Promise<void>;
   changelistOperation: (repoId: string, operation: ChangelistOperation) => Promise<void>;
+  worktreeBusy: Record<string, boolean>;
   loadWorktrees: (repoId?: string) => Promise<void>;
   worktreeOperation: (repoId: string, operation: WorktreeOperation) => Promise<void>;
   openWorktree: (repoId: string, path: string, reveal: boolean) => Promise<void>;
@@ -1300,6 +1302,20 @@ function cancelRequests() {
 
 const errorText = (error: unknown) => {
   const messages: Record<string, string> = {
+    AI_BRANCH_DESCRIPTION_REQUIRED: "Describe your task to generate a branch name.",
+    AI_BRANCH_NAME_INVALID: "AI returned an invalid branch name. Retry or enter a name manually.",
+    INVALID_BRANCH_NAME: "Invalid branch name",
+    BRANCH_EXISTS: "Branch name already exists or conflicts with an existing branch",
+    WORKTREE_MAIN: "Cannot remove the main or currently opened worktree.",
+    WORKTREE_LOCKED: "Unlock the worktree before removing it.",
+    WORKTREE_UNSAVED_COMMITS: "This detached worktree contains commits not saved on a branch or tag. Create a branch before removing it.",
+    WORKTREE_SHELVES: "Restore or move worktree shelves before removing it.",
+    WORKTREE_DIRTY: "Worktree contains local files or changes. Open it to save them, or explicitly confirm force removal.",
+    WORKTREE_BRANCH_OCCUPIED: "Branch is already used by another worktree.",
+    BRANCH_NOT_FOUND: "Branch not found",
+    INVALID_WORKTREE_PATH: "Choose an absolute worktree directory",
+    WORKTREE_EXISTS: "Worktree directory already exists. Choose a different path.",
+
     INVALID_WORKSPACE_FILE: 'Unable to open this workspace file. Check its folders and paths.',
     INVALID_WORKSPACE_NAME: 'Workspace name must contain 1 to 100 characters without control characters.',
     GIT_UPDATE_CONFLICT: 'Update stopped with conflicts or an unfinished version-control operation.',
@@ -1314,6 +1330,21 @@ const errorText = (error: unknown) => {
     ? createTranslator(resolveLanguage(useAppStore.getState().bootstrap?.state.settings?.language ?? 'system'))(message)
     : error instanceof Error ? error.message : String(error);
 };
+export function ensureWorktreeEditorsSaved(path: string): void {
+  const state = useAppStore.getState();
+  const sessions = [state, ...Object.values(state.sessions)];
+  for (const session of sessions) {
+    const target = session.mergeTarget;
+    const draft = session.mergeEditorDraft;
+    if (!target || !draft) continue;
+    const repo = session.snapshot?.repositories.find(r => r.meta.id === target.repoId);
+    if (repo?.meta.rootPath !== path) continue;
+    if (Object.keys(draft.normalEdits).length || Object.keys(draft.resolutions).length) {
+      throw new Error(createTranslator(resolveLanguage(state.bootstrap?.state.settings?.language ?? 'system'))('Save or close unsaved editors in this worktree before removing it.'));
+    }
+  }
+}
+export const repositoryErrorText = errorText;
 const errorDetails = (error: unknown) => error instanceof BridgeError
   ? [error.code, error.operation, error.repositoryId, error.subject, error.hint, error.command, error.exitCode, error.stderr].filter((value) => value !== null && value !== undefined && value !== '').join('\n')
   : undefined;
@@ -1566,6 +1597,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     });
     return false;
   };
+  const worktreeReadEpochs = new Map<string, number>();
+  let worktreeReadSequence = 0;
   const withBusy = async <T>(
     operation: () => Promise<T>,
     domain = 'workspace',
@@ -2441,6 +2474,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       return get().tabs.some((tab) => tab.id === transfer.tabId)
         && Boolean(get().sessions[transfer.tabId]);
     },
+    worktreeBusy: {},
     ready: false, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', diffReturnMode: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], updateDetailCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, batchCommitReports: {}, loadErrors: {},
     logPanelOpen: false,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
@@ -5249,54 +5283,43 @@ export const useAppStore = create<AppStore>((set, get) => {
     loadWorktrees: async (repoId) => {
       const b = get().bridge;
       const wid = get().snapshot?.workspace.id;
+      const tab = get().activeTabId;
       if (!b || !wid) return;
-      if (repoId) {
+      const ids = repoId ? [repoId] : (get().snapshot?.repositories ?? []).filter(r => r.meta.kind === 'git').map(r => r.meta.id);
+      await Promise.all(ids.map(async id => {
+        const key = `${wid}:${id}`;
+        const epoch = ++worktreeReadSequence; worktreeReadEpochs.set(key, epoch);
+        const active = () => worktreeReadEpochs.get(key) === epoch && get().bridge === b && get().snapshot?.workspace.id === wid && get().activeTabId === tab && get().snapshot?.repositories.some(r => r.meta.id === id);
         try {
-          const values = await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repoId } });
-          if (get().snapshot?.workspace.id !== wid) return;
-          set((state) => ({
-            worktrees: { ...state.worktrees, [repoId]: values },
-            loadErrors: { ...state.loadErrors, [`worktrees:${repoId}`]: null },
-          }));
-        } catch (error) {
-          if (get().snapshot?.workspace.id !== wid) return;
-          set((state) => ({
-            loadErrors: { ...state.loadErrors, [`worktrees:${repoId}`]: errorText(error) },
-          }));
-        }
-        return;
-      }
-      const repositories = (get().snapshot?.repositories ?? []).filter((repo) => repo.meta.kind === 'git');
-      const results = await Promise.allSettled(repositories.map(async (repo) => ({
-        repoId: repo.meta.id,
-        worktrees: await b.request<WorktreeEntry[]>({ type: 'worktrees', payload: { workspace_id: wid, repo_id: repo.meta.id } }),
-      })));
-      if (get().snapshot?.workspace.id !== wid) return;
-      set((state) => {
-        const nextWorktrees = { ...state.worktrees };
-        const nextErrors = { ...state.loadErrors };
-        results.forEach((res, index) => {
-          const rId = repositories[index].meta.id;
-          if (res.status === 'fulfilled') {
-            nextWorktrees[rId] = res.value.worktrees;
-            nextErrors[`worktrees:${rId}`] = null;
-          } else {
-            nextErrors[`worktrees:${rId}`] = errorText(res.reason);
-          }
-        });
-        return { worktrees: nextWorktrees, loadErrors: nextErrors };
-      });
+          const values = await b.request<WorktreeEntry[]>({type:'worktrees', payload:{workspace_id:wid, repo_id:id}});
+          if (active()) set(state => ({worktrees:{...state.worktrees, [id]:values}, loadErrors:{...state.loadErrors, [`worktrees:${id}`]:null}}));
+        } catch(error) {
+          if (active()) set(state => ({loadErrors:{...state.loadErrors, [`worktrees:${id}`]:errorText(error)}}));
+        } finally { if (worktreeReadEpochs.get(key) === epoch) worktreeReadEpochs.delete(key); }
+      }));
     },
-    worktreeOperation: async (repoId, operation) => withBusy(async () => {
-      if (!ensureRepositoryCapability(repoId, 'worktreeWrite')) return;
-      const previousPaths = new Set((get().worktrees[repoId] ?? []).map((item) => item.path));
-      await bridge().request({ type: 'worktreeOperation', payload: { workspace_id: workspaceId(), repo_id: repoId, operation } });
-      await get().loadWorktrees(repoId);
-      if (operation.type === 'create') {
-        const created = (get().worktrees[repoId] ?? []).find((item) => !previousPaths.has(item.path));
-        get().addNotification({ type: 'success', title: 'Worktree operation completed', message: created ? { key: 'VersionDock: Worktree created at {0}', args: [created.path] } : 'VersionDock: Worktree created.', workspaceId: get().snapshot?.workspace.id });
-      }
-    }, `worktree:${repoId}`),
+    worktreeOperation: async (repoId, operation) => {
+      const owner = bridge(); const wid = workspaceId(); const tab = get().activeTabId;
+      const key = `${wid}:${repoId}`;
+      if (get().worktreeBusy[key] || !ensureRepositoryCapability(repoId, 'worktreeWrite')) return;
+      set(state => ({worktreeBusy:{...state.worktreeBusy, [key]:true}}));
+      try {
+        await withBusy(async () => {
+          if (operation.type === 'remove') ensureWorktreeEditorsSaved(operation.path);
+          await owner.request({type:'worktreeOperation', payload:{workspace_id:wid, repo_id:repoId, operation}});
+          if (get().bridge !== owner || get().snapshot?.workspace.id !== wid || get().activeTabId !== tab) return;
+          if (operation.type === 'remove') {
+            const paths = get().snapshot?.workspace.paths ?? [];
+            const next = paths.filter(p => p !== operation.path);
+            if (next.length > 0 && next.length !== paths.length) await get().openWorkspace(next);
+          }
+          await get().loadWorktrees(repoId);
+          if (operation.type === 'create') {
+            get().addNotification({type:'success', title:'Worktree operation completed', message:{key:'VersionDock: Worktree created at {0}', args:[operation.path]}, workspaceId:wid, actions:[{type:'openCreatedWorktree', label:'Open in New Window', repoId, path:operation.path}, {type:'addCreatedWorktree', label:'Add Folder to Workspace', repoId, path:operation.path}]});
+          }
+        }, `worktree:${repoId}`, {workspaceId:wid, repositoryId:repoId});
+      } finally { set(state => {const busy = {...state.worktreeBusy}; delete busy[key]; return {worktreeBusy:busy};}); }
+    },
     openWorktree: async (repoId, path, reveal) => withBusy(async () => {
       const managedPath = await bridge().request<string>({ type: 'openWorktree', payload: { workspace_id: workspaceId(), repo_id: repoId, path, reveal } });
       if (!reveal && !await bridge().focusWorkspaceAcrossWindows([managedPath])) await bridge().openInNewWindow([managedPath]);
@@ -6147,9 +6170,15 @@ export const useAppStore = create<AppStore>((set, get) => {
           }
           return;
         }
+        if (action.type === 'openCreatedWorktree') await get().openWorktree(action.repoId, action.path, false);
+        if (action.type === 'addCreatedWorktree') {
+          const paths = get().snapshot?.workspace.paths ?? [];
+          if (!paths.includes(action.path)) await get().openWorkspace([...paths, action.path]);
+        }
         if (action.type === 'createBranch') {
           const wid = workspaceId();
-          const name = await promptDialog({ title: t('Create Branch from Current Commit'), message: t('Enter new branch name') });
+          const {promptBranchName} = await import('../components/promptBranchName');
+          const name = await promptBranchName([action.repoId], { title: t('Create Branch from Current Commit'), message: t('Enter new branch name') });
           if (!name?.trim() || get().snapshot?.workspace.id !== wid) return;
           const current = await bridge().request<RepositoryStatus>({ type: 'repositoryStatus', payload: { workspace_id: wid, repo_id: action.repoId } }, { showProgress: false });
           if (get().snapshot?.workspace.id !== wid || current.revision !== action.revision) return;
