@@ -57,6 +57,9 @@ json5 = "0.4.1"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55.0"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
 

@@ -22,6 +22,14 @@ use crate::{
 };
 
 #[tauri::command]
+pub async fn window_set_controls_visible(
+    window: tauri::WebviewWindow,
+    visible: bool,
+) -> Result<(), DesktopError> {
+    crate::windowing::set_controls_visible(window, visible).await
+}
+
+#[tauri::command]
 pub async fn bridge_cancel(
     request_id: String,
     state: State<'_, AppState>,

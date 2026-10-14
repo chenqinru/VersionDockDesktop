@@ -1,5 +1,3 @@
-import { useProviderAccounts } from './useProviderAccounts';
-import { ProviderPanel } from './ProviderPanel';
 import { IconButton } from './IconButton';
 import { useState, useMemo } from 'react';
 import { Codicon } from './Codicon';
@@ -22,8 +20,6 @@ export function WorkspaceChooser() {
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const { t } = useI18n();
   const bridge = useBridge();
-  const accounts = useProviderAccounts();
-  const [providersOpen, setProvidersOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
   const [checkoutKind, setCheckoutKind] = useState<RepositoryCheckoutKind>();
 
@@ -100,10 +96,6 @@ export function WorkspaceChooser() {
             <button type="button" className="welcome-action-btn" disabled={busy || !svnAvailable} title={!svnAvailable ? t('SVN command-line client was not detected. Install SVN and restart the app.') : undefined} onClick={() => setCheckoutKind('svn')}>
               <div className="welcome-action-icon"><Codicon name="cloud-download" /></div>
               <div className="welcome-action-text"><span className="welcome-action-title">{t('Checkout SVN Repository')}</span><span className="welcome-action-desc">{t('Check out an SVN repository into a local folder.')}</span></div>
-            </button>
-            <button type="button" className="welcome-action-btn" disabled={busy} onClick={() => setProvidersOpen(true)}>
-              <div className="welcome-action-icon"><Codicon name="account" /></div>
-              <div className="welcome-action-text"><span className="welcome-action-title">{t(accounts.length ? 'Remote Accounts' : 'Connect Remote Accounts')}</span><span className="welcome-action-desc">{accounts.length ? t('{0} connected accounts', accounts.length) : 'GitHub · GitLab · Gitee'}</span></div>
             </button>
           </div>
 
@@ -230,7 +222,6 @@ export function WorkspaceChooser() {
           </div>
         </section>
       </div>
-      {providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}
       {checkoutKind && <RepositoryCheckoutDialog kind={checkoutKind} close={() => setCheckoutKind(undefined)} />}
     </main>
   );

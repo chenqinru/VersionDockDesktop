@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useModalWindowControls } from './useModalWindowControls';
 
 export function useDialogFocusTrap(open: boolean, close: () => void, returnFocus?: HTMLElement | null) {
+  useModalWindowControls(open);
   const dialog = useRef<HTMLElement>(null);
   const previous = useRef<HTMLElement | null>(null);
   const closeRef = useRef(close);

@@ -84,6 +84,7 @@ export interface VersionDockBridge {
     close(): Promise<void>;
     destroy(): Promise<void>;
     show(): Promise<void>;
+    setControlsVisible(visible: boolean): Promise<void>;
     isMaximized(): Promise<boolean>;
     dragGeometry(): Promise<WindowDragGeometry | null>;
     setPosition(x: number, y: number): Promise<void>;
@@ -265,6 +266,11 @@ export class TauriBridge implements VersionDockBridge {
     minimize: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().minimize(),
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
     destroy: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().destroy(),
+    setControlsVisible: async (visible: boolean) => {
+      if (this.currentPlatform !== 'macos') return;
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('window_set_controls_visible', { visible });
+    },
     show: async () => {
       const currentWindow = (await import('@tauri-apps/api/window')).getCurrentWindow();
       const background = getComputedStyle(document.documentElement).getPropertyValue('--versiondock-bg').trim();
@@ -784,6 +790,7 @@ export class MockBridge implements VersionDockBridge {
   }
   readonly window = {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined, destroy: async () => undefined, show: async () => undefined,
+    setControlsVisible: async (visible: boolean): Promise<void> => { void visible; },
     hasOtherWorkspaceWindows: async () => false,
     isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined, onDragDrop: async () => () => undefined,
   };

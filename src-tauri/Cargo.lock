@@ -4988,6 +4988,7 @@ dependencies = [
  "keyring",
  "libc",
  "notify",
+ "objc2-app-kit",
  "reqwest",
  "roxmltree",
  "rustls",

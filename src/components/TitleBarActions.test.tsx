@@ -18,15 +18,24 @@ describe('TitleBarActions', () => {
     ['Clone Git Repository', 'Clone Git Repository'],
     ['Manage Remote Accounts (GitHub / GitLab / Gitee)', 'Remote Providers'],
     ['Settings', 'Settings'],
-  ])('opens and closes the existing dialog from %s', (action, dialogName) => {
-    render(<BridgeContext.Provider value={new MockBridge(() => [])}><TitleBarActions workspaceId="ws" /></BridgeContext.Provider>);
-    const button = screen.getByRole('button', { name: action });
-    fireEvent.click(button);
-    const dialog = screen.getByRole('dialog', { name: dialogName });
-    expect(button).toHaveAttribute('aria-expanded', 'true');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(button).toHaveAttribute('aria-expanded', 'false');
+  ])('opens and closes the existing dialog from %s in the applicable contexts', (action, dialogName) => {
+    for (const workspaceId of action === 'Clone Git Repository' ? ['ws'] : ['ws', undefined]) {
+      render(<BridgeContext.Provider value={new MockBridge(() => [])}><TitleBarActions workspaceId={workspaceId} /></BridgeContext.Provider>);
+      const button = screen.getByRole('button', { name: action });
+      fireEvent.click(button);
+      const dialog = screen.getByRole('dialog', { name: dialogName });
+      expect(button).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      cleanup();
+    }
+  });
+
+  it('keeps clone in the welcome body and exposes only accounts and settings in its title bar', () => {
+    render(<BridgeContext.Provider value={new MockBridge(() => [])}><TitleBarActions /></BridgeContext.Provider>);
+    expect(screen.getAllByRole('button')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Clone Git Repository' })).not.toBeInTheDocument();
   });
 
   it('honors clone availability and does not bubble pointer events into the drag region', () => {

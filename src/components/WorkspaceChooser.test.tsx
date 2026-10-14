@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceChooser } from './WorkspaceChooser';
+import { TitleBar } from './TitleBar';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 import { useAppStore } from '../store/appStore';
@@ -156,7 +157,7 @@ describe('WorkspaceChooser V5 setup actions', () => {
   });
 });
 
-it('manages remote accounts without opening a workspace and refreshes the welcome count', async () => {
+it('manages remote accounts from the welcome title bar without opening a workspace', async () => {
   let connected = false;
   const bridge = new MockBridge(command => {
     if (command.type === 'providerAccounts') return connected ? [{ id: 'gitee', provider: 'gitee', host: 'https://gitee.com', login: 'ada', displayName: null, secureStorageRef: 'test' }] : [];
@@ -164,11 +165,14 @@ it('manages remote accounts without opening a workspace and refreshes the welcom
     return [];
   });
   useAppStore.setState({ bootstrap: { state: { recentWorkspaces: [] }, tools: {} } as any, snapshot: undefined });
-  render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
-  fireEvent.click(screen.getByRole('button', { name: /Connect Remote Accounts/ }));
+  const { container } = render(<BridgeContext.Provider value={bridge}><TitleBar /><WorkspaceChooser /></BridgeContext.Provider>);
+  expect(container.querySelectorAll('.titlebar-actions button')).toHaveLength(2);
+  expect(container.querySelectorAll('.welcome-action-btn')).toHaveLength(3);
+  expect(screen.queryByRole('button', { name: /Connect Remote Accounts/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Manage Remote Accounts (GitHub / GitLab / Gitee)' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Add Gitee Account' }));
   fireEvent.change(screen.getByPlaceholderText('Personal Access Token'), { target: { value: 'test-only-token' } });
   fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-  await screen.findByText('1 connected accounts');
+  await screen.findByText('ada');
   expect(useAppStore.getState().snapshot).toBeUndefined();
 });

@@ -157,6 +157,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::bridge_request,
             commands::bridge_cancel,
+            commands::window_set_controls_visible,
             interactions::respond_native_interaction,
             commands::follow_tab_drag_preview,
             app_updater::check_update_mirror,

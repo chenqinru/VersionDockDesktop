@@ -1231,6 +1231,7 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
 /* 左侧侧边栏 */
 .settings-sidebar {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 12px 10px;
@@ -1244,6 +1245,7 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
 /* 搜索框 */
 .settings-search-wrapper {
   position: relative;
+  flex-shrink: 0;
   width: 100%;
   display: flex;
   align-items: center;
@@ -1299,6 +1301,8 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
 
 /* 侧边栏导航列表 */
 .settings-nav {
+  min-height: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1306,6 +1310,7 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
 }
 
 .settings-nav-item {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -7852,7 +7857,7 @@ button.notification-item-action-btn:focus-visible {
 .settings-category-modified-count { margin-left: auto; min-width: 16px; }
 .setting-reset { flex-shrink: 0; width: 22px; height: 22px; color: var(--versiondock-muted); }
 .settings-row[data-setting-modified="true"] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--versiondock-muted) 40%, transparent); }
-.settings-modified-filter { display: flex; align-items: center; gap: 7px; width: 100%; margin: 9px 0 3px; padding: 7px 10px; border: 1px solid var(--versiondock-border-soft); border-radius: 6px; background: transparent; color: var(--versiondock-muted); text-align: left; font: inherit; cursor: pointer; }
+.settings-modified-filter { display: flex; flex-shrink: 0; align-items: center; gap: 7px; width: 100%; margin: 9px 0 3px; padding: 7px 10px; border: 1px solid var(--versiondock-border-soft); border-radius: 6px; background: transparent; color: var(--versiondock-muted); text-align: left; font: inherit; cursor: pointer; }
 .settings-modified-filter:hover, .settings-modified-filter[aria-pressed="true"] { background: var(--versiondock-surface-alt); color: var(--versiondock-text); }
 .settings-modified-filter:focus-visible { outline: 1px solid var(--versiondock-muted); outline-offset: 2px; }
 .setting-summary { display: flex; flex-direction: column; gap: 9px; padding: 10px 14px; }
@@ -7928,13 +7933,6 @@ button.notification-item-action-btn:focus-visible {
 .repository-task-progress > span:first-child { grid-column: 1 / -1; color: var(--versiondock-muted); }
 .repository-task-progress .task-progress-track { width: 100%; }
 .repository-task-progress small { grid-column: 1 / -1; }
-
-@media (max-height: 600px) {
-  .welcome-left { padding: 16px 20px; gap: 10px; }
-  .welcome-actions { gap: 6px; }
-  .welcome-action-btn { padding: 10px 12px; gap: 10px; }
-  .welcome-action-icon { width: 32px; height: 32px; }
-}
 
 .clone-fields[hidden] { display: none; }
 .clone-dialog-accounts .provider-accounts { overflow: hidden; }

@@ -329,6 +329,7 @@ export class BrowserDevBridge implements VersionDockBridge {
     close: async () => undefined,
     destroy: async () => undefined,
     show: async () => undefined,
+    setControlsVisible: async (visible: boolean): Promise<void> => { void visible; },
     isMaximized: async () => false,
     dragGeometry: async () => null,
     setPosition: async () => undefined,

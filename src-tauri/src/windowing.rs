@@ -5,6 +5,48 @@ use crate::{
 };
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
+pub async fn set_controls_visible(
+    window: WebviewWindow,
+    visible: bool,
+) -> Result<(), DesktopError> {
+    #[cfg(target_os = "macos")]
+    {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let app = window.app_handle().clone();
+        app.run_on_main_thread(move || {
+            let result = (|| {
+                use objc2_app_kit::{NSWindow, NSWindowButton};
+                let native = window.ns_window().map_err(|error| {
+                    DesktopError::new("WINDOW_CONTROLS_FAILED", error.to_string(), true)
+                })?;
+                // Tauri owns this NSWindow for the captured window's lifetime.
+                // AppKit views must only be accessed on the main thread.
+                let native = unsafe { &*native.cast::<NSWindow>() };
+                for kind in [
+                    NSWindowButton::CloseButton,
+                    NSWindowButton::MiniaturizeButton,
+                    NSWindowButton::ZoomButton,
+                ] {
+                    if let Some(button) = native.standardWindowButton(kind) {
+                        button.setHidden(!visible);
+                    }
+                }
+                Ok(())
+            })();
+            let _ = send.send(result);
+        })
+        .map_err(|error| DesktopError::new("WINDOW_CONTROLS_FAILED", error.to_string(), true))?;
+        receive
+            .await
+            .map_err(|error| DesktopError::new("WINDOW_CONTROLS_FAILED", error.to_string(), true))?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, visible);
+        Ok(())
+    }
+}
+
 pub fn is_business_window(label: &str) -> bool {
     label == "main" || label.starts_with("window-")
 }
