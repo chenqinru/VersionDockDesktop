@@ -363,7 +363,7 @@ describe('CommitPanel capabilities and file view', () => {
     ] };
     useAppStore.setState({ bootstrap: data, snapshot: { ...gitSnapshot, repositories: [repo] }, selectedRepoId: 'repo', commitSelections: { repo: ['other.txt'] }, changelists: { repo: [] } });
     const { container } = renderPanel();
-    const trigger = screen.getByTitle('VersionDock: Select All');
+    const trigger = screen.getByTitle('Select All');
     trigger.focus();
     fireEvent.keyDown(trigger, { key: 'f', ctrlKey: true });
     const input = screen.getByRole('textbox', { name: 'Search files...' });
@@ -406,7 +406,7 @@ describe('CommitPanel capabilities and file view', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: 'src/nested' }));
     expect(screen.queryByText('read.ts')).not.toBeInTheDocument();
-    const trigger = screen.getByTitle('VersionDock: Select All'); trigger.focus();
+    const trigger = screen.getByTitle('Select All'); trigger.focus();
     fireEvent.keyDown(trigger, { key: 'r' });
     const input = screen.getByRole('textbox', { name: 'Search files...' });
     fireEvent.change(input, { target: { value: 'read' } });
@@ -438,7 +438,7 @@ describe('CommitPanel capabilities and file view', () => {
     useAppStore.setState({ bootstrap: data, snapshot: gitSnapshot, selectedRepoId: 'repo', stashes: { repo: [] }, refresh, loadStashes });
     renderPanel();
     loadStashes.mockClear();
-    fireEvent.click(screen.getByTitle('VersionDock: Refresh Commit Panel'));
+    fireEvent.click(screen.getByTitle('Refresh Commit Panel'));
     await waitFor(() => expect(loadStashes).toHaveBeenCalledOnce());
     expect(refresh).toHaveBeenCalledExactlyOnceWith(false, { reloadRepository: false, trackBusy: false });
   });
@@ -460,8 +460,8 @@ describe('CommitPanel capabilities and file view', () => {
     });
     useAppStore.setState({ bridge: refreshBridge, bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo', refresh: originalRefresh, updateProject });
     render(<BridgeContext.Provider value={refreshBridge}><CommitPanel /></BridgeContext.Provider>);
-    const refreshButton = screen.getByTitle('VersionDock: Refresh Commit Panel');
-    const updateButton = screen.getByTitle('VersionDock: Update Project');
+    const refreshButton = screen.getByTitle('Refresh Commit Panel');
+    const updateButton = screen.getByTitle('Update Project');
     fireEvent.click(refreshButton);
     expect(refreshButton).toBeEnabled();
     expect(updateButton).toBeEnabled();
@@ -486,11 +486,11 @@ describe('CommitPanel capabilities and file view', () => {
     const refreshBridge = new MockBridge(command => command.type === 'workspaceRefresh' ? ++refreshCalls === 1 ? refreshGate : gitSnapshot : []);
     useAppStore.setState({ bridge: refreshBridge, bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo', refresh: originalRefresh });
     render(<BridgeContext.Provider value={refreshBridge}><CommitPanel /></BridgeContext.Provider>);
-    const refreshButton = screen.getByTitle('VersionDock: Refresh Commit Panel');
+    const refreshButton = screen.getByTitle('Refresh Commit Panel');
     fireEvent.click(refreshButton);
     await act(async () => { rejectRefresh(new Error('Refresh failed')); await refreshGate.catch(() => undefined); });
     expect(refreshButton).toBeEnabled();
-    expect(screen.getByTitle('VersionDock: Update Project')).toBeEnabled();
+    expect(screen.getByTitle('Update Project')).toBeEnabled();
     fireEvent.click(refreshButton);
     await waitFor(() => expect(refreshCalls).toBe(2));
     expect(useAppStore.getState().snapshot).toEqual(gitSnapshot);
@@ -579,9 +579,9 @@ describe('CommitPanel capabilities and file view', () => {
     const { container } = render(<BridgeContext.Provider value={diffBridge}><CommitPanel /></BridgeContext.Provider>);
     expect(container.querySelector('.branch-working-diff-panel')).toBeInTheDocument();
     expect(screen.getByTitle('VersionDock Commit')).toBeInTheDocument();
-    expect(screen.getByTitle('VersionDock: Update Project')).toBeInTheDocument();
-    expect(screen.getByTitle('VersionDock: Refresh Commit Panel')).toBeInTheDocument();
-    expect(screen.getByTitle('VersionDock: Settings')).toBeInTheDocument();
+    expect(screen.getByTitle('Update Project')).toBeInTheDocument();
+    expect(screen.getByTitle('Refresh Commit Panel')).toBeInTheDocument();
+    expect(screen.queryByTitle('Settings')).not.toBeInTheDocument();
     expect(container.querySelector('.commit-tabs')).not.toBeInTheDocument();
     expect(screen.getByText('origin/feature vs Working Tree')).toBeInTheDocument();
     expect(screen.getByTitle('src')).toHaveTextContent('2');
@@ -662,7 +662,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.queryByText('Show Diff')).not.toBeInTheDocument();
   });
 
-  it('supports select all / invert selection and manage remote accounts from the panel toolbar', async () => {
+  it('keeps selection and view actions in the panel toolbar after moving global actions', () => {
     const changedRepo = {
       ...gitRepo,
       files: [
@@ -680,7 +680,7 @@ describe('CommitPanel capabilities and file view', () => {
     const { container } = render(<BridgeContext.Provider value={bridge}><CommitPanel /></BridgeContext.Provider>);
 
     // 1. 验证顶栏中的全选按钮
-    const selectAllBtn = container.querySelector('.panel-toolbar button[title="VersionDock: Select All"]');
+    const selectAllBtn = container.querySelector('.panel-toolbar button[title="Select All"]');
     expect(selectAllBtn).toBeInTheDocument();
     expect(selectAllBtn?.querySelector('.custom-icon')).toBeInTheDocument();
 
@@ -689,7 +689,7 @@ describe('CommitPanel capabilities and file view', () => {
     expect(useAppStore.getState().commitSelections['repo']).toEqual(['src/file1.ts', 'src/file2.ts']);
 
     // 全选后变为反选
-    const invertBtn = container.querySelector('.panel-toolbar button[title="VersionDock: Invert Selection"]');
+    const invertBtn = container.querySelector('.panel-toolbar button[title="Invert Selection"]');
     expect(invertBtn).toBeInTheDocument();
     expect(invertBtn?.querySelector('.custom-icon')).toBeInTheDocument();
 
@@ -697,21 +697,16 @@ describe('CommitPanel capabilities and file view', () => {
     fireEvent.click(invertBtn!);
     expect(useAppStore.getState().commitSelections['repo'] ?? []).toEqual([]);
 
-    // 2. 验证顶栏管理远端账号按钮
-    const remoteAccountsBtn = container.querySelector('.panel-toolbar button[title="VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)"]');
-    expect(remoteAccountsBtn).toBeInTheDocument();
-    expect(remoteAccountsBtn?.querySelector('.codicon-account')).toBeInTheDocument();
-
-    // 点击打开远端平台面板
-    fireEvent.click(remoteAccountsBtn!);
-    expect(screen.getByRole('dialog', { name: 'Remote Providers' })).toBeInTheDocument();
+    expect(screen.queryByTitle('Clone Git Repository')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Manage Remote Accounts (GitHub / GitLab / Gitee)')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Settings')).not.toBeInTheDocument();
 
     // 3. 验证更多菜单中不再包含全选和反选
     const moreBtn = container.querySelector('.panel-toolbar button[title="More Actions..."]');
     expect(moreBtn).toBeInTheDocument();
     fireEvent.click(moreBtn!);
-    expect(screen.queryByText('VersionDock: Select All', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
-    expect(screen.queryByText('VersionDock: Invert Selection', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Select All', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Invert Selection', { selector: '.view-options-menu *' })).not.toBeInTheDocument();
   });
 
   it('calculates commit targets for pure SVN workspace in VS Code mode', async () => {
@@ -1175,7 +1170,7 @@ describe('CommitPanel capabilities and file view', () => {
 
     renderPanel();
 
-    const triggerBtn = screen.getByRole('button', { name: 'VersionDock: Resolve Conflicts' });
+    const triggerBtn = screen.getByRole('button', { name: 'Resolve Conflicts' });
     expect(triggerBtn).toBeInTheDocument();
 
     // 点击打开弹窗
@@ -1218,7 +1213,7 @@ describe('CommitPanel capabilities and file view', () => {
 
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'VersionDock: Resolve Conflicts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve Conflicts' }));
     const abortItem = screen.getByRole('menuitem', { name: /Abort Cherry-pick/ });
     expect(abortItem).toBeInTheDocument();
 

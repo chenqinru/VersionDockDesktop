@@ -751,6 +751,21 @@ body.is-tab-drop-target * {
   app-region: drag;
 }
 
+.titlebar-actions {
+  --versiondock-icon-button-size: 28px;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  height: 100%;
+  padding: 0 8px 0 4px;
+  position: relative;
+  z-index: 3;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.titlebar-actions > .icon-button > .codicon { font-size: calc(18px * var(--versiondock-ui-font-scale, 1)); }
+
 .window-controls.linux {
   display: flex;
   align-items: center;

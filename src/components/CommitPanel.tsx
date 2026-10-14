@@ -20,7 +20,6 @@ import { SubtreePanel } from './SubtreePanel';
 import { SyncPanel } from './SyncPanel';
 import { SubmodulePanel } from './SubmodulePanel';
 import { FileIcon } from './FileIcon';
-import { SettingsPanel } from './SettingsPanel';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { IgnoreRulesPanel } from './IgnoreRulesPanel';
 import { ChangelistView } from './ChangelistView';
@@ -28,8 +27,6 @@ import { StatusMark } from './ChangelistGroup';
 import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
-import { RepositoryCheckoutDialog } from './RepositoryCheckoutDialog';
-import { ProviderPanel } from './ProviderPanel';
 import { InvertSelectionIcon, SelectAllIcon, WarningConflictIcon } from './CustomIcons';
 import { performCommitSafetyCheck } from '../history/safetyCheck';
 import { useFileSearch } from '../hooks/useFileSearch';
@@ -438,7 +435,6 @@ export function CommitPanel() {
   const amendRepos = useMemo(() => new Set(amendRepoIds), [amendRepoIds]);
   const openWorkingChanges = useAppStore((state) => state.openWorkingChanges);
   const [viewSubmenu, setViewSubmenu] = useState<'expand' | 'view'>();
-  const [settings, setSettings] = useState(false);
   const openIdentityPanel = useAppStore((state) => state.openIdentityPanel);
   const [ignoreManager, setIgnoreManager] = useState<{ repoId: string; directory: string }>();
   const [expansion, setExpansion] = useState<ExpansionCommand>({ sequence: 0, expanded: true });
@@ -450,9 +446,6 @@ export function CommitPanel() {
   const [syncSelectionCommand, setSyncSelectionCommand] = useState<{ sequence: number; action: 'selectAll' | 'invert' }>({ sequence: 0, action: 'selectAll' });
   const [syncHasSelectable, setSyncHasSelectable] = useState(false);
   const [syncAllSelected, setSyncAllSelected] = useState(false);
-  const [cloneOpen, setCloneOpen] = useState(false);
-  const cloneAvailable = useAppStore(state => state.bootstrap?.capabilities?.availability?.cloneRepository?.available ?? state.bootstrap?.tools?.git ?? false);
-  const [providersOpen, setProvidersOpen] = useState(false);
   const [expandedByTab, setExpandedByTab] = useState<Record<'changes' | 'shelf' | 'stash' | 'sync', boolean | null>>({ changes: true, shelf: false, stash: false, sync: true });
   const [manualTextareaHeight, setManualTextareaHeight] = useState<number | null>(loadPersistedTextareaHeight);
   const manualTextareaHeightRef = useRef<number | null>(manualTextareaHeight);
@@ -1730,8 +1723,8 @@ export function CommitPanel() {
           ref={conflictButtonRef}
           type="button"
           className={totalConflicts > 0 ? 'conflict-warning-button pulsing' : 'conflict-warning-button'}
-          title={totalConflicts > 0 ? t('VersionDock: Resolve Conflicts') : continueLabel}
-          aria-label={totalConflicts > 0 ? t('VersionDock: Resolve Conflicts') : continueLabel}
+          title={totalConflicts > 0 ? t('Resolve Conflicts') : continueLabel}
+          aria-label={totalConflicts > 0 ? t('Resolve Conflicts') : continueLabel}
           aria-haspopup="menu"
           aria-expanded={conflictMenuOpen}
           onClick={(e) => {
@@ -1864,8 +1857,8 @@ export function CommitPanel() {
       <IconButton
         className="panel-selection-action"
         disabled={workspaceBusy || Boolean(toolbarAction)}
-        title={currentTabIsAllSelected ? t('VersionDock: Invert Selection') : t('VersionDock: Select All')}
-        aria-label={currentTabIsAllSelected ? t('VersionDock: Invert Selection') : t('VersionDock: Select All')}
+        title={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
+        aria-label={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
         onClick={() => {
           if (currentTabIsAllSelected) {
             handleInvertSelection();
@@ -1877,23 +1870,10 @@ export function CommitPanel() {
         {currentTabIsAllSelected ? <InvertSelectionIcon /> : <SelectAllIcon />}
       </IconButton>
     )}
-    <IconButton disabled={workspaceBusy || !cloneAvailable} title={t('Clone Git Repository')} aria-label={t('Clone Git Repository')} onClick={() => setCloneOpen(true)}><Codicon name="repo-clone" /></IconButton>
-    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Update Project')} aria-label={t('VersionDock: Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></IconButton>
-    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('VersionDock: Refresh Commit Panel')} aria-label={t('VersionDock: Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></IconButton>
-    <IconButton
-      title={t('VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)')}
-      aria-label={t('VersionDock: Manage Remote Accounts (GitHub / GitLab / Gitee)')}
-      onClick={() => {
-        setViewMenu(false);
-        setSettings(false);
-        setProvidersOpen(true);
-      }}
-    >
-      <Codicon name="account" />
-    </IconButton>
-    <IconButton className={settings ? 'selected' : ''} title={t('VersionDock: Settings')} aria-label={t('VersionDock: Settings')} onClick={() => { setViewMenu(false); setSettings(!settings); }}><Codicon name="settings-gear" /></IconButton>
+    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('Update Project')} aria-label={t('Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></IconButton>
+    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('Refresh Commit Panel')} aria-label={t('Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></IconButton>
     <div ref={viewMenuRef} className="view-options panel-view-options">
-      <IconButton title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSettings(false); setViewSubmenu(undefined); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></IconButton>
+      <IconButton title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewSubmenu(undefined); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></IconButton>
       {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
         <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('expand')} onFocus={() => setViewSubmenu('expand')}>
           <button type="button" role="menuitem" className={viewSubmenu === 'expand' ? 'active' : ''} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
@@ -1913,7 +1893,7 @@ export function CommitPanel() {
       </div>}
     </div>
   </div>;
-  const panelOverlays = <>{cloneOpen && <RepositoryCheckoutDialog kind="git" close={() => setCloneOpen(false)} />}{providersOpen && <ProviderPanel mode="manage" close={() => setProvidersOpen(false)} />}{settings && <SettingsPanel onClose={() => setSettings(false)} />}{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
+  const panelOverlays = <>{ignoreManager && <IgnoreRulesPanel repoId={ignoreManager.repoId} directory={ignoreManager.directory} close={() => setIgnoreManager(undefined)} />}</>;
 
   if (branchWorkingDiffOpen) return <aside className="commit-panel">{panelToolbar}{panelOverlays}<BranchWorkingDiffPanel /></aside>;
 

@@ -17,6 +17,7 @@ import { TabDragPreviewWindow } from '../windowing/tabDragPreviewWindow';
 import { promptDialog } from './dialogService';
 import { workspaceOpenPaths } from '../workspaces/openPaths';
 import { selectWorkspacePaths } from '../workspaces/selectWorkspace';
+import { TitleBarActions } from './TitleBarActions';
 
 interface ActiveTabDrag {
   tab: WorkspaceDescriptor;
@@ -81,6 +82,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
   const bridge = useBridge();
   const platform = bridge.platform();
   const loadedTabs = useAppStore((state) => state.tabs);
+  const workspaceId = useAppStore(state => state.snapshot?.workspace.id);
   const transferringTabIds = useAppStore((state) => state.transferringTabIds);
   const tabs = loadedTabs.length === 0 && startupTab ? [startupTab] : loadedTabs;
   const activeTabId = useAppStore((state) => state.activeTabId) ?? startupTab?.id;
@@ -957,6 +959,7 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
           data-tauri-drag-region
           onPointerDown={(event) => { if (event.button === 0) void bridge.window.startDragging(); }}
         />
+        {workspaceId && <TitleBarActions key={workspaceId} workspaceId={workspaceId} />}
         {platform === 'linux' && (
           <div className="window-controls linux" onPointerDown={(event) => event.stopPropagation()}>
             <button type="button" aria-label={t('Minimize')} title={t('Minimize')} onClick={() => void bridge.window.minimize()}>
