@@ -86,7 +86,11 @@ export function App() {
   const layoutDensity = useLayoutDensity();
   const uiFontSize = bootstrap?.state.settings?.uiFontSize ?? bootstrap?.state.uiFontSize ?? 'standard';
   const language = resolveLanguage(languagePreference);
-  useGlobalScrollbars(bootstrap?.state.settings?.scrollbarVisibility ?? DEFAULT_SETTINGS.scrollbarVisibility!, layoutDensity === 'comfortable', language);
+  useGlobalScrollbars(
+    bootstrap?.state.settings?.scrollbarVisibility ?? DEFAULT_SETTINGS.scrollbarVisibility!, layoutDensity === 'comfortable', language,
+    bootstrap?.state.settings?.smoothScrolling ?? DEFAULT_SETTINGS.smoothScrolling!,
+    bootstrap?.state.settings?.smoothMouseWheelScrolling ?? DEFAULT_SETTINGS.smoothMouseWheelScrolling!,
+  );
   const t = useMemo(() => createTranslator(language, pluginMessages), [language, pluginMessages]);
   const commitWidth = bootstrap?.state.layout?.panelSizes.commit ?? bootstrap?.state.panelSizes?.commit ?? 360;
   const missingTools = snapshot && !snapshot.tools.git && !snapshot.tools.svn;

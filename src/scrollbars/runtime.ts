@@ -2,14 +2,14 @@ import type { ScrollbarVisibility } from '../bindings/generated';
 import { scrollbarOwners } from './ownership';
 import { scrollbarStackingLevel } from './stacking';
 
-// Ported from VersionDock 88094737. Scrolling remains native; this owns only the bars.
+// Ported from VersionDock 88094737. This owns the bars; wheel enhancement is optional.
 export interface ScrollbarOptions {
   visibility: ScrollbarVisibility;
   modernUi: boolean;
   language: string;
 }
 
-export function initializeGlobalScrollbars(options: ScrollbarOptions) {
+export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWheel?: (element: HTMLElement, event: WheelEvent) => boolean) {
   interface Axis {
     track: HTMLDivElement;
     thumb: HTMLDivElement;
@@ -323,6 +323,7 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions) {
       });
       bar.track.addEventListener('wheel', event => {
         if (event.ctrlKey) return;
+        if (handleWheel?.(element, event)) return;
         event.preventDefault();
         const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? clientSize(element, vertical) : 1;
         element.scrollBy({ left: (event.shiftKey ? event.deltaY : event.deltaX) * unit,

@@ -1,3 +1,4 @@
+import { navigationScrollBehavior } from '../scrolling/navigation';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { changeStatus } from '../theme/changeStatus';
 import { SplitButtonMore } from './SplitButtonMore';
@@ -153,7 +154,7 @@ function TreeRow({ node, depth, expanded, toggleExpanded, showDirectory, repo, s
   const highlight = useChangeRowHighlight(repo.meta.id, node.path);
   const rowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (highlight.includes('speed-search-active')) rowRef.current?.scrollIntoView?.({ block: 'nearest' });
+    if (highlight.includes('speed-search-active')) rowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: navigationScrollBehavior() });
   }, [highlight]);
   if (!node.file) {
     const selectable = node.files.filter((file) => !file.isTruncated);
@@ -213,7 +214,7 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
   useEffect(() => {
     if (!search.activeKey || !shouldVirtualize) return;
     const index = flatItems.findIndex(item => item.node.file && changeSearchKey(repo.meta.id, item.node.file.path) === search.activeKey);
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' });
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto', behavior: navigationScrollBehavior() });
   }, [search.activeKey, shouldVirtualize, flatItems, repo.meta.id, virtualizer]);
   const selectableFiles = repo.files.filter((file) => !file.isTruncated);
   const selectedCount = selectableFiles.filter((file) => selected.has(`${repo.meta.id}\0${file.path}`)).length;
@@ -580,7 +581,7 @@ export function CommitPanel() {
     const { repoId, path, file, staged } = changeMatches.active;
     useAppStore.setState({ selectedFile: { repoId, path, staged: staged ?? (file.staged && !file.unstaged) } });
     const frame = requestAnimationFrame(() => {
-      changesScrollRef.current?.querySelector(`[data-change-search-key="${CSS.escape(changeMatches.active!.key)}"]`)?.scrollIntoView?.({ block: 'nearest' });
+      changesScrollRef.current?.querySelector(`[data-change-search-key="${CSS.escape(changeMatches.active!.key)}"]`)?.scrollIntoView?.({ block: 'nearest', behavior: navigationScrollBehavior() });
     });
     return () => cancelAnimationFrame(frame);
   }, [changeMatches.active]);

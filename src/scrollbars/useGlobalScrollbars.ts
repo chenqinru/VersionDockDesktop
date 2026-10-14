@@ -1,16 +1,19 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { ScrollbarVisibility } from '../bindings/generated';
 import { initializeGlobalScrollbars } from './runtime';
+import { initializeSmoothScrolling } from '../scrolling/runtime';
 import './styles.css';
 
-export function useGlobalScrollbars(visibility: ScrollbarVisibility, modernUi: boolean, language: string) {
-  const current = useRef<ReturnType<typeof initializeGlobalScrollbars>>();
-  useEffect(() => {
-    const runtime = initializeGlobalScrollbars({ visibility: 'system', modernUi: false, language: 'en' });
-    current.current = runtime;
-    return () => { runtime.dispose(); current.current = undefined; };
+export function useGlobalScrollbars(visibility: ScrollbarVisibility, modernUi: boolean, language: string, smoothScrolling: boolean, smoothMouseWheelScrolling: boolean) {
+  const current = useRef<{ bars: ReturnType<typeof initializeGlobalScrollbars>; scrolling: ReturnType<typeof initializeSmoothScrolling> }>();
+  useLayoutEffect(() => {
+    const scrolling = initializeSmoothScrolling({ navigation: true, wheel: true });
+    const bars = initializeGlobalScrollbars({ visibility: 'system', modernUi: false, language: 'en' }, scrolling.handleWheel);
+    current.current = { bars, scrolling };
+    return () => { bars.dispose(); scrolling.dispose(); current.current = undefined; };
   }, []);
-  useEffect(() => {
-    current.current?.configure({ visibility, modernUi, language });
-  }, [visibility, modernUi, language]);
+  useLayoutEffect(() => {
+    current.current?.bars.configure({ visibility, modernUi, language });
+    current.current?.scrolling.configure({ navigation: smoothScrolling, wheel: smoothMouseWheelScrolling });
+  }, [visibility, modernUi, language, smoothScrolling, smoothMouseWheelScrolling]);
 }

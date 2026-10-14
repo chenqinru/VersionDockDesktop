@@ -1,3 +1,4 @@
+import { scrollToPosition } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { resolveShikiTheme } from '../theme';
 import { IconButton } from './IconButton';
@@ -164,24 +165,35 @@ function useSyncedScroll(
   enabled = true,
 ) {
   const syncingRef = useRef(false);
+  const synchronizedPositions = useRef(new WeakMap<HTMLElement, { top: number; left: number }>());
   const handleScroll = (source: 0 | 1 | 2, event: React.UIEvent<HTMLDivElement>) => {
     if (!enabled || syncingRef.current) return;
+    const expected = synchronizedPositions.current.get(event.currentTarget);
+    if (expected && Math.abs(event.currentTarget.scrollTop - expected.top) <= 1
+      && Math.abs(event.currentTarget.scrollLeft - expected.left) <= 1) return;
+    synchronizedPositions.current.delete(event.currentTarget);
     syncingRef.current = true;
     const { scrollTop, scrollLeft } = event.currentTarget;
     const left = leftRef.current;
     const center = centerRef.current;
     const right = rightRef.current;
+    const sync = (pane: HTMLDivElement) => {
+      // Peer scroll events arrive asynchronously, possibly after the source's next animation frame.
+      // Remember their actual (potentially clamped/rounded) offsets so they cannot drive it back.
+      const moved = pane.scrollTop !== scrollTop || pane.scrollLeft !== scrollLeft;
+      if (!moved) return;
+      if (pane.scrollTop !== scrollTop) pane.scrollTop = scrollTop;
+      if (pane.scrollLeft !== scrollLeft) pane.scrollLeft = scrollLeft;
+      synchronizedPositions.current.set(pane, { top: pane.scrollTop, left: pane.scrollLeft });
+    };
     if (source !== 0 && left) {
-      left.scrollTop = scrollTop;
-      left.scrollLeft = scrollLeft;
+      sync(left);
     }
     if (source !== 1 && center) {
-      center.scrollTop = scrollTop;
-      center.scrollLeft = scrollLeft;
+      sync(center);
     }
     if (source !== 2 && right) {
-      right.scrollTop = scrollTop;
-      right.scrollLeft = scrollLeft;
+      sync(right);
     }
     syncingRef.current = false;
   };
@@ -504,7 +516,7 @@ export function ThreeWayLayout({ file, language, resolutions, normalEdits, nonCo
     const container = centerRef.current;
     const active = container?.querySelector(`[data-conflict-index="${currentConflictIndex}"]`) as HTMLElement | null;
     if (!container || !active) return;
-    container.scrollTop = Math.max(0, active.offsetTop - 180);
+    scrollToPosition(container, { top: Math.max(0, active.offsetTop - 180) });
   }, [currentConflictIndex, file]);
 
   const applyResolution = (index: number, resolution: Resolution) => {

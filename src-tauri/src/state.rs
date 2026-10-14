@@ -1322,6 +1322,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn smooth_scrolling_defaults_for_existing_settings_and_persists_independently() {
+        let root = tempdir().unwrap();
+        let state = AppState::load(root.path().to_path_buf());
+        let mut old_settings = serde_json::to_value(DesktopSettings::default()).unwrap();
+        old_settings
+            .as_object_mut()
+            .unwrap()
+            .remove("smoothScrolling");
+        old_settings
+            .as_object_mut()
+            .unwrap()
+            .remove("smoothMouseWheelScrolling");
+        let restored: DesktopSettings = serde_json::from_value(old_settings).unwrap();
+        assert!(restored.smooth_scrolling);
+        assert!(restored.smooth_mouse_wheel_scrolling);
+
+        let mut incoming = state.app.read().await.settings.clone();
+        incoming.smooth_scrolling = false;
+        incoming.smooth_mouse_wheel_scrolling = false;
+        let result = state
+            .update_settings(incoming, Some(&["smoothScrolling".into()]))
+            .await
+            .unwrap();
+        assert!(!result.effects.rescan_workspace);
+        assert!(!result.effects.reload_history);
+        assert!(!result.effects.restart_auto_refresh);
+        let restarted = AppState::load(root.path().to_path_buf());
+        assert!(!restarted.app.read().await.settings.smooth_scrolling);
+        assert!(
+            restarted
+                .app
+                .read()
+                .await
+                .settings
+                .smooth_mouse_wheel_scrolling
+        );
+
+        let mut incoming = restarted.app.read().await.settings.clone();
+        incoming.smooth_mouse_wheel_scrolling = false;
+        restarted
+            .update_settings(incoming, Some(&["smoothMouseWheelScrolling".into()]))
+            .await
+            .unwrap();
+        let reloaded = AppState::load(root.path().to_path_buf());
+        assert!(!reloaded.app.read().await.settings.smooth_scrolling);
+        assert!(
+            !reloaded
+                .app
+                .read()
+                .await
+                .settings
+                .smooth_mouse_wheel_scrolling
+        );
+    }
+
+    #[tokio::test]
     async fn scrollbar_mode_persists_without_refreshing_workspace() {
         use crate::models::ScrollbarVisibility;
         let root = tempdir().unwrap();

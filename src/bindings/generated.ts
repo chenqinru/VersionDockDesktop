@@ -921,6 +921,8 @@ export type DesktopSettings = {
 	uiFontSize: UiFontSizePreference,
 	layoutDensity?: LayoutDensity,
 	scrollbarVisibility?: ScrollbarVisibility,
+	smoothScrolling?: boolean,
+	smoothMouseWheelScrolling?: boolean,
 	changesDisplayMode: ChangesDisplayMode,
 	defaultCommitAction: DefaultCommitAction,
 	defaultSaveAction: DefaultSaveAction,

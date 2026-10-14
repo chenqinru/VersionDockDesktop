@@ -1,3 +1,4 @@
+import { navigationScrollBehavior } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ThemedToken } from 'shiki';
@@ -71,7 +72,7 @@ export function SourceCodeView({ content, path, language = 'text' }: { content: 
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, [startSearch, closeSearch, navigate, open]);
   useEffect(() => {
-    container.current?.querySelector<HTMLElement>('.source-search-match.current')?.scrollIntoView?.({ block: 'center', inline: 'center' });
+    container.current?.querySelector<HTMLElement>('.source-search-match.current')?.scrollIntoView?.({ block: 'center', inline: 'center', behavior: navigationScrollBehavior() });
   }, [matches, current, highlighted]);
   useEffect(() => {
     let active = true;

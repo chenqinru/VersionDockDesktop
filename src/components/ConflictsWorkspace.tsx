@@ -1,3 +1,4 @@
+import { navigationScrollBehavior } from '../scrolling/navigation';
 import { changeStatusColor } from '../theme/changeStatus';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -218,7 +219,7 @@ export function ConflictsWorkspace() {
     setLastSelectedKey(key);
     requestAnimationFrame(() => {
       const row = treeScrollerRef.current?.querySelector(`[data-key="${CSS.escape(key)}"]`);
-      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      row?.scrollIntoView({ block: 'nearest', behavior: navigationScrollBehavior() });
     });
   }, []);
 
@@ -273,7 +274,7 @@ export function ConflictsWorkspace() {
 
     requestAnimationFrame(() => {
       const row = treeScrollerRef.current?.querySelector(`[data-key="${CSS.escape(key)}"]`);
-      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      row?.scrollIntoView({ block: 'nearest', behavior: navigationScrollBehavior() });
     });
   }, [speedSearch.isOpen, speedNeedle, matchedFiles]);
 

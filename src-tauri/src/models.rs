@@ -1827,6 +1827,12 @@ pub struct DesktopSettings {
     #[serde(default)]
     #[cfg_attr(test, specta(optional))]
     pub scrollbar_visibility: ScrollbarVisibility,
+    #[serde(default = "default_true")]
+    #[cfg_attr(test, specta(optional))]
+    pub smooth_scrolling: bool,
+    #[serde(default = "default_true")]
+    #[cfg_attr(test, specta(optional))]
+    pub smooth_mouse_wheel_scrolling: bool,
     pub changes_display_mode: ChangesDisplayMode,
     pub default_commit_action: DefaultCommitAction,
     pub default_save_action: DefaultSaveAction,
@@ -1965,6 +1971,8 @@ impl Default for DesktopSettings {
             ui_font_size: UiFontSizePreference::Standard,
             layout_density: LayoutDensity::Comfortable,
             scrollbar_visibility: ScrollbarVisibility::Auto,
+            smooth_scrolling: true,
+            smooth_mouse_wheel_scrolling: true,
             file_icon_theme: FileIconThemePreference::Material,
             changes_display_mode: ChangesDisplayMode::Simplified,
             default_commit_action: DefaultCommitAction::Commit,

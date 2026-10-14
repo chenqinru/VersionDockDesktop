@@ -48,6 +48,24 @@ afterEach(() => {
 });
 
 describe('SettingsPanel', () => {
+  it('persists both smooth scrolling preferences independently and supports search and reset', async () => {
+    const { commands, bridge } = renderPanel();
+    expect(screen.getByRole('checkbox', { name: 'Smooth navigation scrolling' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Smooth mouse wheel scrolling' })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Smooth navigation scrolling' }));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.smoothScrolling).toBe(false));
+    expect(screen.getByRole('checkbox', { name: 'Smooth mouse wheel scrolling' })).toBeChecked();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'smooth' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Smooth mouse wheel scrolling' }));
+    await waitFor(() => expect(commands.some(command => command.type === 'updateSettings' && command.payload.changed_fields?.includes('smoothMouseWheelScrolling') && command.payload.settings.smoothMouseWheelScrolling === false)).toBe(true));
+    await expect(bridge.request<BootstrapData>({ type: 'bootstrap' })).resolves.toMatchObject({ state: { settings: { smoothScrolling: false, smoothMouseWheelScrolling: false } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Restore default: Smooth navigation scrolling' }));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.smoothScrolling).toBe(true));
+    expect(screen.getByRole('checkbox', { name: 'Smooth mouse wheel scrolling' })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore default: Smooth mouse wheel scrolling' }));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.smoothMouseWheelScrolling).toBe(true));
+  });
+
   it('keeps sessions in the tray only when enabled, forcing its recovery icon visible', async () => {
     const { commands } = renderPanel();
     const closeToTray = screen.getByRole('checkbox', { name: 'Keep in tray when closing windows' });

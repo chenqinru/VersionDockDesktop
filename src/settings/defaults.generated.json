@@ -77,6 +77,8 @@
     "showPushDialogForProtectedBranches": true,
     "showTrayIcon": true,
     "skippedUpdateVersion": null,
+    "smoothMouseWheelScrolling": true,
+    "smoothScrolling": true,
     "suppressDivergedWarning": false,
     "syncProtectedBranchesFromGithub": true,
     "theme": "system",

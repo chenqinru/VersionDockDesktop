@@ -1,8 +1,10 @@
+import { navigationScrollBehavior } from '../scrolling/navigation';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { DialogSurface } from './DialogSurface';
 import { LayoutDensitySetting } from './LayoutDensitySetting';
 import { TrayIconSetting, CloseToTraySetting } from './TrayIconSetting';
 import { ScrollbarVisibilitySetting } from './ScrollbarVisibilitySetting';
+import { SmoothScrollingSettings } from './SmoothScrollingSettings';
 import { SettingSelect } from './SettingSelect';
 import { SettingsCard, SettingNumber, SettingToggle } from './SettingsControls';
 import { AiSettings } from './AiSettings';
@@ -81,8 +83,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   useEffect(() => {
     if (!inspectedSetting) return;
     const row = content.current?.querySelector<HTMLElement>(`[data-setting="${inspectedSetting}"]`);
-    row?.scrollIntoView?.({ block:'nearest' });
-    row?.querySelector<HTMLElement>('.settings-stepper-input, .settings-custom-select-trigger, .settings-text-input, .settings-tag-input, .editor-dropdown-trigger, input[type="checkbox"], [role="radio"][aria-checked="true"]')?.focus();
+    row?.scrollIntoView?.({ block: 'nearest', behavior: navigationScrollBehavior() });
+    row?.querySelector<HTMLElement>('.settings-stepper-input, .settings-custom-select-trigger, .settings-text-input, .settings-tag-input, .editor-dropdown-trigger, input[type="checkbox"], [role="radio"][aria-checked="true"]')?.focus({ preventScroll: true });
   }, [inspectedSetting]);
 
   useEffect(() => {
@@ -256,6 +258,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       />
                       <LayoutDensitySetting />
                       <ScrollbarVisibilitySetting />
+                      <SmoothScrollingSettings />
                       <TrayIconSetting />
                       <CloseToTraySetting />
                     </SettingsCard>
@@ -1346,6 +1349,9 @@ function SearchResults({
   }
   if ([t('Scrollbar visibility'), t('Follow system'), t('Auto-hide'), t('Always visible'), t('Control scrollbars across all panels and pages. Changes take effect immediately.'), 'scrollbar'].some(match)) {
     appearanceItems.push(<ScrollbarVisibilitySetting key="scrollbars" />);
+  }
+  if ([t('Smooth navigation scrolling'), t('Smooth mouse wheel scrolling'), t('Animate navigation to commits, search results and changes. Respects the system reduced motion preference.'), t('Smooth stepped mouse wheel input. Continuous touchpad input keeps native scrolling. Respects the system reduced motion preference.'), 'smooth', 'scroll', 'wheel', 'touchpad', '平滑', '滚动', '触控板', '减少动态效果'].some(match)) {
+    appearanceItems.push(<SmoothScrollingSettings key="smooth-scrolling" />);
   }
 
   if ([t('Show tray icon'), t('Show shortcuts in the system tray while the app is running.'), 'tray', 'menu bar', '托盘', '菜单栏'].some(match)) {

@@ -1,3 +1,4 @@
+import { navigationScrollBehavior } from '../scrolling/navigation';
 import { promptBranchName } from './promptBranchName';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { useLayoutDensity, historyDensityMetrics } from '../layoutDensity';
@@ -248,7 +249,7 @@ function CommitList({
     if (!revealTarget || revealTarget.workspaceId !== workspaceId) return;
     const index = commits.findIndex((commit) => commit.repoId === revealTarget.repoId && commit.hash === revealTarget.hash);
     if (index >= 0) {
-      virtualizer.scrollToIndex(index, { align: 'center' });
+      virtualizer.scrollToIndex(index, { align: 'center', behavior: navigationScrollBehavior() });
       useAppStore.setState({ historyRevealTarget: undefined });
       void selectCommit(commits[index]);
     } else if (hasMore && !loading) {

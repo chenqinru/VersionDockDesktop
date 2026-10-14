@@ -1,3 +1,4 @@
+import { navigationScrollBehavior } from '../scrolling/navigation';
 import { IconButton } from './IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RepositoryStatus, SubmoduleEntry } from '../bindings/generated';
@@ -21,7 +22,7 @@ function SubmoduleRow({ repo, entry, busy, highlighted }: { repo: RepositoryStat
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (highlighted) rowRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [highlighted]);
+  useEffect(() => { if (highlighted) rowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: navigationScrollBehavior() }); }, [highlighted]);
   const [context, setContext] = useState<{ x: number; y: number }>();
 
   const remove = async () => {

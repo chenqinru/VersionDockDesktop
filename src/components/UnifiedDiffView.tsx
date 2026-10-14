@@ -1,3 +1,4 @@
+import { navigationScrollBehavior } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -804,7 +805,6 @@ export function UnifiedDiffView({
   useEffect(() => {
     if (!searchQuery || !searchMatches.length) return;
     const match = searchMatches[selectedSearchIndex];
-    virtualizer.scrollToIndex(match.rowIndex, { align: 'center' });
     const pane = scrollRef.current?.querySelector<HTMLElement>(`.unified-diff-pane.${match.side}`);
     const horizontal = pane ?? scrollRef.current;
     if (horizontal) {
@@ -813,6 +813,8 @@ export function UnifiedDiffView({
       horizontalOffset.current = horizontal.scrollLeft;
       if (pane) scrollRef.current?.querySelectorAll<HTMLElement>('.unified-diff-pane').forEach((peer) => { peer.scrollLeft = left; });
     }
+    // A horizontal assignment on the same scroller would cancel a running native animation.
+    virtualizer.scrollToIndex(match.rowIndex, { align: 'center', behavior: navigationScrollBehavior() });
   }, [searchMatches, selectedSearchIndex, searchQuery, virtualizer]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -828,7 +830,7 @@ export function UnifiedDiffView({
   useEffect(() => {
     if (!reveal) return;
     const index = rows.findIndex((row) => row.kind === 'split' ? row[reveal.side === 'old' ? 'oldCell' : 'newCell'].lineNumber === reveal.line : row.kind === 'inline' && (reveal.side === 'old' ? row.oldNumber : row.newNumber) === reveal.line);
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center', behavior: navigationScrollBehavior() });
   }, [reveal, rows, virtualizer]);
   const goToChange = useCallback((index: number) => {
     if (!changeRanges.length) return;
@@ -836,7 +838,7 @@ export function UnifiedDiffView({
     setActiveChangeIndex(target);
     const range = changeRanges[target];
     if (range) {
-      virtualizer.scrollToIndex(range.startIndex, { align: 'center', behavior: 'smooth' });
+      virtualizer.scrollToIndex(range.startIndex, { align: 'center', behavior: navigationScrollBehavior() });
     }
   }, [changeRanges, virtualizer]);
 
