@@ -367,7 +367,6 @@ const styles = {
     justifyContent: 'center',
     padding: '2px 4px',
     border: 'none',
-    borderRadius: '3px',
     background: active ? 'var(--vscode-toolbar-activeBackground, var(--versiondock-selected))' : 'transparent',
     color: disabled
       ? 'var(--vscode-disabledForeground, var(--versiondock-faint))'

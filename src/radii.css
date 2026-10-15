@@ -1,0 +1,22 @@
+/* Shared shape roles. Density changes controls and workbench surfaces;
+   floating menus and dialogs keep stable corners in both layouts. */
+:root {
+  --versiondock-radius-control: 4px;
+  --versiondock-radius-icon: 3px;
+  --versiondock-radius-panel: 0px;
+  --versiondock-radius-row: 0px;
+  --versiondock-radius-popup: 6px;
+  --versiondock-radius-menu-item: 4px;
+  --versiondock-radius-dialog: 12px;
+  --versiondock-radius-badge: 3px;
+  --versiondock-radius-detail: 2px;
+  --versiondock-radius-control-inner: max(0px, calc(var(--versiondock-radius-control) - 1px));
+  --versiondock-radius-panel-inner: max(0px, calc(var(--versiondock-radius-panel) - 1px));
+}
+
+:root[data-density="comfortable"] {
+  --versiondock-radius-control: 6px;
+  --versiondock-radius-icon: 4px;
+  --versiondock-radius-panel: 8px;
+  --versiondock-radius-row: 4px;
+}

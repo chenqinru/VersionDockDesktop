@@ -69,7 +69,7 @@ export function SubmoduleDiffModal({
               gap: 8,
               padding: '12px',
               backgroundColor: 'var(--vscode-sideBar-background, rgba(0, 0, 0, 0.15))',
-              borderRadius: 6,
+              borderRadius: 'var(--versiondock-radius-panel)',
               fontSize: 12,
             }}
           >
@@ -111,7 +111,7 @@ export function SubmoduleDiffModal({
                 marginTop: 4,
                 padding: 10,
                 backgroundColor: 'var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2))',
-                borderRadius: 4,
+                borderRadius: 'var(--versiondock-radius-control)',
                 fontFamily: 'var(--vscode-editor-font-family, monospace)',
                 fontSize: 11,
                 whiteSpace: 'pre-wrap',

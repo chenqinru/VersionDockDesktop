@@ -617,7 +617,6 @@ const css = {
     border: 'none',
     cursor: 'pointer',
     padding: '2px 4px',
-    borderRadius: '3px',
     display: 'flex',
     alignItems: 'center',
     color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))',
@@ -661,7 +660,7 @@ const row = {
   mainBadge: {
     fontSize: '9px',
     padding: '1px 5px',
-    borderRadius: '3px',
+    borderRadius: 'var(--versiondock-radius-badge)',
     flexShrink: 0,
     background: 'var(--versiondock-badge-background, #0e639c)',
     color: 'var(--versiondock-badge-foreground, #ffffff)',
@@ -670,7 +669,7 @@ const row = {
     lineHeight: '13px',
   } as React.CSSProperties,
   pathBadge: {
-    fontSize: '9px', padding: '1px 5px', borderRadius: '3px', minWidth: 0, maxWidth: '45%',
+    fontSize: '9px', padding: '1px 5px', borderRadius: 'var(--versiondock-radius-badge)', minWidth: 0, maxWidth: '45%',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
     background: 'var(--versiondock-badge-background, #0e639c)',
     color: 'var(--versiondock-badge-foreground, #ffffff)',
@@ -679,7 +678,7 @@ const row = {
   workspaceBadge: {
     fontSize: '9px',
     padding: '1px 5px',
-    borderRadius: '3px',
+    borderRadius: 'var(--versiondock-radius-badge)',
     flexShrink: 0,
     background: 'var(--vscode-statusBarItem-remoteBackground, #16825d)',
     color: 'var(--vscode-statusBarItem-remoteForeground, #ffffff)',
@@ -691,7 +690,7 @@ const row = {
   prunableBadge: {
     fontSize: '9px',
     padding: '0 4px',
-    borderRadius: '3px',
+    borderRadius: 'var(--versiondock-radius-badge)',
     flexShrink: 0,
     background: 'var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.2))',
     color: 'var(--vscode-inputValidation-warningForeground, var(--versiondock-warning))',
@@ -702,7 +701,6 @@ const row = {
     border: 'none',
     cursor: 'pointer',
     padding: '2px 4px',
-    borderRadius: '3px',
     fontSize: '13px',
     display: 'flex',
     alignItems: 'center',

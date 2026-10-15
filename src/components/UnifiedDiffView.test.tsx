@@ -135,7 +135,7 @@ describe('parseUnifiedDiff', () => {
     expect(styles).toMatch(/\.diff-fold-row\s*\{[^}]*position:\s*relative/s);
     expect(styles).toMatch(/\.diff-fold-line\s*\{[^}]*position:\s*absolute/s);
     expect(styles).toMatch(/\.diff-fold-badge\s*\{[^}]*border-radius:\s*12px/s);
-    expect(styles).toMatch(/\.diff-fold-action-btn\s*\{[^}]*border-radius:\s*3px/s);
+    expect(styles).toMatch(/\.diff-fold-action-btn\s*\{[^}]*border-radius:\s*var\(--versiondock-radius-icon\)/s);
   });
 
   it('extracts line range from clicked line target or selection', () => {

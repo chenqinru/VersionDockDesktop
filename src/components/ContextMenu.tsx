@@ -175,7 +175,7 @@ const styles = {
   menu: {
     background: 'var(--vscode-menu-background, var(--versiondock-surface-alt, var(--versiondock-surface)))',
     border: '1px solid var(--vscode-menu-border, var(--versiondock-border))',
-    borderRadius: '4px',
+    borderRadius: 'var(--versiondock-radius-popup)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
     minWidth: '180px',
     padding: '4px 0',
@@ -202,6 +202,7 @@ const styles = {
     opacity: disabled ? 0.48 : 1,
     width: '100%',
     border: 0,
+    borderRadius: 'var(--versiondock-radius-menu-item)',
     textAlign: 'left',
   }),
   icon: {

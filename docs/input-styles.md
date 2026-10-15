@@ -1,5 +1,7 @@
 # 输入控件约定
 
+圆角按[公共圆角规则](radius-styles.md)引用语义变量，随布局密度切换；页面不另写圆角数值。
+
 普通单行输入使用 `Input`，普通多行输入使用 `Textarea`，搜索入口使用 `SearchInput`，标签、说明和错误使用 `FormField`。公共样式由 `src/inputs.css` 管理，在 `src/main.tsx` 加载；页面仅管理布局和必要的内容展示（例如忽略规则使用等宽字体）。
 
 ```tsx

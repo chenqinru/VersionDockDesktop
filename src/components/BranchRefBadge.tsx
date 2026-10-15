@@ -46,7 +46,7 @@ export function BranchRefBadge({
       color: selected ? 'var(--vscode-editor-background, var(--versiondock-bg))' : resolvedColor,
       background: selected ? resolvedColor : `${resolvedColor}33`,
       border: `1px solid ${selected ? resolvedColor : `${resolvedColor}88`}`,
-      borderRadius: 3,
+      borderRadius: 'var(--versiondock-radius-badge)',
       boxSizing: 'border-box',
       fontSize: 10,
       fontStyle: 'normal',

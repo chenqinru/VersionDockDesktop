@@ -2,7 +2,7 @@
 :root {
   --dialog-overlay: rgba(0, 0, 0, .22);
   --dialog-shadow: 0 18px 54px rgba(0, 0, 0, .24), 0 4px 12px rgba(0, 0, 0, .12);
-  --dialog-radius: 12px;
+  --dialog-radius: var(--versiondock-radius-dialog);
   --dialog-input-border: var(--versiondock-control-border);
   --dialog-choice-border: color-mix(in srgb, var(--versiondock-text) 24%, var(--versiondock-border));
   --dialog-width-small: 420px;
@@ -33,14 +33,14 @@
 .vd-dialog[data-dialog-size="large"] { --dialog-width: var(--dialog-width-large); }
 .vd-dialog > header { flex-shrink: 0; min-height: 28px; display: flex; align-items: center; gap: 10px; padding: 0; margin-bottom: 14px; background: transparent; border: 0; }
 .vd-dialog > header > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: calc(15px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1.4; }
-.vd-dialog > header > .codicon { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; font-size: 17px; color: var(--versiondock-muted); background: var(--versiondock-hover); border-radius: 9px; }
+.vd-dialog > header > .codicon { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; font-size: 17px; color: var(--versiondock-muted); background: var(--versiondock-hover); border-radius: var(--versiondock-radius-control); }
 .vd-dialog > header > .codicon-warning { color: var(--versiondock-warning); background: color-mix(in srgb, var(--versiondock-warning) 12%, transparent); }
 .vd-dialog > p, .vd-dialog-body > p { color: var(--versiondock-muted); font-size: inherit; line-height: 1.65; margin: 0 0 14px; overflow-wrap: anywhere; }
 .vd-dialog label { gap: 8px; font-size: inherit; }
 .vd-dialog label > span { color: var(--versiondock-text); font-weight: 500; }
 .vd-dialog :is(input, textarea):where(:not(.vd-input):not([type="checkbox"]):not([type="radio"])) {
   min-height: 36px; padding: 8px 10px; background: var(--versiondock-input); color: var(--versiondock-text);
-  border: 1px solid var(--dialog-input-border); border-radius: 7px; outline: 0; font-size: inherit; line-height: 1.45;
+  border: 1px solid var(--dialog-input-border); border-radius: var(--versiondock-radius-control); outline: 0; font-size: inherit; line-height: 1.45;
   transition: border-color .12s ease, box-shadow .12s ease;
 }
 .vd-dialog :is(input, textarea):where(:not(.vd-input):not([type="checkbox"]):not([type="radio"])):focus-visible {
@@ -64,7 +64,7 @@
   min-height: 46px; width: 100%; box-sizing: border-box; padding: 9px 12px;
   --selectable-border: var(--dialog-choice-border);
   --selectable-background: var(--versiondock-surface-alt);
-  border-radius: 7px;
+  border-radius: var(--versiondock-radius-control);
   font-size: inherit; line-height: 1.5;
 }
 .vd-dialog .dialog-choices > button > .codicon { flex-shrink: 0; }
@@ -74,15 +74,15 @@
 .vd-dialog.compact-choice-dialog .dialog-choices { grid-template-columns: minmax(0, 1fr); }
 .vd-dialog.compact-choice-dialog .dialog-choices > button > span:not(.codicon) { flex: 1; grid-template-columns: minmax(0, 1fr); }
 .vd-dialog.compact-choice-dialog .dialog-choices :is(strong, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vd-dialog .ai-input-surface { --ai-input-radius: 7px; --ai-marquee-radius: 6.5px; }
+.vd-dialog .ai-input-surface { --ai-input-radius: var(--versiondock-radius-control); --ai-marquee-radius: calc(var(--ai-input-radius) - .5px); }
 .vd-dialog .dialog-segmented-tabs {
   display: inline-grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-self: start; align-self: flex-start;
-  max-width: 100%; gap: 3px; padding: 3px; border: 1px solid var(--dialog-input-border); border-radius: 8px;
+  max-width: 100%; gap: 3px; padding: 3px; border: 1px solid var(--dialog-input-border); border-radius: var(--versiondock-radius-control);
   background: var(--versiondock-input);
 }
 .vd-dialog .dialog-segmented-tabs > button {
   min-width: 0; min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  padding: 5px 12px; border-radius: 5px;
+  padding: 5px 12px; border-radius: var(--versiondock-radius-control-inner);
   --selectable-foreground: var(--versiondock-muted); font-size: inherit; line-height: 1.3; white-space: nowrap;
 }
 .vd-dialog .dialog-segmented-tabs > button[aria-selected="true"] { font-weight: 600; }
@@ -106,16 +106,16 @@
 .commit-message-body { min-height: 0; overflow: auto; padding: 20px 24px; display: grid; gap: 16px; }
 .commit-message-body .commit-message-description { margin: 0; color: var(--versiondock-muted); font-size: inherit; }
 .commit-message-body .commit-message-label { display: block; margin-bottom: 6px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; letter-spacing: .04em; text-transform: uppercase; }
-.dialog-original-message, .commit-message-body .dialog-commit-list { max-height: 180px; overflow: auto; border: 1px solid var(--versiondock-border); border-radius: 7px; background: var(--versiondock-input); }
+.dialog-original-message, .commit-message-body .dialog-commit-list { max-height: 180px; overflow: auto; border: 1px solid var(--versiondock-border); border-radius: var(--versiondock-radius-control); background: var(--versiondock-input); }
 .dialog-original-message { padding: 9px 11px; font-family: var(--versiondock-code); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
 .commit-message-body .dialog-commit-list > div { display: flex; align-items: flex-start; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--versiondock-border-soft); }
 .commit-message-body .dialog-commit-list > div:last-child { border-bottom: 0; }
 .commit-message-body .dialog-commit-list code { flex-shrink: 0; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.6; }
 .commit-message-body .dialog-commit-list span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .commit-message-body .dialog-commit-list small { display: block; color: var(--versiondock-muted); }
-.vd-dialog.commit-message-dialog .ai-input-surface { --ai-input-radius: 3px; --ai-marquee-radius: 2.5px; --ai-generation-outline-color: var(--dialog-input-border); }
-.vd-dialog.commit-message-dialog .dialog-editor { display: block; padding: 10px 38px 10px 12px; font-family: var(--versiondock-code); font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); line-height: 1.6; border-radius: 3px; }
-.vd-dialog .dialog-editor-ai { position: absolute; z-index: 3; top: 7px; right: 7px; padding: 3px; color: var(--versiondock-text); background: transparent; border: 0; border-radius: 4px; }
+.vd-dialog.commit-message-dialog .ai-input-surface { --ai-input-radius: var(--versiondock-radius-control); --ai-marquee-radius: calc(var(--ai-input-radius) - .5px); --ai-generation-outline-color: var(--dialog-input-border); }
+.vd-dialog.commit-message-dialog .dialog-editor { display: block; padding: 10px 38px 10px 12px; font-family: var(--versiondock-code); font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); line-height: 1.6; border-radius: var(--versiondock-radius-control); }
+.vd-dialog .dialog-editor-ai { position: absolute; z-index: 3; top: 7px; right: 7px; padding: 3px; color: var(--versiondock-text); background: transparent; border: 0; border-radius: var(--versiondock-radius-icon); }
 .vd-dialog .dialog-editor-ai:not(:disabled):hover { background: var(--versiondock-hover); }
 .vd-dialog.commit-message-dialog > footer { flex-shrink: 0; margin: 0; padding: 12px 24px 20px; border-top: 1px solid var(--versiondock-border-soft); }
 .vd-dialog.commit-message-dialog > footer > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
@@ -142,7 +142,7 @@
 .vd-dialog.file-history-panel > .file-history-header > strong { flex: 0 0 auto; font-size: inherit; }
 .vd-dialog.submodule-dialog { --dialog-width: 560px; }
 .submodule-dialog-body { display: flex; flex-direction: column; gap: 14px; }
-.vd-dialog.composer-confirm-dialog > header > .composer-confirm-icon { width: 32px; height: 32px; display: grid; place-items: center; background: var(--versiondock-hover); border-radius: 9px; color: var(--versiondock-muted); }
+.vd-dialog.composer-confirm-dialog > header > .composer-confirm-icon { width: 32px; height: 32px; display: grid; place-items: center; background: var(--versiondock-hover); border-radius: var(--versiondock-radius-control); color: var(--versiondock-muted); }
 @keyframes vd-dialog-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vd-dialog-enter { from { opacity: 0; transform: translateY(5px) scale(.99); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .vd-dialog, .vd-dialog-backdrop { animation: none; } }

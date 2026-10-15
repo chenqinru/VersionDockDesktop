@@ -668,7 +668,7 @@ function CommitList({
             alignItems: 'center',
             gap: '8px',
             border: '1px solid var(--vscode-inputValidation-errorBorder, #f14c4c)',
-            borderRadius: '4px',
+            borderRadius: 'var(--versiondock-radius-popup)',
             background: 'var(--vscode-inputValidation-errorBackground, #5a1d1d)',
             color: 'var(--vscode-inputValidation-errorForeground, #ffffff)',
             fontSize: '11px',

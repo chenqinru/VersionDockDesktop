@@ -6,7 +6,7 @@
   height: var(--input-height);
   padding: 4px 8px;
   border: 1px solid var(--versiondock-control-border);
-  border-radius: 4px;
+  border-radius: var(--versiondock-radius-control);
   background: var(--versiondock-input);
   color: var(--vscode-input-foreground);
   font-family: inherit;
@@ -38,7 +38,7 @@
 .vd-input-with-action > .vd-input { padding-right: 36px; }
 .vd-input-with-action > .icon-button { position: absolute; right: 6px; }
 
-.vd-search-input[data-control-size] { box-sizing: border-box; display: flex; align-items: center; gap: 5px; min-width: 0; height: calc(28px * var(--versiondock-ui-font-scale, 1)); padding: 0 6px; border: 1px solid var(--versiondock-control-border); border-radius: 4px; background: var(--versiondock-input); }
+.vd-search-input[data-control-size] { box-sizing: border-box; display: flex; align-items: center; gap: 5px; min-width: 0; height: calc(28px * var(--versiondock-ui-font-scale, 1)); padding: 0 6px; border: 1px solid var(--versiondock-control-border); border-radius: var(--versiondock-radius-control); background: var(--versiondock-input); }
 .vd-search-input[data-control-size="xs"] { height: calc(24px * var(--versiondock-ui-font-scale, 1)); }
 .vd-search-input[data-control-size="md"] { height: calc(36px * var(--versiondock-ui-font-scale, 1)); }
 .vd-search-input[data-control-size]:where(:not(:has(input:disabled)):not([data-readonly])):hover { border-color: var(--versiondock-control-hover-border); }
@@ -50,4 +50,4 @@
 .vd-search-input > .codicon { flex-shrink: 0; color: var(--versiondock-muted); font-size: 13px; }
 .vd-search-input > .vd-input[data-control-size] { flex: 1; width: 0; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; outline: 0; box-shadow: none; }
 .vd-search-input > .vd-input:disabled { opacity: 1; }
-.vd-search-input > .icon-button, .vd-input-with-action > .icon-button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; min-width: 0; min-height: 0; padding: 0; border-radius: 3px; }
+.vd-search-input > .icon-button, .vd-input-with-action > .icon-button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; min-width: 0; min-height: 0; padding: 0; border-radius: var(--versiondock-radius-icon); }

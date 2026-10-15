@@ -718,7 +718,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                     </div>
 
                     {confirmRemoveId === selectedAccount.id ? (
-                      <div style={{ marginTop: 8, padding: 10, borderRadius: 6, background: 'color-mix(in srgb, var(--versiondock-danger) 12%, transparent)', border: '1px solid var(--versiondock-danger)' }}>
+                      <div style={{ marginTop: 8, padding: 10, borderRadius: 'var(--versiondock-radius-panel)', background: 'color-mix(in srgb, var(--versiondock-danger) 12%, transparent)', border: '1px solid var(--versiondock-danger)' }}>
                         <div style={{ fontSize: '11.5px', marginBottom: 8, color: 'var(--versiondock-text)' }}>
                           {t('Are you sure you want to disconnect account {0}?', selectedAccount.login)}
                         </div>
@@ -909,7 +909,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                           padding: '8px 10px',
                           background: 'color-mix(in srgb, var(--versiondock-sidebar-active) 80%, transparent)',
                           border: '1px solid var(--versiondock-border)',
-                          borderRadius: 4,
+                          borderRadius: 'var(--versiondock-radius-control)',
                           fontSize: '11.5px',
                           color: 'var(--versiondock-muted)',
                           display: 'flex',
@@ -1246,7 +1246,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                 {publishResult && (
                   <div
                     className={publishResult.error ? 'dialog-error' : 'notice'}
-                    style={{ marginTop: 8, padding: 8, borderRadius: 4 }}
+                    style={{ marginTop: 8, padding: 8, borderRadius: 'var(--versiondock-radius-control)' }}
                   >
                     <div>{publishResult.error ? formatProviderError(publishResult.error, t) : t(publishResult.pushed ? 'Repository published successfully' : 'Remote repository created')}</div>
                     <ul>

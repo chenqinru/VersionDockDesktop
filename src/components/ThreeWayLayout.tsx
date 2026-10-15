@@ -1534,7 +1534,7 @@ const styles = {
     gap: 8,
     padding: '9px 12px',
     border: '1px solid color-mix(in srgb, var(--vscode-testing-iconPassed, var(--vscode-gitDecoration-addedResourceForeground)) 48%, var(--vscode-panel-border))',
-    borderRadius: 5,
+    borderRadius: 'var(--versiondock-radius-control)',
     background: 'color-mix(in srgb, var(--vscode-testing-iconPassed, var(--vscode-gitDecoration-addedResourceForeground)) 18%, var(--vscode-editor-background))',
     boxShadow: '0 4px 14px color-mix(in srgb, var(--vscode-widget-shadow, #000) 38%, transparent)',
     transform: 'translateX(-50%)',
@@ -1565,7 +1565,7 @@ const styles = {
     width: 'max-content',
     height: 19,
     overflow: 'hidden',
-    borderRadius: 5,
+    borderRadius: 'var(--versiondock-radius-control)',
     background: 'color-mix(in srgb, var(--vscode-foreground) 8%, transparent)',
   },
   blockActionButton: (kind: 'accept' | 'reset'): React.CSSProperties => ({

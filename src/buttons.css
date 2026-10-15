@@ -14,7 +14,7 @@
   min-height: calc(28px * var(--versiondock-ui-font-scale, 1));
   padding: 3px 10px;
   border: 1px solid var(--button-border);
-  border-radius: 4px;
+  border-radius: var(--versiondock-radius-control);
   background: var(--button-background);
   color: var(--button-foreground);
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
@@ -62,6 +62,11 @@
 .vd-button > .vd-button-loader { position: absolute; left: calc(50% - 6.5px); top: calc(50% - 6.5px); }
 
 /* A split action owns one surface, including its native main Button. */
-.action-split > .vd-button[data-variant] { min-height: 0; background: transparent; color: inherit; border: 0; border-radius: 0; }
+.action-split > .vd-button[data-variant] { min-height: 0; background: transparent; color: inherit; border: 0; }
 .action-split > .vd-button[data-variant]:not(:disabled):is(:hover, :focus-visible, :active) { background: transparent; color: inherit; }
 .action-split > .vd-button[data-variant]:disabled { opacity: 1; }
+
+/* Inner corners follow the enclosing split surface, including compact layout. */
+.action-split > button:first-child { border-radius: var(--versiondock-radius-control-inner) 0 0 var(--versiondock-radius-control-inner); }
+.action-split > button:last-child { border-radius: 0 var(--versiondock-radius-control-inner) var(--versiondock-radius-control-inner) 0; }
+.action-split > button:only-child { border-radius: var(--versiondock-radius-control-inner); }
