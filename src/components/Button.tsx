@@ -2,7 +2,7 @@ import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import { Codicon } from './Codicon';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'link';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'link' | 'ai';
   size?: 'xs' | 'sm' | 'md';
   danger?: boolean;
   loading?: boolean;

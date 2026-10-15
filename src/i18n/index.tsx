@@ -6,6 +6,10 @@ type Messages = Record<string, string>;
 const desktopEn: Messages = {
   "Save or close unsaved editors in this worktree before removing it.": "Save or close unsaved editors in this worktree before removing it.",
   "Generate branch name with AI": "Generate branch name with AI",
+  "AI Generate": "AI Generate",
+  "Manual input": "Manual input",
+  "Stop generation": "Stop generation",
+  "Generate name": "Generate name",
   "Stop generating branch name": "Stop generating branch name",
   "Generating branch name…": "Generating branch name…",
   "Describe your task, or leave empty to generate from current changes.": "Describe your task, or leave empty to generate from current changes.",
@@ -1505,6 +1509,10 @@ const desktopEn: Messages = {
 const desktopZh: Messages = {
   "Save or close unsaved editors in this worktree before removing it.": "请先保存或关闭此工作树中未保存的编辑内容，再删除工作树。",
   "Generate branch name with AI": "使用 AI 生成分支名",
+  "AI Generate": "AI 生成",
+  "Manual input": "手动输入",
+  "Stop generation": "停止生成",
+  "Generate name": "生成名称",
   "Stop generating branch name": "停止生成分支名",
   "Generating branch name…": "正在生成分支名…",
   "Describe your task, or leave empty to generate from current changes.": "描述任务，或留空以根据当前改动生成。",

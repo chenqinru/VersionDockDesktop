@@ -59,6 +59,12 @@
 .dialog-choice-body > .vd-search-input { margin-bottom: 8px; }
 .dialog-choice-body > .dialog-choices { min-height: 0; max-height: min(420px, 50vh); overflow: auto; align-content: start; }
 .vd-dialog-footer-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.vd-dialog > footer > .dialog-branch-ai { margin-right: auto; }
+.dialog-prompt-input { position: relative; min-width: 0; }
+.dialog-prompt-input > .vd-input { width: 100%; }
+.dialog-prompt-input[data-generating] > .vd-input { padding-right: 36px; }
+.dialog-prompt-loader { position: absolute; inset: 0 10px 0 auto; display: flex; align-items: center; color: var(--versiondock-accent); pointer-events: none; }
+.dialog-prompt-loader > .codicon { font-size: 16px; }
 .vd-dialog .dialog-choices { gap: 8px; }
 .vd-dialog .dialog-choices > button {
   min-height: 46px; width: 100%; box-sizing: border-box; padding: 9px 12px;

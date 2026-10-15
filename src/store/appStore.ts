@@ -497,7 +497,7 @@ export interface AppStore {
   restoreLastWorkspace: () => Promise<void>;
   removeRecent: (workspaceId: string) => Promise<void>;
   renameWorkspace: (workspaceId: string, name: string) => Promise<void>;
-  refresh: (silent?: boolean, options?: { reloadRepository?: boolean; trackBusy?: boolean }) => Promise<void>;
+  refresh: (silent?: boolean, options?: { reloadRepository?: boolean; trackBusy?: boolean; propagateErrors?: boolean }) => Promise<void>;
   selectRepo: (repoId: string, reload?: boolean) => Promise<void>;
   openDiff: (repoId: string, path: string, staged: boolean, revision?: string, range?: DiffRange) => Promise<void>;
   openStashDiff: (repoId: string, reference: string, path: string) => Promise<void>;
@@ -671,10 +671,12 @@ let updateDetailsGeneration = 0;
 let changesDiffGeneration = 0;
 let diffRequestGeneration = 0;
 let historyPageGeneration = 0;
+let activeHistoryPage: { workspaceId: string; generation: number } | undefined;
 let historyTopologyGeneration = 0;
 
 function abortHistoryRequests() {
   historyPageGeneration += 1;
+  activeHistoryPage = undefined;
   historyTopologyGeneration += 1;
   requestControllers.get('history:page')?.abort();
   requestControllers.get('history:topology')?.abort();
@@ -692,6 +694,9 @@ let currentWindowLabel = `window-${Math.random().toString(36).slice(2)}`;
 const ownedSchedulerLeases = new Set<string>();
 let startupFetchPending = false;
 const pendingWorkspaceEvents = new Map<string, Map<string, Set<RefreshScope>>>();
+const deferredHistoryRefreshes = new Map<string, Set<string>>();
+const watcherRetries = new Map<string, { attempts: number; nextAt: number }>();
+const WATCHER_RETRY_DELAYS = [1_000, 3_000, 10_000];
 
 function recordPendingWorkspaceEvent(workspaceId: string, repoId: string | null | undefined, scopes: RefreshScope[]): void {
   const targetWorkspaceEvents = pendingWorkspaceEvents.get(workspaceId) ?? new Map<string, Set<RefreshScope>>();
@@ -1703,7 +1708,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     return value;
   };
 
-  const refreshRepositoryRefs = async (wid: string, repoId: string, includeRemotes = false) => {
+  const refreshRepositoryRefs = async (wid: string, repoId: string, includeRemotes = false, propagateErrors = false) => {
     const requestKey = `refs:${wid}:${repoId}`;
     const controller = beginRequest(requestKey);
     const generation = workspaceRequestGeneration;
@@ -1728,6 +1733,11 @@ export const useAppStore = create<AppStore>((set, get) => {
         branches: state.selectedRepoId === repoId && branchesResult.status === 'fulfilled' ? branchesResult.value : state.branches,
         tags: state.selectedRepoId === repoId && tagsResult.status === 'fulfilled' ? tagsResult.value : state.tags,
       }));
+      if (propagateErrors) {
+        for (const result of [branchesResult, tagsResult, remotesResult]) {
+          if (result.status === 'rejected') throw result.reason;
+        }
+      }
     } finally { endRequest(requestKey, controller); }
   };
 
@@ -1784,18 +1794,33 @@ export const useAppStore = create<AppStore>((set, get) => {
     if (current) set({ bootstrap: { ...current, state: { ...current.state, commitSelections: { ...(current.state.commitSelections ?? {}), [workspaceId]: Object.entries(selections).map(([repoId, paths]) => ({ repoId, paths })) } } } });
   };
 
-  let autoFetchController: AbortController | undefined;
-  const backgroundFetch = async () => {
+  const autoFetchControllers = new Map<string, AbortController>();
+  const lastAutoFetchAt = new Map<string, number>();
+  const backgroundFetch = async (trigger: 'focus' | 'interval') => {
+    if (trigger === 'focus' && settings().autoFetchOnFocus === false) return;
     const owner = bridge();
     const wid = get().snapshot?.workspace.id;
-    if (!wid || autoFetchController || isOperationActive(get().operations, { workspaceId: wid })) return;
+    if (!wid || autoFetchControllers.has(wid) || isOperationActive(get().operations, { workspaceId: wid })) return;
     const repositories = get().allRepositories.length ? get().allRepositories : get().snapshot?.repositories ?? [];
     const repos = repositories.filter((repo) => repo.meta.kind === 'git' && !repo.meta.isWorktree);
     if (!repos.length) return;
+    const cooldown = trigger === 'focus' ? 3 * 60_000 : (settings().autoFetchIntervalMinutes ?? 15) * 60_000;
+    if (cooldown <= 0) return;
+    const timestampKey = `versiondock:auto-fetch-at:${wid}`;
+    const now = Date.now();
+    let previous = lastAutoFetchAt.get(wid);
+    try {
+      const stored = localStorage.getItem(timestampKey);
+      const timestamp = stored === null ? undefined : Number(stored);
+      if (timestamp !== undefined && Number.isFinite(timestamp)) previous = Math.max(previous ?? timestamp, timestamp);
+    } catch { /* Keep per-workspace throttling when storage is unavailable. */ }
+    if (previous !== undefined && now - previous < cooldown) return;
     const leaseName = `auto-fetch:${wid}`;
     if (!claimSchedulerLease(leaseName, 60_000)) return;
+    lastAutoFetchAt.set(wid, now);
+    try { localStorage.setItem(timestampKey, String(now)); } catch { /* In-memory timestamp remains available. */ }
     const controller = new AbortController();
-    autoFetchController = controller;
+    autoFetchControllers.set(wid, controller);
     const renewLease = setInterval(() => { claimSchedulerLease(leaseName, 60_000); }, 20_000);
     const stopRenewal = () => clearInterval(renewLease);
     controller.signal.addEventListener('abort', stopRenewal, { once: true });
@@ -1804,13 +1829,17 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!controller.signal.aborted && get().bridge === owner && get().snapshot?.workspace.id === wid) await get().refresh(true);
     } catch (error) {
       console.debug('Background fetch refresh skipped', error);
-    } finally { stopRenewal(); controller.signal.removeEventListener('abort', stopRenewal); if (autoFetchController === controller) autoFetchController = undefined; }
+    } finally {
+      stopRenewal();
+      controller.signal.removeEventListener('abort', stopRenewal);
+      if (autoFetchControllers.get(wid) === controller) autoFetchControllers.delete(wid);
+    }
   };
   const restartAutoRefresh = () => {
     if (autoFetchTimer) clearInterval(autoFetchTimer);
     autoFetchTimer = undefined;
     const minutes = settings().autoFetchIntervalMinutes ?? 15;
-    if (minutes > 0) autoFetchTimer = setInterval(() => void backgroundFetch(), minutes * 60_000);
+    if (minutes > 0) autoFetchTimer = setInterval(() => void backgroundFetch('interval'), minutes * 60_000);
     if (autoRefreshTimer) clearInterval(autoRefreshTimer);
     autoRefreshTimer = undefined;
     const seconds = settings().autoRefreshInterval;
@@ -2272,6 +2301,11 @@ export const useAppStore = create<AppStore>((set, get) => {
     if (current.historyScope.repoIds && !current.historyScope.repoIds.includes(repoId)) return;
     const repo = current.snapshot?.repositories.find((item) => item.meta.id === repoId);
     if (!repo) return;
+    if (current.historyTopologyLoading) {
+      historyTopologyGeneration += 1;
+      requestControllers.get('history:topology')?.abort();
+      set({ historyTopologyLoading: false });
+    }
     const visibleLimit = Math.min(
       Math.max(current.history.length, HISTORY_PAGE_SIZE),
       settings().maximumGraphCommits,
@@ -2321,6 +2355,12 @@ export const useAppStore = create<AppStore>((set, get) => {
   const refreshFromWatcher = async () => {
     const workspaceId = get().snapshot?.workspace.id;
     if (!workspaceId || updatingWorkingTree(workspaceId)) return;
+    const retryAt = watcherRetries.get(workspaceId)?.nextAt ?? 0;
+    if (retryAt > Date.now()) {
+      if (watcherTimer) clearTimeout(watcherTimer);
+      watcherTimer = setTimeout(() => void refreshFromWatcher(), retryAt - Date.now());
+      return;
+    }
     if (watcherRefreshInFlight) {
       watcherRefreshQueued = true;
       return;
@@ -2344,88 +2384,125 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       return true;
     };
+    const load = async (repoId: string, kind: string, request: Promise<void>) => {
+      await request;
+      if (interrupted()) return;
+      const message = get().loadErrors[`${kind}:${repoId}`];
+      if (message) throw new Error(message);
+    };
     try {
       const refreshSnapshot = [...pending.values()].some((scopes) => scopes.has('workspaceSnapshot'));
       if (refreshSnapshot) {
-        await get().refresh(true);
+        await get().refresh(true, { propagateErrors: true });
         if (interrupted()) return;
       }
+      let failure: { error: unknown } | undefined;
       for (const [repoId, scopes] of pending) {
         if (interrupted()) return;
         // Events may outlive a repository removal or a rescan. Never query a
         // repository that is absent from this workspace's current inventory.
         if (!repoId || !get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
-        if (!refreshSnapshot && (scopes.has('status') || scopes.has('index') || scopes.has('operation') || scopes.has('svnRevision') || scopes.has('refs'))) {
-          const status = await bridge().request<RepositoryStatus>(
-            { type: 'repositoryStatus', payload: { workspace_id: workspaceId, repo_id: repoId } },
-            { showProgress: false },
-          );
-          if (interrupted()) return;
-          if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
-          const previous = get().allRepositories.find((repo) => repo.meta.id === repoId);
-          if (previous && !scopes.has('refs') && !scopes.has('history')) queueChangedBranchStatus(workspaceId, previous, status);
-          if (previous) notifyNewUntrackedFiles([previous], [status], workspaceId);
-          applyRepositoryStatus(workspaceId, status);
-          checkStatusNotifications(get().allRepositories, workspaceId);
-        }
-        if (scopes.has('refs') || scopes.has('history')) {
-          await refreshRepositoryRefs(workspaceId, repoId, scopes.has('refs'));
-          if (interrupted()) return;
-          if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
-          if (scopes.has('history') && !get().historyLoading) await refreshHistoryRepository(workspaceId, repoId);
-        }
-        if (interrupted()) return;
-        if (scopes.has('unpushed') || scopes.has('refs')) {
-          const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
-          if (repo?.meta.kind === 'git') await Promise.all([
-            get().loadUnpushedCommits(repoId), get().loadIncomingCommits(repoId),
-            ...(scopes.has('refs') ? [get().loadStashes(repoId)] : []),
-          ]);
-        }
-        if (interrupted()) return;
-        if (scopes.has('conflicts')) await get().loadConflicts(true, repoId);
-        if (interrupted()) return;
-        if (scopes.has('worktrees')) await get().loadWorktrees(repoId);
-        if (interrupted()) return;
-        if (scopes.has('subtrees')) await get().loadSubtrees(repoId);
-        if (interrupted()) return;
-        if (scopes.has('submodules') || scopes.has('index') || scopes.has('status') || scopes.has('refs')) {
-          await get().loadSubmodules(repoId);
-        }
-        if (interrupted()) return;
-        const selected = get().selectedFile;
-        if (scopes.has('diff') && selected?.repoId === repoId && get().mode === 'diff') {
-          const generation = ++diffRequestGeneration;
-          const controller = beginRequest(`watcher-diff:${repoId}`);
-          const diff = await bridge().request<DiffDocument>({
-            type: 'fileDiff',
-            payload: {
-              workspace_id: workspaceId,
-              repo_id: selected.repoId,
-              relative_path: selected.path,
-              staged: selected.staged,
-              revision: selected.revision ?? null,
-              from_revision: selected.fromRevision ?? null,
-              to_revision: selected.toRevision ?? null,
-            },
-          }, { signal: controller.signal, showProgress: false });
-          const current = get();
-          const currentFile = current.selectedFile;
-          if (generation === diffRequestGeneration
-            && current.snapshot?.workspace.id === workspaceId
-            && current.mode === 'diff'
-            && currentFile?.repoId === selected.repoId
-            && currentFile.path === selected.path
-            && currentFile.staged === selected.staged
-            && currentFile.revision === selected.revision
-            && currentFile.fromRevision === selected.fromRevision
-            && currentFile.toRevision === selected.toRevision) {
-            set({ diff });
+        try {
+          if (!refreshSnapshot && (scopes.has('status') || scopes.has('index') || scopes.has('operation') || scopes.has('svnRevision') || scopes.has('refs'))) {
+            const status = await bridge().request<RepositoryStatus>(
+              { type: 'repositoryStatus', payload: { workspace_id: workspaceId, repo_id: repoId } },
+              { showProgress: false },
+            );
+            if (interrupted()) return;
+            if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
+            const previous = get().allRepositories.find((repo) => repo.meta.id === repoId);
+            if (previous && !scopes.has('refs') && !scopes.has('history')) queueChangedBranchStatus(workspaceId, previous, status);
+            if (previous) notifyNewUntrackedFiles([previous], [status], workspaceId);
+            applyRepositoryStatus(workspaceId, status);
+            checkStatusNotifications(get().allRepositories, workspaceId);
           }
+          if (scopes.has('refs') || scopes.has('history')) {
+            await refreshRepositoryRefs(workspaceId, repoId, scopes.has('refs'), true);
+            if (interrupted()) return;
+            if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
+            if (scopes.has('history')) {
+              if (get().historyLoading || activeHistoryPage?.workspaceId === workspaceId) {
+                const deferred = deferredHistoryRefreshes.get(workspaceId) ?? new Set<string>();
+                deferred.add(repoId);
+                deferredHistoryRefreshes.set(workspaceId, deferred);
+              } else {
+                await refreshHistoryRepository(workspaceId, repoId);
+              }
+            }
+          }
+          if (interrupted()) return;
+          if (scopes.has('unpushed') || scopes.has('refs')) {
+            const repo = get().snapshot?.repositories.find((item) => item.meta.id === repoId);
+            if (repo?.meta.kind === 'git') {
+              const results = await Promise.allSettled([
+                load(repoId, 'unpushed', get().loadUnpushedCommits(repoId)),
+                load(repoId, 'incoming', get().loadIncomingCommits(repoId)),
+                ...(scopes.has('refs') ? [load(repoId, 'stashes', get().loadStashes(repoId))] : []),
+              ]);
+              const failure = results.find(result => result.status === 'rejected');
+              if (failure?.status === 'rejected') throw failure.reason;
+            }
+          }
+          if (interrupted()) return;
+          if (scopes.has('conflicts')) await load(repoId, 'conflicts', get().loadConflicts(true, repoId));
+          if (interrupted()) return;
+          if (scopes.has('worktrees')) await load(repoId, 'worktrees', get().loadWorktrees(repoId));
+          if (interrupted()) return;
+          if (scopes.has('subtrees')) await load(repoId, 'subtrees', get().loadSubtrees(repoId));
+          if (interrupted()) return;
+          if (scopes.has('submodules') || scopes.has('index') || scopes.has('status') || scopes.has('refs')) {
+            await load(repoId, 'submodules', get().loadSubmodules(repoId));
+          }
+          if (interrupted()) return;
+          const selected = get().selectedFile;
+          if (scopes.has('diff') && selected?.repoId === repoId && get().mode === 'diff') {
+            const generation = ++diffRequestGeneration;
+            const controller = beginRequest(`watcher-diff:${repoId}`);
+            const diff = await bridge().request<DiffDocument>({
+              type: 'fileDiff',
+              payload: {
+                workspace_id: workspaceId,
+                repo_id: selected.repoId,
+                relative_path: selected.path,
+                staged: selected.staged,
+                revision: selected.revision ?? null,
+                from_revision: selected.fromRevision ?? null,
+                to_revision: selected.toRevision ?? null,
+              },
+            }, { signal: controller.signal, showProgress: false });
+            const current = get();
+            const currentFile = current.selectedFile;
+            if (generation === diffRequestGeneration
+              && current.snapshot?.workspace.id === workspaceId
+              && current.mode === 'diff'
+              && currentFile?.repoId === selected.repoId
+              && currentFile.path === selected.path
+              && currentFile.staged === selected.staged
+              && currentFile.revision === selected.revision
+              && currentFile.fromRevision === selected.fromRevision
+              && currentFile.toRevision === selected.toRevision) {
+              set({ diff });
+            }
+          }
+          pending.delete(repoId);
+        } catch (error) {
+          if (interrupted()) return;
+          if (isAbortError(error)) pending.delete(repoId);
+          else failure ??= { error };
         }
       }
+      if (failure) throw failure.error;
+      watcherRetries.delete(workspaceId);
     } catch (error) {
-      if (!interrupted() && !isAbortError(error)) console.debug('Background repository refresh failed', error);
+      if (!interrupted() && !isAbortError(error)) {
+        const attempts = watcherRetries.get(workspaceId)?.attempts ?? 0;
+        const delay = WATCHER_RETRY_DELAYS[attempts];
+        if (delay !== undefined) {
+          watcherRetries.set(workspaceId, { attempts: attempts + 1, nextAt: Date.now() + delay });
+          for (const [repoId, scopes] of pending) recordPendingWorkspaceEvent(workspaceId, repoId || null, [...scopes]);
+        }
+        console.debug('Background repository refresh failed', error);
+      }
     } finally {
       if (lifecycle === workingTreeLifecycle) {
         watcherRefreshInFlight = false;
@@ -2433,11 +2510,21 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (watcherRefreshQueued || (activeWorkspace && pendingWorkspaceEvents.get(activeWorkspace)?.size)) {
           watcherRefreshQueued = false;
           if (watcherTimer) clearTimeout(watcherTimer);
-          watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
+          const delay = Math.max(300, (watcherRetries.get(activeWorkspace ?? '')?.nextAt ?? 0) - Date.now());
+          watcherTimer = setTimeout(() => void refreshFromWatcher(), delay);
         }
       }
     }
   };
+
+  function drainDeferredHistoryRefreshes(workspaceId: string): void {
+    if (get().snapshot?.workspace.id !== workspaceId || get().historyLoading || activeHistoryPage?.workspaceId === workspaceId) return;
+    const deferred = deferredHistoryRefreshes.get(workspaceId);
+    if (!deferred?.size) return;
+    deferredHistoryRefreshes.delete(workspaceId);
+    for (const repoId of deferred) recordPendingWorkspaceEvent(workspaceId, repoId, ['history']);
+    drainPendingWorkspaceEvents(workspaceId);
+  }
 
   function drainPendingWorkspaceEvents(workspaceId: string): boolean {
     if (get().snapshot?.workspace.id !== workspaceId) return false;
@@ -2543,6 +2630,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       const refreshRuntimeOnVisibility = () => {
         if (document.visibilityState === 'visible') refreshRuntimeOnFocus();
       };
+      const fetchOnFocus = () => { if (get().ready) void backgroundFetch('focus'); };
+      bridgeSubscriptions.push(useAppStore.subscribe((state) => {
+        const wid = state.snapshot?.workspace.id;
+        if (wid) drainDeferredHistoryRefreshes(wid);
+      }));
       configureTaskProgress((id) => value.cancelOperation(id));
       bridgeSubscriptions.push(value.subscribe((event) => {
         if ('type' in event && event.type === 'author-avatar-cache-cleared') { window.dispatchEvent(new Event('versiondock-avatar-cache-clear')); return; }
@@ -2585,9 +2677,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       }));
       bridgeSubscriptions.push(resetTaskProgress);
       window.addEventListener('focus', refreshRuntimeOnFocus);
+      window.addEventListener('focus', fetchOnFocus);
       document.addEventListener('visibilitychange', refreshRuntimeOnVisibility);
       bridgeSubscriptions.push(() => {
         window.removeEventListener('focus', refreshRuntimeOnFocus);
+        window.removeEventListener('focus', fetchOnFocus);
         document.removeEventListener('visibilitychange', refreshRuntimeOnVisibility);
       });
       void value.onLogEntry((entry) => { if (owner === logSession) enqueueLog(entry); }).then((dispose) => {
@@ -2660,10 +2754,12 @@ export const useAppStore = create<AppStore>((set, get) => {
                 if (key.startsWith(prefix) && (!event.repoId || key === `${prefix}${event.repoId}`)) controller.abort();
               });
             }
+            watcherRetries.delete(event.workspaceId);
             recordPendingWorkspaceEvent(event.workspaceId, event.repoId, event.scopes);
             if (watcherTimer) clearTimeout(watcherTimer);
             watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
           } else {
+            watcherRetries.delete(event.workspaceId);
             recordPendingWorkspaceEvent(event.workspaceId, event.repoId, event.scopes);
           }
         }
@@ -2737,13 +2833,17 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (autoRefreshTimer) clearInterval(autoRefreshTimer);
       if (autoFetchTimer) clearInterval(autoFetchTimer);
       autoFetchTimer = undefined;
-      autoFetchController?.abort();
-      autoFetchController = undefined;
+      autoFetchControllers.forEach(controller => controller.abort());
+      autoFetchControllers.clear();
+      lastAutoFetchAt.clear();
       commitSelectionSaveTimers.forEach((timer) => clearTimeout(timer));
       commitSelectionSaveTimers.clear();
       watcherTimer = undefined;
       autoRefreshTimer = undefined;
       pendingWorkspaceEvents.clear();
+      deferredHistoryRefreshes.clear();
+      activeHistoryPage = undefined;
+      watcherRetries.clear();
       watcherRefreshInFlight = false;
       watcherRefreshQueued = false;
       repositoryEventGenerations.clear();
@@ -3059,6 +3159,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       const nextSessions = { ...get().sessions };
       delete nextSessions[workspaceId];
       pendingWorkspaceEvents.delete(workspaceId);
+      deferredHistoryRefreshes.delete(workspaceId);
+      watcherRetries.delete(workspaceId);
+      autoFetchControllers.get(workspaceId)?.abort();
+      autoFetchControllers.delete(workspaceId);
 
       if (get().activeTabId === workspaceId) {
         if (nextTabs.length > 0) {
@@ -3334,6 +3438,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         try {
           await operation();
         } catch (error) {
+          if (options.propagateErrors) throw error;
           if (!isAbortError(error)) {
             publishError('Workspace refresh failed', error);
           }
@@ -4271,6 +4376,12 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       const pageGeneration = ++historyPageGeneration;
       const requestWorkspace = workspaceId();
+      activeHistoryPage = { workspaceId: requestWorkspace, generation: pageGeneration };
+      const finishHistoryPage = () => {
+        if (activeHistoryPage?.generation !== pageGeneration) return;
+        activeHistoryPage = undefined;
+        drainDeferredHistoryRefreshes(requestWorkspace);
+      };
       const avatarEpoch = authorAvatarEpoch();
       const pageController = beginRequest('history:page');
       const visibleLimit = Math.min((reset ? 0 : get().history.length) + HISTORY_PAGE_SIZE, historyMaxCommits);
@@ -4341,6 +4452,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           historyLoading: false,
         });
 
+        finishHistoryPage();
+
         // Match the plugin: start selected-file loading as soon as the log page
         // is visible, before refs, auxiliary tabs or topology finish loading.
         if (history[0] && get().mode === 'history' && !get().selectedCommits.length) void get().selectCommit(history[0]);
@@ -4397,6 +4510,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
       } finally {
         if (!silent && pageGeneration === historyPageGeneration) set({ historyLoading: false });
+        finishHistoryPage();
       }
     },
 

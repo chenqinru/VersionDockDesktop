@@ -226,6 +226,38 @@ describe('DialogHost identity prompts', () => {
 
 
 describe('AI branch name input', () => {
+  it.each(['en', 'zh-CN'] as const)('keeps the visible stop action usable and ignores late generation after stopping in %s', async (language) => {
+    const t = createTranslator(language);
+    let complete!: (name: string) => void;
+    let signal!: AbortSignal;
+    const generate = vi.fn((_description, current: AbortSignal) => {
+      signal = current;
+      return new Promise<string>(resolve => { complete = resolve; });
+    });
+    render(<I18nContext.Provider value={{ language, preference: language === 'en' ? 'en' : 'zhCn', t }}><DialogHost /></I18nContext.Provider>);
+    act(() => publishDialog({ kind: 'prompt', title: 'New Branch', message: '', inputLabel: 'Branch name', initialValue: 'manual/name', generateBranchName: generate, resolve: vi.fn() }));
+    fireEvent.click(screen.getByRole('button', { name: t('AI Generate') }));
+    expect(screen.getByRole('button', { name: t('Manual input') })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: t('Generate name') }));
+    const stop = screen.getByRole('button', { name: t('Stop generation') });
+    expect(stop).toBeEnabled();
+    expect(screen.getByRole('button', { name: t('Generate name') })).toBeDisabled();
+    const taskInput = screen.getByLabelText(t('Task description'));
+    expect(taskInput).toHaveAttribute('aria-busy', 'true');
+    expect(taskInput).toHaveAttribute('readonly');
+    expect(taskInput).toBeEnabled();
+    const status = screen.getByRole('status', { name: t('Generating branch name…') });
+    expect(taskInput.parentElement).toContainElement(status);
+    expect(status.textContent).toBe('');
+    fireEvent.click(stop);
+    expect(signal.aborted).toBe(true);
+    expect(screen.getByLabelText('Branch name')).toHaveValue('manual/name');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await act(async () => { complete('late/generated-name'); });
+    expect(screen.getByLabelText('Branch name')).toHaveValue('manual/name');
+    expect(screen.getByRole('button', { name: t('AI Generate') })).toBeEnabled();
+  });
+
   it('returns from task entry on Escape before dismissing and restores focus to the trigger', async () => {
     render(<><button>New branch</button><DialogHost /></>);
     const trigger = screen.getByRole('button', { name: 'New branch' });
@@ -249,7 +281,7 @@ describe('AI branch name input', () => {
     fireEvent.click(screen.getByTitle('Back'));
     expect(screen.getByLabelText('Branch name')).toHaveValue('manual/name');
     fireEvent.click(screen.getByTitle('Generate branch name with AI'));
-    fireEvent.click(screen.getByText('Generate branch name with AI'));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
     await waitFor(() => expect(screen.getByLabelText('Branch name')).toHaveValue('fix/login-timeout'));
     expect(generate).toHaveBeenCalledWith('修复登录超时', expect.any(AbortSignal));
     expect(resolve).not.toHaveBeenCalled();
@@ -262,10 +294,10 @@ describe('AI branch name input', () => {
     const generate = vi.fn().mockRejectedValueOnce(new Error('provider unavailable')).mockImplementation((_description, current) => {signal=current; return new Promise(() => {});});
     render(<DialogHost />);
     act(() => publishDialog({kind:'prompt', title:'New Branch', message:'', inputLabel:'Branch name', initialValue:'manual/name', generateBranchName:generate, resolve:vi.fn()}));
-    fireEvent.click(screen.getByTitle('Generate branch name with AI')); fireEvent.click(screen.getByText('Generate branch name with AI'));
+    fireEvent.click(screen.getByTitle('Generate branch name with AI')); fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('provider unavailable'));
     expect(screen.getByLabelText('Branch name')).toHaveValue('manual/name');
-    fireEvent.click(screen.getByTitle('Generate branch name with AI')); fireEvent.click(screen.getByText('Generate branch name with AI'));
+    fireEvent.click(screen.getByTitle('Generate branch name with AI')); fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
     fireEvent.click(screen.getByText('Cancel'));
     expect(signal?.aborted).toBe(true);
   });
@@ -277,8 +309,8 @@ it('allows generating a branch name from changes with both inputs empty', async 
   render(<DialogHost />);
   act(() => publishDialog({kind:'prompt', title:'New Branch', message:'', inputLabel:'Branch name', generateBranchName:generate, resolve:vi.fn()}));
   fireEvent.click(screen.getByTitle('Generate branch name with AI'));
-  expect(screen.getByText('Generate branch name with AI')).not.toBeDisabled();
-  fireEvent.click(screen.getByText('Generate branch name with AI'));
+  expect(screen.getByRole('button', { name: 'Generate name' })).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
   await waitFor(() => expect(screen.getByLabelText('Branch name')).toHaveValue('feat/current-changes'));
   expect(generate).toHaveBeenCalledWith('', expect.any(AbortSignal));
 });

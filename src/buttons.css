@@ -32,6 +32,13 @@
   --button-border: var(--versiondock-primary-button-border);
   --button-hover: var(--vscode-button-hoverBackground);
 }
+.vd-button[data-variant="ai"] {
+  --button-foreground: #fff;
+  --button-background: linear-gradient(125deg, #6841d9, #2366c2);
+  --button-border: transparent;
+  --button-hover: linear-gradient(125deg, #5c35cb, #1d5bb1);
+  --button-pressed: linear-gradient(125deg, #502bb9, #184e9c);
+}
 .vd-button:is([data-variant="ghost"], [data-variant="link"]) {
   --button-foreground: var(--versiondock-text);
   --button-background: transparent;

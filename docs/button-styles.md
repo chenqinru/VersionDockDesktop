@@ -21,6 +21,7 @@
 | 参数 | 用途 |
 | --- | --- |
 | `variant="primary"` | 主操作，使用主题主按钮色 |
+| `variant="ai"` | AI 生成操作，使用公共蓝紫渐变及白字，与取消等次操作区分 |
 | `variant="secondary"` | 默认值，次操作，有边框 |
 | `variant="ghost"` | 轻量操作，透明背景 |
 | `variant="link"` | 文本链接操作 |

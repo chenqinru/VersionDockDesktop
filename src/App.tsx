@@ -65,7 +65,6 @@ export function App() {
   const comparisonTarget = useAppStore((state) => state.comparisonTarget);
   const ready = useAppStore((state) => state.ready);
   const transferringWorkspace = useAppStore((state) => Boolean(state.transferringTabIds[state.snapshot?.workspace.id ?? '']));
-  const sync = useAppStore((state) => state.sync);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const initializeRepository = useAppStore((state) => state.initializeRepository);
   const setPanelSize = useAppStore((state) => state.setPanelSize);
@@ -79,7 +78,6 @@ export function App() {
   const [pluginMessages, setPluginMessages] = useState<Record<string, string>>({});
   const [dropActive, setDropActive] = useState(false);
   const [checkoutKind, setCheckoutKind] = useState<RepositoryCheckoutKind>();
-  const focusFetchRunning = useRef(false);
   const [startupTab] = useState(startupTransferTab);
   const startupTabTransfer = useRef(new URLSearchParams(window.location.search).has('tabTransfer'));
   // Refresh color helpers throughout the workbench when system appearance changes.
@@ -127,23 +125,6 @@ export function App() {
       window.removeEventListener('online', check);
     };
   }, [ready, bootstrap?.state.settings?.autoCheckUpdates]);
-
-  useEffect(() => {
-    const handleFocus = () => {
-      if (!ready || focusFetchRunning.current || (bootstrap?.state.settings?.autoFetchOnFocus ?? true) === false) return;
-      const gitRepos = useAppStore.getState().snapshot?.repositories.filter((repo) => repo.meta.kind === 'git' && !repo.meta.isWorktree) ?? [];
-      if (!gitRepos.length) return;
-      const storageKey = 'versiondock:auto-fetch-on-focus-at';
-      const previous = Number(localStorage.getItem(storageKey) ?? 0);
-      if (Date.now() - previous < 3 * 60 * 1000) return;
-      localStorage.setItem(storageKey, String(Date.now()));
-      focusFetchRunning.current = true;
-      void Promise.allSettled(gitRepos.map((repo) => sync(repo.meta.id, 'fetch', false)))
-        .finally(() => { focusFetchRunning.current = false; });
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [bootstrap?.state.settings?.autoFetchOnFocus, ready, sync]);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.density = layoutDensity;
