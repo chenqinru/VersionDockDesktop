@@ -1,13 +1,15 @@
 /* Git log parity layer: compact geometry and interaction states from the plugin reference. */
+.history-workspace, .compare-workspace { --history-filter-height: calc(26px * var(--versiondock-ui-font-scale, 1)); }
 .history-workspace { min-width: 0; container: history-workspace / inline-size; background: var(--versiondock-bg); user-select: none; -webkit-user-select: none; }
-.history-filters { display: flex; align-items: center; flex: 0 0 38px; height: 38px; padding: 6px 10px; gap: 6px; box-sizing: border-box; background: var(--versiondock-bg); border-bottom: 1px solid var(--versiondock-border); }
+.history-filters { display: flex; align-items: center; flex: 0 0 calc(var(--history-filter-height) + 12px); height: calc(var(--history-filter-height) + 12px); padding: 6px 10px; gap: 6px; box-sizing: border-box; background: var(--versiondock-bg); border-bottom: 1px solid var(--versiondock-border); }
+.history-filters .commit-search[data-control-size] { height: var(--history-filter-height); }
 .history-filters .commit-search { width: auto; min-width: 130px; flex: 1.2 1 180px; }
-.history-filters .filter-anchor { min-width: 100px; height: 26px; flex: 1 1 150px; }
+.history-filters .filter-anchor { min-width: 100px; height: var(--history-filter-height); flex: 1 1 150px; }
 .history-filters .repo-filter-anchor { flex: 1 1 140px; }
 .history-filters .branch-filter-anchor { min-width: 110px; flex: 1.1 1 160px; }
 .history-filters .date-filter-anchor { width: auto; min-width: 160px; max-width: none; flex: 1.5 1 220px; }
-.history-filters .filter-button { display: flex; align-items: center; white-space: nowrap; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); width: 100%; min-width: 0; height: 26px; padding: 0 8px; gap: 5px; color: var(--versiondock-muted); border: 1px solid var(--versiondock-border); background: var(--versiondock-input); border-radius: 4px; }
-.history-path-chip { min-width: 0; max-width: 260px; height: 26px; flex: 0 1 auto; display: flex; align-items: center; gap: 5px; padding: 0 6px 0 8px; box-sizing: border-box; color: var(--versiondock-text); background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.history-filters .filter-button { display: flex; align-items: center; white-space: nowrap; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); width: 100%; min-width: 0; height: var(--history-filter-height); box-sizing: border-box; padding: 0 8px; gap: 5px; border-radius: 4px; }
+.history-path-chip { min-width: 0; max-width: 260px; height: var(--history-filter-height); flex: 0 1 auto; display: flex; align-items: center; gap: 5px; padding: 0 6px 0 8px; box-sizing: border-box; color: var(--versiondock-text); background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .history-path-chip > .codicon { flex: 0 0 auto; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .history-path-chip > span { flex: 0 0 auto; color: var(--versiondock-muted); }
 .history-path-chip > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: inherit; }
@@ -18,18 +20,15 @@
 .history-path-clear > .codicon { font-size: 10px; }
 .history-filters .filter-button > .filter-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .filter-trigger { width: 100%; height: 100%; position: relative; }
-.history-filters .filter-button.active { color: var(--versiondock-selection-foreground); background: var(--versiondock-selection-background); }
-.history-filters .filter-button:not(.active):hover { background: var(--versiondock-hover); }
-.history-filters .filter-button.active:hover { filter: brightness(1.08); }
 .history-filters .filter-button > .filter-clear-slot { width: 12px; flex: 0 0 12px; }
 .history-filters .date-filter-anchor .filter-button.active > .filter-label { text-align: center; }
-.history-filters .filter-trigger-clear { position: absolute; top: 7px; right: 23px; width: 12px; height: 12px; padding: 1px; display: grid; place-items: center; }
+.history-filters .filter-trigger-clear { position: absolute; top: 50%; transform: translateY(-50%); right: 23px; width: 12px; height: 12px; padding: 1px; display: grid; place-items: center; }
 .history-filters .filter-trigger-clear .codicon { font-size: 10px; }
 .history-filters .filter-button > .codicon { flex: 0 0 auto; font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
 .history-filters .filter-button > .codicon:last-child { margin-left: 0; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .history-filters .filter-button > .filter-repo-dot { width: 8px; min-width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
 .history-filters button.history-clear-filters,
-.history-filters button.more-button { width: 26px; height: 26px; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; flex: 0 0 26px; box-sizing: border-box; padding: 0; margin: 0; display: flex; align-items: center; justify-content: center; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; cursor: pointer; line-height: 1; }
+.history-filters button.more-button { width: var(--history-filter-height); height: var(--history-filter-height); min-width: var(--history-filter-height); min-height: var(--history-filter-height); max-width: var(--history-filter-height); max-height: var(--history-filter-height); flex: 0 0 var(--history-filter-height); box-sizing: border-box; padding: 0; margin: 0; display: flex; align-items: center; justify-content: center; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; cursor: pointer; line-height: 1; }
 .history-filters button.history-clear-filters,
 .history-filters button.history-clear-filters > .codicon { color: var(--vscode-errorForeground, var(--versiondock-danger)); }
 .history-filters button.history-clear-filters:hover { color: var(--vscode-errorForeground, var(--versiondock-danger)); background: var(--versiondock-hover); border-color: var(--versiondock-border); }
@@ -39,7 +38,7 @@
 .history-filters button.history-clear-filters > .codicon { font-size: 15px; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; margin: 0; padding: 0; }
 .history-filters button.more-button > .codicon { font-size: 14px; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; margin: 0; padding: 0; }
 .filter-anchor { position: relative; height: 26px; }
-.filter-popover { position: absolute; z-index: 200; display: flex; flex-direction: column; border: 1px solid var(--versiondock-border); top: 100%; margin-top: 2px; left: 0; width: 100%; min-width: 0; max-height: none; overflow: hidden; background: var(--versiondock-surface-alt); border-color: var(--versiondock-border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.filter-popover { position: absolute; z-index: 200; display: flex; flex-direction: column; top: 100%; margin-top: 2px; left: 0; width: 100%; min-width: 0; max-height: none; overflow: hidden; }
 .filter-anchor > .filter-popover:not(.date-popover) { right: 0; width: auto; min-width: 0; max-width: none; box-sizing: border-box; }
 .popover-search { width: auto; margin: 5px 8px; }
 .filter-options { padding: 3px 0; max-height: 200px; overflow-y: auto; }
@@ -60,7 +59,7 @@
 .filter-option-count + .filter-option-check,
 .filter-options label:has(.filter-option-count) .filter-option-check { margin-left: 4px; }
 .filter-group-label { padding: 6px 10px 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; text-transform: uppercase; letter-spacing: 0; color: var(--versiondock-muted); user-select: none; }
-.date-popover { box-sizing: border-box; background: var(--vscode-dropdown-background, var(--versiondock-bg)); top: 100%; left: 0; right: 0; width: auto; min-width: 168px; padding-bottom: 0; z-index: 300; box-shadow: 0 4px 16px rgba(0,0,0,.25); max-width: calc(100vw - 16px); margin-top: 2px; transform: translateX(var(--date-popover-offset, 0px)); }
+.date-popover { box-sizing: border-box; top: 100%; left: 0; right: 0; width: auto; min-width: 168px; padding-bottom: 0; z-index: 300; max-width: calc(100vw - 16px); margin-top: 2px; transform: translateX(var(--date-popover-offset, 0px)); }
 .calendar-panes { display: flex; padding: 8px; }
 .calendar-panes.single-calendar { display: block; }
 .calendar-pane { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
@@ -76,11 +75,12 @@
 .calendar-grid button { min-width: 0; padding: 3px 1px; border-radius: 3px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
 .calendar-grid button { cursor: pointer; border: 0; background: transparent; color: var(--versiondock-text); }
 .calendar-grid button:hover { background: var(--versiondock-hover); }
-.calendar-grid button.in-range { background: var(--versiondock-selection-inactive-background); }
-.calendar-grid button.edge { color: var(--versiondock-selection-foreground); background: var(--versiondock-selection-background); font-weight: 700; }
+.calendar-grid button.in-range { background: var(--versiondock-item-inactive-selected-background); }
+.calendar-grid button.edge { color: var(--versiondock-item-selected-foreground); background: var(--versiondock-item-selected-background); font-weight: 700; }
+.calendar-grid button.edge:hover { background: var(--versiondock-item-selected-hover-background); }
 .history-filter-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-.history-more { position: relative; flex: 0 0 26px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; z-index: 30; }
-.more-menu { position: absolute; z-index: 120; top: 30px; right: 0; width: max-content; padding: 4px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 6px 20px color-mix(in srgb, var(--versiondock-bg) 68%, transparent); }
+.history-more { position: relative; flex: 0 0 var(--history-filter-height); width: var(--history-filter-height); height: var(--history-filter-height); display: flex; align-items: center; justify-content: center; z-index: 30; }
+.more-menu { position: absolute; z-index: 120; top: calc(var(--history-filter-height) + 4px); right: 0; width: max-content; padding: 4px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 6px 20px color-mix(in srgb, var(--versiondock-bg) 68%, transparent); }
 .more-menu button { width: 100%; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; text-align: left; white-space: nowrap; border-radius: 2px; }
 .more-menu .codicon { color: var(--versiondock-muted); font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
 .history-columns { display: flex; min-height: 0; flex: 1; }

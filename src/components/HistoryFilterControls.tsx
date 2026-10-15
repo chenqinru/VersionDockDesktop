@@ -87,7 +87,7 @@ export function ToggleFilter({ icon, leading, label, title, active, open, onClic
 }) {
   const { t } = useI18n();
   return <div className="filter-trigger">
-    <button type="button" className={`filter-button ${active ? 'active' : ''} ${open ? 'open' : ''}`} title={title} onClick={onClick} aria-expanded={open} aria-haspopup="dialog">
+    <button type="button" className={`filter-button ${active ? 'active' : ''} ${open ? 'open' : ''}`} data-filter-active={active || undefined} title={title} onClick={onClick} aria-expanded={open} aria-haspopup="dialog">
     {leading ?? (icon ? <Codicon name={icon} /> : null)}
     <span className="filter-label">{label}</span>
     {onClear && active && <span className="filter-clear-slot" aria-hidden="true" />}

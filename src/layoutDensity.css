@@ -54,7 +54,7 @@
 [data-density="comfortable"] .branch-slot-collapsed { margin-right: 6px; }
 [data-density="comfortable"] .detail-slot-collapsed { margin-left: 6px; }
 [data-density="comfortable"] :is(.branch-sidebar-expand, .detail-sidebar-expand) { width: 22px; height: 22px; margin-inline: 2px; border-radius: 3px; }
-[data-density="comfortable"] .branch-sidebar-collapse { width: 26px; height: 26px; border: 0; border-radius: 6px; }
+[data-density="comfortable"] .branch-sidebar-collapse { width: var(--history-filter-height); height: var(--history-filter-height); border: 0; border-radius: 6px; }
 [data-density="comfortable"] .branch-repo-list { padding: 0 0 3px; }
 [data-density="comfortable"] .branch-section-title { margin: 3px 6px 1px; height: auto; min-height: 23px; border: 0; border-radius: 4px; background: color-mix(in srgb, var(--versiondock-text) 4%, transparent); }
 [data-density="comfortable"] .branch-section-toggle { height: auto; min-height: 23px; padding: 2px 8px; border-radius: 4px; box-sizing: border-box; }
@@ -73,9 +73,10 @@
 [data-density="comfortable"] .repo-strip-bar { width: 4px; min-width: 4px; flex-basis: 4px; border-radius: 999px; }
 
 /* Search controls and their menus. Portals inherit density from the document. */
-[data-density="comfortable"] .history-filters { padding: 0 6px 6px 0; flex-basis: auto; height: auto; min-height: 32px; border-bottom: 0; }
-[data-density="comfortable"] .history-filters :is(.filter-button, .history-path-chip, .more-button, .history-clear-filters) { border-radius: 6px; }
-[data-density="comfortable"] :is(.filter-popover, .history-more .more-menu) { border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .28); }
+[data-density="comfortable"] :is(.history-workspace, .compare-workspace) { --history-filter-height: calc(28px * var(--versiondock-ui-font-scale, 1)); }
+[data-density="comfortable"] .branch-search[data-control-size] { border-radius: 6px; }
+[data-density="comfortable"] .history-filters { padding: 0 6px 6px 0; flex-basis: auto; height: auto; min-height: calc(var(--history-filter-height) + 6px); border-bottom: 0; }
+[data-density="comfortable"] .history-filters :is(.commit-search, .filter-button, .history-path-chip, .more-button, .history-clear-filters) { border-radius: 6px; }
 
 /* File lists and commit details retain their operations and selected state. */
 [data-density="comfortable"] :is(.detail-files-title, .changes-files-toolbar) { padding: 5px 10px 6px; min-height: 32px; flex-basis: auto; height: auto; border-bottom: 0; position: relative; }
@@ -100,7 +101,7 @@
 [data-density="comfortable"] [data-density-repository] { margin-top: 6px; border-bottom: 0 !important; }
 [data-density="comfortable"] [data-density-repository]:first-child { margin-top: 4px; }
 [data-density="comfortable"] [data-density-section] { margin: 4px 6px 2px; border-left: 3px solid var(--versiondock-selection-border); }
-[data-density="comfortable"] .branch-sidebar-header { height: auto; min-height: 32px; gap: 4px; padding: 5px 6px 1px; border-bottom: 0; }
+[data-density="comfortable"] .branch-sidebar-header { height: auto; min-height: calc(var(--history-filter-height) + 12px); gap: 4px; padding: 6px; border-bottom: 0; }
 [data-density="comfortable"] .inner-resize-handle::after { content: ''; position: absolute; top: 4px; bottom: 4px; left: 2px; width: 2px; border-radius: 2px; background: transparent; }
 [data-density="comfortable"] .inner-resize-handle:hover::after { background: var(--versiondock-selection-border); }
 [data-density="comfortable"] .compare-workspace { border: 1px solid var(--versiondock-border); border-radius: var(--density-card-radius); box-sizing: border-box; overflow: hidden; }

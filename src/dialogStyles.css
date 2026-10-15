@@ -3,7 +3,7 @@
   --dialog-overlay: rgba(0, 0, 0, .22);
   --dialog-shadow: 0 18px 54px rgba(0, 0, 0, .24), 0 4px 12px rgba(0, 0, 0, .12);
   --dialog-radius: 12px;
-  --dialog-input-border: color-mix(in srgb, var(--versiondock-text) 18%, var(--versiondock-border));
+  --dialog-input-border: var(--versiondock-control-border);
   --dialog-choice-border: color-mix(in srgb, var(--versiondock-text) 24%, var(--versiondock-border));
   --dialog-width-small: 420px;
   --dialog-width-medium: 580px;

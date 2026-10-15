@@ -1,9 +1,9 @@
 /* One action-button surface. Page classes may position buttons, but do not repaint them. */
 .vd-button[data-variant] {
-  --button-foreground: var(--versiondock-text);
-  --button-background: var(--versiondock-surface-alt);
-  --button-border: var(--versiondock-border);
-  --button-hover: var(--versiondock-hover);
+  --button-foreground: var(--vscode-button-secondaryForeground);
+  --button-background: var(--vscode-button-secondaryBackground);
+  --button-border: var(--versiondock-control-border);
+  --button-hover: var(--vscode-button-secondaryHoverBackground);
   box-sizing: border-box;
   position: relative;
   display: inline-flex;
@@ -27,17 +27,24 @@
 }
 .vd-button[data-variant="primary"] {
   --button-foreground: var(--vscode-button-foreground, #fff);
-  --button-background: var(--versiondock-accent-bg);
-  --button-border: transparent;
+  --button-background: var(--vscode-button-background);
+  --button-border: var(--versiondock-primary-button-border);
   --button-hover: var(--vscode-button-hoverBackground);
 }
 .vd-button:is([data-variant="ghost"], [data-variant="link"]) {
+  --button-foreground: var(--versiondock-text);
   --button-background: transparent;
   --button-border: transparent;
+  --button-hover: var(--versiondock-hover);
 }
 .vd-button[data-variant="link"] { --button-foreground: var(--versiondock-accent); padding-inline: 4px; }
 .vd-button[data-danger] { --button-foreground: var(--versiondock-danger); --button-hover: color-mix(in srgb, var(--versiondock-danger) 14%, var(--versiondock-surface)); }
+.vd-button[data-danger][data-variant="secondary"] {
+  --button-background: var(--versiondock-surface-alt);
+  --button-border: var(--versiondock-control-border);
+}
 .vd-button[data-danger][data-variant="primary"] {
+  --button-border: transparent;
   --button-background: var(--versiondock-danger);
   --button-foreground: #fff;
   --button-hover: color-mix(in srgb, var(--versiondock-danger) 88%, var(--versiondock-text));

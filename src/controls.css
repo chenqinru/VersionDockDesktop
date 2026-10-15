@@ -1,15 +1,20 @@
 /* Shared selection controls. Page rules only own their placement and available width. */
 .vd-select { position: relative; min-width: 0; }
-.vd-select-trigger[data-control-size] { display: flex; align-items: center; justify-content: space-between; gap: 8px; box-sizing: border-box; width: 100%; min-width: 0; height: calc(28px * var(--versiondock-ui-font-scale, 1)); padding: 4px 8px; border: 1px solid var(--versiondock-border); border-radius: 4px; background: var(--versiondock-input); color: var(--versiondock-text); font: inherit; font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1)); text-align: left; }
+.vd-select-trigger[data-control-size] { display: flex; align-items: center; justify-content: space-between; gap: 8px; box-sizing: border-box; width: 100%; min-width: 0; height: calc(28px * var(--versiondock-ui-font-scale, 1)); padding: 4px 8px; border-radius: 4px; font: inherit; font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1)); text-align: left; }
 .vd-select-trigger[data-control-size="xs"] { height: calc(24px * var(--versiondock-ui-font-scale, 1)); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .vd-select-trigger[data-control-size="md"] { height: calc(36px * var(--versiondock-ui-font-scale, 1)); padding-inline: 10px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
-.vd-select-trigger[data-control-size]:where(:not(:disabled)):hover { background: var(--versiondock-input); border-color: var(--versiondock-control-hover-border); }
-.vd-select-trigger[data-control-size]:is(:focus-visible, [aria-expanded="true"]) { border-color: var(--versiondock-control-focus-border); outline: 1px solid var(--versiondock-control-focus-border); outline-offset: -1px; box-shadow: none; }
+.vd-select-trigger[data-control-size], .history-filters .filter-button { border: 1px solid var(--versiondock-control-border); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); }
+.vd-select-trigger[data-control-size]:where(:not(:disabled)):hover, .history-filters .filter-button:where(:not(:disabled)):hover { background: var(--vscode-dropdown-background); border-color: var(--versiondock-control-hover-border); }
+.history-filters .filter-button[data-filter-active="true"] { background: var(--versiondock-item-selected-background); border-color: var(--versiondock-item-selected-border); color: var(--versiondock-item-selected-foreground); }
+.history-filters .filter-button[data-filter-active="true"]:where(:not(:disabled)):hover { background: var(--versiondock-item-selected-hover-background); }
+.vd-select-trigger[data-control-size]:is(:focus-visible, [aria-expanded="true"]), .history-filters .filter-button:is(:focus-visible, [aria-expanded="true"]) { border-color: var(--versiondock-control-focus-border); outline: 1px solid var(--versiondock-control-focus-border); outline-offset: -1px; box-shadow: none; }
 .vd-select-trigger[data-control-size][data-invalid="true"] { border-color: var(--versiondock-danger); outline-color: var(--versiondock-danger); }
 .vd-select-trigger[data-control-size]:disabled { opacity: .55; }
 .vd-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vd-select-trigger > .codicon { flex: 0 0 auto; font-size: 12px; color: var(--versiondock-muted); }
-.vd-select-menu { position: absolute; z-index: 200; top: calc(100% + 4px); right: 0; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; overflow: auto; border: 1px solid var(--versiondock-border); border-radius: 6px; background: var(--versiondock-surface); color: var(--versiondock-text); box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }
+.vd-select-menu { position: absolute; z-index: 200; top: calc(100% + 4px); right: 0; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; overflow: auto; }
+/* History pickers keep list/calendar geometry while sharing the dropdown surface. */
+.vd-select-menu, .filter-popover, .history-more .more-menu { border: 1px solid var(--versiondock-control-border); border-radius: 6px; background: var(--versiondock-surface); color: var(--versiondock-text); box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }
 .vd-select-menu[data-placement="above"] { top: auto; bottom: calc(100% + 4px); }
 .vd-select-menu > .vd-select-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; box-sizing: border-box; width: 100%; min-height: calc(26px * var(--versiondock-ui-font-scale, 1)); padding: 4px 8px; border-radius: 3px; text-align: left; font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1)); }
 .vd-select-option > span { min-width: 0; overflow-wrap: anywhere; }
