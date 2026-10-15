@@ -15,7 +15,8 @@
   --versiondock-border-soft: #303234;
   --versiondock-text: #BBBEBF;
   --versiondock-muted: #8C8C8C;
-  --versiondock-faint: #555555;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #555555;
   --versiondock-accent: #3994BC;
   --versiondock-accent-bg: #297AA0;
   --versiondock-success: #72C892;
@@ -57,7 +58,7 @@
   --vscode-charts-purple: #b180d7;
   --vscode-list-inactiveSelectionBackground: var(--versiondock-selection-inactive-background);
   --vscode-list-inactiveSelectionForeground: var(--versiondock-selection-foreground);
-  --vscode-textLink-foreground: var(--versiondock-accent);
+  --vscode-textLink-foreground: color-mix(in srgb, var(--versiondock-accent) 60%, var(--versiondock-text));
   --versiondock-badge-background: var(--versiondock-accent-bg);
   --versiondock-badge-foreground: #ffffff;
   --vscode-statusBarItem-remoteBackground: #16825d;
@@ -104,31 +105,33 @@
   --versiondock-border: #4e5864;
   --versiondock-border-soft: #3f4752;
   --versiondock-text: #adbac7;
-  --versiondock-muted: #768390;
-  --versiondock-faint: #545d68;
+  --versiondock-muted: #a0adba;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #545d68;
   --versiondock-accent: #539bf5;
   --versiondock-accent-bg: #316dca;
+  --vscode-textLink-foreground: color-mix(in srgb, var(--versiondock-accent) 40%, var(--versiondock-text));
   --versiondock-success: #57ab5a;
   --versiondock-danger: #f47067;
   --versiondock-menu-danger-foreground: #fa7c73;
   --versiondock-warning: #c69026;
   --versiondock-input: #22272e;
   --vscode-titleBar-activeBackground: #22272e;
-  --vscode-titleBar-activeForeground: #768390;
+  --vscode-titleBar-activeForeground: var(--versiondock-muted);
   --vscode-titleBar-border: #444c56;
   --vscode-statusBar-background: #22272e;
-  --vscode-statusBar-foreground: #768390;
+  --vscode-statusBar-foreground: var(--versiondock-muted);
   --vscode-statusBar-border: #444c56;
   --vscode-statusBarItem-hoverBackground: #adbac714;
   --vscode-statusBarItem-activeBackground: #adbac71f;
   --vscode-button-background: #347d39;
   --vscode-button-foreground: #ffffff;
-  --vscode-button-hoverBackground: #46954a;
+  --vscode-button-hoverBackground: #3a833f;
   --vscode-button-border: transparent;
   --vscode-button-secondaryBackground: #3d444d;
   --vscode-button-secondaryForeground: #adbac7;
   --vscode-button-secondaryBorder: #adbac726;
-  --vscode-button-secondaryHoverBackground: #444c56;
+  --vscode-button-secondaryHoverBackground: #404853;
   --vscode-input-background: #22272e;
   --vscode-input-foreground: #adbac7;
   --vscode-input-border: #444c56;
@@ -146,8 +149,9 @@
   --versiondock-border: #49515e;
   --versiondock-border-soft: #3b424d;
   --versiondock-text: #abb2bf;
-  --versiondock-muted: #7f848e;
-  --versiondock-faint: #5c6370;
+  --versiondock-muted: #a8adb7;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #5c6370;
   --versiondock-accent: #61afef;
   --versiondock-accent-bg: #4d78cc;
   --versiondock-success: #98c379;
@@ -188,8 +192,9 @@
   --versiondock-border: #51556d;
   --versiondock-border-soft: #414559;
   --versiondock-text: #f8f8f2;
-  --versiondock-muted: #9ea3c0;
-  --versiondock-faint: #6272a4;
+  --versiondock-muted: #b4b9d6;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #6272a4;
   --versiondock-accent: #bd93f9;
   --versiondock-accent-bg: #9575cd;
   --versiondock-success: #50fa7b;
@@ -230,8 +235,9 @@
   --versiondock-border: #566178;
   --versiondock-border-soft: #434c5e;
   --versiondock-text: #d8dee9;
-  --versiondock-muted: #9aa5b8;
-  --versiondock-faint: #616e88;
+  --versiondock-muted: #b4bfd2;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #616e88;
   --versiondock-accent: #88c0d0;
   --versiondock-accent-bg: #5e81ac;
   --versiondock-success: #a3be8c;
@@ -272,8 +278,9 @@
   --versiondock-border: #505050;
   --versiondock-border-soft: #3d3d3d;
   --versiondock-text: #cccccc;
-  --versiondock-muted: #969696;
-  --versiondock-faint: #6e6e6e;
+  --versiondock-muted: #a9a9a9;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #6e6e6e;
   --versiondock-accent: #3794ff;
   --versiondock-accent-bg: #0e639c;
   --versiondock-success: #73c991;
@@ -318,7 +325,8 @@
   --versiondock-border-soft: #dcdfe4;
   --versiondock-text: #202020;
   --versiondock-muted: #606060;
-  --versiondock-faint: #999999;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #999999;
   --versiondock-accent: #0069CC;
   --versiondock-accent-bg: #0069CC;
   --versiondock-success: #587c0c;
@@ -364,7 +372,8 @@
   --versiondock-border-soft: #d4d6db;
   --versiondock-text: #333333;
   --versiondock-muted: #616161;
-  --versiondock-faint: #8a8a8a;
+  --versiondock-faint: var(--versiondock-muted);
+  --vscode-disabledForeground: #8a8a8a;
   --versiondock-accent: #006ab1;
   --versiondock-accent-bg: #007acc;
   --versiondock-success: #16825d;
@@ -395,6 +404,22 @@
   --vscode-dropdown-background: #ffffff;
   --vscode-dropdown-border: #cecece;
   --vscode-dropdown-foreground: #616161;
+}
+
+/* Accessible action pairs are local to each palette, including theme previews.
+   Semantic danger text stays bright; filled controls use a separate red surface. */
+:root, .theme-preview-surface {
+  --vscode-descriptionForeground: var(--versiondock-muted);
+  --vscode-textLink-foreground: color-mix(in srgb, var(--versiondock-accent) 60%, var(--versiondock-text));
+  --versiondock-danger-button-background: color-mix(in srgb, var(--versiondock-danger) 70%, #000000);
+  --versiondock-danger-button-foreground: #ffffff;
+  --versiondock-danger-button-hover-background: color-mix(in srgb, var(--versiondock-danger-button-background) 88%, #000000);
+  --versiondock-danger-button-pressed-background: color-mix(in srgb, var(--versiondock-danger-button-background) 78%, #000000);
+  --versiondock-danger-button-border: color-mix(in srgb, var(--versiondock-danger-button-foreground) 28%, var(--versiondock-danger-button-background));
+}
+:root:is([data-theme="light"], [data-theme="light2026"]),
+.theme-preview-surface:is([data-theme="light"], [data-theme="light2026"]) {
+  --versiondock-danger-button-background: var(--versiondock-danger);
 }
 
 /* Controls have their own interaction semantics; list selection stays independent.

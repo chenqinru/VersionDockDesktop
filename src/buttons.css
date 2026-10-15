@@ -4,6 +4,7 @@
   --button-background: var(--vscode-button-secondaryBackground);
   --button-border: var(--versiondock-control-border);
   --button-hover: var(--vscode-button-secondaryHoverBackground);
+  --button-pressed: color-mix(in srgb, var(--button-hover) 90%, var(--button-background));
   box-sizing: border-box;
   position: relative;
   display: inline-flex;
@@ -37,24 +38,25 @@
   --button-border: transparent;
   --button-hover: var(--versiondock-hover);
 }
-.vd-button[data-variant="link"] { --button-foreground: var(--versiondock-accent); padding-inline: 4px; }
-.vd-button[data-danger] { --button-foreground: var(--versiondock-danger); --button-hover: color-mix(in srgb, var(--versiondock-danger) 14%, var(--versiondock-surface)); }
+.vd-button[data-variant="link"] { --button-foreground: var(--vscode-textLink-foreground); padding-inline: 4px; }
+.vd-button[data-danger] { --button-foreground: var(--versiondock-menu-danger-foreground); --button-hover: var(--versiondock-menu-danger-hover-background); }
 .vd-button[data-danger][data-variant="secondary"] {
   --button-background: var(--versiondock-surface-alt);
   --button-border: var(--versiondock-control-border);
 }
 .vd-button[data-danger][data-variant="primary"] {
-  --button-border: transparent;
-  --button-background: var(--versiondock-danger);
-  --button-foreground: #fff;
-  --button-hover: color-mix(in srgb, var(--versiondock-danger) 88%, var(--versiondock-text));
+  --button-border: var(--versiondock-danger-button-border);
+  --button-background: var(--versiondock-danger-button-background);
+  --button-foreground: var(--versiondock-danger-button-foreground);
+  --button-hover: var(--versiondock-danger-button-hover-background);
+  --button-pressed: var(--versiondock-danger-button-pressed-background);
 }
 .vd-button[data-size="xs"] { min-height: calc(22px * var(--versiondock-ui-font-scale, 1)); padding: 1px 6px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); gap: 4px; }
 .vd-button[data-size="md"] { min-height: calc(32px * var(--versiondock-ui-font-scale, 1)); padding: 5px 14px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .vd-button[data-variant]:not(:disabled):is(:hover, :focus-visible) { color: var(--button-foreground); background: var(--button-hover); }
 .vd-button[data-variant="link"]:not(:disabled):is(:hover, :focus-visible) { text-decoration: underline; }
 .vd-button[data-variant="ghost"][aria-pressed="true"] { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); }
-.vd-button[data-variant]:not(:disabled):active { background: color-mix(in srgb, var(--button-hover) 80%, var(--button-foreground)); }
+.vd-button[data-variant]:not(:disabled):active { background: var(--button-pressed); }
 .vd-button[data-variant]:focus-visible { outline: 2px solid var(--versiondock-control-focus-border); outline-offset: 2px; }
 .vd-button[data-variant]:disabled { opacity: .45; cursor: default; }
 .vd-button > .codicon, .vd-button-loading-label > .codicon { flex-shrink: 0; font-size: 13px; }
