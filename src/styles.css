@@ -213,6 +213,19 @@
   --vscode-textCodeBlock-background: rgba(0, 0, 0, 0.035);
 }
 
+/* Controls have their own interaction semantics; list selection stays independent.
+   Define aliases locally in previews so they resolve against the preview's palette. */
+:root, .theme-preview-surface {
+  --versiondock-control-focus-border: color-mix(in srgb, var(--versiondock-muted) 65%, var(--versiondock-border));
+  --versiondock-control-hover-border: color-mix(in srgb, var(--versiondock-control-focus-border) 65%, var(--versiondock-border));
+  --versiondock-control-checked-background: var(--versiondock-accent-bg);
+  --versiondock-control-checked-foreground: var(--vscode-button-foreground);
+}
+:root:is([data-theme="githubDarkDimmed"], [data-theme="oneDarkPro"], [data-theme="dracula"], [data-theme="nord"], [data-theme="dark"], [data-theme="light"]),
+.theme-preview-surface:is([data-theme="githubDarkDimmed"], [data-theme="oneDarkPro"], [data-theme="dracula"], [data-theme="nord"], [data-theme="dark"], [data-theme="light"]) {
+  --versiondock-control-focus-border: var(--versiondock-accent);
+}
+
 /* File change semantics are shared by every panel and bound locally in previews. */
 :root, .theme-preview-surface {
   --versiondock-change-added: var(--versiondock-success);
@@ -6546,7 +6559,7 @@ button.danger:not(:disabled):hover,
   background: var(--versiondock-icon-pressed-background) !important;
 }
 .icon-button:focus-visible {
-  outline: 1px solid var(--versiondock-selection-border);
+  outline: 1px solid var(--versiondock-control-focus-border);
   outline-offset: -1px;
 }
 .icon-button:not(.split-button-more):disabled {
@@ -6858,13 +6871,13 @@ button.danger:not(:disabled):hover,
 .output-error-banner { display: flex; align-items: center; gap: 6px; padding: 4px 10px; color: var(--versiondock-warning, #d29922); font-size: 12px; }
 .output-storage-error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
-/* Setting values and defaults share the application's neutral interaction colors. */
+/* Metadata stays muted; modified-setting indicators use the theme accent. */
 .setting-metadata { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 3px; }
 .setting-default { color: var(--versiondock-muted); font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1)); max-width: min(100%, 320px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setting-modified-badge, .settings-category-modified-count { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px; background: var(--versiondock-surface-alt); color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); padding: 1px 5px; line-height: 16px; }
 .settings-category-modified-count { margin-left: auto; min-width: 16px; }
 .setting-reset { flex-shrink: 0; width: 22px; height: 22px; color: var(--versiondock-muted); }
-.settings-row[data-setting-modified="true"] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--versiondock-muted) 40%, transparent); }
+.settings-row[data-setting-modified="true"] { box-shadow: inset 2px 0 0 var(--versiondock-accent); }
 .settings-modified-filter { display: flex; flex-shrink: 0; align-items: center; gap: 7px; width: 100%; margin: 9px 0 3px; padding: 7px 10px; border: 1px solid var(--versiondock-border-soft); border-radius: 6px; background: transparent; color: var(--versiondock-muted); text-align: left; font: inherit; cursor: pointer; }
 .settings-modified-filter:hover, .settings-modified-filter[aria-pressed="true"] { background: var(--versiondock-surface-alt); color: var(--versiondock-text); }
 .settings-modified-filter:focus-visible { outline: 1px solid var(--versiondock-muted); outline-offset: 2px; }

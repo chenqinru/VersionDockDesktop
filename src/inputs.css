@@ -20,8 +20,8 @@
 .vd-input[data-control-size="xs"] { --input-height: calc(24px * var(--versiondock-ui-font-scale, 1)); padding: 2px 6px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .vd-input[data-control-size="md"] { --input-height: calc(36px * var(--versiondock-ui-font-scale, 1)); padding: 6px 10px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .vd-input[data-control-size]::placeholder { color: var(--versiondock-muted); opacity: 1; }
-.vd-input[data-control-size]:where(:not(:disabled):not([readonly])):hover { border-color: var(--versiondock-selection-border); }
-.vd-input[data-control-size]:focus-visible { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; box-shadow: none; }
+.vd-input[data-control-size]:where(:not(:disabled):not([readonly])):hover { border-color: var(--versiondock-control-hover-border); }
+.vd-input[data-control-size]:focus-visible { border-color: var(--versiondock-control-focus-border); outline: 1px solid var(--versiondock-control-focus-border); outline-offset: -1px; box-shadow: none; }
 .vd-input[data-control-size][aria-invalid="true"] { border-color: var(--versiondock-danger); }
 .vd-input[data-control-size][aria-invalid="true"]:focus-visible { outline-color: var(--versiondock-danger); }
 .vd-input[data-control-size][readonly] { background: var(--versiondock-surface-alt); }
@@ -41,8 +41,8 @@
 .vd-search-input[data-control-size] { box-sizing: border-box; display: flex; align-items: center; gap: 5px; min-width: 0; height: calc(28px * var(--versiondock-ui-font-scale, 1)); padding: 0 6px; border: 1px solid var(--versiondock-border); border-radius: 4px; background: var(--versiondock-input); }
 .vd-search-input[data-control-size="xs"] { height: calc(24px * var(--versiondock-ui-font-scale, 1)); }
 .vd-search-input[data-control-size="md"] { height: calc(36px * var(--versiondock-ui-font-scale, 1)); }
-.vd-search-input[data-control-size]:where(:not(:has(input:disabled)):not([data-readonly])):hover { border-color: var(--versiondock-selection-border); }
-.vd-search-input[data-control-size]:focus-within { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
+.vd-search-input[data-control-size]:where(:not(:has(input:disabled)):not([data-readonly])):hover { border-color: var(--versiondock-control-hover-border); }
+.vd-search-input[data-control-size]:focus-within { border-color: var(--versiondock-control-focus-border); outline: 1px solid var(--versiondock-control-focus-border); outline-offset: -1px; }
 .vd-search-input[data-control-size][data-invalid="true"] { border-color: var(--versiondock-danger); }
 .vd-search-input[data-control-size][data-invalid="true"]:focus-within { outline-color: var(--versiondock-danger); }
 .vd-search-input:is([data-disabled], :has(input:disabled)) { opacity: .55; }

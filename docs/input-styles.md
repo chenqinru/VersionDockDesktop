@@ -22,7 +22,7 @@
 ## 公共状态与尺寸
 
 - `controlSize="xs" | "sm" | "md"` 控制外观，默认 `sm`，高度分别为 24、28、36px，随应用字号缩放。原生 `size` 仍保留其原有含义。
-- 悬停和聚焦边框使用主题灰色 `--versiondock-selection-border`，与现有弹窗一致；错误状态保持主题错误色。
+- 悬停和聚焦使用控件主题变量 `--versiondock-control-hover-border` / `--versiondock-control-focus-border`：2026 深浅主题保持中性焦点，其余主题跟随各自强调色；错误状态保持主题错误色。
 - `invalid` 或 `aria-invalid` 控制错误外观；`readOnly`、`disabled` 使用原生行为，保留 `fieldset` 的禁用继承。
 - `Input`、`Textarea` 和 `SearchInput` 透传原生属性、事件和 ref，不管理业务值。多行输入保留原生 `rows`，公共最小高度为 72px；页面可按内容用途调整高度。
 - `FormField` 为一个输入控件生成稳定 id，关联标签、说明和错误，合并控件已有的 `aria-describedby`。需要显式 id 时，将同一个 id 传给字段和控件；一个字段只放一个主要输入控件，选择目录等附属按钮可以放在其中。

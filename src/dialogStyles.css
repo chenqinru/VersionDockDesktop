@@ -47,7 +47,7 @@
   border-color: var(--versiondock-selection-border); outline: 0;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--versiondock-text) 7%, transparent);
 }
-.vd-dialog button:not(.vd-button):where(:not(.vd-select-trigger):not(.vd-select-option)):focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
+.vd-dialog button:not(.vd-button):where(:not(.vd-select-trigger):not(.vd-select-option)):focus-visible { outline: 2px solid var(--versiondock-control-focus-border); outline-offset: 2px; }
 .vd-dialog > footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding: 0; border: 0; }
 .vd-dialog button:disabled { opacity: .45; cursor: default; }
 .vd-dialog .dialog-error { margin: 12px 0 0; color: var(--versiondock-danger); }

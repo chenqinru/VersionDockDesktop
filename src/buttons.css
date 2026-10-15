@@ -48,7 +48,7 @@
 .vd-button[data-variant="link"]:not(:disabled):is(:hover, :focus-visible) { text-decoration: underline; }
 .vd-button[data-variant="ghost"][aria-pressed="true"] { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); }
 .vd-button[data-variant]:not(:disabled):active { background: color-mix(in srgb, var(--button-hover) 80%, var(--button-foreground)); }
-.vd-button[data-variant]:focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
+.vd-button[data-variant]:focus-visible { outline: 2px solid var(--versiondock-control-focus-border); outline-offset: 2px; }
 .vd-button[data-variant]:disabled { opacity: .45; cursor: default; }
 .vd-button > .codicon, .vd-button-loading-label > .codicon { flex-shrink: 0; font-size: 13px; }
 .vd-button-loading-label { display: inline-flex; align-items: center; justify-content: center; gap: inherit; opacity: 0; }
