@@ -38,12 +38,12 @@
 .vd-dialog > p { color: var(--versiondock-muted); font-size: inherit; line-height: 1.65; margin: 0 0 14px; overflow-wrap: anywhere; }
 .vd-dialog label { gap: 8px; font-size: inherit; }
 .vd-dialog label > span { color: var(--versiondock-text); font-weight: 500; }
-.vd-dialog :is(input, textarea):where(:not([type="checkbox"]):not([type="radio"])) {
+.vd-dialog :is(input, textarea):where(:not(.vd-input):not([type="checkbox"]):not([type="radio"])) {
   min-height: 36px; padding: 8px 10px; background: var(--versiondock-input); color: var(--versiondock-text);
   border: 1px solid var(--dialog-input-border); border-radius: 7px; outline: 0; font-size: inherit; line-height: 1.45;
   transition: border-color .12s ease, box-shadow .12s ease;
 }
-.vd-dialog :is(input, textarea):where(:not([type="checkbox"]):not([type="radio"])):focus-visible {
+.vd-dialog :is(input, textarea):where(:not(.vd-input):not([type="checkbox"]):not([type="radio"])):focus-visible {
   border-color: var(--versiondock-selection-border); outline: 0;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--versiondock-text) 7%, transparent);
 }
@@ -113,7 +113,7 @@
 .vd-dialog.clone-dialog.clone-dialog-accounts { gap: 8px; }
 .vd-dialog.clone-dialog.clone-dialog-accounts > footer { margin-top: 0; }
 .vd-dialog.clone-dialog-accounts .clone-fields label { gap: 4px; }
-.vd-dialog.clone-dialog-accounts .clone-fields input:not([type="checkbox"]) {
+.vd-dialog.clone-dialog-accounts .clone-fields input:where(:not(.vd-input)):not([type="checkbox"]) {
   min-height: 32px;
   height: 32px;
   padding: 5px 8px;

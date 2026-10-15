@@ -1,3 +1,5 @@
+import { FormField } from './FormField';
+import { Input } from './Input';
 import { Button } from './Button';
 import { useCallback, useRef, useState } from 'react';
 import type { RemoteRepository } from '../bindings/generated';
@@ -134,18 +136,27 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
           setProviderAccountId(accountId);
         }} />}
         <fieldset className="clone-fields" disabled={locked} hidden={git && source === 'account' && accountFormOpen}>
-        <label><span>{t(git ? 'Git URL' : 'SVN URL')}</span><input autoFocus={!git || source === 'url'} value={url} placeholder={git ? 'https://github.com/user/repository.git' : 'https://svn.example.com/project/trunk'} onChange={(event) => changeUrl(event.target.value)} /></label>
-        {git && source === 'url' && <small>{t('SSH URLs use your Git SSH configuration. Platform accounts authenticate HTTPS repositories.')}</small>}
+        <FormField label={t(git ? 'Git URL' : 'SVN URL')} description={git && source === 'url' ? t('SSH URLs use your Git SSH configuration. Platform accounts authenticate HTTPS repositories.') : undefined}>
+          <Input controlSize="md" autoFocus={!git || source === 'url'} value={url} placeholder={git ? 'https://github.com/user/repository.git' : 'https://svn.example.com/project/trunk'} onChange={(event) => changeUrl(event.target.value)} />
+        </FormField>
         <div className="checkout-destination-fields">
-        <label><span>{t('Parent folder')}</span><div className="dialog-input-row"><input value={parent} onChange={(event) => setParent(event.target.value)} /><Button type="button"  onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}><Codicon name="folder-opened" /><span>{t('Browse…')}</span></Button></div></label>
-        <label><span>{t('Folder name')}</span><input value={targetName} onChange={(event) => { inferredNameRef.current = ''; setTargetName(event.target.value); }} /></label>
+        <FormField label={t('Parent folder')}>
+          <div className="dialog-input-row"><Input controlSize="md" value={parent} onChange={(event) => setParent(event.target.value)} /><Button type="button"  onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}><Codicon name="folder-opened" /><span>{t('Browse…')}</span></Button></div>
+        </FormField>
+        <FormField label={t('Folder name')}>
+          <Input controlSize="md" value={targetName} onChange={(event) => { inferredNameRef.current = ''; setTargetName(event.target.value); }} />
+        </FormField>
         </div>
         {validationError && <p className="dialog-error">{validationError}</p>}
         {!git && <>
           <label className="dialog-check"><SelectionCheckbox label={t('SVN authentication')} checked={showAuthentication} disabled={locked} onChange={() => setShowAuthentication(value => !value)} />{t('SVN authentication')}</label>
           {showAuthentication && <div className="checkout-auth-fields">
-            <label><span>{t('Username')}</span><input value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-            <label><span>{t('Password')}</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <FormField label={t('Username')}>
+              <Input controlSize="md" value={username} onChange={(event) => setUsername(event.target.value)} />
+            </FormField>
+            <FormField label={t('Password')}>
+              <Input controlSize="md" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            </FormField>
           </div>}
         </>}
         {(!git || source === 'url') && <label className="dialog-check"><SelectionCheckbox label={t('Open in New Window')} checked={openInNewWindow} disabled={locked} onChange={() => setOpenInNewWindow(value => !value)} />{t('Open in New Window')}</label>}

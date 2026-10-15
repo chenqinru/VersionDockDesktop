@@ -1,3 +1,4 @@
+import { SearchInput } from './SearchInput';
 import { IconButton } from './IconButton';
 import { useState, useMemo } from 'react';
 import { Codicon } from './Codicon';
@@ -122,21 +123,15 @@ export function WorkspaceChooser() {
               {recent.length > 0 && <span className="recent-count">{recent.length}</span>}
             </div>
             {recent.length > 3 && (
-              <div className="recent-search-wrap">
-                <Codicon name="search" />
-                <input
-                  type="text"
-                  placeholder={t('Search recent workspaces...')}
-                  value={filterText}
-                  onChange={(e) => setFilterText(e.target.value)}
-                  className="recent-search-input"
-                />
-                {filterText && (
-                  <IconButton type="button" className="recent-search-clear" title={t('Clear')} onClick={() => setFilterText('')}>
-                    <Codicon name="close" />
-                  </IconButton>
-                )}
-              </div>
+              <SearchInput
+                containerClassName="recent-search-wrap"
+                placeholder={t('Search recent workspaces...')}
+                aria-label={t('Search recent workspaces...')}
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                clearLabel={t('Clear')}
+                onClear={() => setFilterText('')}
+              />
             )}
           </div>
 

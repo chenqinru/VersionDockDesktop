@@ -1,17 +1,12 @@
 /* Git log parity layer: compact geometry and interaction states from the plugin reference. */
 .history-workspace { min-width: 0; container: history-workspace / inline-size; background: var(--versiondock-bg); user-select: none; -webkit-user-select: none; }
 .history-filters { display: flex; align-items: center; flex: 0 0 38px; height: 38px; padding: 6px 10px; gap: 6px; box-sizing: border-box; background: var(--versiondock-bg); border-bottom: 1px solid var(--versiondock-border); }
-.history-filters .commit-search { display: flex; align-items: center; gap: 5px; width: auto; min-width: 130px; flex: 1.2 1 180px; height: 26px; padding: 0 6px; background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; }
-.history-filters .commit-search > .codicon { color: var(--versiondock-muted); }
-.history-filters .commit-search input { min-width: 0; flex: 1; padding: 0; border: 0; outline: 0; background: transparent; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.history-filters .commit-search { width: auto; min-width: 130px; flex: 1.2 1 180px; }
 .history-filters .filter-anchor { min-width: 100px; height: 26px; flex: 1 1 150px; }
 .history-filters .repo-filter-anchor { flex: 1 1 140px; }
 .history-filters .branch-filter-anchor { min-width: 110px; flex: 1.1 1 160px; }
 .history-filters .date-filter-anchor { width: auto; min-width: 160px; max-width: none; flex: 1.5 1 220px; }
 .history-filters .filter-button { display: flex; align-items: center; white-space: nowrap; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); width: 100%; min-width: 0; height: 26px; padding: 0 8px; gap: 5px; color: var(--versiondock-muted); border: 1px solid var(--versiondock-border); background: var(--versiondock-input); border-radius: 4px; }
-.history-filters .commit-search button { width: 18px; height: 18px; min-width: 0; min-height: 0; margin: 0; padding: 0; border: none; background: transparent; color: var(--versiondock-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; line-height: 1; }
-.history-filters .commit-search button:hover { color: var(--versiondock-text); background: transparent; border: none; }
-.history-filters .commit-search button .codicon { font-size: 10px; }
 .history-path-chip { min-width: 0; max-width: 260px; height: 26px; flex: 0 1 auto; display: flex; align-items: center; gap: 5px; padding: 0 6px 0 8px; box-sizing: border-box; color: var(--versiondock-text); background: var(--versiondock-input); border: 1px solid var(--versiondock-border); border-radius: 4px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .history-path-chip > .codicon { flex: 0 0 auto; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .history-path-chip > span { flex: 0 0 auto; color: var(--versiondock-muted); }
@@ -46,9 +41,7 @@
 .filter-anchor { position: relative; height: 26px; }
 .filter-popover { position: absolute; z-index: 200; display: flex; flex-direction: column; border: 1px solid var(--versiondock-border); top: 100%; margin-top: 2px; left: 0; width: 100%; min-width: 0; max-height: none; overflow: hidden; background: var(--versiondock-surface-alt); border-color: var(--versiondock-border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
 .filter-anchor > .filter-popover:not(.date-popover) { right: 0; width: auto; min-width: 0; max-width: none; box-sizing: border-box; }
-.popover-search { display: flex; align-items: center; gap: 5px; height: 26px; padding: 5px 8px; border-bottom: 1px solid var(--versiondock-border); box-sizing: border-box; }
-.popover-search .codicon { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); flex: 0 0 auto; }
-.popover-search input { min-width: 0; flex: 1; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--versiondock-text); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.popover-search { width: auto; margin: 5px 8px; }
 .filter-options { padding: 3px 0; max-height: 200px; overflow-y: auto; }
 .history-filters .filter-options label,
 .filter-options label { display: flex; align-items: center; min-height: 26px; height: auto; width: 100%; padding: 5px 10px; gap: 8px; border: 0; border-radius: 0; background: transparent; position: relative; cursor: pointer; box-sizing: border-box; text-align: left; }

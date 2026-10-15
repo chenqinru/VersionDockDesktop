@@ -1,0 +1,53 @@
+.vd-input[data-control-size] {
+  --input-height: calc(28px * var(--versiondock-ui-font-scale, 1));
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--input-height);
+  padding: 4px 8px;
+  border: 1px solid var(--versiondock-border);
+  border-radius: 4px;
+  background: var(--versiondock-input);
+  color: var(--versiondock-text);
+  font-family: inherit;
+  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
+  font-weight: 400;
+  line-height: 1.4;
+  outline: 0;
+  box-shadow: none;
+  transition: border-color .12s ease, background-color .12s ease;
+}
+.vd-input[data-control-size="xs"] { --input-height: calc(24px * var(--versiondock-ui-font-scale, 1)); padding: 2px 6px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.vd-input[data-control-size="md"] { --input-height: calc(36px * var(--versiondock-ui-font-scale, 1)); padding: 6px 10px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.vd-input[data-control-size]::placeholder { color: var(--versiondock-muted); opacity: 1; }
+.vd-input[data-control-size]:where(:not(:disabled):not([readonly])):hover { border-color: var(--versiondock-selection-border); }
+.vd-input[data-control-size]:focus-visible { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; box-shadow: none; }
+.vd-input[data-control-size][aria-invalid="true"] { border-color: var(--versiondock-danger); }
+.vd-input[data-control-size][aria-invalid="true"]:focus-visible { outline-color: var(--versiondock-danger); }
+.vd-input[data-control-size][readonly] { background: var(--versiondock-surface-alt); }
+.vd-input[data-control-size]:disabled { opacity: .55; cursor: default; }
+.vd-textarea[data-control-size] { height: auto; min-height: calc(72px * var(--versiondock-ui-font-scale, 1)); resize: vertical; }
+
+.vd-form-field { display: grid; min-width: 0; gap: 6px; }
+.vd-form-field > .vd-field-label { display: flex; align-items: baseline; gap: 4px; color: var(--versiondock-text); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; }
+.vd-field-required, .vd-field-error { color: var(--versiondock-danger); }
+.vd-field-control { min-width: 0; }
+.vd-field-description, .vd-field-error { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.45; }
+.vd-field-description { color: var(--versiondock-muted); }
+.vd-input-with-action { position: relative; display: flex; align-items: center; min-width: 0; }
+.vd-input-with-action > .vd-input { padding-right: 36px; }
+.vd-input-with-action > .icon-button { position: absolute; right: 6px; }
+
+.vd-search-input[data-control-size] { box-sizing: border-box; display: flex; align-items: center; gap: 5px; min-width: 0; height: calc(28px * var(--versiondock-ui-font-scale, 1)); padding: 0 6px; border: 1px solid var(--versiondock-border); border-radius: 4px; background: var(--versiondock-input); }
+.vd-search-input[data-control-size="xs"] { height: calc(24px * var(--versiondock-ui-font-scale, 1)); }
+.vd-search-input[data-control-size="md"] { height: calc(36px * var(--versiondock-ui-font-scale, 1)); }
+.vd-search-input[data-control-size]:where(:not(:has(input:disabled)):not([data-readonly])):hover { border-color: var(--versiondock-selection-border); }
+.vd-search-input[data-control-size]:focus-within { border-color: var(--versiondock-selection-border); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
+.vd-search-input[data-control-size][data-invalid="true"] { border-color: var(--versiondock-danger); }
+.vd-search-input[data-control-size][data-invalid="true"]:focus-within { outline-color: var(--versiondock-danger); }
+.vd-search-input:is([data-disabled], :has(input:disabled)) { opacity: .55; }
+.vd-search-input[data-readonly] { background: var(--versiondock-surface-alt); }
+.vd-search-input > .codicon { flex-shrink: 0; color: var(--versiondock-muted); font-size: 13px; }
+.vd-search-input > .vd-input[data-control-size] { flex: 1; width: 0; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; outline: 0; box-shadow: none; }
+.vd-search-input > .vd-input:disabled { opacity: 1; }
+.vd-search-input > .icon-button, .vd-input-with-action > .icon-button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; min-width: 0; min-height: 0; padding: 0; border-radius: 3px; }

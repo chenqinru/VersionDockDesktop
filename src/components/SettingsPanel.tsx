@@ -1,3 +1,5 @@
+import { SearchInput } from './SearchInput';
+import { Input } from './Input';
 import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { scrollbarContains } from '../scrollbars/ownership';
@@ -135,31 +137,17 @@ export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelPro
         <div className="settings-layout">
           {/* 左侧侧边栏 */}
           <aside className="settings-sidebar">
-            <div className="settings-search-wrapper">
-              <Codicon name="search" className="settings-search-icon" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                className="settings-search-input"
-                placeholder={t('Search settings...')}
-                value={searchQuery}
-                onChange={(e) => { setInspectedSetting(undefined); setSearchQuery(e.target.value); }}
-                aria-label={t('Search settings...')}
-              />
-              {searchQuery && (
-                <IconButton
-                  type="button"
-                  className="settings-search-clear"
-                  aria-label={t('Clear')}
-                  onClick={() => {
-                    setSearchQuery('');
-                    searchInputRef.current?.focus();
-                  }}
-                >
-                  <Codicon name="close" />
-                </IconButton>
-              )}
-            </div>
+            <SearchInput
+              containerClassName="settings-search-wrapper"
+              ref={searchInputRef}
+              className="settings-search-input"
+              placeholder={t('Search settings...')}
+              value={searchQuery}
+              onChange={(e) => { setInspectedSetting(undefined); setSearchQuery(e.target.value); }}
+              aria-label={t('Search settings...')}
+              clearLabel={t('Clear')}
+              onClear={() => setSearchQuery('')}
+            />
 
             <button type="button" className={`settings-modified-filter ${onlyModified ? 'active' : ''}`} aria-pressed={onlyModified}
               title={t('Show only values that differ from the current defaults.')}
@@ -880,7 +868,7 @@ function IgnoredFoldersSetting({
         <div className="settings-tag-input-row">
           <div className="settings-tag-input-wrapper">
             <Codicon name="folder-opened" className="settings-tag-input-icon" />
-            <input
+            <Input
               type="text"
               className="settings-tag-input"
               placeholder={t('Type folder name and press Enter (e.g. node_modules, dist)...')}
@@ -968,7 +956,7 @@ function SettingProtectedBranches({
         <div className="settings-tag-input-row">
           <div className="settings-tag-input-wrapper">
             <Codicon name="git-branch" className="settings-tag-input-icon" />
-            <input
+            <Input
               type="text"
               className="settings-tag-input"
               placeholder={t('Pattern (e.g. release/*)')}
@@ -1224,7 +1212,7 @@ function ExternalEditorSettings({
             <label className="settings-input-field">
               <span className="settings-label-text">{t('Editor path or command')}</span>
               <div className="editor-input-with-browse">
-                <input
+                <Input
                   aria-label={t('Editor path or command')}
                   value={customExecutable}
                   onChange={(event) => {

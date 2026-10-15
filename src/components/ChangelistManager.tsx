@@ -1,3 +1,4 @@
+import { Input } from './Input';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { IconButton } from './IconButton';
 import { useEffect, useRef, useState } from 'react';
@@ -38,7 +39,7 @@ export function ChangelistManager({ repoId, close }: { repoId: string; close: ()
   const create = async () => { if (!name.trim()) return; await operate(repoId, { type: 'create', name: name.trim() }); setName(''); };
   return <div ref={popover} className="changelist-popover" onClick={(event) => event.stopPropagation()}>
     <header><strong>{t('Changelists')}</strong><IconButton title={t('Close')} onClick={close}><Codicon name="close" /></IconButton></header>
-    <div className="changelist-create"><input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void create(); }} placeholder={t('Changelist name')} /><IconButton title={t('New Changelist')} disabled={!name.trim()} onClick={() => void create()}><Codicon name="add" /></IconButton></div>
+    <div className="changelist-create"><Input value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void create(); }} placeholder={t('Changelist name')} /><IconButton title={t('New Changelist')} disabled={!name.trim()} onClick={() => void create()}><Codicon name="add" /></IconButton></div>
     {entries.map((entry) => (
       <div className="changelist-manage-row" key={entry.id} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, entry }); }}>
         <Codicon name="list-unordered" />

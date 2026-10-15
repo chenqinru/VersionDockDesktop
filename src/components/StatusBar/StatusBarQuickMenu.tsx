@@ -1,3 +1,4 @@
+import { SearchInput } from '../SearchInput';
 import { Children, cloneElement, forwardRef, isValidElement, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Codicon } from '../Codicon';
 import { IconButton } from '../IconButton';
@@ -71,15 +72,11 @@ export const StatusBarQuickMenu = forwardRef<HTMLDivElement, Props>(function Sta
         {onBack && <IconButton title={t('Back')} onClick={onBack}><Codicon name="arrow-left" /></IconButton>}
         <span title={title}>{title}</span>
       </div>
-      <div className="branch-menu-search">
-        <Codicon name="search" className="branch-menu-search-icon" />
-        <input ref={input} aria-label={t('Filter…')} placeholder={t('Filter…')} value={query}
+      <SearchInput containerClassName="branch-menu-search" onClear={() => { onSearch?.(); setQuery(''); setHighlighted(-1); }} ref={input} aria-label={t('Filter…')} placeholder={t('Filter…')} value={query}
           role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${id}-list`}
           aria-activedescendant={highlighted >= 0 ? `${id}-item-${highlighted}` : undefined}
           onChange={(event) => { onSearch?.(); setQuery(event.target.value); setHighlighted(-1); }} />
-        <IconButton title={t('Clear search')} className={query ? '' : 'branch-menu-clear-hidden'} tabIndex={query ? 0 : -1} aria-hidden={!query}
-          onClick={() => { onSearch?.(); setQuery(''); setHighlighted(-1); input.current?.focus(); }}><Codicon name="close" /></IconButton>
-      </div>
+
     </div>
     <div ref={body} id={`${id}-list`} role="listbox" aria-label={title} className="statusbar-popover-content">{content}</div>
     {query && Children.toArray(content).length === 0 && <div className="statusbar-popover-empty">{t('No matches')}</div>}

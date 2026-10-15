@@ -1,3 +1,7 @@
+import { FormField } from './FormField';
+import { SearchInput } from './SearchInput';
+import { Textarea } from './Textarea';
+import { Input } from './Input';
 import { Button } from './Button';
 import { RepositoryTaskProgress } from './RepositoryTaskProgress';
 import { IconButton } from './IconButton';
@@ -918,10 +922,9 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                       </div>
                     )}
 
-                    <div className="provider-form-field">
-                      <label htmlFor="gh-pat-input">{t('Personal Access Token')}</label>
-                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                        <input
+                    <FormField id="gh-pat-input" className="provider-form-field" label={t('Personal Access Token')} description={t('GitHub Personal Access Token requires the repo and read:org scopes.')}>
+                      <div className="vd-input-with-action">
+                        <Input controlSize="md"
                           id="gh-pat-input"
                           type={showGhPassword ? 'text' : 'password'}
                           value={ghPat}
@@ -933,17 +936,13 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         />
                         <IconButton
                           type="button"
-                          style={{ position: 'absolute', right: 8, background: 'transparent', border: 'none', color: 'var(--versiondock-muted)', cursor: 'pointer' }}
                           onClick={() => setShowGhPassword(!showGhPassword)}
                           title={t(showGhPassword ? 'Hide' : 'Show')}
                         >
                           <Codicon name={showGhPassword ? 'eye-closed' : 'eye'} />
                         </IconButton>
                       </div>
-                      <span className="provider-field-hint">
-                        {t('GitHub Personal Access Token requires the repo and read:org scopes.')}
-                      </span>
-                    </div>
+                    </FormField>
 
                     <div className="provider-form-actions">
                       <Button variant="primary"
@@ -992,23 +991,18 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                       <span>{editingAccountId ? t('Reauthenticate') : t('Add GitLab Account')}</span>
                     </div>
 
-                    <div className="provider-form-field">
-                      <label htmlFor="gl-host-input">{t('GitLab Host')}</label>
-                      <input
+                    <FormField id="gl-host-input" className="provider-form-field" label={t('GitLab Host')} description={t('Enter gitlab.com or a self-hosted GitLab URL')}>
+                      <Input controlSize="md"
                         id="gl-host-input"
                         value={glHost}
                         placeholder="https://gitlab.com"
                         onChange={(e) => setGlHost(e.target.value)}
                       />
-                      <span className="provider-field-hint">
-                        {t('Enter gitlab.com or a self-hosted GitLab URL')}
-                      </span>
-                    </div>
+                    </FormField>
 
-                    <div className="provider-form-field">
-                      <label htmlFor="gl-pat-input">{t('Personal Access Token')}</label>
-                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                        <input
+                    <FormField id="gl-pat-input" className="provider-form-field" label={t('Personal Access Token')} description={t('GitLab Personal Access Token requires the api scope.')}>
+                      <div className="vd-input-with-action">
+                        <Input controlSize="md"
                           id="gl-pat-input"
                           type={showGlPassword ? 'text' : 'password'}
                           value={glPat}
@@ -1017,17 +1011,13 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         />
                         <IconButton
                           type="button"
-                          style={{ position: 'absolute', right: 8, background: 'transparent', border: 'none', color: 'var(--versiondock-muted)', cursor: 'pointer' }}
                           onClick={() => setShowGlPassword(!showGlPassword)}
                           title={t(showGlPassword ? 'Hide' : 'Show')}
                         >
                           <Codicon name={showGlPassword ? 'eye-closed' : 'eye'} />
                         </IconButton>
                       </div>
-                      <span className="provider-field-hint">
-                        {t('GitLab Personal Access Token requires the api scope.')}
-                      </span>
-                    </div>
+                    </FormField>
 
                     <div className="provider-form-actions">
                       <Button variant="primary"
@@ -1071,10 +1061,9 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                       <span>{editingAccountId ? t('Reauthenticate') : t('Add Gitee Account')}</span>
                     </div>
 
-                    <div className="provider-form-field">
-                      <label htmlFor="gt-pat-input">{t('Personal Access Token')}</label>
-                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                        <input
+                    <FormField id="gt-pat-input" className="provider-form-field" label={t('Personal Access Token')} description={t('Gitee Personal Access Token requires the projects and user_info scopes.')}>
+                      <div className="vd-input-with-action">
+                        <Input controlSize="md"
                           id="gt-pat-input"
                           type={showGtPassword ? 'text' : 'password'}
                           value={gtPat}
@@ -1083,17 +1072,13 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                         />
                         <IconButton
                           type="button"
-                          style={{ position: 'absolute', right: 8, background: 'transparent', border: 'none', color: 'var(--versiondock-muted)', cursor: 'pointer' }}
                           onClick={() => setShowGtPassword(!showGtPassword)}
                           title={showGtPassword ? t('Hide') : t('Show')}
                         >
                           <Codicon name={showGtPassword ? 'eye-closed' : 'eye'} />
                         </IconButton>
                       </div>
-                      <span className="provider-field-hint">
-                        {t('Gitee Personal Access Token requires the projects and user_info scopes.')}
-                      </span>
-                    </div>
+                    </FormField>
 
                     <div className="provider-form-actions">
                       <Button variant="primary"
@@ -1135,17 +1120,14 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
             {mode === 'browse' && !accountFormOpen && selectedAccount && (
               <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
                 <div className="provider-browse-header">
-                  <div className="provider-search-box">
-                    <Codicon name="search" className="provider-search-icon" />
-                    <input
+                  <SearchInput containerClassName="provider-search-box" controlSize="md" aria-label={t('Search repositories…')}
                       value={query}
                       placeholder={t('Search repositories…')}
                       onChange={(e) => setQuery(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') searchRepositories();
                       }}
-                    />
-                  </div>
+                  />
                   <Button
                     type="button"
                     onClick={searchRepositories}
@@ -1225,25 +1207,23 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                   </select>
                 </div>
 
-                <div className="provider-form-field">
-                  <label htmlFor="pub-name-input">{t('Repository name')}</label>
-                  <input
+                <FormField id="pub-name-input" className="provider-form-field" label={t('Repository name')}>
+                  <Input controlSize="md"
                     id="pub-name-input"
                     value={publishName}
                     placeholder="my-repo"
                     onChange={(e) => setPublishName(e.target.value)}
                   />
-                </div>
+                </FormField>
 
-                <div className="provider-form-field">
-                  <label htmlFor="pub-desc-textarea">{t('Description')}</label>
-                  <textarea
+                <FormField id="pub-desc-textarea" className="provider-form-field" label={t('Description')}>
+                  <Textarea controlSize="md"
                     id="pub-desc-textarea"
                     value={publishDescription}
                     placeholder={t('Description')}
                     onChange={(e) => setPublishDescription(e.target.value)}
                   />
-                </div>
+                </FormField>
 
                 <div className="provider-form-field">
                   <label htmlFor="pub-visibility-select">{t('Visibility')}</label>

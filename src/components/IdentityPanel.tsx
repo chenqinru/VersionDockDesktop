@@ -1,3 +1,5 @@
+import { FormField } from './FormField';
+import { Input } from './Input';
 import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { IconButton } from './IconButton';
@@ -237,19 +239,19 @@ function GitIdentity({
           }}
         >
           <div className="identity-inputs-grid">
-            <input
+            <Input controlSize="md"
               aria-label={t('Profile label')}
               placeholder={t('Profile Label (e.g. Work)')}
               value={label}
               onChange={(event) => setLabel(event.target.value)}
             />
-            <input
+            <Input controlSize="md"
               aria-label={t('User Name')}
               placeholder={t('User Name')}
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-            <input
+            <Input controlSize="md"
               aria-label={t('User Email')}
               placeholder={t('User Email')}
               type="email"
@@ -405,34 +407,25 @@ function SvnAccount({
       {(value.nativeCredentials?.length ?? 0) > 0 && <div className="identity-sources-card"><strong>{t('SVN Native Cache')}</strong>{value.nativeCredentials?.map((credential) => <div className="identity-source-item" key={credential.id}><span>{credential.realm}{credential.username ? ` · ${credential.username}` : ''}</span><Button danger onClick={() => void operate({ type: 'clearNative', credential_id: credential.id })}><Codicon name="trash" />{t('Clear')}</Button></div>)}</div>}
 
       <div className="identity-form-row">
-        <label className="identity-label-block">
-          <span className="field-title">{t('Username')}</span>
-          <input
+        <FormField className="identity-label-block" label={t('Username')}>
+          <Input controlSize="md"
             className="identity-input"
             value={username}
             onChange={(event) => setUsername(event.target.value)}
           />
-        </label>
+        </FormField>
       </div>
 
       <div className="identity-form-row">
-        <label className="identity-label-block">
-          <span className="field-title">
-            {t('Password')}{' '}
-            <small className="field-hint">
-              {passwordEnabled
-                ? `· ${t('system secure storage')}`
-                : `· ${t('use SVN credential cache')}`}
-            </small>
-          </span>
-          <input
+        <FormField className="identity-label-block" label={t('Password')} description={passwordEnabled ? t('system secure storage') : t('use SVN credential cache')}>
+          <Input controlSize="md"
             className="identity-input"
             type="password"
             disabled={!passwordEnabled}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-        </label>
+        </FormField>
       </div>
 
       <div className="identity-actions">

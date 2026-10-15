@@ -1,3 +1,4 @@
+import { Input } from './Input';
 import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { IconButton } from './IconButton';
@@ -138,14 +139,14 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
           <div className="remote-add-card">
             <div className="remote-section-title">{t('Add Remote')}</div>
             <div className="remote-add-row">
-              <input
-                className="remote-input-name"
+              <Input
+                className="remote-input-name" aria-label={t('Remote name')}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder={t('Remote name (e.g. origin, upstream)')}
               />
-              <input
-                className="remote-input-url"
+              <Input
+                className="remote-input-url" aria-label={t('Remote URL (git@... or https://...)')}
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 placeholder={t('Remote URL (git@... or https://...)')}

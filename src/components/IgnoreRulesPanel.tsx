@@ -1,3 +1,6 @@
+import { FormField } from './FormField';
+import { Textarea } from './Textarea';
+import { Input } from './Input';
 import { Button } from './Button';
 import { useEffect, useState } from 'react';
 import type { IgnoreRules } from '../bindings/generated';
@@ -87,7 +90,7 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
           <label style={{ display: 'flex', flex: 1, gap: 6, alignItems: 'center', margin: 0 }}>
             <span style={{ fontSize: 11, color: 'var(--versiondock-muted)', whiteSpace: 'nowrap' }}>{t('Directory')}:</span>
-            <input
+            <Input controlSize="md"
               type="text"
               aria-label={t('Directory')}
               value={dirInput}
@@ -107,16 +110,15 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
           </Button>
         </div>
         <p>{isRulesValid && rules ? `${rules.source}${rules.directory ? ` · ${rules.directory}` : ''}` : t('Loading…')}</p>
-        <label>
-          <span>{t('One pattern per line')}</span>
-          <textarea
+        <FormField label={t('One pattern per line')}>
+          <Textarea controlSize="md"
             aria-label={t('Ignore patterns')}
             autoFocus
             disabled={!isRulesValid || saving}
             value={isRulesValid ? text : ''}
             onChange={(event) => setText(event.target.value)}
           />
-        </label>
+        </FormField>
         {error && <div className="error-row" role="alert">{error}</div>}
         <footer>
           <Button onClick={close}>{t('Close')}</Button>

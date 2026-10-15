@@ -1,3 +1,5 @@
+import { FormField } from './FormField';
+import { Input } from './Input';
 import { Button } from './Button';
 import { AiGenerationBorder } from './AiGenerationBorder';
 import { DialogSurface } from './DialogSurface';
@@ -103,7 +105,9 @@ export function DialogHost() {
   return <DialogSurface ref={dialog} size={isEditor || request.items?.length || request.compactChoices ? 'medium' : 'small'} className={`app-dialog${isEditor ? ' commit-message-dialog' : ''}${request.compactChoices ? ' compact-choice-dialog' : ''}`} onClose={() => { if (branchTaskMode && !generating) setBranchTaskMode(false); else finish(false); }} closeDisabled={submitting} aria-labelledby="app-dialog-title" onKeyDown={handleKeyDown}>
       <header><Codicon name={request.icon ?? (request.danger ? 'warning' : request.kind === 'prompt' ? 'edit' : isEditor ? 'git-commit' : 'question')} /><strong id="app-dialog-title">{request.title}</strong><IconButton title={t('Close')} disabled={submitting} onClick={() => finish(false)}><Codicon name="close" /></IconButton></header>
       {!isEditor && (branchTaskMode ? <p>{t('Describe your task, or leave empty to generate from current changes.')}</p> : request.message && <p>{request.message}</p>)}
-      {request.kind === 'prompt' && <label><span>{branchTaskMode ? t('Task description') : request.inputLabel}</span><input autoFocus disabled={submitting || generating} aria-label={branchTaskMode ? t('Task description') : request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={branchTaskMode ? branchTask : value} placeholder={branchTaskMode ? t('e.g. Fix login timeout') : undefined} onChange={(event) => branchTaskMode ? setBranchTask(event.target.value) : setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submit(); }} /></label>}
+      {request.kind === 'prompt' && <FormField label={branchTaskMode ? t('Task description') : request.inputLabel}>
+        <Input controlSize="md" autoFocus disabled={submitting || generating} aria-label={branchTaskMode ? t('Task description') : request.inputLabel ?? request.title} type={request.inputType ?? 'text'} value={branchTaskMode ? branchTask : value} placeholder={branchTaskMode ? t('e.g. Fix login timeout') : undefined} onChange={(event) => branchTaskMode ? setBranchTask(event.target.value) : setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submit(); }} />
+      </FormField>}
       {request.generateBranchName && generating && <p role="status">{t('Generating branch name…')}</p>}
       {!isEditor && request.items?.length ? <div className="dialog-commit-list">{request.items.map((item) => <div key={item.id}><code>{item.id}</code><span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span></div>)}</div> : null}
       {isEditor && <div className="commit-message-body">

@@ -1,3 +1,4 @@
+import { SearchInput } from '../SearchInput';
 import { IconButton } from '../IconButton';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '../Codicon';
@@ -306,28 +307,16 @@ export function OutputPanel() {
             className="output-dropdown-level"
           />
 
-          <div className="output-search-wrap">
-            <Codicon name="search" className="output-search-icon" />
-            <input
-              type="text"
-              className="output-search-input"
-              placeholder={t('Filter output…')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label={t('Filter output…')}
-            />
-            {searchQuery && (
-              <IconButton
-                type="button"
-                className="output-search-clear"
-                onClick={() => setSearchQuery('')}
-                title={t('Clear filter')}
-                aria-label={t('Clear filter')}
-              >
-                <Codicon name="close" />
-              </IconButton>
-            )}
-          </div>
+          <SearchInput
+            containerClassName="output-search-wrap"
+            controlSize="xs"
+            placeholder={t('Filter output…')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label={t('Filter output…')}
+            clearLabel={t('Clear filter')}
+            onClear={() => setSearchQuery('')}
+          />
 
           <div className="output-actions">
             <IconButton

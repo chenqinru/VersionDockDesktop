@@ -1,3 +1,4 @@
+import { SearchInput } from './SearchInput';
 import { IconButton } from './IconButton';
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useI18n } from '../i18n';
@@ -51,9 +52,10 @@ export function CommitSearch({ value, onChange }: {
       changeHandler.current(next);
     }, 250);
   };
-  return <label className="commit-search">
-    <Codicon name="search" />
-    <input
+  return <SearchInput
+      containerClassName="commit-search"
+      clearLabel={t('Clear')}
+      onClear={() => submitNow('')}
       value={local}
       aria-label={t('Search commits…')}
       onChange={(event) => change(event.target.value)}
@@ -69,9 +71,7 @@ export function CommitSearch({ value, onChange }: {
         }
       }}
       placeholder={t('Search commits…')}
-    />
-    {local && <IconButton type="button" title={t('Clear')} tabIndex={-1} onMouseDown={(event) => event.preventDefault()} onClick={() => submitNow('')}><Codicon name="close" /></IconButton>}
-  </label>;
+    />;
 }
 
 export function ToggleFilter({ icon, leading, label, title, active, open, onClick, onClear }: {
@@ -187,17 +187,14 @@ export function FilterPopover({
 
   return <div className="filter-popover" data-selection-mode="single" role="dialog" aria-label={allLabel}>
     {isSearchable && (
-      <div className="popover-search">
-        <Codicon name="search" />
-        <input
+      <SearchInput containerClassName="popover-search"
           autoFocus
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('Filter…')}
           aria-label={t('Filter…')}
-        />
-      </div>
+      />
     )}
     <div className="filter-options">
       <label className="filter-option-all" data-selected={!selected} onClick={(event) => { if (!(event.target instanceof HTMLInputElement)) { event.preventDefault(); onSelect(''); } }}>

@@ -1,3 +1,4 @@
+import { SearchInput } from './SearchInput';
 import { IconButton } from './IconButton';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
@@ -98,10 +99,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   return <aside className="branch-sidebar">
     <div className="branch-sidebar-sticky-header">
       <div className="branch-sidebar-header">
-        <div className="branch-search">
-          <Codicon name="filter" />
-          <input aria-label={t('Filter branches and tags')} value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
-        </div>
+        <SearchInput containerClassName="branch-search" aria-label={t('Filter branches and tags')} value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
         <IconButton className="branch-sidebar-collapse" title={t('Collapse sidebar')} aria-label={t('Collapse sidebar')} onClick={onCollapse}>
           <Codicon name="layout-sidebar-left" />
         </IconButton>

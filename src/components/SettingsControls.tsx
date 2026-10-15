@@ -1,3 +1,4 @@
+import { Input } from './Input';
 import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { useI18n } from '../i18n';
 import { IconButton } from './IconButton';
@@ -157,7 +158,7 @@ export function SettingText({
       <SettingLabel label={label} htmlFor={id} setting={setting} />
       <div className="settings-text-control">
         <div className="settings-text-input-group">
-          <input {...input} id={id} className="settings-text-input" />
+          <Input {...input} id={id} className="settings-text-input" />
           {accessory}
         </div>
         {actions && <div className="settings-control-actions">{actions}</div>}
