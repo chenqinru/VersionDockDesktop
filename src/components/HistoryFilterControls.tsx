@@ -197,8 +197,8 @@ export function FilterPopover({
           aria-label={t('Filter…')}
       />
     )}
-    <div className="filter-options">
-      <label className="filter-option-all" data-selected={!selected} onClick={(event) => { if (!(event.target instanceof HTMLInputElement)) { event.preventDefault(); onSelect(''); } }}>
+    <div className="filter-options vd-row-scope">
+      <label className="vd-row filter-option-all" data-row-selected={!selected} data-selected={!selected} onClick={(event) => { if (!(event.target instanceof HTMLInputElement)) { event.preventDefault(); onSelect(''); } }}>
         <input name={radioGroup} aria-label={allLabel} type="radio" checked={!selected} onClick={() => { if (!selected) onSelect(''); }} onChange={() => onSelect('')} />
         {renderLeading()}
         <span className="filter-option-content"><span className="filter-option-name">{allLabel}</span></span>
@@ -209,7 +209,7 @@ export function FilterPopover({
         return (
           <Fragment key={value.id}>
             {showGroup && <div className="filter-group-label">{t(value.group!)}</div>}
-            <label data-selected={active ? active.id === value.id : selected === value.id} title={value.sublabel ? `${value.label} <${value.sublabel}>` : value.label} onClick={(event) => { if (!(event.target instanceof HTMLInputElement)) { event.preventDefault(); onSelect(value.id); } }}>
+            <label className="vd-row" data-row-selected={active ? active.id === value.id : selected === value.id} data-selected={active ? active.id === value.id : selected === value.id} title={value.sublabel ? `${value.label} <${value.sublabel}>` : value.label} onClick={(event) => { if (!(event.target instanceof HTMLInputElement)) { event.preventDefault(); onSelect(value.id); } }}>
               <input name={radioGroup} aria-label={`${value.label}${value.sublabel ? ` ${value.sublabel}` : ''}`} type="radio" checked={active ? active.id === value.id : selected === value.id} onClick={() => { if (active ? active.id === value.id : selected === value.id) onSelect(value.id); }} onChange={() => onSelect(value.id)} />
               {renderLeading(value)}
               <span className="filter-option-content">

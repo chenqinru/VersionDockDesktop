@@ -220,7 +220,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   };
 
   return <div data-density-card="" className={`sync-timeline-card ${selected ? 'selected' : ''}`}>
-    <div data-sync-commit-row="" className="sync-timeline-row" role="button" tabIndex={0} onClick={(event) => { if (event.ctrlKey || event.metaKey) onSelected(key, true); else { onClearSelection(); void toggle(); } }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClearSelection(); void toggle(); } }} onContextMenu={(event) => { event.preventDefault(); if (!selected) onSelected(key, false); setContext({ x: event.clientX, y: event.clientY }); }}>
+    <div data-sync-commit-row="" data-row-selected={selected} className="vd-row sync-timeline-row" role="button" tabIndex={0} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); if (event.ctrlKey || event.metaKey) onSelected(key, true); else { onClearSelection(); void toggle(); } }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClearSelection(); void toggle(); } }} onContextMenu={(event) => { event.preventDefault(); if (!selected) onSelected(key, false); setContext({ x: event.clientX, y: event.clientY }); }}>
       <div className="sync-commit-left">
         <span className={`sync-direction-icon ${item.kind}`} title={t(item.kind === 'incoming' ? 'Incoming' : 'Outgoing')}><Codicon name={item.kind === 'incoming' ? 'arrow-down' : 'arrow-up'} /></span>
         <code>{commit.shortHash}</code>
@@ -721,7 +721,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
 
   return <div className="sync-panel">
     <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
-    <div className="sync-repository-list">
+    <div className="sync-repository-list vd-row-scope">
       {repos.map((repo) => <SyncRepoSection
         key={repo.meta.id}
         repo={repo}

@@ -34,6 +34,20 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
+  it('focuses a clicked commit row without changing range-selection semantics', () => {
+    const commit = { repoId: 'repo', hash: 'focus-row', shortHash: 'focus', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'focus selection', refs: [], unpushed: true };
+    const select = vi.spyOn(useAppStore.getState(), 'selectCommit').mockResolvedValue();
+    try {
+      useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit], selectedCommits: [commit] });
+      render(<HistoryWorkspace />);
+      const row = screen.getByText(commit.message, { selector: '.commit-subject-text' }).closest('.commit-row')!;
+      fireEvent.click(row, { shiftKey: true });
+      expect(row).toHaveFocus();
+      expect(row).toHaveAttribute('data-row-selected', 'true');
+      expect(select).toHaveBeenCalledWith(expect.objectContaining(commit), 'range', [expect.objectContaining(commit)]);
+    } finally { select.mockRestore(); }
+  });
+
   it('loads complete messages for squash and preserves oldest-first display order', async () => {
     const editor = vi.spyOn(dialogService, 'editorDialog').mockResolvedValue(undefined);
     const commits = ['new', 'old'].map((hash, index) => ({ repoId: 'repo', hash, shortHash: hash, parents: index === 0 ? ['old'] : ['base'], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `${hash} subject`, refs: index === 0 ? ['HEAD -> main'] : [], unpushed: true }));

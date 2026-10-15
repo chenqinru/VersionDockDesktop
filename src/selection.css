@@ -5,6 +5,7 @@
   --versiondock-item-selected-hover-background: color-mix(in srgb, var(--versiondock-accent) 24%, var(--versiondock-surface));
   --versiondock-item-selected-foreground: var(--versiondock-text);
   --versiondock-item-selected-border: color-mix(in srgb, var(--versiondock-accent) 55%, var(--versiondock-border));
+  --versiondock-item-inactive-selected-background: color-mix(in srgb, var(--versiondock-accent) 12%, var(--versiondock-surface));
   /* Menu feedback needs more separation than a persistent list selection.
      Pair backgrounds and foregrounds to keep small menu text readable. */
   --versiondock-menu-hover-background: color-mix(in srgb, var(--versiondock-accent) 28%, var(--versiondock-surface-alt));
@@ -55,6 +56,38 @@
   cursor: default;
 }
 @media (prefers-reduced-motion: reduce) { .vd-selectable { transition: none; } }
+
+/* Rows share feedback without changing their dimensions, borders or business colors.
+   Each list owns its focus scope; opening a portalled menu leaves a subdued target. */
+.vd-row-scope {
+  --row-selected-background: var(--versiondock-item-inactive-selected-background);
+  --row-selected-hover-background: var(--versiondock-item-selected-background);
+}
+.vd-row-scope:focus-within {
+  --row-selected-background: var(--versiondock-item-selected-background);
+  --row-selected-hover-background: var(--versiondock-item-selected-hover-background);
+}
+.vd-row {
+  background: var(--row-background, transparent);
+  transition: background-color .12s ease;
+}
+.vd-row:where(:not(:disabled):not([aria-disabled="true"])):hover {
+  background: var(--versiondock-item-hover-background);
+}
+.vd-row:is([data-row-context="true"], .is-active-match, .speed-search-active) {
+  background: var(--versiondock-item-inactive-selected-background);
+}
+.vd-row[data-row-selected="true"] {
+  background: var(--row-selected-background, var(--versiondock-item-selected-background));
+}
+.vd-row[data-row-selected="true"]:where(:not(:disabled):not([aria-disabled="true"])):hover {
+  background: var(--row-selected-hover-background, var(--versiondock-item-selected-hover-background));
+}
+.vd-row:is(:focus-visible, :has(> input:focus-visible), .is-active-match, .speed-search-active) {
+  outline: 1px solid var(--versiondock-control-focus-border);
+  outline-offset: -1px;
+}
+@media (prefers-reduced-motion: reduce) { .vd-row { transition: none; } }
 
 /* Menu actions use the same theme tint as selection, without claiming to be selected. */
 .vd-menu-item {

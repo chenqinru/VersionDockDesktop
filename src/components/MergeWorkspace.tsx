@@ -3,8 +3,6 @@ import { Checkbox } from './Checkbox';
 import { Button } from './Button';
 import { expandAiResolutionLines, inferAiAcceptedSides, normalEditsEqual, previewDelay } from '../ai/mergePreview';
 import { aiRequest, useAiStore } from '../ai/aiStore';
-import { IconButton } from './IconButton';
-import { AiPromptEditor } from './AiSettings';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
@@ -56,7 +54,6 @@ export function MergeWorkspace() {
   const aiTransaction = useRef<{ control: AbortController; snapshot: NonNullable<typeof storedDraft>; result: string }>();
   const aiBusy = aiStatus.phase === 'analyzing' || aiStatus.phase === 'typing';
   const editingBusy = busy || aiBusy;
-  const [aiPrompt, setAiPrompt] = useState(false);
   const [resolutions, setResolutions] = useState<Record<number, Resolution>>(initialDraft?.resolutions ?? {});
   const [normalEdits, setNormalEdits] = useState<NormalEdits>(initialDraft?.normalEdits ?? {});
   const [nonConflictingSelections, setNonConflictingSelections] = useState<NonConflictingSelections>(initialDraft?.nonConflictingSelections ?? {});
@@ -401,11 +398,9 @@ export function MergeWorkspace() {
         {!merge.binary && <Button variant="primary" size="xs" type="button" data-busy={aiBusy} disabled={busy || !unresolvedConflictIndexes.length && !aiBusy} onClick={() => void resolveWithAi()} title={t(aiBusy ? 'Stop AI conflict resolution' : 'Resolve all remaining conflicts with AI')}>
           <Codicon name={aiBusy ? 'stop-circle' : 'sparkle-filled'} />{t(aiBusy ? 'Stop AI' : unresolvedConflictIndexes.length ? 'Resolve {0} conflicts with AI' : 'AI resolved', unresolvedConflictIndexes.length)}
         </Button>}
-        {!merge.binary && <IconButton title={t('Edit AI prompt')} disabled={aiBusy} onClick={() => setAiPrompt(true)}><Codicon name="edit" /></IconButton>}
       </div>
 
       {aiRun?.error && <ErrorNotice>{aiRun.error}</ErrorNotice>}
-      {aiPrompt && <AiPromptEditor task="merge-conflict" onClose={() => setAiPrompt(false)} />}
 
       {/* 二进制冲突提示 */}
       {merge.binary ? (

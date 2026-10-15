@@ -499,10 +499,7 @@ export function ConflictsWorkspace() {
   return (
     <div className="conflicts-workspace-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--vscode-editor-background)', color: 'var(--vscode-foreground)', overflow: 'hidden' }}>
       <style>{`
-        .versiondock-conflicts-dir-row:hover,
-        .versiondock-conflicts-file-row[data-selected="false"]:hover {
-          background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08)) !important;
-        }
+        .versiondock-conflicts-dir-row:hover { background: var(--vscode-list-hoverBackground) !important; }
       `}</style>
 
       {/* 顶部页面标签与返回栏 */}
@@ -642,7 +639,7 @@ export function ConflictsWorkspace() {
               <span style={{ width: 86, textAlign: 'center', flexShrink: 0 }}>{t('Current')}</span>
               <span style={{ width: 86, textAlign: 'center', flexShrink: 0 }}>{t('Conflict Incoming')}</span>
             </div>
-            <div ref={treeScrollerRef} className="conflicts-tree-scroller" style={{ flex: 1, overflow: 'auto', paddingTop: 2 }}>
+            <div ref={treeScrollerRef} className="conflicts-tree-scroller vd-row-scope" style={{ flex: 1, overflow: 'auto', paddingTop: 2 }}>
               {groupByDir
                 ? tree.map((node) => (
                     <TreeRowItem
@@ -836,7 +833,9 @@ function FileRowItem({
 
   return (
     <div
-      className="conflicts-file-row versiondock-conflicts-file-row"
+      className="vd-row conflicts-file-row versiondock-conflicts-file-row"
+      tabIndex={-1}
+      data-row-selected={selected}
       data-key={fileKey(file)}
       data-selected={selected ? 'true' : 'false'}
       style={{
@@ -847,12 +846,11 @@ function FileRowItem({
         padding: '2px 10px 2px 0',
         paddingLeft: 6 + depth * 16,
         cursor: 'pointer',
-        background: selected ? 'var(--vscode-list-activeSelectionBackground, var(--versiondock-selection-background))' : 'transparent',
-        color: selected ? 'var(--vscode-list-activeSelectionForeground, var(--versiondock-selection-foreground))' : 'var(--vscode-foreground)',
+        color: 'var(--vscode-foreground)',
         fontSize: 13,
         userSelect: 'none',
       }}
-      onClick={(e) => onSelect(file, e)}
+      onClick={(e) => { e.currentTarget.focus({ preventScroll: true }); onSelect(file, e); }}
       onDoubleClick={() => onOpen(file)}
       title={`${file.repoName}/${file.path}`}
     >

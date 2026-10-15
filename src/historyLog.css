@@ -44,12 +44,8 @@
 .popover-search { width: auto; margin: 5px 8px; }
 .filter-options { padding: 3px 0; max-height: 200px; overflow-y: auto; }
 .history-filters .filter-options label,
-.filter-options label { display: flex; align-items: center; min-height: 26px; height: auto; width: 100%; padding: 5px 10px; gap: 8px; border: 0; border-radius: 0; background: transparent; position: relative; cursor: pointer; box-sizing: border-box; text-align: left; }
-.filter-options label:hover { background: var(--versiondock-hover); }
-.filter-options label[data-selected="true"] { color: var(--versiondock-selection-foreground); background: var(--versiondock-selection-background); }
-.filter-options label[data-selected="true"]:hover { filter: brightness(1.08); }
+.filter-options label { display: flex; align-items: center; min-height: 26px; height: auto; width: 100%; padding: 5px 10px; gap: 8px; border: 0; border-radius: 0; position: relative; cursor: pointer; box-sizing: border-box; text-align: left; }
 .filter-options label > input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
-.filter-options label:focus-within { outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
 .filter-option-leading { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; line-height: 1; }
 .filter-option-leading.filter-leading-avatar { width: 20px; height: 20px; flex: 0 0 20px; }
 .filter-option-leading.filter-leading-avatar .codicon { font-size: 14px; color: var(--versiondock-muted); }
@@ -99,8 +95,6 @@
 .repo-strip strong { position: absolute; top: 0; left: 6px; right: 0; height: 28px; padding: 0 6px; overflow: hidden; color: var(--versiondock-text); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: .06em; line-height: 28px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; transform: translateY(var(--repo-name-offset, 0)); }
 .commit-row { position: absolute; left: 0; right: 0; z-index: 2; height: 28px; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 0; color: var(--versiondock-text); background: transparent; border: 0; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); text-align: left; user-select: none; -webkit-user-select: none; }
 .commit-row { cursor: pointer; }
-.commit-row:hover { background: var(--versiondock-hover); }
-.commit-row.selected { background: var(--versiondock-hover); }
 .commit-graph { flex: 0 0 auto; height: 28px; overflow: visible; }
 .commit-refs { min-width: 0; display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .commit-refs em { min-width: 0; max-width: 150px; height: 17px; display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; overflow: hidden; padding: 0 5px; color: var(--ref-color, var(--versiondock-accent)); background: color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 20%, transparent); border: 1px solid color-mix(in srgb, var(--ref-color, var(--versiondock-accent)) 55%, transparent); border-radius: 3px; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-style: normal; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }

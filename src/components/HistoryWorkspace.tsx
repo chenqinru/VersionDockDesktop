@@ -599,7 +599,7 @@ function CommitList({
     setContext(undefined);
   };
 
-  return <div className="commit-list-frame"><div className="commit-list" ref={parent} onClick={() => { setContext(undefined); setPopover(undefined); }} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) { if (onLoadMore) onLoadMore(); else void loadHistory(false); } }}>
+  return <div className="commit-list-frame"><div className="commit-list vd-row-scope" ref={parent} onClick={() => { setContext(undefined); setPopover(undefined); }} onScroll={(event) => { const element = event.currentTarget; if (hasMore && !loading && element.scrollHeight - element.scrollTop - element.clientHeight < 300) { if (onLoadMore) onLoadMore(); else void loadHistory(false); } }}>
     <div className="commit-list-content" style={{ height: virtualizer.getTotalSize() }}>
       {multiRepo && repoBlocks.map((block) => {
         const blockTopPx = density.padding + block.start * COMMIT_ROW_HEIGHT;
@@ -617,7 +617,7 @@ function CommitList({
         const key = commitKey(commit.repoId, commit.hash);
         const isSelected = selected.has(key);
         const isMergeCommit = commit.parents.length > 1;
-        return <div key={key} className={`commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); window.getSelection()?.removeAllRanges(); if (hoverTimer.current) clearTimeout(hoverTimer.current); setPopover(undefined); setContext({ x: event.clientX, y: event.clientY, commit }); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits); } }}>
+        return <div key={key} data-row-selected={isSelected} className={`vd-row commit-row ${isSelected ? 'selected' : ''}`} style={{ transform: `translateY(${item.start}px)` }} role="button" tabIndex={0} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); window.getSelection()?.removeAllRanges(); if (hoverTimer.current) clearTimeout(hoverTimer.current); setPopover(undefined); setContext({ x: event.clientX, y: event.clientY, commit }); }} onMouseEnter={(event) => schedulePopover(event, commit)} onMouseLeave={closePopoverSoon} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits); }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void selectCommit(commit, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single', commits); } }}>
           {labelColWidth > 0 && <div style={{ width: labelColWidth, flexShrink: 0 }} />}
           <CommitGraph commit={commit} selected={isSelected} />
           <RefBadges refs={commit.refs} repoKind={repoKindById[commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[commit.repoId] ?? []} isSelected={isSelected} maxVisible={maxVisibleRefs} />

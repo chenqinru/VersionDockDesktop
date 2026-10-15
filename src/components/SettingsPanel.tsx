@@ -1146,12 +1146,13 @@ function ExternalEditorSettings({
             </button>
 
             {isOpen && (
-              <div className="editor-dropdown-menu" role="listbox" tabIndex={-1}>
+              <div className="editor-dropdown-menu vd-row-scope" role="listbox" tabIndex={-1}>
                 <button
                   type="button"
                   role="option"
                   aria-selected={selectedMode === 'none'}
-                  className={`editor-dropdown-item ${selectedMode === 'none' ? 'active' : ''}`}
+                  data-row-selected={selectedMode === 'none'}
+                  className={`vd-row editor-dropdown-item ${selectedMode === 'none' ? 'active' : ''}`}
                   onClick={() => handleSelect('none')}
                 >
                   <span className="editor-icon-box">
@@ -1169,7 +1170,8 @@ function ExternalEditorSettings({
                     type="button"
                     role="option"
                     aria-selected={selectedMode === opt.id}
-                    className={`editor-dropdown-item ${selectedMode === opt.id ? 'active' : ''}`}
+                    data-row-selected={selectedMode === opt.id}
+                    className={`vd-row editor-dropdown-item ${selectedMode === opt.id ? 'active' : ''}`}
                     onClick={() => handleSelect(opt.id)}
                   >
                     <span className="editor-icon-box">
@@ -1186,7 +1188,8 @@ function ExternalEditorSettings({
                   type="button"
                   role="option"
                   aria-selected={selectedMode === 'custom'}
-                  className={`editor-dropdown-item ${selectedMode === 'custom' ? 'active' : ''}`}
+                  data-row-selected={selectedMode === 'custom'}
+                  className={`vd-row editor-dropdown-item ${selectedMode === 'custom' ? 'active' : ''}`}
                   onClick={() => handleSelect('custom')}
                 >
                   <span className="editor-icon-box">

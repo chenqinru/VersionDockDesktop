@@ -128,7 +128,7 @@ function SubmoduleRow({ repo, entry, busy, highlighted }: { repo: RepositoryStat
         : undefined;
 
   return <div data-density-card="" ref={rowRef} className={`submodule-row ${highlighted ? 'selected' : context ? 'context-active' : ''}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY }); }}>
-    <div data-density-row="" className="submodule-row-main">
+    <div data-density-row="" data-row-selected={highlighted} data-row-context={Boolean(context)} className="vd-row submodule-row-main">
       <Codicon name={entry.initialized ? 'repo' : 'repo-clone'} />
       <div className="submodule-info">
         <div className="submodule-title-line">
@@ -192,7 +192,7 @@ export function SubmodulePanel({ repos, highlight, active = true }: { repos: Rep
 
   return <div className="submodule-panel">
     <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
-    <div className="submodule-repo-list">
+    <div className="submodule-repo-list vd-row-scope">
       {repos.map((repo) => {
         const needle = speedSearch.query.trim().toLocaleLowerCase();
         const allItems = entries[repo.meta.id] ?? [];

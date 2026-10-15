@@ -149,7 +149,7 @@ export function ChangelistView({
 
   return (
     <div
-      className="changelists-view-container"
+      className="changelists-view-container vd-row-scope"
       style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}
       onContextMenu={(e) => {
         if (e.target === e.currentTarget) {

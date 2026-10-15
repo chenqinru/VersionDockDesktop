@@ -292,6 +292,9 @@ describe('ConflictsWorkspace', () => {
     const row2 = screen.getByText('file2.txt');
     fireEvent.click(row1);
     fireEvent.click(row2, { ctrlKey: true });
+    expect(row1.closest('.vd-row')).toHaveAttribute('data-row-selected', 'true');
+    expect(row2.closest('.vd-row')).toHaveAttribute('data-row-selected', 'true');
+    expect(row2.closest('.vd-row')).toHaveFocus();
 
     const acceptBtn = screen.getByRole('button', { name: 'Accept Current' });
     fireEvent.click(acceptBtn);

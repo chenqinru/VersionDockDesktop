@@ -1058,14 +1058,16 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
                 <span>{t('Recent Workspaces')}</span>
                 <span className="workspace-menu-count">{recentWorkspaces.length}</span>
               </div>
-              <div className="workspace-menu-scroll">
+              <div className="workspace-menu-scroll vd-row-scope">
                 {recentWorkspaces.map((workspace) => {
                   const isOpened = tabs.some((t) => t.id === workspace.id);
                   const isCurrentActive = workspace.id === activeTabId;
                   return (
                     <div
                       key={workspace.id}
-                      className={`workspace-menu-item-row-wrap ${isCurrentActive ? 'active' : ''}`}
+                      className={`vd-row workspace-menu-item-row-wrap ${isCurrentActive ? 'active' : ''}`}
+                      data-row-selected={isCurrentActive}
+                      aria-disabled={!workspace.available || busy}
                     >
                       <button
                         type="button"

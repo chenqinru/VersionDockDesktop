@@ -105,7 +105,7 @@ export function CommitChangesWorkspace() {
     }
   };
 
-  const renderFile = (target: ChangeTarget, depth?: number) => <button key={targetKey(target)} title={target.path} aria-label={target.path} aria-current={targetKey(target) === currentSelectedKey ? 'true' : undefined} style={depth === undefined ? undefined : { paddingLeft: 28 + depth * 14 }} className={`changes-file-row status-${changeStatus(target.status)} ${targetKey(target) === currentSelectedKey ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => handleSelect(target)}>
+  const renderFile = (target: ChangeTarget, depth?: number) => <button key={targetKey(target)} title={target.path} aria-label={target.path} aria-current={targetKey(target) === currentSelectedKey ? 'true' : undefined} style={depth === undefined ? undefined : { paddingLeft: 28 + depth * 14 }} data-row-selected={targetKey(target) === currentSelectedKey} className={`vd-row changes-file-row status-${changeStatus(target.status)} ${targetKey(target) === currentSelectedKey ? 'selected' : ''}`} onContextMenu={(event) => openContext(event, target)} onClick={() => handleSelect(target)}>
     <FileIcon name={target.path.split('/').pop() ?? target.path} />
     <span className="changes-file-name" title={target.path}>{depth === undefined ? target.path : target.path.split('/').pop()}</span>
     {!isWorking(target) && target.added !== null && <em className="added">+{target.added}</em>}
@@ -171,7 +171,7 @@ export function CommitChangesWorkspace() {
           <IconButton title={t('Tree view')} className={fileMode === 'tree' ? 'selected' : ''} aria-pressed={fileMode === 'tree'} onClick={() => switchFileMode('tree')}><Codicon name="list-tree" /></IconButton>
           <IconButton title={t('Flat list')} className={fileMode === 'list' ? 'selected' : ''} aria-pressed={fileMode === 'list'} onClick={() => switchFileMode('list')}><Codicon name="list-flat" /></IconButton>
         </div>
-        <div className="changes-files-content">
+        <div className="changes-files-content vd-row-scope">
           {changes.kind === 'commits' && repositories.map((repo) => {
             const files = changes.files.filter((target) => target.repoId === repo.meta.id);
             if (!files.length) return null;

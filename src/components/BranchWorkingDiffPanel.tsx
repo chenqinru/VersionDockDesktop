@@ -88,7 +88,7 @@ function BranchWorkingFileRow({ file, depth, selected, select, openContext }: {
   const directory = depth === 0 && file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
   return <button
     type="button"
-    className={`branch-working-file-row status-${changeStatus(file.status)} ${selected ? 'selected' : ''}`}
+    data-row-selected={selected} className={`vd-row branch-working-file-row status-${changeStatus(file.status)} ${selected ? 'selected' : ''}`}
     style={{ paddingLeft: 10 + depth * 18 }}
     title={file.path}
     onClick={() => select(file)}
@@ -120,7 +120,7 @@ function BranchWorkingTreeNode({ node, depth, collapsed, selectedPath, toggle, s
   if (node.kind === 'file') return <BranchWorkingFileRow file={node.file} depth={depth} selected={selectedPath === node.file.path} select={select} openContext={openContext} />;
   const folded = collapsed.has(node.path);
   return <div className="branch-working-directory">
-    <button type="button" className="branch-working-directory-row" style={{ paddingLeft: 10 + depth * 18 }} title={node.path} onClick={() => toggle(node.path)}>
+    <button type="button" className="vd-row branch-working-directory-row" style={{ paddingLeft: 10 + depth * 18 }} title={node.path} onClick={() => toggle(node.path)}>
       <Codicon name={folded ? 'chevron-right' : 'chevron-down'} />
       <FileIcon name={node.name.split('/').pop() ?? node.name} folder open={!folded} />
       <span>{node.name}</span>
@@ -189,7 +189,7 @@ export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree'
         <IconButton type="button" className={viewMode === 'list' ? 'selected' : ''} title={t('List view')} onClick={() => setViewMode('list')}><Codicon name="list-flat" /></IconButton>
       </div>
     </div>
-    <div className="branch-working-files">
+    <div className="branch-working-files vd-row-scope">
       {files.length === 0 ? <EmptyState>{t('No file differences between {0} and the working tree', baseLabel)}</EmptyState> : viewMode === 'tree'
         ? tree.map((node) => <BranchWorkingTreeNode key={node.kind === 'directory' ? node.path : node.file.path} node={node} depth={0} collapsed={collapsed} selectedPath={selectedPath} toggle={(path) => setCollapsed((current) => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next; })} select={select} openContext={(event, file) => setContext({ x: event.clientX, y: event.clientY, file })} />)
         : files.map((file) => <BranchWorkingFileRow key={`${file.status}:${file.path}`} file={file} depth={0} selected={selectedPath === file.path} select={select} openContext={(event, target) => setContext({ x: event.clientX, y: event.clientY, file: target })} />)}

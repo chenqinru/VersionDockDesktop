@@ -301,7 +301,8 @@ function DetailTreeNodeView({
         data-detail-repo-id={file.repoId}
         data-detail-path={file.path}
         data-detail-from-revision={file.fromRevision ?? ''}
-        className={`detail-file-row status-${changeStatus(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
+        data-row-selected={isSelected}
+        className={`vd-row detail-file-row status-${changeStatus(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
         style={{ paddingLeft: 18 + depth * 14 }}
         title={`${file.path}\n${t('Click to open diff')}`}
         onClick={() => openTarget(file, openDiff, onOpeningDiff)}
@@ -402,7 +403,8 @@ function DetailFlatFileRow({
       data-detail-path={file.path}
       data-detail-from-revision={file.fromRevision ?? ''}
       key={`${file.repoId}:${file.fromRevision ?? ''}:${file.path}`}
-      className={`detail-file-row detail-list-row status-${changeStatus(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
+      data-row-selected={isSelected}
+      className={`vd-row detail-file-row detail-list-row status-${changeStatus(file.status)} ${isSelected ? 'selected' : ''} ${isActiveMatch ? 'is-active-match' : ''}`}
       title={`${file.path}\n${t('Click to open diff')}`}
       onClick={() => openTarget(file, openDiff, onOpeningDiff)}
       onContextMenu={(event) => onFileContextMenu?.(event, file)}
@@ -606,8 +608,9 @@ function MergeParentChangeGroup({
     <div className="merge-parent-group">
       <button
         type="button"
-        className="merge-parent-row"
+        className="vd-row merge-parent-row"
         data-selected={isExpanded}
+        aria-expanded={isExpanded}
         title={`${change.hash}\n${change.message}`}
         onClick={toggle}
       >
@@ -1331,7 +1334,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
           <IconButton type="button" className={fileMode === 'list' ? 'selected' : ''} title={t('Flat list')} onClick={() => { setFileMode('list'); setAllTreeExpanded(null); setCollapsedDirs({}); }}><Codicon name="list-flat" /></IconButton>
         </div>
         <FileSearchWidget variant={workspaceView ? 'files' : 'speed'} query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length }} onNavigate={handleNavigateMatch} />
-        <div className="detail-files" ref={fileListRef}>
+        <div className="detail-files vd-row-scope" ref={fileListRef}>
           {loading && !targets.length && <LoadingState>{t('Loading files...')}</LoadingState>}
           {!loading && isMergeCommit && targets.length === 0 && (
             <div className="no-merge-conflicts">{t('No merge conflicts')}</div>

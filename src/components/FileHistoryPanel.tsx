@@ -101,8 +101,8 @@ function FileHistoryDialog({ workspaceId, repoId, path }: { workspaceId: string;
         <IconButton aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></IconButton>
       </header>
       <div className="file-history-layout">
-        <aside>
-          {entries.map((entry) => <button className={selected?.revision === entry.revision ? 'active' : ''} key={`${entry.revision}:${entry.path}`} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, entry }); }} onClick={() => choose(entry)}>
+        <aside className="vd-row-scope">
+          {entries.map((entry) => <button data-row-selected={selected?.revision === entry.revision} className={`vd-row ${selected?.revision === entry.revision ? 'active' : ''}`} key={`${entry.revision}:${entry.path}`} onContextMenu={(event) => { event.preventDefault(); setContext({ x: event.clientX, y: event.clientY, entry }); }} onClick={() => choose(entry)}>
             <b>{entry.revision.slice(0, 10)}</b><span title={entry.message}>{entry.message}</span><small title={`${entry.author} · ${entry.date}`}>{entry.author} · {formatHistoryDate(entry.date)}</small>
           </button>)}
           {cursor && <Button className="load-more" disabled={listLoading} onClick={() => void loadMore()}>{t('Load more')}</Button>}

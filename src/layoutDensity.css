@@ -120,14 +120,8 @@
 [data-density="comfortable"] [data-density-card-body]::before { content: ''; position: absolute; left: 6px; right: 6px; top: 0; height: 1px; background: var(--versiondock-border); opacity: .85; pointer-events: none; }
 
 /* Keep feedback on the inset row, while card dividers span the common 6px edges. */
-[data-density="comfortable"] .sync-timeline-card.selected { background: transparent; }
-[data-density="comfortable"] .sync-timeline-card.selected > .sync-timeline-row { background: var(--versiondock-selected); }
 [data-density="comfortable"] .submodule-row { padding: 0; }
 [data-density="comfortable"] .submodule-row-main { min-height: 42px; padding: 6px 10px; }
-[data-density="comfortable"] .submodule-row:is(:hover, .selected, .context-active) { background: transparent; }
-[data-density="comfortable"] .submodule-row:hover > .submodule-row-main { background: var(--versiondock-hover); }
-[data-density="comfortable"] .submodule-row.selected > .submodule-row-main { background: var(--versiondock-selection-background); }
-[data-density="comfortable"] .submodule-row.context-active > .submodule-row-main { background: var(--vscode-list-inactiveSelectionBackground); }
 [data-density="comfortable"] :is(.vscode-section-header, .changelist-heading) { padding-block: 0; }
 [data-density="comfortable"] :is(.file-row, .directory-row, .file-item, .folder-item, .sync-timeline-row, .branch-ref-row, .branch-repo-row, .commit-row, .detail-file-row, .detail-root-label, .detail-tree-dir > button, .changes-file-row, .changes-directory-row, [data-density-row], .filter-options label, .history-more .more-menu > button) { transition: background .12s ease, color .12s ease; }
 [data-density="comfortable"] :is(.repo-heading, .repository-group-header, .vscode-section-header, .changelist-heading, .filter-button, .history-path-chip) { transition: background .12s ease, border-color .12s ease; }

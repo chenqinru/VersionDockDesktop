@@ -98,7 +98,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const isRefSelected = (branch: SidebarBranch) => refFilter.has(branch.ref) &&
     (!refRepoIds || (refRepoIds.length === branch.repoIds.length && branch.repoIds.every((id) => refRepoIds.includes(id))));
 
-  return <aside className="branch-sidebar">
+  return <aside className="branch-sidebar vd-row-scope">
     <div className="branch-sidebar-sticky-header">
       <div className="branch-sidebar-header">
         <SearchInput containerClassName="branch-search" aria-label={t('Filter branches and tags')} value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('Filter branches and tags')} />
@@ -361,12 +361,12 @@ function RepositoryRow({ repo, showVcsBadges, selected, active, onClick, onDoubl
 }) {
   const { t } = useI18n();
   return <div
-    className={`branch-repo-row ${selected ? 'selected' : ''} ${active ? 'active' : ''}`}
+    data-row-selected={active} className={`vd-row branch-repo-row ${selected ? 'selected' : ''} ${active ? 'active' : ''}`}
     role="button"
     tabIndex={0}
     aria-pressed={active}
     title={t('Double-click to filter commits by repository: {0}', repo.meta.name)}
-    onClick={onClick}
+    onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onClick(); }}
     onDoubleClick={onDoubleClick}
     onKeyDown={(event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -425,12 +425,12 @@ function BranchRow({ branch, repoColors, multiRepo, showVcsBadges, selected, act
   const { ahead, behind } = sumBranchAheadBehind(branch);
   const isPrimary = isPrimaryBranch(branch.name);
   return <div
-    className={`branch-ref-row ${branch.current ? 'head' : ''} ${selected ? 'filtered' : ''} ${active ? 'active' : ''} ${contextActive ? 'context-active' : ''} ${isPrimary ? 'primary' : ''}`}
+    data-row-selected={active} data-row-context={contextActive} className={`vd-row branch-ref-row ${branch.current ? 'head' : ''} ${selected ? 'filtered' : ''} ${active ? 'active' : ''} ${contextActive ? 'context-active' : ''} ${isPrimary ? 'primary' : ''}`}
     role="button"
     tabIndex={0}
     aria-pressed={active}
     title={`${branch.name}\n${branch.vcsKind === 'svn' ? t('Double-click to filter by this branch · Right-click for SVN actions') : t('Double-click to filter by this branch · Right-click for Git actions')}`}
-    onClick={onClick}
+    onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onClick(); }}
     onDoubleClick={onDoubleClick}
     onContextMenu={onContextMenu}
     onKeyDown={(event) => {
@@ -471,12 +471,12 @@ function TagRow({ tag, repoColors, multiRepo, showVcsBadges, active, contextActi
 }) {
   const { t } = useI18n();
   return <div
-    className={`branch-ref-row tag-row ${active ? 'active' : ''} ${detached ? 'head' : ''} ${contextActive ? 'context-active' : ''}`}
+    data-row-selected={active} data-row-context={contextActive} className={`vd-row branch-ref-row tag-row ${active ? 'active' : ''} ${detached ? 'head' : ''} ${contextActive ? 'context-active' : ''}`}
     role="button"
     tabIndex={0}
     aria-pressed={active}
     title={`${t('Tag: {0}', tag.name)}${detached ? ` (${t('current')})` : ''}\n${tag.instances.map(({ repo, tag }) => `${repo.meta.name}: ${tag.tagType ? t(tag.tagType === 'annotated' ? 'Annotated tag' : 'Lightweight tag') : tag.name}`).join('\n')}\n${t('Right-click for actions')}`}
-    onClick={onClick}
+    onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onClick(); }}
     onContextMenu={onContextMenu}
     onKeyDown={(event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;

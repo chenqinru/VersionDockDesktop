@@ -58,7 +58,7 @@ export function TreeNode({
     return (
       <div className="tree-directory">
         <div
-          className={`directory-row ${highlight}`}
+          data-row-selected={highlight.startsWith('selected')} data-row-context={highlight.includes('context-active')} className={`vd-row directory-row ${highlight}`}
           style={{ paddingLeft: currentPad }}
           onClick={() => setLocalExpansion({ sequence: expansion.sequence, expanded: !expanded })}
           onContextMenu={(event) => onFolderContext(event, node.path, node.files)}
@@ -102,7 +102,7 @@ export function TreeNode({
   return (
     <div
       data-change-search-key={changeSearchKey(repo.meta.id, node.file.path)}
-      className={`file-row status-${changeStatus(node.file.status, node.file.conflicted)} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`}
+      data-row-selected={highlight.startsWith('selected')} data-row-context={highlight.includes('context-active')} className={`vd-row file-row status-${changeStatus(node.file.status, node.file.conflicted)} ${node.file.conflicted ? 'conflicted' : ''} ${highlight}`}
       style={{ paddingLeft: currentPad }}
       onClick={() => onFile(node.file!)}
       onContextMenu={(event) => onContext(event, node.file!)}
@@ -341,7 +341,9 @@ function SingleRepoFileList({
         return (
           <div
             data-change-search-key={changeSearchKey(repo.meta.id, file.path)}
-            className={`file-row status-${changeStatus(file.status, file.conflicted)} ${file.conflicted ? 'conflicted' : ''} ${search.activeKey === changeSearchKey(repo.meta.id, file.path) ? 'speed-search-active' : ''} ${highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path ? 'selected' : highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path ? 'context-active' : ''}`}
+            data-row-selected={highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path}
+            data-row-context={highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path}
+            className={`vd-row file-row status-${changeStatus(file.status, file.conflicted)} ${file.conflicted ? 'conflicted' : ''} ${search.activeKey === changeSearchKey(repo.meta.id, file.path) ? 'speed-search-active' : ''} ${highlight.selected?.repoId === repo.meta.id && highlight.selected.path === file.path ? 'selected' : highlight.context?.repoId === repo.meta.id && highlight.context.path === file.path ? 'context-active' : ''}`}
             style={{ paddingLeft: basePad }}
             key={key}
             onClick={() => onFile(repo.meta.id, file)}
