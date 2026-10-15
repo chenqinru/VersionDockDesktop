@@ -87,7 +87,9 @@ describe('CommitPanel capabilities and file view', () => {
     expect(screen.getByTitle('More Actions...')).toBeInTheDocument();
     fireEvent.click(screen.getByTitle('More Actions...'));
     expect(screen.queryByRole('button', { name: 'Expand all' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Expand Mode' })).toHaveAttribute('aria-expanded', 'false');
     fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Expand Mode' }));
+    expect(screen.getByRole('menuitem', { name: 'Expand Mode' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Expand all' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Collapse all' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stage' })).not.toBeInTheDocument();
@@ -1309,8 +1311,8 @@ describe('CommitPanel repository visibility menu', () => {
     expect(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }).querySelector('.codicon')).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Manage Repository Visibility' }));
     const dialog = await screen.findByRole('dialog', { name: 'Manage Repository Visibility' });
-    expect(within(dialog).getByRole('button', { name: /Repository\s*\/tmp\/repo/ })).toHaveClass('selected');
-    expect(within(dialog).getByRole('button', { name: /Hidden repository\s*\/tmp\/hidden/ })).not.toHaveClass('selected');
+    expect(within(dialog).getByRole('button', { name: /Repository\s*\/tmp\/repo/, pressed: true })).toHaveClass('selected');
+    expect(within(dialog).getByRole('button', { name: /Hidden repository\s*\/tmp\/hidden/, pressed: false })).not.toHaveClass('selected');
   });
 
   it('hides and restores repositories through the existing settings writer, preserving other projects', async () => {

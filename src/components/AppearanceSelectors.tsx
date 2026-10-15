@@ -27,7 +27,7 @@ function RadioCards<T extends string>({ label, value, choices, onChange, classNa
     onChange(choices[next].id);
   };
   return <div className={className} role="radiogroup" aria-label={label}>
-    {choices.map((item, index) => <button key={item.id} type="button" role="radio" aria-label={item.label} aria-checked={value === item.id} tabIndex={value === item.id ? 0 : -1} className={`settings-preview-card ${value === item.id ? 'active' : ''}`} onClick={() => { if (value !== item.id) onChange(item.id); }} onKeyDown={(event) => navigate(event, index)}>
+    {choices.map((item, index) => <button key={item.id} type="button" role="radio" aria-label={item.label} aria-checked={value === item.id} tabIndex={value === item.id ? 0 : -1} className={`vd-selectable settings-preview-card ${value === item.id ? 'active' : ''}`} onClick={() => { if (value !== item.id) onChange(item.id); }} onKeyDown={(event) => navigate(event, index)}>
       <div aria-hidden="true" className="settings-preview-content">{item.preview}</div>
       <span className="settings-preview-caption">{item.label}</span>
     </button>)}

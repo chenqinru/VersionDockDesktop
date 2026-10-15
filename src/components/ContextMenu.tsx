@@ -147,9 +147,12 @@ export function ContextMenu({ x, y, header, anchorRect, placement = 'below', var
             key={it.id}
             type="button"
             role="menuitem"
+            className="vd-selectable vd-menu-item"
+            data-danger={it.danger || undefined}
+            data-accent={it.accent || undefined}
             disabled={it.disabled}
             title={it.disabled ? it.disabledReason : undefined}
-            style={{ ...styles.item(!!it.danger, !!it.disabled), ...(variant ? styles.gitLogItem(!!it.disabled) : {}), ...(it.accent && !it.disabled ? { color: 'var(--vscode-textLink-foreground)', fontWeight: 600 } : {}) }}
+            style={{ ...styles.item(!!it.disabled), ...(variant ? styles.gitLogItem(!!it.disabled) : {}) }}
             onClick={(event) => { if (!it.disabled) { onSelect(it.id, event.currentTarget.getBoundingClientRect()); onClose(); } }}
           >
             {it.iconNode ? <span style={styles.icon}>{it.iconNode}</span> : <Codicon name={it.icon} style={styles.icon} />}
@@ -190,22 +193,16 @@ const styles = {
     cursor: disabled ? 'default' : 'pointer',
     whiteSpace: 'nowrap',
   }),
-  item: (danger: boolean, disabled: boolean): React.CSSProperties => ({
+  item: (disabled: boolean): React.CSSProperties => ({
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
     padding: '5px 12px',
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.48 : 1,
-    background: 'transparent',
-    color: danger
-      ? 'var(--vscode-errorForeground, var(--versiondock-danger))'
-      : 'var(--vscode-menu-foreground, var(--versiondock-text))',
-    transition: 'background 0.08s',
     width: '100%',
     border: 0,
     textAlign: 'left',
-    font: 'inherit',
   }),
   icon: {
     fontSize: '14px',

@@ -22,7 +22,7 @@
 ## 公共状态与尺寸
 
 - `controlSize="xs" | "sm" | "md"` 控制外观，默认 `sm`，高度分别为 24、28、36px，随应用字号缩放。原生 `size` 仍保留其原有含义。
-- 悬停和聚焦使用控件主题变量 `--versiondock-control-hover-border` / `--versiondock-control-focus-border`：2026 深浅主题保持中性焦点，其余主题跟随各自强调色；错误状态保持主题错误色。
+- 悬停和聚焦使用控件主题变量 `--versiondock-control-hover-border` / `--versiondock-control-focus-border`：所有主题（包括 2026 深浅主题）统一跟随各自强调色；错误状态保持主题错误色。
 - `invalid` 或 `aria-invalid` 控制错误外观；`readOnly`、`disabled` 使用原生行为，保留 `fieldset` 的禁用继承。
 - `Input`、`Textarea` 和 `SearchInput` 透传原生属性、事件和 ref，不管理业务值。多行输入保留原生 `rows`，公共最小高度为 72px；页面可按内容用途调整高度。
 - `FormField` 为一个输入控件生成稳定 id，关联标签、说明和错误，合并控件已有的 `aria-describedby`。需要显式 id 时，将同一个 id 传给字段和控件；一个字段只放一个主要输入控件，选择目录等附属按钮可以放在其中。
@@ -37,3 +37,5 @@
 设置项继续使用 `SettingText` 和现有设置元数据布局，内部输入复用 `Input`。密码显隐使用 `vd-input-with-action` 容器配合已有 `IconButton`，避免文字与按钮重叠。
 
 提交信息框、AI 提示编辑器、代码及合并编辑器保留专用交互；数字步进、复选框、单选框、颜色选择和隐藏兼容控件使用原有组件。全局及弹窗输入规则排除公共输入，页面不再另设背景、边框、悬停和焦点状态。
+
+数字步进器由组合容器统一显示主题焦点边框，内部数字输入不再叠加焦点框；加减按钮保留键盘焦点标识，编辑、失焦保存和上下键步进仍由原组件处理。

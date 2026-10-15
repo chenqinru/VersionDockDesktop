@@ -1880,20 +1880,20 @@ export function CommitPanel() {
       <IconButton title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewSubmenu(undefined); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></IconButton>
       {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
         <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('expand')} onFocus={() => setViewSubmenu('expand')}>
-          <button type="button" role="menuitem" className={viewSubmenu === 'expand' ? 'active' : ''} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
+          <button type="button" role="menuitem" className="vd-selectable vd-menu-item" aria-haspopup="menu" aria-expanded={viewSubmenu === 'expand'} onClick={() => setViewSubmenu('expand')}><span>{t('Expand Mode')}</span><Codicon name="chevron-right" /></button>
           {viewSubmenu === 'expand' && <div className="view-options-submenu" role="menu">
-            <button type="button" aria-pressed={panelExpanded === true} className={panelExpanded === true ? 'selected' : ''} onClick={() => setPanelExpansion(true)}><span className="view-menu-check">{panelExpanded === true && <Codicon name="check" />}</span><span>{t('Expand all')}</span></button>
-            <button type="button" aria-pressed={panelExpanded === false} className={panelExpanded === false ? 'selected' : ''} onClick={() => setPanelExpansion(false)}><span className="view-menu-check">{panelExpanded === false && <Codicon name="check" />}</span><span>{t('Collapse all')}</span></button>
+            <button type="button" aria-pressed={panelExpanded === true} className={`vd-selectable vd-menu-item ${panelExpanded === true ? 'selected' : ''}`} onClick={() => setPanelExpansion(true)}><span className="view-menu-check">{panelExpanded === true && <Codicon name="check" />}</span><span>{t('Expand all')}</span></button>
+            <button type="button" aria-pressed={panelExpanded === false} className={`vd-selectable vd-menu-item ${panelExpanded === false ? 'selected' : ''}`} onClick={() => setPanelExpansion(false)}><span className="view-menu-check">{panelExpanded === false && <Codicon name="check" />}</span><span>{t('Collapse all')}</span></button>
           </div>}
         </div>
         <div className="view-submenu-entry" onMouseEnter={() => setViewSubmenu('view')} onFocus={() => setViewSubmenu('view')}>
-          <button type="button" role="menuitem" className={viewSubmenu === 'view' ? 'active' : ''} onClick={() => setViewSubmenu('view')}><span>{t('View options')}</span><Codicon name="chevron-right" /></button>
+          <button type="button" role="menuitem" className="vd-selectable vd-menu-item" aria-haspopup="menu" aria-expanded={viewSubmenu === 'view'} onClick={() => setViewSubmenu('view')}><span>{t('View options')}</span><Codicon name="chevron-right" /></button>
           {viewSubmenu === 'view' && <div className="view-options-submenu" role="menu">
-            <button type="button" aria-pressed={panelViewMode === 'list'} className={panelViewMode === 'list' ? 'selected' : ''} onClick={() => setPanelViewMode('list')}><span className="view-menu-check">{panelViewMode === 'list' && <Codicon name="check" />}</span><span>{t('Flat list')}</span></button>
-            <button type="button" aria-pressed={panelViewMode === 'tree'} className={panelViewMode === 'tree' ? 'selected' : ''} onClick={() => setPanelViewMode('tree')}><span className="view-menu-check">{panelViewMode === 'tree' && <Codicon name="check" />}</span><span>{t('Tree view')}</span></button>
+            <button type="button" aria-pressed={panelViewMode === 'list'} className={`vd-selectable vd-menu-item ${panelViewMode === 'list' ? 'selected' : ''}`} onClick={() => setPanelViewMode('list')}><span className="view-menu-check">{panelViewMode === 'list' && <Codicon name="check" />}</span><span>{t('Flat list')}</span></button>
+            <button type="button" aria-pressed={panelViewMode === 'tree'} className={`vd-selectable vd-menu-item ${panelViewMode === 'tree' ? 'selected' : ''}`} onClick={() => setPanelViewMode('tree')}><span className="view-menu-check">{panelViewMode === 'tree' && <Codicon name="check" />}</span><span>{t('Tree view')}</span></button>
           </div>}
         </div>
-        {allRepositories.length > 1 && <button type="button" role="menuitem" onMouseEnter={() => setViewSubmenu(undefined)} onFocus={() => setViewSubmenu(undefined)} onClick={() => void manageRepositoryVisibility()}><span>{t('Manage Repository Visibility')}</span></button>}
+        {allRepositories.length > 1 && <button type="button" role="menuitem" className="vd-selectable vd-menu-item" onMouseEnter={() => setViewSubmenu(undefined)} onFocus={() => setViewSubmenu(undefined)} onClick={() => void manageRepositoryVisibility()}><span>{t('Manage Repository Visibility')}</span></button>}
       </div>}
     </div>
   </div>;

@@ -51,8 +51,8 @@
   --vscode-sideBarSectionHeader-background: var(--versiondock-surface-alt);
   --vscode-toolbar-hoverBackground: var(--versiondock-hover);
   --vscode-toolbar-activeBackground: var(--versiondock-selection-background);
-  --vscode-menu-selectionBackground: var(--versiondock-selection-background);
-  --vscode-menu-selectionForeground: var(--versiondock-selection-foreground);
+  --vscode-menu-selectionBackground: var(--versiondock-menu-hover-background);
+  --vscode-menu-selectionForeground: var(--versiondock-menu-foreground);
   --vscode-charts-orange: #d18616;
   --vscode-charts-purple: #b180d7;
   --vscode-list-inactiveSelectionBackground: var(--versiondock-selection-inactive-background);
@@ -93,6 +93,7 @@
   --versiondock-accent-bg: #316dca;
   --versiondock-success: #57ab5a;
   --versiondock-danger: #f47067;
+  --versiondock-menu-danger-foreground: #fa7c73;
   --versiondock-warning: #c69026;
   --versiondock-input: #1c2128;
 }
@@ -111,6 +112,7 @@
   --versiondock-accent-bg: #4d78cc;
   --versiondock-success: #98c379;
   --versiondock-danger: #e06c75;
+  --versiondock-menu-danger-foreground: #ef858d;
   --versiondock-warning: #e5c07b;
   --versiondock-input: #1e2227;
 }
@@ -129,6 +131,7 @@
   --versiondock-accent-bg: #9575cd;
   --versiondock-success: #50fa7b;
   --versiondock-danger: #ff5555;
+  --versiondock-menu-danger-foreground: #ff8080;
   --versiondock-warning: #f1fa8c;
   --versiondock-input: #21222c;
 }
@@ -147,6 +150,7 @@
   --versiondock-accent-bg: #5e81ac;
   --versiondock-success: #a3be8c;
   --versiondock-danger: #bf616a;
+  --versiondock-menu-danger-foreground: #fa969f;
   --versiondock-warning: #ebcb8b;
   --versiondock-input: #242933;
 }
@@ -216,14 +220,10 @@
 /* Controls have their own interaction semantics; list selection stays independent.
    Define aliases locally in previews so they resolve against the preview's palette. */
 :root, .theme-preview-surface {
-  --versiondock-control-focus-border: color-mix(in srgb, var(--versiondock-muted) 65%, var(--versiondock-border));
+  --versiondock-control-focus-border: var(--versiondock-accent);
   --versiondock-control-hover-border: color-mix(in srgb, var(--versiondock-control-focus-border) 65%, var(--versiondock-border));
   --versiondock-control-checked-background: var(--versiondock-accent-bg);
   --versiondock-control-checked-foreground: var(--vscode-button-foreground);
-}
-:root:is([data-theme="githubDarkDimmed"], [data-theme="oneDarkPro"], [data-theme="dracula"], [data-theme="nord"], [data-theme="dark"], [data-theme="light"]),
-.theme-preview-surface:is([data-theme="githubDarkDimmed"], [data-theme="oneDarkPro"], [data-theme="dracula"], [data-theme="nord"], [data-theme="dark"], [data-theme="light"]) {
-  --versiondock-control-focus-border: var(--versiondock-accent);
 }
 
 /* File change semantics are shared by every panel and bound locally in previews. */
@@ -329,7 +329,7 @@ input, textarea, select, [contenteditable="true"] {
 button, input, textarea, select { font: inherit; color: inherit; }
 button { border: 0; background: transparent; cursor: default; }
 button:not(:disabled) { cursor: pointer; transition: background-color .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
-button:where(:not(.vd-button):not(.icon-button):not(.vd-select-trigger):not(.vd-select-option)):not(:disabled):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+button:where(:not(.vd-button):not(.icon-button):not(.vd-select-trigger):not(.vd-select-option):not(.vd-selectable)):not(:disabled):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
 button:disabled { opacity: .45; cursor: default; }
 button:focus-visible, input:where(:not(.vd-input)):focus-visible, textarea:where(:not(.vd-input)):focus-visible, select:focus-visible { outline: 1px solid var(--versiondock-accent); outline-offset: -1px; }
 input:not(:disabled), textarea:not(:disabled), select:not(:disabled) { transition: border-color .12s ease, box-shadow .12s ease, background-color .12s ease; }
@@ -588,7 +588,7 @@ body.is-tab-drop-target * {
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--versiondock-selection-border);
+  background: var(--versiondock-accent);
   border-radius: 0 0 5px 5px;
 }
 
@@ -1277,21 +1277,12 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
   height: 32px;
   padding: 0 8px;
   border-radius: 7px;
-  color: var(--versiondock-muted);
   text-decoration: none;
   font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
   font-weight: 450;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-
-.settings-nav-item:hover {
-  background: var(--versiondock-hover);
-  color: var(--versiondock-text);
 }
 
 .settings-nav-item.active {
-  background: var(--versiondock-selection-background);
-  color: var(--versiondock-selection-foreground);
   font-weight: 550;
 }
 
@@ -1302,10 +1293,6 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-}
-
-.settings-nav-item.active .settings-nav-icon-badge .codicon {
-  color: var(--versiondock-selection-foreground);
 }
 
 .settings-nav-text {
@@ -1457,9 +1444,11 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.settings-custom-stepper:hover { border-color: var(--versiondock-control-hover-border); }
 .settings-custom-stepper:focus-within {
-  border-color: var(--versiondock-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
+  border-color: var(--versiondock-control-focus-border);
+  outline: 1px solid var(--versiondock-control-focus-border);
+  outline-offset: -1px;
 }
 
 .settings-stepper-btn {
@@ -1518,6 +1507,9 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
   font-weight: 550;
   outline: none;
 }
+
+/* The composite stepper owns the focus border; its editable value has no second ring. */
+.settings-custom-stepper .settings-stepper-input:focus-visible { outline: 0; }
 
 .settings-stepper-suffix {
   color: var(--versiondock-muted);
@@ -1652,10 +1644,7 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
 .settings-theme-segmented, .settings-file-icon-segmented { display: grid; gap: 8px; padding: 10px 12px; }
 .settings-theme-segmented { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .settings-file-icon-segmented { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.settings-preview-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 7px; border: 1px solid var(--versiondock-border); border-radius: 5px; text-align: left; }
-.settings-preview-card:hover, .settings-preview-card.active { background: var(--versiondock-selection-background); }
-.settings-preview-card.active { border-color: var(--versiondock-selection-border); box-shadow: inset 0 0 0 1px var(--versiondock-selection-border); }
-.settings-preview-card:focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
+.settings-preview-card { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 7px; --selectable-border: var(--versiondock-border); border-radius: 5px; text-align: left; }
 .settings-preview-content { min-width: 0; width: 100%; }
 .settings-preview-caption { min-width: 0; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 1.35; }
 .theme-preview-surface { height: 42px; display: flex; overflow: hidden; border: 1px solid var(--versiondock-border); border-radius: 3px; color: var(--versiondock-text); background: var(--versiondock-bg); }
@@ -2517,7 +2506,7 @@ button.welcome-update-button {
 .panel-toolbar { flex: 0 0 35px; min-width: 0; height: 35px; padding: 0 6px 0 10px; overflow: visible; display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--versiondock-border-soft); background: var(--versiondock-surface); }
 .panel-toolbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 35px; color: var(--versiondock-text); letter-spacing: 0; }
 .panel-toolbar > span { flex: 1; min-width: 0; }
-.panel-toolbar button {
+.panel-toolbar button:where(:not(.vd-selectable)) {
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
@@ -2534,8 +2523,8 @@ button.welcome-update-button {
   box-sizing: border-box;
   transition: background-color 0.1s ease, color 0.1s ease;
 }
-.panel-toolbar button:hover,
-.panel-toolbar button.selected {
+.panel-toolbar button:where(:not(.vd-selectable)):hover,
+.panel-toolbar button.selected:where(:not(.vd-selectable)) {
   color: var(--versiondock-text);
   background: var(--versiondock-hover);
 }
@@ -2579,16 +2568,10 @@ button.welcome-update-button {
 .view-options-menu button > span:not(.view-menu-check):not(.codicon),
 .view-options-submenu button > span:not(.view-menu-check):not(.codicon) { min-width: 0; flex: 1; white-space: nowrap; }
 .view-options-menu button > .codicon:last-child { margin-left: auto; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
-.view-options-menu > .view-submenu-entry > button:hover,
-.view-options-menu > .view-submenu-entry > button:focus-visible,
-.view-options-menu > .view-submenu-entry > button.active { color: var(--versiondock-selection-foreground); background: var(--versiondock-selection-background); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
 .view-options-submenu { position: absolute; z-index: 1; top: -4px; left: calc(100% + 3px); width: 120px; padding: 3px; }
-.view-options-submenu button:hover,
-.view-options-submenu button:focus-visible { color: #fff; background: var(--versiondock-accent-bg); outline: 1px solid color-mix(in srgb, #fff 28%, transparent); outline-offset: -1px; }
 .view-menu-check { width: 13px; height: 13px; flex: 0 0 13px; display: grid; place-items: center; }
 .view-menu-check .codicon { font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .panel-view-options .view-options-menu { left: 0; right: auto; width: max-content; min-width: 128px; }
-.view-options-menu > button:is(:hover, :focus-visible) { color: var(--versiondock-selection-foreground); background: var(--versiondock-selection-background); outline: 1px solid var(--versiondock-selection-border); outline-offset: -1px; }
 
 .conflict-action-wrapper { position: relative; }
 .conflict-actions-menu,
@@ -3149,7 +3132,7 @@ button.conflict-action-item {
 .detail-message-title strong { min-width: 0; flex: 1; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 1.45; font-weight: 400; }
 .detail-message-title button { width: 18px; height: 18px; flex: 0 0 18px; color: var(--versiondock-muted); }
 .detail-message-title button:hover { background: var(--versiondock-hover); color: var(--versiondock-text); }
-.detail-message-card pre { margin-top: 8px; padding-top: 0; border-top: 0; white-space: pre-wrap; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); word-break: break-word; user-select: text; }
+.detail-message-card pre { margin: 8px 0 0; padding-top: 0; border-top: 0; white-space: pre-wrap; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); word-break: break-word; user-select: text; }
 .detail-author-meta { min-width: 0; display: flex; align-items: center; gap: 6px; margin-top: 3px; margin-bottom: 5px; }
 .detail-author-meta .avatar { width: 20px; height: 20px; flex: 0 0 20px; overflow: hidden; font-size: calc(8px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1; }
 .detail-author-line { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
@@ -3235,7 +3218,7 @@ button.conflict-action-item {
 .detail-message-title button .codicon { font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
 .detail-message-title button:hover { background: var(--versiondock-hover); }
 .detail-message-expand-placeholder { width: 18px; height: 18px; flex: 0 0 18px; }
-.detail-message-card pre { margin-top: 8px; padding-top: 0; border-top: 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); white-space: pre-wrap; word-break: break-word; user-select: text; }
+.detail-message-card pre { margin: 8px 0 0; padding-top: 0; border-top: 0; color: var(--versiondock-text); font: calc(12px * var(--versiondock-ui-font-scale, 1))/1.45 var(--versiondock-code); white-space: pre-wrap; word-break: break-word; user-select: text; }
 .detail-refs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
 .detail-refs em { height: 16px; padding: 0 6px; line-height: 16px; border-radius: 3px; }
 .detail-ref-overflow { height: 18px; padding: 0 5px; color: var(--versiondock-muted); border: 1px solid var(--versiondock-border); border-radius: 3px; background: transparent; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
@@ -3449,7 +3432,7 @@ button.danger:not(:disabled):hover,
 .worktree-row strong { display: flex; align-items: center; gap: 5px; }
 .worktree-row strong em { padding: 1px 4px; border-radius: 2px; color: #fff; background: var(--versiondock-accent-bg); font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-style: normal; }
 .changelist-popover { position: fixed; z-index: 120; left: 8px; top: 102px; width: min(330px, calc(100vw - 16px)); max-height: 55vh; overflow: auto; padding: 5px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 6px 20px #0008; }.changelist-popover > header { height: 28px; display: flex; align-items: center; }.changelist-popover > header strong { flex: 1; }.changelist-create { display: flex; gap: 4px; padding: 4px 0; }.changelist-create input { min-width: 0; flex: 1; }.changelist-create button, .changelist-manage-row > button { width: 27px; border: 1px solid var(--versiondock-border); }.changelist-manage-row { min-height: 35px; display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--versiondock-border-soft); }.changelist-manage-row > span { min-width: 0; flex: 1; display: flex; flex-direction: column; }.changelist-manage-row small { color: var(--versiondock-muted); }.context-menu .context-label { display: block; padding: 3px 8px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
-.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:color-mix(in srgb,var(--versiondock-surface) 55%,transparent);backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--versiondock-surface);border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 8px 24px var(--vscode-widget-shadow,rgba(0,0,0,.2));padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent}.dialog-choices>button:hover{background:var(--versiondock-hover);border-color:var(--versiondock-border)}.dialog-choices>button>.codicon{color:var(--versiondock-muted)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.dialog-choices .danger-choice strong{color:var(--versiondock-danger)}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
+.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:color-mix(in srgb,var(--versiondock-surface) 55%,transparent);backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--versiondock-surface);border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 8px 24px var(--vscode-widget-shadow,rgba(0,0,0,.2));padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left}.dialog-choices>button>.codicon{color:var(--versiondock-muted)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.dialog-choices .danger-choice strong{color:var(--versiondock-danger)}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
 .clone-dialog { display: grid; gap: 10px; }
 .clone-dialog > button { justify-self: start; }
 .clone-dialog footer { margin-top: 6px; }
@@ -4522,30 +4505,36 @@ button.danger:not(:disabled):hover,
   transition: all 0.1s ease;
 }
 
-.statusbar-menu-item:not(:disabled):not(.non-clickable):is(:hover, :focus-visible, .submenu-open) {
+.statusbar-menu-item:not(:disabled):not(.non-clickable):is(:hover, :focus-visible, .submenu-open, .keyboard-selected, .selected) {
   background: var(--versiondock-menu-hover-background);
+  color: var(--statusbar-menu-foreground, var(--versiondock-menu-foreground));
 }
 .statusbar-quick-menu .statusbar-menu-item:not(:disabled):not(.non-clickable):active { background: var(--versiondock-menu-pressed-background); }
-.statusbar-menu-item:not(:disabled):not(.non-clickable):is(:hover, :focus-visible, .submenu-open, .keyboard-selected, .selected) :is(.statusbar-menu-item-desc, .statusbar-menu-item-detail) { color: var(--versiondock-text); }
+.statusbar-menu-item:not(:disabled):not(.non-clickable):is(:hover, :focus-visible, .submenu-open, .keyboard-selected, .selected) :is(.statusbar-menu-item-desc, .statusbar-menu-item-detail) { color: var(--versiondock-menu-foreground); }
 .statusbar-menu-item:disabled { background: transparent !important; }
 
 .statusbar-menu-item.active-ref {
   background: var(--versiondock-selection-background);
-  color: var(--versiondock-selection-foreground);
+  color: var(--versiondock-menu-foreground);
   font-weight: 500;
 }
 
 .statusbar-menu-item.danger {
-  color: var(--versiondock-danger);
+  --statusbar-menu-foreground: var(--versiondock-menu-danger-foreground);
+  --versiondock-menu-hover-background: var(--versiondock-menu-danger-hover-background);
+  --versiondock-menu-pressed-background: var(--versiondock-menu-danger-pressed-background);
+  color: var(--versiondock-menu-danger-foreground);
 }
 
 .statusbar-menu-item.danger-sub {
-  color: var(--versiondock-warning);
+  --statusbar-menu-foreground: var(--versiondock-menu-warning-foreground);
+  color: var(--versiondock-menu-warning-foreground);
   padding-left: 20px;
 }
 
 .statusbar-menu-item.warning {
-  color: var(--versiondock-warning);
+  --statusbar-menu-foreground: var(--versiondock-menu-warning-foreground);
+  color: var(--versiondock-menu-warning-foreground);
 }
 
 .statusbar-menu-item.non-clickable {
@@ -6125,22 +6114,9 @@ button.danger:not(:disabled):hover,
   justify-content: space-between;
   padding: 8px 10px;
   border-radius: 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.12s ease;
   text-align: left;
   width: 100%;
   box-sizing: border-box;
-}
-
-.provider-account-card:hover {
-  background: var(--versiondock-hover);
-}
-
-.provider-account-card.selected {
-  background: var(--versiondock-selection-background);
-  border-color: var(--versiondock-selection-border);
 }
 
 .provider-account-info {
@@ -6437,17 +6413,8 @@ button.danger:not(:disabled):hover,
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: var(--versiondock-surface);
-  border: 1px solid var(--versiondock-border-soft);
   border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.12s ease;
   text-align: left;
-}
-
-.provider-repo-item:hover {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
 }
 
 .provider-repo-name-group {
@@ -6477,10 +6444,10 @@ button.danger:not(:disabled):hover,
 .commit-panel {
   --vscode-toolbar-hoverBackground: color-mix(in srgb, var(--versiondock-text) 12%, transparent);
 }
-.commit-panel button:where(:not(.vd-button):not(.sync-direction-pill):not(.action-split > button):not(:disabled)):is(:hover, :focus-visible) {
+.commit-panel button:where(:not(.vd-button):not(.vd-selectable):not(.sync-direction-pill):not(.action-split > button):not(:disabled)):is(:hover, :focus-visible) {
   background: var(--panel-button-hover, var(--vscode-toolbar-hoverBackground, var(--versiondock-hover))) !important;
 }
-.commit-panel button:where(:not(.vd-button):not(.sync-primary-action):not(.sync-primary-more):not(.sync-direction-pill):not(.commit-tabs button):not(.split-button > button)):is(:hover, :focus-visible) {
+.commit-panel button:where(:not(.vd-button):not(.vd-selectable):not(.sync-primary-action):not(.sync-primary-more):not(.sync-direction-pill):not(.commit-tabs button):not(.split-button > button)):is(:hover, :focus-visible) {
   border-radius: 4px;
 }
 .commit-panel .repository-group-main,
@@ -6513,26 +6480,16 @@ button.danger:not(:disabled):hover,
 .detail-file-search button { display: flex; align-items: center; justify-content: center; min-height: 0; padding: 2px; background: transparent; border: none; opacity: .75; }
 .detail-file-search button:hover { background: var(--versiondock-hover); opacity: 1; }
 
-/* Shared icon actions use neutral gray even over colored repository headers.
-   Important feedback rules also cover legacy caller inline backgrounds. */
+/* Icon actions retain their neutral feedback, independent of themed menu items. */
 :root, .theme-preview-surface {
   --versiondock-icon-hover-background: #484848;
   --versiondock-icon-pressed-background: #555555;
-  --versiondock-menu-hover-background: var(--versiondock-icon-hover-background);
-  --versiondock-menu-pressed-background: var(--versiondock-icon-pressed-background);
 }
 :root:is([data-theme="light"], [data-theme="light2026"]),
 .theme-preview-surface:is([data-theme="light"], [data-theme="light2026"]) {
   --versiondock-icon-hover-background: #dedede;
   --versiondock-icon-pressed-background: #c8c8c8;
 }
-.vd-context-menu > [role="menuitem"]:not(:disabled):is(:hover, :focus-visible) {
-  background: var(--versiondock-menu-hover-background) !important;
-}
-.vd-context-menu > [role="menuitem"]:not(:disabled):active {
-  background: var(--versiondock-menu-pressed-background) !important;
-}
-.vd-context-menu > [role="menuitem"]:disabled { background: transparent !important; }
 :where(.icon-button) {
   width: var(--versiondock-icon-button-size, 22px);
   height: var(--versiondock-icon-button-size, 22px);
@@ -6545,6 +6502,12 @@ button.danger:not(:disabled):hover,
   border: 0;
   border-radius: 3px;
   background: transparent;
+}
+/* Disclosure arrows keep their hit area and focus outline without an action background. */
+.icon-button[data-icon-variant="bare"] {
+  --versiondock-icon-hover-background: transparent;
+  --versiondock-icon-pressed-background: transparent;
+  --panel-button-hover: transparent;
 }
 /* Keep semantic and caller colors stable across interaction states. */
 .icon-button { color: var(--versiondock-muted); }
@@ -6937,7 +6900,6 @@ button.danger:not(:disabled):hover,
 .clone-dialog-accounts .provider-body { grid-template-columns: 220px minmax(0, 1fr); }
 .clone-dialog-accounts .provider-content { padding: 12px; }
 .clone-dialog-accounts .provider-sidebar-footer { display: none; }
-.provider-repo-item.selected { background: var(--versiondock-sidebar-active); }
 .publish-target { color: var(--versiondock-text); }
 .publish-target small { display: block; overflow-wrap: anywhere; color: var(--versiondock-muted); }
 @media (max-width: 600px) {
@@ -6972,3 +6934,9 @@ button.danger:not(:disabled):hover,
 }
 
 .repo-selection-control { margin-right: 6px; }
+
+/* Layout-specific defaults for shared selectable items. */
+
+.settings-nav-item { --selectable-foreground: var(--versiondock-muted); }
+
+.provider-repo-item { --selectable-background: var(--versiondock-surface); --selectable-border: var(--versiondock-border-soft); }

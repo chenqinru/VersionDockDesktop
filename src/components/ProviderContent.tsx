@@ -553,7 +553,8 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                   <button
                     key={account.id}
                     type="button"
-                    className={`provider-account-card ${isSelected ? 'selected' : ''}`}
+                    className={`vd-selectable provider-account-card ${isSelected ? 'selected' : ''}`}
+                    aria-pressed={isSelected}
                     title={`${account.displayName ? `${account.displayName} (${account.login})` : account.login} · ${account.host}`}
                     disabled={busy || publishUncertain || Boolean(publishResult?.remoteCreated)}
                     onClick={() => {
@@ -1141,10 +1142,11 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                   {(repositoryContext === `${selectedAccountId}:${submittedQuery}` ? repositories : []).map((repo) => (
                     <div
                       key={`${repo.host}:${repo.id}`}
-                      className={`provider-repo-item ${selectedRepositoryUrl === repo.cloneUrl ? 'selected' : ''}`}
+                      className={`vd-selectable provider-repo-item ${selectedRepositoryUrl === repo.cloneUrl ? 'selected' : ''}`}
                       aria-pressed={selectedRepositoryUrl === repo.cloneUrl}
                       role="button"
-                      tabIndex={0}
+                      aria-disabled={disabled || undefined}
+                      tabIndex={disabled ? -1 : 0}
                       onClick={() => { if (!disabled) onClone?.(repo, selectedAccountId); }}
                       onKeyDown={(e) => {
                         if (!disabled && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClone?.(repo, selectedAccountId); }

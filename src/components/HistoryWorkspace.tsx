@@ -61,9 +61,9 @@ function MoreMenu({ open, onToggle, onFetch, expanded, onToggleExpanded, showRep
     window.addEventListener('blur', blur);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', escape); window.removeEventListener('blur', blur); };
   }, [onToggle, open]);
-  return <div ref={ref} className="history-more"><IconButton type="button" className={`more-button ${open ? 'selected' : ''}`} title={t('More actions')} aria-label={t('More actions')} onClick={onToggle}><Codicon name="three-bars" style={{ fontSize: '14px' }} /></IconButton>{open && <div className="more-menu">
-    <button onClick={() => { onFetch(); onToggle(); }}><Codicon name="sync" />{t('Fetch and Refresh')}</button>
-    {showRepoNames && <button onClick={() => { onToggleExpanded(); onToggle(); }}><Codicon name={expanded ? 'collapse-all' : 'expand-all'} />{t(expanded ? 'Collapse project names' : 'Expand project names')}</button>}
+  return <div ref={ref} className="history-more"><IconButton type="button" className={`more-button ${open ? 'selected' : ''}`} title={t('More actions')} aria-label={t('More actions')} aria-haspopup="menu" aria-expanded={open} onClick={onToggle}><Codicon name="three-bars" style={{ fontSize: '14px' }} /></IconButton>{open && <div className="more-menu">
+    <button className="vd-selectable vd-menu-item" onClick={() => { onFetch(); onToggle(); }}><Codicon name="sync" />{t('Fetch and Refresh')}</button>
+    {showRepoNames && <button className="vd-selectable vd-menu-item" onClick={() => { onToggleExpanded(); onToggle(); }}><Codicon name={expanded ? 'collapse-all' : 'expand-all'} />{t(expanded ? 'Collapse project names' : 'Expand project names')}</button>}
   </div>}</div>;
 }
 

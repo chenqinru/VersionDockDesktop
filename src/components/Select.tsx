@@ -145,7 +145,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         }
       }}>
       {options.map(option => <button type="button" role="option" key={option.value} value={option.value} disabled={option.disabled}
-        aria-selected={option.value === value} tabIndex={-1} className="vd-select-option"
+        aria-selected={option.value === value} tabIndex={-1} className="vd-selectable vd-select-option"
         onClick={() => { if (!trigger.current?.matches(':disabled') && !option.disabled) { onChange(option.value); close(true); } }}>
         <span>{option.label}</span>{option.value === value && <Codicon name="check" />}
       </button>)}

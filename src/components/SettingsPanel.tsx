@@ -162,7 +162,7 @@ export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelPro
                 return (
                   <a
                     key={category.id}
-                    className={`settings-nav-item ${isActive ? 'active' : ''}`}
+                    className={`vd-selectable settings-nav-item ${isActive ? 'active' : ''}`}
                     href={`#${category.id}`}
                     aria-current={isActive ? 'location' : undefined}
                     aria-label={t(category.label)}

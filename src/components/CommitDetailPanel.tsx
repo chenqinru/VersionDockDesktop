@@ -712,12 +712,14 @@ function RefBadges({ detail, repoKind, collapsible = false }: { detail: CommitSu
 }
 
 function splitCommitMessage(detail: Pick<CommitDetail, 'commit' | 'fullMessage'>): { subject: string; body: string } {
+  if (!detail.fullMessage) return { subject: detail.commit.message, body: '' };
   const messageLines = detail.fullMessage.replace(/\r\n/g, '\n').split('\n');
-  const subject = messageLines[0]?.trim() || detail.commit.message.trim();
-  const body = messageLines[0]?.trim() === detail.commit.message.trim()
-    ? messageLines.slice(1).join('\n').replace(/^\s*\n/, '').trimEnd()
-    : detail.fullMessage.trim();
-  return { subject, body };
+  const subject = messageLines[0]?.trim() || detail.commit.message;
+  // Git's %s can fold body lines into the subject when there is no blank separator.
+  // Match the plugin: the first full-message line owns the title, the rest is body.
+  let bodyStart = 1;
+  while (bodyStart < messageLines.length && messageLines[bodyStart].trim() === '') bodyStart += 1;
+  return { subject, body: messageLines.slice(bodyStart).join('\n').trimEnd() };
 }
 
 function CommitMessage({
@@ -754,6 +756,7 @@ function CommitMessage({
         </strong>
         {canExpand ? (
           <IconButton
+            variant="bare"
             type="button"
             title={expanded ? t('Click to collapse') : t('Click to expand')}
             aria-expanded={expanded}

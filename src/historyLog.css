@@ -84,9 +84,8 @@
 .calendar-grid button.edge { color: var(--versiondock-selection-foreground); background: var(--versiondock-selection-background); font-weight: 700; }
 .history-filter-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .history-more { position: relative; flex: 0 0 26px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; z-index: 30; }
-.more-menu { position: absolute; z-index: 120; top: 30px; right: 0; width: 190px; padding: 4px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 6px 20px color-mix(in srgb, var(--versiondock-bg) 68%, transparent); }
-.more-menu button { border: 0; background: transparent; width: 100%; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; text-align: left; border-radius: 2px; }
-.more-menu button:hover { color: var(--versiondock-text); background: var(--versiondock-selected); }
+.more-menu { position: absolute; z-index: 120; top: 30px; right: 0; width: max-content; padding: 4px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); border-radius: 4px; box-shadow: 0 6px 20px color-mix(in srgb, var(--versiondock-bg) 68%, transparent); }
+.more-menu button { width: 100%; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; text-align: left; white-space: nowrap; border-radius: 2px; }
 .more-menu .codicon { color: var(--versiondock-muted); font-size: calc(13px * var(--versiondock-ui-font-scale, 1)); }
 .history-columns { display: flex; min-height: 0; flex: 1; }
 .log-pane { min-width: 0; background: var(--versiondock-bg); }

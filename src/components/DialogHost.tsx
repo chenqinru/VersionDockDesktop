@@ -119,7 +119,7 @@ export function DialogHost() {
         {submitError && <ErrorNotice>{submitError}</ErrorNotice>}
       </div>}
       {!isEditor && submitError && <ErrorNotice>{submitError}</ErrorNotice>}
-      {request.kind === 'choice' && <div className="dialog-choices">{request.choices?.map((choice) => <button key={choice.id} className={choice.danger ? 'danger-choice' : ''} onClick={() => finish(choice.id)}>{choice.icon && <Codicon name={choice.icon} />}<span><strong title={request.compactChoices ? choice.label : undefined}>{choice.label}</strong>{choice.description && <small title={request.compactChoices ? choice.description : undefined}>{choice.description}</small>}</span></button>)}</div>}
+      {request.kind === 'choice' && <div className="dialog-choices">{request.choices?.map((choice) => <button key={choice.id} className={`vd-selectable ${choice.danger ? 'danger-choice' : ''}`} onClick={() => finish(choice.id)}>{choice.icon && <Codicon name={choice.icon} />}<span><strong title={request.compactChoices ? choice.label : undefined}>{choice.label}</strong>{choice.description && <small title={request.compactChoices ? choice.description : undefined}>{choice.description}</small>}</span></button>)}</div>}
       {request.kind === 'multiChoice' && (
         <div className="dialog-choices dialog-multi-choices">
           {request.choices?.map((choice) => {
@@ -128,7 +128,8 @@ export function DialogHost() {
               <button
                 key={choice.id}
                 type="button"
-                className={`choice-item ${isChecked ? 'selected' : ''}`}
+                className={`vd-selectable choice-item ${isChecked ? 'selected' : ''}`}
+                aria-pressed={isChecked}
                 onClick={() => {
                   setSelectedChoiceIds((prev) =>
                     prev.includes(choice.id) ? prev.filter((id) => id !== choice.id) : [...prev, choice.id]

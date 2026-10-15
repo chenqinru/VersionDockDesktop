@@ -20,6 +20,8 @@ describe('ProviderPanel', () => {
     await waitFor(() => expect(reject).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: /bob \(bob\)/ }));
     expect(screen.getByText('@bob')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /bob \(bob\)/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /alice \(alice\)/ })).toHaveAttribute('aria-pressed', 'false');
     reject(new Error('late authorization error'));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Retry secure storage access' })).not.toBeDisabled());
     expect(screen.queryByText('late authorization error')).toBeNull();

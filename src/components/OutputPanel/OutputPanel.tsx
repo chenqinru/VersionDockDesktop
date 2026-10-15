@@ -435,6 +435,7 @@ export function OutputPanel() {
                   )}
                   {hasDetails && (
                     <IconButton
+                      variant="bare"
                       type="button"
                       aria-expanded={isExpanded}
                       className="output-log-details-toggle"

@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ShelfPanel } from './ShelfPanel';
 import { useAppStore } from '../store/appStore';
 import type { RepositoryStatus, ShelfEntry } from '../bindings/generated';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
+import { createTranslator, I18nContext } from '../i18n';
 
 const gitRepo: RepositoryStatus = {
   meta: {
@@ -53,6 +54,30 @@ afterEach(() => {
 });
 
 describe('ShelfPanel', () => {
+  it.each([
+    { language: 'zh-CN' as const, preference: 'zhCn' as const, applyDelete: '应用并删除', applyKeep: '应用并保留', drop: '删除搁置记录', file: '仅恢复此文件' },
+    { language: 'en' as const, preference: 'en' as const, applyDelete: 'Apply and delete', applyKeep: 'Apply and keep', drop: 'Delete shelve', file: 'Unshelve this file only' },
+  ])('localizes menu actions and button tooltips in $language before external translations load', ({ language, preference, applyDelete, applyKeep, drop, file }) => {
+    const bridge = new MockBridge(() => []);
+    useAppStore.setState({ bridge, snapshot, shelves: { repo: sampleShelves } });
+    render(<I18nContext.Provider value={{ language, preference, t: createTranslator(language) }}>
+      <BridgeContext.Provider value={bridge}>
+        <ShelfPanel repos={[gitRepo]} viewMode="list" expansion={{ sequence: 1, expanded: true }} />
+      </BridgeContext.Provider>
+    </I18nContext.Provider>);
+    const header = screen.getByText(sampleShelves[0].name).closest(`div[title="${sampleShelves[0].name}"]`)!;
+    fireEvent.mouseEnter(header);
+    for (const name of [applyDelete, applyKeep, drop]) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute('title', name);
+    }
+    fireEvent.mouseEnter(screen.getByText('ShelfPanel.tsx').closest('div[title="src/components/ShelfPanel.tsx"]')!);
+    expect(screen.getByRole('button', { name: file })).toHaveAttribute('title', file);
+    fireEvent.contextMenu(header);
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: applyDelete })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: applyKeep })).toBeInTheDocument();
+  });
+
   it('renders repository header and empty shelf state', () => {
     const bridge = new MockBridge(() => []);
     useAppStore.setState({ bridge, snapshot });

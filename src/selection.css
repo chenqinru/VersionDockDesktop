@@ -1,0 +1,85 @@
+/* Shared feedback only. Each caller keeps its own layout, semantics and events. */
+:root, .theme-preview-surface {
+  --versiondock-item-hover-background: var(--versiondock-hover);
+  --versiondock-item-selected-background: color-mix(in srgb, var(--versiondock-accent) 18%, var(--versiondock-surface));
+  --versiondock-item-selected-hover-background: color-mix(in srgb, var(--versiondock-accent) 24%, var(--versiondock-surface));
+  --versiondock-item-selected-foreground: var(--versiondock-text);
+  --versiondock-item-selected-border: color-mix(in srgb, var(--versiondock-accent) 55%, var(--versiondock-border));
+  /* Menu feedback needs more separation than a persistent list selection.
+     Pair backgrounds and foregrounds to keep small menu text readable. */
+  --versiondock-menu-hover-background: color-mix(in srgb, var(--versiondock-accent) 28%, var(--versiondock-surface-alt));
+  --versiondock-menu-pressed-background: color-mix(in srgb, var(--versiondock-accent) 34%, var(--versiondock-surface-alt));
+  --versiondock-menu-foreground: color-mix(in srgb, var(--versiondock-text) 50%, #fff);
+  --versiondock-menu-accent-foreground: color-mix(in srgb, var(--versiondock-accent) 20%, #fff);
+  --versiondock-menu-danger-hover-background: color-mix(in srgb, var(--versiondock-danger) 18%, var(--versiondock-surface));
+  --versiondock-menu-danger-pressed-background: color-mix(in srgb, var(--versiondock-danger) 20%, var(--versiondock-surface));
+  --versiondock-menu-danger-foreground: var(--versiondock-danger);
+  --versiondock-menu-warning-foreground: color-mix(in srgb, var(--versiondock-warning) 30%, #fff);
+}
+:root:is([data-theme="light"], [data-theme="light2026"]),
+.theme-preview-surface:is([data-theme="light"], [data-theme="light2026"]) {
+  --versiondock-menu-foreground: var(--versiondock-text);
+  --versiondock-menu-accent-foreground: color-mix(in srgb, var(--versiondock-accent) 50%, var(--versiondock-text));
+  --versiondock-menu-danger-hover-background: color-mix(in srgb, var(--versiondock-danger) 10%, var(--versiondock-surface-alt));
+  --versiondock-menu-danger-pressed-background: color-mix(in srgb, var(--versiondock-danger) 16%, var(--versiondock-surface-alt));
+  --versiondock-menu-danger-foreground: color-mix(in srgb, var(--versiondock-danger) 45%, var(--versiondock-text));
+  --versiondock-menu-warning-foreground: color-mix(in srgb, var(--versiondock-warning) 50%, var(--versiondock-text));
+}
+
+.vd-selectable {
+  box-sizing: border-box;
+  border: 1px solid var(--selectable-border, transparent);
+  background: var(--selectable-background, transparent);
+  color: var(--selectable-foreground, var(--versiondock-text));
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease;
+}
+.vd-selectable:where(:not(:disabled):not([aria-disabled="true"])) { cursor: pointer; }
+.vd-selectable:where(:not(:disabled):not([aria-disabled="true"])):hover {
+  background: var(--versiondock-item-hover-background);
+  color: var(--versiondock-text);
+}
+.vd-selectable:is([aria-selected="true"], [aria-pressed="true"], [role="radio"][aria-checked="true"], [aria-current="page"], [aria-current="location"], [aria-current="true"]) {
+  background: var(--versiondock-item-selected-background);
+  border-color: var(--versiondock-item-selected-border);
+  color: var(--versiondock-item-selected-foreground);
+}
+.vd-selectable:is([aria-selected="true"], [aria-pressed="true"], [role="radio"][aria-checked="true"], [aria-current="page"], [aria-current="location"], [aria-current="true"]):where(:not(:disabled):not([aria-disabled="true"])):hover {
+  background: var(--versiondock-item-selected-hover-background);
+}
+.vd-selectable:focus-visible {
+  outline: 1px solid var(--versiondock-control-focus-border);
+  outline-offset: -1px;
+}
+.vd-selectable:is(:disabled, [aria-disabled="true"]) {
+  opacity: .45;
+  cursor: default;
+}
+@media (prefers-reduced-motion: reduce) { .vd-selectable { transition: none; } }
+
+/* Menu actions use the same theme tint as selection, without claiming to be selected. */
+.vd-menu-item {
+  --versiondock-item-hover-background: var(--versiondock-menu-hover-background);
+  --selectable-foreground: var(--menu-item-foreground, var(--versiondock-menu-foreground));
+}
+.vd-menu-item:where(:not(:disabled):not([aria-disabled="true"])):is(:hover, :focus-visible) {
+  background: var(--versiondock-menu-hover-background);
+  color: var(--menu-item-foreground, var(--versiondock-menu-foreground));
+}
+.vd-menu-item:where(:not(:disabled):not([aria-disabled="true"])):active {
+  background: var(--versiondock-menu-pressed-background);
+  color: var(--menu-item-foreground, var(--versiondock-menu-foreground));
+}
+.vd-menu-item[data-danger] {
+  --menu-item-foreground: var(--versiondock-menu-danger-foreground);
+  --versiondock-menu-hover-background: var(--versiondock-menu-danger-hover-background);
+  --versiondock-menu-pressed-background: var(--versiondock-menu-danger-pressed-background);
+  --versiondock-control-focus-border: var(--versiondock-menu-danger-foreground);
+}
+.vd-menu-item[data-accent]:not(:disabled):not([data-danger]) {
+  --menu-item-foreground: var(--versiondock-menu-accent-foreground);
+  font-weight: 600;
+}
+.vd-menu-item[aria-haspopup="menu"][aria-expanded="true"] {
+  background: var(--versiondock-menu-hover-background);
+  border-color: var(--versiondock-item-selected-border);
+}

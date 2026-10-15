@@ -368,6 +368,7 @@ function ShelfRow({
         title={fullMessage}
       >
         <IconButton
+          variant="bare"
           type="button"
           style={rowStyle.chevronBtn}
           title={expanded ? t('Collapse') : t('Expand')}

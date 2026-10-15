@@ -374,6 +374,47 @@ describe('CommitDetailPanel merge commits', () => {
     } finally { selection.removeAllRanges(); }
   });
 
+  it.each([
+    {
+      name: 'Git paragraph subject without a blank separator',
+      message: 'fix(commit): refresh repository - update selection - clear amend',
+      fullMessage: 'fix(commit): refresh repository\n- update selection\n- clear amend\n\n',
+      subject: 'fix(commit): refresh repository',
+      body: '- update selection\n- clear amend',
+    },
+    {
+      name: 'CRLF, leading separators, indentation and internal blank lines',
+      message: 'fix: preserve message formatting',
+      fullMessage: 'fix: preserve message formatting\r\n\r\n \t\r\n  indented description\r\n\r\n- last line\r\n\r\n',
+      subject: 'fix: preserve message formatting',
+      body: '  indented description\n\n- last line',
+    },
+    {
+      name: 'subject only with a different history summary',
+      message: 'outdated summary',
+      fullMessage: 'fix: authoritative full message\n\n',
+      subject: 'fix: authoritative full message',
+      body: '',
+    },
+    {
+      name: 'fallback when the full message is unavailable',
+      message: 'fix: fallback subject',
+      fullMessage: '',
+      subject: 'fix: fallback subject',
+      body: '',
+    },
+  ])('matches plugin message splitting for $name', ({ message, fullMessage, subject, body }) => {
+    localStorage.setItem('versiondock:commitMessagesExpandedByDefault', 'true');
+    const commit = { ...directoryCommit, message };
+    const detail = { ...directoryDetail, commit, fullMessage };
+    useAppStore.setState({ snapshot, selectedCommit: detail, selectedCommits: [commit], selectedCommitDetails: { [commitKey(commit.repoId, commit.hash)]: detail } });
+    const { container } = render(<CommitDetailPanel onCollapse={vi.fn()} />);
+    const card = container.querySelector('.detail-message-card')!;
+    expect(card.querySelector('.detail-message-title strong')?.textContent).toBe(subject);
+    expect(card.querySelector('pre')?.textContent ?? '').toBe(body);
+    expect(card.textContent?.split(subject)).toHaveLength(2);
+  });
+
   it('allows expanding a directory immediately on first click after collapse all', () => {
     useAppStore.setState({
       snapshot: { ...snapshot, repositories: [...snapshot.repositories, { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, id: 'repo-2', name: 'Repo 2' } }] },
