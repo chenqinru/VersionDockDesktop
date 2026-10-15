@@ -3404,7 +3404,7 @@ button.danger:not(:disabled):hover,
 .worktree-row strong { display: flex; align-items: center; gap: 5px; }
 .worktree-row strong em { padding: 1px 4px; border-radius: 2px; color: #fff; background: var(--versiondock-accent-bg); font-size: calc(9px * var(--versiondock-ui-font-scale, 1)); font-style: normal; }
 .changelist-popover { position: fixed; z-index: 120; left: 8px; top: 102px; width: min(330px, calc(100vw - 16px)); max-height: 55vh; overflow: auto; padding: 5px; background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 6px 20px #0008; }.changelist-popover > header { height: 28px; display: flex; align-items: center; }.changelist-popover > header strong { flex: 1; }.changelist-create { display: flex; gap: 4px; padding: 4px 0; }.changelist-create input { min-width: 0; flex: 1; }.changelist-create button, .changelist-manage-row > button { width: 27px; border: 1px solid var(--versiondock-border); }.changelist-manage-row { min-height: 35px; display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--versiondock-border-soft); }.changelist-manage-row > span { min-width: 0; flex: 1; display: flex; flex-direction: column; }.changelist-manage-row small { color: var(--versiondock-muted); }.context-menu .context-label { display: block; padding: 3px 8px; color: var(--versiondock-muted); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
-.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:color-mix(in srgb,var(--versiondock-surface) 55%,transparent);backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--versiondock-surface);border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 8px 24px var(--vscode-widget-shadow,rgba(0,0,0,.2));padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left}.dialog-choices>button>.codicon{color:var(--versiondock-muted)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.dialog-choices .danger-choice strong{color:var(--versiondock-danger)}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
+.dialog-backdrop{position:fixed;inset:0;z-index:10000;background:color-mix(in srgb,var(--versiondock-surface) 55%,transparent);backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px);display:grid;place-items:center}.app-dialog{width:min(460px,calc(100vw - 48px));background:var(--versiondock-surface);border:1px solid var(--vscode-widget-border,var(--versiondock-border));box-shadow:0 8px 24px var(--vscode-widget-shadow,rgba(0,0,0,.2));padding:18px;border-radius:6px}.app-dialog header{display:flex;align-items:center;gap:9px;font-size:14px}.app-dialog header .codicon-warning{color:var(--versiondock-warning,#cca700)}.app-dialog p{white-space:pre-wrap;line-height:1.5;margin:14px 0;color:var(--vscode-descriptionForeground,var(--versiondock-muted))}.app-dialog label{display:grid;gap:6px}.app-dialog input{width:100%;box-sizing:border-box}.dialog-choices{display:grid;gap:4px}.dialog-choices>button{min-height:42px;padding:6px 8px;display:flex;align-items:center;gap:8px;text-align:left}.dialog-choices>button>.codicon{color:var(--versiondock-muted)}.dialog-choices>button>span{min-width:0;display:grid;gap:2px}.dialog-choices small{color:var(--versiondock-muted);font-size:10px}.app-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.app-dialog button.danger{background:var(--versiondock-danger,#c42b1c);color:#fff}.settings-color-list{display:grid;gap:6px;margin-top:8px}.settings-color-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-color-row input[type=color]{width:42px;height:24px;padding:1px}
 .clone-dialog { display: grid; gap: 10px; }
 .clone-dialog > button { justify-self: start; }
 .clone-dialog footer { margin-top: 6px; }
@@ -3464,18 +3464,7 @@ button.danger:not(:disabled):hover,
   padding: 24px;
 }
 
-.modal-panel {
-  width: min(680px, calc(100vw - 48px));
-  max-height: calc(100vh - 64px);
-  display: flex;
-  flex-direction: column;
-  background: var(--vscode-editor-background, var(--versiondock-surface-alt, #1e1e1e));
-  border: 1px solid var(--versiondock-border, #3c3c3c);
-  border-radius: 6px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-  animation: modal-fade-in 0.16s ease-out;
-}
+.modal-panel { display: flex; flex-direction: column; }
 
 @keyframes modal-fade-in {
   from {
@@ -3488,30 +3477,7 @@ button.danger:not(:disabled):hover,
   }
 }
 
-.modal-header {
-  height: 40px;
-  flex: 0 0 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 14px;
-  background: var(--versiondock-surface, #252526);
-  border-bottom: 1px solid var(--versiondock-border, #3c3c3c);
-  user-select: none;
-}
-
-.modal-header-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--versiondock-text, #cccccc);
-}
-
-.modal-header-title .codicon {
-  color: var(--versiondock-accent, #007acc);
-}
+.modal-header { user-select: none; }
 
 .modal-repo-badge {
   padding: 1px 7px;
@@ -3521,24 +3487,6 @@ button.danger:not(:disabled):hover,
   background: var(--versiondock-hover, rgba(255, 255, 255, 0.08));
   color: var(--versiondock-muted, #858585);
   border: 1px solid var(--versiondock-border, #3c3c3c);
-}
-
-.modal-close-btn {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  border-radius: 4px;
-  background: transparent;
-  border: none;
-  color: var(--versiondock-muted, #858585);
-  cursor: pointer;
-  transition: all 0.1s ease;
-}
-
-.modal-close-btn:hover {
-  background: var(--versiondock-hover, rgba(255, 255, 255, 0.1));
-  color: var(--versiondock-text, #ffffff);
 }
 
 .modal-body {
@@ -4304,7 +4252,6 @@ button.danger:not(:disabled):hover,
 }
 
 .dialog-multi-choices .choice-item.selected { background: var(--versiondock-selection-background); color: var(--versiondock-selection-foreground); }
-.dialog-multi-choices .choice-item:focus-visible { outline-color: var(--versiondock-muted); }
 
 .statusbar-quick-menu {
   width: min(360px, calc(100vw - 16px));

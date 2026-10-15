@@ -41,6 +41,7 @@
 - 普通下拉、复选框和开关使用 `Select`、`Checkbox`、`Switch`，设置及文件选择包装保留各自业务语义；通用空结果、加载和错误使用 `EmptyState`、`LoadingState`、`ErrorNotice`。控件焦点和选中状态使用各自的语义主题变量，详见 [选择控件与状态提示](docs/selection-and-state-components.md)。
 - 普通列表项和导航的状态外观复用 `.vd-selectable`，通过对应的 `aria-pressed`、`aria-selected`、`aria-current` 或单选卡片的 `aria-checked` 驱动；页面保留布局及业务行为，详见 [列表项选中态](docs/selection-styles.md)。
 - 工作台文件、提交及分支等列表行复用 `.vd-row` 和 `.vd-row-scope`，通过 `data-row-selected` / `data-row-context` 表达视觉状态；不得把复选框、HEAD、展开及业务状态色当作行选中。
+- 普通弹窗复用 `DialogSurface` 的外观、层级与焦点管理；服务弹窗固定标题及底部按钮，仅内容区滚动，详见 [弹窗样式与交互](docs/dialog-styles.md)。
 - Git 与 SVN 的操作语义不同，按实际仓库类型和工具能力实现。平台相关进程、路径和编码处理复用 `cli.rs`，尤其注意 Windows 后台窗口和 Unicode 路径、macOS 从 Finder 启动时的工具探测与语言环境。
 - 凭据使用现有系统安全存储；托管平台 API 账号与 Git 自身的 SSH / HTTPS 认证分别处理。日志和错误信息不输出 Token、密码或 API 密钥。
 - 新增能力应贯通界面、Bridge、Rust 和操作结果；演示数据、占位入口及静态检查不能作为已实现能力的证据。

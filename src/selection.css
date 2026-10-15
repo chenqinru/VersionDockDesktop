@@ -55,6 +55,24 @@
   opacity: .45;
   cursor: default;
 }
+/* Destructive choices share the readable danger palette used by menus. */
+.vd-selectable[data-danger="true"] { --selectable-foreground: var(--versiondock-menu-danger-foreground); }
+.vd-selectable[data-danger="true"]:is([aria-selected="true"], [aria-pressed="true"]) {
+  background: var(--versiondock-menu-danger-hover-background);
+  color: var(--versiondock-menu-danger-foreground);
+  border-color: var(--versiondock-menu-danger-foreground);
+}
+.vd-selectable[data-danger="true"]:where(:not(:disabled):not([aria-disabled="true"])):is(:hover, :focus-visible) {
+  background: var(--versiondock-menu-danger-hover-background);
+  color: var(--versiondock-menu-danger-foreground);
+  border-color: var(--versiondock-menu-danger-foreground);
+}
+.vd-selectable[data-danger="true"]:where(:not(:disabled):not([aria-disabled="true"])):active {
+  background: var(--versiondock-menu-danger-pressed-background);
+  color: var(--versiondock-menu-danger-foreground);
+  border-color: var(--versiondock-menu-danger-foreground);
+}
+.vd-selectable[data-danger="true"]:focus-visible { outline-color: var(--versiondock-menu-danger-foreground); }
 @media (prefers-reduced-motion: reduce) { .vd-selectable { transition: none; } }
 
 /* Rows share feedback without changing their dimensions, borders or business colors.

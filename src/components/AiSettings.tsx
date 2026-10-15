@@ -1,4 +1,5 @@
 import { ErrorNotice } from './ErrorNotice';
+import { Textarea } from './Textarea';
 import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { SettingSelect } from './SettingSelect';
@@ -237,7 +238,7 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
           {scope === 'workspace' && <SettingSelect label={t('Repository')} disabled={saving} value={repoId} options={(snapshot?.repositories ?? []).map(r => [r.meta.id, r.meta.name])} onChange={setRepoId} />}
         </div>
         {loaded === key && info?.path && <small className="ai-prompt-path">{info.path}</small>}
-        <textarea
+        <Textarea controlSize="md"
           aria-label={t('AI prompt')}
           spellCheck={false}
           disabled={busy}

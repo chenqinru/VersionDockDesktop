@@ -10,10 +10,10 @@ export type { ProviderPanelProps } from './ProviderContent';
 export function ProviderPanel(props: ProviderPanelProps) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  return <DialogSurface preserveStyle className="modal-panel provider-panel" onClose={props.close} closeDisabled={busy} aria-label={t('Remote Providers')}>
+  return <DialogSurface size="large" className="modal-panel provider-panel" onClose={props.close} closeDisabled={busy} aria-label={t('Remote Providers')}>
     <header className="modal-header">
-      <div className="modal-header-title"><Codicon name="cloud" /><strong>{t(props.mode === 'browse' ? 'Browse Remote Repositories' : props.mode === 'publish' ? 'Publish Repository' : 'Remote Providers')}</strong></div>
-      <IconButton className="modal-close-btn" disabled={busy} onClick={props.close} title={t('Close')} aria-label={t('Close')}><Codicon name="close" /></IconButton>
+      <Codicon name="cloud" /><strong>{t(props.mode === 'browse' ? 'Browse Remote Repositories' : props.mode === 'publish' ? 'Publish Repository' : 'Remote Providers')}</strong>
+      <IconButton disabled={busy} onClick={props.close} title={t('Close')} aria-label={t('Close')}><Codicon name="close" /></IconButton>
     </header>
     <ProviderContent {...props} onBusyChange={setBusy} />
   </DialogSurface>;

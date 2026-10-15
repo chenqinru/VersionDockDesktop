@@ -16,8 +16,7 @@ export function useDialogFocusTrap(open: boolean, close: () => void, returnFocus
       if (dialog.current?.contains(document.activeElement)) return;
       focusable()[0]?.focus();
     });
-    const key = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || document.querySelector('[role="menu"]')) return;
+    const topmostModal = () => {
       const modals = [...document.querySelectorAll<HTMLElement>('[aria-modal="true"]')].filter(element => getComputedStyle(element).display !== 'none');
       const layer = (element: HTMLElement) => {
         let value = 0;
@@ -28,7 +27,11 @@ export function useDialogFocusTrap(open: boolean, close: () => void, returnFocus
         return value;
       };
       modals.sort((a, b) => layer(a) - layer(b));
-      if (modals.at(-1) !== dialog.current) return;
+      return modals.at(-1);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || document.querySelector('[role="menu"]')) return;
+      if (topmostModal() !== dialog.current) return;
       if (event.key === 'Escape' && dialog.current?.querySelector('[role="search"], [role="listbox"]')) return;
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRef.current(); return; }
       if (event.key !== 'Tab') return;
@@ -44,7 +47,17 @@ export function useDialogFocusTrap(open: boolean, close: () => void, returnFocus
       else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
     };
     window.addEventListener('keydown', key, true);
-    return () => { window.removeEventListener('keydown', key, true); queueMicrotask(() => previous.current?.focus()); };
+    return () => {
+      window.removeEventListener('keydown', key, true);
+      queueMicrotask(() => {
+        const target = previous.current;
+        if (!target?.isConnected) return;
+        // A following workflow step may already have opened another modal.
+        // Restore into a remaining parent, but never steal focus from the new dialog.
+        const remaining = topmostModal();
+        if (!remaining || remaining.contains(target)) target.focus();
+      });
+    };
   }, [open, returnFocus]);
   return dialog;
 }

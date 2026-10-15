@@ -42,3 +42,18 @@ it('blocks escape and backdrop dismissal during an operation', () => {
   fireEvent.click(screen.getByRole('presentation'));
   expect(close).toHaveBeenCalledOnce();
 });
+
+it('does not restore a previous trigger over a following dialog', async () => {
+  function Workflow() {
+    const [step, setStep] = useState(0);
+    return <><button onClick={() => setStep(1)}>Start</button>
+      {step === 1 && <DialogSurface key="first" onClose={() => setStep(0)} aria-label="First"><button onClick={() => setStep(2)}>Continue</button></DialogSurface>}
+      {step === 2 && <DialogSurface key="second" onClose={() => setStep(0)} aria-label="Second"><input aria-label="Next value" autoFocus /></DialogSurface>}
+    </>;
+  }
+  render(<Workflow />);
+  screen.getByText('Start').focus();
+  fireEvent.click(screen.getByText('Start'));
+  fireEvent.click(screen.getByText('Continue'));
+  await waitFor(() => expect(screen.getByLabelText('Next value')).toHaveFocus());
+});

@@ -26,14 +26,11 @@ export function IdentityPanel({ repoId, close }: { repoId: string; close: () => 
   return (
     <DialogSurface size="medium" className="modal-panel identity-panel" onClose={close} aria-label={repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}>
         <header className="modal-header">
-          <div className="modal-header-title">
-            <Codicon name="account" />
-            <strong>{repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}</strong>
-            <span className="modal-repo-badge">{repo.meta.name}</span>
-          </div>
+          <Codicon name="account" />
+          <strong>{repo.meta.kind === 'git' ? t('Git Identity') : t('SVN Account')}</strong>
+          <span className="modal-repo-badge">{repo.meta.name}</span>
           <IconButton
             type="button"
-            className="modal-close-btn"
             title={t('Close')}
             onClick={close}
           >

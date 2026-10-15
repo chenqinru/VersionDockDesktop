@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DialogHost } from './DialogHost';
-import { choiceDialog, editorDialog, promptDialog, publishDialog } from './dialogService';
+import { choiceDialog, editorDialog, multiChoiceDialog, promptDialog, publishDialog } from './dialogService';
 import { openCommitMessageEditor } from './commitMessageEditor';
 import { createTranslator, I18nContext } from '../i18n';
 
@@ -11,6 +11,38 @@ afterEach(() => {
 });
 
 describe('DialogHost compact choices', () => {
+  const branches = Array.from({ length: 12 }, (_, index) => ({ id: `branch:${index}`, label: `feature/${index}`, description: `/worktrees/repo-${index}` }));
+
+  it('searches long choice lists by name and description, shows empty results, and clears the query for the next dialog', async () => {
+    const selected = vi.fn();
+    render(<DialogHost />);
+    await act(async () => { void choiceDialog({ title: 'Branches', message: '', choices: branches }).then(selected); });
+    const search = screen.getByRole('textbox', { name: 'Search options...' });
+    fireEvent.change(search, { target: { value: ' REPO-3 ' } });
+    expect(screen.getByText('feature/3')).toBeInTheDocument();
+    expect(screen.queryByText('feature/2')).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: 'missing' } });
+    expect(screen.getByRole('status')).toHaveTextContent('No matching options');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(search).toHaveFocus();
+    fireEvent.change(search, { target: { value: 'feature/5' } });
+    fireEvent.click(screen.getByText('feature/5'));
+    await waitFor(() => expect(selected).toHaveBeenCalledWith('branch:5'));
+    await act(async () => { void choiceDialog({ title: 'Branches again', message: '', choices: branches }); });
+    expect(screen.getByRole('textbox', { name: 'Search options...' })).toHaveValue('');
+    expect(screen.getByText('feature/2')).toBeInTheDocument();
+  });
+
+  it('preserves checked choices hidden by search when confirming a multi-choice dialog', async () => {
+    const selected = vi.fn();
+    render(<DialogHost />);
+    await act(async () => { void multiChoiceDialog({ title: 'Branches', message: '', choices: branches, initialSelected: ['branch:1'] }).then(selected); });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search options...' }), { target: { value: 'feature/3' } });
+    fireEvent.click(screen.getByRole('button', { name: /feature\/3/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(selected).toHaveBeenCalledWith(['branch:1', 'branch:3']));
+  });
+
   it.each(['en', 'zh-CN'] as const)('preserves full branch names and paths for compact choices in %s', async (language) => {
     const t = createTranslator(language);
     const label = 'codex/sync-plugin-worktree-branch-refresh';
@@ -194,6 +226,19 @@ describe('DialogHost identity prompts', () => {
 
 
 describe('AI branch name input', () => {
+  it('returns from task entry on Escape before dismissing and restores focus to the trigger', async () => {
+    render(<><button>New branch</button><DialogHost /></>);
+    const trigger = screen.getByRole('button', { name: 'New branch' });
+    trigger.focus();
+    act(() => publishDialog({ kind: 'prompt', title: 'New Branch', message: '', inputLabel: 'Branch name', initialValue: 'manual/name', generateBranchName: vi.fn(), resolve: vi.fn() }));
+    fireEvent.click(screen.getByTitle('Generate branch name with AI'));
+    fireEvent.keyDown(screen.getByLabelText('Task description'), { key: 'Escape' });
+    expect(screen.getByLabelText('Branch name')).toHaveValue('manual/name');
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it('keeps the manual name when returning from the task input, and returns generated names for editing', async () => {
     const generate = vi.fn().mockResolvedValue('fix/login-timeout');
     const resolve = vi.fn();

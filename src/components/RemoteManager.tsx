@@ -117,16 +117,13 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
 
   return (
     <>
-    <DialogSurface preserveStyle ref={popover} className="modal-panel remote-manager-modal" onClose={close} aria-label={t('Manage Remotes')}>
+    <DialogSurface size="large" ref={popover} className="modal-panel remote-manager-modal" onClose={close} aria-label={t('Manage Remotes')}>
         <header className="modal-header">
-          <div className="modal-header-title">
-            <Codicon name="remote-explorer" />
-            <strong>{t('Manage Remotes')}</strong>
+          <Codicon name="remote-explorer" />
+          <strong>{t('Manage Remotes')}</strong>
             {repo && <span className="modal-repo-badge">{repo.meta.name}</span>}
-          </div>
           <IconButton
             type="button"
-            className="modal-close-btn"
             title={t('Close')}
             onClick={close}
           >

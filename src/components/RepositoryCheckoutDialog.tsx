@@ -127,8 +127,8 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
           setSource(next);
           event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next === 'url' ? 0 : 1]?.focus();
         }}>
-          <button type="button" role="tab" aria-selected={source === 'url'} tabIndex={source === 'url' ? 0 : -1} disabled={locked} onClick={() => setSource('url')}><Codicon name="link" /><span>{t('Repository URL')}</span></button>
-          <button type="button" role="tab" aria-selected={source === 'account'} tabIndex={source === 'account' ? 0 : -1} disabled={locked} onClick={() => setSource('account')}><Codicon name="account" /><span>{t('Remote Accounts')}</span></button>
+          <button className="vd-selectable" type="button" role="tab" aria-selected={source === 'url'} tabIndex={source === 'url' ? 0 : -1} disabled={locked} onClick={() => setSource('url')}><Codicon name="link" /><span>{t('Repository URL')}</span></button>
+          <button className="vd-selectable" type="button" role="tab" aria-selected={source === 'account'} tabIndex={source === 'account' ? 0 : -1} disabled={locked} onClick={() => setSource('account')}><Codicon name="account" /><span>{t('Remote Accounts')}</span></button>
         </div>}
         {git && source === 'account' && <ProviderContent mode="browse" disabled={locked} close={() => setSource('url')} selectedRepositoryUrl={providerAccountId ? url : undefined} onAccountFormChange={setAccountFormOpen} onAccountChange={clearAccountSelection} onClone={(repository: RemoteRepository, accountId) => {
           setUrl(repository.cloneUrl);

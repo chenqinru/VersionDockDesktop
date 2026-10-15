@@ -493,7 +493,7 @@ export function WorktreePanel({ active = true,
     check();
     const localName = (b: BranchInfo) => b.remote ? b.name.slice((b.remoteName?.length ?? b.name.indexOf('/')) + 1) : b.name;
     const branchChoices = new Map(branches.map((branch, index) => [`branch:${index}`, branch]));
-    const selected = await choiceDialog({title:t('New Worktree — Branch'), message:t('Select branch for new worktree'), compactChoices:true, choices:[
+    const selected = await choiceDialog({title:t('New Worktree — Branch'), icon:'git-branch', message:t('Select branch for new worktree'), compactChoices:true, choices:[
       {id:'new', label:t('Create new branch…'), icon:'add'},
       ...branches.map((branch, index) => {
         const occupied = worktrees.find(w => w.branch === localName(branch));
@@ -505,7 +505,7 @@ export function WorktreePanel({ active = true,
     const picked = branchChoices.get(selected);
     const occupied = picked && worktrees.find(w => w.branch === localName(picked));
     if (occupied) {
-      const action = await choiceDialog({title:t('New Worktree — Branch'), message:t('Branch "{0}" is already used by worktree at {1}.', occupied.branch, occupied.path), choices:[{id:'open', label:t('Open in New Window')}, {id:'add', label:t('Add Folder to Workspace')}]});
+      const action = await choiceDialog({title:t('New Worktree — Branch'), icon:'git-branch', message:t('Branch "{0}" is already used by worktree at {1}.', occupied.branch, occupied.path), choices:[{id:'open', label:t('Open in New Window')}, {id:'add', label:t('Add Folder to Workspace')}]});
       if (!action) return;
       check();
       if (action === 'open') await openWorktree(repoId, occupied.path, false);
