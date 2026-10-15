@@ -6,6 +6,7 @@ import { AiComposerWorkspace } from './components/AiComposerWorkspace';
 import { AiCodeReviewWorkspace } from './components/AiCodeReviewWorkspace';
 import { aiWorkspaceChanged } from './ai/aiStore';
 import { useEffectiveTheme } from './theme/useEffectiveTheme';
+import { useMouseBackNavigation } from './hooks/useMouseBackNavigation';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { WorkspaceChooser } from './components/WorkspaceChooser';
@@ -56,6 +57,7 @@ function splitCheckoutTarget(path: string): { parent: string; name: string } {
 export { NotificationToast } from './components/NotificationToast';
 
 export function App() {
+  useMouseBackNavigation();
   const bridge = useBridge();
   const bootstrap = useAppStore((state) => state.bootstrap);
   const snapshot = useAppStore((state) => state.snapshot);
@@ -250,7 +252,7 @@ export function App() {
 
   return <I18nContext.Provider value={{ language, preference: languagePreference, t }}>
     <div className="app-shell" ref={startupFocus} tabIndex={-1}>
-      <TitleBar startupTab={!ready && !snapshot ? startupTab : undefined} />
+      <TitleBar welcomeMode={ready && !snapshot} startupTab={!ready && !snapshot ? startupTab : undefined} />
       {!ready && !snapshot ? <div className="startup"><Codicon name="loading codicon-modifier-spin" />{t('Loading workspace…')}</div> : !snapshot ? <WorkspaceChooser /> : (
         <main className="main-workspace" ref={(element) => { if (element) element.inert = transferringWorkspace; }} aria-busy={transferringWorkspace || undefined}>
           <div style={{ width: commitWidth }} className="commit-slot"><CommitPanel key={snapshot.workspace.id} /></div>

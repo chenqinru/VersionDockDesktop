@@ -175,7 +175,7 @@ export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree'
         <div><i style={{ background: repoColor }} /><strong>{repoName}</strong><span>{t('{0} vs Working Tree', baseLabel)}</span></div>
         <small>{t('{0} compared with {1}', baseLabel, value.currentRef)}</small>
       </div>
-      <IconButton type="button" title={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} aria-label={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} onClick={close}><Codicon name="arrow-left" /></IconButton>
+      <IconButton data-navigation-back="" type="button" title={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} aria-label={t(source === 'repository' ? 'Back to Changes' : 'Back to Worktrees')} onClick={close}><Codicon name="arrow-left" /></IconButton>
     </header>
     <div className="branch-working-toolbar">
       <span>{files.length === 1 ? t('{0} file', files.length) : t('{0} files', files.length)}</span>

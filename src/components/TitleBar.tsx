@@ -61,7 +61,7 @@ function transferId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = {}) {
+export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: WorkspaceDescriptor; welcomeMode?: boolean } = {}) {
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const addAnchorRef = useRef<HTMLButtonElement>(null);
@@ -85,7 +85,9 @@ export function TitleBar({ startupTab }: { startupTab?: WorkspaceDescriptor } = 
   const workspaceId = useAppStore(state => state.snapshot?.workspace.id);
   const initialized = useAppStore(state => Boolean(state.bootstrap));
   const transferringTabIds = useAppStore((state) => state.transferringTabIds);
-  const tabs = loadedTabs.length === 0 && startupTab ? [startupTab] : loadedTabs;
+  // Tab registration can finish before the workspace snapshot is displayed.
+  // Keep the titlebar on the same surface as the main application during that gap.
+  const tabs = welcomeMode ? [] : loadedTabs.length === 0 && startupTab ? [startupTab] : loadedTabs;
   const activeTabId = useAppStore((state) => state.activeTabId) ?? startupTab?.id;
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const recentWorkspaces = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);

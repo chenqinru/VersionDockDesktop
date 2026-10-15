@@ -4891,20 +4891,25 @@ button.danger:not(:disabled):hover,
   gap: 6px;
   padding: 6px 12px 8px;
   border-bottom: 2px solid transparent;
-  color: var(--about-secondary-text);
+  color: var(--versiondock-muted);
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
   font-weight: 500;
   cursor: pointer;
 }
 
-.about-tab-btn:hover {
+.about-tabs > .about-tab-btn:not(:disabled):hover {
   color: var(--versiondock-text);
+  background: var(--versiondock-item-hover-background);
 }
 
-.about-tab-btn.active {
-  color: var(--versiondock-selection-foreground);
-  border-bottom-color: var(--versiondock-selection-border);
+.about-tabs > .about-tab-btn[aria-selected="true"] {
+  color: var(--versiondock-accent);
+  border-bottom-color: var(--versiondock-accent);
   font-weight: 600;
+}
+
+.about-tabs > .about-tab-btn[aria-selected="true"]:hover {
+  color: var(--versiondock-accent);
 }
 
 .about-body {
@@ -6461,6 +6466,7 @@ button.danger:not(:disabled):hover,
 .source-code-toolbar { min-height: 28px; display: flex; justify-content: flex-end; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--versiondock-border-soft); }
 .source-code-workspace > .detail-file-search { position: absolute; top: 32px; right: 8px; z-index: 20; }
 .source-code-view { min-width: 0; min-height: 0; }
+.code-highlight-loading { position: absolute; inset: 32px 0 auto; z-index: 1; pointer-events: none; }
 .source-code-view ::selection { background: var(--versiondock-selection-background); color: inherit; }
 .source-code-view mark { padding: 0; background: var(--versiondock-hover); outline: 1px solid var(--versiondock-selection-border); }
 .source-code-view mark.current { background: var(--versiondock-selection-background); outline-width: 2px; }

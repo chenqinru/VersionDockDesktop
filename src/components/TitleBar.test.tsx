@@ -23,6 +23,20 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it('keeps the welcome title while a registered workspace is still waiting to be displayed', () => {
+    useAppStore.setState({ tabs: [], activeTabId: null, operations: {} });
+    const view = render(<BridgeContext.Provider value={bridge}><TitleBar welcomeMode /></BridgeContext.Provider>);
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id }));
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(view.container.querySelector('.titlebar')).toHaveClass('welcome-mode');
+    expect(view.container.querySelector('.titlebar-welcome-title')).toBeInTheDocument();
+    view.rerender(<BridgeContext.Provider value={bridge}><TitleBar welcomeMode={false} /></BridgeContext.Provider>);
+    expect(screen.getByRole('tab', { name: /Workspace/ })).toBeInTheDocument();
+    expect(view.container.querySelector('.titlebar-welcome-title')).not.toBeInTheDocument();
+    expect(view.container.querySelector('.titlebar')).not.toHaveClass('welcome-mode');
+  });
+
   it('only offers a new-window action for recent workspaces that are not already open', () => {
     const otherOpened = { ...workspace, id: 'other-opened', name: 'Other Opened', paths: ['/tmp/other-opened'] };
     const closed = { ...workspace, id: 'closed', name: 'Closed', paths: ['/tmp/closed'] };

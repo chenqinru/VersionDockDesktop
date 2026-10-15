@@ -519,6 +519,7 @@ export function ConflictsWorkspace() {
         <Button
           type="button"
           className="diff-back-button"
+          data-navigation-back=""
           onClick={backToHistory}
           title={t('Back to history')}
           style={{ flexShrink: 0 }}

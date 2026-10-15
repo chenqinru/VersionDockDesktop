@@ -19,7 +19,7 @@ export function WorkspaceHeader({
 }) {
   return (
     <header className={`workspace-page-header ${className}`}>
-      <Button type="button" className="workspace-back-button" disabled={backDisabled} onClick={onBack}>
+      <Button data-navigation-back="" type="button" className="workspace-back-button" disabled={backDisabled} onClick={onBack}>
         <Codicon name="arrow-left" /><span>{backLabel}</span>
       </Button>
       {children}

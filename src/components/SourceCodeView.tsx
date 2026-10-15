@@ -2,13 +2,14 @@ import { navigationScrollBehavior } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ThemedToken } from 'shiki';
-import { cachedDiffLines, highlightDiffLines } from './UnifiedDiffView';
+import { cachedDiffLines, highlightDiffLines, resolveDiffHighlightLanguage } from './UnifiedDiffView';
 import { BridgeContext } from '../platform/context';
 import { resolveShikiTheme } from '../theme';
 import { useI18n } from '../i18n';
 import { FileSearchWidget } from './FileSearchWidget';
 import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
+import { LoadingState } from './LoadingState';
 
 export function SourceCodeView({ content, path, language = 'text' }: { content: string; path: string; language?: string }) {
   const { t } = useI18n();
@@ -17,6 +18,7 @@ export function SourceCodeView({ content, path, language = 'text' }: { content: 
   const lines = useMemo(() => content.replace(/\r\n/g, '\n').split('\n'), [content]);
   const cached = useMemo(() => content.length <= 1_000_000 && lines.length <= 10_000 ? cachedDiffLines(lines, language, path, theme) : undefined, [content.length, lines, language, path, theme]);
   const [highlighted, setHighlighted] = useState<{ content: string; path: string; language: string; theme: typeof theme; tokens: ThemedToken[][] }>();
+  const [failed, setFailed] = useState<{ content: string; path: string; language: string; theme: typeof theme }>();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
@@ -54,6 +56,7 @@ export function SourceCodeView({ content, path, language = 'text' }: { content: 
       if (!controller.signal.aborted) setHighlighted({ content, path, language, theme, tokens });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
+      setFailed({ content, path, language, theme });
       const details = JSON.stringify({ path, language, reason: error instanceof Error ? error.message : 'UnknownError' });
       if (bridge) void bridge.pushClientLog('warn', 'ui', 'Syntax highlighting failed', details).catch(() => undefined);
       else console.warn('Syntax highlighting failed', details);
@@ -81,10 +84,15 @@ export function SourceCodeView({ content, path, language = 'text' }: { content: 
   }, [content, path]);
 
   const tokens = highlighted?.content === content && highlighted.path === path && highlighted.language === language && highlighted.theme === theme ? highlighted.tokens : cached;
+  const highlightPending = !tokens && content.length <= 1_000_000 && lines.length <= 10_000
+    && Boolean(resolveDiffHighlightLanguage(language, path, lines))
+    && !(failed?.content === content && failed.path === path && failed.language === language && failed.theme === theme);
   return <section ref={container} tabIndex={-1} className="source-code-workspace">
     <div className="source-code-toolbar"><IconButton title={t('Find in file')} aria-label={t('Find in file')} onClick={startSearch}><Codicon name="search" /></IconButton></div>
     <FileSearchWidget placeholder={t('Find in file')} query={query} isOpen={open} inputRef={input} onChange={(value) => { setQuery(value); setIndex(0); }} onClose={closeSearch} count={{ current: matches.length ? current + 1 : 0, total: matches.length }} onNavigate={navigate} />
-    <div className="code-view source-code-view"><pre className="shiki"><code>{lines.map((line, lineIndex) => {
+    <div className="code-view source-code-view" aria-busy={highlightPending}>
+    {highlightPending && <LoadingState className="code-highlight-loading" />}
+    <pre className="shiki" style={{ visibility: highlightPending ? 'hidden' : undefined }}><code>{lines.map((line, lineIndex) => {
       let offset = 0;
       const lineMatches = matchesByLine.get(lineIndex) ?? [];
       const values = tokens?.[lineIndex]?.length ? tokens[lineIndex] : [{ content: line }];

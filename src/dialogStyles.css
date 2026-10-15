@@ -99,7 +99,7 @@
   padding: 5px 8px;
 }
 .vd-dialog.ignore-dialog textarea { min-height: 220px; max-height: 45vh; resize: vertical; font-family: var(--versiondock-code); }
-.vd-dialog .dialog-editor { min-height: 190px; max-height: 45vh; width: 100%; box-sizing: border-box; resize: vertical; }
+.vd-dialog .dialog-editor[data-control-size] { min-height: 190px; max-height: 45vh; width: 100%; box-sizing: border-box; resize: vertical; }
 .vd-dialog.commit-message-dialog { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .vd-dialog.commit-message-dialog > header { flex-shrink: 0; padding: 16px 24px 12px; margin: 0; border-bottom: 1px solid var(--versiondock-border-soft); }
 .vd-dialog.commit-message-dialog > header > .codicon { background: transparent; color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--versiondock-warning)); width: 20px; flex-basis: 20px; }

@@ -385,6 +385,7 @@ export function MergeWorkspace() {
         <Button
           type="button"
           className="diff-back-button"
+          data-navigation-back=""
           onClick={openConflicts}
           title={t('Back to conflicts')}
         >

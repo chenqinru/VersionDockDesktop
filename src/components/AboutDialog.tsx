@@ -132,7 +132,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
             type="button"
             role="tab"
             aria-selected={activeTab === 'about'}
-            className={`about-tab-btn ${activeTab === 'about' ? 'active' : ''}`}
+            className="about-tab-btn"
             onClick={() => setActiveTab('about')}
           >
             <Codicon name="info" />
@@ -142,7 +142,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
             type="button"
             role="tab"
             aria-selected={activeTab === 'changelog'}
-            className={`about-tab-btn ${activeTab === 'changelog' ? 'active' : ''}`}
+            className="about-tab-btn"
             onClick={() => setActiveTab('changelog')}
           >
             <Codicon name="history" />

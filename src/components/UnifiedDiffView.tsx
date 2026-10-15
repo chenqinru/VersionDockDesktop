@@ -1,4 +1,5 @@
 import { Button } from './Button';
+import { LoadingState } from './LoadingState';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -231,7 +232,7 @@ function diffCellGroups(parsed: ParsedUnifiedDiff, side: DiffSide): DiffCell[][]
 // template hunks without their surrounding SFC tags; treating the entire patch
 // as one fragment makes one section's grammar corrupt every other section.
 // eslint-disable-next-line react-refresh/only-export-components
-export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: DiffSide, language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw, options?: { signal?: AbortSignal; onGroup?: (cells: DiffCell[], tokens: ThemedToken[][]) => void; onError?: (error: unknown) => void }): Promise<WeakMap<DiffCell, ThemedToken[]>> {
+export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: DiffSide, language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw, options?: { signal?: AbortSignal; onGroup?: (cells: DiffCell[], tokens: ThemedToken[][]) => void; onError?: (error: unknown, cells: DiffCell[]) => void }): Promise<WeakMap<DiffCell, ThemedToken[]>> {
   const groups = diffCellGroups(parsed, side);
   const highlighted = new WeakMap<DiffCell, ThemedToken[]>();
   // Each side advances one hunk at a time. The shared worker interleaves both
@@ -244,7 +245,7 @@ export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: D
       cells.forEach((cell, index) => highlighted.set(cell, tokens[index] ?? []));
       options?.onGroup?.(cells, tokens);
     } catch (error) {
-      if (!options?.signal?.aborted) options?.onError?.(error);
+      if (!options?.signal?.aborted) options?.onError?.(error, cells);
     }
   }
   return highlighted;
@@ -618,15 +619,17 @@ export function UnifiedDiffView({
     searchMatches.forEach((match, index) => values.set(match.cell, [...values.get(match.cell) ?? [], { start: match.start, end: match.end, current: index === selectedSearchIndex }]));
     return values;
   }, [searchMatches, selectedSearchIndex]);
+  const highlightEligible = useMemo(() => content.length <= 1_000_000
+    && parsed.rows.filter(row => row.kind === 'pair').length <= 10_000, [content.length, parsed]);
   const cachedTokens = useMemo(() => {
     const tokens = new WeakMap<DiffCell, ThemedToken[]>();
-    if (content.length > 1_000_000 || parsed.rows.filter((row) => row.kind === 'pair').length > 10_000) return tokens;
+    if (!highlightEligible) return tokens;
     for (const side of ['old', 'new'] as const) for (const cells of diffCellGroups(parsed, side)) {
       const cached = cachedDiffLines(cells.map((cell) => cell.content || ' '), language, path, theme);
       cells.forEach((cell, index) => { if (cached?.[index]) tokens.set(cell, cached[index]); });
     }
     return tokens;
-  }, [content.length, parsed, language, path, theme]);
+  }, [highlightEligible, parsed, language, path, theme]);
   const [highlighted, setHighlighted] = useState<{ parsed: ParsedUnifiedDiff; theme: typeof theme; language: string; tokens: WeakMap<DiffCell, ThemedToken[]> }>();
   const renderedTokens = highlighted?.parsed === parsed && highlighted.theme === theme && highlighted.language === language ? highlighted.tokens : cachedTokens;
   const containerRef = useRef<HTMLElement>(null);
@@ -788,6 +791,17 @@ export function UnifiedDiffView({
     },
   });
 
+  const visibleRows = virtualizer.range
+    ? rows.slice(virtualizer.range.startIndex, virtualizer.range.endIndex + 1)
+    : rows.slice(0, 40);
+  const highlightPending = highlightEligible
+    && Boolean(resolveDiffHighlightLanguage(language, path, []))
+    && visibleRows.some(row => {
+      const pending = (cell: DiffCell) => cell.kind !== 'empty' && !renderedTokens.has(cell);
+      return row.kind === 'split' ? pending(row.oldCell) || pending(row.newCell)
+        : row.kind === 'inline' ? pending(row.cell) : false;
+    });
+
   const openSearch = useCallback(() => {
     searchTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     previousCollapsed.current = collapsed;
@@ -894,13 +908,19 @@ export function UnifiedDiffView({
       else console.warn('Syntax highlighting failed', details);
     };
     for (const side of ['old', 'new'] as const) {
+      let firstGroup = true;
+      const publishGroup = (cells: DiffCell[], tokens: ThemedToken[][]) => {
+        cells.forEach((cell, index) => additions.set(cell, tokens[index] ?? []));
+        if (firstGroup) {
+          firstGroup = false;
+          if (frame !== undefined) cancelAnimationFrame(frame);
+          publish();
+        } else if (frame === undefined) frame = requestAnimationFrame(publish);
+      };
       void highlightParsedDiffSide(parsed, side, language, path, theme, {
         signal: controller.signal,
-        onError,
-        onGroup: (cells, tokens) => {
-          cells.forEach((cell, index) => additions.set(cell, tokens[index] ?? []));
-          if (frame === undefined) frame = requestAnimationFrame(publish);
-        },
+        onError: (error, cells) => { onError(error); publishGroup(cells, []); },
+        onGroup: publishGroup,
       });
     }
     return () => {
@@ -980,8 +1000,9 @@ export function UnifiedDiffView({
     </div>
     <FileSearchWidget placeholder={t('Find in file')} query={searchQuery} isOpen={searchOpen} inputRef={searchInput} onChange={(query) => { setSearchQuery(query); setSearchIndex(0); }} onClose={closeSearch} count={{ current: searchMatches.length ? selectedSearchIndex + 1 : 0, total: searchMatches.length }} onNavigate={navigateSearch} />
     {historyError && <div className="diff-history-error" role="alert">{historyError}</div>}
-    <div ref={scrollRef} className="unified-diff-scroll">
-      <div className="unified-diff-virtual" style={{ height: virtualizer.getTotalSize() }}>
+    <div ref={scrollRef} className="unified-diff-scroll" aria-busy={highlightPending}>
+      {highlightPending && <LoadingState className="code-highlight-loading" />}
+      <div className="unified-diff-virtual" style={{ height: virtualizer.getTotalSize(), visibility: highlightPending ? 'hidden' : undefined }}>
         {view === 'split' ? (
           <div className="unified-diff-split-container">
             <div className="unified-diff-pane old" onScroll={syncHorizontalScroll}>

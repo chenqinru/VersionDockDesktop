@@ -2,11 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SyncPanel } from './SyncPanel';
 import { useAppStore } from '../store/appStore';
-import type { CommitDetail, CommitNode, IncomingCommit, RepositoryStatus, UnpushedCommit, WorkspaceSnapshot } from '../bindings/generated';
+import type { CommitDetail, CommitNode, IncomingCommit, RepositoryStatus, RevisionChanges, UnpushedCommit, WorkspaceSnapshot } from '../bindings/generated';
 import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 import * as dialogService from './dialogService';
 import { commitKey } from '../history/commitDetails';
+import { StrictMode } from 'react';
 
 const bridge = new MockBridge(() => []);
 const gitRepo: RepositoryStatus = {
@@ -75,6 +76,111 @@ afterEach(() => {
     incomingCommits: {},
     loadErrors: {},
     operations: {},
+  });
+});
+
+describe('SyncPanel aggregate changes loading', () => {
+  const files = (path: string): RevisionChanges => ({ fromRevision: 'base', toRevision: 'head', files: [{ path, status: 'M', added: 1, removed: 0 }] });
+  const deferred = () => {
+    let resolve!: (value: RevisionChanges) => void;
+    const promise = new Promise<RevisionChanges>(done => { resolve = done; });
+    return { promise, resolve };
+  };
+  const setup = (responder: ConstructorParameters<typeof MockBridge>[0], incoming: IncomingCommit[] = []) => {
+    useAppStore.setState({ bridge: new MockBridge(responder), snapshot, branchesByRepo: {}, unpushedCommits: { 'repo-1': sampleOutgoing }, incomingCommits: { 'repo-1': incoming } });
+    const view = render(<SyncPanel repos={[gitRepo]} fileViewMode="flat" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show aggregated changes' }));
+    return view;
+  };
+
+  it('finishes aggregate file loading after StrictMode replays the initial effects', async () => {
+    const changes = { fromRevision: 'base', toRevision: 'out-1', files: [{ path: 'fixed.ts', status: 'M', added: 1, removed: 0 }] };
+    const requests = vi.fn((command, options) => command.type === 'unpushedChanges'
+      ? new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });
+        queueMicrotask(() => { if (!options.signal.aborted) resolve(changes); });
+      }) : []);
+    useAppStore.setState({ bridge: new MockBridge(requests), snapshot, unpushedCommits: { 'repo-1': sampleOutgoing }, incomingCommits: { 'repo-1': [] } });
+    render(<StrictMode><SyncPanel repos={[gitRepo]} fileViewMode="flat" /></StrictMode>);
+    fireEvent.click(screen.getByRole('button', { name: 'Show aggregated changes' }));
+    expect(await screen.findByText('fixed.ts')).toBeInTheDocument();
+    expect(screen.queryByText('Loading files...')).not.toBeInTheDocument();
+  });
+
+  it('shows each direction as soon as it completes instead of waiting for the other direction', async () => {
+    const outgoing = deferred();
+    setup(command => command.type === 'unpushedChanges' ? outgoing.promise : command.type === 'incomingChanges' ? files('incoming.ts') : [], sampleIncoming);
+    expect(await screen.findByText('incoming.ts')).toBeInTheDocument();
+    expect(screen.getByText('Loading files...')).toBeInTheDocument();
+    await act(async () => outgoing.resolve(files('outgoing.ts')));
+    expect(screen.getByText('outgoing.ts')).toBeInTheDocument();
+    expect(screen.queryByText('Loading files...')).not.toBeInTheDocument();
+  });
+
+  it.each(['REQUEST_TIMEOUT', 'REQUEST_CANCELLED'])('offers a working retry after %s without losing the successful direction', async code => {
+    let attempts = 0;
+    const requests = vi.fn(command => {
+      if (command.type === 'incomingChanges') return files('incoming.ts');
+      if (command.type === 'unpushedChanges') {
+        if (++attempts === 1) return Promise.reject(new Error(code));
+        return files('retried.ts');
+      }
+      return [];
+    });
+    setup(requests, sampleIncoming);
+    expect(await screen.findByRole('alert')).toHaveTextContent(code);
+    expect(screen.getByText('incoming.ts')).toBeInTheDocument();
+    expect(screen.queryByText('Loading files...')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('retried.ts')).toBeInTheDocument();
+    expect(requests.mock.calls.filter(([command]) => command.type === 'incomingChanges')).toHaveLength(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each(['tab', 'collapse'] as const)('restarts cancelled requests after %s navigation and ignores their late results', async navigation => {
+    const cancelled = deferred();
+    let signal: AbortSignal | undefined;
+    let attempts = 0;
+    const view = setup((command, options) => {
+      if (command.type !== 'unpushedChanges') return [];
+      signal = options?.signal;
+      return ++attempts === 1 ? cancelled.promise : files('current.ts');
+    });
+    await waitFor(() => expect(attempts).toBe(1));
+    if (navigation === 'tab') view.rerender(<SyncPanel active={false} repos={[gitRepo]} fileViewMode="flat" />);
+    else fireEvent.click(screen.getByRole('button', { name: 'Repo 1' }));
+    expect(signal?.aborted).toBe(true);
+    if (navigation === 'tab') view.rerender(<SyncPanel active repos={[gitRepo]} fileViewMode="flat" />);
+    else fireEvent.click(screen.getByRole('button', { name: 'Repo 1' }));
+    expect(await screen.findByText('current.ts')).toBeInTheDocument();
+    await act(async () => cancelled.resolve(files('obsolete.ts')));
+    expect(screen.queryByText('obsolete.ts')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading files...')).not.toBeInTheDocument();
+  });
+
+  it('loads aggregate changes only on demand and reuses completed results across view switches', async () => {
+    const requests = vi.fn(command => command.type === 'unpushedChanges' ? files('cached.ts') : []);
+    useAppStore.setState({ bridge: new MockBridge(requests), snapshot, unpushedCommits: { 'repo-1': sampleOutgoing }, incomingCommits: { 'repo-1': [] } });
+    render(<SyncPanel repos={[gitRepo]} fileViewMode="flat" />);
+    await act(async () => { await Promise.resolve(); });
+    expect(requests.mock.calls.filter(([command]) => command.type === 'unpushedChanges')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Show aggregated changes' }));
+    expect(await screen.findByText('cached.ts')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show commit list' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show aggregated changes' }));
+    expect(await screen.findByText('cached.ts')).toBeInTheDocument();
+    expect(requests.mock.calls.filter(([command]) => command.type === 'unpushedChanges')).toHaveLength(1);
+  });
+
+  it('invalidates incoming changes when HEAD changes even if incoming commit hashes are unchanged', async () => {
+    const old = deferred();
+    let attempts = 0;
+    const view = setup(command => command.type === 'incomingChanges' ? (++attempts === 1 ? old.promise : files('new-base.ts')) : files('outgoing.ts'), sampleIncoming);
+    await waitFor(() => expect(attempts).toBe(1));
+    view.rerender(<SyncPanel repos={[{ ...gitRepo, revision: 'new-head' }]} fileViewMode="flat" />);
+    expect(await screen.findByText('new-base.ts')).toBeInTheDocument();
+    await act(async () => old.resolve(files('old-base.ts')));
+    expect(screen.queryByText('old-base.ts')).not.toBeInTheDocument();
   });
 });
 

@@ -124,11 +124,19 @@ export function highlightSyntax(code: string, language: string, theme: Highlight
 
 /** Warm the engine during idle time; source code is never logged or persisted. */
 export function scheduleHighlightWarmup(): () => void {
-  const warm = () => { void highlightSyntax('', 'text', 'dark-plus').catch(() => undefined); };
+  const controller = new AbortController();
+  const warm = async () => {
+    // Warm grammars as well as WASM. Yield between languages so opening a file
+    // can take the next worker slot instead of waiting behind the warmup queue.
+    for (const language of ['text', 'typescript', 'javascript', 'tsx', 'vue', 'json', 'rust', 'java', 'python']) {
+      if (controller.signal.aborted) return;
+      await highlightSyntax('', language, 'dark-plus', controller.signal).catch(() => undefined);
+    }
+  };
   if (typeof window.requestIdleCallback === 'function') {
     const id = window.requestIdleCallback(warm);
-    return () => window.cancelIdleCallback(id);
+    return () => { window.cancelIdleCallback(id); controller.abort(); };
   }
   const id = window.setTimeout(warm, 200);
-  return () => window.clearTimeout(id);
+  return () => { window.clearTimeout(id); controller.abort(); };
 }

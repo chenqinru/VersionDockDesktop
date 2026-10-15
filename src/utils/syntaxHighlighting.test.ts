@@ -19,6 +19,25 @@ beforeEach(() => { vi.resetModules(); FakeWorker.instances = []; vi.stubGlobal('
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('syntax highlighting worker and cache', () => {
+  it('warms grammars without queuing ahead of a real file and cancels remaining warmup work', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestIdleCallback', undefined);
+    const service = await import('./syntaxHighlighting');
+    const stop = service.scheduleHighlightWarmup();
+    await vi.advanceTimersByTimeAsync(200);
+    const worker = FakeWorker.instances[0];
+    expect(worker.requests[0].language).toBe('text');
+    const file = service.highlightSyntax('const value = 1', 'typescript', 'dark-plus');
+    worker.reply([]);
+    await Promise.resolve();
+    expect(worker.requests[1].code).toBe('const value = 1');
+    stop();
+    worker.reply(tokens('const value = 1'));
+    await file;
+    await Promise.resolve();
+    expect(worker.requests).toHaveLength(2);
+  });
+
   it('shares concurrent identical work and makes repeat results available synchronously', async () => {
     const service = await import('./syntaxHighlighting');
     const a = service.highlightSyntax('fn main() {}', 'rust', 'dark-plus');

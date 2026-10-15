@@ -47,6 +47,20 @@ afterEach(() => {
 });
 
 describe('global scrollbar runtime', () => {
+  it.each(['vertical', 'both'])('keeps the native %s resize corner clear of overlay tracks', resize => {
+    const element = scroller();
+    element.style.resize = resize;
+    dispose = initializeGlobalScrollbars({ visibility: 'visible', modernUi: false, language: 'en' }).dispose;
+    flush();
+    const vertical = document.querySelector<HTMLElement>('[data-versiondock-overlay-scrollbar="vertical"]')!;
+    const horizontal = document.querySelector<HTMLElement>('[data-versiondock-overlay-scrollbar="horizontal"]')!;
+    expect(Number.parseFloat(vertical.style.height)).toBeLessThanOrEqual(element.clientHeight - 16);
+    expect(Number.parseFloat(horizontal.style.width)).toBeLessThanOrEqual(element.clientWidth - 16);
+    element.style.resize = 'none';
+    window.dispatchEvent(new Event('resize')); flush();
+    expect(Number.parseFloat(vertical.style.height)).toBeGreaterThan(element.clientHeight - 16);
+  });
+
   it('keeps system mode intact and cleans up after repeated forced modes', () => {
     const element = scroller(); element.scrollTop = 150;
     dispose = initializeGlobalScrollbars({ visibility: 'system', modernUi: false, language: 'en' }).dispose;

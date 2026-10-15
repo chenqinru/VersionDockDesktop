@@ -198,10 +198,14 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
       zIndex: String(record.stackingLevel),
       clipPath: `inset(${top - rect.top}px ${rect.right - right}px ${rect.bottom - bottom}px ${left - rect.left}px)` });
     const size = Number.parseFloat(getComputedStyle(root).getPropertyValue('--versiondock-scrollbar-size')) || 10;
+    // Overlay tracks must leave the native resize handle reachable.
+    const resizeCorner = style.resize && style.resize !== 'none' ? Math.max(16, size) : 0;
     for (const [axis, isVertical, needed] of [
       [record.vertical, true, vertical], [record.horizontal, false, horizontal],
     ] as const) {
-      axis.length = Math.max(0, (isVertical ? rect.height : rect.width) - ((isVertical ? horizontal : vertical) ? size : 0));
+      const start = !isVertical && style.direction === 'rtl' ? resizeCorner : 0;
+      const corner = Math.max(start ? 0 : resizeCorner, (isVertical ? horizontal : vertical) ? size : 0);
+      axis.length = Math.max(0, (isVertical ? rect.height : rect.width) - start - corner);
       axis.maximum = maximum(element, isVertical);
       const content = isVertical ? element.scrollHeight : element.scrollWidth;
       axis.thumbLength = Math.min(axis.length, Math.max(20, axis.length * clientSize(element, isVertical) / Math.max(1, content)));
@@ -212,7 +216,7 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
         Object.assign(axis.track.style, { top: '0', right: '0', height: `${axis.length}px` });
         Object.assign(axis.thumb.style, { top: `${offset}px`, height: `${axis.thumbLength}px` });
       } else {
-        Object.assign(axis.track.style, { left: '0', bottom: '0', width: `${axis.length}px` });
+        Object.assign(axis.track.style, { left: `${start}px`, bottom: '0', width: `${axis.length}px` });
         Object.assign(axis.thumb.style, { left: `${offset}px`, width: `${axis.thumbLength}px` });
       }
       // A global overlay must not draw over a modal, sticky header or another pane.

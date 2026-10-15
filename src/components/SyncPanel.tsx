@@ -1,9 +1,11 @@
 import { Button } from './Button';
+import { ErrorNotice } from './ErrorNotice';
+import { useSyncRevisionChanges } from '../hooks/useSyncRevisionChanges';
 import { SplitButtonMore } from './SplitButtonMore';
 import { generateHistoricalMessage, useAiStore } from '../ai/aiStore';
 import { IconButton } from './IconButton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BranchInfo, CommitDetail, IncomingCommit, RepositoryStatus, RevisionChanges, UnpushedCommit, UnpushedOperation } from '../bindings/generated';
+import type { BranchInfo, CommitDetail, IncomingCommit, RepositoryStatus, UnpushedCommit, UnpushedOperation } from '../bindings/generated';
 import { useI18n } from '../i18n';
 import { capabilityAvailable, isOperationActive, isOperationActiveForRepositories, resolveNotificationText, useAppStore } from '../store/appStore';
 import { useSpeedSearch } from '../hooks/useSpeedSearch';
@@ -257,7 +259,8 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   </div>;
 }
 
-function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo, filter, query, expanded, fileViewMode, onToggleChecked, onToggleFilter, onToggleExpanded, onFileViewModeChange }: {
+function SyncRepoSection({ active, repo, branch, outgoing, incoming, checked, singleRepo, filter, query, expanded, fileViewMode, onToggleChecked, onToggleFilter, onToggleExpanded, onFileViewModeChange }: {
+  active: boolean;
   repo: RepositoryStatus;
   branch?: BranchInfo;
   outgoing: UnpushedCommit[];
@@ -286,9 +289,6 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(new Set());
   const [hovered, setHovered] = useState(false);
   const [displayMode, setDisplayMode] = useState<'commits' | 'changes'>('commits');
-  const [changesCache, setChangesCache] = useState<Record<string, RevisionChanges>>({});
-  const [changesLoading, setChangesLoading] = useState(false);
-  const [changesError, setChangesError] = useState<{ key: string; outgoing?: string; incoming?: string }>();
   const detailCache = useRef<Record<string, CommitDetail>>({});
   const [commitDetails, setCommitDetails] = useState<Record<string, CommitDetail>>({});
   const [searchError, setSearchError] = useState<string>();
@@ -297,7 +297,6 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
     detailCache.current = { ...detailCache.current, [hash]: detail };
     setCommitDetails(detailCache.current);
   }, []);
-  const lastChangesRequest = useRef<string>();
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number }>();
   const [branchMenuAnchor, setBranchMenuAnchor] = useState<DOMRect>();
   const busy = isOperationActive(operations, { workspaceId, repositoryId: repo.meta.id, domain: 'sync' });
@@ -333,51 +332,12 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
     void Promise.all(Array.from({ length: Math.min(4, missing.length) }, worker));
     return () => { active = false; controller.abort(); };
   }, [bridge, cacheDetail, displayMode, incomingHashes, outgoingHashes, query, repo.meta.id, searchRetry, workspaceId]);
-  const changesKey = `${workspaceId ?? ''}\0${repo.meta.id}\0${outgoingHashes}\0${incomingHashes}`;
-  const outgoingKey = `${workspaceId ?? ''}\0${repo.meta.id}\0outgoing\0${outgoingHashes}`;
-  const incomingKey = `${workspaceId ?? ''}\0${repo.meta.id}\0incoming\0${incomingHashes}`;
-  const currentChanges = { outgoing: changesCache[outgoingKey], incoming: changesCache[incomingKey] };
-  const currentError = changesError?.key === changesKey ? changesError : undefined;
+  const changesEnabled = active && expanded && displayMode === 'changes';
+  const outgoingChanges = useSyncRevisionChanges({ bridge, workspaceId, repoId: repo.meta.id, revision: repo.revision, hashes: outgoingHashes, direction: 'outgoing', enabled: changesEnabled });
+  const incomingChanges = useSyncRevisionChanges({ bridge, workspaceId, repoId: repo.meta.id, revision: repo.revision, hashes: incomingHashes, direction: 'incoming', enabled: changesEnabled });
+  const currentChanges = { outgoing: outgoingChanges.data, incoming: incomingChanges.data };
   const outgoingError = loadErrors[`unpushed:${repo.meta.id}`];
   const incomingError = loadErrors[`incoming:${repo.meta.id}`];
-  const missingOutgoing = Boolean(outgoingHashes && !currentChanges.outgoing);
-  const missingIncoming = Boolean(incomingHashes && !currentChanges.incoming);
-  useEffect(() => {
-    if (!expanded) {
-      lastChangesRequest.current = undefined;
-      return;
-    }
-    if (!bridge || !workspaceId || (!missingOutgoing && !missingIncoming) || lastChangesRequest.current === changesKey) return;
-    lastChangesRequest.current = changesKey;
-    let active = true;
-    const controller = new AbortController();
-    queueMicrotask(() => { if (active) { setChangesLoading(true); setChangesError(undefined); } });
-    void Promise.allSettled([
-      missingOutgoing
-        ? bridge.request<RevisionChanges>({ type: 'unpushedChanges', payload: { workspace_id: workspaceId, repo_id: repo.meta.id, oldest_revision: outgoingHashes.split(',').at(-1) ?? null } }, { signal: controller.signal })
-        : Promise.resolve(undefined),
-      missingIncoming
-        ? bridge.request<RevisionChanges>({ type: 'incomingChanges', payload: { workspace_id: workspaceId, repo_id: repo.meta.id } }, { signal: controller.signal })
-        : Promise.resolve(undefined),
-    ]).then(([outgoingResult, incomingResult]) => {
-      if (!active) return;
-      setChangesLoading(false);
-      setChangesError({
-        key: changesKey,
-        outgoing: outgoingResult.status === 'rejected' ? String(outgoingResult.reason) : undefined,
-        incoming: incomingResult.status === 'rejected' ? String(incomingResult.reason) : undefined,
-      });
-      setChangesCache((current) => {
-        const next = { ...current };
-        if (outgoingResult.status === 'fulfilled' && outgoingResult.value) next[outgoingKey] = outgoingResult.value;
-        if (incomingResult.status === 'fulfilled' && incomingResult.value) next[incomingKey] = incomingResult.value;
-        const keys = Object.keys(next);
-        for (const key of keys.slice(0, Math.max(0, keys.length - 32))) delete next[key];
-        return next;
-      });
-    });
-    return () => { active = false; controller.abort(); };
-  }, [bridge, changesKey, expanded, incomingKey, missingIncoming, missingOutgoing, outgoingHashes, outgoingKey, repo.meta.id, workspaceId]);
   const needle = query.trim().toLocaleLowerCase();
   const repoMatches = `${repo.meta.name} ${branchLabel}`.toLocaleLowerCase().includes(needle);
   const timeline: TimelineCommit[] = [];
@@ -490,11 +450,11 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
       {!incomingActive && !outgoingActive ? <div className="sync-empty">{t('No commit type selected')}</div> : displayMode === 'changes' ? <>
         {incomingActive && incoming.length > 0 && <div className="sync-aggregate-section">
           {filter === 'all' && <div className="sync-aggregate-title incoming"><Codicon name="arrow-down" />{currentChanges.incoming ? t('Incoming Changes ({0})', currentChanges.incoming.files.length) : t('Incoming Changes')}</div>}
-          {currentError?.incoming && <div className="sync-empty"><Codicon name="warning" />{currentError.incoming}</div>}
-          {!currentError?.incoming &&
+          {incomingChanges.error && <ErrorNotice onRetry={incomingChanges.retry}>{incomingChanges.error}</ErrorNotice>}
+          {!incomingChanges.error &&
           <SyncFileList
             files={currentChanges?.incoming?.files ?? []}
-            loading={!currentChanges.incoming && (changesLoading || !currentError)}
+            loading={incomingChanges.loading}
             viewMode={fileViewMode}
             query={query}
             onViewModeChange={onFileViewModeChange}
@@ -504,11 +464,11 @@ function SyncRepoSection({ repo, branch, outgoing, incoming, checked, singleRepo
         </div>}
         {outgoingActive && outgoing.length > 0 && <div className="sync-aggregate-section">
           {filter === 'all' && <div className="sync-aggregate-title outgoing"><Codicon name="arrow-up" />{currentChanges.outgoing ? t('Outgoing Changes ({0})', currentChanges.outgoing.files.length) : t('Outgoing Changes')}</div>}
-          {currentError?.outgoing && <div className="sync-empty"><Codicon name="warning" />{currentError.outgoing}</div>}
-          {!currentError?.outgoing &&
+          {outgoingChanges.error && <ErrorNotice onRetry={outgoingChanges.retry}>{outgoingChanges.error}</ErrorNotice>}
+          {!outgoingChanges.error &&
           <SyncFileList
             files={currentChanges?.outgoing?.files ?? []}
-            loading={!currentChanges.outgoing && (changesLoading || !currentError)}
+            loading={outgoingChanges.loading}
             viewMode={fileViewMode}
             query={query}
             onViewModeChange={onFileViewModeChange}
@@ -724,6 +684,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
     <div className="sync-repository-list vd-row-scope">
       {repos.map((repo) => <SyncRepoSection
         key={repo.meta.id}
+        active={active}
         repo={repo}
         branch={branchesByRepo[repo.meta.id]?.find((branch) => branch.current)}
         outgoing={outgoing[repo.meta.id] ?? []}
