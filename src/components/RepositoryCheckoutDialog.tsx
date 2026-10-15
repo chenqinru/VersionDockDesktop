@@ -142,7 +142,7 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
         </FormField>
         <div className="checkout-destination-fields">
         <FormField label={t('Parent folder')}>
-          <div className="dialog-input-row"><Input controlSize="md" value={parent} onChange={(event) => setParent(event.target.value)} /><Button type="button"  onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}><Codicon name="folder-opened" /><span>{t('Browse…')}</span></Button></div>
+          <div className="dialog-input-row"><Input controlSize="md" value={parent} onChange={(event) => setParent(event.target.value)} /><Button size="md" type="button" onClick={async () => { const value = await bridge.selectDirectory(t(git ? 'Select clone parent folder' : 'Select checkout parent folder')); if (value) setParent(value); }}><Codicon name="folder-opened" /><span>{t('Browse…')}</span></Button></div>
         </FormField>
         <FormField label={t('Folder name')}>
           <Input controlSize="md" value={targetName} onChange={(event) => { inferredNameRef.current = ''; setTargetName(event.target.value); }} />

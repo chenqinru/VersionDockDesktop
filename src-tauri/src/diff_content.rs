@@ -177,19 +177,23 @@ pub(crate) async fn compare(
         token,
     )
     .await?;
+    let mut in_hunk = false;
     let content = output
         .stdout_text()
         .split_inclusive('\n')
         .map(|line| {
-            if line.starts_with("diff --git ") {
+            if line.starts_with("@@ ") {
+                in_hunk = true;
+            }
+            if !in_hunk && line.starts_with("diff --git ") {
                 format!("diff --git a/{path} b/{path}\n")
-            } else if line.starts_with("--- ") {
+            } else if !in_hunk && line.starts_with("--- ") {
                 if left.is_empty() {
                     "--- /dev/null\n".into()
                 } else {
                     format!("--- a/{path}\n")
                 }
-            } else if line.starts_with("+++ ") {
+            } else if !in_hunk && line.starts_with("+++ ") {
                 if right.is_empty() {
                     "+++ /dev/null\n".into()
                 } else {
@@ -236,12 +240,12 @@ pub(crate) async fn working_diff(
     }
     let old_path = patch_path(&original.content, "--- ", path);
     let new_path = patch_path(&original.content, "+++ ", path);
-    let left = if original.content.contains("--- /dev/null") {
+    let left = if old_path == "/dev/null" {
         Vec::new()
     } else {
         blob(repo, &format!("{base_ref}:{old_path}"), mode, token).await?
     };
-    let right = if original.content.contains("+++ /dev/null") {
+    let right = if new_path == "/dev/null" {
         Vec::new()
     } else {
         working(repo, &new_path).await?
@@ -307,12 +311,12 @@ pub(crate) async fn file_diff(
     } else {
         (format!(":{old_path}"), None)
     };
-    let left = if left_spec.is_empty() || original.content.contains("--- /dev/null") {
+    let left = if left_spec.is_empty() || old_path == "/dev/null" {
         Vec::new()
     } else {
         blob(repo, &left_spec, mode, token).await?
     };
-    let right = if original.content.contains("+++ /dev/null") {
+    let right = if new_path == "/dev/null" {
         Vec::new()
     } else if let Some(spec) = right_spec {
         blob(repo, &spec, mode, token).await?
@@ -322,7 +326,10 @@ pub(crate) async fn file_diff(
     compare(path, &left, &right, token).await
 }
 pub(crate) fn patch_path(content: &str, prefix: &str, fallback: &str) -> String {
-    if let Some(value) = content.lines().find_map(|line| line.strip_prefix(prefix)) {
+    // Hunk payload may itself contain header-looking text. Only metadata
+    // before the first hunk describes which files are being compared.
+    let metadata = || content.lines().take_while(|line| !line.starts_with("@@ "));
+    if let Some(value) = metadata().find_map(|line| line.strip_prefix(prefix)) {
         let value = value.trim_end_matches('\t');
         let value = if value.starts_with('"') {
             decode_git_path(value)
@@ -334,8 +341,7 @@ pub(crate) fn patch_path(content: &str, prefix: &str, fallback: &str) -> String 
             .unwrap_or(&value)
             .to_string();
     }
-    content
-        .lines()
+    metadata()
         .find_map(|line| {
             line.strip_prefix(if prefix == "--- " {
                 "rename from "
@@ -430,7 +436,7 @@ pub(crate) async fn shelf_diff(
                     None => return Ok(document),
                 }
             }
-            _ if document.content.lines().any(|line| line == "--- /dev/null") => Vec::new(),
+            _ if patch_path(&document.content, "--- ", "") == "/dev/null" => Vec::new(),
             _ => return Ok(document),
         }
     };
@@ -440,10 +446,10 @@ pub(crate) async fn shelf_diff(
 
 /// Apply display hunks by position, retaining current context, just as the plugin preview does.
 pub(crate) fn apply_preview(patch: &str, current: &str) -> String {
-    if patch.lines().any(|l| l == "+++ /dev/null") {
+    if patch_path(patch, "+++ ", "") == "/dev/null" {
         return String::new();
     }
-    let is_new = patch.lines().any(|l| l == "--- /dev/null");
+    let is_new = patch_path(patch, "--- ", "") == "/dev/null";
     let input: Vec<_> = current.split_inclusive('\n').collect();
     let mut out = String::new();
     let mut cursor = 0usize;
@@ -495,4 +501,24 @@ pub(crate) fn apply_preview(patch: &str, current: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hunk_payload_is_not_file_header_metadata() {
+        let patch =
+            "--- a/source.txt\n+++ b/source.txt\n@@ -2 +2 @@\n--- /dev/null\n+++ /dev/null\n";
+        assert_eq!(patch_path(patch, "--- ", ""), "source.txt");
+        assert_eq!(patch_path(patch, "+++ ", ""), "source.txt");
+        assert_eq!(
+            apply_preview(patch, "prefix\n-- /dev/null\nsuffix\n"),
+            "prefix\n++ /dev/null\nsuffix\n"
+        );
+        let without_headers = "@@ -2 +2 @@\n--- /dev/null\n+++ /dev/null\n";
+        assert_eq!(patch_path(without_headers, "--- ", "fallback"), "fallback");
+        assert_eq!(patch_path(without_headers, "+++ ", "fallback"), "fallback");
+    }
 }

@@ -594,6 +594,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
               <Button
                 type="button"
                 className="provider-add-btn"
+                size={compactAccountActions ? 'xs' : 'sm'}
                 aria-label={t('Add GitHub Account')}
                 title={!isGithubAvailable ? (providerAvailability?.githubProvider?.detail ?? t('Secure storage is unavailable')) : t('Add GitHub Account')}
                 disabled={busy || Boolean(publishResult?.remoteCreated) || !isGithubAvailable}
@@ -615,6 +616,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
               <Button
                 type="button"
                 className="provider-add-btn"
+                size={compactAccountActions ? 'xs' : 'sm'}
                 aria-label={t('Add GitLab Account')}
                 title={providerAvailability?.gitlabProvider?.detail ?? t('Add GitLab Account')}
                 disabled={busy || Boolean(publishResult?.remoteCreated) || providerAvailability?.gitlabProvider?.available === false}
@@ -633,6 +635,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
               <Button
                 type="button"
                 className="provider-add-btn"
+                size={compactAccountActions ? 'xs' : 'sm'}
                 aria-label={t('Add Gitee Account')}
                 title={providerAvailability?.giteeProvider?.detail ?? t('Add Gitee Account')}
                 disabled={busy || Boolean(publishResult?.remoteCreated) || providerAvailability?.giteeProvider?.available === false}
@@ -1130,6 +1133,7 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                   />
                   <Button
                     type="button"
+                    size="md"
                     onClick={searchRepositories}
                     disabled={repositoriesLoading}
                   >

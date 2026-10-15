@@ -722,7 +722,7 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
         })}
       </div>}
       <div className={`sync-primary-split action-split ${mainAction.tone}`}>
-        <Button variant={mainAction.tone === "primary" ? "primary" : "secondary"} danger={mainAction.tone === "danger"} size="xs" className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || !mainAction.enabled} onClick={() => void runAction(() => mainAction.fetch ? fetchAll() : syncSelected(undefined, mainAction.direction))}><Codicon name={mainAction.icon} />{mainAction.label}</Button>
+        <Button variant="primary" size="xs" className={`sync-primary-action ${mainAction.tone}`} disabled={actionBusy || !mainAction.enabled} onClick={() => void runAction(() => mainAction.fetch ? fetchAll() : syncSelected(undefined, mainAction.direction))}><Codicon name={mainAction.icon} />{mainAction.label}</Button>
         {footerItems.length > 0 && <SplitButtonMore className="sync-primary-more" disabled={actionBusy || !mainAction.enabled} title={t('More Actions')} aria-expanded={Boolean(footerMenu)} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFooterMenu(current => current ? undefined : rect); }} />}
       </div>
       {footerMenu && footerItems.length > 0 && <ContextMenu x={footerMenu.left} y={footerMenu.top} anchorRect={footerMenu} placement="above" items={footerItems} onSelect={(id) => void runAction(() => runFooterMenu(id))} onClose={() => setFooterMenu(undefined)} />}

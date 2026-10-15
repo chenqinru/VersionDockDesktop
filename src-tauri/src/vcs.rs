@@ -2629,7 +2629,7 @@ pub async fn file_history(
     let limit = limit.clamp(1, 200);
     match repo.kind {
         VcsKind::Git => {
-            let format = format!("{RECORD}%H{FIELD}%P{FIELD}%an{FIELD}%aI{FIELD}%s");
+            let format = format!("{RECORD}%H{FIELD}%P{FIELD}%an{FIELD}%aI{FIELD}%B");
             let output = git(
                 vec![
                     "log".into(),
@@ -2764,7 +2764,7 @@ fn parse_git_file_history(output: &str, initial_path: &str) -> Vec<FileHistoryEn
             previous_path: previous_path.clone(),
             author: fields[2].to_string(),
             date: fields[3].to_string(),
-            message: fields[4].to_string(),
+            message: commit_message_title(fields[4]).to_string(),
             status,
         });
         current_path = previous_path.unwrap_or(path_at_revision);
@@ -4399,7 +4399,7 @@ async fn update_summary(
         VcsKind::Git => {
             validate_revision(before)?;
             validate_revision(after)?;
-            let format = format!("%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}");
+            let format = format!("%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%B{FIELD}%D{RECORD}");
             let range = format!("{before}..{after}");
             let (raw, stats, statuses) = tokio::try_join!(
                 async {
@@ -4768,8 +4768,8 @@ pub async fn unpushed_commits(
             Some(UnpushedCommit {
                 hash: fields[0].into(),
                 short_hash: fields[1].into(),
-                message: fields[2].into(),
-                body: commit_message_body(fields[3], fields[2]),
+                message: commit_message_title(fields[3]).into(),
+                body: commit_message_body(fields[3]),
                 full_message: Some(fields[3].trim().to_string()),
                 author: fields[4].into(),
                 author_email: Some(fields[7].into()).filter(|value: &String| !value.is_empty()),
@@ -4915,12 +4915,20 @@ async fn git_revision_changes(
     })
 }
 
-fn commit_message_body(full_message: &str, subject: &str) -> Option<String> {
-    let full_message = full_message.trim();
-    let body = full_message
-        .strip_prefix(subject)
-        .unwrap_or(full_message)
-        .trim();
+// Git's %s folds the first paragraph, which may contain body lines when
+// the author omitted a blank separator. Display titles always use one line.
+fn commit_message_title(full_message: &str) -> &str {
+    full_message
+        .trim()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+}
+
+fn commit_message_body(full_message: &str) -> Option<String> {
+    let (_, body) = full_message.trim().split_once('\n')?;
+    let body = body.trim();
     (!body.is_empty()).then(|| body.to_string())
 }
 
@@ -4963,8 +4971,8 @@ pub async fn incoming_commits(
             Some(IncomingCommit {
                 hash: fields[0].into(),
                 short_hash: fields[1].into(),
-                message: fields[2].into(),
-                body: commit_message_body(fields[3], fields[2]),
+                message: commit_message_title(fields[3]).into(),
+                body: commit_message_body(fields[3]),
                 full_message: Some(fields[3].trim().to_string()),
                 author: fields[4].into(),
                 author_email: Some(fields[7].into()).filter(|value: &String| !value.is_empty()),
@@ -6208,7 +6216,7 @@ async fn git_history(
                 email: fields[4].into(),
                 author_date: fields[5].into(),
                 committer_date: fields[6].into(),
-                message: fields[7].into(),
+                message: commit_message_title(fields[9]).into(),
                 refs: fields[8]
                     .split(',')
                     .map(str::trim)
@@ -6379,7 +6387,7 @@ fn parse_git_log(repo_id: &str, raw: &str) -> Vec<CommitNode> {
                 email: fields[4].into(),
                 author_date: fields[5].into(),
                 committer_date: fields[6].into(),
-                message: fields[7].into(),
+                message: commit_message_title(fields[7]).into(),
                 refs: fields[8]
                     .split(',')
                     .map(str::trim)
@@ -6544,7 +6552,7 @@ pub async fn branch_compare_commits(
     };
 
     let format = format!(
-        "%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}"
+        "%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%B{FIELD}%D{RECORD}"
     );
 
     let max_count = if resolved_revision.is_some() {
@@ -7063,7 +7071,7 @@ pub async fn commit_detail(
     match repo.kind {
         VcsKind::Git => {
             validate_revision(revision)?;
-            let format = format!("%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%s{FIELD}%D{RECORD}%B");
+            let format = format!("%H{FIELD}%h{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%aI{FIELD}%cI{FIELD}%B{FIELD}%D{RECORD}%B");
             let raw = git(
                 vec![
                     "show".into(),
@@ -7403,7 +7411,7 @@ pub async fn merge_parent_changes(
             vec![
                 "show".into(),
                 "-s".into(),
-                "--format=%h%x00%an%x00%aI%x00%s".into(),
+                "--format=%h%x00%an%x00%aI%x00%B".into(),
                 parent.clone(),
             ],
             repo,
@@ -7436,8 +7444,8 @@ pub async fn merge_parent_changes(
         let author_name = meta_parts.get(1).copied().unwrap_or("").to_string();
         let author_date = meta_parts.get(2).copied().unwrap_or("").to_string();
         let message = meta_parts
-            .get(3..)
-            .map(|p| p.join("\0"))
+            .get(3)
+            .map(|message| commit_message_title(message).to_string())
             .unwrap_or_default();
         let file_count = changed_paths
             .lines()
@@ -7516,22 +7524,22 @@ pub async fn merge_commits(
             vec![
                 "log".into(),
                 format!("{}..{}", parents[0], parent),
-                format!("--format=%H{FIELD}%h{FIELD}%an{FIELD}%aI{FIELD}%s"),
+                format!("--format=%H{FIELD}%h{FIELD}%an{FIELD}%aI{FIELD}%B{RECORD}"),
             ],
             repo,
             token,
         )
         .await?
         .stdout_text();
-        for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-            let fields = line.split(FIELD).collect::<Vec<_>>();
+        for record in raw.split(RECORD).filter(|record| !record.trim().is_empty()) {
+            let fields = record.trim().split(FIELD).collect::<Vec<_>>();
             if fields.len() < 5 {
                 continue;
             }
             result.push(MergeCommitSummary {
                 hash: fields[0].into(),
                 short_hash: fields[1].into(),
-                message: fields[4].into(),
+                message: commit_message_title(fields[4]).into(),
                 author: fields[2].into(),
                 author_date: fields[3].into(),
                 parent_index: index as u32,
@@ -7645,7 +7653,7 @@ pub async fn branches(
         return svn_branches(repo, token).await;
     }
     let format = format!(
-        "%(refname:short){FIELD}%(refname){FIELD}%(HEAD){FIELD}%(upstream:short){FIELD}%(upstream:track){FIELD}%(contents:subject){FIELD}%(committerdate:iso-strict){RECORD}"
+        "%(refname:short){FIELD}%(refname){FIELD}%(HEAD){FIELD}%(upstream:short){FIELD}%(upstream:track){FIELD}%(contents){FIELD}%(committerdate:iso-strict){RECORD}"
     );
     let raw = git(
         vec![
@@ -7680,8 +7688,8 @@ pub async fn branches(
                 return None;
             }
             let last_commit_message = fields.get(5).and_then(|s| {
-                let trimmed = s.trim();
-                (!trimmed.is_empty()).then(|| trimmed.to_string())
+                let title = commit_message_title(s);
+                (!title.is_empty()).then(|| title.to_string())
             });
             let last_commit_date = fields.get(6).and_then(|s| {
                 let trimmed = s.trim();
@@ -14166,6 +14174,20 @@ pub(crate) fn language_for(path: &str) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn commit_message_title_and_body_handle_line_endings_and_missing_separators() {
+        for (message, title, body) in [
+            ("", "", None),
+            ("title\n", "title", None),
+            ("title\n- item", "title", Some("- item")),
+            ("title\n\n- item\n", "title", Some("- item")),
+            ("title\r\n- item\r\n", "title", Some("- item")),
+        ] {
+            assert_eq!(commit_message_title(message), title);
+            assert_eq!(commit_message_body(message).as_deref(), body);
+        }
+    }
 
     #[tokio::test]
     async fn svn_incoming_revisions_cached_does_not_block_on_uncached_or_expired_state() {

@@ -121,6 +121,7 @@
 .vd-dialog.commit-message-dialog > footer > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .vd-dialog.modal-panel { padding: 0; overflow: hidden; }
 .vd-dialog.modal-panel > .modal-header { height: auto; flex-basis: auto; padding: 20px 20px 0; }
+.vd-dialog.provider-panel > .modal-header { margin-bottom: 0; padding-bottom: 13px; border-bottom: 1px solid var(--versiondock-border); }
 .vd-dialog.modal-panel .modal-body { min-height: 0; padding: 0 20px 20px; }
 .vd-dialog .modal-repo-badge { flex: 0 1 auto; min-width: 0; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vd-dialog.identity-panel .effective-name { overflow-wrap: anywhere; }

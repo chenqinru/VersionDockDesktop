@@ -1216,6 +1216,175 @@ async fn real_svn_file_kind_probes_preserve_deleted_moved_and_missing_conflicts(
 }
 
 #[tokio::test]
+async fn real_git_commit_titles_use_the_first_line_and_preserve_bodies() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "Title Test"], root);
+    command("git", &["config", "user.email", "title@example.test"], root);
+    command("git", &["commit", "--allow-empty", "-m", "base"], root);
+    let base = command_output("git", &["rev-parse", "HEAD"], root);
+    let messages = [
+        (
+            "feat(ui): 无空行标题",
+            "feat(ui): 无空行标题\n- searchable first body\n- second item",
+        ),
+        (
+            "fix(ui): 有空行标题",
+            "fix(ui): 有空行标题\n\n- searchable second body",
+        ),
+        ("chore: 单行标题", "chore: 单行标题"),
+    ];
+    let mut hashes = Vec::new();
+    for (index, (_, message)) in messages.iter().enumerate() {
+        std::fs::write(root.join("message.txt"), format!("{index}\n")).unwrap();
+        command("git", &["add", "message.txt"], root);
+        command("git", &["commit", "-m", message], root);
+        hashes.push(command_output("git", &["rev-parse", "HEAD"], root));
+    }
+    let repository = repo(root, VcsKind::Git);
+    let token = CancellationToken::new();
+    let page = vcs::history(&repository, 0, 20, Default::default(), &token)
+        .await
+        .unwrap();
+    let file_history = vcs::file_history(&repository, "message.txt", None, 20, &token)
+        .await
+        .unwrap();
+    let outgoing = vcs::unpushed_commits(&repository, &token).await.unwrap();
+    for (index, (title, full_message)) in messages.iter().enumerate() {
+        assert_eq!(
+            page.commits
+                .iter()
+                .find(|commit| commit.hash == hashes[index])
+                .unwrap()
+                .message,
+            *title
+        );
+        assert_eq!(
+            file_history
+                .entries
+                .iter()
+                .find(|entry| entry.revision == hashes[index])
+                .unwrap()
+                .message,
+            *title
+        );
+        let detail = vcs::commit_detail(&repository, &hashes[index], &token)
+            .await
+            .unwrap();
+        assert_eq!(detail.commit.message, *title);
+        assert_eq!(detail.full_message, *full_message);
+        let outgoing = outgoing
+            .iter()
+            .find(|commit| commit.hash == hashes[index])
+            .unwrap();
+        assert_eq!(outgoing.message, *title);
+        assert_eq!(outgoing.full_message.as_deref(), Some(*full_message));
+        let body = full_message.split_once('\n').map(|(_, body)| body.trim());
+        assert_eq!(outgoing.body.as_deref(), body);
+    }
+    let search = vcs::history(
+        &repository,
+        0,
+        20,
+        HistoryQuery {
+            text: Some("searchable first body".into()),
+            ..Default::default()
+        },
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(search.commits.len(), 1);
+    assert_eq!(search.commits[0].message, messages[0].0);
+    let compared = vcs::branch_compare_commits(
+        &repository,
+        &hashes[0],
+        "main",
+        "targetOnly",
+        0,
+        20,
+        &HistoryQuery::default(),
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(compared.len(), 2);
+    assert_eq!(compared[1].message, messages[1].0);
+    let merged = vcs::merge_commits(
+        &repository,
+        &hashes[2],
+        &[hashes[0].clone(), hashes[2].clone()],
+        &token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[1].message, messages[1].0);
+    // Use a local tracking branch so incoming titles and full bodies are tested
+    // without contacting any network or modifying the user's repository.
+    command("git", &["switch", "-c", "receiver", &base], root);
+    command(
+        "git",
+        &["branch", "--set-upstream-to=main", "receiver"],
+        root,
+    );
+    let incoming = vcs::incoming_commits(&repository, &token).await.unwrap();
+    assert_eq!(incoming.len(), 3);
+    for (index, (title, full_message)) in messages.iter().enumerate() {
+        let incoming = incoming
+            .iter()
+            .find(|commit| commit.hash == hashes[index])
+            .unwrap();
+        assert_eq!(incoming.message, *title);
+        assert_eq!(incoming.full_message.as_deref(), Some(*full_message));
+        assert_eq!(
+            incoming.body.as_deref(),
+            full_message.split_once('\n').map(|(_, body)| body.trim())
+        );
+    }
+    let branches = vcs::branches(&repository, &token).await.unwrap();
+    assert_eq!(
+        branches
+            .iter()
+            .find(|branch| branch.name == "receiver")
+            .unwrap()
+            .last_commit_message
+            .as_deref(),
+        Some("base")
+    );
+    let update = vcs::sync(
+        &repository,
+        SyncAction::PullFfOnly,
+        None,
+        None,
+        false,
+        &Default::default(),
+        &token,
+    )
+    .await
+    .unwrap()
+    .update
+    .unwrap()
+    .summary
+    .unwrap();
+    assert_eq!(update.detail.commits.len(), 3);
+    assert_eq!(
+        update
+            .detail
+            .commits
+            .iter()
+            .find(|commit| commit.hash == hashes[0])
+            .unwrap()
+            .message,
+        messages[0].0
+    );
+}
+
+#[tokio::test]
 async fn v5_init_clone_commit_messages_and_structured_history_are_real() {
     if !available("git") {
         return;
@@ -7864,6 +8033,137 @@ async fn real_git_restore_warnings_preserve_actual_update_and_conflict_outcomes(
             );
         }
     }
+}
+
+#[tokio::test]
+async fn real_git_diff_header_markers_inside_source_preserve_unchanged_lines() {
+    use crate::{diff_content, models::CatFileFilterMode};
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let root = directory.path();
+    command("git", &["init", "-b", "main"], root);
+    command("git", &["config", "user.name", "Diff Test"], root);
+    command("git", &["config", "user.email", "diff@example.test"], root);
+    let mut lines = (0..15_000)
+        .map(|i| format!("unchanged source line {i}"))
+        .collect::<Vec<_>>();
+    lines[100] = r#"let old_header = "--- /dev/null";"#.into();
+    lines[200] = r#"let new_header = "+++ /dev/null";"#.into();
+    lines[5_000] = "-- /dev/null".into();
+    lines[10_000] = "++ previous text".into();
+    std::fs::write(root.join("source.rs"), format!("{}\n", lines.join("\n"))).unwrap();
+    command("git", &["add", "."], root);
+    command("git", &["commit", "-m", "base"], root);
+    let before = read_text(root.join("source.rs"));
+    let base = command_output("git", &["rev-parse", "HEAD"], root);
+    lines[2_500] = "changed source line 2500".into();
+    lines[5_000] = "-- ordinary text".into();
+    lines[10_000] = "++ /dev/null".into();
+    let after = format!("{}\n", lines.join("\n"));
+    std::fs::write(root.join("source.rs"), &after).unwrap();
+    let repository = repo(root, VcsKind::Git);
+    let token = CancellationToken::new();
+    let assert_sparse = |doc: crate::models::DiffDocument| {
+        assert!(!doc.binary && !doc.truncated);
+        assert_eq!(
+            diff_content::patch_path(&doc.content, "--- ", ""),
+            "source.rs"
+        );
+        assert_eq!(
+            diff_content::patch_path(&doc.content, "+++ ", ""),
+            "source.rs"
+        );
+        let body = doc
+            .content
+            .lines()
+            .skip_while(|line| !line.starts_with("@@ "))
+            .skip(1)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            body.iter().filter(|line| line.starts_with(' ')).count(),
+            14_997
+        );
+        assert_eq!(body.iter().filter(|line| line.starts_with('-')).count(), 3);
+        assert_eq!(body.iter().filter(|line| line.starts_with('+')).count(), 3);
+        // These are deletion/addition payload, despite looking like file headers.
+        assert!(body.contains(&"--- /dev/null"));
+        assert!(body.contains(&"+++ /dev/null"));
+        assert_eq!(diff_content::apply_preview(&doc.content, &before), after);
+    };
+    for mode in [
+        CatFileFilterMode::None,
+        CatFileFilterMode::Filters,
+        CatFileFilterMode::Textconv,
+    ] {
+        assert_sparse(
+            diff_content::file_diff(
+                &repository,
+                "source.rs",
+                false,
+                None,
+                None,
+                None,
+                &mode,
+                &token,
+            )
+            .await
+            .unwrap(),
+        );
+        assert_sparse(
+            diff_content::working_diff(&repository, "source.rs", "HEAD", &mode, &token)
+                .await
+                .unwrap(),
+        );
+    }
+    command("git", &["add", "source.rs"], root);
+    assert_sparse(
+        diff_content::file_diff(
+            &repository,
+            "source.rs",
+            true,
+            None,
+            None,
+            None,
+            &CatFileFilterMode::None,
+            &token,
+        )
+        .await
+        .unwrap(),
+    );
+    command("git", &["commit", "-m", "sparse changes"], root);
+    let revision = command_output("git", &["rev-parse", "HEAD"], root);
+    assert_sparse(
+        diff_content::file_diff(
+            &repository,
+            "source.rs",
+            false,
+            Some(revision.clone()),
+            None,
+            None,
+            &CatFileFilterMode::None,
+            &token,
+        )
+        .await
+        .unwrap(),
+    );
+    assert_sparse(
+        diff_content::file_diff(
+            &repository,
+            "source.rs",
+            false,
+            None,
+            Some(base),
+            Some(revision),
+            &CatFileFilterMode::None,
+            &token,
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(read_text(root.join("source.rs")), after);
+    assert!(command_output("git", &["status", "--porcelain"], root).is_empty());
 }
 
 #[tokio::test]

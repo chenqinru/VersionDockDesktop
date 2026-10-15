@@ -21,7 +21,8 @@
   --versiondock-success: #72C892;
   --versiondock-update-background: var(--versiondock-success);
   --versiondock-update-foreground: #10251a;
-  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 88%, #ffffff);
+  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 92%, #000000);
+  --versiondock-update-pressed-background: color-mix(in srgb, var(--versiondock-success) 90%, #000000);
   --versiondock-sponsor-foreground: #ffb3c4;
   --versiondock-danger: #F28772;
   --versiondock-warning: #CCA700;
@@ -307,7 +308,8 @@
 :root[data-theme="light2026"], .theme-preview-surface[data-theme="light2026"] {
   --versiondock-sponsor-foreground: #a3214c;
   --versiondock-update-foreground: #ffffff;
-  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 88%, #000000);
+  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 82%, #000000);
+  --versiondock-update-pressed-background: color-mix(in srgb, var(--versiondock-success) 72%, #000000);
   --versiondock-bg: #FFFFFF;
   --versiondock-surface: #FAFAFD;
   --versiondock-surface-alt: #F0F0F3;
@@ -352,7 +354,8 @@
 :root[data-theme="light"], .theme-preview-surface[data-theme="light"] {
   --versiondock-sponsor-foreground: #a3214c;
   --versiondock-update-foreground: #ffffff;
-  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 88%, #000000);
+  --versiondock-update-hover-background: color-mix(in srgb, var(--versiondock-success) 82%, #000000);
+  --versiondock-update-pressed-background: color-mix(in srgb, var(--versiondock-success) 72%, #000000);
   --versiondock-bg: #ffffff;
   --versiondock-surface: #f3f3f3;
   --versiondock-surface-alt: #ececec;
@@ -511,6 +514,9 @@ input, textarea, select, [contenteditable="true"] {
 .diff-inline-row code,
 .code-view code,
 .detail-message-card pre,
+.extended-full-message,
+.extended-message-card,
+.commit-detail-workspace-heading > strong,
 .detail-commit-summary,
 .output-panel pre,
 .toast-details pre,
@@ -635,6 +641,21 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   background: var(--versiondock-hover);
   border-color: var(--versiondock-border-soft);
 }
+
+/* The active tab's frame already separates it from its neighbors. */
+.titlebar-tab:not(.active) + .titlebar-tab:not(.active)::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 50%;
+  width: 1px;
+  height: 14px;
+  transform: translateY(-50%);
+  background: var(--versiondock-border);
+  pointer-events: none;
+}
+
+.titlebar-tabs:has(.dragging) .titlebar-tab::before { opacity: 0; }
 
 .titlebar-tab.dragging {
   opacity: 0.35;
@@ -3105,26 +3126,28 @@ button.conflict-action-item {
 .split-button > button:first-child { min-width: 72px; padding: 0 9px; }
 .split-button > button:nth-child(2) { width: 25px; padding: 0; border-left: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
 .action-split {
-  --split-background: var(--versiondock-surface-alt);
-  --split-foreground: var(--versiondock-text);
-  --split-hover-background: var(--versiondock-hover);
+  --split-background: var(--vscode-button-secondaryBackground);
+  --split-foreground: var(--vscode-button-secondaryForeground);
+  --split-hover-background: var(--vscode-button-secondaryHoverBackground);
   color: var(--split-foreground);
   background: var(--split-background);
+  border-color: var(--versiondock-control-border);
 }
 .action-split > button { background: transparent; color: inherit; border-radius: 0; }
 .action-split > button:not(:disabled):is(:hover, :focus-visible, :active) { background: transparent; color: inherit; }
 .action-split:has(> button:not(:disabled)):is(:hover, :focus-within),
 .action-split:has(> .split-button-more[aria-expanded="true"]) { background: var(--split-hover-background); }
 .action-split > .split-button-more { flex: 0 0 auto; }
-.action-split > button:focus-visible { outline: 1px solid var(--versiondock-selection-border); outline-offset: -2px; }
+.action-split > button:focus-visible { outline: 1px solid var(--versiondock-control-focus-border); outline-offset: -2px; }
 .action-split:has(> button:first-child:disabled) { opacity: .4; }
 .action-split > button:disabled { opacity: 1; }
-.commit-action {
+.commit-action, .sync-primary-split {
   --split-background: var(--vscode-button-background);
   --split-foreground: var(--vscode-button-foreground, #fff);
   --split-hover-background: var(--vscode-button-hoverBackground);
-  min-width: 0; flex: 1; border-color: var(--versiondock-primary-button-border);
+  border-color: var(--versiondock-primary-button-border);
 }
+.commit-action { min-width: 0; flex: 1; }
 .commit-action > button:first-child { flex: 1; }
 .split-menu { border-radius: var(--versiondock-radius-popup); position: absolute; z-index: 130; left: 0; bottom: 34px; min-width: 165px; padding: 3px; color: var(--versiondock-text); background: var(--versiondock-surface-alt); border: 1px solid var(--versiondock-border); box-shadow: 0 5px 18px #0008; }
 .split-menu.right { left: auto; right: 0; }
@@ -3576,10 +3599,8 @@ button.conflict-action-item {
 .welcome-primary .primary:not(:disabled):hover,
 .merge-workspace header .primary:not(:disabled):hover,
 .compare-workspace > header .primary:not(:disabled):hover,
-.commit-action > button:not(:disabled):hover,
 .push-panel > footer > button:not(:disabled):hover,
 .remote-add button:not(:disabled):hover { color: #fff; background: var(--versiondock-accent); }
-.commit-action > button:not(:disabled):hover { background: var(--vscode-button-hoverBackground); color: var(--vscode-button-foreground); }
 button.danger:not(:disabled):hover,
 .remote-list .danger:not(:disabled):hover { color: #fff; background: color-mix(in srgb, var(--versiondock-danger) 72%, var(--versiondock-surface)); border-color: var(--versiondock-danger); }
 .stash-repo > header { height: 28px; padding: 0 6px; }
@@ -5451,11 +5472,23 @@ button.danger:not(:disabled):hover,
   font-size: calc(11px * var(--versiondock-ui-font-scale, 1));
   font-weight: 600;
   border-radius: var(--versiondock-radius-icon);
+  transition: background-color .12s ease, box-shadow .12s ease;
 }
 
-.statusbar-item.statusbar-update-badge:is(:hover, :focus-visible, .active) {
+.statusbar-item.statusbar-update-badge:not(:disabled):is(:hover, :focus-visible, .active) {
   color: var(--versiondock-update-foreground);
   background: var(--versiondock-update-hover-background);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--versiondock-update-foreground) 35%, transparent);
+}
+
+.statusbar-item.statusbar-update-badge:not(:disabled):active {
+  background: var(--versiondock-update-pressed-background);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--versiondock-update-foreground) 60%, transparent);
+}
+
+.statusbar-item.statusbar-update-badge:focus-visible {
+  outline: 1px solid var(--versiondock-update-foreground);
+  outline-offset: -2px;
 }
 
 .statusbar-item.statusbar-update-badge:disabled {
@@ -6106,9 +6139,6 @@ button.danger:not(:disabled):hover,
 .sync-selected-pill > small { display: inline-flex; align-items: center; gap: 1px; padding: 0 3px; border-radius: 7px; font-size: 9px; background: color-mix(in srgb, currentColor 16%, transparent); }
 .sync-selected-pill > small.incoming { color: var(--versiondock-info); }
 .sync-primary-split {
-  --split-background: var(--vscode-button-background, var(--versiondock-accent-bg));
-  --split-foreground: var(--vscode-button-foreground, #fff);
-  --split-hover-background: var(--vscode-button-hoverBackground);
   width: 100%; display: flex; overflow: hidden; border-radius: var(--versiondock-radius-control);
   border: 1px solid var(--versiondock-primary-button-border);
 }
@@ -6117,16 +6147,6 @@ button.danger:not(:disabled):hover,
 }
 .sync-primary-action { flex: 1; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; }
 .sync-primary-split > .sync-primary-more { width: 28px; flex: 0 0 28px; padding: 0; border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent); }
-.sync-primary-split.pull {
-  --split-background: color-mix(in srgb, var(--versiondock-info, #1f6feb) 85%, #0d419d 15%);
-  --split-foreground: #fff;
-  --split-hover-background: color-mix(in srgb, var(--split-background) 90%, #fff 10%);
-}
-.sync-primary-split.push {
-  --split-background: color-mix(in srgb, var(--versiondock-success, #238636) 75%, #196c2e 25%);
-  --split-foreground: #fff;
-  --split-hover-background: color-mix(in srgb, var(--split-background) 90%, #fff 10%);
-}
 .repository-group-main > .repository-count { flex: 0 0 auto; min-width: 18px; height: 16px; padding: 0 5px; color: var(--versiondock-badge-foreground, #fff); background: var(--versiondock-badge-background, var(--versiondock-accent-bg)); border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; }
 .submodule-row { min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--versiondock-border-soft); }
 
@@ -6510,7 +6530,7 @@ button.danger:not(:disabled):hover,
 /* 仓库浏览模式 */
 .provider-browse-header {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -6992,6 +7012,7 @@ button.danger:not(:disabled):hover,
   flex-direction: column;
 }
 .checkout-destination-fields { display: grid; gap: 10px; }
+.clone-dialog .dialog-input-row { align-items: stretch; }
 .clone-dialog-accounts .checkout-destination-fields { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
 .clone-dialog-accounts .clone-fields { flex: none; gap: 8px; }
 .clone-dialog-accounts > footer { flex: none; }
@@ -7022,7 +7043,8 @@ button.danger:not(:disabled):hover,
 .clone-dialog-accounts .provider-sidebar-header { flex: none; padding: 8px 10px; }
 .clone-dialog-accounts .provider-account-card { flex: none; padding: 4px 8px; }
 .clone-dialog-accounts .provider-add-section { flex: none; }
-.provider-add-section.compact { flex-direction: row; padding: 6px 8px; gap: 4px; }
+.provider-add-section.compact { flex-direction: row; flex-wrap: wrap; padding: 6px 8px; gap: 4px; }
+.provider-add-section.compact > .provider-add-btn { flex: 1 1 auto; width: auto; min-width: 0; justify-content: center; }
 
 .clone-new-window-option { margin-right: auto; color: var(--versiondock-muted); }
 
