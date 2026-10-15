@@ -1,3 +1,5 @@
+import { ErrorNotice } from '../ErrorNotice';
+import { LoadingState } from '../LoadingState';
 import { clearAuthorAvatarCache } from '../../avatars/authorAvatarResolver';
 import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
@@ -193,13 +195,13 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
   const activeLabel = customProfile?.label ?? t(profileId === LOCAL_PROFILE_ID ? 'Local' : 'Global');
   return <StatusBarPopoverPortal>
     <StatusBarQuickMenu key={`${repoId}:${page}`} ref={popoverRef} title={rootTitle} active={!profileId && !provider && !busy} className="profile-menu-popover" style={mainStyle} onSearch={back} onBack={page === 'repositories' ? () => setPage('identity') : undefined}>
-      {data.loading ? <div className="statusbar-popover-loading"><Codicon name="loading codicon-modifier-spin" />{t('Loading…')}</div> : page === 'repositories' ? repositoryItems : <>
+      {data.loading ? <LoadingState>{t('Loading…')}</LoadingState> : page === 'repositories' ? repositoryItems : <>
         {!data.errors[repoId] && (repo?.meta.kind === 'svn' ? svnItems : gitItems)}
         {repositories.length > 1 && <div className="statusbar-menu-section"><ProfileMenuItem busy={busy} label={t('Switch to another repository…')} icon="arrow-swap" onClick={() => { back(); setPage('repositories'); }} description={t('Current: {0}  ·  {1} repositories in workspace', repo?.meta.name ?? '', repositories.length)} /></div>}
         {remoteItems}
       </>}
-      {(error || data.errors[repoId]) && <div className="error-row" role="alert">{error || data.errors[repoId]}<ProfileMenuItem busy={busy} label={t('Retry')} icon="refresh" onClick={data.reload} /></div>}
-      {busy && <div className="statusbar-popover-loading" role="status"><Codicon name="loading codicon-modifier-spin" />{t('Processing…')}</div>}
+      {(error || data.errors[repoId]) && <ErrorNotice>{error || data.errors[repoId]}<ProfileMenuItem busy={busy} label={t('Retry')} icon="refresh" onClick={data.reload} /></ErrorNotice>}
+      {busy && <LoadingState>{t('Processing…')}</LoadingState>}
     </StatusBarQuickMenu>
     {profileId && submenuPos && <StatusBarQuickMenu key={profileId} ref={submenuRef} title={customProfile ? t('Profile: {0}', customProfile.label) : activeLabel} active={!busy && !provider} style={{ position: 'fixed', left: submenuPos.left, top: submenuPos.top, maxHeight: submenuPos.maxHeight, zIndex: 1001 }} onBack={back}>
       <ProfileMenuItem busy={busy} label={t(identity?.selectedProfileId === profileId ? 'Active (in use)' : customProfile ? 'Use for this project/workspace' : 'Use for this workspace')} icon="check" onClick={() => { if (identity?.selectedProfileId === profileId) back(); else void selectProfile(profileId); }} description={t(identity?.selectedProfileId === profileId ? 'This profile is active for this workspace' : 'Use "{0}" for commits made by VersionDock in this workspace', activeLabel)} />

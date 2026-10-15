@@ -7,6 +7,8 @@ import './layoutDensity.css';
 import './dialogStyles.css';
 import './buttons.css';
 import './inputs.css';
+import './controls.css';
+import './states.css';
 import { App } from './App';
 import { BridgeContext } from './platform/context';
 import type { VersionDockBridge } from './platform/bridge';

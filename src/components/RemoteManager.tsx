@@ -1,3 +1,4 @@
+import { EmptyState } from './EmptyState';
 import { Input } from './Input';
 import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
@@ -170,10 +171,7 @@ export function RemoteManager({ repoId, close }: { repoId: string; close: () => 
           <div className="remote-list-card">
             <div className="remote-section-title">{t('REMOTES')}</div>
             {values.length === 0 ? (
-              <div className="remote-list-empty">
-                <Codicon name="cloud" />
-                <span>{t('No remotes configured')}</span>
-              </div>
+              <EmptyState compact><span>{t('No remotes configured')}</span></EmptyState>
             ) : (
               <div className="remote-list">
                 {values.map((remote) => (

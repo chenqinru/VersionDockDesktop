@@ -1,3 +1,6 @@
+import { ErrorNotice } from './ErrorNotice';
+import { LoadingState } from './LoadingState';
+import { EmptyState } from './EmptyState';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -355,7 +358,7 @@ function RepoSection({
       ) : undefined}>
 
       {entries.length === 0 ? (
-        <div style={css.empty}>{t('No subtrees registered')}</div>
+        <EmptyState compact>{t('No subtrees registered')}</EmptyState>
       ) : (
         entries.map((entry) => (
           <SubtreeRow
@@ -636,18 +639,15 @@ export function SubtreePanel({
     if (entry) void systemOpen(entry.repoId, entry.prefix, true);
   };
 
-  if (externalLoading && resolvedEntries.length === 0) return <div style={css.empty}>{t('Loading...')}</div>;
+  if (externalLoading && resolvedEntries.length === 0) return <LoadingState>{t('Loading...')}</LoadingState>;
   if (externalError) {
     return (
-      <div style={css.errorRow}>
-        <Codicon name="warning" style={{ marginRight: '4px', flexShrink: 0 }} />
-        {externalError}
-      </div>
+      <ErrorNotice>{externalError}</ErrorNotice>
     );
   }
 
   if (grouped.length === 0) {
-    return <div style={css.empty}>{t('No Git repositories found in this workspace.')}</div>;
+    return <EmptyState compact>{t('No Git repositories found in this workspace.')}</EmptyState>;
   }
 
   const multiRepo = forcedMultiRepo ?? (grouped.length >= 1);
@@ -722,20 +722,6 @@ const css = {
     gap: '4px',
     padding: '6px 8px',
     borderTop: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))',
-  } as React.CSSProperties,
-  empty: {
-    padding: '16px 12px',
-    fontSize: '12px',
-    color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))',
-    textAlign: 'center' as const,
-  },
-  errorRow: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    padding: '4px 8px',
-    fontSize: '11px',
-    color: 'var(--vscode-errorForeground, var(--versiondock-danger))',
-    background: 'var(--vscode-inputValidation-errorBackground, rgba(244, 135, 113, 0.15))',
   } as React.CSSProperties,
 };
 

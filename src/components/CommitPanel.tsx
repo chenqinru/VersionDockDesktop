@@ -1,3 +1,5 @@
+import { ErrorNotice } from './ErrorNotice';
+import { EmptyState } from './EmptyState';
 import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { scrollbarContains } from '../scrollbars/ownership';
@@ -1918,7 +1920,7 @@ export function CommitPanel() {
 
       <div className="changes-scroll" ref={changesScrollRef}>
         {tab === 'changes' && <FileSearchWidget variant="speed" query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: changeMatches.matches.length ? changeMatches.index + 1 : 0, total: changeMatches.matches.length }} onNavigate={navigateSearch} />}
-        {!repos.length && <div className="empty-state"><Codicon name="source-control" />{t('No repositories found')}</div>}
+        {!repos.length && <EmptyState icon="source-control">{t('No repositories found')}</EmptyState>}
         {changelistEnabled ? (
           <ChangelistView
             repos={repos}
@@ -2178,7 +2180,7 @@ export function CommitPanel() {
             </IconButton>
           </div>
         </div>
-        {aiMessage?.error && <div role="alert" className="ai-error">{aiMessage.error}</div>}
+        {aiMessage?.error && <ErrorNotice>{aiMessage.error}</ErrorNotice>}
         {mergeMessageSuggestion && <div className="merge-message-suggestion" role="status"><span>{t('Merge message suggestion')}: {mergeMessageSuggestion}</span><Button variant="ghost" size="xs" type="button" onClick={applyMergeMessageSuggestion}>{t('Use Merge Message')}</Button><Button variant="ghost" size="xs" type="button" onClick={dismissMergeMessageSuggestion}>{t('Ignore')}</Button></div>}
         <div className="ai-commit-input ai-input-surface" data-generating={Boolean(aiMessage?.running)}>
         <AiGenerationBorder active={Boolean(aiMessage?.running)} />

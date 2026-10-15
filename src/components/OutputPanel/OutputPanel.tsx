@@ -1,3 +1,4 @@
+import { EmptyState } from '../EmptyState';
 import { SearchInput } from '../SearchInput';
 import { IconButton } from '../IconButton';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -405,10 +406,7 @@ export function OutputPanel() {
         }}
       >
         {filteredEntries.length === 0 ? (
-          <div className="output-empty">
-            <Codicon name="info" />
-            <span>{searchQuery ? t('No output matching filter.') : t('No log output recorded yet.')}</span>
-          </div>
+          <EmptyState icon="info">{searchQuery ? t('No output matching filter.') : t('No log output recorded yet.')}</EmptyState>
         ) : (
           <div className={`output-log-list ${virtual ? 'virtual' : ''}`} style={virtual ? { height: totalHeight, position: 'relative' } : undefined}>
             {(virtual ? virtualizer.getVirtualItems().map((item) => ({ entry: filteredEntries[item.index], item })) : filteredEntries.map((entry) => ({ entry, item: undefined }))).map(({ entry, item }) => {

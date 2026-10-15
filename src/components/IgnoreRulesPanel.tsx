@@ -1,3 +1,4 @@
+import { ErrorNotice } from './ErrorNotice';
 import { FormField } from './FormField';
 import { Textarea } from './Textarea';
 import { Input } from './Input';
@@ -119,7 +120,7 @@ export function IgnoreRulesPanel({ repoId, directory: initialDirectory = '', clo
             onChange={(event) => setText(event.target.value)}
           />
         </FormField>
-        {error && <div className="error-row" role="alert">{error}</div>}
+        {error && <ErrorNotice>{error}</ErrorNotice>}
         <footer>
           <Button onClick={close}>{t('Close')}</Button>
           <Button variant="primary" loading={saving} disabled={!isRulesValid || saving} onClick={() => void save()}>{t('Save')}</Button>

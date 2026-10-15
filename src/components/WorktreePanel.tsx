@@ -1,3 +1,6 @@
+import { LoadingState } from './LoadingState';
+import { EmptyState } from './EmptyState';
+import { ErrorNotice } from './ErrorNotice';
 import { Button } from './Button';
 import { promptBranchName } from './promptBranchName';
 import { IconButton } from './IconButton';
@@ -353,14 +356,10 @@ function RepoSection({
       ) : undefined}>
 
       {error && (
-        <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }}>
-          <Codicon name="error" style={{ marginRight: '6px' }} />
-          {error}
-          <Button disabled={busy} onClick={onRefresh}>{t('Retry')}</Button>
-        </div>
+        <ErrorNotice onRetry={onRefresh} retrying={busy}>{error}</ErrorNotice>
       )}
       {repo.worktrees.length === 0 && !error ? (
-        <div style={css.empty}>{t('No worktrees')}</div>
+        <EmptyState compact>{t('No worktrees')}</EmptyState>
       ) : (
         repo.worktrees.map((w) => (
           <WorktreeRow
@@ -568,13 +567,10 @@ export function WorktreePanel({ active = true,
 
   const multiRepo = forcedMultiRepo ?? (resolvedRepos.length >= 1);
 
-  if (externalLoading) return <div style={css.empty}>{t('Loading…')}</div>;
+  if (externalLoading) return <LoadingState>{t('Loading…')}</LoadingState>;
   if (externalError) {
     return (
-      <div style={css.errorRow}>
-        <Codicon name="warning" style={{ marginRight: '4px', flexShrink: 0 }} />
-        {externalError}
-      </div>
+      <ErrorNotice>{externalError}</ErrorNotice>
     );
   }
 
@@ -585,7 +581,7 @@ export function WorktreePanel({ active = true,
     <div style={css.root}>
       <SpeedSearchIndicator query={speedSearch.query} onClear={speedSearch.clear} />
       {allEmpty && resolvedRepos.length === 0 ? (
-        <div style={css.empty}>{t('No worktrees')}</div>
+        <EmptyState compact>{t('No worktrees')}</EmptyState>
       ) : (
         resolvedRepos.map((repo) => (
           <RepoSection
@@ -631,20 +627,6 @@ const css = {
     gap: '4px',
     padding: '6px 8px',
     borderTop: '1px solid var(--vscode-panel-border, var(--versiondock-border-soft))',
-  } as React.CSSProperties,
-  empty: {
-    padding: '16px 12px',
-    fontSize: '12px',
-    color: 'var(--vscode-descriptionForeground, var(--versiondock-muted))',
-    textAlign: 'center' as const,
-  },
-  errorRow: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    padding: '4px 8px',
-    fontSize: '11px',
-    color: 'var(--vscode-errorForeground, var(--versiondock-danger))',
-    background: 'var(--vscode-inputValidation-errorBackground, rgba(244, 135, 113, 0.15))',
   } as React.CSSProperties,
 };
 

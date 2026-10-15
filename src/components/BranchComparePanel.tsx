@@ -1,3 +1,5 @@
+import { EmptyState } from './EmptyState';
+import { LoadingState } from './LoadingState';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { buildHistoryAuthorOptions } from '../history/authors';
 import { IconButton } from './IconButton';
@@ -154,11 +156,11 @@ function ComparePane({
     <h3 title={title}>{title}</h3>
     <div className="compare-pane-list">
       {active && loading ? (
-        <div className="compare-empty">{t('Loading...')}</div>
+        <LoadingState compact>{t('Loading...')}</LoadingState>
       ) : visible.length > 0 ? (
         renderCommits(visible)
       ) : (
-        <div className="compare-empty">{active ? t('No matches') : emptyText}</div>
+        <EmptyState compact>{active ? t('No matches') : emptyText}</EmptyState>
       )}
     </div>
   </section>;
@@ -219,7 +221,7 @@ export function BranchComparePanel({
       <span className="compare-title" title={`${baseLabel} → ${targetLabel}`}>{t('{0} vs {1}', baseLabel, targetLabel)}</span>
       <IconButton aria-label={t('Close')} title={t('Close')} onClick={close}><Codicon name="close" /></IconButton>
     </header>
-    {!activeComparison ? <div className="empty-state"><Codicon name={busy ? 'loading codicon-modifier-spin' : 'compare-changes'} />{t(busy ? 'Loading...' : 'Select two branches to compare')}</div> : <div ref={stack} className="compare-stack" style={topHeight ? { gridTemplateRows: `${topHeight}px 4px minmax(0, 1fr)` } : undefined}>
+    {!activeComparison ? busy ? <LoadingState compact={false}>{t('Loading...')}</LoadingState> : <EmptyState icon="compare-changes">{t('Select two branches to compare')}</EmptyState> : <div ref={stack} className="compare-stack" style={topHeight ? { gridTemplateRows: `${topHeight}px 4px minmax(0, 1fr)` } : undefined}>
       <ComparePane
         repoId={repoId}
         authors={authors}

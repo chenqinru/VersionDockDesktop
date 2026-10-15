@@ -1,3 +1,4 @@
+import { selectValue } from '../test/select';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppStateSnapshot, BootstrapData, BridgeCommand } from '../bindings/generated';
@@ -166,11 +167,11 @@ describe('SettingsPanel', () => {
     const { commands } = renderPanel();
     const select = screen.getByRole('combobox', { name: 'Scrollbar visibility' });
     expect(select).toHaveValue('auto');
-    fireEvent.change(select, { target: { value: 'visible' } });
+    selectValue(select, 'visible');
     await vi.waitFor(() => expect(commands.some(command => command.type === 'updateSettings' && command.payload.settings.scrollbarVisibility === 'visible')).toBe(true));
     expect(useAppStore.getState().bootstrap?.state.settings?.scrollbarVisibility).toBe('visible');
     fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'auto-hide' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Scrollbar visibility' }), { target: { value: 'system' } });
+    selectValue(screen.getByRole('combobox', { name: 'Scrollbar visibility' }), 'system');
     await vi.waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.scrollbarVisibility).toBe('system'));
     fireEvent.click(screen.getByRole('button', { name: 'Restore default: Scrollbar visibility' }));
     await vi.waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.scrollbarVisibility).toBe('auto'));
@@ -180,11 +181,11 @@ describe('SettingsPanel', () => {
     const { commands } = renderPanel();
     const select = screen.getByRole('combobox', { name: 'Layout density' });
     expect(select).toHaveValue('comfortable');
-    fireEvent.change(select, { target: { value: 'compact' } });
+    selectValue(select, 'compact');
     await vi.waitFor(() => expect(commands.some(command => command.type === 'updateSettings' && command.payload.settings.layoutDensity === 'compact')).toBe(true));
     expect(useAppStore.getState().bootstrap?.state.settings?.layoutDensity).toBe('compact');
     fireEvent.change(screen.getByRole('textbox', { name: 'Search settings...' }), { target: { value: 'comfortable' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Layout density' }), { target: { value: 'comfortable' } });
+    selectValue(screen.getByRole('combobox', { name: 'Layout density' }), 'comfortable');
     await vi.waitFor(() => expect(useAppStore.getState().bootstrap?.state.settings?.layoutDensity).toBe('comfortable'));
     const update = commands.filter(command => command.type === 'updateSettings').at(-1);
     expect(update?.type === 'updateSettings' && update.payload.changed_fields).toEqual(['layoutDensity']);
@@ -197,17 +198,19 @@ describe('SettingsPanel', () => {
     expect(themes.querySelectorAll('[role="radio"]')).toHaveLength(9);
     expect(screen.queryByRole('combobox', { name: 'Theme' })).toBeNull();
     fireEvent.click(screen.getByRole('radio', { name: 'GitHub Dark Dimmed' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'zhCn' } });
+    selectValue(screen.getByRole('combobox', { name: 'Language' }), 'zhCn');
     const fontSize = screen.getByRole('combobox', { name: 'UI font size' });
-    expect(Array.from(fontSize.querySelectorAll('option')).map((option) => option.value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
-    fireEvent.change(fontSize, { target: { value: 'maximum' } });
+    fireEvent.click(fontSize);
+    expect(screen.getAllByRole('option').map(option => (option as HTMLButtonElement).value)).toEqual(['minimum', 'small', 'standard', 'large', 'maximum']);
+    fireEvent.keyDown(screen.getByRole('option', { name: 'Standard' }), { key: 'Escape' });
+    selectValue(fontSize, 'maximum');
 
     expect(screen.getByRole('radiogroup', { name: 'File icon theme' }).querySelectorAll('[role="radio"]')).toHaveLength(4);
     fireEvent.click(screen.getByRole('radio', { name: 'Catppuccin Icons (Soft & Modern)' }));
 
     // 切换至 Changes and commit 分类
     fireEvent.click(screen.getByRole('link', { name: 'Changes and commit' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'File view' }), { target: { value: 'list' } });
+    selectValue(screen.getByRole('combobox', { name: 'File view' }), 'list');
 
     expect(useAppStore.getState().bootstrap?.state.settings).toMatchObject({ theme: 'githubDarkDimmed', language: 'zhCn', uiFontSize: 'maximum', fileIconTheme: 'catppuccin' });
     expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ fileViewMode: 'list' });

@@ -1,3 +1,7 @@
+import { EmptyState } from './EmptyState';
+import { ErrorNotice } from './ErrorNotice';
+import { Checkbox } from './Checkbox';
+import { Select } from './Select';
 import { FormField } from './FormField';
 import { SearchInput } from './SearchInput';
 import { Textarea } from './Textarea';
@@ -659,22 +663,17 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
 
           {/* 右侧主视窗 */}
           <div className="provider-content">
-            {error && <p className="dialog-error" style={{ marginBottom: 12 }}>{error}</p>}
+            {error && <ErrorNotice>{error}</ErrorNotice>}
 
             {/* 1. 账号管理模式 Manage */}
             {(mode === 'manage' || accountFormOpen || !selectedAccount) && (
               <>
                 {/* 视图 A: 空状态 */}
                 {activeView === 'none' && (
-                  <div className="provider-empty-state">
-                    <div className="provider-empty-icon">
-                      <Codicon name="account" />
-                    </div>
-                    <div className="provider-empty-title">{t('Remote Providers')}</div>
-                    <div className="provider-empty-desc">
-                      {t('Connect your GitHub, GitLab, or Gitee accounts to browse repositories, publish projects, and resolve author avatars.')}
-                    </div>
-                  </div>
+                  <EmptyState className="provider-empty-state" icon="account"
+                    description={t('Connect your GitHub, GitLab, or Gitee accounts to browse repositories, publish projects, and resolve author avatars.')}>
+                    {t('Remote Providers')}
+                  </EmptyState>
                 )}
 
                 {/* 视图 B: 账号详情卡片 */}
@@ -1190,22 +1189,12 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                 </div>
 
                 <p className="publish-target">{publishRepo?.meta.name} · {publishRepo?.branch}<small>{publishRepo?.meta.rootPath}</small></p>
-                {publishPreflightError && <p className="dialog-error">{publishPreflightError}</p>}
+                {publishPreflightError && <ErrorNotice>{publishPreflightError}</ErrorNotice>}
                 <fieldset className="provider-publish-fields" disabled={busy || publishUncertain || Boolean(publishResult?.remoteCreated)}>
-                <div className="provider-form-field">
-                  <label htmlFor="pub-namespace-select">{t('Namespace')}</label>
-                  <select
-                    id="pub-namespace-select"
-                    value={namespace}
-                    onChange={(e) => setNamespace(e.target.value)}
-                  >
-                    {namespaces.map((item) => (
-                      <option key={item.id} value={selectedProvider === 'gitlab' ? item.id : item.fullPath}>
-                        {item.fullPath}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <FormField id="pub-namespace-select" className="provider-form-field" label={t('Namespace')}>
+                  <Select controlSize="md" value={namespace} onChange={setNamespace}
+                    options={namespaces.map(item => ({ value: selectedProvider === 'gitlab' ? item.id : item.fullPath, label: item.fullPath }))} />
+                </FormField>
 
                 <FormField id="pub-name-input" className="provider-form-field" label={t('Repository name')}>
                   <Input controlSize="md"
@@ -1225,25 +1214,13 @@ export function ProviderContent({ mode, repoId, workspaceId: requestedWorkspaceI
                   />
                 </FormField>
 
-                <div className="provider-form-field">
-                  <label htmlFor="pub-visibility-select">{t('Visibility')}</label>
-                  <select
-                    id="pub-visibility-select"
-                    value={visibility}
-                    onChange={(e) => setVisibility(e.target.value as RemoteVisibility)}
-                  >
-                    <option value="private">{t('Private')}</option>
-                    {selectedProvider === 'gitlab' && <option value="internal">{t('Internal')}</option>}
-                    <option value="public">{t('Public')}</option>
-                  </select>
-                </div>
+                <FormField id="pub-visibility-select" className="provider-form-field" label={t('Visibility')}>
+                  <Select controlSize="md" value={visibility} onChange={next => setVisibility(next as RemoteVisibility)}
+                    options={[{ value: 'private', label: t('Private') }, ...(selectedProvider === 'gitlab' ? [{ value: 'internal', label: t('Internal') }] : []), { value: 'public', label: t('Public') }]} />
+                </FormField>
 
                 <label className="dialog-check" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '11.5px', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={pushAfterCreate}
-                    onChange={(e) => setPushAfterCreate(e.target.checked)}
-                  />
+                  <Checkbox checked={pushAfterCreate} onChange={event => setPushAfterCreate(event.target.checked)} />
                   <span>{t('Push after creating')}</span>
                 </label>
 

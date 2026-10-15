@@ -17,10 +17,10 @@ it('opens options above the trigger when a scrollable settings pane clips the bo
   });
   const change = vi.fn();
   render(<div className="settings-content"><SettingSelect label="Layout density" value="comfortable" options={[["comfortable", "Comfortable"], ["compact", "Compact"]]} onChange={change} /></div>);
-  fireEvent.click(screen.getByRole('button', { name: 'Layout density' }));
+  fireEvent.click(screen.getByRole('combobox', { name: 'Layout density' }));
   expect(screen.getByRole('listbox')).toHaveAttribute('data-placement', 'above');
   fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Compact' }));
   expect(change).toHaveBeenCalledWith('compact');
   expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Layout density' })).toHaveFocus();
+  expect(screen.getByRole('combobox', { name: 'Layout density' })).toHaveFocus();
 });

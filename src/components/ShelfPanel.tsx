@@ -1,3 +1,5 @@
+import { EmptyState } from './EmptyState';
+import { ErrorNotice } from './ErrorNotice';
 import { changeStatusColor, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { buildSavedChangeTree, type TreeDir } from './savedChangeTree';
@@ -657,17 +659,11 @@ export function ShelfPanel({ active = true,
 
 
               {error && (
-                <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }}>
-                  <Codicon name="error" style={{ marginRight: '6px' }} />
-                  {error}
-                </div>
+                <ErrorNotice>{error}</ErrorNotice>
               )}
 
               {repoShelves.length === 0 && !error ? (
-                <div style={css.empty}>
-                  <Codicon name="archive" style={{ marginRight: '6px' }} />
-                  {t('No shelved changes')}
-                </div>
+                <EmptyState compact>{t('No shelved changes')}</EmptyState>
               ) : (
                 repoShelves.map((entry) => (
                   <ShelfRow
@@ -709,14 +705,5 @@ const css = {
   },
   repoSection: {
     borderBottom: '1px solid var(--versiondock-border, var(--vscode-panel-border, #333))',
-  },
-  empty: {
-    padding: '16px 12px',
-    fontSize: '12px',
-    color: 'var(--versiondock-muted, var(--vscode-descriptionForeground, #888))',
-    textAlign: 'center' as const,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 };

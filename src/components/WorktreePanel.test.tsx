@@ -134,7 +134,7 @@ describe('WorktreePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'VersionDock' }));
     expect(status).toBeVisible();
     act(() => useAppStore.setState({ worktreeBusy: {} }));
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Worktree operation in progress…' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'VersionDock' }));
     expect(screen.getAllByRole('button', { name: actionName })[0]).not.toBeDisabled();
   });

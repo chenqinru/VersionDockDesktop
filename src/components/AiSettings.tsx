@@ -1,3 +1,4 @@
+import { ErrorNotice } from './ErrorNotice';
 import { Button } from './Button';
 import { DialogSurface } from './DialogSurface';
 import { SettingSelect } from './SettingSelect';
@@ -244,9 +245,7 @@ export function AiPromptEditor({ task, onClose }: { task: AiTask; onClose: () =>
           onChange={(e) => setText(e.target.value)}
         />
         {error && (
-          <div role="alert" className="ai-error">
-            {error}
-          </div>
+          <ErrorNotice>{error}</ErrorNotice>
         )}
         <footer>
           <Button disabled={busy} onClick={() => void apply('reset')}>

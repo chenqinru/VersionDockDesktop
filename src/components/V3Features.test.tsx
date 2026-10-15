@@ -1,3 +1,4 @@
+import { selectValue } from '../test/select';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReactNode } from 'react';
@@ -100,7 +101,7 @@ describe('V3 identity and file history', () => {
     useAppStore.setState({ bridge, snapshot });
     render(provider(bridge, <IdentityPanel repoId="git" close={() => undefined} />));
     expect(await screen.findByText('Local User <local@example.test>')).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Profile' }), { target: { value: 'release' } });
+    selectValue(screen.getByRole('combobox', { name: 'Profile' }), 'release');
     await waitFor(() => expect(commands).toContain('gitProfileOperation'));
   });
 });

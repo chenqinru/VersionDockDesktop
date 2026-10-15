@@ -1,3 +1,4 @@
+import { Switch } from './Switch';
 import { Input } from './Input';
 import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { useI18n } from '../i18n';
@@ -174,9 +175,6 @@ export function SettingToggle({ label, description, checked, onChange, setting, 
   const info = useSettingState(setting);
   return <div className="settings-toggle settings-row" data-setting={setting} data-setting-modified={info?.modified}>
     <SettingLabel label={label} description={description} setting={setting} htmlFor={id} />
-    <label className="settings-switch">
-      <input id={id} aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)} />
-      <span className="settings-switch-track"><span className="settings-switch-thumb" /></span>
-    </label>
+    <Switch id={id} aria-label={label} checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)} />
   </div>;
 }

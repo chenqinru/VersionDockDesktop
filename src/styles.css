@@ -316,7 +316,7 @@ input, textarea, select, [contenteditable="true"] {
 button, input, textarea, select { font: inherit; color: inherit; }
 button { border: 0; background: transparent; cursor: default; }
 button:not(:disabled) { cursor: pointer; transition: background-color .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
-button:where(:not(.vd-button):not(.icon-button)):not(:disabled):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
+button:where(:not(.vd-button):not(.icon-button):not(.vd-select-trigger):not(.vd-select-option)):not(:disabled):hover { color: var(--versiondock-text); background: var(--versiondock-hover); }
 button:disabled { opacity: .45; cursor: default; }
 button:focus-visible, input:where(:not(.vd-input)):focus-visible, textarea:where(:not(.vd-input)):focus-visible, select:focus-visible { outline: 1px solid var(--versiondock-accent); outline-offset: -1px; }
 input:not(:disabled), textarea:not(:disabled), select:not(:disabled) { transition: border-color .12s ease, box-shadow .12s ease, background-color .12s ease; }
@@ -1409,123 +1409,15 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
 }
 
 /* 原生隐藏 select 保持测试与 a11y 兼容 */
-.settings-hidden-native-select {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
 
 /* 现代 macOS 风格自定义下拉菜单 Custom Select */
-.settings-custom-select {
+.settings-row > .settings-custom-select {
   position: relative;
   min-width: 140px;
   max-width: 220px;
 }
 
-.settings-custom-select-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  height: 28px;
-  padding: 0 8px 0 10px;
-  background: var(--versiondock-input);
-  border: 1px solid var(--versiondock-border);
-  border-radius: 6px;
-  color: var(--versiondock-text);
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  cursor: pointer;
-  outline: none;
-  transition: all 0.15s ease;
-  user-select: none;
-  box-sizing: border-box;
-}
-
-.settings-custom-select-trigger:hover {
-  background: var(--versiondock-hover);
-  border-color: var(--versiondock-accent);
-}
-
-.settings-custom-select-trigger.open,
-.settings-custom-select-trigger:focus {
-  border-color: var(--versiondock-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--versiondock-accent) 25%, transparent);
-}
-
-.settings-custom-select-val {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 450;
-}
-
-.settings-custom-select-trigger .codicon {
-  font-size: 12px;
-  color: var(--versiondock-muted);
-  flex-shrink: 0;
-}
-
-.settings-custom-select-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 100%;
-  width: max-content;
-  max-width: 260px;
-  max-height: 220px;
-  overflow-y: auto;
-  z-index: 120;
-  background: var(--versiondock-surface);
-  border: 1px solid var(--versiondock-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
 /* Keep options inside scrollable settings panes at either edge. */
-.settings-custom-select-menu[data-placement="above"] { top: auto; bottom: calc(100% + 4px); }
-
-.settings-custom-select-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 5px;
-  background: transparent;
-  border: none;
-  color: var(--versiondock-text);
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  cursor: pointer;
-  text-align: left;
-  outline: none;
-  transition: background-color 0.1s ease;
-  box-sizing: border-box;
-}
-
-.settings-custom-select-option:hover {
-  background: var(--versiondock-hover);
-}
-
-.settings-custom-select-option.active {
-  color: var(--versiondock-selection-foreground);
-  font-weight: 600;
-}
-
-.settings-custom-select-option .codicon-check {
-  font-size: 11px;
-  color: var(--versiondock-accent);
-}
 
 /* 隐藏的原生 input 保持测试与 a11y 兼容 */
 .settings-hidden-native-input {
@@ -1741,70 +1633,6 @@ html:is([data-versiondock-scrollbar-visibility="auto"], [data-versiondock-scroll
 .settings-tag-input.vd-input[data-control-size] { padding-left: 28px; }
 
 /* Switch 现代滑动开关 (第一版经典质感) */
-.settings-switch {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  user-select: none;
-}
-
-.settings-switch input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-  margin: 0;
-}
-
-.settings-switch-track {
-  position: relative;
-  display: inline-block;
-  width: 38px;
-  height: 22px;
-  background-color: color-mix(in srgb, var(--versiondock-input) 80%, var(--versiondock-border));
-  border: 1px solid var(--versiondock-border);
-  border-radius: 12px;
-  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
-  box-sizing: border-box;
-}
-
-.settings-switch-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  background-color: #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.settings-switch input:checked + .settings-switch-track {
-  background-color: var(--versiondock-selection-background);
-  border-color: var(--versiondock-selection-border);
-}
-
-.settings-switch input:checked + .settings-switch-track .settings-switch-thumb {
-  transform: translateX(16px);
-}
-
-.settings-switch.mini .settings-switch-track {
-  width: 32px;
-  height: 18px;
-}
-
-.settings-switch.mini .settings-switch-thumb {
-  top: 1.5px;
-  left: 1.5px;
-  width: 13px;
-  height: 13px;
-}
-
-.settings-switch.mini input:checked + .settings-switch-track .settings-switch-thumb {
-  transform: translateX(14px);
-}
 
 /* 主题分段视觉预览选择器 (第一版经典质感) */
 /* Preview surfaces share the real root theme tokens defined above. */
@@ -2967,25 +2795,6 @@ button.conflict-action-item {
 .repo-heading > b { min-width: 18px; height: 16px; flex: 0 0 auto; padding: 0 5px; border-radius: 8px; background: var(--versiondock-accent-bg); color: #fff; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; line-height: 16px; text-align: center; }
 .file-row, .directory-row { height: 22px; min-height: 22px; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 22px; user-select: none; -webkit-user-select: none; }
 .file-row { min-width: 0; display: flex; align-items: center; gap: 3px; padding-right: 8px; overflow: hidden; white-space: nowrap; }
-.selection-checkbox { position: relative; width: 13px; height: 13px; flex: 0 0 13px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid var(--versiondock-selection-border); border-radius: 3px; background: transparent; color: #fff; }
-.selection-checkbox.selected {
-  border-color: var(--versiondock-selection-border);
-  background-color: var(--versiondock-selection-background);
-}
-/* Commit-panel and dialog options share the same blue checkbox selection. */
-.commit-panel .selection-checkbox, .vd-dialog .selection-checkbox {
-  border-color: color-mix(in srgb, var(--versiondock-accent) 65%, var(--versiondock-border));
-}
-.commit-panel .selection-checkbox.selected, .vd-dialog .selection-checkbox.selected {
-  border-color: var(--versiondock-accent-bg);
-  background-color: var(--versiondock-accent-bg);
-}
-.vd-dialog .selection-checkbox { color: var(--vscode-button-foreground, #fff); }
-.commit-panel input[type="checkbox"] { accent-color: var(--versiondock-accent-bg); }
-.selection-checkbox.disabled { opacity: .3; pointer-events: none; }
-.selection-checkbox input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: default; }
-.selection-checkbox .codicon { position: relative; pointer-events: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); line-height: 11px; font-weight: 700; }
-.selection-checkbox:has(input:focus-visible) { outline: 1px solid var(--versiondock-focusBorder, var(--versiondock-accent)); outline-offset: 1px; }
 .directory-row > .selection-checkbox, .file-row > .selection-checkbox { margin-right: 3px; }
 .file-row button { min-width: 0; flex: 1; height: 100%; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; text-align: left; }
 .file-row .file-name-group { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 4px; overflow: hidden; }
@@ -3188,7 +2997,6 @@ button.conflict-action-item {
 .branch-sidebar { height: 100%; overflow: auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); user-select: none; background: var(--versiondock-surface); }
 .branch-sidebar-sticky-header { position: sticky; top: 0; z-index: 4; background: var(--versiondock-surface); }
 .branch-sidebar-header { height: 35px; display: flex; align-items: stretch; background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); }
-.branch-loading { height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--versiondock-loading-foreground); background: var(--versiondock-surface); border-bottom: 1px solid var(--versiondock-border); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 /* Keep background paging feedback anchored to the visible log frame. */
 .commit-list-frame { position: relative; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .commit-list-content { position: relative; }
@@ -3349,9 +3157,6 @@ button.conflict-action-item {
 .aggregate-repo { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .aggregate-repo > .codicon { color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
 .aggregate-item .detail-message-card { margin-top: 5px; }
-.detail-loading { padding: 12px 8px; color: var(--versiondock-loading-foreground); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); text-align: center; }
-.detail-files > .detail-loading { padding: 8px; }
-.detail-loading.detail-error { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--versiondock-warning, #cca700); }
 .no-merge-conflicts { padding: 8px 10px 7px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); font-weight: 400; text-align: center; opacity: 0.72; }
 .merge-parent-group { margin-top: 4px; border-top: 1px solid var(--versiondock-border-soft); }
 .merge-parent-row { width: 100%; min-height: 24px; height: 24px; display: flex; align-items: center; gap: 5px; padding: 2px 8px; text-align: left; background: transparent; border: none; cursor: pointer; user-select: none; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
@@ -3514,7 +3319,6 @@ button.conflict-action-item {
 .compare-pane > h3 { min-width: 0; height: 28px; flex: 0 0 28px; margin: 0; padding: 0 8px; display: flex; align-items: center; overflow: hidden; color: var(--versiondock-warning, #d7ba7d); background: color-mix(in srgb, var(--versiondock-warning, #d7ba7d) 18%, var(--versiondock-bg)); border-bottom: 1px solid var(--versiondock-border-soft); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .compare-pane-list { min-height: 0; flex: 1; overflow: hidden; }
 .compare-pane-list > .commit-list-frame { height: 100%; }
-.compare-empty { height: 100%; padding: 16px 8px; display: grid; place-items: center; color: var(--versiondock-muted); text-align: center; }
 .compare-splitter { position: relative; cursor: row-resize; background: var(--versiondock-border); }
 .compare-splitter:hover { background: var(--versiondock-accent); }
 .compare-splitter > i { position: absolute; inset: -2px 0; }
@@ -3604,7 +3408,6 @@ button.conflict-action-item {
 }
 
 /* Default interaction feedback for controls without a component-specific hover state. */
-.selection-checkbox:not(.disabled), .selection-checkbox:not(.disabled) input { cursor: pointer; }
 .welcome-primary .primary:not(:disabled):hover,
 .merge-workspace header .primary:not(:disabled):hover,
 .compare-workspace > header .primary:not(:disabled):hover,
@@ -4030,21 +3833,6 @@ button.danger:not(:disabled):hover,
 .field-hint {
   font-weight: normal;
   color: var(--versiondock-faint, #666);
-}
-
-.identity-select {
-  height: 32px;
-  padding: 0 10px;
-  background: var(--versiondock-input, #3c3c3c);
-  border: 1px solid var(--versiondock-border, #3c3c3c);
-  border-radius: 4px;
-  color: var(--versiondock-text, #cccccc);
-  font-size: calc(12px * var(--versiondock-ui-font-scale, 1));
-}
-
-.identity-select:focus {
-  border-color: var(--versiondock-accent, #007acc);
-  outline: none;
 }
 
 .identity-sources-card {
@@ -5851,64 +5639,6 @@ button.danger:not(:disabled):hover,
   width: 172px;
 }
 
-.output-dropdown-trigger {
-  width: 100%;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 0 8px;
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  border-radius: 3px;
-  border: 1px solid var(--versiondock-border);
-  background: var(--versiondock-surface);
-  color: var(--versiondock-text);
-  cursor: pointer;
-  outline: none;
-  transition: all 0.12s ease;
-  user-select: none;
-  white-space: nowrap;
-  box-sizing: border-box;
-}
-
-.output-dropdown-trigger:hover,
-.output-dropdown-trigger.active {
-  border-color: var(--versiondock-selection-border);
-  background: var(--versiondock-selection-background);
-}
-
-.output-dropdown-trigger .codicon {
-  font-size: 10px;
-  color: var(--versiondock-muted);
-  flex-shrink: 0;
-}
-
-.output-dropdown-label {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.output-dropdown-menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--versiondock-surface-alt);
-  border: 1px solid var(--versiondock-border);
-  border-radius: 4px;
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
-  padding: 4px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  animation: outputDropdownFadeIn 0.12s ease-out;
-}
-
 @keyframes outputDropdownFadeIn {
   from {
     opacity: 0;
@@ -5918,44 +5648,6 @@ button.danger:not(:disabled):hover,
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.output-dropdown-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 8px;
-  border-radius: 3px;
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  color: var(--versiondock-text);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-  transition: background 0.1s ease;
-  box-sizing: border-box;
-}
-
-.output-dropdown-item:hover {
-  background: var(--versiondock-hover);
-}
-
-.output-dropdown-item.selected {
-  background: var(--versiondock-selection-background);
-  color: var(--versiondock-selection-foreground);
-  font-weight: 600;
-}
-
-.output-dropdown-item-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.output-dropdown-check {
-  font-size: 11px;
-  color: var(--versiondock-accent);
-  margin-left: 8px;
-  flex-shrink: 0;
 }
 
 .output-search-wrap { width: 160px; max-width: 28vw; min-width: 80px; }
@@ -6012,17 +5704,6 @@ button.danger:not(:disabled):hover,
   line-height: 1.5;
   padding: 6px 10px;
   background: var(--versiondock-surface);
-}
-
-.output-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 100%;
-  color: var(--versiondock-muted);
-  font-family: inherit;
-  font-size: 13px;
 }
 
 .output-log-list {
@@ -6530,36 +6211,6 @@ button.danger:not(:disabled):hover,
 .provider-empty-state {
   margin: auto;
   max-width: 380px;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 0;
-}
-
-.provider-empty-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--versiondock-accent) 15%, transparent);
-  color: var(--versiondock-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-}
-
-.provider-empty-title {
-  font-size: calc(14px * var(--versiondock-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--versiondock-text);
-}
-
-.provider-empty-desc {
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  color: var(--versiondock-muted);
-  line-height: 1.5;
 }
 
 /* 账号详情卡片 */
@@ -6721,18 +6372,6 @@ button.danger:not(:disabled):hover,
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
   font-weight: 500;
   color: var(--versiondock-text);
-}
-
-.provider-form-field select {
-  width: 100%;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 4px;
-  background: var(--versiondock-input);
-  border: 1px solid var(--versiondock-border);
-  color: var(--versiondock-text);
-  font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
-  box-sizing: border-box;
 }
 
 .provider-device-code-box {
@@ -6942,7 +6581,7 @@ button.danger:not(:disabled):hover,
 .diff-code-cell mark.diff-search-match.current, .diff-inline-row mark.diff-search-match.current { background: var(--versiondock-selection-background); outline: 2px solid var(--versiondock-selection-border); }
 .diff-history-error { padding: 6px 10px; font-size: 12px; color: var(--versiondock-danger); }
 
-.file-history-empty { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--versiondock-muted); font-size: 12px; }
+.file-history-empty { flex: 1; }
 .file-history-panel .error-row > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .file-history-header > button[aria-pressed='true'] { background: var(--versiondock-selection-background); color: var(--versiondock-text); }
 .source-code-workspace { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
@@ -7210,9 +6849,6 @@ button.danger:not(:disabled):hover,
 @keyframes merge-ai-orbit { to { transform:rotate(360deg); } }
 .merge-ai-orbit { display:inline-flex; animation:merge-ai-orbit 1.2s linear infinite; }
 @media (prefers-reduced-motion:reduce) { .merge-ai-orbit { animation:none; } }
-
-.output-dropdown-item { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; font-family: inherit; }
-.output-dropdown-item:focus-visible { outline: 1px solid var(--versiondock-focus-border, var(--versiondock-accent)); background: var(--versiondock-hover); }
 .output-log-list.virtual { display: block; }
 .output-log-row { box-sizing: border-box; }
 .output-log-row.error .output-log-details-box { color: var(--versiondock-danger, #f85149); }
@@ -7235,7 +6871,6 @@ button.danger:not(:disabled):hover,
 .setting-summary { display: flex; flex-direction: column; gap: 9px; padding: 10px 14px; }
 .settings-modified-results { display: flex; flex-direction: column; gap: 14px; }
 .setting-current-value { max-width: 44%; min-width: 0; overflow-wrap: anywhere; text-align: right; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-text); }
-.settings-switch:has(input:disabled) { opacity: .45; cursor: default; }
 @media (max-width: 900px) { .setting-current-value { max-width: 40%; } .setting-metadata { gap: 4px; } }
 .settings-modified-results .setting-current-value { margin-left: auto; }
 .setting-edit { flex-shrink: 0; color: var(--versiondock-muted); }
@@ -7245,7 +6880,6 @@ button.danger:not(:disabled):hover,
 .branch-section-title:focus-within .branch-tag-create { opacity: 1 !important; pointer-events: auto; }
 .branch-section-title:hover .branch-tag-create:disabled,
 .branch-section-title:focus-within .branch-tag-create:disabled { opacity: .4 !important; cursor: default; }
-.branch-tags-empty { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; font-size: 11px; color: var(--versiondock-muted); }
 [data-density="comfortable"] .branch-tag-create { border-radius: 6px; transition: background .12s ease; }
 [data-density="compact"] .branch-tag-create { border-radius: 0; }
 
@@ -7323,3 +6957,5 @@ button.danger:not(:disabled):hover,
   width: 100%;
   justify-content: flex-start;
 }
+
+.repo-selection-control { margin-right: 6px; }

@@ -1,3 +1,4 @@
+import { EmptyState } from './EmptyState';
 import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { promptBranchName } from './promptBranchName';
@@ -634,7 +635,7 @@ function CommitList({
     {popover && <CommitPopover detail={popover.detail} anchor={popover.anchor} repoKind={repoKindById[popover.detail.commit.repoId] ?? 'git'} remoteNames={remoteNamesByRepo[popover.detail.commit.repoId] ?? []} onClose={() => setPopover(undefined)} onEnter={() => { popoverActive.current = true; if (closeTimer.current) clearTimeout(closeTimer.current); }} onLeave={() => { popoverActive.current = false; setPopover(undefined); }} />}
     {context && <ContextMenu x={context.x} y={context.y} variant="gitLog" header={contextSelection(context.commit).length > 1 ? t('{0} commits selected', contextSelection(context.commit).length) : undefined} items={contextItems(context.commit)} onSelect={(id, rect) => void runContext(id, context.commit, rect)} onClose={() => setContext(undefined)} />}
     {branchOptions && createPortal(<BranchMenuPopover anchorRect={branchOptions.anchorRect} initialRepoId={branchOptions.repoId} repoOnly directBranch={branchOptions.svn ? undefined : { repoId: branchOptions.repoId, branchName: branchOptions.branchName, isCurrent: branchOptions.isCurrent }} onClose={() => setBranchOptions(undefined)} />, document.body, `${branchOptions.repoId}:${branchOptions.branchName}`)}
-    {!loading && !commits.length && <div className="empty-state"><Codicon name="history" /><span>{t('No history')}</span></div>}
+    {!loading && !commits.length && <EmptyState icon="history"><span>{t('No history')}</span></EmptyState>}
     </div>
     {loading && <>
       <div className="history-loading" role="status" aria-live="polite" aria-label={t('Loading commits…')}><Codicon name="loading codicon-modifier-spin" /><span>{t('Loading commits…')}</span></div>

@@ -47,7 +47,7 @@
   border-color: var(--versiondock-selection-border); outline: 0;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--versiondock-text) 7%, transparent);
 }
-.vd-dialog button:not(.vd-button):focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
+.vd-dialog button:not(.vd-button):where(:not(.vd-select-trigger):not(.vd-select-option)):focus-visible { outline: 2px solid var(--versiondock-selection-border); outline-offset: 2px; }
 .vd-dialog > footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding: 0; border: 0; }
 .vd-dialog button:disabled { opacity: .45; cursor: default; }
 .vd-dialog .dialog-error { margin: 12px 0 0; color: var(--versiondock-danger); }
@@ -149,10 +149,7 @@
 .vd-dialog.identity-panel .identity-inputs-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .vd-dialog.identity-panel .identity-inputs-grid input { min-width: 0; width: 100%; box-sizing: border-box; }
 .vd-dialog.identity-panel .identity-inputs-grid > button { grid-column: 1 / -1; justify-self: end; }
-.vd-dialog.identity-panel .identity-select { appearance: none; border-radius: 7px; min-height: 36px; background: var(--versiondock-input); }
 .vd-dialog.identity-panel .identity-select-wrap { position: relative; min-width: 0; }
-.vd-dialog.identity-panel .identity-select-wrap select { width: 100%; padding-right: 30px; }
-.vd-dialog.identity-panel .identity-select-wrap > .codicon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--versiondock-muted); pointer-events: none; }
 .vd-dialog.ai-prompt-dialog { height: min(560px, calc(100vh - 48px)); gap: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .vd-dialog.ai-prompt-dialog > header { flex-shrink: 0; margin-bottom: 0; }
 .vd-dialog.ai-prompt-dialog > footer { margin-top: 4px; flex-shrink: 0; justify-content: space-between; }

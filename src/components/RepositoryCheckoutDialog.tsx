@@ -1,3 +1,4 @@
+import { ErrorNotice } from './ErrorNotice';
 import { FormField } from './FormField';
 import { Input } from './Input';
 import { Button } from './Button';
@@ -147,7 +148,7 @@ export function RepositoryCheckoutDialog({ kind, close, defaultParent = '', defa
           <Input controlSize="md" value={targetName} onChange={(event) => { inferredNameRef.current = ''; setTargetName(event.target.value); }} />
         </FormField>
         </div>
-        {validationError && <p className="dialog-error">{validationError}</p>}
+        {validationError && <ErrorNotice>{validationError}</ErrorNotice>}
         {!git && <>
           <label className="dialog-check"><SelectionCheckbox label={t('SVN authentication')} checked={showAuthentication} disabled={locked} onChange={() => setShowAuthentication(value => !value)} />{t('SVN authentication')}</label>
           {showAuthentication && <div className="checkout-auth-fields">

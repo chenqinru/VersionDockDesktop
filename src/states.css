@@ -1,0 +1,12 @@
+.vd-empty-state, .vd-loading-state { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 100px; box-sizing: border-box; padding: 20px 12px; color: var(--versiondock-muted); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 1.5; text-align: center; }
+.vd-empty-state { flex-direction: column; }
+.vd-empty-state > .codicon { font-size: 24px; opacity: .65; }
+.vd-empty-state[data-compact], .vd-loading-state[data-compact] { flex-direction: row; min-height: 32px; padding: 8px 10px; }
+.vd-empty-state[data-compact] > .codicon, .vd-loading-state > .codicon { flex-shrink: 0; font-size: 14px; }
+.vd-state-content { min-width: 0; overflow-wrap: anywhere; }
+.vd-state-content small { display: block; margin-top: 4px; font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-muted); }
+.vd-state-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 6px; flex-wrap: wrap; }
+.vd-error-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; box-sizing: border-box; margin: 6px 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--versiondock-danger) 25%, transparent); border-radius: 4px; background: color-mix(in srgb, var(--versiondock-danger) 8%, var(--versiondock-surface)); color: var(--versiondock-danger); font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); line-height: 1.5; }
+.vd-error-notice > .codicon { flex: 0 0 auto; }
+.vd-error-notice > .vd-state-content { flex: 1 1 100px; white-space: pre-wrap; }
+@media (prefers-reduced-motion: reduce) { .vd-loading-state .codicon-modifier-spin { animation: none; } }

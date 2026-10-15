@@ -1,3 +1,6 @@
+import { EmptyState } from './EmptyState';
+import { ErrorNotice } from './ErrorNotice';
+import { LoadingState } from './LoadingState';
 import { Button } from './Button';
 import { useEffect, useRef, useState } from 'react';
 import type { DiffDocument, FileHistoryEntry, FileHistoryPage, FileRevisionDocument } from '../bindings/generated';
@@ -105,12 +108,12 @@ function FileHistoryDialog({ workspaceId, repoId, path }: { workspaceId: string;
           {cursor && <Button className="load-more" disabled={listLoading} onClick={() => void loadMore()}>{t('Load more')}</Button>}
         </aside>
         <main>
-          {listLoading && !entries.length && <div className="detail-loading"><Codicon name="loading codicon-modifier-spin" />{t('Loading files...')}</div>}
-          {listError && <div className="error-row" role="alert"><span>{listError}</span><Button onClick={() => { if (entries.length) void loadMore(); else setListRetry((value) => value + 1); }}>{t('Retry')}</Button></div>}
-          {!listLoading && !listError && !entries.length && <div className="file-history-empty"><Codicon name="history" /><span>{t('No history')}</span></div>}
+          {listLoading && !entries.length && <LoadingState>{t('Loading files...')}</LoadingState>}
+          {listError && <ErrorNotice onRetry={() => { if (entries.length) void loadMore(); else setListRetry((value) => value + 1); }}><span>{listError}</span></ErrorNotice>}
+          {!listLoading && !listError && !entries.length && <EmptyState compact className="file-history-empty" icon="history"><span>{t('No history')}</span></EmptyState>}
           {selected && <>
-            {preview.loading && <div className="detail-loading"><Codicon name="loading codicon-modifier-spin" />{t('Loading files...')}</div>}
-            {preview.error && <div className="error-row" role="alert"><span>{preview.error}</span><Button onClick={() => setPreviewRetry((value) => value + 1)}>{t('Retry')}</Button></div>}
+            {preview.loading && <LoadingState>{t('Loading files...')}</LoadingState>}
+            {preview.error && <ErrorNotice onRetry={() => setPreviewRetry((value) => value + 1)}><span>{preview.error}</span></ErrorNotice>}
             {resource?.binary ? <DiffPlaceholder kind="binary" path={resource.path} /> : resource?.truncated ? <DiffPlaceholder kind="truncated" path={resource.path} lineCount={preview.diff?.lineCount} /> : preview.diff ? <UnifiedDiffView className="file-history-diff" repoId={repoId} oldPath={selected.previousPath ?? undefined} oldRevision={selected.previousRevision ?? undefined} newRevision={selected.revision} onShowSelectionHistory={(range, revision, targetPath) => { close(); void useAppStore.getState().openHistoryForLineRange(repoId, targetPath ?? (range.side === 'old' ? selected.previousPath ?? selected.path : selected.path), range, revision); }} content={preview.diff.content} path={preview.diff.path} language={preview.diff.language} splitBreakpoint={900} /> : preview.document && <SourceCodeView content={preview.document.content} path={preview.document.path} />}
           </>}
         </main>

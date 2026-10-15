@@ -1,3 +1,4 @@
+import { Switch } from './Switch';
 import { SearchInput } from './SearchInput';
 import { Input } from './Input';
 import { Button } from './Button';
@@ -767,22 +768,14 @@ function RepositoryAppearanceSettings({ settings }: { settings: DesktopSettings 
                                     />
                                     <span className="settings-color-picker-preview" style={{ backgroundColor: currentColor }} />
                                   </label>
-                                  <label className="settings-switch mini" title={t('Visible repository: {0}', repo.meta.name)}>
-                                    <input
-                                      aria-label={t('Visible repository: {0}', repo.meta.name)}
-                                      type="checkbox"
-                                      checked={isVisible}
-                                      onChange={(event) => {
-                                        const next = new Set(hidden);
-                                        if (event.target.checked) next.delete(repo.meta.id);
-                                        else next.add(repo.meta.id);
-                                        void updateSettings({ hiddenRepositoryIds: [...next] });
-                                      }}
-                                    />
-                                    <span className="settings-switch-track">
-                                      <span className="settings-switch-thumb" />
-                                    </span>
-                                  </label>
+                                  <Switch controlSize="sm" aria-label={t('Visible repository: {0}', repo.meta.name)}
+                                    checked={isVisible}
+                                    onChange={(event) => {
+                                      const next = new Set(hidden);
+                                      if (event.target.checked) next.delete(repo.meta.id);
+                                      else next.add(repo.meta.id);
+                                      void updateSettings({ hiddenRepositoryIds: [...next] });
+                                    }} />
                                 </div>
                               </div>
                             );

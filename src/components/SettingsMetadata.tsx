@@ -36,10 +36,10 @@ export function SettingMetadata({ setting, label, onBeforeRestore }: { setting?:
     </>}
   </span>;
 }
-export function SettingLabel({ label, description, setting, htmlFor, onBeforeRestore }: { label: string; description?: string; setting?: SettingPath; htmlFor?: string; onBeforeRestore?: () => void }) {
+export function SettingLabel({ label, description, descriptionId, setting, htmlFor, onBeforeRestore }: { label: string; description?: string; descriptionId?: string; setting?: SettingPath; htmlFor?: string; onBeforeRestore?: () => void }) {
   return <span className="settings-label">
     {htmlFor ? <label htmlFor={htmlFor}><strong>{label}</strong></label> : <strong>{label}</strong>}
-    {description && <small>{description}</small>}
+    {description && <small id={descriptionId}>{description}</small>}
     <SettingMetadata setting={setting} label={label} onBeforeRestore={onBeforeRestore} />
   </span>;
 }

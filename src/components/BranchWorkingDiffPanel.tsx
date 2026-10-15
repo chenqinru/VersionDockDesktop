@@ -1,3 +1,4 @@
+import { EmptyState } from './EmptyState';
 import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { useMemo, useState } from 'react';
@@ -189,7 +190,7 @@ export function WorkingDiffPanel({ source }: { source: 'repository' | 'worktree'
       </div>
     </div>
     <div className="branch-working-files">
-      {files.length === 0 ? <div className="empty-state">{t('No file differences between {0} and the working tree', baseLabel)}</div> : viewMode === 'tree'
+      {files.length === 0 ? <EmptyState>{t('No file differences between {0} and the working tree', baseLabel)}</EmptyState> : viewMode === 'tree'
         ? tree.map((node) => <BranchWorkingTreeNode key={node.kind === 'directory' ? node.path : node.file.path} node={node} depth={0} collapsed={collapsed} selectedPath={selectedPath} toggle={(path) => setCollapsed((current) => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next; })} select={select} openContext={(event, file) => setContext({ x: event.clientX, y: event.clientY, file })} />)
         : files.map((file) => <BranchWorkingFileRow key={`${file.status}:${file.path}`} file={file} depth={0} selected={selectedPath === file.path} select={select} openContext={(event, target) => setContext({ x: event.clientX, y: event.clientY, file: target })} />)}
     </div>

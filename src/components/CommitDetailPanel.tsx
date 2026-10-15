@@ -1,3 +1,6 @@
+import { EmptyState } from './EmptyState';
+import { ErrorNotice } from './ErrorNotice';
+import { LoadingState } from './LoadingState';
 import { Button } from './Button';
 import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { AiExplanation } from './AiExplanation';
@@ -618,16 +621,11 @@ function MergeParentChangeGroup({
       </button>
       {isExpanded && (
         <div className="merge-parent-files">
-          {loading && <div className="detail-loading">{t('Loading files...')}</div>}
+          {loading && <LoadingState>{t('Loading files...')}</LoadingState>}
           {!loading && error && (
-            <div className="detail-loading detail-error">
-              <span>{t('Failed to load files')}</span>
-              <Button type="button" className="detail-retry-button" onClick={retry}>
-                {t('Retry')}
-              </Button>
-            </div>
+            <ErrorNotice onRetry={retry}><span>{t('Failed to load files')}</span></ErrorNotice>
           )}
-          {!loading && !error && files && files.length === 0 && <div className="detail-loading">{t('No changed files')}</div>}
+          {!loading && !error && files && files.length === 0 && <EmptyState compact>{t('No changed files')}</EmptyState>}
           {!loading && !error && files && files.length > 0 && (
             viewMode === 'tree' ? (
               buildTree(parentTargets, `merge-dir:${change.hash}`).map((node) => (
@@ -829,7 +827,7 @@ function ExtendedCommitSummary({
               if (isItemLoading) {
                 return (
                   <article className="extended-commit-item" key={key}>
-                    <div className="detail-loading">{t('Loading...')}</div>
+                    <LoadingState>{t('Loading...')}</LoadingState>
                   </article>
                 );
               }
@@ -840,12 +838,7 @@ function ExtendedCommitSummary({
                     <div className="extended-commit-repo" style={{ color: repo?.meta.color }}>
                       <Codicon name="repo" />{repo?.meta.name ?? commit.repoId}
                     </div>
-                    <div className="detail-loading detail-error">
-                      <span>{itemError || t('Failed to load commit details')}</span>
-                      <Button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
-                        {t('Retry')}
-                      </Button>
-                    </div>
+                    <ErrorNotice onRetry={() => void reloadSelectedCommits()}><span>{itemError || t('Failed to load commit details')}</span></ErrorNotice>
                   </article>
                 );
               }
@@ -865,12 +858,12 @@ function ExtendedCommitSummary({
             })}
           </div>
         </div>
-        {loading && <div className="detail-loading">{t('Loading...')}</div>}
+        {loading && <LoadingState>{t('Loading...')}</LoadingState>}
       </section>
     );
   }
 
-  if (!detail) return <section className="extended-commit-summary"><div className="detail-loading">{t('Loading...')}</div></section>;
+  if (!detail) return <section className="extended-commit-summary"><LoadingState>{t('Loading...')}</LoadingState></section>;
   const commit = detail.commit;
   const repo = repoMap.get(commit.repoId);
   return (
@@ -1336,12 +1329,12 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
         </div>
         <FileSearchWidget variant={workspaceView ? 'files' : 'speed'} query={speedSearch.query} isOpen={speedSearch.isOpen} inputRef={speedSearch.inputRef} onChange={speedSearch.setQuery} onClose={speedSearch.clear} count={{ current: matchedTargets.length > 0 ? activeMatchIndex + 1 : 0, total: matchedTargets.length }} onNavigate={handleNavigateMatch} />
         <div className="detail-files" ref={fileListRef}>
-          {loading && !targets.length && <div className="detail-loading" role="status">{t('Loading files...')}</div>}
+          {loading && !targets.length && <LoadingState>{t('Loading files...')}</LoadingState>}
           {!loading && isMergeCommit && targets.length === 0 && (
             <div className="no-merge-conflicts">{t('No merge conflicts')}</div>
           )}
           {!loading && !isMergeCommit && targets.length === 0 && (
-            <div className="detail-loading">{t('No changed files')}</div>
+            <EmptyState compact>{t('No changed files')}</EmptyState>
           )}
           {!loading && targets.length > 0 && (
             shouldVirtualize ? (
@@ -1561,12 +1554,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
                       <RefBadges detail={summary} repoKind={repo?.meta.kind} />
                     </>
                   ) : (
-                    <div className="detail-loading detail-error">
-                      <span>{itemError || t('Failed to load commit details')}</span>
-                      <Button type="button" className="detail-retry-button" onClick={() => void reloadSelectedCommits()}>
-                        {t('Retry')}
-                      </Button>
-                    </div>
+                    <ErrorNotice onRetry={() => void reloadSelectedCommits()}><span>{itemError || t('Failed to load commit details')}</span></ErrorNotice>
                   )}
                 </article>
               );

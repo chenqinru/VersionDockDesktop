@@ -1,3 +1,5 @@
+import { ErrorNotice } from './ErrorNotice';
+import { Checkbox } from './Checkbox';
 import { Button } from './Button';
 import { expandAiResolutionLines, inferAiAcceptedSides, normalEditsEqual, previewDelay } from '../ai/mergePreview';
 import { aiRequest, useAiStore } from '../ai/aiStore';
@@ -402,7 +404,7 @@ export function MergeWorkspace() {
         {!merge.binary && <IconButton title={t('Edit AI prompt')} disabled={aiBusy} onClick={() => setAiPrompt(true)}><Codicon name="edit" /></IconButton>}
       </div>
 
-      {aiRun?.error && <div role="alert" className="ai-error">{aiRun.error}</div>}
+      {aiRun?.error && <ErrorNotice>{aiRun.error}</ErrorNotice>}
       {aiPrompt && <AiPromptEditor task="merge-conflict" onClose={() => setAiPrompt(false)} />}
 
       {/* 二进制冲突提示 */}
@@ -527,12 +529,8 @@ export function MergeWorkspace() {
               <span style={{ width: 1, height: 16, background: 'var(--vscode-panel-border, #444444)', flexShrink: 0, margin: '0 3px' }} />
 
               <label style={{ display: 'inline-flex', alignItems: 'center', height: 22, gap: 5, whiteSpace: 'nowrap', fontSize: 12, lineHeight: '22px', cursor: 'pointer', userSelect: 'none' }}>
-                <input
-                  type="checkbox"
-                  checked={syncScrollEnabled}
-                  onChange={(e) => setSyncScrollEnabled(e.target.checked)}
-                  style={{ margin: 0, cursor: 'pointer', verticalAlign: 'middle' }}
-                />
+                  <Checkbox checked={syncScrollEnabled}
+                    onChange={(e) => setSyncScrollEnabled(e.target.checked)} />
                 <span>{t('Synchronous Scrolling')}</span>
               </label>
             </div>

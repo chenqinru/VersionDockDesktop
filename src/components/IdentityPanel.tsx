@@ -1,3 +1,6 @@
+import { ErrorNotice } from './ErrorNotice';
+import { LoadingState } from './LoadingState';
+import { Select } from './Select';
 import { FormField } from './FormField';
 import { Input } from './Input';
 import { Button } from './Button';
@@ -129,7 +132,7 @@ function GitIdentity({
     }
   };
 
-  if (!value) return <div className="detail-loading">{error ?? t('Loading files...')}</div>;
+  if (!value) return error ? <ErrorNotice>{error}</ErrorNotice> : <LoadingState>{t('Loading files...')}</LoadingState>;
 
   const getSourceLabel = (source: string) => {
     switch (source) {
@@ -169,33 +172,22 @@ function GitIdentity({
 
       {/* Profile 选择项 */}
       <div className="identity-form-row">
-        <label className="identity-label-block">
-          <span className="field-title">{t('Profile')}</span>
-          <div className="identity-select-wrap"><select
+        <FormField label={t('Profile')}>
+          <Select controlSize="md"
             aria-label={t('Profile')}
-            className="identity-select"
             value={value.selectedProfileId ?? ''}
-            onChange={(event) =>
-              void operate({
-                type: 'gitProfileOperation',
-                payload: {
-                  workspace_id: workspaceId,
-                  repo_id: repoId,
-                  operation: { type: 'select', profile_id: event.target.value || null },
-                },
-              })
-            }
-          >
-            <option value="">{t('Auto · local → global')}</option>
-            <option value={LOCAL_PROFILE_ID}>{t('Local')}</option>
-            <option value={GLOBAL_PROFILE_ID}>{t('Global')}</option>
-            {value.profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.label} ({profile.userName} &lt;{profile.email}&gt;)
-              </option>
-            ))}
-          </select><Codicon name="chevron-down" /></div>
-        </label>
+            onChange={next => void operate({
+              type: 'gitProfileOperation',
+              payload: { workspace_id: workspaceId, repo_id: repoId, operation: { type: 'select', profile_id: next || null } },
+            })}
+            options={[
+              { value: '', label: t('Auto · local → global') },
+              { value: LOCAL_PROFILE_ID, label: t('Local') },
+              { value: GLOBAL_PROFILE_ID, label: t('Global') },
+              ...value.profiles.map(profile => ({ value: profile.id, label: `${profile.label} (${profile.userName} <${profile.email}>)` })),
+            ]}
+          />
+        </FormField>
       </div>
 
       {/* Local 与 Global 提示 */}
@@ -317,7 +309,7 @@ function GitIdentity({
         </div>
       )}
 
-      {error && <div className="error-row">{error}</div>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
     </div>
   );
 }
@@ -389,7 +381,7 @@ function SvnAccount({
     }
   };
 
-  if (!value) return <div className="detail-loading">{error ?? t('Loading files...')}</div>;
+  if (!value) return error ? <ErrorNotice>{error}</ErrorNotice> : <LoadingState>{t('Loading files...')}</LoadingState>;
 
   const passwordEnabled = value.passwordStdinSupported && value.secureStorageAvailable;
 
@@ -466,7 +458,7 @@ function SvnAccount({
         </div>
       )}
 
-      {error && <div className="error-row">{error}</div>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
     </div>
   );
 }

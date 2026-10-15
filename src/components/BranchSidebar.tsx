@@ -1,3 +1,5 @@
+import { EmptyState } from './EmptyState';
+import { LoadingState } from './LoadingState';
 import { SearchInput } from './SearchInput';
 import { IconButton } from './IconButton';
 import { useDeferredValue, useMemo, useState } from 'react';
@@ -105,10 +107,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
         </IconButton>
       </div>
 
-      {loading && <div className="branch-loading" role="status" aria-live="polite">
-        <Codicon name="loading codicon-modifier-spin" />
-        <span>{t('Loading branches…')}</span>
-      </div>}
+      {loading && <LoadingState><span>{t('Loading branches…')}</span></LoadingState>}
 
       {repos.length > 1 && <div className="branch-repo-list">
         {repos.map((repo) => <RepositoryRow
@@ -179,7 +178,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
       onToggle={() => toggleSection('tags')}
       action={repos.some(repo => repo.meta.kind === 'git') ? <IconButton className="branch-tag-create" title={t('New Tag...')} aria-label={t('New Tag...')} disabled={tagBusy} onClick={() => { void runTagWorkflow({ action: 'create', repoIds: repos.filter(repo => repo.meta.kind === 'git').map(repo => repo.meta.id), preferredRepoId: selectedRepoId ?? undefined }); }}><Codicon name="add" /></IconButton> : undefined}
     >
-      {model.tags.length === 0 && <div className="branch-tags-empty"><Codicon name="tag" /><span>{t(filter ? 'No matching tags' : 'No tags yet')}</span></div>}
+      {model.tags.length === 0 && <EmptyState compact icon="tag"><span>{t(filter ? 'No matching tags' : 'No tags yet')}</span></EmptyState>}
       {model.tags.map((tag) => <TagRow
         key={tag.key}
         tag={tag}

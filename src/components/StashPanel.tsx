@@ -1,3 +1,5 @@
+import { EmptyState } from './EmptyState';
+import { ErrorNotice } from './ErrorNotice';
 import { changeStatusColor, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { buildSavedChangeTree, type TreeDir } from './savedChangeTree';
@@ -585,16 +587,11 @@ export function StashPanel({ active = true,
 
               {/* Stash items or empty */}
               {error && (
-                <div style={{ ...css.empty, color: 'var(--vscode-errorForeground, #f48771)' }} className="stash-empty">
-                  <Codicon name="error" style={{ marginRight: '6px' }} />
-                  {error}
-                </div>
+                <ErrorNotice>{error}</ErrorNotice>
               )}
 
               {list.length === 0 && !error ? (
-                <div style={css.empty} className="stash-empty">
-                  {t('No stashes')}
-                </div>
+                <EmptyState compact>{t('No stashes')}</EmptyState>
               ) : (
                 list.map((entry) => (
                   <StashRow
@@ -638,15 +635,6 @@ const css = {
   },
   repoSection: {
     borderBottom: '1px solid var(--versiondock-border, var(--vscode-panel-border, #333))',
-  },
-  empty: {
-    padding: '16px 12px',
-    fontSize: '12px',
-    color: 'var(--versiondock-muted, var(--vscode-descriptionForeground, #888))',
-    textAlign: 'center' as const,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 };
 

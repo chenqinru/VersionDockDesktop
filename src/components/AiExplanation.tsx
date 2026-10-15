@@ -1,3 +1,4 @@
+import { ErrorNotice } from './ErrorNotice';
 import { Button } from './Button';
 import Markdown from 'react-markdown';
 import { useEffect, useRef, useState } from 'react';
@@ -73,7 +74,7 @@ export function AiExplanation({ commits, toolbar }: { commits: AiCommit[]; toolb
         }}>{children}</a> }}>{text}</Markdown>
         {busy && <span className="ai-explanation-cursor" aria-hidden="true" />}
       </div>}
-      {run.error && <div role="alert" className="ai-error">{run.error}</div>}
+      {run.error && <ErrorNotice>{run.error}</ErrorNotice>}
       {!busy && <footer className="ai-explanation-footer">
         <span>{state === 'cancelled' ? t('Partial output was kept') : run.result
           ? `${run.result.provider}${run.result.model ? ` · ${run.result.model}` : ''} · ${(run.result.durationMs / 1000).toFixed(1)}s` : ''}</span>

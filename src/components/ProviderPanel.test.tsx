@@ -318,7 +318,8 @@ describe('remote workflows', () => {
     render(<BridgeContext.Provider value={new MockBridge(requests)}><ProviderPanel mode="publish" repoId="unused" close={vi.fn()} /></BridgeContext.Provider>);
     await waitFor(() => expect(resolveAlice).toBeDefined());
     fireEvent.click(screen.getByRole('button', { name: /bob.*gitlab.com/ }));
-    await screen.findByRole('option', { name: 'bob-group' });
+    await waitFor(() => expect(screen.getByLabelText('Namespace')).toHaveTextContent('bob-group'));
+    fireEvent.click(screen.getByLabelText('Namespace'));
     resolveAlice([{ id: '10', name: 'alice-group', fullPath: 'alice-group', kind: 'group' }]);
     await waitFor(() => expect(screen.getByLabelText('Namespace')).toHaveValue('20'));
     expect(screen.queryByRole('option', { name: 'alice-group' })).toBeNull();

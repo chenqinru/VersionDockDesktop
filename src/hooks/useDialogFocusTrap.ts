@@ -10,9 +10,11 @@ export function useDialogFocusTrap(open: boolean, close: () => void, returnFocus
   useEffect(() => {
     if (!open) return;
     previous.current = returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const focusable = () => [...(dialog.current?.querySelectorAll<HTMLElement>('button, input, textarea, select, [tabindex]') ?? [])]
+      .filter(element => element.tabIndex >= 0 && !element.matches(':disabled, input[type="hidden"]') && !element.closest('[hidden], [aria-hidden="true"]'));
     queueMicrotask(() => {
       if (dialog.current?.contains(document.activeElement)) return;
-      dialog.current?.querySelector<HTMLElement>('input:not([disabled]), button:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')?.focus();
+      focusable()[0]?.focus();
     });
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || document.querySelector('[role="menu"]')) return;
@@ -27,15 +29,19 @@ export function useDialogFocusTrap(open: boolean, close: () => void, returnFocus
       };
       modals.sort((a, b) => layer(a) - layer(b));
       if (modals.at(-1) !== dialog.current) return;
-      if (event.key === 'Escape' && dialog.current?.querySelector('[role="search"]')) return;
+      if (event.key === 'Escape' && dialog.current?.querySelector('[role="search"], [role="listbox"]')) return;
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRef.current(); return; }
       if (event.key !== 'Tab') return;
-      const values = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
+      const values = focusable();
       if (!values.length) return;
       const first = values[0], last = values.at(-1)!;
+      // Options use programmatic focus; Tab continues from their owning selection control.
+      const active = document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest('.vd-select')?.querySelector('[role="combobox"]') ?? document.activeElement
+        : document.activeElement;
       if (!dialog.current?.contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
-      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      else if (event.shiftKey && active === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
     };
     window.addEventListener('keydown', key, true);
     return () => { window.removeEventListener('keydown', key, true); queueMicrotask(() => previous.current?.focus()); };

@@ -1,3 +1,4 @@
+import { EmptyState } from './EmptyState';
 import { SearchInput } from './SearchInput';
 import { IconButton } from './IconButton';
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
@@ -223,7 +224,7 @@ export function FilterPopover({
           </Fragment>
         );
       })}
-      {!displayed.length && <div className="filter-empty">{t(kind === 'author' ? 'No authors match' : 'No matches')}</div>}
+      {!displayed.length && <EmptyState compact>{t(kind === 'author' ? 'No authors match' : 'No matches')}</EmptyState>}
     </div>
   </div>;
 }

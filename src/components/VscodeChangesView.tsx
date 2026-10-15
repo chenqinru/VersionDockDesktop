@@ -1,3 +1,4 @@
+import { Checkbox } from './Checkbox';
 import { changeStatus } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
 import { changeSearchKey, hasSearchMatch, useChangeSearch } from './changeSearch';
@@ -511,9 +512,7 @@ function VscodeRepoSection({
         onContextMenu={(e) => onRepoContext(e, repo, staged)}
       >
         {(staged || repo.meta.kind === 'svn') && onToggleRepoSelection && (
-          <input
-            type="checkbox"
-            checked={files.length === 0 ? false : (repoSelected ?? true)}
+          <Checkbox checked={files.length === 0 ? false : (repoSelected ?? true)}
             disabled={files.length === 0}
             title={files.length === 0 ? undefined : t('Include this repository in the commit')}
             onChange={(e) => {
@@ -523,12 +522,7 @@ function VscodeRepoSection({
               }
             }}
             onClick={(e) => e.stopPropagation()}
-            style={{
-              margin: '0 6px 0 0',
-              flexShrink: 0,
-              cursor: files.length === 0 ? 'default' : 'pointer',
-            }}
-          />
+            containerClassName="repo-selection-control" aria-label={t('Include this repository in the commit')} />
         )}
         <div className="repo-heading-main">
           <button

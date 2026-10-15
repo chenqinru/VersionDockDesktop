@@ -1,3 +1,4 @@
+import { Checkbox } from './Checkbox';
 import { Button } from './Button';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { changeStatusColor } from '../theme/changeStatus';
@@ -540,12 +541,8 @@ export function ConflictsWorkspace() {
         <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: 'var(--vscode-descriptionForeground)' }}>{operationLabel}</div>
         <div style={{ marginTop: 4, fontSize: 12, color: 'var(--vscode-descriptionForeground)' }}>{conflictCountSummary}</div>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 12, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={groupByDir}
-            onChange={(e) => setGroupByDir(e.currentTarget.checked)}
-            style={{ margin: 0 }}
-          />
+          <Checkbox checked={groupByDir}
+            onChange={(e) => setGroupByDir(e.currentTarget.checked)} />
           {t('Group by directory')}
         </label>
       </div>
