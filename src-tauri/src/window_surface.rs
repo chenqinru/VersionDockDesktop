@@ -1,7 +1,12 @@
 //! Keep the main webview and its native host fitted to the window client area.
 //! Window geometry and webview geometry are separate on Windows/WebView2.
 use crate::models::{DesktopError, WindowViewport};
-use tauri::{Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{Manager, WebviewWindow};
+#[cfg(any(not(target_os = "macos"), test))]
+use tauri::{PhysicalPosition, PhysicalSize};
+
+#[cfg(target_os = "macos")]
+mod macos;
 
 pub struct Surface {
     pub viewport: WindowViewport,
@@ -15,6 +20,7 @@ fn error(error: impl std::fmt::Display) -> DesktopError {
     DesktopError::new("WINDOW_SURFACE_FAILED", error.to_string(), true)
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn fitted(
     size: PhysicalSize<u32>,
     origin: PhysicalPosition<i32>,
@@ -28,13 +34,13 @@ fn fitted(
 pub async fn synchronize(window: &WebviewWindow) -> Result<Surface, DesktopError> {
     let (send, receive) = tokio::sync::oneshot::channel();
     let current = window.clone();
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     window
         .with_webview(move |platform| {
             let _ = send.send(inspect(current, platform));
         })
         .map_err(error)?;
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     window
         .app_handle()
         .run_on_main_thread(move || {
@@ -46,7 +52,8 @@ pub async fn synchronize(window: &WebviewWindow) -> Result<Surface, DesktopError
 
 fn inspect(
     window: WebviewWindow,
-    #[cfg(target_os = "windows")] platform: tauri::webview::PlatformWebview,
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    platform: tauri::webview::PlatformWebview,
 ) -> Result<Surface, DesktopError> {
     let size = window.inner_size().map_err(error)?;
     let scale = window.scale_factor().map_err(error)?;
@@ -148,7 +155,11 @@ fn inspect(
             }
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        surface.ready = macos::fit(&platform)?;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let webview: &tauri::Webview = window.as_ref();
         let bounds = webview.bounds().map_err(error)?;
@@ -168,6 +179,9 @@ fn inspect(
     }
     // Only enable proportional resizing once the measured ratio is 1:1.
     // Enabling it while the webview is still small preserves that ratio.
+    // macOS main webviews use AppKit's native autoresizing, not Wry's
+    // proportional set_bounds (which only handles child webviews on macOS).
+    #[cfg(not(target_os = "macos"))]
     if surface.ready {
         let webview: &tauri::Webview = window.as_ref();
         webview.set_auto_resize(true).map_err(error)?;
@@ -176,18 +190,39 @@ fn inspect(
 }
 
 pub fn schedule(window: WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        // A native resize notification already runs on the UI thread. Fit
+        // here, before returning to AppKit; a Tokio round trip can queue stale
+        // repairs behind the next drag step. Startup calls are dispatched by
+        // with_webview to the same UI thread.
+        if let Err(error) = window.with_webview(move |platform| {
+            if let Err(error) = macos::fit(&platform) {
+                // Logging emits a frontend event; leave the native callback
+                // before re-entering the runtime's webview dispatcher.
+                tauri::async_runtime::spawn(async move { warn(error) });
+            }
+        }) {
+            warn(self::error(error));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     tauri::async_runtime::spawn(async move {
         if let Err(error) = synchronize(&window).await {
-            crate::logger::log_entry(
-                crate::models::LogLevel::Warn,
-                crate::models::LogChannel::Core,
-                "Unable to fit webview to window",
-                Some(error.message),
-                None,
-                None,
-            );
+            warn(error);
         }
     });
+}
+
+fn warn(error: DesktopError) {
+    crate::logger::log_entry(
+        crate::models::LogLevel::Warn,
+        crate::models::LogChannel::Core,
+        "Unable to fit webview to window",
+        Some(error.message),
+        None,
+        None,
+    );
 }
 
 pub fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
