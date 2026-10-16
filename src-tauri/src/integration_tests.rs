@@ -10020,7 +10020,12 @@ async fn worktree_migration_protects_detached_commits_and_missing_checkout_shelv
     let r = repo(&working, VcsKind::Git);
     let config = directory.path().join("config");
     let t = CancellationToken::new();
-    let linked = directory.path().join("detached\nunicode-树");
+    // Windows rejects newlines in file names; retain that coverage on Unix.
+    let linked = directory.path().join(if cfg!(windows) {
+        "detached unicode-树"
+    } else {
+        "detached\nunicode-树"
+    });
     let path = linked.to_string_lossy().into_owned();
     command_output(
         "git",
