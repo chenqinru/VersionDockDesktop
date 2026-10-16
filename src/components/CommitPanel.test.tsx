@@ -32,6 +32,27 @@ const originalUpdateProject = useAppStore.getState().updateProject;
 afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, updateProject: originalUpdateProject, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
 describe('CommitPanel capabilities and file view', () => {
+  it('explains a workspace scan and restores available actions while history and branches load', () => {
+    const operation = { operationId: 'scan', status: 'running', context: { domain: 'workspace', workspaceId: 'workspace', target: 'workspaceOpen' } };
+    useAppStore.setState({ bootstrap: bootstrap(true), snapshot: gitSnapshot, selectedRepoId: 'repo', operations: { scan: operation } as never });
+    renderPanel();
+    const refresh = screen.getByRole('button', { name: 'Refresh Commit Panel' });
+    const update = screen.getByRole('button', { name: 'Update Project' });
+    expect(refresh).toBeDisabled();
+    expect(update).toBeDisabled();
+    expect(refresh).toHaveAttribute('title', 'Loading workspace…');
+    expect(screen.getByRole('button', { name: 'Commit' })).toHaveAttribute('title', 'Loading workspace…');
+    act(() => useAppStore.setState({ operations: {}, historyLoading: true, branchesLoading: true }));
+    expect(refresh).toBeEnabled();
+    expect(update).toBeEnabled();
+    expect(refresh).toHaveAttribute('title', 'Refresh Commit Panel');
+    // An unrelated workspace write still protects actions that depend on its status.
+    act(() => useAppStore.setState({ operations: { write: { ...operation, context: { ...operation.context, target: null } } } as never }));
+    expect(update).toBeDisabled();
+    expect(update).toHaveAttribute('title', 'Workspace operation in progress…');
+    act(() => useAppStore.setState({ operations: {}, historyLoading: false, branchesLoading: false }));
+  });
+
   it('keeps only review, split and message history in the commit options', () => {
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: gitSnapshot, selectedRepoId: 'repo' });
     const { container } = renderPanel();

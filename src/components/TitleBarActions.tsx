@@ -20,7 +20,7 @@ export function TitleBarActions({ workspaceId }: { workspaceId?: string }) {
   return <>
     <div className="titlebar-actions" role="toolbar" aria-label={t('Workspace')}
       onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
-      {workspaceId && <IconButton title={t('Clone Git Repository')} disabled={busy || !cloneAvailable} aria-haspopup="dialog" aria-expanded={dialog === 'clone'} onClick={() => setDialog('clone')}><Codicon name="repo-clone" /></IconButton>}
+      {workspaceId && <IconButton title={t(busy ? 'Workspace operation in progress…' : 'Clone Git Repository')} aria-label={t('Clone Git Repository')} disabled={busy || !cloneAvailable} aria-haspopup="dialog" aria-expanded={dialog === 'clone'} onClick={() => setDialog('clone')}><Codicon name="repo-clone" /></IconButton>}
       <IconButton title={t('Manage Remote Accounts (GitHub / GitLab / Gitee)')} aria-haspopup="dialog" aria-expanded={dialog === 'providers'} onClick={() => setDialog('providers')}><Codicon name="account" /></IconButton>
       <IconButton title={t('GitHub Repository')} onClick={() => void openExternalLink(GITHUB_REPO_URL)}><Codicon name="github" /></IconButton>
       <IconButton title={t('About VersionDock & Check Updates')} aria-haspopup="dialog" aria-expanded={aboutOpen} onClick={() => { close(); openAbout('about'); }}><Codicon name="info" /></IconButton>

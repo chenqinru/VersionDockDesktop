@@ -4,7 +4,7 @@ import { BridgeError, MockBridge, createOperationRequestEvent, type BridgeEvent,
 import { resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
 import { currentDialog, publishDialog } from '../components/dialogService';
 import { commitKey } from '../history/commitDetails';
-import { interleaveHistory, isOperationActive, isOperationActiveForRepositories, resolveNotificationText, useAppStore, workspacePathsEqual, type WorkingChangeTarget } from './appStore';
+import { interleaveHistory, isOperationActive, isWorkspaceOpening, isOperationActiveForRepositories, resolveNotificationText, useAppStore, workspacePathsEqual, type WorkingChangeTarget } from './appStore';
 
 const bootstrap: BootstrapData = {
   applicationSessionId: 'test-session',
@@ -40,6 +40,75 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
+  it('releases the opening lock when repository status is ready, before history and refs finish', async () => {
+    const ws = snapshot('opening-phases', 1);
+    ws.repositories = [repository('repo', 'Repository')];
+    const scan = deferred<WorkspaceSnapshot>();
+    const history = deferred<HistoryPage>();
+    const refs = deferred<unknown[]>();
+    const request = vi.fn((command: BridgeCommand) => {
+      if (command.type === 'workspaceOpen') return scan.promise;
+      if (command.type === 'history') return history.promise;
+      if (command.type === 'branches') return refs.promise;
+      return [];
+    });
+    useAppStore.setState({ bridge: new MockBridge(request), bootstrap, allRepositories: [] });
+    const opening = useAppStore.getState().openWorkspace(ws.workspace.paths);
+    const repeated = useAppStore.getState().openWorkspace(ws.workspace.paths);
+    expect(repeated).toBe(opening);
+    expect(isWorkspaceOpening(useAppStore.getState().operations)).toBe(true);
+    scan.resolve(ws);
+    await vi.waitFor(() => expect(useAppStore.getState().snapshot?.workspace.id).toBe(ws.workspace.id));
+    expect(isWorkspaceOpening(useAppStore.getState().operations)).toBe(false);
+    expect(isOperationActive(useAppStore.getState().operations, { domain: 'workspace' })).toBe(false);
+    expect(useAppStore.getState().historyLoading).toBe(true);
+    expect(useAppStore.getState().branchesLoading).toBe(true);
+    expect(request.mock.calls.filter(([command]) => command.type === 'workspaceOpen')).toHaveLength(1);
+    // A ready tab can be activated again without waiting for its older history request.
+    expect(await useAppStore.getState().openWorkspace(ws.workspace.paths)).toBe(true);
+    history.resolve({ commits: [], hasMore: false });
+    refs.resolve([]);
+    expect(await opening).toBe(true);
+    expect(await repeated).toBe(true);
+    expect(useAppStore.getState().operations).toEqual({});
+  });
+
+  it.each(['failure', 'cancel', 'timeout'] as const)('restores opening actions after %s and allows retry', async outcome => {
+    const ws = snapshot('opening-retry', 1);
+    const scan = deferred<WorkspaceSnapshot>();
+    let attempts = 0;
+    useAppStore.setState({ bridge: new MockBridge(command => command.type === 'workspaceOpen' ? (++attempts === 1 ? scan.promise : ws) : []), bootstrap, allRepositories: [] });
+    const opening = useAppStore.getState().openWorkspace(ws.workspace.paths);
+    expect(isWorkspaceOpening(useAppStore.getState().operations)).toBe(true);
+    await vi.waitFor(() => expect(attempts).toBe(1));
+    scan.reject(outcome === 'cancel' ? new DOMException('Canceled', 'AbortError') : new Error(outcome));
+    expect(await opening).toBe(false);
+    expect(isWorkspaceOpening(useAppStore.getState().operations)).toBe(false);
+    expect(await useAppStore.getState().openWorkspace(ws.workspace.paths)).toBe(true);
+    expect(attempts).toBe(2);
+    expect(useAppStore.getState().operations).toEqual({});
+  });
+
+  it('does not hold a workspace lock while startup restores history', async () => {
+    const ws = snapshot('startup-opening', 1);
+    ws.repositories = [repository('repo', 'Repository')];
+    const history = deferred<HistoryPage>();
+    const bridge = new MockBridge(command => {
+      if (command.type === 'bootstrap') return { ...bootstrap, launchWorkspaceId: ws.workspace.id, state: { ...bootstrap.state, recentWorkspaces: [ws.workspace] } };
+      if (command.type === 'workspaceOpen') return ws;
+      if (command.type === 'history') return history.promise;
+      return [];
+    });
+    useAppStore.setState({ allRepositories: [] });
+    const startup = useAppStore.getState().initialize(bridge);
+    await vi.waitFor(() => expect(useAppStore.getState().historyLoading).toBe(true));
+    expect(useAppStore.getState().snapshot?.workspace.id).toBe(ws.workspace.id);
+    expect(isOperationActive(useAppStore.getState().operations, { domain: 'workspace' })).toBe(false);
+    history.resolve({ commits: [], hasMore: false });
+    await startup;
+    expect(useAppStore.getState().operations).toEqual({});
+  });
+
   it.each([false, true])('refreshes undo commit silently and respects a workspace switch (switched: %s)', async (switched) => {
     const current = snapshot('undo-workspace', 1);
     current.repositories = [repository('repo', 'Repository')];

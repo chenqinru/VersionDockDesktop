@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { Codicon } from './Codicon';
 import { WorkspaceItem } from './WorkspaceItem';
 import { OpenWorkspaceAction } from './OpenWorkspaceAction';
-import { isOperationActive, useAppStore } from '../store/appStore';
+import { isWorkspaceOpening, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './RepositoryCheckoutDialog';
@@ -19,7 +19,7 @@ export function WorkspaceChooser() {
   const removeRecent = useAppStore((state) => state.removeRecent);
   const cloneAvailable = useAppStore((state) => state.bootstrap?.capabilities?.availability?.cloneRepository?.available ?? state.bootstrap?.tools?.git ?? false);
   const svnAvailable = useAppStore((state) => state.bootstrap?.tools?.svn ?? false);
-  const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
+  const busy = useAppStore((state) => isWorkspaceOpening(state.operations));
   const { t } = useI18n();
   const bridge = useBridge();
   const [filterText, setFilterText] = useState('');
@@ -66,7 +66,7 @@ export function WorkspaceChooser() {
           </div>
 
           <div className="welcome-actions">
-            <OpenWorkspaceAction size="welcome" disabled={busy} onClick={event => void choose(event.metaKey || event.ctrlKey)} />
+            <OpenWorkspaceAction size="welcome" disabled={busy} title={busy ? t('Loading workspace…') : undefined} onClick={event => void choose(event.metaKey || event.ctrlKey)} />
             <button type="button" className="welcome-action-btn" disabled={busy || !cloneAvailable} onClick={() => setCheckoutKind('git')}>
               <div className="welcome-action-icon"><Codicon name="repo-clone" /></div>
               <div className="welcome-action-text"><span className="welcome-action-title">{t('Clone Repository')}</span><span className="welcome-action-desc">{t('Clone a Git repository into a local folder.')}</span></div>
@@ -143,6 +143,7 @@ export function WorkspaceChooser() {
                     workspace={workspace}
                     size="welcome"
                     disabled={busy}
+                    disabledReason={busy ? t('Loading workspace…') : undefined}
                     onOpen={event => handleRecentClick(event, workspaceOpenPaths(workspace))}
                     actions={<>
                       <IconButton className="workspace-item-action" title={t('Open in New Window')} disabled={busy}

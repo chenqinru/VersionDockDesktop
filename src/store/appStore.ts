@@ -1209,6 +1209,7 @@ export function isOperationActive(
     workspaceId?: string | null;
     repositoryId?: string | null;
     domain?: OperationDomain | OperationDomain[];
+    target?: string;
   },
 ): boolean {
   const domains = criteria.domain
@@ -1217,7 +1218,13 @@ export function isOperationActive(
   return Object.values(operations).some((operation) => ACTIVE_OPERATION_STATUSES.has(operation.status)
     && (criteria.workspaceId === undefined || operation.context.workspaceId === criteria.workspaceId)
     && (criteria.repositoryId === undefined || operation.context.repositoryId === criteria.repositoryId)
+    && (criteria.target === undefined || operation.context.target === criteria.target)
     && (!domains || domains.has(operation.context.domain)));
+}
+
+/** Opening is a window transition; unrelated workspace work must not block the opener. */
+export function isWorkspaceOpening(operations: Record<string, OperationEvent>): boolean {
+  return isOperationActive(operations, { domain: 'workspace', target: 'workspaceOpen' });
 }
 
 const REPOSITORY_TARGET_PREFIX = 'repositories:';
@@ -1401,6 +1408,7 @@ function queueBranchRecoveryDialog(task: () => Promise<void>): Promise<void> {
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
+  const openingWorkspaces = new Map<string, Promise<boolean>>();
   const primeHistoryAvatars = (workspaceId: string, repoId: string, page: HistoryPage) => {
     if (!get().bootstrap?.state.settings?.onlineAvatarsEnabled || !page.avatars) return;
     const state = get();
@@ -1626,13 +1634,21 @@ export const useAppStore = create<AppStore>((set, get) => {
   const worktreeReadEpochs = new Map<string, number>();
   let worktreeReadSequence = 0;
   const withBusy = async <T>(
-    operation: () => Promise<T>,
+    operation: (releaseBusy: () => void) => Promise<T>,
     domain = 'workspace',
     target?: { repositoryId?: string | null; target?: string | null; workspaceId?: string | null; remote?: string | null; branch?: string | null },
     options?: { rethrow?: boolean; notifyError?: boolean; trackBusy?: boolean },
   ): Promise<T | undefined> => {
     const operationId = `client-${Date.now()}-${++localOperationSequence}`;
     const context = { ...operationContext(domain, get()), ...target, visibility: 'background' as const };
+    const releaseBusy = () => {
+      if (options?.trackBusy === false || !get().operations[operationId]) return;
+      set(state => {
+        const operations = { ...state.operations };
+        delete operations[operationId];
+        return { operations };
+      });
+    };
     if (options?.trackBusy !== false) set((state) => ({
       operations: {
         ...state.operations,
@@ -1651,7 +1667,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       },
     }));
     try {
-      return await operation();
+      return await operation(releaseBusy);
     } catch (error) {
       if (!isAbortError(error) && options?.notifyError !== false) {
         const msg = errorText(error);
@@ -1693,11 +1709,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (options?.rethrow) throw error;
       return undefined;
     } finally {
-      if (options?.trackBusy !== false) set((state) => {
-        const operations = { ...state.operations };
-        delete operations[operationId];
-        return { operations };
-      });
+      releaseBusy();
     }
   };
 
@@ -2282,7 +2294,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     }
   };
 
-  const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true, silent = false) => {
+  const applySnapshot = async (snapshot: WorkspaceSnapshot, reloadRepository = true, silent = false, onReady?: () => void) => {
     const named = get().tabs.find(tab => tab.id === snapshot.workspace.id && tab.customName);
     if (named) snapshot = { ...snapshot, workspace: { ...snapshot.workspace, name: named.name, customName: named.customName } };
     const requestGeneration = workspaceRequestGeneration;
@@ -2318,6 +2330,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     checkStatusNotifications(allRepositories, snapshot.workspace.id);
     notifyResolvedOperations(allRepositories, snapshot.workspace.id);
+    // Repository status is ready; history, refs and auxiliary lists load independently below.
+    onReady?.();
     if (selectedRepoId && (workspaceChanged || reloadRepository)) await get().selectRepo(selectedRepoId, true);
     if (requestGeneration !== workspaceRequestGeneration || get().snapshot?.workspace.id !== snapshot.workspace.id) return;
     const requests: Promise<void>[] = [get().loadConflicts(silent)];
@@ -2880,12 +2894,13 @@ export const useAppStore = create<AppStore>((set, get) => {
             checkStatusNotifications(get().allRepositories, currentSnapshot.workspace.id);
           }
         }
-      }, 'workspace');
+      }, 'application');
       set({ ready: true });
       void get().checkUpdateSilently();
     },
 
     dispose: () => {
+      openingWorkspaces.clear();
       resetLogSession();
       settingsWriter = undefined;
       layoutWriter?.writer.dispose(); layoutWriter = undefined;
@@ -2923,85 +2938,98 @@ export const useAppStore = create<AppStore>((set, get) => {
       releaseSchedulerLeases();
     },
 
-    openWorkspace: async (paths, focus = true, options = {}) => {
-      let opened = false;
-      await withBusy(async () => {
-      if (!paths.length) return;
-      const existingTab = get().tabs.find((tab) => workspacePathsEqual(workspaceOpenPaths(tab), paths) || workspacePathsEqual(tab.paths, paths));
-      if (existingTab) {
-        if (options.insertionIndex !== undefined) {
-          const currentIndex = get().tabs.findIndex((tab) => tab.id === existingTab.id);
-          const targetIndex = Math.max(0, Math.min(options.insertionIndex, get().tabs.length - 1));
-          if (currentIndex !== targetIndex) get().reorderTabs(currentIndex, targetIndex);
-        }
-        if (focus) {
-          await get().switchTab(existingTab.id);
-        }
-        opened = true;
-        return;
-      }
-
-      if (!options.skipCrossWindowFocus) {
-        try {
-          const focusedOther = await bridge().focusWorkspaceAcrossWindows(paths);
-          if (focusedOther) {
+    openWorkspace: (paths, focus = true, options = {}) => {
+      if (!paths.length) return Promise.resolve(false);
+      const key = JSON.stringify([...paths].sort());
+      const pending = openingWorkspaces.get(key);
+      if (pending) return pending;
+      const opening = (async () => {
+        let opened = false;
+        await withBusy(async releaseBusy => {
+          const ready = () => {
+            if (openingWorkspaces.get(key) === opening) openingWorkspaces.delete(key);
+            releaseBusy();
+          };
+          const existingTab = get().tabs.find((tab) => workspacePathsEqual(workspaceOpenPaths(tab), paths) || workspacePathsEqual(tab.paths, paths));
+          if (existingTab) {
+            if (options.insertionIndex !== undefined) {
+              const currentIndex = get().tabs.findIndex((tab) => tab.id === existingTab.id);
+              const targetIndex = Math.max(0, Math.min(options.insertionIndex, get().tabs.length - 1));
+              if (currentIndex !== targetIndex) get().reorderTabs(currentIndex, targetIndex);
+            }
+            if (focus) {
+              await get().switchTab(existingTab.id);
+            }
+            opened = true;
             return;
           }
-        } catch {
-          // ignore cross-window focus error and fallback to opening in current window
-        }
-      }
 
-      const currentActiveId = get().activeTabId;
-      if (currentActiveId) {
-        const currentSession = extractCurrentSession(get());
-        if (currentSession) {
-          set((state) => ({
-            sessions: { ...state.sessions, [currentActiveId]: currentSession },
-          }));
-        }
-      }
+          if (!options.skipCrossWindowFocus) {
+            try {
+              const focusedOther = await bridge().focusWorkspaceAcrossWindows(paths);
+              if (focusedOther) {
+                return;
+              }
+            } catch {
+              // ignore cross-window focus error and fallback to opening in current window
+            }
+          }
 
-      cancelRequests();
-      commitSelectionGeneration += 1;
-      const controller = beginRequest('workspace');
-      const requestGeneration = ++workspaceRequestGeneration;
-      const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths } }, { signal: controller.signal });
-      if (requestGeneration !== workspaceRequestGeneration) return;
-      const current = get().bootstrap ?? { state: emptyState, tools: snapshot.tools, applicationSessionId: 'frontend-session', capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false } };
-      
-      const workspaceDescriptor = snapshot.workspace;
-      const filteredTabs = get().tabs.filter((item) => item.id !== workspaceDescriptor.id);
-      const insertionIndex = options.insertionIndex === undefined
-        ? filteredTabs.length
-        : Math.max(0, Math.min(options.insertionIndex, filteredTabs.length));
-      const nextTabs = [...filteredTabs];
-      nextTabs.splice(insertionIndex, 0, workspaceDescriptor);
-      const recentWorkspaces = [workspaceDescriptor, ...current.state.recentWorkspaces.filter((item) => item.id !== workspaceDescriptor.id)].slice(0, 10);
-      const nextBootstrap: BootstrapData = {
-        ...current,
-        state: {
-          ...current.state,
-          recentWorkspaces,
-          openWorkspaceIds: nextTabs.map((t) => t.id),
-          activeWorkspaceId: workspaceDescriptor.id,
-          lastWorkspaceId: workspaceDescriptor.id,
-        },
-      };
+          const currentActiveId = get().activeTabId;
+          if (currentActiveId) {
+            const currentSession = extractCurrentSession(get());
+            if (currentSession) {
+              set((state) => ({
+                sessions: { ...state.sessions, [currentActiveId]: currentSession },
+              }));
+            }
+          }
 
-      set({
-        bootstrap: nextBootstrap,
-        tabs: nextTabs,
-        activeTabId: workspaceDescriptor.id,
-      });
+          cancelRequests();
+          commitSelectionGeneration += 1;
+          const controller = beginRequest('workspace');
+          const requestGeneration = ++workspaceRequestGeneration;
+          const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths } }, { signal: controller.signal });
+          if (requestGeneration !== workspaceRequestGeneration) return;
+          const current = get().bootstrap ?? { state: emptyState, tools: snapshot.tools, applicationSessionId: 'frontend-session', capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false } };
 
-      await persistTabs(nextTabs, workspaceDescriptor.id);
-      opened = get().tabs.some((tab) => tab.id === workspaceDescriptor.id);
-      if (requestGeneration !== workspaceRequestGeneration || get().activeTabId !== workspaceDescriptor.id) return;
-      await applySnapshot(snapshot);
-      opened = get().tabs.some((tab) => tab.id === workspaceDescriptor.id);
-      }, 'workspace');
-      return opened;
+          const workspaceDescriptor = snapshot.workspace;
+          const filteredTabs = get().tabs.filter((item) => item.id !== workspaceDescriptor.id);
+          const insertionIndex = options.insertionIndex === undefined
+            ? filteredTabs.length
+            : Math.max(0, Math.min(options.insertionIndex, filteredTabs.length));
+          const nextTabs = [...filteredTabs];
+          nextTabs.splice(insertionIndex, 0, workspaceDescriptor);
+          const recentWorkspaces = [workspaceDescriptor, ...current.state.recentWorkspaces.filter((item) => item.id !== workspaceDescriptor.id)].slice(0, 10);
+          const nextBootstrap: BootstrapData = {
+            ...current,
+            state: {
+              ...current.state,
+              recentWorkspaces,
+              openWorkspaceIds: nextTabs.map((t) => t.id),
+              activeWorkspaceId: workspaceDescriptor.id,
+              lastWorkspaceId: workspaceDescriptor.id,
+            },
+          };
+
+          set({
+            bootstrap: nextBootstrap,
+            tabs: nextTabs,
+            activeTabId: workspaceDescriptor.id,
+          });
+
+          await persistTabs(nextTabs, workspaceDescriptor.id);
+          opened = get().tabs.some((tab) => tab.id === workspaceDescriptor.id);
+          if (requestGeneration !== workspaceRequestGeneration || get().activeTabId !== workspaceDescriptor.id) return;
+          await applySnapshot(snapshot, true, false, ready);
+          opened = get().tabs.some((tab) => tab.id === workspaceDescriptor.id);
+        }, 'workspace', { target: 'workspaceOpen' });
+        return opened;
+      })();
+      openingWorkspaces.set(key, opening);
+      const cleanup = () => { if (openingWorkspaces.get(key) === opening) openingWorkspaces.delete(key); };
+      void opening.then(cleanup, cleanup);
+      return opening;
     },
 
     initializeRepository: async (targetPath) => {
@@ -3187,7 +3215,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           // 标签窗口同步失败不阻塞工作区切回与会话恢复
         }
       } else {
-        await withBusy(async () => {
+        await withBusy(async releaseBusy => {
           const controller = beginRequest('workspace');
           const requestGeneration = ++workspaceRequestGeneration;
           const snapshot = await bridge().request<WorkspaceSnapshot>({ type: 'workspaceOpen', payload: { paths: workspaceOpenPaths(targetTab) } }, { signal: controller.signal });
@@ -3196,8 +3224,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           set(state => ({ tabs: state.tabs.map(tab => tab.id === workspaceId ? snapshot.workspace : tab).filter((tab, index, all) => all.findIndex(item => item.id === tab.id) === index), activeTabId: openedId, unreadErrorCount: nextUnreadErrors, batchCommitReport: undefined }));
           await persistTabs(get().tabs, openedId);
           if (requestGeneration !== workspaceRequestGeneration || get().activeTabId !== openedId) return;
-          await applySnapshot(snapshot, true);
-        }, 'workspace');
+          await applySnapshot(snapshot, true, false, releaseBusy);
+        }, 'workspace', { target: 'workspaceOpen' });
       }
     },
 

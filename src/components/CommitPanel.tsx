@@ -13,7 +13,7 @@ import { RepositoryBranchBadge } from './RepositoryBranchBadge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from './Codicon';
 import { choiceDialog, confirmDialog, multiChoiceDialog, promptDialog } from './dialogService';
-import { capabilityAvailable, capabilityReason, isOperationActive, isOperationActiveForRepositories, useAppStore } from '../store/appStore';
+import { capabilityAvailable, capabilityReason, isWorkspaceOpening, isOperationActive, isOperationActiveForRepositories, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import type { FileChange, RecentCommitMessage, RepositoryStatus } from '../bindings/generated';
 import { StashPanel } from './StashPanel';
@@ -348,6 +348,7 @@ export function CommitPanel() {
     workspaceId: state.snapshot?.workspace.id,
     domain: 'workspace',
   }));
+  const openingWorkspace = useAppStore(state => isWorkspaceOpening(state.operations));
   const viewMode = useAppStore((state) => (state.bootstrap?.state.layout?.fileViewMode ?? state.bootstrap?.state.fileViewMode) === 'list' ? 'list' : 'tree');
   const setFileViewMode = useAppStore((state) => state.setFileViewMode);
   const stashViewMode = useAppStore((state) => (state.bootstrap?.state.layout?.stashViewMode ?? state.bootstrap?.state.stashViewMode) === 'list' ? 'list' : 'tree');
@@ -545,6 +546,7 @@ export function CommitPanel() {
   const saveMenuRef = useRef<HTMLDivElement>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  const workspaceBusyReason = workspaceBusy ? t(openingWorkspace ? 'Loading workspace…' : 'Workspace operation in progress…') : undefined;
   useEffect(() => {
     if (!historyOpen) return;
     const closeOnBlur = () => setHistoryOpen(false);
@@ -985,11 +987,11 @@ export function CommitPanel() {
   });
   const commitUnavailable = commitTargets.find((repo) => !capabilityAvailable(repo.capabilities, 'commit', true));
   const pushUnavailable = commitTargets.find((repo) => repo.meta.kind === 'git' && !capabilityAvailable(repo.capabilities, 'syncPush', true));
-  const commitDisabledReason = commitUnavailable
+  const commitDisabledReason = workspaceBusyReason ?? (commitUnavailable
     ? capabilityReason(commitUnavailable.capabilities, 'commit')
     : pushUnavailable
       ? capabilityReason(pushUnavailable.capabilities, 'syncPush')
-      : undefined;
+      : undefined);
   const settingsNoVerify = useAppStore((state) => state.bootstrap?.state.settings?.noVerify ?? false);
   const [hookChoice, setHookChoice] = useState({ configured: settingsNoVerify, checked: settingsNoVerify });
   if (hookChoice.configured !== settingsNoVerify) setHookChoice({ configured: settingsNoVerify, checked: settingsNoVerify });
@@ -1866,7 +1868,7 @@ export function CommitPanel() {
       <IconButton
         className="panel-selection-action"
         disabled={workspaceBusy || Boolean(toolbarAction)}
-        title={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
+        title={workspaceBusyReason ?? (currentTabIsAllSelected ? t('Invert Selection') : t('Select All'))}
         aria-label={currentTabIsAllSelected ? t('Invert Selection') : t('Select All')}
         onClick={() => {
           if (currentTabIsAllSelected) {
@@ -1879,8 +1881,8 @@ export function CommitPanel() {
         {currentTabIsAllSelected ? <InvertSelectionIcon /> : <SelectAllIcon />}
       </IconButton>
     )}
-    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('Update Project')} aria-label={t('Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></IconButton>
-    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={t('Refresh Commit Panel')} aria-label={t('Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></IconButton>
+    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={workspaceBusyReason ?? t('Update Project')} aria-label={t('Update Project')} onClick={() => void runToolbarAction('update', updateProject)}><Codicon name="cloud-download" /></IconButton>
+    <IconButton disabled={workspaceBusy || Boolean(toolbarAction)} title={workspaceBusyReason ?? t('Refresh Commit Panel')} aria-label={t('Refresh Commit Panel')} onClick={() => void refreshPanel()}><Codicon name="refresh" /></IconButton>
     <div ref={viewMenuRef} className="view-options panel-view-options">
       <IconButton title={t('More Actions...')} aria-label={t('More Actions...')} aria-haspopup="menu" aria-expanded={viewMenu} className={viewMenu ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setViewSubmenu(undefined); setViewMenu((value) => !value); }}><Codicon name="ellipsis" /></IconButton>
       {viewMenu && <div className="view-options-menu" role="menu" onClick={(event) => event.stopPropagation()}>
@@ -2175,7 +2177,7 @@ export function CommitPanel() {
               type="button"
               disabled={!repos.length || workspaceBusy || historyLoading || Boolean(aiMessage?.running)}
               aria-label={t('Commit message history')}
-              title={t('View commit message history')}
+              title={workspaceBusyReason ?? (historyLoading ? t('Loading…') : t('View commit message history'))}
               onClick={() => {
                 void fetchMessageHistory();
                 setHistoryOpen(true);
@@ -2232,8 +2234,8 @@ export function CommitPanel() {
         <AiCommitGenerator busy={commitBusy || workspaceBusy} candidates={commitTargets.map((repo) => ({ repoId: repo.meta.id, paths: effectiveSelectedByRepo.get(repo.meta.id) ?? [], stagedOnly: isVscode && repo.meta.kind === 'git' }))} />
         </div>
         <div className="commit-actions">
-          {showGitActions && <div ref={saveMenuRef} className="split-button action-split save-action"><Button disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || saveBusy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</Button><SplitButtonMore title={t('Save options')} aria-haspopup="menu" aria-expanded={saveMenu} disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || saveBusy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }} />{saveMenu && <div className="split-menu">{orderedSaveActions.map((action) => <button key={action} disabled={saveBusy} onClick={() => { void doSave(action); setSaveMenu(false); }}><Codicon name={action === 'shelf' ? 'archive' : 'save'} />{t(action === 'shelf' ? 'Shelve changes' : 'Stash changes')}</button>)}</div>}</div>}
-          <div ref={commitMenuRef} className="split-button action-split commit-action"><Button variant="primary" title={commitDisabledReason} disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable) || (primaryCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(primaryCommitAction === 'commitAndPush')}><Codicon name={primaryCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(primaryCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</Button>{showGitActions && <SplitButtonMore title={t('Commit options')} aria-haspopup="menu" aria-expanded={commitMenu} disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }} />}{commitMenu && <div className="split-menu right">{orderedCommitActions.map((push) => <button key={String(push)} disabled={commitBusy || Boolean(commitUnavailable) || (push && Boolean(pushUnavailable))} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : push && pushUnavailable ? capabilityReason(pushUnavailable.capabilities, 'syncPush') : undefined} onClick={() => { void doCommit(push); setCommitMenu(false); }}><Codicon name={push ? 'cloud-upload' : 'check'} />{t(push ? 'Commit & Push' : 'Commit')}</button>)}</div>}</div>
+          {showGitActions && <div ref={saveMenuRef} className="split-button action-split save-action"><Button title={workspaceBusyReason} disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || saveBusy} onClick={() => void doSave(defaultSaveAction)}><Codicon name={defaultSaveAction === 'shelf' ? 'archive' : 'save'} />{t(defaultSaveAction === 'shelf' ? 'Shelve' : 'Stash')}</Button><SplitButtonMore title={workspaceBusyReason ?? t('Save options')} aria-haspopup="menu" aria-expanded={saveMenu} disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || saveBusy} onClick={() => { setSaveMenu((value) => !value); setCommitMenu(false); }} />{saveMenu && <div className="split-menu">{orderedSaveActions.map((action) => <button key={action} disabled={saveBusy} onClick={() => { void doSave(action); setSaveMenu(false); }}><Codicon name={action === 'shelf' ? 'archive' : 'save'} />{t(action === 'shelf' ? 'Shelve changes' : 'Stash changes')}</button>)}</div>}</div>}
+          <div ref={commitMenuRef} className="split-button action-split commit-action"><Button variant="primary" title={commitDisabledReason} disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable) || (primaryCommitAction === 'commitAndPush' && Boolean(pushUnavailable))} onClick={() => void doCommit(primaryCommitAction === 'commitAndPush')}><Codicon name={primaryCommitAction === 'commitAndPush' ? 'cloud-upload' : 'check'} />{t(primaryCommitAction === 'commitAndPush' ? 'Commit & Push' : 'Commit')}</Button>{showGitActions && <SplitButtonMore title={workspaceBusyReason ?? t('Commit options')} aria-haspopup="menu" aria-expanded={commitMenu} disabled={Boolean(aiMessage?.running) || !message.trim() || !commitTargets.length || commitBusy || Boolean(commitUnavailable)} onClick={() => { setCommitMenu((value) => !value); setSaveMenu(false); }} />}{commitMenu && <div className="split-menu right">{orderedCommitActions.map((push) => <button key={String(push)} disabled={commitBusy || Boolean(commitUnavailable) || (push && Boolean(pushUnavailable))} title={commitUnavailable ? capabilityReason(commitUnavailable.capabilities, 'commit') : push && pushUnavailable ? capabilityReason(pushUnavailable.capabilities, 'syncPush') : undefined} onClick={() => { void doCommit(push); setCommitMenu(false); }}><Codicon name={push ? 'cloud-upload' : 'check'} />{t(push ? 'Commit & Push' : 'Commit')}</button>)}</div>}</div>
         </div>
       </div>
       </div>

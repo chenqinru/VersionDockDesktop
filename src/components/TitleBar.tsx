@@ -12,7 +12,7 @@ import { Codicon } from './Codicon';
 import { ProjectIcon } from './ProjectIcon';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
-import { isOperationActive, useAppStore } from '../store/appStore';
+import { isWorkspaceOpening, useAppStore } from '../store/appStore';
 import { useBridge } from '../platform/context';
 import type { TabDragPayload, WindowDragGeometry } from '../platform/bridge';
 import type { WindowTabTransfer, WorkspaceDescriptor } from '../bindings/generated';
@@ -95,7 +95,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
   // Keep the titlebar on the same surface as the main application during that gap.
   const tabs = welcomeMode ? [] : loadedTabs.length === 0 && startupTab ? [startupTab] : loadedTabs;
   const activeTabId = useAppStore((state) => state.activeTabId) ?? startupTab?.id;
-  const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
+  const busy = useAppStore((state) => isWorkspaceOpening(state.operations));
   const recentWorkspaces = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const filteredRecentWorkspaces = filterWorkspaces(recentWorkspaces, workspaceQuery);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
@@ -952,7 +952,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
               className={`titlebar-tab-add ${newTabMenuOpen ? 'active' : ''} ${draggingTabId !== null || remoteInsertionActive ? 'drag-hidden' : ''}`}
               aria-label={t('New Tab')}
               aria-hidden={draggingTabId !== null || remoteInsertionActive}
-              title={t('Open Workspace')}
+              title={t(busy ? 'Loading workspace…' : 'Open Workspace')}
               disabled={busy || Boolean(startupTab)}
               tabIndex={draggingTabId !== null || remoteInsertionActive ? -1 : undefined}
               onClick={toggleNewTabMenu}
@@ -1053,7 +1053,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
           }}
         >
           <div className="workspace-menu-primary-wrap">
-            <OpenWorkspaceAction size="menu" role="menuitem" disabled={busy} onClick={() => void chooseWorkspace()} />
+            <OpenWorkspaceAction size="menu" role="menuitem" disabled={busy} title={busy ? t('Loading workspace…') : undefined} onClick={() => void chooseWorkspace()} />
           </div>
 
           <div className="workspace-menu-header">
@@ -1085,6 +1085,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
                   opened={isOpened}
                   current={isCurrentActive}
                   disabled={busy}
+                  disabledReason={busy ? t('Loading workspace…') : undefined}
                   onOpen={event => {
                     if (event.metaKey || event.ctrlKey) {
                       void bridge.openInNewWindow(workspaceOpenPaths(workspace));

@@ -24,6 +24,36 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it.each(['en', 'zh-CN'] as const)('only blocks opening during a workspace transition and explains the reason in %s', language => {
+    const t = createTranslator(language);
+    const originalBootstrap = useAppStore.getState().bootstrap;
+    const operation = { operationId: 'scan', context: { domain: 'workspace', workspaceId: 'other', target: null }, status: 'running' };
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, operations: { scan: operation } as never,
+      bootstrap: { state: { recentWorkspaces: [workspace] } } as never,
+    });
+    try {
+      render(<BridgeContext.Provider value={bridge}><I18nContext.Provider value={{ language, preference: 'system', t }}><TitleBar /></I18nContext.Provider></BridgeContext.Provider>);
+      const add = screen.getByRole('button', { name: t('New Tab') });
+      expect(add).toBeEnabled();
+      fireEvent.click(add);
+      expect(screen.getByRole('menuitem', { name: /^Workspace/ })).toBeEnabled();
+      act(() => useAppStore.setState({ operations: { scan: { ...operation, context: { ...operation.context, target: 'workspaceOpen' } } } as never }));
+      expect(add).toBeDisabled();
+      expect(add).toHaveAttribute('title', t('Loading workspace…'));
+      const item = screen.getByRole('menuitem', { name: /^Workspace/ });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAccessibleDescription(t('Loading workspace…'));
+      for (const action of ['Settings', 'About VersionDock & Check Updates', 'GitHub Repository', 'Manage Remote Accounts (GitHub / GitLab / Gitee)']) {
+        expect(screen.getByRole('button', { name: t(action) })).toBeEnabled();
+      }
+      act(() => useAppStore.setState({ operations: {} }));
+      expect(add).toBeEnabled();
+      expect(item).toBeEnabled();
+    } finally {
+      useAppStore.setState({ bootstrap: originalBootstrap, operations: {} });
+    }
+  });
+
   it('keeps mouse focus inside the menu until the workspace chooser opens', async () => {
     const originalBootstrap = useAppStore.getState().bootstrap;
     const originalOpen = useAppStore.getState().openWorkspace;

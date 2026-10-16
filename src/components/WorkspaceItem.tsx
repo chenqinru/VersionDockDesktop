@@ -10,12 +10,13 @@ interface WorkspaceItemProps {
   opened?: boolean;
   current?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
   onOpen: MouseEventHandler<HTMLButtonElement>;
   actions?: ReactNode;
 }
 
 /** Shared workspace identity and row feedback; the caller owns opening and actions. */
-export function WorkspaceItem({ workspace, size, opened = false, current = false, disabled = false, onOpen, actions }: WorkspaceItemProps) {
+export function WorkspaceItem({ workspace, size, opened = false, current = false, disabled = false, disabledReason, onOpen, actions }: WorkspaceItemProps) {
   const { t } = useI18n();
   const hintId = useId();
   const unavailable = !workspace.available;
@@ -25,14 +26,16 @@ export function WorkspaceItem({ workspace, size, opened = false, current = false
     data-size={size}
     data-row-selected={current || undefined}
     aria-disabled={disabled || undefined}
+    title={disabled ? disabledReason : undefined}
   >
     <button
       type="button"
       role={menu ? 'menuitem' : undefined}
       className={`workspace-item-main ${menu ? 'workspace-menu-item' : 'recent-card-btn'}`}
       disabled={disabled}
+      aria-description={disabled ? disabledReason : undefined}
       aria-current={current ? 'page' : undefined}
-      aria-describedby={unavailable ? hintId : undefined}
+      aria-describedby={unavailable && !(disabled && disabledReason) ? hintId : undefined}
       onClick={onOpen}
     >
       <ProjectIcon name={workspace.name} seed={workspace.paths[0] || workspace.id || workspace.name}
