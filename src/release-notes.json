@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.13",
+    "date": "2026-10-16",
+    "highlights": {
+      "zh-CN": [
+        "欢迎页支持管理远程账号，克隆时可直接搜索并选择账号下的仓库；完善仓库发布的进度、取消及部分成功提示，并改善作者头像匹配与缓存。",
+        "新建分支和工作树支持 AI 命名，同名工作树通过路径标签区分；删除前检查本地改动、忽略文件、搁置及未保存内容，并完善与 VersionDock 扩展的搁置数据互通。",
+        "统一按钮、输入框、下拉框、列表及弹窗的主题反馈与圆角，改善文字和危险按钮的可读性；标题栏增加项目渐变色，欢迎页版本胶囊整合更新进度。",
+        "记忆窗口大小、位置和面板分割比例，跨窗口同步工作台布局，并支持重置布局；统一最近工作区列表与搜索，新增平滑滚动设置及鼠标侧键返回。",
+        "修正提交标题与正文及代码差异的解析，高亮就绪后再显示代码；同步变更支持取消和重试，提交后及时刷新状态，并减少打开项目期间不必要的操作禁用。",
+        "通知和日志支持按项目或应用筛选，并可从通知定位关联操作日志；按当前范围标记已读或清理，日志正文支持选择复制，任务进度和异常状态使用主题适配颜色。"
+      ],
+      "en": [
+        "Manage remote accounts from the welcome screen and search account repositories when cloning. Improve publishing progress, cancellation and partial-success messages, along with author avatar matching and caching.",
+        "Use AI naming when creating branches and worktrees, and distinguish worktrees with the same name using path labels. Check local changes, ignored files, shelves and unsaved content before removal, and improve shelf data interoperability with the VersionDock extension.",
+        "Unify theme feedback and corner radii for buttons, inputs, selects, lists and dialogs, and improve text and danger-button readability. Add project gradients to the title bar and show update progress in the welcome screen version capsule.",
+        "Remember window size, position and panel split ratios, synchronize workbench layout across windows, and support resetting the layout. Unify recent workspace lists and search, and add smooth scrolling settings and mouse side-button back navigation.",
+        "Fix commit title, body and code diff parsing, and show code once highlighting is ready. Support cancellation and retry when loading sync changes, refresh status after commits, and reduce unnecessary action blocking while opening projects.",
+        "Filter notifications and logs by project or application, and open related operation logs from notifications. Mark notifications as read or clear entries within the current scope, select and copy log text, and adapt task progress and error colors to the theme."
+      ]
+    }
+  },
+  {
     "version": "0.1.12",
     "date": "2026-10-09",
     "highlights": {
