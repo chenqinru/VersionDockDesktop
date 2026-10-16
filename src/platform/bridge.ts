@@ -288,7 +288,7 @@ export class TauriBridge implements VersionDockBridge {
     close: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().close(),
     destroy: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().destroy(),
     setControlsVisible: async (visible: boolean) => {
-      if (this.currentPlatform !== 'macos') return;
+      if (this.currentPlatform === 'linux') return;
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('window_set_controls_visible', { visible });
     },

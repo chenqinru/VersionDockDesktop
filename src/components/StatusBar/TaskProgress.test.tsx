@@ -26,6 +26,16 @@ beforeEach(() => {
 afterEach(() => { cleanup(); resetTaskProgress(); useAppStore.setState(original); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('task progress entry and details', () => {
+  it('localizes queued discard tasks in both the footer and details without a plugin bundle', () => {
+    renderItem('zh-CN');
+    const event = createOperationRequestEvent({ type: 'discard', payload: { workspace_id: 'current', repo_id: 'repo', paths: ['a.txt'] } }, {}, 'discard');
+    act(() => useTaskProgressStore.getState().requested(event, { workspaceName: 'Project', repoName: 'Repo' }));
+    delay();
+    expect(screen.getByText('丢弃更改')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '任务进度' }));
+    expect(screen.getAllByText('丢弃更改')).toHaveLength(2);
+    expect(screen.queryByText('Discard Changes')).not.toBeInTheDocument();
+  });
   it('shows batch commits and grouped pushes immediately while keeping quick single reads quiet', () => {
     renderItem();
     const event = createOperationRequestEvent({ type: 'batchCommit', payload: { workspace_id: 'current', targets: [{ repoId: 'repo' }, { repoId: 'next' }], push: false } } as any, {}, 'batch');

@@ -600,6 +600,22 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   padding-inline-end: var(--title-bar-controls-width, 138px);
 }
 
+/* The Windows plugin defaults to the OS theme; application themes own these. */
+#tbo-controls {
+  --tbo-symbol: var(--vscode-titleBar-activeForeground);
+  --tbo-default: transparent;
+  --tbo-hover: var(--versiondock-icon-hover-background);
+  --tbo-pressed: var(--versiondock-icon-pressed-background);
+  --tbo-inactive: transparent;
+  z-index: 30 !important;
+}
+:root[data-window-controls-blocked="true"] #tbo-controls {
+  pointer-events: none;
+}
+:root #tbo-controls[data-active="false"] .tbo-btn:not(:hover):not(.tbo-hover) .tbo-glyph {
+  opacity: .65;
+}
+
 .titlebar-macos-spacer {
   flex: 0 0 82px;
   width: 82px;

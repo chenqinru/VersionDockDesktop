@@ -143,6 +143,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            windowing::caption_window_event(window, event);
             window_layout::window_event(window, event);
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 tray::close_requested(window, api);

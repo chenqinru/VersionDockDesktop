@@ -29,6 +29,12 @@ afterEach(() => {
 });
 
 describe('native startup window', () => {
+  it.each(['macos', 'windows'])('routes %s caption visibility through the native bridge', async platform => {
+    native.platform.mockReturnValue(platform);
+    const bridge = new TauriBridge();
+    await bridge.window.setControlsVisible(false);
+    expect(native.invoke).toHaveBeenCalledWith('window_set_controls_visible', { visible: false });
+  });
   it.each(['windows', 'linux', 'macos'])('refreshes the %s native background before both window mode changes', async platform => {
     native.platform.mockReturnValue(platform);
     const bridge = new TauriBridge();

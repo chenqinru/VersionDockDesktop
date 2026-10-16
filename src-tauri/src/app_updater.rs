@@ -16,10 +16,24 @@ pub async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
             let _helper = start_macos_restart_helper(macos_restart_command(
                 std::process::id(),
                 std::path::Path::new("/usr/bin/open"),
+                std::path::Path::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"),
                 bundle,
                 &args,
             ))
             .await?;
+            crate::logger::log_entry(
+                crate::logger::LogLevel::Info,
+                crate::logger::LogChannel::Core,
+                "Restarting macOS application after current process exits",
+                Some(format!(
+                    "version={} pid={} bundle={} method=launch-services-after-exit",
+                    app.package_info().version,
+                    std::process::id(),
+                    bundle.display()
+                )),
+                None,
+                None,
+            );
             app.exit(0);
             return Ok(());
         }
@@ -33,8 +47,9 @@ pub async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
 const MACOS_RESTART_SCRIPT: &str = r#"
 parent_pid=$1
 opener=$2
-bundle=$3
-shift 3
+registrar=$3
+bundle=$4
+shift 4
 printf 'ready\n'
 exec 1>/dev/null
 attempt=0
@@ -44,6 +59,9 @@ while /bin/kill -0 "$parent_pid" 2>/dev/null; do
     if [ "$attempt" -ge 300 ]; then exit 1; fi
     /bin/sleep 0.1
 done
+# Replacing the bundle changes its file identity. Refresh Launch Services for
+# this exact app path before asking it to activate the installed version.
+if [ -x "$registrar" ]; then "$registrar" -f "$bundle" >/dev/null 2>&1; fi
 exec "$opener" "$bundle" --args "$@"
 "#;
 
@@ -51,6 +69,7 @@ exec "$opener" "$bundle" --args "$@"
 fn macos_restart_command(
     parent_pid: u32,
     opener: &std::path::Path,
+    registrar: &std::path::Path,
     bundle: &std::path::Path,
     args: &[std::ffi::OsString],
 ) -> tokio::process::Command {
@@ -63,6 +82,7 @@ fn macos_restart_command(
         .arg("versiondock-restart")
         .arg(parent_pid.to_string())
         .arg(opener)
+        .arg(registrar)
         .arg(bundle)
         .args(args)
         .stdin(Stdio::null())
@@ -149,8 +169,23 @@ mod restart_tests {
             .kill_on_drop(true)
             .spawn()
             .unwrap();
-        let mut command = macos_restart_command(old_process.id().unwrap(), &opener, &bundle, &args);
+        let registrar = directory.path().join("fake registrar");
+        let registered_args = directory.path().join("registered");
+        std::fs::write(
+            &registrar,
+            "#!/bin/sh\nprintf '%s\\0' \"$@\" > \"$VD_RESTART_REGISTER_FILE\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&registrar, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = macos_restart_command(
+            old_process.id().unwrap(),
+            &opener,
+            &registrar,
+            &bundle,
+            &args,
+        );
         command.env("VD_RESTART_ARGS_FILE", &recorded_args);
+        command.env("VD_RESTART_REGISTER_FILE", &registered_args);
         let helper = start_macos_restart_helper(command).await.unwrap();
         let helper_pid = helper.id().unwrap();
         // The real caller also drops this handle as it exits.
@@ -161,6 +196,7 @@ mod restart_tests {
         );
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert!(!recorded_args.exists());
+        assert!(!registered_args.exists());
         old_process.kill().await.unwrap();
         let captured = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -186,6 +222,10 @@ mod restart_tests {
                 "--project".into(),
                 "a ' \" $()\n树".into(),
             ]
+        );
+        assert_eq!(
+            std::fs::read(registered_args).unwrap(),
+            format!("-f\0{}\0", bundle.display()).into_bytes()
         );
     }
 

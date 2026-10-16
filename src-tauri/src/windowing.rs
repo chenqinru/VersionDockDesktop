@@ -40,11 +40,85 @@ pub async fn set_controls_visible(
             .await
             .map_err(|error| DesktopError::new("WINDOW_CONTROLS_FAILED", error.to_string(), true))?
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let app = window.app_handle().clone();
+        app.run_on_main_thread(move || {
+            if let Ok(mut hidden) = HIDDEN_CAPTIONS.lock() {
+                if visible {
+                    hidden.remove(window.label());
+                } else {
+                    hidden.insert(window.label().to_owned());
+                }
+            }
+            let result = sync_windows_snap_visibility(&window.as_ref().window(), visible);
+            let _ = send.send(result);
+        })
+        .map_err(|error| DesktopError::new("WINDOW_CONTROLS_FAILED", error.to_string(), true))?;
+        receive
+            .await
+            .map_err(|error| DesktopError::new("WINDOW_CONTROLS_FAILED", error.to_string(), true))?
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (window, visible);
         Ok(())
     }
+}
+
+#[cfg(target_os = "windows")]
+static HIDDEN_CAPTIONS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+#[cfg(target_os = "windows")]
+fn sync_windows_snap_visibility(window: &tauri::Window, visible: bool) -> Result<(), DesktopError> {
+    use windows_sys::Win32::UI::{
+        Input::KeyboardAndMouse::EnableWindow,
+        WindowsAndMessaging::{FindWindowExW, ShowWindow, SW_HIDE, SW_SHOWNOACTIVATE},
+    };
+    let parent = window
+        .hwnd()
+        .map_err(|error| DesktopError::new("WINDOW_CONTROLS_FAILED", error.to_string(), true))?;
+    let class: Vec<u16> = "TboSnapOverlay\0".encode_utf16().collect();
+    // The plugin's transparent maximize hit surface is a native child HWND;
+    // CSS alone cannot put it behind a modal or prevent it intercepting input.
+    unsafe {
+        let overlay = FindWindowExW(
+            parent.0,
+            std::ptr::null_mut(),
+            class.as_ptr(),
+            std::ptr::null(),
+        );
+        if !overlay.is_null() {
+            EnableWindow(overlay, i32::from(visible));
+            ShowWindow(overlay, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
+        }
+    }
+    Ok(())
+}
+
+pub fn caption_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    #[cfg(target_os = "windows")]
+    {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            if let Ok(mut hidden) = HIDDEN_CAPTIONS.lock() {
+                hidden.remove(window.label());
+            }
+        } else if matches!(
+            event,
+            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            let hidden = HIDDEN_CAPTIONS
+                .lock()
+                .is_ok_and(|hidden| hidden.contains(window.label()));
+            if hidden {
+                let _ = sync_windows_snap_visibility(window, false);
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, event);
 }
 
 pub fn is_business_window(label: &str) -> bool {

@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createTranslator, resolveLanguage } from '.';
 
 describe('i18n', () => {
+  it('translates the queued discard task before plugin translations load', () => {
+    expect(createTranslator('zh-CN')('Discard Changes')).toBe('丢弃更改');
+    expect(createTranslator('en')('Discard Changes')).toBe('Discard Changes');
+  });
   it('uses English on non-Chinese systems and Chinese on Chinese systems', () => {
     expect(resolveLanguage('system', 'en-US')).toBe('en');
     expect(resolveLanguage('system', 'zh-Hans-CN')).toBe('zh-CN');

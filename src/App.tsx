@@ -36,6 +36,7 @@ import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './compone
 import { startupTransferTab } from './windowing/startupTabTransfer';
 import { useStartupWindowReveal } from './windowing/useStartupWindowReveal';
 import { useWorkspaceWindowMode } from './windowing/useWorkspaceWindowMode';
+import { useWindowsCaptionLabels } from './hooks/useWindowsCaptionLabels';
 import { LoadingState } from './components/LoadingState';
 import { selectWorkspacePaths } from './workspaces/selectWorkspace';
 
@@ -95,6 +96,7 @@ export function App() {
     bootstrap?.state.settings?.smoothMouseWheelScrolling ?? DEFAULT_SETTINGS.smoothMouseWheelScrolling!,
   );
   const t = useMemo(() => createTranslator(language, pluginMessages), [language, pluginMessages]);
+  useWindowsCaptionLabels(bridge, t);
   const commitWidth = bootstrap?.state.layout?.panelSizes.commit ?? bootstrap?.state.panelSizes?.commit ?? 360;
   const missingTools = snapshot && !snapshot.tools.git && !snapshot.tools.svn;
   const noRepositories = snapshot && !snapshot.repositories.length;
