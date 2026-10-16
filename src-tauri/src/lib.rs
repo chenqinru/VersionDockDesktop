@@ -34,6 +34,7 @@ mod tray;
 mod update_worker;
 mod vcs;
 mod window_layout;
+mod window_surface;
 mod windowing;
 mod workspace;
 
@@ -138,11 +139,13 @@ pub fn run() {
                     let _ = window.set_title_bar_height(38);
                     let _ = window.set_title_bar_overlay(true);
                 }
+                window_surface::schedule(window);
             }
 
             Ok(())
         })
         .on_window_event(|window, event| {
+            window_surface::window_event(window, event);
             windowing::caption_window_event(window, event);
             window_layout::window_event(window, event);
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

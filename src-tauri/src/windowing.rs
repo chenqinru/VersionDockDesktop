@@ -280,20 +280,20 @@ pub fn create_window(
     if let Some(transfer) = &transfer {
         state.bind_tab_session(transfer, &label)?;
     }
-    let _window = builder.build().map_err(|err| {
+    let window = builder.build().map_err(|err| {
         DesktopError::new(
             "WINDOW_CREATE_FAILED",
             format!("Failed to create window: {err}"),
             true,
         )
     })?;
-
     #[cfg(target_os = "windows")]
     {
         use tauri_plugin_window_controls::WindowControlsExt;
-        let _ = _window.set_title_bar_height(38);
-        let _ = _window.set_title_bar_overlay(true);
+        let _ = window.set_title_bar_height(38);
+        let _ = window.set_title_bar_overlay(true);
     }
+    crate::window_surface::schedule(window);
 
     Ok(label)
 }

@@ -517,7 +517,7 @@ async fn confirm_viewport(
     let mut previous = None;
     loop {
         let expired = tokio::time::Instant::now() >= deadline;
-        let (viewport, sample, done, confirmed) = on_main_thread(window, move |window| {
+        on_main_thread(window, move |window| {
             if !window
                 .state::<WindowLayouts>()
                 .windows
@@ -529,28 +529,16 @@ async fn confirm_viewport(
             {
                 return Err(native_error("Window layout request superseded"));
             }
-            let size = window.inner_size().map_err(native_error)?;
-            let scale = window.scale_factor().map_err(native_error)?;
-            let logical = size.to_logical::<f64>(scale);
-            let viewport = WindowViewport {
-                width: logical.width,
-                height: logical.height,
-            };
-            let sample = (size.width, size.height, scale.to_bits());
-            let matching = matches_target(
-                &viewport,
-                window.is_maximized().map_err(native_error)?,
-                target,
-            );
-            let confirmed = matching && previous == Some(sample);
-            let done = confirmed || expired || window.is_minimized().map_err(native_error)?;
-            if done && size.width > 0 && size.height > 0 {
-                let webview: &tauri::Webview = window.as_ref();
-                webview.set_size(size).map_err(native_error)?;
-            }
-            Ok((viewport, matching.then_some(sample), done, confirmed))
+            Ok(())
         })
         .await?;
+        // A successful setter only means the resize was requested. Read both
+        // webview layers on a later native turn before accepting the dimensions.
+        let surface = crate::window_surface::synchronize(window).await?;
+        let matching =
+            surface.ready && matches_target(&surface.viewport, surface.maximized, target);
+        let confirmed = matching && previous == Some(surface.sample);
+        let done = confirmed || expired || surface.minimized;
         if done {
             if expired {
                 crate::logger::log_entry(
@@ -562,9 +550,9 @@ async fn confirm_viewport(
                     None,
                 );
             }
-            return Ok((viewport, confirmed));
+            return Ok((surface.viewport, confirmed));
         }
-        previous = sample;
+        previous = matching.then_some(surface.sample);
         tokio::time::sleep(Duration::from_millis(16)).await;
     }
 }
