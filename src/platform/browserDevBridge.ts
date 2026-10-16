@@ -332,6 +332,12 @@ export class BrowserDevBridge implements VersionDockBridge {
     show: async () => undefined,
     setControlsVisible: async (visible: boolean): Promise<void> => { void visible; },
     isMaximized: async () => false,
+    onFullscreenChanged: async (handler: (fullscreen: boolean) => void) => {
+      const refresh = () => handler(Boolean(document.fullscreenElement));
+      document.addEventListener('fullscreenchange', refresh);
+      refresh();
+      return () => document.removeEventListener('fullscreenchange', refresh);
+    },
     dragGeometry: async () => null,
     setPosition: async () => undefined,
     setCursorIcon: async () => undefined,

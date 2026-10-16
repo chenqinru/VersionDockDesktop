@@ -24,6 +24,33 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it('marks native macOS fullscreen so the traffic-light spacer can collapse and restore', async () => {
+    const mac = new MockBridge(() => null);
+    vi.spyOn(mac, 'platform').mockReturnValue('macos');
+    let change!: (fullscreen: boolean) => void;
+    vi.spyOn(mac.window, 'onFullscreenChanged').mockImplementation(async handler => { change = handler; handler(false); return () => undefined; });
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id });
+    const { container } = render(<BridgeContext.Provider value={mac}><TitleBar /></BridgeContext.Provider>);
+    const header = container.querySelector('.titlebar')!;
+    expect(container.querySelector('.titlebar-macos-spacer')).toBeInTheDocument();
+    expect(header).not.toHaveAttribute('data-fullscreen');
+    act(() => change(true));
+    expect(header).toHaveAttribute('data-fullscreen', 'true');
+    expect(screen.getByRole('tab', { name: /Workspace/ })).toBeInTheDocument();
+    act(() => change(false));
+    expect(header).not.toHaveAttribute('data-fullscreen');
+    await act(async () => {});
+  });
+
+  it.each(['windows', 'linux'] as const)('does not add a traffic-light spacer or subscription on %s', platform => {
+    const bridge = new MockBridge(() => null);
+    vi.spyOn(bridge, 'platform').mockReturnValue(platform);
+    const subscribe = vi.spyOn(bridge.window, 'onFullscreenChanged');
+    const { container } = render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+    expect(container.querySelector('.titlebar-macos-spacer')).not.toBeInTheDocument();
+    expect(subscribe).not.toHaveBeenCalled();
+  });
+
   it.each(['en', 'zh-CN'] as const)('only blocks opening during a workspace transition and explains the reason in %s', language => {
     const t = createTranslator(language);
     const originalBootstrap = useAppStore.getState().bootstrap;

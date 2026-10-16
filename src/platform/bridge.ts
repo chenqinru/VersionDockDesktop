@@ -86,6 +86,7 @@ export interface VersionDockBridge {
     show(): Promise<void>;
     setControlsVisible(visible: boolean): Promise<void>;
     isMaximized(): Promise<boolean>;
+    onFullscreenChanged(handler: (fullscreen: boolean) => void): Promise<() => void>;
     dragGeometry(): Promise<WindowDragGeometry | null>;
     setPosition(x: number, y: number): Promise<void>;
     setCursorIcon(icon: 'default' | 'grab' | 'grabbing' | 'copy'): Promise<void>;
@@ -298,6 +299,26 @@ export class TauriBridge implements VersionDockBridge {
       await this.request({ type: 'windowReveal' }, { showProgress: false });
     },
     isMaximized: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().isMaximized(),
+    onFullscreenChanged: async (handler: (fullscreen: boolean) => void) => {
+      const current = (await import('@tauri-apps/api/window')).getCurrentWindow();
+      let active = true;
+      let generation = 0;
+      const refresh = async () => {
+        if (!active) return;
+        const request = ++generation;
+        try {
+          const fullscreen = await current.isFullscreen();
+          if (active && request === generation) handler(fullscreen);
+        } catch (error) {
+          if (active && request === generation) console.warn('Unable to read fullscreen state', error);
+        }
+      };
+      // Subscribe before the initial query so a concurrent transition is not lost.
+      // Tao emits resize after macOS has completed entering/exiting fullscreen.
+      const unlisten = await current.onResized(() => { void refresh(); });
+      void refresh();
+      return () => { active = false; generation += 1; unlisten(); };
+    },
     setPosition: async (x: number, y: number) => {
       const [{ LogicalPosition }, { getCurrentWindow }] = await Promise.all([
         import('@tauri-apps/api/dpi'), import('@tauri-apps/api/window'),
@@ -809,6 +830,7 @@ export class MockBridge implements VersionDockBridge {
     hasOtherWorkspaceWindows: async () => false,
     isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined,
     setWorkspaceMode: async (): Promise<WindowViewport> => ({ width: window.innerWidth, height: window.innerHeight }),
+    onFullscreenChanged: async (handler: (fullscreen: boolean) => void): Promise<() => void> => { handler(false); return () => undefined; },
     onDragDrop: async () => () => undefined,
   };
 }

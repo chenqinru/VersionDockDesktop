@@ -8,6 +8,8 @@ const native = vi.hoisted(() => ({
   setWebviewBackgroundColor: vi.fn(),
   show: vi.fn(),
   setFocus: vi.fn(),
+  isFullscreen: vi.fn(),
+  onResized: vi.fn(),
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke }));
 vi.mock('@tauri-apps/plugin-os', () => ({ platform: native.platform }));
@@ -22,6 +24,8 @@ beforeEach(() => {
   native.setWebviewBackgroundColor.mockResolvedValue(undefined);
   native.show.mockResolvedValue(undefined);
   native.setFocus.mockResolvedValue(undefined);
+  native.isFullscreen.mockResolvedValue(false);
+  native.onResized.mockResolvedValue(() => undefined);
 });
 afterEach(() => {
   document.documentElement.style.removeProperty('--versiondock-bg');
@@ -29,6 +33,44 @@ afterEach(() => {
 });
 
 describe('native startup window', () => {
+  it('delivers initial fullscreen state and refreshes it after native resize, then unsubscribes', async () => {
+    let resize!: () => void;
+    const unlisten = vi.fn();
+    native.onResized.mockImplementation(async callback => { resize = callback; return unlisten; });
+    native.isFullscreen.mockResolvedValue(true);
+    const change = vi.fn();
+    const dispose = await new TauriBridge().window.onFullscreenChanged(change);
+    await vi.waitFor(() => expect(change).toHaveBeenLastCalledWith(true));
+    native.isFullscreen.mockResolvedValue(false);
+    resize();
+    await vi.waitFor(() => expect(change).toHaveBeenLastCalledWith(false));
+    dispose();
+    const count = native.isFullscreen.mock.calls.length;
+    resize();
+    expect(native.isFullscreen).toHaveBeenCalledTimes(count);
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
+
+  it('ignores old fullscreen queries after a newer resize or teardown', async () => {
+    let resize!: () => void;
+    let resolve!: (fullscreen: boolean) => void;
+    native.onResized.mockImplementation(async callback => { resize = callback; return () => undefined; });
+    native.isFullscreen.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    const change = vi.fn();
+    const dispose = await new TauriBridge().window.onFullscreenChanged(change);
+    resize();
+    await vi.waitFor(() => expect(change).toHaveBeenCalledExactlyOnceWith(false));
+    resolve(true);
+    await Promise.resolve();
+    expect(change).toHaveBeenCalledExactlyOnceWith(false);
+    native.isFullscreen.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    resize();
+    dispose();
+    resolve(true);
+    await Promise.resolve();
+    expect(change).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
   it('returns the native content size and serializes overlapping mode requests', async () => {
     const bridge = new TauriBridge();
     let complete!: (response: unknown) => void;

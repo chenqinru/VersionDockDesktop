@@ -15,6 +15,7 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { isWorkspaceOpening, useAppStore } from '../store/appStore';
 import { useBridge } from '../platform/context';
+import { useWindowFullscreen } from '../hooks/useWindowFullscreen';
 import type { TabDragPayload, WindowDragGeometry } from '../platform/bridge';
 import type { WindowTabTransfer, WorkspaceDescriptor } from '../bindings/generated';
 import { dragPoint, shouldDetachTab, tabSnapInsertionIndex, type ScreenPoint, type WindowBounds } from '../windowing/tabDrag';
@@ -88,6 +89,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
   const suppressClickRef = useRef<string | null>(null);
   const bridge = useBridge();
   const platform = bridge.platform();
+  const fullscreen = useWindowFullscreen(bridge, platform === 'macos');
   const loadedTabs = useAppStore((state) => state.tabs);
   const workspaceId = useAppStore(state => state.snapshot?.workspace.id);
   const initialized = useAppStore(state => Boolean(state.bootstrap));
@@ -827,6 +829,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
     <>
       <header
         className={`titlebar ${platform} ${tabs.length === 0 ? 'welcome-mode' : ''}`}
+        data-fullscreen={fullscreen || undefined}
         style={activeProject ? { '--titlebar-project-color': getProjectColor(activeProject.paths[0] || activeProject.id || activeProject.name) } as CSSProperties : undefined}
         data-tauri-drag-region
         onDoubleClick={(event) => {
