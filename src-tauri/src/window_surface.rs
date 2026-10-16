@@ -196,7 +196,9 @@ pub fn schedule(window: WebviewWindow) {
         // here, before returning to AppKit; a Tokio round trip can queue stale
         // repairs behind the next drag step. Startup calls are dispatched by
         // with_webview to the same UI thread.
+        let current = window.clone();
         if let Err(error) = window.with_webview(move |platform| {
+            macos::observe_fullscreen(&platform, &current);
             if let Err(error) = macos::fit(&platform) {
                 // Logging emits a frontend event; leave the native callback
                 // before re-entering the runtime's webview dispatcher.
@@ -226,6 +228,13 @@ fn warn(error: DesktopError) {
 }
 
 pub fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    #[cfg(target_os = "macos")]
+    if matches!(event, tauri::WindowEvent::Destroyed) {
+        let label = window.label().to_owned();
+        let _ = window
+            .app_handle()
+            .run_on_main_thread(move || macos::forget(&label));
+    }
     if crate::windowing::is_business_window(window.label())
         && matches!(
             event,

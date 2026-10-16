@@ -34,6 +34,16 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
+  it('keeps an unmeasured history viewport bounded instead of rendering the entire history', () => {
+    const history = Array.from({ length: 2000 }, (_, index) => ({ repoId: 'repo', hash: `hash-${index}`, shortHash: `${index}`, parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `commit ${index}`, refs: [] }));
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history, selectedCommits: [] });
+    const { container } = render(<HistoryWorkspace />);
+    const rows = container.querySelectorAll('.commit-row');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.length).toBeLessThan(100);
+    expect(screen.queryByText('commit 1999', { selector: '.commit-subject-text' })).not.toBeInTheDocument();
+  });
+
   it('focuses a clicked commit row without changing range-selection semantics', () => {
     const commit = { repoId: 'repo', hash: 'focus-row', shortHash: 'focus', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'focus selection', refs: [], unpushed: true };
     const select = vi.spyOn(useAppStore.getState(), 'selectCommit').mockResolvedValue();

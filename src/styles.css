@@ -624,6 +624,10 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   app-region: drag;
 }
 .titlebar.macos[data-fullscreen] .titlebar-macos-spacer { display: none; }
+/* Native AppKit notifications update this visual state during the animation,
+   before the normal Tauri event queue can reconcile React's fullscreen state. */
+:root[data-versiondock-native-fullscreen="true"] .titlebar.macos .titlebar-macos-spacer { display: none; }
+:root[data-versiondock-native-fullscreen="false"] .titlebar.macos .titlebar-macos-spacer { display: block; }
 
 :root:is([data-theme="light"], [data-theme="light2026"]) .titlebar { --titlebar-tint-strength: 16%; }
 

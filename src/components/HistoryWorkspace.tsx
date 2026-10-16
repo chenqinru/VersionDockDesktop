@@ -263,7 +263,7 @@ function CommitList({
     }
   }, [commits, hasMore, loadHistory, loading, revealTarget, selectCommit, virtualizer, workspaceId]);
   const [hoveredKey, setHoveredKey] = useState<string>();
-  const [containerWidth, setContainerWidth] = useState(0);
+  const [maxVisibleRefs, setMaxVisibleRefs] = useState(0);
   const [context, setContext] = useState<{ x: number; y: number; commit: CommitNode }>();
   const [branchOptions, setBranchOptions] = useState<{ anchorRect: DOMRect; repoId: string; branchName: string; isCurrent: boolean; svn: boolean }>();
   const [popover, setPopover] = useState<{ detail: CommitDetail; anchor: CommitPopoverAnchor }>();
@@ -293,16 +293,21 @@ function CommitList({
   useLayoutEffect(() => {
     const element = parent.current;
     if (!element) return;
-    const update = () => setContainerWidth(element.clientWidth);
+    // CSS handles pixel-by-pixel resizing. React only needs to update when
+    // the number of ref badges actually changes.
+    const update = () => {
+      const space = element.clientWidth - labelColWidth - 340;
+      setMaxVisibleRefs(space < 80 ? 0 : space < 170 ? 1 : 2);
+    };
     update();
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
     observer?.observe(element);
-    window.addEventListener('resize', update);
+    if (!observer) window.addEventListener('resize', update);
     return () => {
       observer?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, []);
+  }, [labelColWidth]);
 
   const schedulePopover = (event: React.MouseEvent<HTMLDivElement>, commit: CommitNode) => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -339,11 +344,16 @@ function CommitList({
     closeTimer.current = setTimeout(() => { if (!popoverActive.current) setPopover(undefined); }, 120);
   };
   const allExpanded = repoBlocks.length > 0 && repoBlocks.every((block) => expandedRepoIds.has(block.repoId));
-  const refsSpace = containerWidth - labelColWidth - 340;
-  const maxVisibleRefs = refsSpace < 80 ? 0 : refsSpace < 170 ? 1 : 2;
   const virtualItems = virtualizer.getVirtualItems();
   const scrollTop = virtualizer.scrollOffset ?? 0;
-  const renderedItems = virtualItems.length > 0 ? virtualItems : commits.map((_, index) => ({ index, start: density.padding + index * COMMIT_ROW_HEIGHT }));
+  // A temporarily unmeasured/zero-sized viewport must not expand a virtual
+  // history into thousands of DOM rows during a window transition.
+  const fallbackStart = Math.max(0, Math.floor((scrollTop - density.padding) / COMMIT_ROW_HEIGHT) - 14);
+  const fallbackCount = Math.max(0, Math.min(commits.length - fallbackStart, Math.ceil(window.innerHeight / COMMIT_ROW_HEIGHT) + 28));
+  const renderedItems = virtualItems.length > 0 ? virtualItems : Array.from({ length: fallbackCount }, (_, offset) => {
+    const index = fallbackStart + offset;
+    return { index, start: density.padding + index * COMMIT_ROW_HEIGHT };
+  });
   const contextSelection = (commit: CommitNode): CommitNode[] => selected.has(commitKey(commit.repoId, commit.hash)) && selectedCommits.length > 1 && selectedCommits.every((item) => item.repoId === commit.repoId) ? selectedCommits : [commit];
   const commitMenuRefs = (commit: CommitNode) => {
     const svn = repoKindById[commit.repoId] === 'svn';

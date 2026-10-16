@@ -24,6 +24,29 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it('coalesces resize bookkeeping and reports the final size after resizing stops', async () => {
+    vi.useFakeTimers();
+    const bridge = new MockBridge(() => null);
+    const sync = vi.spyOn(bridge, 'syncWindowBounds').mockResolvedValue();
+    const width = vi.spyOn(window, 'outerWidth', 'get');
+    try {
+      render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+      sync.mockClear();
+      for (let index = 0; index < 10; index += 1) {
+        width.mockReturnValue(1000 + index);
+        fireEvent(window, new Event('resize'));
+      }
+      expect(sync).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(100));
+      expect(sync).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ width: 1009 }));
+      await act(async () => {});
+    } finally {
+      cleanup();
+      width.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('marks native macOS fullscreen so the traffic-light spacer can collapse and restore', async () => {
     const mac = new MockBridge(() => null);
     vi.spyOn(mac, 'platform').mockReturnValue('macos');

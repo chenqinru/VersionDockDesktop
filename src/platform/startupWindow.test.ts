@@ -10,6 +10,7 @@ const native = vi.hoisted(() => ({
   setFocus: vi.fn(),
   isFullscreen: vi.fn(),
   onResized: vi.fn(),
+  listen: vi.fn(),
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke }));
 vi.mock('@tauri-apps/plugin-os', () => ({ platform: native.platform }));
@@ -26,6 +27,7 @@ beforeEach(() => {
   native.setFocus.mockResolvedValue(undefined);
   native.isFullscreen.mockResolvedValue(false);
   native.onResized.mockResolvedValue(() => undefined);
+  native.listen.mockResolvedValue(() => undefined);
 });
 afterEach(() => {
   document.documentElement.style.removeProperty('--versiondock-bg');
@@ -33,6 +35,37 @@ afterEach(() => {
 });
 
 describe('native startup window', () => {
+  it('restores the titlebar inset on native fullscreen exit before stale resize queries finish', async () => {
+    let event!: (event: { payload: boolean }) => void;
+    let resized!: () => void;
+    let resolve!: (fullscreen: boolean) => void;
+    const unlisten = vi.fn();
+    native.listen.mockImplementation(async (_name, callback) => { event = callback; return unlisten; });
+    native.onResized.mockImplementation(async callback => { resized = callback; return () => undefined; });
+    native.isFullscreen.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    const change = vi.fn();
+    const dispose = await new TauriBridge().window.onFullscreenChanged(change);
+    event({ payload: false });
+    resolve(true);
+    await Promise.resolve();
+    resized();
+    expect(change).toHaveBeenCalledExactlyOnceWith(false);
+    event({ payload: true });
+    expect(change).toHaveBeenLastCalledWith(true);
+    dispose();
+    event({ payload: false });
+    expect(change).toHaveBeenLastCalledWith(true);
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
+
+  it('removes the native listener when resize subscription fails', async () => {
+    const unlisten = vi.fn();
+    native.listen.mockResolvedValue(unlisten);
+    native.onResized.mockRejectedValueOnce(new Error('closed'));
+    await expect(new TauriBridge().window.onFullscreenChanged(vi.fn())).rejects.toThrow('closed');
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
+
   it('delivers initial fullscreen state and refreshes it after native resize, then unsubscribes', async () => {
     let resize!: () => void;
     const unlisten = vi.fn();

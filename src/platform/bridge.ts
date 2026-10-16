@@ -303,8 +303,9 @@ export class TauriBridge implements VersionDockBridge {
       const current = (await import('@tauri-apps/api/window')).getCurrentWindow();
       let active = true;
       let generation = 0;
+      let nativeObserved = false;
       const refresh = async () => {
-        if (!active) return;
+        if (!active || nativeObserved) return;
         const request = ++generation;
         try {
           const fullscreen = await current.isFullscreen();
@@ -313,11 +314,27 @@ export class TauriBridge implements VersionDockBridge {
           if (active && request === generation) console.warn('Unable to read fullscreen state', error);
         }
       };
+      // AppKit announces exit before its animation, while Tao's fullscreen
+      // query remains true until the final resize. Native notifications own
+      // the state once received; late queries must not undo that early inset.
+      const unlistenNative = await current.listen<boolean>('versiondock://window-fullscreen', event => {
+        if (!active) return;
+        nativeObserved = true;
+        generation += 1;
+        handler(event.payload);
+      });
       // Subscribe before the initial query so a concurrent transition is not lost.
       // Tao emits resize after macOS has completed entering/exiting fullscreen.
-      const unlisten = await current.onResized(() => { void refresh(); });
+      let unlisten: () => void;
+      try {
+        unlisten = await current.onResized(() => { void refresh(); });
+      } catch (error) {
+        active = false;
+        unlistenNative();
+        throw error;
+      }
       void refresh();
-      return () => { active = false; generation += 1; unlisten(); };
+      return () => { active = false; generation += 1; unlisten(); unlistenNative(); };
     },
     setPosition: async (x: number, y: number) => {
       const [{ LogicalPosition }, { getCurrentWindow }] = await Promise.all([

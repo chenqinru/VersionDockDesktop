@@ -210,7 +210,14 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
     };
     reportBounds();
     const interval = setInterval(reportBounds, 800);
-    window.addEventListener('resize', reportBounds);
+    // Native window geometry can change faster than WebKit presents frames.
+    // Keep resize bookkeeping off the render path and send the final bounds.
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const resized = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(reportBounds, 100);
+    };
+    window.addEventListener('resize', resized);
 
     let unlistenState: (() => void) | undefined;
     let unlistenImport: (() => void) | undefined;
@@ -353,7 +360,8 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
     return () => {
       disposed = true;
       clearInterval(interval);
-      window.removeEventListener('resize', reportBounds);
+      clearTimeout(resizeTimer);
+      window.removeEventListener('resize', resized);
       unlistenImport?.();
       unlistenState?.();
       document.body.classList.remove('is-tab-drop-target');
