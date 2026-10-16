@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockBridge, type VersionDockBridge } from '../platform/bridge';
@@ -6,20 +6,15 @@ import type { WindowViewport } from '../bindings/generated';
 import { useWorkspaceWindowMode, waitForWindowPaint } from './useWorkspaceWindowMode';
 
 function Shell({ bridge, workspace, ready = true }: { bridge: VersionDockBridge; workspace: boolean; ready?: boolean }) {
-  const transitioning = useWorkspaceWindowMode(bridge, ready, workspace);
-  return <output>{transitioning ? 'Resizing' : workspace ? 'Project' : 'Welcome'}</output>;
+  useWorkspaceWindowMode(bridge, ready, workspace);
+  return null;
 }
 
 const viewport = { width: 1024, height: 768 };
-
 const advance = async (ms = 160) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(viewport.width);
-  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(viewport.height);
-  vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(viewport.width);
-  vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(viewport.height);
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => window.setTimeout(() => callback(performance.now()), 16));
   vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => window.clearTimeout(id));
@@ -31,33 +26,29 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-describe('workspace window mode transition', () => {
-  it.each(['windows', 'linux', 'macos'] as const)('covers both welcome/project transitions on %s until native resize and paint settle', async platform => {
+describe('workspace window mode', () => {
+  it.each(['windows', 'linux', 'macos'] as const)('paints the destination before requesting either native resize on %s', async platform => {
     const bridge = new MockBridge(() => null);
     vi.spyOn(bridge, 'platform').mockReturnValue(platform);
     const mode = vi.spyOn(bridge.window, 'setWorkspaceMode').mockResolvedValue(viewport);
     const view = render(<Shell bridge={bridge} workspace={false} />);
     await advance();
-    let complete!: () => void;
-    mode.mockImplementationOnce(() => new Promise<WindowViewport>(resolve => { complete = () => resolve(viewport); }));
+    mode.mockClear();
     view.rerender(<Shell bridge={bridge} workspace />);
-    expect(screen.getByRole('status')).toHaveTextContent('Resizing');
-    expect(mode).not.toHaveBeenCalledWith(true, false);
-    await advance(40);
-    expect(mode).toHaveBeenLastCalledWith(true, false);
-    await advance(1000);
-    expect(screen.getByRole('status')).toHaveTextContent('Resizing');
-    await act(async () => complete());
-    await advance();
-    expect(screen.getByRole('status')).toHaveTextContent('Project');
+    expect(mode).not.toHaveBeenCalled();
+    await advance(16);
+    expect(mode).not.toHaveBeenCalled();
+    await advance(16);
+    expect(mode).toHaveBeenCalledExactlyOnceWith(true, false);
+    mode.mockClear();
     view.rerender(<Shell bridge={bridge} workspace={false} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Resizing');
-    await advance();
-    expect(mode).toHaveBeenLastCalledWith(false, false);
-    expect(screen.getByRole('status')).toHaveTextContent('Welcome');
+    await advance(32);
+    expect(mode).toHaveBeenCalledExactlyOnceWith(false, false);
+    // Native code owns final viewport confirmation; no second frontend wait.
+    expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('does not resize or mask the project again when switching between project tabs', async () => {
+  it('does not resize the project again when switching between project tabs', async () => {
     const bridge = new MockBridge(() => null);
     const mode = vi.spyOn(bridge.window, 'setWorkspaceMode').mockResolvedValue(viewport);
     const view = render(<Shell bridge={bridge} workspace />);
@@ -66,93 +57,107 @@ describe('workspace window mode transition', () => {
     view.rerender(<Shell bridge={bridge} workspace />);
     await advance();
     expect(mode).not.toHaveBeenCalled();
-    expect(screen.getByRole('status')).toHaveTextContent('Project');
   });
 
-  it('keeps welcome masked if the previous project resize finishes after the last tab closes', async () => {
+  it('cancels obsolete resizes before they reach the native bridge', async () => {
+    const bridge = new MockBridge(() => null);
+    const mode = vi.spyOn(bridge.window, 'setWorkspaceMode').mockResolvedValue(viewport);
+    const view = render(<Shell bridge={bridge} workspace={false} />);
+    await advance();
+    mode.mockClear();
+    view.rerender(<Shell bridge={bridge} workspace />);
+    await advance(16);
+    view.rerender(<Shell bridge={bridge} workspace={false} />);
+    await advance();
+    expect(mode).toHaveBeenCalledExactlyOnceWith(false, false);
+  });
+
+  it('requests the latest mode without waiting for an old native reply', async () => {
     const bridge = new MockBridge(() => null);
     const mode = vi.spyOn(bridge.window, 'setWorkspaceMode').mockResolvedValue(viewport);
     const view = render(<Shell bridge={bridge} workspace={false} />);
     await advance();
     let oldComplete!: () => void;
-    let currentComplete!: () => void;
-    mode.mockImplementationOnce(() => new Promise<WindowViewport>(resolve => { oldComplete = () => resolve(viewport); }))
-      .mockImplementationOnce(() => new Promise<WindowViewport>(resolve => { currentComplete = () => resolve(viewport); }));
+    mode.mockClear().mockImplementationOnce(() => new Promise<WindowViewport>(resolve => { oldComplete = () => resolve(viewport); }));
     view.rerender(<Shell bridge={bridge} workspace />);
-    await advance(40);
+    await advance(32);
     view.rerender(<Shell bridge={bridge} workspace={false} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Resizing');
-    await advance(40);
+    await advance(32);
+    expect(mode.mock.calls).toEqual([[true, false], [false, false]]);
     await act(async () => oldComplete());
     await advance();
-    expect(screen.getByRole('status')).toHaveTextContent('Resizing');
-    await act(async () => currentComplete());
-    await advance();
-    expect(screen.getByRole('status')).toHaveTextContent('Welcome');
+    expect(mode).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('reveals the current page even if native layout restoration fails', async () => {
+  it('recovers after a native layout restoration fails', async () => {
     const bridge = new MockBridge(() => null);
     const error = new Error('Window unavailable');
-    vi.spyOn(bridge.window, 'setWorkspaceMode').mockRejectedValue(error);
+    const mode = vi.spyOn(bridge.window, 'setWorkspaceMode').mockRejectedValueOnce(error).mockResolvedValue(viewport);
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    render(<Shell bridge={bridge} workspace />);
+    const view = render(<Shell bridge={bridge} workspace />);
     await advance();
-    expect(warning).toHaveBeenCalledWith('Unable to restore window layout', error);
-    expect(screen.getByRole('status')).toHaveTextContent('Project');
+    expect(warning).toHaveBeenCalledExactlyOnceWith('Unable to restore window layout', error);
+    view.rerender(<Shell bridge={bridge} workspace={false} />);
+    await advance();
+    expect(mode).toHaveBeenLastCalledWith(false, false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('preserves immediate transfer display and native bounds under StrictMode', async () => {
+  it('preserves transferred bounds under StrictMode without waiting for a paint', async () => {
     window.history.replaceState(null, '', '/?tabTransfer=1');
     const bridge = new MockBridge(() => null);
     const mode = vi.spyOn(bridge.window, 'setWorkspaceMode').mockResolvedValue(viewport);
     const view = render(<StrictMode><Shell bridge={bridge} workspace={false} ready={false} /></StrictMode>);
     view.rerender(<StrictMode><Shell bridge={bridge} workspace /></StrictMode>);
-    expect(screen.getByRole('status')).toHaveTextContent('Project');
-    await advance();
     expect(mode).toHaveBeenCalledWith(true, true);
+    await advance();
     expect(mode).not.toHaveBeenCalledWith(true, false);
+    view.rerender(<StrictMode><Shell bridge={bridge} workspace={false} /></StrictMode>);
+    await advance();
+    expect(mode).toHaveBeenLastCalledWith(false, false);
+  });
+
+  it('does not resize before startup is ready or after unmounting', async () => {
+    const bridge = new MockBridge(() => null);
+    const mode = vi.spyOn(bridge.window, 'setWorkspaceMode');
+    const view = render(<Shell bridge={bridge} workspace ready={false} />);
+    await advance();
+    expect(mode).not.toHaveBeenCalled();
+    view.rerender(<Shell bridge={bridge} workspace />);
+    view.unmount();
+    await advance();
+    expect(mode).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
-describe('window paint readiness', () => {
-  it('waits for the acknowledged native dimensions even after the old delay has elapsed', async () => {
+describe('destination page paint', () => {
+  it('waits one paint opportunity even while window dimensions are changing', async () => {
     const done = vi.fn();
-    void waitForWindowPaint(new AbortController().signal, { width: 1440, height: 900 }).then(done);
-    await advance(800);
+    void waitForWindowPaint(new AbortController().signal).then(done);
+    await advance(16);
     expect(done).not.toHaveBeenCalled();
-    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1440);
-    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(900);
-    await advance(64);
-    expect(done).not.toHaveBeenCalled();
-    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1440);
-    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(900);
-    await advance(32);
+    window.dispatchEvent(new Event('resize'));
+    await advance(16);
     expect(done).toHaveBeenCalledExactlyOnceWith(true);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('allows physical to logical rounding on fractional-DPI displays', async () => {
+  it('bounds the delay when the renderer does not schedule animation frames', async () => {
+    vi.mocked(window.requestAnimationFrame).mockReturnValue(1);
     const done = vi.fn();
-    void waitForWindowPaint(new AbortController().signal, { width: 1024.8, height: 768.4 }).then(done);
-    await advance(32);
-    expect(done).toHaveBeenCalledExactlyOnceWith(true);
-  });
-
-  it('falls back when the window manager refuses the requested dimensions', async () => {
-    const done = vi.fn();
-    void waitForWindowPaint(new AbortController().signal, { width: 1440, height: 900 }).then(done);
-    await advance(1199);
+    void waitForWindowPaint(new AbortController().signal).then(done);
+    await advance(119);
     expect(done).not.toHaveBeenCalled();
     await advance(1);
     expect(done).toHaveBeenCalledExactlyOnceWith(true);
-    expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('finishes when a window becomes hidden during confirmation', async () => {
+  it('finishes when the window becomes hidden', async () => {
     const done = vi.fn();
-    void waitForWindowPaint(new AbortController().signal, { width: 1440, height: 900 }).then(done);
-    await advance(32);
+    void waitForWindowPaint(new AbortController().signal).then(done);
+    await advance(16);
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
     await advance(0);
@@ -160,30 +165,19 @@ describe('window paint readiness', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('resets layout confirmation when a resize arrives between matching frames', async () => {
-    const done = vi.fn();
-    void waitForWindowPaint(new AbortController().signal, viewport).then(done);
-    await advance(16);
-    window.dispatchEvent(new Event('resize'));
-    await advance(16);
-    expect(done).not.toHaveBeenCalled();
-    await advance(16);
-    expect(done).toHaveBeenCalledWith(true);
-  });
-
-  it('does not hang if a hidden webview never schedules animation frames', async () => {
+  it('does not wait for a hidden webview to schedule animation frames', async () => {
     vi.mocked(window.requestAnimationFrame).mockReturnValue(1);
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     const done = vi.fn();
-    void waitForWindowPaint(new AbortController().signal, viewport).then(done);
-    await advance(750);
-    expect(done).toHaveBeenCalledWith(true);
+    void waitForWindowPaint(new AbortController().signal).then(done);
+    await advance(0);
+    expect(done).toHaveBeenCalledExactlyOnceWith(true);
   });
 
-  it('cancels pending work and removes resize listeners on teardown', async () => {
+  it('cancels scheduled frames and listeners on teardown', async () => {
     const controller = new AbortController();
     const done = vi.fn();
-    void waitForWindowPaint(controller.signal, viewport).then(done);
+    void waitForWindowPaint(controller.signal).then(done);
     controller.abort();
     await advance();
     expect(done).toHaveBeenCalledExactlyOnceWith(false);

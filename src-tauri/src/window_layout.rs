@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
 use tauri::{Manager, Window};
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct Geometry {
     x: f64,
@@ -307,21 +310,27 @@ impl WindowLayouts {
                 .map_err(native_error)?;
             let mut target = None;
             if !preserve {
-                window.set_fullscreen(false).map_err(native_error)?;
-                window.unmaximize().map_err(native_error)?;
                 let geometry = saved
                     .map(|value| area.fit(value))
                     .unwrap_or_else(|| area.default_geometry(workspace));
                 target = Some(geometry);
-                window
-                    .set_size(tauri::LogicalSize::new(geometry.width, geometry.height))
-                    .map_err(native_error)?;
-                window
-                    .set_position(tauri::PhysicalPosition::new(
-                        geometry.x.round() as i32,
-                        geometry.y.round() as i32,
-                    ))
-                    .map_err(native_error)?;
+                #[cfg(target_os = "macos")]
+                let applied = macos::set_geometry(window, geometry, initialized && !same_mode)?;
+                #[cfg(not(target_os = "macos"))]
+                let applied = false;
+                if !applied {
+                    window.set_fullscreen(false).map_err(native_error)?;
+                    window.unmaximize().map_err(native_error)?;
+                    window
+                        .set_size(tauri::LogicalSize::new(geometry.width, geometry.height))
+                        .map_err(native_error)?;
+                    window
+                        .set_position(tauri::PhysicalPosition::new(
+                            geometry.x.round() as i32,
+                            geometry.y.round() as i32,
+                        ))
+                        .map_err(native_error)?;
+                }
                 // Set normal bounds before maximizing, including the first launch.
                 if workspace {
                     self.windows

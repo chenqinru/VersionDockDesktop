@@ -565,13 +565,6 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
 .codicon, .codicon[class*="codicon-"] { font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }
 .app-shell { --titlebar-height: 38px; height: 100%; display: flex; flex-direction: column; position: relative; }
 .app-shell:focus { outline: none; }
-.app-shell[data-window-transition] > :not(.window-mode-transition):not(.titlebar) { visibility: hidden; }
-.app-shell > .window-mode-transition {
-  position: fixed;
-  inset: var(--titlebar-height) 0 0;
-  z-index: 19;
-  background: var(--versiondock-bg);
-}
 /* ===== 现代一体化 TitleBar 顶栏与标签栏样式 ===== */
 .titlebar {
   --titlebar-tint-strength: 20%;

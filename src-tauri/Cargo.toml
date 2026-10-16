@@ -63,7 +63,7 @@ block2 = "0.6.2"
 objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSDate", "NSNotification", "NSOperation", "NSRunLoop", "NSString", "block2"] }
 objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKContentWorld", "WKFrameInfo", "WKWebView", "block2"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder", "NSWorkspace", "NSAccessibility"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
