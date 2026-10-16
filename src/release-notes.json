@@ -1,5 +1,25 @@
 [
   {
+    "version": "0.1.15",
+    "date": "2026-10-16",
+    "highlights": {
+      "zh-CN": [
+        "改善欢迎页与项目页之间的窗口切换，保留标题栏，仅在内容区显示加载过渡；确认窗口尺寸与页面布局匹配后再展示内容，并避免缩放中间态覆盖已记忆的窗口布局。",
+        "修复 Windows 最小化、最大化和关闭按钮在部分应用主题下不清晰的问题，使图标与悬停颜色跟随应用主题，并补充中文提示及最大化、还原状态切换的翻译。",
+        "修复 Windows 窗口按钮遮挡弹窗及最大化命中区域拦截弹窗操作的问题；Windows、Linux 按钮保持在遮罩下方，macOS 原生按钮在弹窗期间隐藏，关闭后恢复。",
+        "补充任务进度中“丢弃更改”的内置中英文翻译，避免中文界面出现英文任务名称。",
+        "优化 macOS 更新重启，在旧进程退出后刷新原应用的系统登记信息再重新打开，并记录重启版本与应用路径，便于排查更新后 Dock 图标异常。"
+      ],
+      "en": [
+        "Improve transitions between the welcome screen and project workspace by keeping the title bar visible and showing loading feedback only in the content area. Reveal content once window dimensions and page layout match, and keep intermediate resize states from overwriting the saved window layout.",
+        "Fix minimize, maximize and close buttons being hard to see in some Windows app themes. Match icon and hover colors to the app theme, and add Chinese labels that follow maximize and restore state changes.",
+        "Fix Windows window controls covering dialogs and the native maximize hit area intercepting dialog input. Keep Windows and Linux controls beneath the backdrop, and hide macOS native controls while dialogs are open, restoring them afterward.",
+        "Add built-in English and Chinese translations for the Discard Changes task so Chinese interfaces no longer show an English task name.",
+        "Improve macOS update restarts by refreshing the original app registration after the old process exits and before reopening the app. Log the restart version and app path to help investigate Dock icon issues after updates."
+      ]
+    }
+  },
+  {
     "version": "0.1.14",
     "date": "2026-10-16",
     "highlights": {
