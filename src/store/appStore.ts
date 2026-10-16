@@ -51,6 +51,8 @@ export interface OpenWorkspaceOptions {
 }
 
 export interface SyncOptions {
+  /** Automatic fetches may yield to user repository writes. */
+  backgroundFetch?: boolean;
   remote?: string;
   branch?: string;
   rethrow?: boolean;
@@ -1846,7 +1848,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const stopRenewal = () => clearInterval(renewLease);
     controller.signal.addEventListener('abort', stopRenewal, { once: true });
     try {
-      await Promise.allSettled(repos.map((repo) => owner.request({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: 'fetch', remote: null, branch: null, force: false } }, { showProgress: false, timeoutMs: 600_000, signal: controller.signal })));
+      await Promise.allSettled(repos.map((repo) => owner.request({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: 'fetch', remote: null, branch: null, force: false } }, { showProgress: false, timeoutMs: 600_000, signal: controller.signal, context: { target: 'autoFetch' } })));
       if (!controller.signal.aborted && get().bridge === owner && get().snapshot?.workspace.id === wid) await get().refresh(true);
     } catch (error) {
       console.debug('Background fetch refresh skipped', error);
@@ -2886,7 +2888,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           try {
             const allRepos = get().allRepositories.length ? get().allRepositories : (currentSnapshot.repositories ?? []);
             const gitRepos = allRepos.filter((repo) => repo.meta.kind === 'git' && repo.toolAvailable !== false && !repo.meta.isWorktree);
-            await Promise.allSettled(gitRepos.map((repo) => get().sync(repo.meta.id, 'fetch', false)));
+            await Promise.allSettled(gitRepos.map((repo) => get().sync(repo.meta.id, 'fetch', false, { backgroundFetch: true })));
             await get().refresh(true);
           } finally {
             startupFetchPending = false;
@@ -4162,7 +4164,9 @@ export const useAppStore = create<AppStore>((set, get) => {
           } : options.onOperationId ?? (action === 'fetch' && notify && options.showProgress !== false
             ? (id: string) => useTaskProgressStore.getState().trackForegroundRequest(id) : undefined);
           try {
-            result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null, force: options.force ?? false } }, { timeoutMs: 600_000, showProgress: progress || action === 'fetch' ? false : (options.showProgress ?? notify), onOperationId });
+            result = await bridge().request<SyncResult>({ type: 'sync', payload: { workspace_id: wid, repo_id: repoId, action, remote: options.remote ?? null, branch: options.branch ?? null, force: options.force ?? false } }, { timeoutMs: 600_000, showProgress: progress || action === 'fetch' ? false : (options.showProgress ?? notify), onOperationId,
+              ...(action === 'fetch' && options.backgroundFetch ? { context: { target: 'autoFetch' } } : {}),
+            });
           } catch (error) {
             if (error instanceof BridgeError) await notifyUpdateRestoreWarning(error.restoreWarning, wid, repoId);
             if (await handlePullAutoStashError(error, wid)) {

@@ -1035,7 +1035,7 @@ describe('appStore async lifecycle', () => {
     ws.repositories = [{ ...repoVisible }, { ...repoHidden }];
 
     const fetchedRepoIds: string[] = [];
-    const bridge = new MockBridge((command) => {
+    const bridge = new MockBridge((command, options) => {
       if (command.type === 'bootstrap') {
         return {
           ...bootstrap,
@@ -1054,6 +1054,7 @@ describe('appStore async lifecycle', () => {
         const payload = command.payload as { repo_id: string; action: string };
         if (payload.action === 'fetch') {
           fetchedRepoIds.push(payload.repo_id);
+          expect(options?.context?.target).toBe('autoFetch');
           return { output: 'Fetched' };
         }
       }

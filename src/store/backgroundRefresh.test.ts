@@ -264,7 +264,16 @@ describe('unified automatic fetch', () => {
     focus(); await tick();
     expect(calls('sync').length).toBeGreaterThan(0);
     expect(calls('sync').every(([command, options]) => command.type === 'sync'
-      && command.payload.action === 'fetch' && options?.showProgress === false)).toBe(true);
+      && command.payload.action === 'fetch' && options?.showProgress === false
+      && options.context?.target === 'autoFetch')).toBe(true);
+  });
+
+  it('does not mark a silent manual fetch as an automatic fetch', async () => {
+    request.mockImplementation((command, options) => command.type === 'sync'
+      ? Promise.resolve({ output: '', update: null }) : original(command, options));
+    await useAppStore.getState().sync('api', 'fetch', false);
+    expect(calls('sync')).toHaveLength(1);
+    expect(calls('sync')[0][1]?.context?.target).not.toBe('autoFetch');
   });
 
   it('respects per-project cross-window cooldown, settings, and disposal', async () => {

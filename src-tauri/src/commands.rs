@@ -3075,11 +3075,16 @@ async fn dispatch(
             let (phase, message) = sync_phase(&action);
             let repo = resolve_repo(state, &workspace_id, &repo_id).await?;
             let needs_worker = crate::update_worker::needs_worker(&repo, &action);
-            let value = with_write_coordinated(
+            let background_fetch = repo.kind == VcsKind::Git
+                && matches!(action, crate::models::SyncAction::Fetch)
+                && request_context.target.as_deref() == Some("autoFetch")
+                && request_context.visibility == crate::models::OperationVisibility::Background;
+            let value = with_write_priority(
                 state,
                 &repo_id,
                 token,
                 !needs_worker && !matches!(action, crate::models::SyncAction::Push),
+                background_fetch,
                 async {
                     emit_operation_phase(
                         app,
@@ -4717,17 +4722,58 @@ async fn with_write_coordinated<T, F>(
 where
     F: std::future::Future<Output = Result<T, DesktopError>>,
 {
+    with_write_priority(state, repo_id, token, lock_transaction, false, operation).await
+}
+
+pub(crate) async fn with_write_priority<T, F>(
+    state: &AppState,
+    repo_id: &str,
+    token: &tokio_util::sync::CancellationToken,
+    lock_transaction: bool,
+    background_fetch: bool,
+    operation: F,
+) -> Result<T, DesktopError>
+where
+    F: std::future::Future<Output = Result<T, DesktopError>>,
+{
+    // Register before waiting for the write lock, so queued user operations
+    // preempt an active automatic fetch and prevent new ones from jumping in.
+    if token.is_cancelled() {
+        return Err(DesktopError::new(
+            "REQUEST_CANCELLED",
+            "Operation cancelled",
+            true,
+        ));
+    }
+    let _activity = state
+        .repository_priority
+        .enter(repo_id, token, background_fetch);
     let lock = state.write_lock(repo_id).await;
     state::emit_current_operation(
         OperationStatus::Queued,
-        "waitingForRepository",
-        "Waiting for the repository write lock",
+        if _activity.preempted_fetch {
+            "stoppingBackgroundFetch"
+        } else {
+            "waitingForRepository"
+        },
+        if _activity.preempted_fetch {
+            "Stopping automatic fetch before repository operation"
+        } else {
+            "Waiting for the repository write lock"
+        },
     );
     let _guard = tokio::select! {
+        biased;
         _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
         guard = lock.lock_owned() => guard,
     };
-    let _permit = state.acquire_write(token).await?;
+    // Slow automatic fetches in unrelated repositories must not occupy all
+    // foreground write slots. Both pools remain bounded and share repo locks.
+    let _permit = if background_fetch {
+        state.acquire_background_fetch(token).await?
+    } else {
+        state.acquire_write(token).await?
+    };
     // A source-watcher restart must not let the new UI write into a repository
     // whose detached update worker is still updating or restoring local changes.
     let _transaction = if lock_transaction {
@@ -4735,6 +4781,13 @@ where
     } else {
         None
     };
+    if token.is_cancelled() {
+        return Err(DesktopError::new(
+            "REQUEST_CANCELLED",
+            "Operation cancelled",
+            true,
+        ));
+    }
     operation.await
 }
 
@@ -5048,6 +5101,80 @@ mod tests {
         let error = waiting.await.unwrap().unwrap_err();
         drop(held);
         assert_eq!(error.code, "REQUEST_CANCELLED");
+    }
+
+    #[tokio::test]
+    async fn coordinator_keeps_foreground_slots_available_when_other_repositories_are_fetching() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState::load(root.path().to_path_buf()));
+        let mut tasks = Vec::new();
+        let mut cancels = Vec::new();
+        for index in 0..2 {
+            let state = state.clone();
+            let token = tokio_util::sync::CancellationToken::new();
+            cancels.push(token.clone());
+            let (started, start) = tokio::sync::oneshot::channel();
+            tasks.push(tokio::spawn(async move {
+                with_write_priority(
+                    &state,
+                    &format!("fetch-{index}"),
+                    &token,
+                    false,
+                    true,
+                    async {
+                        started.send(()).unwrap();
+                        token.cancelled().await;
+                        Ok::<_, DesktopError>(())
+                    },
+                )
+                .await
+            }));
+            start.await.unwrap();
+        }
+        let token = tokio_util::sync::CancellationToken::new();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            with_write(&state, "local-repo", &token, async {
+                Ok::<_, DesktopError>(())
+            }),
+        )
+        .await;
+        for cancel in cancels {
+            cancel.cancel();
+        }
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+        result
+            .expect("unrelated background fetches blocked a local commit")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn coordinator_does_not_cancel_manual_operations_or_release_their_write_lock_early() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState::load(root.path().to_path_buf()));
+        let token = tokio_util::sync::CancellationToken::new();
+        let held = state.write_lock("repo").await.lock_owned().await;
+        let (started, mut start) = tokio::sync::oneshot::channel();
+        let pending_state = state.clone();
+        let pending_token = token.clone();
+        let pending = tokio::spawn(async move {
+            with_write(&pending_state, "repo", &pending_token, async {
+                started.send(()).unwrap();
+                Ok::<_, DesktopError>(())
+            })
+            .await
+        });
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            start.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(!token.is_cancelled());
+        drop(held);
+        pending.await.unwrap().unwrap();
+        start.await.unwrap();
     }
 
     #[test]

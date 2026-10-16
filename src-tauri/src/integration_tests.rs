@@ -2801,6 +2801,131 @@ fn repo(path: &Path, kind: VcsKind) -> RepositoryMeta {
 }
 
 #[tokio::test]
+async fn real_git_commit_preempts_stalled_automatic_fetch_and_waits_for_process_exit() {
+    if !available("git") {
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let working = directory.path().join("working");
+    std::fs::create_dir(&working).unwrap();
+    command("git", &["init", "-b", "main"], &working);
+    command("git", &["config", "user.name", "Priority Test"], &working);
+    command(
+        "git",
+        &["config", "user.email", "priority@example.test"],
+        &working,
+    );
+    std::fs::write(working.join("file.txt"), "initial\n").unwrap();
+    command("git", &["add", "."], &working);
+    command("git", &["commit", "-m", "initial"], &working);
+
+    // A real Git transport connects successfully but receives no server reply.
+    // This reproduces a stalled network fetch without accessing the Internet.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    command(
+        "git",
+        &[
+            "remote",
+            "add",
+            "origin",
+            &format!("git://{address}/repo.git"),
+        ],
+        &working,
+    );
+    let (started, start) = tokio::sync::oneshot::channel();
+    let (closed, close) = tokio::sync::oneshot::channel();
+    let server = std::thread::spawn(move || {
+        use std::io::Read;
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut buffer = [0; 4096];
+        assert!(stream.read(&mut buffer).unwrap() > 0);
+        let _ = started.send(());
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = closed.send(());
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => panic!("Git transport was not terminated: {error}"),
+            }
+        }
+    });
+
+    let repository = repo(&working, VcsKind::Git);
+    let state = std::sync::Arc::new(crate::state::AppState::load(
+        directory.path().join("config"),
+    ));
+    let token = CancellationToken::new();
+    let fetch_state = state.clone();
+    let fetch_repo = repository.clone();
+    let fetch = tokio::spawn(async move {
+        let settings = fetch_state.app.read().await.settings.clone();
+        crate::commands::with_write_priority(
+            &fetch_state,
+            &fetch_repo.id,
+            &token,
+            true,
+            true,
+            async {
+                vcs::sync(
+                    &fetch_repo,
+                    SyncAction::Fetch,
+                    None,
+                    None,
+                    false,
+                    &settings,
+                    &token,
+                )
+                .await
+            },
+        )
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), start)
+        .await
+        .unwrap()
+        .unwrap();
+    std::fs::write(working.join("file.txt"), "user change\n").unwrap();
+    let commit_token = CancellationToken::new();
+    let commit = crate::commands::with_write(&state, &repository.id, &commit_token, async {
+        // The canceled Git process must close its transport before commit runs.
+        tokio::time::timeout(std::time::Duration::from_secs(2), close)
+            .await
+            .unwrap()
+            .unwrap();
+        vcs::commit(
+            &repository,
+            "user commit",
+            false,
+            &["file.txt".into()],
+            &commit_token,
+        )
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), commit)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fetch.await.unwrap().unwrap_err().code, "REQUEST_CANCELLED");
+    server.join().unwrap();
+    assert_eq!(
+        command_output("git", &["log", "-1", "--format=%s"], &working),
+        "user commit"
+    );
+    assert_eq!(
+        command_output("git", &["show", "HEAD:file.txt"], &working),
+        "user change"
+    );
+    assert!(command_output("git", &["status", "--porcelain"], &working).is_empty());
+    assert!(!working.join(".git/index.lock").exists());
+}
+
+#[tokio::test]
 async fn real_git_pull_auto_stash_preserves_staged_and_unstaged_changes() {
     if !available("git") {
         return;

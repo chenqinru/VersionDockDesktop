@@ -38,6 +38,7 @@ describe('i18n', () => {
     ['Waiting for a repository read slot', '正在等待仓库读取许可'],
     ['Waiting for a repository write slot', '正在等待仓库写入许可'],
     ['Waiting for the repository write lock', '正在等待仓库写入锁'],
+    ['Stopping automatic fetch before repository operation', '正在停止自动获取，以执行仓库操作'],
     ['Preparing selected paths and creating commit', '正在准备所选文件并创建提交'],
     ['Pulling repository changes with fast-forward only', '正在以快进方式拉取仓库更改'],
   ])('translates native operation text without depending on plugin bundles: %s', (english, chinese) => {

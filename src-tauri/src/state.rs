@@ -95,7 +95,9 @@ pub struct AppState {
     pub cancellations: Mutex<HashMap<String, CancellationToken>>,
     pub read_limit: Semaphore,
     pub write_limit: Semaphore,
+    background_fetch_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    pub(crate) repository_priority: crate::repository_priority::RepositoryPriority,
     state_write_lock: Mutex<()>,
     layout_revision: AtomicU32,
     repository_cache: RwLock<HashMap<String, HashMap<String, RepositoryMeta>>>,
@@ -177,7 +179,9 @@ impl AppState {
             cancellations: Mutex::new(HashMap::new()),
             read_limit: Semaphore::new(4),
             write_limit: Semaphore::new(2),
+            background_fetch_limit: Semaphore::new(2),
             write_locks: Mutex::new(HashMap::new()),
+            repository_priority: Default::default(),
             state_write_lock: Mutex::new(()),
             layout_revision: AtomicU32::new(0),
             repository_cache: RwLock::new(HashMap::new()),
@@ -409,14 +413,32 @@ impl AppState {
         &self,
         cancellation: &CancellationToken,
     ) -> Result<tokio::sync::SemaphorePermit<'_>, DesktopError> {
+        self.acquire_repository_slot(&self.write_limit, cancellation)
+            .await
+    }
+
+    pub(crate) async fn acquire_background_fetch(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<tokio::sync::SemaphorePermit<'_>, DesktopError> {
+        self.acquire_repository_slot(&self.background_fetch_limit, cancellation)
+            .await
+    }
+
+    async fn acquire_repository_slot<'a>(
+        &self,
+        slots: &'a Semaphore,
+        cancellation: &CancellationToken,
+    ) -> Result<tokio::sync::SemaphorePermit<'a>, DesktopError> {
         emit_current_operation(
             OperationStatus::Queued,
             "waitingForWriteSlot",
             "Waiting for a repository write slot",
         );
         let permit = tokio::select! {
+            biased;
             _ = cancellation.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
-            permit = self.write_limit.acquire() => permit.map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true)),
+            permit = slots.acquire() => permit.map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true)),
         }?;
         emit_current_operation(
             OperationStatus::Running,
