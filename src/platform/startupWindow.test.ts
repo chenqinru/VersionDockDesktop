@@ -29,6 +29,28 @@ afterEach(() => {
 });
 
 describe('native startup window', () => {
+  it('returns the native content size and serializes overlapping mode requests', async () => {
+    const bridge = new TauriBridge();
+    let complete!: (response: unknown) => void;
+    native.invoke.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }))
+      .mockResolvedValueOnce({ result: { width: 880, height: 540 }, error: null });
+    const project = bridge.window.setWorkspaceMode(true);
+    const welcome = bridge.window.setWorkspaceMode(false);
+    await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledOnce());
+    complete({ result: { width: 1440, height: 900 }, error: null });
+    await expect(project).resolves.toEqual({ width: 1440, height: 900 });
+    await expect(welcome).resolves.toEqual({ width: 880, height: 540 });
+    expect(native.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues mode restoration after a previous request fails', async () => {
+    const bridge = new TauriBridge();
+    native.invoke.mockRejectedValueOnce(new Error('Resize failed'))
+      .mockResolvedValueOnce({ result: { width: 880, height: 540 }, error: null });
+    await expect(bridge.window.setWorkspaceMode(true)).rejects.toThrow('Resize failed');
+    await expect(bridge.window.setWorkspaceMode(false)).resolves.toEqual({ width: 880, height: 540 });
+  });
+
   it.each(['macos', 'windows'])('routes %s caption visibility through the native bridge', async platform => {
     native.platform.mockReturnValue(platform);
     const bridge = new TauriBridge();

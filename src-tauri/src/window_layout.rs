@@ -1,7 +1,7 @@
 //! Native window geometry is separate from workbench layout and welcome sizing.
 //! Each live window owns its project geometry; only the latest user adjustment is
 //! used as the initial placement after restarting the application.
-use crate::models::DesktopError;
+use crate::models::{DesktopError, WindowViewport};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
 use tauri::{Manager, Window};
@@ -260,12 +260,12 @@ impl WindowLayouts {
             scale: 1.0,
         })
     }
-    pub fn set_mode(
+    fn set_mode(
         &self,
         window: &Window,
         workspace: bool,
         preserve: bool,
-    ) -> Result<(), DesktopError> {
+    ) -> Result<Option<Geometry>, DesktopError> {
         self.register(window.label(), preserve && workspace);
         let (same_mode, initialized) = {
             let windows = self.windows.lock().unwrap();
@@ -273,7 +273,7 @@ impl WindowLayouts {
             (entry.workspace == workspace, entry.epoch > 0)
         };
         if same_mode && initialized {
-            return Ok(());
+            return Ok(None);
         }
         // Capture the project before making the same native window a welcome screen.
         if initialized && !same_mode {
@@ -304,12 +304,14 @@ impl WindowLayouts {
                     480.0_f64.min((area.height - 40.0).max(1.0)),
                 )))
                 .map_err(native_error)?;
+            let mut target = None;
             if !preserve {
                 window.set_fullscreen(false).map_err(native_error)?;
                 window.unmaximize().map_err(native_error)?;
                 let geometry = saved
                     .map(|value| area.fit(value))
                     .unwrap_or_else(|| area.default_geometry(workspace));
+                target = Some(geometry);
                 window
                     .set_size(tauri::LogicalSize::new(geometry.width, geometry.height))
                     .map_err(native_error)?;
@@ -333,18 +335,18 @@ impl WindowLayouts {
                     }
                 }
             }
-            Ok(())
+            Ok(target)
         })();
         if let Some(entry) = self.windows.lock().unwrap().entries.get_mut(window.label()) {
             if entry.epoch == epoch {
                 entry.transitioning = false;
             }
         }
-        result?;
+        let target = result?;
         if preserve {
             self.capture(window)?;
         }
-        Ok(())
+        Ok(target)
     }
     pub fn reset(&self, window: &Window) -> Result<(), DesktopError> {
         let workspace = {
@@ -365,7 +367,7 @@ impl WindowLayouts {
                 })
                 .unwrap_or(false)
         };
-        self.set_mode(window, workspace, false)
+        self.set_mode(window, workspace, false).map(|_| ())
     }
     pub fn remove(&self, label: &str) {
         self.windows.lock().unwrap().entries.remove(label);
@@ -430,30 +432,141 @@ pub fn window_event(window: &Window, event: &tauri::WindowEvent) {
     }
 }
 
-pub async fn set_mode(
-    window: tauri::WebviewWindow,
-    workspace: bool,
-    preserve: bool,
-) -> Result<(), DesktopError> {
+async fn on_main_thread<T: Send + 'static>(
+    window: &tauri::WebviewWindow,
+    action: impl FnOnce(tauri::WebviewWindow) -> Result<T, DesktopError> + Send + 'static,
+) -> Result<T, DesktopError> {
     let (send, receive) = tokio::sync::oneshot::channel();
+    let current = window.clone();
     window
         .app_handle()
         .clone()
         .run_on_main_thread(move || {
-            let result = window
-                .state::<WindowLayouts>()
-                .set_mode(&window.as_ref().window(), workspace, preserve)
-                .and_then(|()| {
-                    // Apply the content bounds in the same native turn, rather than
-                    // leaving the old webview size until a later OS resize event.
-                    let size = window.inner_size().map_err(native_error)?;
-                    let webview: &tauri::Webview = window.as_ref();
-                    webview.set_size(size).map_err(native_error)
-                });
-            let _ = send.send(result);
+            let _ = send.send(action(current));
         })
         .map_err(native_error)?;
     receive.await.map_err(native_error)?
+}
+
+fn matches_target(viewport: &WindowViewport, maximized: bool, target: Option<Geometry>) -> bool {
+    viewport.width > 0.0
+        && viewport.height > 0.0
+        && target.is_none_or(|target| {
+            maximized == target.maximized
+                && (maximized
+                    || ((viewport.width - target.width).abs() <= 1.0
+                        && (viewport.height - target.height).abs() <= 1.0))
+        })
+}
+
+pub async fn set_mode(
+    window: tauri::WebviewWindow,
+    workspace: bool,
+    preserve: bool,
+) -> Result<WindowViewport, DesktopError> {
+    let (target, epoch) = on_main_thread(&window, move |window| {
+        let layouts = window.state::<WindowLayouts>();
+        let target = layouts.set_mode(&window.as_ref().window(), workspace, preserve)?;
+        let mut windows = layouts.windows.lock().unwrap();
+        let entry = windows
+            .entries
+            .get_mut(window.label())
+            .ok_or_else(|| native_error("Window closed"))?;
+        // Do not persist intermediate unmaximize/resize events as user geometry.
+        entry.transitioning = true;
+        Ok((target, entry.epoch))
+    })
+    .await?;
+    let result = confirm_viewport(&window, target, epoch).await;
+    let confirmed = result.as_ref().is_ok_and(|(_, confirmed)| *confirmed);
+    let cleanup = on_main_thread(&window, move |window| {
+        let layouts = window.state::<WindowLayouts>();
+        let current = {
+            let mut windows = layouts.windows.lock().unwrap();
+            if let Some(entry) = windows
+                .entries
+                .get_mut(window.label())
+                .filter(|entry| entry.epoch == epoch)
+            {
+                entry.transitioning = false;
+                true
+            } else {
+                false
+            }
+        };
+        if current && confirmed {
+            layouts.capture(&window.as_ref().window())?;
+        }
+        Ok(())
+    })
+    .await;
+    if let Err(error) = cleanup {
+        warn(error.message);
+    }
+    result.map(|(viewport, _)| viewport)
+}
+
+async fn confirm_viewport(
+    window: &tauri::WebviewWindow,
+    target: Option<Geometry>,
+    epoch: u64,
+) -> Result<(WindowViewport, bool), DesktopError> {
+    // set_size/unmaximize/maximize may enqueue OS work. Confirm the native result
+    // instead of reporting the old webview bounds as the new content size.
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(1200);
+    let mut previous = None;
+    loop {
+        let expired = tokio::time::Instant::now() >= deadline;
+        let (viewport, sample, done, confirmed) = on_main_thread(window, move |window| {
+            if !window
+                .state::<WindowLayouts>()
+                .windows
+                .lock()
+                .unwrap()
+                .entries
+                .get(window.label())
+                .is_some_and(|entry| entry.epoch == epoch)
+            {
+                return Err(native_error("Window layout request superseded"));
+            }
+            let size = window.inner_size().map_err(native_error)?;
+            let scale = window.scale_factor().map_err(native_error)?;
+            let logical = size.to_logical::<f64>(scale);
+            let viewport = WindowViewport {
+                width: logical.width,
+                height: logical.height,
+            };
+            let sample = (size.width, size.height, scale.to_bits());
+            let matching = matches_target(
+                &viewport,
+                window.is_maximized().map_err(native_error)?,
+                target,
+            );
+            let confirmed = matching && previous == Some(sample);
+            let done = confirmed || expired || window.is_minimized().map_err(native_error)?;
+            if done && size.width > 0 && size.height > 0 {
+                let webview: &tauri::Webview = window.as_ref();
+                webview.set_size(size).map_err(native_error)?;
+            }
+            Ok((viewport, matching.then_some(sample), done, confirmed))
+        })
+        .await?;
+        if done {
+            if expired {
+                crate::logger::log_entry(
+                    crate::models::LogLevel::Warn,
+                    crate::models::LogChannel::Core,
+                    "Window resize confirmation timed out",
+                    None,
+                    None,
+                    None,
+                );
+            }
+            return Ok((viewport, confirmed));
+        }
+        previous = sample;
+        tokio::time::sleep(Duration::from_millis(16)).await;
+    }
 }
 pub async fn reset(window: tauri::WebviewWindow) -> Result<(), DesktopError> {
     let (send, receive) = tokio::sync::oneshot::channel();
@@ -473,6 +586,69 @@ pub async fn reset(window: tauri::WebviewWindow) -> Result<(), DesktopError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resize_confirmation_requires_target_content_size_and_maximize_state() {
+        let target = Geometry {
+            x: 0.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 900.0,
+            maximized: false,
+        };
+        assert!(!matches_target(
+            &WindowViewport {
+                width: 880.0,
+                height: 540.0
+            },
+            false,
+            Some(target)
+        ));
+        assert!(!matches_target(
+            &WindowViewport {
+                width: 1440.0,
+                height: 900.0
+            },
+            true,
+            Some(target)
+        ));
+        assert!(matches_target(
+            &WindowViewport {
+                width: 1440.8,
+                height: 899.6
+            },
+            false,
+            Some(target)
+        ));
+        assert!(!matches_target(
+            &WindowViewport {
+                width: 0.0,
+                height: 0.0
+            },
+            false,
+            None
+        ));
+        let maximized = Geometry {
+            maximized: true,
+            ..target
+        };
+        assert!(!matches_target(
+            &WindowViewport {
+                width: 1440.0,
+                height: 900.0
+            },
+            false,
+            Some(maximized)
+        ));
+        assert!(matches_target(
+            &WindowViewport {
+                width: 1920.0,
+                height: 1040.0
+            },
+            true,
+            Some(maximized)
+        ));
+    }
+
     #[test]
     fn missing_monitor_and_smaller_work_area_keep_geometry_visible() {
         let area = Area {
@@ -549,6 +725,39 @@ mod tests {
             windows.entries["window-second"].project
         );
     }
+    #[test]
+    fn resize_intermediate_bounds_do_not_replace_saved_project_geometry() {
+        let root = tempfile::tempdir().unwrap();
+        let layouts = WindowLayouts::load(root.path().into());
+        layouts.register("main", true);
+        let project = Geometry {
+            x: 180.0,
+            y: 100.0,
+            width: 1440.0,
+            height: 900.0,
+            maximized: false,
+        };
+        let intermediate = Geometry {
+            width: 880.0,
+            height: 540.0,
+            ..project
+        };
+        let mut windows = layouts.windows.lock().unwrap();
+        windows.record("main", project);
+        windows.entries.get_mut("main").unwrap().transitioning = true;
+        windows.record("main", intermediate);
+        assert_eq!(windows.saved.project, Some(project));
+        layouts.flush_pending(&mut windows).unwrap();
+        let restored = WindowLayouts::load(root.path().into());
+        assert_eq!(
+            restored.windows.lock().unwrap().saved.project,
+            Some(project)
+        );
+        windows.entries.get_mut("main").unwrap().transitioning = false;
+        windows.record("main", intermediate);
+        assert_eq!(windows.saved.project, Some(intermediate));
+    }
+
     #[test]
     fn maximizing_immediately_after_resize_preserves_normal_bounds_before_debounced_save() {
         let root = tempfile::tempdir().unwrap();

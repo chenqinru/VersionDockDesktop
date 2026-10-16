@@ -5,7 +5,7 @@ import { formatDemoLogs, logLevelPriority, mergeLogEntries } from '../logs/entri
 import type {
   AiEvent, BridgeCommand, DesktopError, OperationDomain, LayoutUpdateResult,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
-  WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent, WorkspaceDescriptor,
+  WindowTabTransfer, WindowTabTransferCompleted, WindowViewport, WorkspaceEvent, WorkspaceDescriptor,
   LogEntry, LogLevel, LogChannel, UpdateRestoreWarning,
 } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
@@ -90,7 +90,7 @@ export interface VersionDockBridge {
     setPosition(x: number, y: number): Promise<void>;
     setCursorIcon(icon: 'default' | 'grab' | 'grabbing' | 'copy'): Promise<void>;
     setSize(width: number, height: number, center?: boolean): Promise<void>;
-    setWorkspaceMode(workspace: boolean, preserveBounds?: boolean): Promise<void>;
+    setWorkspaceMode(workspace: boolean, preserveBounds?: boolean): Promise<WindowViewport>;
     onDragDrop(handler: (paths: string[]) => void): Promise<() => void>;
   };
 }
@@ -306,11 +306,12 @@ export class TauriBridge implements VersionDockBridge {
     },
     setCursorIcon: async (icon: 'default' | 'grab' | 'grabbing' | 'copy') => (await import('@tauri-apps/api/window')).getCurrentWindow().setCursorIcon(icon),
     setWorkspaceMode: async (workspace: boolean, preserveBounds = false) => {
-      this.windowModeQueue = this.windowModeQueue.catch(() => undefined).then(async () => {
+      const result = this.windowModeQueue.catch(() => undefined).then(async () => {
         await this.syncWindowBackground('Unable to set window transition background');
-        await this.request<void>({ type: 'windowSetWorkspaceMode', payload: { workspace, preserve_bounds: preserveBounds } }, { showProgress: false });
+        return this.request<WindowViewport>({ type: 'windowSetWorkspaceMode', payload: { workspace, preserve_bounds: preserveBounds } }, { showProgress: false });
       });
-      await this.windowModeQueue;
+      this.windowModeQueue = result.then(() => undefined, () => undefined);
+      return result;
     },
     setSize: async (width: number, height: number, center = false) => {
       try {
@@ -806,6 +807,8 @@ export class MockBridge implements VersionDockBridge {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined, destroy: async () => undefined, show: async () => undefined,
     setControlsVisible: async (visible: boolean): Promise<void> => { void visible; },
     hasOtherWorkspaceWindows: async () => false,
-    isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined, setWorkspaceMode: async () => undefined, onDragDrop: async () => () => undefined,
+    isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined,
+    setWorkspaceMode: async (): Promise<WindowViewport> => ({ width: window.innerWidth, height: window.innerHeight }),
+    onDragDrop: async () => () => undefined,
   };
 }

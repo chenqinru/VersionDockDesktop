@@ -1,37 +1,47 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { VersionDockBridge } from '../platform/bridge';
+import type { WindowViewport } from '../bindings/generated';
 
-// Wait for committed pixels, and after a native resize let viewport events settle.
-// Hidden/minimized webviews must not get stuck waiting for animation frames.
-export function waitForWindowPaint(signal: AbortSignal, resizing = false): Promise<boolean> {
+// Confirm the web viewport has caught up to the native content bounds and stayed
+// unchanged across layout opportunities. RAF is not an OS compositor fence.
+export function waitForWindowPaint(signal: AbortSignal, viewport?: WindowViewport): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(false);
   return new Promise(resolve => {
     let frame = 0;
-    let quiet = 0;
+    let previous = '';
     const finish = () => {
       window.cancelAnimationFrame(frame);
-      window.clearTimeout(quiet);
       window.clearTimeout(fallback);
       window.removeEventListener('resize', resized);
+      document.removeEventListener('visibilitychange', visibilityChanged);
       signal.removeEventListener('abort', finish);
       resolve(!signal.aborted);
     };
     const paint = () => {
-      frame = window.requestAnimationFrame(() => {
-        frame = window.requestAnimationFrame(finish);
-      });
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      // Reading client dimensions flushes pending document layout. Allow one CSS
+      // pixel for native physical/logical rounding on fractional-scale displays.
+      const layoutWidth = document.documentElement.clientWidth;
+      const layoutHeight = document.documentElement.clientHeight;
+      const matches = !viewport || (typeof viewport.width === 'number' && typeof viewport.height === 'number'
+        && Math.abs(width - viewport.width) <= 1 && Math.abs(height - viewport.height) <= 1);
+      const laidOut = layoutWidth > 0 && layoutHeight > 0
+        && Math.abs(layoutWidth - width) <= 1 && Math.abs(layoutHeight - height) <= 1;
+      const sample = `${width}:${height}:${layoutWidth}:${layoutHeight}`;
+      if (matches && laidOut && previous === sample) { finish(); return; }
+      previous = matches && laidOut ? sample : '';
+      frame = window.requestAnimationFrame(paint);
     };
     const resized = () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(quiet);
-      quiet = window.setTimeout(paint, 64);
+      previous = '';
     };
-    const fallback = window.setTimeout(finish, document.hidden ? 0 : resizing ? 750 : 120);
+    const visibilityChanged = () => { if (document.hidden) finish(); };
+    const fallback = window.setTimeout(finish, document.hidden ? 0 : viewport ? 1200 : 120);
     signal.addEventListener('abort', finish, { once: true });
-    if (resizing) {
-      window.addEventListener('resize', resized);
-      resized();
-    } else paint();
+    window.addEventListener('resize', resized);
+    document.addEventListener('visibilitychange', visibilityChanged);
+    frame = window.requestAnimationFrame(paint);
   });
 }
 
@@ -51,12 +61,13 @@ export function useWorkspaceWindowMode(bridge: VersionDockBridge, ready: boolean
     void (async () => {
       // The mask must paint before changing native bounds in either direction.
       if (!preserve && !await waitForWindowPaint(controller.signal)) return;
+      let viewport: WindowViewport | undefined;
       try {
-        await bridge.window.setWorkspaceMode(workspace, preserve);
+        viewport = await bridge.window.setWorkspaceMode(workspace, preserve);
       } catch (error) {
         console.warn('Unable to restore window layout', error);
       }
-      if (!preserve && !await waitForWindowPaint(controller.signal, true)) return;
+      if (!preserve && !await waitForWindowPaint(controller.signal, viewport)) return;
       if (!controller.signal.aborted) {
         transfer.current = false;
         setTransferring(false);

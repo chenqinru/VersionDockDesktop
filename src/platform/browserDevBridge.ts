@@ -336,7 +336,7 @@ export class BrowserDevBridge implements VersionDockBridge {
     setPosition: async () => undefined,
     setCursorIcon: async () => undefined,
     setSize: async () => undefined,
-    setWorkspaceMode: async () => undefined,
+    setWorkspaceMode: async () => ({ width: window.innerWidth, height: window.innerHeight }),
     onDragDrop: async () => () => undefined,
   };
 

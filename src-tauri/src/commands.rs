@@ -1513,11 +1513,10 @@ async fn dispatch(
         BridgeCommand::WindowSetWorkspaceMode {
             workspace,
             preserve_bounds,
-        } => {
+        } => json(
             crate::window_layout::set_mode(invoking_window.clone(), workspace, preserve_bounds)
-                .await?;
-            json(true)
-        }
+                .await?,
+        ),
         BridgeCommand::WorkspaceOpen { paths } => {
             let _permit = state.acquire_read(token).await?;
             emit_operation_phase(

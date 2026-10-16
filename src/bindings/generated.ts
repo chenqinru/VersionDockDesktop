@@ -1706,6 +1706,12 @@ export type WindowTabTransferCompleted = {
 	accepted: boolean,
 };
 
+export type WindowViewport = {
+	/**  Logical content size, in CSS pixels at the default webview zoom. */
+	width: number | null,
+	height: number | null,
+};
+
 export type WorkspaceDescriptor = {
 	id: string,
 	name: string,

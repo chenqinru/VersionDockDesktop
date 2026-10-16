@@ -102,6 +102,15 @@ pub struct ResponseEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Type))]
 #[serde(rename_all = "camelCase")]
+pub struct WindowViewport {
+    /// Logical content size, in CSS pixels at the default webview zoom.
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
 pub struct WindowTabTransfer {
     pub transfer_id: String,
     pub source_window_label: String,
