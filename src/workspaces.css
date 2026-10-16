@@ -1,0 +1,81 @@
+/* Workspace identity is shared by the welcome list and the compact switcher. */
+.workspace-item {
+  --workspace-item-gap: 10px;
+  --workspace-item-padding: 7px 8px;
+  --workspace-item-name-size: 12px;
+  --workspace-item-path-size: 10.5px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid transparent;
+}
+.workspace-item[data-size="menu"] { border-radius: var(--versiondock-radius-menu-item); }
+.workspace-item[data-size="welcome"] {
+  --workspace-item-gap: 12px;
+  --workspace-item-padding: 8px 10px;
+  --workspace-item-name-size: 12.5px;
+  --workspace-item-path-size: 11px;
+}
+.workspace-item > .workspace-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--workspace-item-gap);
+  padding: var(--workspace-item-padding);
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--versiondock-text);
+  text-align: left;
+}
+.workspace-item > .workspace-item-main:is(:hover, :focus-visible) { background: transparent; color: var(--versiondock-text); }
+.workspace-item-main:focus-visible { outline: none; }
+.workspace-item:has(.workspace-item-main:focus-visible) { outline: 1px solid var(--versiondock-control-focus-border); outline-offset: -1px; }
+.workspace-item:not([data-row-selected="true"]):has(.workspace-item-main:focus-visible) { background: var(--versiondock-item-hover-background); }
+.workspace-item-icon { flex-shrink: 0; }
+.workspace-item-info { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.workspace-item-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.workspace-item-name, .workspace-item-path { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 1.4; }
+.workspace-item-name { font-size: calc(var(--workspace-item-name-size) * var(--versiondock-ui-font-scale, 1)); font-weight: 500; }
+.workspace-item-path { color: var(--versiondock-muted); font-size: calc(var(--workspace-item-path-size) * var(--versiondock-ui-font-scale, 1)); }
+.workspace-item-opened { flex: 0 0 auto; font-size: calc(9.5px * var(--versiondock-ui-font-scale, 1)); line-height: 1.4; padding: 0 4px; border: 1px solid var(--versiondock-border); border-radius: var(--versiondock-radius-badge); color: var(--versiondock-muted); background: var(--versiondock-surface-alt); white-space: nowrap; }
+.workspace-item-unavailable { display: flex; align-items: flex-start; gap: 4px; color: var(--versiondock-muted); font-size: calc(var(--workspace-item-path-size) * var(--versiondock-ui-font-scale, 1)); line-height: 1.4; }
+.workspace-item-unavailable > .codicon { flex-shrink: 0; color: var(--versiondock-warning); font-size: inherit; line-height: inherit; }
+.workspace-item-check { flex-shrink: 0; margin-left: auto; color: var(--versiondock-accent); }
+.workspace-item-actions { display: flex; flex-shrink: 0; align-items: center; gap: 4px; margin-right: 6px; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.workspace-item:is(:hover, :focus-within) .workspace-item-actions { opacity: 1; pointer-events: auto; }
+.workspace-item-action { width: 26px; height: 26px; }
+.recent-count, .workspace-menu-count { flex-shrink: 0; font-size: calc(10.5px * var(--versiondock-ui-font-scale, 1)); font-weight: 500; line-height: 1.2; padding: 1px 6px; border: 1px solid var(--versiondock-border); border-radius: var(--versiondock-radius-badge); background: var(--versiondock-surface-alt); color: var(--versiondock-muted); }
+
+.workspace-menu-heading { display: flex; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap; }
+.workspace-menu-search { flex: 1; max-width: 160px; }
+
+/* The same primary entry keeps a larger target on the welcome page. */
+.workspace-open-action[data-size] {
+  --workspace-open-icon-size: 32px;
+  --workspace-open-gap: 12px;
+  --workspace-open-padding: 10px 12px;
+  --workspace-open-title-size: 12.5px;
+  --workspace-open-description-size: 10.5px;
+  display: flex;
+  align-items: center;
+  gap: var(--workspace-open-gap);
+  width: 100%;
+  padding: var(--workspace-open-padding);
+  border: 1px solid color-mix(in srgb, var(--versiondock-accent) 40%, var(--versiondock-border));
+  border-radius: var(--versiondock-radius-menu-item);
+  color: var(--versiondock-text);
+  background: color-mix(in srgb, var(--versiondock-accent) 12%, var(--versiondock-surface));
+  text-align: left;
+}
+.workspace-open-action[data-size="welcome"] { --workspace-open-icon-size: 38px; --workspace-open-gap: 14px; --workspace-open-padding: 14px 16px; --workspace-open-title-size: 13px; --workspace-open-description-size: 11px; border-radius: var(--versiondock-radius-control); }
+.workspace-open-action[data-size]:not(:disabled):is(:hover, :focus-visible) { color: var(--versiondock-text); background: color-mix(in srgb, var(--versiondock-accent) 20%, var(--versiondock-surface)); border-color: var(--versiondock-accent); }
+.workspace-open-action[data-size]:not(:disabled):active { background: color-mix(in srgb, var(--versiondock-accent) 25%, var(--versiondock-surface)); }
+.workspace-open-action-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 var(--workspace-open-icon-size); width: var(--workspace-open-icon-size); height: var(--workspace-open-icon-size); border-radius: var(--versiondock-radius-control); background: color-mix(in srgb, var(--versiondock-accent) 20%, transparent); color: var(--versiondock-accent); }
+.workspace-open-action-icon > .codicon { font-size: calc(16px * var(--versiondock-ui-font-scale, 1)); }
+.workspace-open-action-content { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 2px; }
+.workspace-open-action-title { font-size: calc(var(--workspace-open-title-size) * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1.4; }
+.workspace-open-action-description { font-size: calc(var(--workspace-open-description-size) * var(--versiondock-ui-font-scale, 1)); color: var(--versiondock-muted); line-height: 1.4; }
+.workspace-open-action-arrow { flex-shrink: 0; color: var(--versiondock-muted); }

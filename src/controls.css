@@ -1,3 +1,6 @@
+/* Floating surfaces share a lighter shadow on light themes. */
+:root, .theme-preview-surface { --versiondock-popup-shadow: 0 6px 18px rgba(0, 0, 0, .22); }
+:root:is([data-theme="light"], [data-theme="light2026"]), .theme-preview-surface:is([data-theme="light"], [data-theme="light2026"]) { --versiondock-popup-shadow: 0 6px 18px rgba(24, 30, 38, .14); }
 /* Shared selection controls. Page rules only own their placement and available width. */
 .vd-select { position: relative; min-width: 0; }
 .vd-select-trigger[data-control-size] { display: flex; align-items: center; justify-content: space-between; gap: 8px; box-sizing: border-box; width: 100%; min-width: 0; height: calc(28px * var(--versiondock-ui-font-scale, 1)); padding: 4px 8px; border-radius: var(--versiondock-radius-control); font: inherit; font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1)); text-align: left; }
@@ -14,7 +17,7 @@
 .vd-select-trigger > .codicon { flex: 0 0 auto; font-size: 12px; color: var(--versiondock-muted); }
 .vd-select-menu { position: absolute; z-index: 200; top: calc(100% + 4px); right: 0; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; overflow: auto; }
 /* History pickers keep list/calendar geometry while sharing the dropdown surface. */
-.vd-select-menu, .filter-popover, .history-more .more-menu { border: 1px solid var(--versiondock-control-border); border-radius: var(--versiondock-radius-popup); background: var(--versiondock-surface); color: var(--versiondock-text); box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }
+.vd-select-menu, .filter-popover, .history-more .more-menu { border: 1px solid var(--versiondock-control-border); border-radius: var(--versiondock-radius-popup); background: var(--versiondock-surface); color: var(--versiondock-text); box-shadow: var(--versiondock-popup-shadow); }
 .vd-select-menu[data-placement="above"] { top: auto; bottom: calc(100% + 4px); }
 .vd-select-menu > .vd-select-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; box-sizing: border-box; width: 100%; min-height: calc(26px * var(--versiondock-ui-font-scale, 1)); padding: 4px 8px; border-radius: var(--versiondock-radius-menu-item); text-align: left; font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1)); }
 .vd-select-option > span { min-width: 0; overflow-wrap: anywhere; }
@@ -29,6 +32,8 @@
 .vd-checkbox > input:focus-visible + .vd-checkbox-indicator, .vd-switch > input:focus-visible + .vd-switch-track { outline: 1px solid var(--versiondock-control-focus-border); outline-offset: 2px; }
 .vd-checkbox:has(input:disabled), .vd-switch:has(input:disabled) { opacity: .45; }
 .vd-checkbox > input:disabled, .vd-switch > input:disabled { cursor: default; }
+label:has(> :is(.vd-checkbox, .vd-switch) > input:not(:disabled)) { cursor: pointer; }
+label:has(> :is(.vd-checkbox, .vd-switch) > input:disabled) { cursor: default; }
 .vd-checkbox > input[aria-invalid="true"] + .vd-checkbox-indicator { border-color: var(--versiondock-danger); outline-color: var(--versiondock-danger); }
 
 .vd-switch { position: relative; display: inline-flex; flex: 0 0 auto; width: calc(38px * var(--versiondock-ui-font-scale, 1)); height: calc(22px * var(--versiondock-ui-font-scale, 1)); vertical-align: middle; }

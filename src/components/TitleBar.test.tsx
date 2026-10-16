@@ -6,6 +6,7 @@ import { MockBridge, type TabDragPayload, type VersionDockBridge } from '../plat
 import { useAppStore } from '../store/appStore';
 import { I18nContext, createTranslator } from '../i18n';
 import * as dialogService from './dialogService';
+import { DialogHost } from './DialogHost';
 
 const bridge = new MockBridge(() => []);
 const workspace = {
@@ -23,6 +24,89 @@ afterEach(() => {
 });
 
 describe('TitleBar tab dragging', () => {
+  it('keeps mouse focus inside the menu until the workspace chooser opens', async () => {
+    const originalBootstrap = useAppStore.getState().bootstrap;
+    const originalOpen = useAppStore.getState().openWorkspace;
+    const open = vi.fn().mockResolvedValue(true);
+    const picker = vi.spyOn(bridge, 'selectWorkspaceFolders').mockResolvedValue(['/tmp/selected']);
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, operations: {}, openWorkspace: open,
+      bootstrap: { state: { recentWorkspaces: [] } } as never,
+    });
+    try {
+      render(<BridgeContext.Provider value={bridge}><div className="app-shell" tabIndex={-1}><TitleBar /><DialogHost /></div></BridgeContext.Provider>);
+      fireEvent.click(screen.getByRole('button', { name: 'New Tab' }));
+      const search = screen.getByRole('textbox');
+      expect(search).toHaveFocus();
+      fireEvent.change(search, { target: { value: 'team' } });
+      const clear = screen.getByRole('button', { name: 'Clear' });
+      fireEvent.mouseDown(clear);
+      expect(search).toHaveFocus();
+      fireEvent.click(clear);
+      const action = screen.getByRole('menuitem', { name: /Open Workspace/ });
+      // Safari does not focus buttons on mouse down; prevent its fallback focus on the shell.
+      expect(fireEvent.mouseDown(within(action).getByText('Open Workspace'), { button: 0 })).toBe(false);
+      expect(action).toHaveFocus();
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      fireEvent.click(action);
+      const dialog = await screen.findByRole('dialog', { name: 'Open Workspace' });
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: /Open Local Folder/ }));
+      await waitFor(() => expect(open).toHaveBeenCalledWith(['/tmp/selected']));
+    } finally {
+      dialogService.publishDialog(undefined);
+      picker.mockRestore();
+      useAppStore.setState({ bootstrap: originalBootstrap, openWorkspace: originalOpen });
+    }
+  });
+
+  it('keeps the workspace menu inside the right window edge', () => {
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, operations: {} });
+    render(<BridgeContext.Provider value={bridge}><TitleBar /></BridgeContext.Provider>);
+    const anchor = screen.getByRole('button', { name: 'New Tab' });
+    vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({ left: window.innerWidth - 30, bottom: 32 } as DOMRect);
+    fireEvent.click(anchor);
+    expect(screen.getByRole('menu')).toHaveStyle({ left: `${window.innerWidth - 380 - 12}px` });
+  });
+
+  it.each(['en', 'zh-CN'] as const)('searches recent projects by name and path, clears and resets the query in %s', language => {
+    const languageT = createTranslator(language);
+    const originalBootstrap = useAppStore.getState().bootstrap;
+    const team = { ...workspace, id: 'team', name: '团队项目', paths: ['/projects/team-root'], workspaceFile: '/config/group.code-workspace' };
+    useAppStore.setState({
+      tabs: [workspace], activeTabId: workspace.id, operations: {},
+      bootstrap: { state: { recentWorkspaces: [workspace, team] } } as never,
+    });
+    try {
+      render(<BridgeContext.Provider value={bridge}><I18nContext.Provider value={{ language, preference: 'system', t: languageT }}><TitleBar /></I18nContext.Provider></BridgeContext.Provider>);
+      const openMenu = () => fireEvent.click(screen.getByRole('button', { name: languageT('New Tab') }));
+      openMenu();
+      const input = screen.getByRole('textbox', { name: languageT('Search recent workspaces...') });
+      expect(input).toHaveFocus();
+      for (const query of ['团队', '  TEAM-ROOT  ', 'GROUP.CODE-WORKSPACE']) {
+        fireEvent.change(input, { target: { value: query } });
+        expect(screen.getByRole('menuitem', { name: /团队项目/ })).toBeInTheDocument();
+        expect(screen.queryByRole('menuitem', { name: /^Workspace/ })).not.toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: new RegExp(languageT('Open Workspace')) })).toBeInTheDocument();
+        expect(screen.getByText('1 / 2')).toBeInTheDocument();
+      }
+      fireEvent.change(input, { target: { value: 'no-such-project' } });
+      expect(screen.getByText(languageT('No matches'))).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: languageT('Clear') }));
+      expect(input).toHaveValue('');
+      expect(input).toHaveFocus();
+      expect(screen.getByRole('menuitem', { name: /^Workspace/ })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByText(languageT('Already open'))).toBeInTheDocument();
+      fireEvent.change(input, { target: { value: '团队' } });
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      openMenu();
+      expect(screen.getByRole('textbox')).toHaveValue('');
+      expect(screen.getByRole('menuitem', { name: /^Workspace/ })).toBeInTheDocument();
+    } finally {
+      useAppStore.setState({ bootstrap: originalBootstrap });
+    }
+  });
+
   it('keeps the welcome title while a registered workspace is still waiting to be displayed', () => {
     useAppStore.setState({ tabs: [], activeTabId: null, operations: {} });
     const view = render(<BridgeContext.Provider value={bridge}><TitleBar welcomeMode /></BridgeContext.Provider>);
@@ -35,6 +119,34 @@ describe('TitleBar tab dragging', () => {
     expect(screen.getByRole('tab', { name: /Workspace/ })).toBeInTheDocument();
     expect(view.container.querySelector('.titlebar-welcome-title')).not.toBeInTheDocument();
     expect(view.container.querySelector('.titlebar')).not.toHaveClass('welcome-mode');
+  });
+
+  it.each(['en', 'zh-CN'] as const)('retries unavailable recent workspace files from the menu in %s', async language => {
+    const t = createTranslator(language);
+    const unavailable = { ...workspace, id: 'unavailable', name: 'Unavailable Team', available: false, workspaceFile: '/tmp/team.code-workspace', paths: ['/tmp/a', '/tmp/b'] };
+    const previousBootstrap = useAppStore.getState().bootstrap;
+    const previousOpen = useAppStore.getState().openWorkspace;
+    const open = vi.fn().mockResolvedValue(false);
+    const newWindow = vi.spyOn(bridge, 'openInNewWindow').mockResolvedValue('new-window');
+    useAppStore.setState({ tabs: [workspace], activeTabId: workspace.id, operations: {}, openWorkspace: open,
+      bootstrap: { state: { recentWorkspaces: [unavailable] } } as never,
+    });
+    try {
+      render(<BridgeContext.Provider value={bridge}><I18nContext.Provider value={{ language, preference: 'system', t }}><TitleBar /></I18nContext.Provider></BridgeContext.Provider>);
+      fireEvent.click(screen.getByRole('button', { name: t('New Tab') }));
+      const item = screen.getByRole('menuitem', { name: /Unavailable Team/ });
+      expect(item).toBeEnabled();
+      expect(item).toHaveAccessibleDescription(t('Path was unavailable — click to retry'));
+      fireEvent.click(item);
+      await waitFor(() => expect(open).toHaveBeenCalledWith(['/tmp/team.code-workspace']));
+      fireEvent.click(screen.getByRole('button', { name: t('New Tab') }));
+      fireEvent.click(screen.getByRole('button', { name: t('Open in New Window') }));
+      await waitFor(() => expect(newWindow).toHaveBeenCalledWith(['/tmp/team.code-workspace']));
+      expect(open).toHaveBeenCalledOnce();
+    } finally {
+      useAppStore.setState({ bootstrap: previousBootstrap, openWorkspace: previousOpen });
+      newWindow.mockRestore();
+    }
   });
 
   it('only offers a new-window action for recent workspaces that are not already open', () => {
@@ -52,7 +164,7 @@ describe('TitleBar tab dragging', () => {
       for (const opened of [workspace, otherOpened]) {
         const row = within(menu).getByText(opened.name).closest('.workspace-menu-item-row-wrap')!;
         expect(within(row as HTMLElement).queryByRole('button', { name: 'Open in New Window' })).not.toBeInTheDocument();
-        expect(within(row as HTMLElement).getByText('Open')).toBeInTheDocument();
+        expect(within(row as HTMLElement).getByText('Already open')).toBeInTheDocument();
       }
       expect(within(menu).getAllByRole('button', { name: 'Open in New Window' })).toHaveLength(1);
     } finally { useAppStore.setState({ bootstrap: originalBootstrap }); }

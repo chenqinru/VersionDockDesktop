@@ -148,4 +148,29 @@ describe('task progress entry and details', () => {
     fireEvent.keyDown(document, { key: 'Escape' }); expect(entry).toHaveFocus();
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'Processing');
   });
+
+  it('realigns an open panel when its status entry resizes and stops observing on close', () => {
+    let resized: ResizeObserverCallback | undefined;
+    const observe = vi.fn(), disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resized = callback; }
+      observe = observe;
+      disconnect = disconnect;
+    });
+    try {
+      renderItem(); act(() => start()); delay();
+      const entry = screen.getByRole('button', { name: 'Task progress' });
+      const rect = vi.spyOn(entry, 'getBoundingClientRect').mockReturnValue({ right: window.innerWidth - 30 } as DOMRect);
+      fireEvent.click(entry);
+      expect(observe).toHaveBeenCalledWith(entry);
+      expect(screen.getByRole('dialog').style.right).toBe('30px');
+      rect.mockReturnValue({ right: window.innerWidth - 45 } as DOMRect);
+      act(() => resized?.([], {} as ResizeObserver));
+      expect(screen.getByRole('dialog').style.right).toBe('45px');
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(disconnect).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

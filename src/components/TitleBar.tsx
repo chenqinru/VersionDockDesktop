@@ -1,3 +1,8 @@
+import { SearchInput } from './SearchInput';
+import { EmptyState } from './EmptyState';
+import { filterWorkspaces } from '../workspaces/filterWorkspaces';
+import { WorkspaceItem } from './WorkspaceItem';
+import { OpenWorkspaceAction } from './OpenWorkspaceAction';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { isLightTheme } from '../theme';
 import { getEffectiveTheme } from '../theme/useEffectiveTheme';
@@ -63,6 +68,7 @@ function transferId(): string {
 
 export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: WorkspaceDescriptor; welcomeMode?: boolean } = {}) {
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
+  const [workspaceQuery, setWorkspaceQuery] = useState('');
   const [maximized, setMaximized] = useState(false);
   const addAnchorRef = useRef<HTMLButtonElement>(null);
   const addMenuRef = useRef<HTMLElement>(null);
@@ -91,6 +97,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
   const activeTabId = useAppStore((state) => state.activeTabId) ?? startupTab?.id;
   const busy = useAppStore((state) => isOperationActive(state.operations, { domain: 'workspace' }));
   const recentWorkspaces = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
+  const filteredRecentWorkspaces = filterWorkspaces(recentWorkspaces, workspaceQuery);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
   const switchTab = useAppStore((state) => state.switchTab);
   const closeTab = useAppStore((state) => state.closeTab);
@@ -161,9 +168,11 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
   const reorderTabs = useAppStore((state) => state.reorderTabs);
 
   const toggleNewTabMenu = () => {
+    if (!newTabMenuOpen) setWorkspaceQuery('');
     if (!newTabMenuOpen && addAnchorRef.current) {
       const rect = addAnchorRef.current.getBoundingClientRect();
-      const left = Math.max(12, Math.min(window.innerWidth - 370, rect.left - 8));
+      const menuWidth = Math.min(380, window.innerWidth - 24);
+      const left = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, rect.left - 8));
       setMenuPos({ left: Math.round(left), top: Math.round(rect.bottom + 4) });
     }
     setNewTabMenuOpen((prev) => !prev);
@@ -1028,6 +1037,14 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
           ref={addMenuRef}
           className="workspace-switcher titlebar-tab-menu"
           role="menu"
+          onMouseDown={event => {
+            if (event.button !== 0 || event.defaultPrevented || !(event.target instanceof Element)) return;
+            const button = event.target.closest('button');
+            if (!button || button.disabled) return;
+            // WebKit otherwise moves focus to the shell and dismisses the menu before click.
+            event.preventDefault();
+            button.focus({ preventScroll: true });
+          }}
           style={{
             position: 'fixed',
             top: menuPos.top,
@@ -1036,97 +1053,58 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
           }}
         >
           <div className="workspace-menu-primary-wrap">
-            <button
-              type="button"
-              className="workspace-menu-primary-btn"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => void chooseWorkspace()}
-            >
-              <div className="workspace-menu-btn-icon">
-                <Codicon name="folder-opened" />
-              </div>
-              <div className="workspace-menu-btn-content">
-                <span className="workspace-menu-btn-title">{t('Open Workspace')}</span>
-                <span className="workspace-menu-btn-desc">{t('Open local folders or a .code-workspace file.')}</span>
-              </div>
-              <Codicon name="chevron-right" className="workspace-menu-btn-arrow" />
-            </button>
+            <OpenWorkspaceAction size="menu" role="menuitem" disabled={busy} onClick={() => void chooseWorkspace()} />
           </div>
 
-          {recentWorkspaces.length > 0 && (
-            <>
-              <div className="workspace-menu-header">
-                <span>{t('Recent Workspaces')}</span>
-                <span className="workspace-menu-count">{recentWorkspaces.length}</span>
-              </div>
-              <div className="workspace-menu-scroll vd-row-scope">
-                {recentWorkspaces.map((workspace) => {
-                  const isOpened = tabs.some((t) => t.id === workspace.id);
-                  const isCurrentActive = workspace.id === activeTabId;
-                  return (
-                    <div
-                      key={workspace.id}
-                      className={`vd-row workspace-menu-item-row-wrap ${isCurrentActive ? 'active' : ''}`}
-                      data-row-selected={isCurrentActive}
-                      aria-disabled={!workspace.available || busy}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className={`workspace-menu-item ${isCurrentActive ? 'active' : ''} ${isOpened ? 'opened' : ''} ${workspace.available ? '' : 'unavailable'}`}
-                        disabled={!workspace.available || busy}
-                        onClick={(event) => {
-                          if (event.metaKey || event.ctrlKey) {
-                            void bridge.openInNewWindow(workspaceOpenPaths(workspace));
-                            setNewTabMenuOpen(false);
-                          } else {
-                            void handleOpenRecent(workspaceOpenPaths(workspace));
-                          }
-                        }}
-                      >
-                        <ProjectIcon
-                          name={workspace.name}
-                          seed={workspace.paths[0] || workspace.id || workspace.name}
-                          size="medium"
-                          available={workspace.available}
-                          className="workspace-menu-item-icon"
-                        />
-                        <div className="workspace-menu-item-info">
-                          <div className="workspace-menu-item-row">
-                            <span className="workspace-menu-item-name">{workspace.name}</span>
-                            {isOpened && <span className="workspace-menu-tag">{t('Open')}</span>}
-                          </div>
-                          <span className="workspace-menu-item-path" title={workspace.paths.join(' · ')}>
-                            {workspace.paths.join(' · ')}
-                          </span>
-                        </div>
-                        {isCurrentActive && (
-                          <div className="workspace-menu-item-check">
-                            <Codicon name="check" />
-                          </div>
-                        )}
-                      </button>
-                      {!isOpened && <IconButton
-                        type="button"
-                        className="workspace-menu-item-open-window"
-                        aria-label={t('Open in New Window')}
-                        title={t('Open in New Window')}
-                        disabled={!workspace.available || busy}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void bridge.openInNewWindow(workspaceOpenPaths(workspace));
-                          setNewTabMenuOpen(false);
-                        }}
-                      >
-                        <Codicon name="window" />
-                      </IconButton>}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
+          <div className="workspace-menu-header">
+            <div className="workspace-menu-heading">
+              <span>{t('Recent Workspaces')}</span>
+              <span className="workspace-menu-count">{workspaceQuery.trim() ? `${filteredRecentWorkspaces.length} / ${recentWorkspaces.length}` : recentWorkspaces.length}</span>
+            </div>
+            <SearchInput
+              autoFocus
+              controlSize="xs"
+              containerClassName="workspace-menu-search"
+              aria-label={t('Search recent workspaces...')}
+              placeholder={t('Search')}
+              value={workspaceQuery}
+              onChange={event => setWorkspaceQuery(event.target.value)}
+              clearLabel={t('Clear')}
+              onClear={() => setWorkspaceQuery('')}
+            />
+          </div>
+          <div className="workspace-menu-scroll vd-row-scope">
+            {filteredRecentWorkspaces.map((workspace) => {
+              const isOpened = tabs.some((t) => t.id === workspace.id);
+              const isCurrentActive = workspace.id === activeTabId;
+              return (
+                <WorkspaceItem
+                  key={workspace.id}
+                  workspace={workspace}
+                  size="menu"
+                  opened={isOpened}
+                  current={isCurrentActive}
+                  disabled={busy}
+                  onOpen={event => {
+                    if (event.metaKey || event.ctrlKey) {
+                      void bridge.openInNewWindow(workspaceOpenPaths(workspace));
+                      setNewTabMenuOpen(false);
+                    } else void handleOpenRecent(workspaceOpenPaths(workspace));
+                  }}
+                  actions={!isOpened && <IconButton
+                    className="workspace-item-action"
+                    title={t('Open in New Window')}
+                    disabled={busy}
+                    onClick={() => {
+                      void bridge.openInNewWindow(workspaceOpenPaths(workspace));
+                      setNewTabMenuOpen(false);
+                    }}
+                  ><Codicon name="window" /></IconButton>}
+                />
+              );
+            })}
+            {filteredRecentWorkspaces.length === 0 && <EmptyState compact icon={recentWorkspaces.length ? 'search' : 'inbox'}>{t(recentWorkspaces.length ? 'No matches' : 'No recent workspaces')}</EmptyState>}
+          </div>
         </aside>
       )}
     </>

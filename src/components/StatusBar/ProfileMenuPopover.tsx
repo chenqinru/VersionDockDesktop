@@ -191,7 +191,7 @@ export function ProfileMenuPopover({ anchorRect, anchorRef, onClose, data, repos
   })();
   const rootTitle = page === 'repositories' ? t('VersionDock — Version Control Accounts') : repo?.meta.kind === 'svn' ? t('VersionDock — SVN Account: {0}', repo.meta.name) : repo ? repositories.length > 1 ? t('VersionDock — Accounts & Identities: {0} ({1}/{2})', repo.meta.name, repositories.findIndex((item) => item.meta.id === repoId) + 1, repositories.length) : t('VersionDock — Accounts & Identities: {0}', repo.meta.name) : t('VersionDock — Accounts & Identities');
   const width = Math.min(360, window.innerWidth - 16);
-  const mainStyle = { position: 'fixed' as const, bottom: 28, left: Math.max(8, Math.min(anchorRect?.left ?? 120, window.innerWidth - width - 8)), maxHeight: Math.min(440, window.innerHeight - 40), zIndex: 1000 };
+  const mainStyle = { position: 'fixed' as const, bottom: 'calc(var(--versiondock-statusbar-height) + 4px)', left: Math.max(8, Math.min(anchorRect?.left ?? 120, window.innerWidth - width - 8)), maxHeight: 'min(440px, calc(100vh - var(--versiondock-statusbar-height) - 16px))', zIndex: 1000 };
   const activeLabel = customProfile?.label ?? t(profileId === LOCAL_PROFILE_ID ? 'Local' : 'Global');
   return <StatusBarPopoverPortal>
     <StatusBarQuickMenu key={`${repoId}:${page}`} ref={popoverRef} title={rootTitle} active={!profileId && !provider && !busy} className="profile-menu-popover" style={mainStyle} onSearch={back} onBack={page === 'repositories' ? () => setPage('identity') : undefined}>

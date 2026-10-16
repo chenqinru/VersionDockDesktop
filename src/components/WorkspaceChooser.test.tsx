@@ -53,6 +53,20 @@ describe('WorkspaceChooser V5 setup actions', () => {
     expect(filePicker).not.toHaveBeenCalled();
   });
 
+  it('keeps unavailable recent workspace files retryable on welcome', () => {
+    const bridge = new MockBridge(() => true);
+    const openWorkspace = vi.fn().mockResolvedValue(false);
+    useAppStore.setState({ openWorkspace, operations: {}, bootstrap: { state: { recentWorkspaces: [
+      { id: 'team', name: 'Unavailable Team', workspaceFile: '/tmp/team.code-workspace', paths: ['/tmp/a', '/tmp/b'], available: false },
+    ] } } as never });
+    render(<BridgeContext.Provider value={bridge}><WorkspaceChooser /></BridgeContext.Provider>);
+    const item = screen.getByRole('button', { name: /Unavailable Team/ });
+    expect(item).toBeEnabled();
+    expect(item).toHaveAccessibleDescription('Path was unavailable — click to retry');
+    fireEvent.click(item);
+    expect(openWorkspace).toHaveBeenCalledWith(['/tmp/team.code-workspace']);
+  });
+
   it('reopens recent file workspaces from their source file rather than the old folder list', () => {
     const bridge = new MockBridge(() => true);
     const openWorkspace = vi.fn().mockResolvedValue(true);

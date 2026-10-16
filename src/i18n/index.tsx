@@ -4,6 +4,7 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Already open': 'Already open',
   'Workbench layout': 'Workbench layout',
   'Reset layout': 'Reset layout',
   'Restore panel sizes and the current window to their default layout.': 'Restore panel sizes and the current window to their default layout.',
@@ -1513,6 +1514,7 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Already open': '已打开',
   'Workbench layout': '工作台布局',
   'Reset layout': '重置布局',
   'Restore panel sizes and the current window to their default layout.': '将面板尺寸和当前窗口恢复为默认布局。',

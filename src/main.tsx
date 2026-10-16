@@ -11,6 +11,7 @@ import './inputs.css';
 import './controls.css';
 import './selection.css';
 import './states.css';
+import './workspaces.css';
 import { App } from './App';
 import { BridgeContext } from './platform/context';
 import type { VersionDockBridge } from './platform/bridge';

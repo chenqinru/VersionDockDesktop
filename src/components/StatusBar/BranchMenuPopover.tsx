@@ -728,7 +728,7 @@ export function BranchMenuPopover({ anchorRect, anchorRef, onClose, initialRepoI
   const commonBranchIsCurrent = activeCommonBranch && !activeCommonBranch.isRemote && gitRepos.some((r) => r.branch === activeCommonBranch.name || branchesByRepo[r.meta.id]?.some((b) => b.current && b.name === activeCommonBranch.name));
 
   const currentCommonBranchName = [...new Set(gitRepos.map((r) => getRepoEffectiveRef(r, branchesByRepo)))].join(', ') || 'HEAD';
-  const popoverStyle: React.CSSProperties = { position: 'fixed', bottom: 28, ...(placement === 'bottomLeft' ? { left: 8 } : { left: Math.max(8, Math.min(anchorRect?.left ?? 8, window.innerWidth - BRANCH_MENU_WIDTH - 8)) }), maxHeight: 'min(440px, calc(100vh - 40px))', zIndex: 1000 };
+  const popoverStyle: React.CSSProperties = { position: 'fixed', bottom: 'calc(var(--versiondock-statusbar-height) + 4px)', ...(placement === 'bottomLeft' ? { left: 8 } : { left: Math.max(8, Math.min(anchorRect?.left ?? 8, window.innerWidth - BRANCH_MENU_WIDTH - 8)) }), maxHeight: 'min(440px, calc(100vh - var(--versiondock-statusbar-height) - 16px))', zIndex: 1000 };
 
   const totalAhead = useMemo(() => gitRepos.reduce((sum, r) => sum + (r.ahead ?? 0), 0), [gitRepos]);
   const hasBehind = useMemo(() => repositories.some((r) => (r.behind ?? 0) > 0), [repositories]);

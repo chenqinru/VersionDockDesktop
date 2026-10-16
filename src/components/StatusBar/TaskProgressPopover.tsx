@@ -20,7 +20,7 @@ export function TaskProgressPopover({ anchorRef, currentWorkspaceId, onClose }: 
   const openLog = useAppStore((state) => state.setLogPanelOpen);
   const [scope, setScope] = useState<'current' | 'all'>(() => Object.values(tasks).some((task) => !task.workspaceId || task.workspaceId === currentWorkspaceId) ? 'current' : 'all');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [position, setPosition] = useState({ right: 8, bottom: 28 });
+  const [right, setRight] = useState(8);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; }, [onClose]);
@@ -32,10 +32,12 @@ export function TaskProgressPopover({ anchorRef, currentWorkspaceId, onClose }: 
   useEffect(() => {
     const update = () => {
       const rect = anchorRef.current?.getBoundingClientRect();
-      setPosition({ right: rect ? Math.max(8, window.innerWidth - rect.right) : 8, bottom: rect ? Math.max(28, window.innerHeight - rect.top + 5) : 28 });
+      setRight(rect ? Math.max(8, window.innerWidth - rect.right) : 8);
     };
     update(); window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : undefined;
+    if (anchorRef.current) observer?.observe(anchorRef.current);
+    return () => { window.removeEventListener('resize', update); observer?.disconnect(); };
   }, [anchorRef]);
   useEffect(() => {
     const panel = panelRef.current, anchor = anchorRef.current;
@@ -85,7 +87,7 @@ export function TaskProgressPopover({ anchorRef, currentWorkspaceId, onClose }: 
   </article>;
 
   return createPortal(<div ref={panelRef} className="task-progress-popover" role="dialog" tabIndex={-1} aria-label={t('Task progress')}
-    style={{ right: position.right, bottom: position.bottom, maxHeight: `calc(100vh - ${position.bottom + 8}px)` }}
+    style={{ right, bottom: 'calc(var(--versiondock-statusbar-height) + 4px)', maxHeight: 'calc(100vh - var(--versiondock-statusbar-height) - 12px)' }}
     onKeyDown={(event) => {
       if (event.key !== 'Tab') return;
       const items = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), article[tabindex]')].filter((element) => element.tabIndex >= 0);

@@ -97,10 +97,10 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
 
   const popoverStyle: React.CSSProperties = {
     position: 'fixed',
-    bottom: 28,
+    bottom: 'calc(var(--versiondock-statusbar-height) + 4px)',
     right: anchorRect ? Math.max(8, window.innerWidth - anchorRect.right) : 8,
     width: 'min(450px, calc(100vw - 16px))',
-    maxHeight: 'calc(100vh - 60px)',
+    maxHeight: 'calc(100vh - var(--versiondock-statusbar-height) - 36px)',
     zIndex: 1000,
   };
 

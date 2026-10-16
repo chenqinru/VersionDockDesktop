@@ -58,7 +58,7 @@ describe('identity status menu', () => {
 
   it('keeps the bottom anchor, searches credentials and opens profile actions with keyboard', async () => {
     setup(); const menu = await open();
-    expect(menu.style.bottom).toBe('28px');
+    expect(menu.style.bottom).toBe('calc(var(--versiondock-statusbar-height) + 4px)');
     fireEvent.change(within(menu).getByRole('combobox'), { target: { value: 'work@example.test' } });
     expect(within(menu).queryByText('Local')).not.toBeInTheDocument();
     expect(within(menu).getByText('Work')).toBeInTheDocument();

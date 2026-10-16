@@ -2,7 +2,8 @@ import { SearchInput } from './SearchInput';
 import { IconButton } from './IconButton';
 import { useState, useMemo } from 'react';
 import { Codicon } from './Codicon';
-import { ProjectIcon } from './ProjectIcon';
+import { WorkspaceItem } from './WorkspaceItem';
+import { OpenWorkspaceAction } from './OpenWorkspaceAction';
 import { isOperationActive, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useBridge } from '../platform/context';
@@ -10,6 +11,7 @@ import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './Reposit
 import { workspaceOpenPaths } from '../workspaces/openPaths';
 import { selectWorkspacePaths } from '../workspaces/selectWorkspace';
 import { WelcomeUpdateButton } from './WelcomeUpdateButton';
+import { filterWorkspaces } from '../workspaces/filterWorkspaces';
 
 export function WorkspaceChooser() {
   const recent = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
@@ -42,11 +44,7 @@ export function WorkspaceChooser() {
     }
   };
 
-  const filteredRecent = useMemo(() => {
-    if (!filterText.trim()) return recent;
-    const q = filterText.trim().toLowerCase();
-    return recent.filter((w) => w.name.toLowerCase().includes(q) || w.paths.some((p) => p.toLowerCase().includes(q)));
-  }, [recent, filterText]);
+  const filteredRecent = useMemo(() => filterWorkspaces(recent, filterText), [recent, filterText]);
 
   return (
     <main className="welcome-container">
@@ -68,20 +66,7 @@ export function WorkspaceChooser() {
           </div>
 
           <div className="welcome-actions">
-            <button
-              type="button"
-              className="welcome-action-btn primary"
-              disabled={busy}
-              onClick={(event) => void choose(event.metaKey || event.ctrlKey)}
-            >
-              <div className="welcome-action-icon">
-                <Codicon name="folder-opened" />
-              </div>
-              <div className="welcome-action-text">
-                <span className="welcome-action-title">{t('Open Workspace')}</span>
-                <span className="welcome-action-desc">{t('Open local folders or a .code-workspace file.')}</span>
-              </div>
-            </button>
+            <OpenWorkspaceAction size="welcome" disabled={busy} onClick={event => void choose(event.metaKey || event.ctrlKey)} />
             <button type="button" className="welcome-action-btn" disabled={busy || !cloneAvailable} onClick={() => setCheckoutKind('git')}>
               <div className="welcome-action-icon"><Codicon name="repo-clone" /></div>
               <div className="welcome-action-text"><span className="welcome-action-title">{t('Clone Repository')}</span><span className="welcome-action-desc">{t('Clone a Git repository into a local folder.')}</span></div>
@@ -153,56 +138,19 @@ export function WorkspaceChooser() {
             ) : (
               <div className="recent-items">
                 {filteredRecent.map((workspace) => (
-                  <div className={`recent-card ${workspace.available ? '' : 'unavailable'}`} key={workspace.id}>
-                    <button
-                      type="button"
-                      className="recent-card-btn"
-                      disabled={busy}
-                      onClick={(event) => handleRecentClick(event, workspaceOpenPaths(workspace))}
-                    >
-                      <ProjectIcon
-                        name={workspace.name}
-                        seed={workspace.paths[0] || workspace.id || workspace.name}
-                        size="large"
-                        available={workspace.available}
-                        className="recent-card-icon"
-                      />
-                      <div className="recent-card-info">
-                        <span className="recent-card-name" title={workspace.name}>{workspace.name}</span>
-                        <span className="recent-card-path" title={workspace.paths.join(' · ')}>
-                          {workspace.paths.join(' · ')}
-                        </span>
-                        {!workspace.available && <span className="recent-card-badge">{t('Path was unavailable — click to retry')}</span>}
-                      </div>
-                    </button>
-                    <div className="recent-card-actions">
-                      <IconButton
-                        type="button"
-                        className="recent-card-action-btn"
-                        title={t('Open in New Window')}
-                        aria-label={t('Open in New Window')}
-                        disabled={busy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void bridge.openInNewWindow(workspaceOpenPaths(workspace));
-                        }}
-                      >
-                        <Codicon name="window" />
-                      </IconButton>
-                      <IconButton
-                        type="button"
-                        className="recent-card-action-btn remove"
-                        title={t('Remove from recent')}
-                        aria-label={t('Remove from recent')}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void removeRecent(workspace.id);
-                        }}
-                      >
-                        <Codicon name="close" />
-                      </IconButton>
-                    </div>
-                  </div>
+                  <WorkspaceItem
+                    key={workspace.id}
+                    workspace={workspace}
+                    size="welcome"
+                    disabled={busy}
+                    onOpen={event => handleRecentClick(event, workspaceOpenPaths(workspace))}
+                    actions={<>
+                      <IconButton className="workspace-item-action" title={t('Open in New Window')} disabled={busy}
+                        onClick={() => void bridge.openInNewWindow(workspaceOpenPaths(workspace))}><Codicon name="window" /></IconButton>
+                      <IconButton className="workspace-item-action" title={t('Remove from recent')} disabled={busy}
+                        onClick={() => void removeRecent(workspace.id)}><Codicon name="close" /></IconButton>
+                    </>}
+                  />
                 ))}
               </div>
             )}

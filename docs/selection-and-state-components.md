@@ -46,6 +46,7 @@
 ```
 
 - 二者完整透传原生 checkbox 的值、事件、ref、标签关联、表单行为和字段集禁用，保留 checkbox 可访问语义。
+- 包裹控件的 `label` 与方框、开关共用手型光标，文字点击仍由原生标签触发；禁用时（包括 `fieldset disabled`）统一使用默认光标。
 - 选中背景与标记使用 `--versiondock-control-checked-background` / `--versiondock-control-checked-foreground`，跟随主题强调色；列表选中色独立管理。
 - `Checkbox.indeterminate` 同步原生半选状态；受控和非受控输入均可用。`Switch.controlSize="sm" | "md"` 对应紧凑和普通尺寸。
 - `containerClassName` 用于外层布局，原生属性和 `className` 作用于内部 input。
