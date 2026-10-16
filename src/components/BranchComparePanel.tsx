@@ -3,12 +3,13 @@ import { LoadingState } from './LoadingState';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { buildHistoryAuthorOptions } from '../history/authors';
 import { IconButton } from './IconButton';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { CommitNode } from '../bindings/generated';
 import { Codicon } from './Codicon';
 import { AuthorAvatar } from './AuthorAvatar';
 import { useI18n } from '../i18n';
 import { isOperationActive, useAppStore } from '../store/appStore';
+import { useResizable } from '../hooks/useResizable';
 import { CommitSearch, DateFilter, DatePopover, FilterPopover, ToggleFilter } from './HistoryFilterControls';
 
 type CompareFilters = {
@@ -190,27 +191,28 @@ export function BranchComparePanel({
   const target = initialTarget ?? fallback;
   const { t } = useI18n();
   const stack = useRef<HTMLDivElement>(null);
-  const [topHeight, setTopHeight] = useState<number>();
+  const storedRatio = useAppStore(state => state.bootstrap?.state.layout?.comparisonSplitRatio);
+  const saveRatio = useAppStore(state => state.setComparisonSplitRatio);
+  const [stackHeight, setStackHeight] = useState(0);
+  const ratio = storedRatio ?? .5;
+  const minPaneHeight = Math.min(110, Math.max(0, (stackHeight - 4) / 2));
+  const maxTopHeight = Math.max(minPaneHeight, stackHeight - 4 - minPaneHeight);
+  const topHeight = stackHeight ? Math.max(minPaneHeight, Math.min(maxTopHeight, (stackHeight - 4) * ratio)) : undefined;
   const activeComparison = comparison?.base === current && comparison.target === target ? comparison : undefined;
+  useLayoutEffect(() => {
+    const element = stack.current; if (!element) return;
+    const update = () => setStackHeight(element.getBoundingClientRect().height);
+    update();
+    const observer = new ResizeObserver(update); observer.observe(element);
+    return () => observer.disconnect();
+  }, [activeComparison]);
 
   useEffect(() => {
     if (current && target && current !== target && !activeComparison) void compare(repoId, current, target);
   }, [activeComparison, compare, current, repoId, target]);
 
-  const resize = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const bounds = stack.current?.getBoundingClientRect();
-    if (!bounds) return;
-    const move = (next: PointerEvent) => setTopHeight(Math.max(110, Math.min(bounds.height - 114, next.clientY - bounds.top)));
-    const finish = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', finish);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', finish);
-  };
+  const updateTopHeight = (height: number) => saveRatio(Math.max(minPaneHeight, Math.min(maxTopHeight, height)) / Math.max(1, stackHeight - 4));
+  const resize = useResizable(topHeight ?? 110, minPaneHeight, maxTopHeight, updateTopHeight, 1, 'y');
 
   const baseLabel = formatRef(current);
   const targetLabel = formatRef(target);
@@ -233,7 +235,7 @@ export function BranchComparePanel({
         commits={activeComparison.targetCommits}
         renderCommits={renderCommits}
       />
-      <div className="compare-splitter" role="separator" tabIndex={0} aria-label={t('Resize branch comparison')} aria-orientation="horizontal" aria-valuemin={110} aria-valuenow={Math.round(topHeight ?? 110)} onPointerDown={resize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setTopHeight((value) => Math.max(110, (value ?? 110) + (event.key === 'ArrowDown' ? 10 : -10))); } }}><i /></div>
+      <div className="compare-splitter" role="separator" tabIndex={0} aria-label={t('Resize branch comparison')} aria-orientation="horizontal" aria-valuemin={Math.round(minPaneHeight)} aria-valuemax={Math.round(maxTopHeight)} aria-valuenow={Math.round(topHeight ?? 110)} onPointerDown={resize} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); updateTopHeight((topHeight ?? 110) + (event.key === 'ArrowDown' ? 10 : -10)); } }}><i /></div>
       <ComparePane
         repoId={repoId}
         authors={authors}

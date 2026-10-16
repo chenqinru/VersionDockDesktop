@@ -4,6 +4,12 @@ import type { LanguagePreference } from '../bindings/generated';
 type Messages = Record<string, string>;
 
 const desktopEn: Messages = {
+  'Workbench layout': 'Workbench layout',
+  'Reset layout': 'Reset layout',
+  'Restore panel sizes and the current window to their default layout.': 'Restore panel sizes and the current window to their default layout.',
+  'Layout update failed': 'Layout update failed',
+  'Layout reset failed': 'Layout reset failed',
+
   "Save or close unsaved editors in this worktree before removing it.": "Save or close unsaved editors in this worktree before removing it.",
   "Generate branch name with AI": "Generate branch name with AI",
   "AI Generate": "AI Generate",
@@ -1507,6 +1513,12 @@ const desktopEn: Messages = {
 };
 
 const desktopZh: Messages = {
+  'Workbench layout': '工作台布局',
+  'Reset layout': '重置布局',
+  'Restore panel sizes and the current window to their default layout.': '将面板尺寸和当前窗口恢复为默认布局。',
+  'Layout update failed': '布局保存失败',
+  'Layout reset failed': '布局重置失败',
+
   "Save or close unsaved editors in this worktree before removing it.": "请先保存或关闭此工作树中未保存的编辑内容，再删除工作树。",
   "Generate branch name with AI": "使用 AI 生成分支名",
   "AI Generate": "AI 生成",

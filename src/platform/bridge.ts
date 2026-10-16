@@ -3,7 +3,7 @@ import { IDENTITY_CHANGED } from '../components/StatusBar/profileStatus';
 import { createNativeInteractionHandler } from '../services/nativeInteractions';
 import { formatDemoLogs, logLevelPriority, mergeLogEntries } from '../logs/entries';
 import type {
-  AiEvent, BridgeCommand, DesktopError, OperationDomain,
+  AiEvent, BridgeCommand, DesktopError, OperationDomain, LayoutUpdateResult,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
   WindowTabTransfer, WindowTabTransferCompleted, WorkspaceEvent, WorkspaceDescriptor,
   LogEntry, LogLevel, LogChannel, UpdateRestoreWarning,
@@ -40,7 +40,7 @@ export interface OperationRequestEvent {
   context: RequestContext;
 }
 export interface OperationSettledEvent { progressEvent: true; type: 'operation-settled'; requestId: string; error?: unknown; result?: unknown }
-export type BridgeEvent = AiEvent | OperationEvent | WorkspaceEvent | RepositoryEvent | OperationRequestEvent | OperationSettledEvent | { type: 'workspace-renamed'; workspace: WorkspaceDescriptor } | { type: 'author-avatar-cache-cleared' } | { type: 'native-unavailable' };
+export type BridgeEvent = { type: 'layout-changed'; update: LayoutUpdateResult; sourceWindowLabel?: string } | AiEvent | OperationEvent | WorkspaceEvent | RepositoryEvent | OperationRequestEvent | OperationSettledEvent | { type: 'workspace-renamed'; workspace: WorkspaceDescriptor } | { type: 'author-avatar-cache-cleared' } | { type: 'native-unavailable' };
 
 export interface VersionDockBridge {
   send(command: BridgeCommand): void;
@@ -90,6 +90,7 @@ export interface VersionDockBridge {
     setPosition(x: number, y: number): Promise<void>;
     setCursorIcon(icon: 'default' | 'grab' | 'grabbing' | 'copy'): Promise<void>;
     setSize(width: number, height: number, center?: boolean): Promise<void>;
+    setWorkspaceMode(workspace: boolean, preserveBounds?: boolean): Promise<void>;
     onDragDrop(handler: (paths: string[]) => void): Promise<() => void>;
   };
 }
@@ -171,7 +172,7 @@ function requestId(): string {
 
 const commandDomain = (command: BridgeCommand): OperationDomain => {
   switch (command.type) {
-    case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'saveCommitSelections': case 'updateSettings': case 'updateLayout': return 'application';
+    case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'saveCommitSelections': case 'updateSettings': case 'updateLayout': case 'resetLayout': case 'windowSetWorkspaceMode': return 'application';
     case 'workspaceOpen': case 'workspaceRename': case 'workspaceRefresh': case 'workspaceRemoveRecent': case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository': return 'workspace';
     case 'repositoryStatus': return 'status';
     case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff':
@@ -251,6 +252,7 @@ export class TauriBridge implements VersionDockBridge {
   private authenticatedOperations = new Set<string>();
   private operationTimers = new Map<string, { pause: () => void; resume: () => void }>();
   private windowSyncQueue: Promise<void> = Promise.resolve();
+  private windowModeQueue: Promise<void> = Promise.resolve();
   private trackedRequests = new Set<string>();
   private contextGenerations = new Map<string, number>();
   private currentPlatform: 'macos' | 'windows' | 'linux' = (() => { const value = osPlatform(); return value === 'macos' || value === 'windows' ? value : 'linux'; })();
@@ -299,6 +301,10 @@ export class TauriBridge implements VersionDockBridge {
       await getCurrentWindow().setPosition(new LogicalPosition(x, y));
     },
     setCursorIcon: async (icon: 'default' | 'grab' | 'grabbing' | 'copy') => (await import('@tauri-apps/api/window')).getCurrentWindow().setCursorIcon(icon),
+    setWorkspaceMode: async (workspace: boolean, preserveBounds = false) => {
+      this.windowModeQueue = this.windowModeQueue.catch(() => undefined).then(() => this.request<void>({ type: 'windowSetWorkspaceMode', payload: { workspace, preserve_bounds: preserveBounds } }, { showProgress: false }));
+      await this.windowModeQueue;
+    },
     setSize: async (width: number, height: number, center = false) => {
       try {
         await this.request({ type: 'windowSetSize', payload: { width, height, center } }, { showProgress: false });
@@ -792,6 +798,6 @@ export class MockBridge implements VersionDockBridge {
     startDragging: async () => undefined, toggleMaximize: async () => undefined, minimize: async () => undefined, close: async () => undefined, destroy: async () => undefined, show: async () => undefined,
     setControlsVisible: async (visible: boolean): Promise<void> => { void visible; },
     hasOtherWorkspaceWindows: async () => false,
-    isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined, onDragDrop: async () => () => undefined,
+    isMaximized: async () => false, dragGeometry: async () => null, setPosition: async () => undefined, setCursorIcon: async () => undefined, setSize: async () => undefined, setWorkspaceMode: async () => undefined, onDragDrop: async () => () => undefined,
   };
 }

@@ -5,6 +5,8 @@ import { DialogHost } from './DialogHost';
 import { publishDialog } from './dialogService';
 import { useAppStore } from '../store/appStore';
 import { commitKey } from '../history/commitDetails';
+import { DEFAULT_LAYOUT } from '../settings/defaults';
+import { MockBridge } from '../platform/bridge';
 import { createTranslator, I18nContext } from '../i18n';
 import type { CommitDetail, CommitNode, WorkspaceSnapshot } from '../bindings/generated';
 
@@ -1446,6 +1448,12 @@ describe('CommitDetailPanel merge commits', () => {
   });
 
   it('allows resizing the summary beyond its initial percentage while retaining space for files', () => {
+    const previousBootstrap = useAppStore.getState().bootstrap;
+    const previousBridge = useAppStore.getState().bridge;
+    useAppStore.setState({ bridge: new MockBridge(command => command.type === 'updateLayout' ? command.payload.layout : undefined), bootstrap: {
+      applicationSessionId: 'layout-test', state: { recentWorkspaces: [], lastWorkspaceId: null, layout: structuredClone(DEFAULT_LAYOUT) }, tools: snapshot.tools,
+      capabilities: { ai: false, stash: false, shelf: false, changelist: false, worktree: false, subtree: false, compare: false, remoteManagement: false },
+    } });
     const original = HTMLElement.prototype.getBoundingClientRect;
     const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const height = this.classList.contains('commit-detail') ? 600 : this.classList.contains('detail-summary') ? 220 : 0;
@@ -1458,12 +1466,14 @@ describe('CommitDetailPanel merge commits', () => {
       for (let index = 0; index < 40; index++) fireEvent.keyDown(separator, { key: 'ArrowUp' });
       const expandedHeight = Number(separator.getAttribute('aria-valuenow'));
       expect(expandedHeight).toBeGreaterThan(600 * .48);
+      expect(useAppStore.getState().bootstrap?.state.layout?.detailInfoHeight).toBe(expandedHeight);
       expect(expandedHeight).toBeLessThan(600 - 96);
       expect(document.querySelector('.detail-summary')).toHaveStyle({ maxHeight: 'none', flex: `0 0 ${expandedHeight}px` });
       for (let index = 0; index < 60; index++) fireEvent.keyDown(separator, { key: 'ArrowDown' });
       expect(Number(separator.getAttribute('aria-valuenow'))).toBeGreaterThanOrEqual(96);
     } finally {
       bounds.mockRestore();
+      useAppStore.setState({ bootstrap: previousBootstrap, bridge: previousBridge });
     }
   });
 

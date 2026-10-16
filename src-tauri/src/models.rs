@@ -217,6 +217,14 @@ pub enum BridgeCommand {
     AiResetCliSession,
     UpdateLayout {
         layout: LayoutState,
+        #[serde(default)]
+        #[cfg_attr(test, specta(optional))]
+        changed_fields: Option<Vec<String>>,
+    },
+    ResetLayout,
+    WindowSetWorkspaceMode {
+        workspace: bool,
+        preserve_bounds: bool,
     },
     WorkspaceOpen {
         paths: Vec<String>,
@@ -2202,6 +2210,12 @@ pub struct LayoutState {
     pub stash_view_mode: String,
     pub branch_sidebar_collapsed: bool,
     pub branch_sidebar_collapsed_sections: Vec<String>,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub detail_info_height: Option<u32>,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub comparison_split_ratio: Option<f64>,
 }
 
 impl Default for LayoutState {
@@ -2213,8 +2227,48 @@ impl Default for LayoutState {
             stash_view_mode: "tree".into(),
             branch_sidebar_collapsed: false,
             branch_sidebar_collapsed_sections: Vec::new(),
+            detail_info_height: None,
+            comparison_split_ratio: None,
         }
     }
+}
+
+impl LayoutState {
+    pub fn normalize(mut self) -> Self {
+        if self.file_view_mode != "list" {
+            self.file_view_mode = "tree".into();
+        }
+        if self.stash_view_mode != "list" {
+            self.stash_view_mode = "tree".into();
+        }
+        self.panel_sizes.commit = self.panel_sizes.commit.clamp(280, 620);
+        self.panel_sizes.branches = self.panel_sizes.branches.clamp(120, 400);
+        self.panel_sizes.detail = self.panel_sizes.detail.clamp(220, 680);
+        self.detail_info_height = self.detail_info_height.map(|height| height.clamp(96, 4000));
+        self.comparison_split_ratio = self
+            .comparison_split_ratio
+            .filter(|ratio| ratio.is_finite())
+            .map(|ratio| ratio.clamp(0.05, 0.95));
+        self
+    }
+
+    pub fn reset_geometry(&mut self) {
+        let defaults = Self::default();
+        self.panel_sizes = defaults.panel_sizes;
+        self.branch_sidebar_collapsed = false;
+        self.branch_sidebar_collapsed_sections.clear();
+        self.detail_info_height = None;
+        self.comparison_split_ratio = None;
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutUpdateResult {
+    pub layout: LayoutState,
+    pub revision: u32,
+    pub reset: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

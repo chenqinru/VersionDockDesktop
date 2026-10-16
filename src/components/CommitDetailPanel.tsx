@@ -963,8 +963,10 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
   const [messagesExpandedByDefault, setMessagesExpandedByDefault] = useState(() => {
     try { return localStorage.getItem('versiondock:commitMessagesExpandedByDefault') === 'true'; } catch { return false; }
   });
-  const [infoHeight, setInfoHeight] = useState<number>();
+  const storedInfoHeight = useAppStore(state => state.bootstrap?.state.layout?.detailInfoHeight);
+  const saveInfoHeight = useAppStore(state => state.setDetailInfoHeight);
   const [containerHeight, setContainerHeight] = useState(0);
+  const [initialInfoHeight, setInitialInfoHeight] = useState<number>();
   const containerRef = useRef<HTMLElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
   const [fileContextMenu, setFileContextMenu] = useState<{ position: { x: number; y: number }; file: DetailFileTarget }>();
@@ -1183,24 +1185,25 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
   const minInfoHeight = Math.min(160, Math.max(96, Math.floor((containerHeight - 4) / 4)));
   const maxInfoHeight = Math.max(minInfoHeight, containerHeight - 4 - minInfoHeight);
   const clampInfoHeight = useCallback((height: number) => Math.min(maxInfoHeight, Math.max(minInfoHeight, height)), [maxInfoHeight, minInfoHeight]);
+  const preferredInfoHeight = storedInfoHeight ?? initialInfoHeight;
+  const infoHeight = preferredInfoHeight === undefined ? undefined : containerHeight ? clampInfoHeight(preferredInfoHeight) : preferredInfoHeight;
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || variant === 'workspace') return;
     const update = () => {
       const height = container.getBoundingClientRect().height;
       if (height <= 4) return;
-      const minimum = Math.min(160, Math.max(96, Math.floor((height - 4) / 4)));
-      const maximum = Math.max(minimum, height - 4 - minimum);
       setContainerHeight(height);
-      setInfoHeight((current) => Math.min(maximum, Math.max(minimum, current ?? summaryRef.current?.getBoundingClientRect().height ?? 220)));
+      if (storedInfoHeight == null) setInitialInfoHeight(current => current ?? summaryRef.current?.getBoundingClientRect().height ?? 220);
     };
     update();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(update);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [detail, selectedCommits.length, variant]);
-  const resizeInfo = useResizable(infoHeight ?? 220, minInfoHeight, maxInfoHeight, setInfoHeight, -1, 'y');
+  }, [detail, selectedCommits.length, variant, storedInfoHeight]);
+  const updateInfoHeight = (height: number) => { const next = clampInfoHeight(height); saveInfoHeight(next); };
+  const resizeInfo = useResizable(infoHeight ?? 220, minInfoHeight, maxInfoHeight, updateInfoHeight, -1, 'y');
 
   useEffect(() => {
     setExpandedMessages(new Set(messagesExpandedByDefault ? selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash)) : []));
@@ -1508,7 +1511,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
         </div>
       </section>
 
-      {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={minInfoHeight} aria-valuemax={maxInfoHeight} aria-valuenow={Math.round(infoHeight ?? 220)} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); setInfoHeight((value) => clampInfoHeight((value ?? 220) + (event.key === 'ArrowUp' ? 10 : -10))); } }}><i /></div>}
+      {!workspaceView && <div className="detail-info-resize" role="separator" tabIndex={0} aria-label={t('Resize commit detail')} aria-orientation="horizontal" aria-valuemin={minInfoHeight} aria-valuemax={maxInfoHeight} aria-valuenow={Math.round(infoHeight ?? 220)} onPointerDown={resizeInfo} onKeyDown={(event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); updateInfoHeight((infoHeight ?? 220) + (event.key === 'ArrowUp' ? 10 : -10)); } }}><i /></div>}
       {workspaceView ? <ExtendedCommitSummary updateDetails={updateDetails} explanation={!loading && selectedCommits.length > 0 ? <AiExplanation commits={selectedCommits.map(c => ({ repoId: c.repoId, hash: c.hash }))} toolbar={aiToolbar} /> : undefined} detail={detail} selectedCommits={selectedCommits} selectedDetails={selectedDetails} loading={loading} repoMap={repoMap} /> : <section ref={summaryRef} className="detail-summary" style={infoHeight !== undefined ? { flex: `0 0 ${infoHeight}px`, minHeight: 0, maxHeight: 'none' } : undefined}>
         <header className="detail-toolbar">
           <span className="detail-toolbar-label" style={selectedCommits.length === 1 ? { color: repoMap.get(selectedPrimary?.repoId ?? '')?.meta.color } : undefined}>

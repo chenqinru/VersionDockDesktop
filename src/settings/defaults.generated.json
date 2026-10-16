@@ -3,6 +3,8 @@
     "activeTab": "changes",
     "branchSidebarCollapsed": false,
     "branchSidebarCollapsedSections": [],
+    "comparisonSplitRatio": null,
+    "detailInfoHeight": null,
     "fileViewMode": "tree",
     "panelSizes": {
       "branches": 220,

@@ -6,6 +6,7 @@ import { navigationScrollBehavior } from '../scrolling/navigation';
 import { scrollbarContains } from '../scrollbars/ownership';
 import { DialogSurface } from './DialogSurface';
 import { LayoutDensitySetting } from './LayoutDensitySetting';
+import { ResetLayoutSetting } from './ResetLayoutSetting';
 import { TrayIconSetting, CloseToTraySetting } from './TrayIconSetting';
 import { ScrollbarVisibilitySetting } from './ScrollbarVisibilitySetting';
 import { SmoothScrollingSettings } from './SmoothScrollingSettings';
@@ -252,6 +253,7 @@ export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelPro
                         onChange={(value) => void setUiFontSize(value as UiFontSizePreference)}
                       />
                       <LayoutDensitySetting />
+                      <ResetLayoutSetting />
                       <ScrollbarVisibilitySetting />
                       <SmoothScrollingSettings />
                       <TrayIconSetting />
@@ -1333,6 +1335,9 @@ function SearchResults({
     );
   }
 
+  if ([t('Reset layout'), t('Workbench layout'), t('Restore panel sizes and the current window to their default layout.'), 'reset layout', 'window', 'panel', '重置布局', '窗口', '面板'].some(match)) {
+    appearanceItems.push(<ResetLayoutSetting key="reset-layout" />);
+  }
   if ([t('Layout density'), t('Comfortable'), t('Compact'), t('Comfortable uses rounded cards and inset rows; compact maximizes working space.'), 'layout', 'density', 'comfortable', 'compact'].some(match)) {
     appearanceItems.push(<LayoutDensitySetting key="density" />);
   }

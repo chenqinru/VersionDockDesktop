@@ -216,17 +216,11 @@ export function App() {
   const hasSnapshot = Boolean(snapshot);
   useEffect(() => {
     if (!ready) return;
-    // The transferred window already has the source size and drop position.
-    // Skip both startup sizing passes; later empty/workspace transitions still resize.
-    if (startupTabTransfer.current) {
-      if (hasSnapshot) startupTabTransfer.current = false;
-      return;
-    }
-    if (hasSnapshot) {
-      void bridge.window.setSize(0, 0, true);
-    } else {
-      void bridge.window.setSize(880, 540, true);
-    }
+    if (startupTabTransfer.current && !hasSnapshot) return;
+    const preserveBounds = startupTabTransfer.current && hasSnapshot;
+    startupTabTransfer.current = false;
+    void bridge.window.setWorkspaceMode(hasSnapshot, preserveBounds)
+      .catch(error => console.warn('Unable to restore window layout', error));
   }, [bridge, ready, hasSnapshot]);
 
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);

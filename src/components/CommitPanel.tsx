@@ -453,6 +453,11 @@ export function CommitPanel() {
   const [expandedByTab, setExpandedByTab] = useState<Record<'changes' | 'shelf' | 'stash' | 'sync', boolean | null>>({ changes: true, shelf: false, stash: false, sync: true });
   const [manualTextareaHeight, setManualTextareaHeight] = useState<number | null>(loadPersistedTextareaHeight);
   const manualTextareaHeightRef = useRef<number | null>(manualTextareaHeight);
+  const layoutResetVersion = useAppStore(state => state.layoutResetVersion);
+  useEffect(() => {
+    manualTextareaHeightRef.current = loadPersistedTextareaHeight();
+    setManualTextareaHeight(manualTextareaHeightRef.current);
+  }, [layoutResetVersion]);
   useEffect(() => {
     manualTextareaHeightRef.current = manualTextareaHeight;
   }, [manualTextareaHeight]);

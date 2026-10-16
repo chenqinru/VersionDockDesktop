@@ -725,7 +725,10 @@ export function HistoryWorkspace() {
   const branchSidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
   const collapsedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
   const setBranchSidebarState = useAppStore((state) => state.setBranchSidebarState);
-  const [detailSidebarCollapsed, setDetailSidebarCollapsed] = useState(false);
+  const layoutResetVersion = useAppStore(state => state.layoutResetVersion);
+  const [detailSidebarState, setDetailSidebarState] = useState({ collapsed: false, resetVersion: layoutResetVersion });
+  const detailSidebarCollapsed = detailSidebarState.resetVersion === layoutResetVersion && detailSidebarState.collapsed;
+  const setDetailSidebarCollapsed = (collapsed: boolean) => setDetailSidebarState({ collapsed, resetVersion: layoutResetVersion });
   const compareTarget = useAppStore((state) => state.comparisonTarget);
   const openBranchComparison = useAppStore((state) => state.openBranchComparison);
   const closeBranchComparison = useAppStore((state) => state.closeBranchComparison);

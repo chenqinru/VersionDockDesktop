@@ -32,6 +32,10 @@ const renderPanel = (onClose = vi.fn(), scope: SettingsScope = 'workspace', lang
     commands.push(command);
     if (command.type === 'updateSettings') { persisted.state.settings = structuredClone(command.payload.settings); return { settings: command.payload.settings, effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: false } }; }
     if (command.type === 'updateLayout') { persisted.state.layout = structuredClone(command.payload.layout); return command.payload.layout; }
+    if (command.type === 'resetLayout') {
+      persisted.state.layout = { ...persisted.state.layout!, panelSizes: { commit: 360, branches: 220, detail: 380 }, detailInfoHeight: null, comparisonSplitRatio: null, branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
+      return { layout: persisted.state.layout, revision: 100, reset: true };
+    }
     if (command.type === 'bootstrap') return persisted;
     return true;
   });
@@ -51,6 +55,23 @@ afterEach(() => {
 });
 
 describe('SettingsPanel', () => {
+  it.each(['en', 'zh-CN'] as const)('resets geometric layout from appearance and search without changing preferences in %s', async (language) => {
+    const { commands } = renderPanel(vi.fn(), 'application', language);
+    const t = createTranslator(language);
+    const current = useAppStore.getState().bootstrap!;
+    act(() => useAppStore.setState({ bootstrap: { ...current, state: { ...current.state, layout: { ...current.state.layout!, panelSizes: { commit: 550, branches: 330, detail: 500 }, detailInfoHeight: 400, comparisonSplitRatio: .7 } } }, logPanelHeight: 450 }));
+    localStorage.setItem('versiondock:commit-message-textarea-height', '250');
+    localStorage.setItem('versiondock:logPanelHeight', '450');
+    fireEvent.change(screen.getByRole('textbox', { name: t('Search settings...') }), { target: { value: t('Reset layout') } });
+    fireEvent.click(screen.getByRole('button', { name: t('Reset layout') }));
+    await waitFor(() => expect(commands.some(command => command.type === 'resetLayout')).toBe(true));
+    await waitFor(() => expect(useAppStore.getState().bootstrap?.state.layout).toMatchObject({ panelSizes: { commit: 360, branches: 220, detail: 380 }, detailInfoHeight: null, comparisonSplitRatio: null }));
+    expect(useAppStore.getState().bootstrap?.state.settings).toEqual(current.state.settings);
+    expect(useAppStore.getState().logPanelHeight).toBe(240);
+    expect(localStorage.getItem('versiondock:commit-message-textarea-height')).toBeNull();
+    expect(localStorage.getItem('versiondock:logPanelHeight')).toBeNull();
+  });
+
   it.each(['en', 'zh-CN'] as const)('limits welcome categories and search to application settings in %s', (language) => {
     renderPanel(vi.fn(), 'application', language);
     const dialog = screen.getByRole('dialog');

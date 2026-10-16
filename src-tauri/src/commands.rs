@@ -1486,18 +1486,37 @@ async fn dispatch(
             }
             json(result)
         }
-        BridgeCommand::UpdateLayout { mut layout } => {
-            if layout.file_view_mode != "list" {
-                layout.file_view_mode = "tree".into();
-            }
-            if layout.stash_view_mode != "list" {
-                layout.stash_view_mode = "tree".into();
-            }
-            layout.panel_sizes.commit = layout.panel_sizes.commit.clamp(280, 620);
-            layout.panel_sizes.branches = layout.panel_sizes.branches.clamp(120, 400);
-            layout.panel_sizes.detail = layout.panel_sizes.detail.clamp(220, 680);
-            state.update_layout(layout.clone()).await?;
-            json(layout)
+        BridgeCommand::UpdateLayout {
+            layout,
+            changed_fields,
+        } => {
+            let result = state
+                .update_layout_fields(layout, changed_fields.as_deref())
+                .await?;
+            app.emit(
+                "versiondock://event",
+                serde_json::json!({ "type": "layout-changed", "sourceWindowLabel": invoking_window.label(), "update": result }),
+            )
+            .map_err(|error| DesktopError::new("LAYOUT_EVENT_FAILED", error.to_string(), true))?;
+            json(result.layout)
+        }
+        BridgeCommand::ResetLayout => {
+            let result = state.reset_layout().await?;
+            crate::window_layout::reset(invoking_window.clone()).await?;
+            app.emit(
+                "versiondock://event",
+                serde_json::json!({ "type": "layout-changed", "sourceWindowLabel": invoking_window.label(), "update": result }),
+            )
+            .map_err(|error| DesktopError::new("LAYOUT_EVENT_FAILED", error.to_string(), true))?;
+            json(result)
+        }
+        BridgeCommand::WindowSetWorkspaceMode {
+            workspace,
+            preserve_bounds,
+        } => {
+            crate::window_layout::set_mode(invoking_window.clone(), workspace, preserve_bounds)
+                .await?;
+            json(true)
         }
         BridgeCommand::WorkspaceOpen { paths } => {
             let _permit = state.acquire_read(token).await?;

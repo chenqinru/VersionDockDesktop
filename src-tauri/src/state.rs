@@ -97,6 +97,7 @@ pub struct AppState {
     pub write_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     state_write_lock: Mutex<()>,
+    layout_revision: AtomicU32,
     repository_cache: RwLock<HashMap<String, HashMap<String, RepositoryMeta>>>,
     tool_cache: RwLock<Option<ToolAvailability>>,
     pub window_workspaces: std::sync::Mutex<HashMap<String, Vec<Vec<String>>>>,
@@ -122,6 +123,7 @@ impl AppState {
             .unwrap_or_default();
         app.schema_version = 7;
         app.settings = app.settings.normalize();
+        app.layout = app.layout.normalize();
         if app.layout.stash_view_mode != "list" && app.layout.stash_view_mode != "tree" {
             app.layout.stash_view_mode = "tree".into();
         }
@@ -177,6 +179,7 @@ impl AppState {
             write_limit: Semaphore::new(2),
             write_locks: Mutex::new(HashMap::new()),
             state_write_lock: Mutex::new(()),
+            layout_revision: AtomicU32::new(0),
             repository_cache: RwLock::new(HashMap::new()),
             tool_cache: RwLock::new(None),
             window_workspaces: std::sync::Mutex::new(HashMap::new()),
@@ -498,11 +501,95 @@ impl AppState {
         Ok(crate::models::SettingsUpdateResult { settings, effects })
     }
 
+    #[cfg(test)]
     pub async fn update_layout(&self, layout: LayoutState) -> Result<(), DesktopError> {
+        self.update_layout_fields(layout, None).await.map(|_| ())
+    }
+
+    pub async fn update_layout_fields(
+        &self,
+        incoming: LayoutState,
+        fields: Option<&[String]>,
+    ) -> Result<crate::models::LayoutUpdateResult, DesktopError> {
         let _state_write = self.state_write_lock.lock().await;
         let mut snapshot = self.app.read().await.clone();
-        snapshot.layout = layout;
-        self.save_app_state_locked(snapshot).await
+        let layout = if let Some(fields) = fields {
+            let encode_error = |error: serde_json::Error| {
+                DesktopError::new("INVALID_LAYOUT", error.to_string(), false)
+            };
+            let mut current = serde_json::to_value(&snapshot.layout).map_err(encode_error)?;
+            let incoming = serde_json::to_value(incoming).map_err(encode_error)?;
+            for field in fields {
+                if ![
+                    "panelSizes.commit",
+                    "panelSizes.branches",
+                    "panelSizes.detail",
+                    "activeTab",
+                    "fileViewMode",
+                    "stashViewMode",
+                    "branchSidebarCollapsed",
+                    "branchSidebarCollapsedSections",
+                    "detailInfoHeight",
+                    "comparisonSplitRatio",
+                ]
+                .contains(&field.as_str())
+                {
+                    return Err(DesktopError::new(
+                        "INVALID_LAYOUT_FIELD",
+                        format!("Unknown layout field: {field}"),
+                        false,
+                    ));
+                }
+                // Only known leaf fields may be merged. A stale window must not
+                // overwrite another window's unrelated panel sizes or view mode.
+                let path = format!("/{}", field.replace('.', "/"));
+                let target = current.pointer_mut(&path).ok_or_else(|| {
+                    DesktopError::new(
+                        "INVALID_LAYOUT_FIELD",
+                        format!("Unknown layout field: {field}"),
+                        false,
+                    )
+                })?;
+                if target.is_object() || field.contains('/') || field.contains('~') {
+                    return Err(DesktopError::new(
+                        "INVALID_LAYOUT_FIELD",
+                        format!("Invalid layout field: {field}"),
+                        false,
+                    ));
+                }
+                *target = incoming.pointer(&path).cloned().ok_or_else(|| {
+                    DesktopError::new(
+                        "INVALID_LAYOUT_FIELD",
+                        format!("Unknown layout field: {field}"),
+                        false,
+                    )
+                })?;
+            }
+            serde_json::from_value::<LayoutState>(current).map_err(encode_error)?
+        } else {
+            incoming
+        }
+        .normalize();
+        snapshot.layout = layout.clone();
+        self.save_app_state_locked(snapshot).await?;
+        Ok(crate::models::LayoutUpdateResult {
+            layout,
+            revision: self.layout_revision.fetch_add(1, Ordering::SeqCst) + 1,
+            reset: false,
+        })
+    }
+
+    pub async fn reset_layout(&self) -> Result<crate::models::LayoutUpdateResult, DesktopError> {
+        let _state_write = self.state_write_lock.lock().await;
+        let mut snapshot = self.app.read().await.clone();
+        snapshot.layout.reset_geometry();
+        let layout = snapshot.layout.clone();
+        self.save_app_state_locked(snapshot).await?;
+        Ok(crate::models::LayoutUpdateResult {
+            layout,
+            revision: self.layout_revision.fetch_add(1, Ordering::SeqCst) + 1,
+            reset: true,
+        })
     }
 
     pub async fn save_app_state(&self, mut snapshot: AppStateSnapshot) -> Result<(), DesktopError> {
@@ -1279,6 +1366,60 @@ mod tests {
             serde_json::to_value(&state.app.read().await.settings).unwrap(),
             serde_json::to_value(before).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn layout_updates_merge_windows_restore_on_restart_and_reset_only_geometry() {
+        let root = tempdir().unwrap();
+        let state = AppState::load(root.path().into());
+        let mut first = state.app.read().await.layout.clone();
+        let mut second = first.clone();
+        first.panel_sizes.commit = 500;
+        first.detail_info_height = Some(300);
+        second.panel_sizes.branches = 330;
+        second.comparison_split_ratio = Some(0.65);
+        second.file_view_mode = "list".into();
+        let fields_a = ["panelSizes.commit".into(), "detailInfoHeight".into()];
+        let fields_b = [
+            "panelSizes.branches".into(),
+            "comparisonSplitRatio".into(),
+            "fileViewMode".into(),
+        ];
+        let (a, b) = tokio::join!(
+            state.update_layout_fields(first, Some(&fields_a)),
+            state.update_layout_fields(second, Some(&fields_b))
+        );
+        assert_ne!(a.unwrap().revision, b.unwrap().revision);
+        let restored = AppState::load(root.path().into());
+        let layout = restored.app.read().await.layout.clone();
+        assert_eq!(layout.panel_sizes.commit, 500);
+        assert_eq!(layout.panel_sizes.branches, 330);
+        assert_eq!(layout.detail_info_height, Some(300));
+        assert_eq!(layout.comparison_split_ratio, Some(0.65));
+        assert!(state
+            .update_layout_fields(layout.clone(), Some(&["panelSizes".into()]))
+            .await
+            .is_err());
+        assert!(state
+            .update_layout_fields(layout, Some(&["unknown".into()]))
+            .await
+            .is_err());
+        let reset = state.reset_layout().await.unwrap();
+        assert!(reset.reset);
+        assert_eq!(
+            reset.layout.panel_sizes.commit,
+            LayoutState::default().panel_sizes.commit
+        );
+        assert!(reset.layout.detail_info_height.is_none());
+        assert!(reset.layout.comparison_split_ratio.is_none());
+        assert_eq!(reset.layout.file_view_mode, "list");
+        assert!(AppState::load(root.path().into())
+            .app
+            .read()
+            .await
+            .layout
+            .detail_info_height
+            .is_none());
     }
 
     #[tokio::test]

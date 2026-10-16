@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, DEFAULT_LAYOUT } from '../settings/defaults';
 import { mergeLogEntries } from '../logs/entries';
 import { configureTaskProgress, isTaskActive, resetTaskProgress, useTaskProgressStore } from '../progress/taskProgressStore';
 import { SettingsWriter } from '../services/settingsWriter';
+import { LayoutWriter, layoutPatch } from '../services/layoutWriter';
 import { create } from 'zustand';
 import type {
   AppStateSnapshot, BootstrapData, BranchInfo, CommitBranches, CommitDetail, CommitFile, CommitNode, ConflictFile, DiffDocument, GraphCommitNode,
@@ -18,7 +19,7 @@ import type {
   SyncResult, UpdateRestoreWarning, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
   BranchRecoveryResult, RepositoryCommitSelection, RestoreConflictsResult,
   ConflictResolutionResult,
-  LogEntry, LogLevel, LogChannel,
+  LogEntry, LogLevel, LogChannel, LayoutUpdateResult,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
 import { buildCommitFileTargets, commitKey, type DetailFileTarget } from '../history/commitDetails';
@@ -610,6 +611,10 @@ export interface AppStore {
   setStashViewMode: (value: 'tree' | 'list') => void;
   setActiveTab: (value: 'changes' | 'shelf' | 'stash' | 'worktree' | 'subtree' | 'submodule' | 'sync' | 'push') => void;
   setPanelSize: (key: 'commit' | 'branches' | 'detail', value: number) => void;
+  setDetailInfoHeight: (height: number) => void;
+  setComparisonSplitRatio: (ratio: number) => void;
+  resetLayout: () => Promise<void>;
+  layoutResetVersion: number;
   setBranchSidebarState: (collapsed: boolean, collapsedSections: string[]) => void;
   updateSettings: (patch: Partial<DesktopSettings>) => Promise<void>;
   addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read' | 'actions'> & { actions?: AppNotificationAction[] }) => string;
@@ -1881,10 +1886,49 @@ export const useAppStore = create<AppStore>((set, get) => {
     if ('showTrayIcon' in patch || 'closeToTray' in patch || 'language' in patch) await get().refreshRuntimeCapabilities();
   };
 
+  let layoutWriter: { bridge: VersionDockBridge; writer: LayoutWriter } | undefined;
+  let layoutResetRevision = -1;
+  let publishedLayout: LayoutState | undefined;
+  const clearLocalGeometry = () => {
+    try {
+      localStorage.removeItem('versiondock:commit-message-textarea-height');
+      localStorage.removeItem('versiondock:logPanelHeight');
+    } catch { /* Layout can still reset when browser storage is unavailable. */ }
+    set(state => ({ logPanelHeight: 240, layoutResetVersion: state.layoutResetVersion + 1 }));
+  };
+  const applyLayout = (next: LayoutState) => {
+    publishedLayout = next;
+    set(state => state.bootstrap ? { bootstrap: { ...state.bootstrap, state: { ...state.bootstrap.state, layout: next } } } : {});
+  };
+  const getLayoutWriter = () => {
+    const owner = bridge();
+    if (layoutWriter?.bridge !== owner || (publishedLayout && layout() !== publishedLayout)) {
+      if (layoutWriter?.bridge !== owner) layoutResetRevision = -1;
+      layoutWriter?.writer.dispose();
+      publishedLayout = layout();
+      const active = () => get().bridge === owner && Boolean(get().bootstrap) && layoutWriter?.writer === writer;
+      const writer = new LayoutWriter(layout(),
+        (next, changed_fields) => owner.request({ type: 'updateLayout', payload: { layout: next, changed_fields } }, { showProgress: false }),
+        next => { if (active()) applyLayout(next); },
+        error => { if (active()) publishError('Layout update failed', error); },
+      );
+      layoutWriter = { bridge: owner, writer };
+    }
+    return layoutWriter.writer;
+  };
+  const receiveLayout = (result: LayoutUpdateResult) => {
+    getLayoutWriter().receive(result);
+    if (result.reset && result.revision > layoutResetRevision) {
+      layoutResetRevision = result.revision;
+      clearLocalGeometry();
+    }
+  };
   const updateLayout = (next: LayoutState) => {
-    const bootstrap = get().bootstrap; if (!bootstrap) return;
-    set({ bootstrap: { ...bootstrap, state: { ...bootstrap.state, layout: next } } });
-    bridge().send({ type: 'updateLayout', payload: { layout: next } });
+    if (!get().bootstrap) return;
+    const patch = layoutPatch(layout(), next);
+    const writer = getLayoutWriter();
+    applyLayout(next);
+    writer.update(patch, Object.keys(patch).every(key => ['panelSizes', 'detailInfoHeight', 'comparisonSplitRatio'].includes(key)));
   };
 
   const showBatchProgress = (message: NotificationText, wid: string, repositories: Array<{ id: string; name: string }>) => {
@@ -2582,6 +2626,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     worktreeBusy: {},
     ready: false, notifications: [], toastNotificationIds: [], notificationCenterOpen: false, identityPanelRepoId: null, remoteManagerRepoId: null, aboutOpen: false, aboutInitialTab: 'about', updateAvailableInfo: null, tabs: [], activeTabId: null, sessions: {}, allRepositories: [], mode: 'history', diffReturnMode: undefined, history: [], historyHasMore: false, historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyRepoErrors: {}, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, historyLoading: false, historyTopologyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, selectedCommits: [], updateDetailCommits: [], selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, conflicts: [], merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, stashes: {}, shelves: {}, changelists: {}, worktrees: {}, subtrees: {}, submodules: {}, unpushedCommits: {}, incomingCommits: {}, remotes: {}, batchCommitReport: undefined, batchCommitReports: {}, loadErrors: {},
     logPanelOpen: false,
+    layoutResetVersion: 0,
     logPanelHeight: typeof localStorage !== 'undefined' ? Number(localStorage.getItem('versiondock:logPanelHeight') ?? 240) : 240,
     logEntries: [],
     logError: null,
@@ -2623,6 +2668,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       resetLogSession();
       const owner = logSession;
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
+      layoutWriter?.writer.dispose(); layoutWriter = undefined; layoutResetRevision = -1;
       currentWindowLabel = await value.getWindowLabel().catch(() => currentWindowLabel);
       if (owner !== logSession) return;
       set({ bridge: value });
@@ -2631,12 +2677,32 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (document.visibilityState === 'visible') refreshRuntimeOnFocus();
       };
       const fetchOnFocus = () => { if (get().ready) void backgroundFetch('focus'); };
+      const flushLayout = () => { void layoutWriter?.writer.flush(); };
+      window.addEventListener('pagehide', flushLayout);
+      window.addEventListener('pointerup', flushLayout);
+      window.addEventListener('pointercancel', flushLayout);
+      const visibilityLayout = () => { if (document.visibilityState === 'hidden') flushLayout(); };
+      document.addEventListener('visibilitychange', visibilityLayout);
+      bridgeSubscriptions.push(() => { window.removeEventListener('pagehide', flushLayout); window.removeEventListener('pointerup', flushLayout); window.removeEventListener('pointercancel', flushLayout); document.removeEventListener('visibilitychange', visibilityLayout); });
       bridgeSubscriptions.push(useAppStore.subscribe((state) => {
         const wid = state.snapshot?.workspace.id;
         if (wid) drainDeferredHistoryRefreshes(wid);
       }));
       configureTaskProgress((id) => value.cancelOperation(id));
       bridgeSubscriptions.push(value.subscribe((event) => {
+        if ('update' in event && event.type === 'layout-changed') {
+          if (get().bootstrap) {
+            const update = event.sourceWindowLabel && event.sourceWindowLabel !== currentWindowLabel ? {
+              ...event.update,
+              layout: { ...layout(), panelSizes: event.update.layout.panelSizes,
+                detailInfoHeight: event.update.layout.detailInfoHeight, comparisonSplitRatio: event.update.layout.comparisonSplitRatio,
+                ...(event.update.reset ? { branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] } : {}),
+              },
+            } : event.update;
+            receiveLayout(update);
+          }
+          return;
+        }
         if ('type' in event && event.type === 'author-avatar-cache-cleared') { window.dispatchEvent(new Event('versiondock-avatar-cache-clear')); return; }
         if ('workspace' in event && event.type === 'workspace-renamed') { applyWorkspaceName(event.workspace); return; }
         const progress = useTaskProgressStore.getState();
@@ -2822,6 +2888,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     dispose: () => {
       resetLogSession();
       settingsWriter = undefined;
+      layoutWriter?.writer.dispose(); layoutWriter = undefined;
       workingTreeLifecycle++;
       workingTreeUpdates.clear();
       workingTreeRequests.clear();
@@ -6163,6 +6230,16 @@ export const useAppStore = create<AppStore>((set, get) => {
     setPanelSize: (key, value) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;
       updateLayout({ ...layout(), panelSizes: { ...layout().panelSizes, [key]: Math.round(value) } });
+    },
+    setDetailInfoHeight: (height) => { if (Number.isFinite(height)) updateLayout({ ...layout(), detailInfoHeight: Math.round(height) }); },
+    setComparisonSplitRatio: (ratio) => { if (Number.isFinite(ratio)) updateLayout({ ...layout(), comparisonSplitRatio: Math.min(.95, Math.max(.05, ratio)) }); },
+    resetLayout: async () => {
+      if (!get().bootstrap) return;
+      try {
+        await getLayoutWriter().flush();
+        const result = await bridge().request<LayoutUpdateResult>({ type: 'resetLayout' }, { showProgress: false });
+        receiveLayout(result);
+      } catch (error) { publishError('Layout reset failed', error); throw error; }
     },
     setBranchSidebarState: (collapsed, collapsedSections) => {
       const bootstrap = get().bootstrap; if (!bootstrap) return;

@@ -311,6 +311,7 @@ const initialState: AppStateSnapshot = {
 };
 
 export class BrowserDevBridge implements VersionDockBridge {
+  private layoutRevision = 0;
   private state: AppStateSnapshot = structuredClone(initialState);
   private repositories = structuredClone(browserDemoMode === 'mixed' ? mixedRepositories : initialRepositories);
   private readonly branchValues = browserDemoMode === 'mixed' ? mixedBranches : branches;
@@ -335,6 +336,7 @@ export class BrowserDevBridge implements VersionDockBridge {
     setPosition: async () => undefined,
     setCursorIcon: async () => undefined,
     setSize: async () => undefined,
+    setWorkspaceMode: async () => undefined,
     onDragDrop: async () => () => undefined,
   };
 
@@ -509,7 +511,28 @@ export class BrowserDevBridge implements VersionDockBridge {
           : structuredClone(settings);
         return { settings: structuredClone(this.state.settings), effects: { rescanWorkspace: false, reloadHistory: false, restartAutoRefresh: true } };
       }
-      case 'updateLayout': this.state.layout = structuredClone(command.payload.layout); return command.payload.layout;
+      case 'updateLayout': {
+        const { mergeLayout } = await import('../services/layoutWriter');
+        const { layout, changed_fields } = command.payload;
+        const patch: import('../services/layoutWriter').LayoutPatch = {};
+        for (const field of changed_fields ?? Object.keys(layout)) {
+          if (field.startsWith('panelSizes.')) {
+            const key = field.slice(11) as keyof typeof layout.panelSizes;
+            patch.panelSizes = { ...patch.panelSizes, [key]: layout.panelSizes[key] };
+          } else Object.assign(patch, { [field]: layout[field as keyof typeof layout] });
+        }
+        this.state.layout = mergeLayout(this.state.layout!, patch);
+        const update = { layout: structuredClone(this.state.layout), revision: ++this.layoutRevision, reset: false };
+        this.handlers.forEach(handler => handler({ type: 'layout-changed', update }));
+        return update.layout;
+      }
+      case 'resetLayout': {
+        const { DEFAULT_LAYOUT } = await import('../settings/defaults');
+        this.state.layout = { ...this.state.layout!, panelSizes: { ...DEFAULT_LAYOUT.panelSizes }, detailInfoHeight: null, comparisonSplitRatio: null, branchSidebarCollapsed: false, branchSidebarCollapsedSections: [] };
+        const update = { layout: structuredClone(this.state.layout), revision: ++this.layoutRevision, reset: true };
+        this.handlers.forEach(handler => handler({ type: 'layout-changed', update }));
+        return update;
+      }
       case 'workspaceOpen': case 'workspaceRefresh': {
         this.generation += 1;
         const value = this.snapshot();

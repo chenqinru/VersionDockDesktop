@@ -33,6 +33,7 @@ mod tab_drag;
 mod tray;
 mod update_worker;
 mod vcs;
+mod window_layout;
 mod windowing;
 mod workspace;
 
@@ -117,6 +118,9 @@ pub fn run() {
             let logger = logger::init_global_logger(log_dir);
             logger.set_app_handle(app.handle().clone());
             app.manage(AppState::load(config_dir));
+            app.manage(window_layout::WindowLayouts::load(
+                app.path().app_config_dir()?,
+            ));
             app.manage(tray::TrayState::default());
             tray::schedule_refresh(app.handle());
 
@@ -139,6 +143,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            window_layout::window_event(window, event);
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 tray::close_requested(window, api);
             }
@@ -167,6 +172,11 @@ pub fn run() {
         .expect("error while building VersionDock Desktop")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                for window in app.webview_windows().values() {
+                    let _ = app
+                        .state::<window_layout::WindowLayouts>()
+                        .capture(&window.as_ref().window());
+                }
                 tray::mark_exiting(app);
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {

@@ -1,0 +1,74 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_LAYOUT } from '../settings/defaults';
+import { LayoutWriter, layoutFields, layoutPatch, mergeLayout } from './layoutWriter';
+import type { LayoutState, LayoutUpdateResult } from '../bindings/generated';
+afterEach(() => vi.useRealTimers());
+describe('layout persistence', () => {
+  it('debounces drag changes and saves only changed leaves', async () => {
+    vi.useFakeTimers();
+    const save = vi.fn().mockResolvedValue(undefined);
+    const changed = vi.fn();
+    const writer = new LayoutWriter(DEFAULT_LAYOUT, save, changed, vi.fn());
+    for (let commit = 360; commit <= 500; commit += 10) writer.update({ panelSizes: { commit } });
+    expect(save).not.toHaveBeenCalled();
+    expect(changed.mock.lastCall?.[0].panelSizes.commit).toBe(500);
+    await vi.advanceTimersByTimeAsync(180);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][1]).toEqual(['panelSizes.commit']);
+    writer.dispose();
+  });
+  it('serializes writes, keeps pending local choices and incorporates other windows', async () => {
+    const completions: Array<() => void> = [];
+    const save = vi.fn<(layout: LayoutState, fields: string[]) => Promise<void>>(() => new Promise<void>(resolve => completions.push(resolve)));
+    const changed = vi.fn();
+    const writer = new LayoutWriter(DEFAULT_LAYOUT, save, changed, vi.fn());
+    writer.update({ panelSizes: { commit: 500 } });
+    const flushed = writer.flush();
+    writer.update({ detailInfoHeight: 300 });
+    const remote = mergeLayout(DEFAULT_LAYOUT, { panelSizes: { branches: 310, commit: 500 } });
+    writer.receive({ layout: remote, revision: 2, reset: false });
+    writer.receive({ layout: DEFAULT_LAYOUT, revision: 1, reset: false });
+    expect(changed.mock.lastCall?.[0]).toMatchObject({ panelSizes: { commit: 500, branches: 310 }, detailInfoHeight: 300 });
+    completions[0](); await Promise.resolve(); await Promise.resolve();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1][0]).toMatchObject({ panelSizes: { branches: 310 }, detailInfoHeight: 300 });
+    completions[1](); await flushed;
+    writer.dispose();
+  });
+  it('prevents queued and late responses from undoing a reset', async () => {
+    let complete!: () => void;
+    const changed = vi.fn();
+    const writer = new LayoutWriter(DEFAULT_LAYOUT, () => new Promise<void>(resolve => { complete = resolve; }), changed, vi.fn());
+    writer.update({ panelSizes: { commit: 590 } });
+    const flushed = writer.flush();
+    writer.update({ detailInfoHeight: 400 });
+    writer.receive({ layout: DEFAULT_LAYOUT, revision: 3, reset: true });
+    complete(); await flushed;
+    expect(changed.mock.lastCall?.[0]).toEqual(DEFAULT_LAYOUT);
+    writer.receive({ layout: mergeLayout(DEFAULT_LAYOUT, { detailInfoHeight: 400 }), revision: 2, reset: false });
+    expect(changed.mock.lastCall?.[0]).toEqual(DEFAULT_LAYOUT);
+    writer.dispose();
+  });
+  it('rolls failed writes back and keeps the next independent change usable', async () => {
+    const failed = vi.fn(); const changed = vi.fn();
+    const save = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockResolvedValue(undefined);
+    const writer = new LayoutWriter(DEFAULT_LAYOUT, save, changed, failed);
+    writer.update({ panelSizes: { commit: 500 } }); await writer.flush();
+    expect(changed.mock.lastCall?.[0]).toEqual(DEFAULT_LAYOUT);
+    expect(failed).toHaveBeenCalledOnce();
+    writer.update({ comparisonSplitRatio: .65 }); await writer.flush();
+    expect(changed.mock.lastCall?.[0].comparisonSplitRatio).toBe(.65);
+    const fields = layoutFields(layoutPatch(DEFAULT_LAYOUT, mergeLayout(DEFAULT_LAYOUT, { panelSizes: { detail: 420 }, comparisonSplitRatio: .65 })));
+    expect(fields).toEqual(expect.arrayContaining(['panelSizes.detail', 'comparisonSplitRatio']));
+    writer.dispose();
+  });
+  it('ignores late data after its window session is disposed', async () => {
+    let complete!: (value: LayoutUpdateResult) => void;
+    const changed = vi.fn();
+    const writer = new LayoutWriter(DEFAULT_LAYOUT, () => new Promise(resolve => { complete = resolve; }), changed, vi.fn());
+    writer.update({ detailInfoHeight: 500 }); const flushed = writer.flush();
+    writer.dispose(); changed.mockClear();
+    complete({ layout: DEFAULT_LAYOUT, revision: 1, reset: false }); await flushed;
+    expect(changed).not.toHaveBeenCalled();
+  });
+});

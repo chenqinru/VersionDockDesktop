@@ -286,6 +286,10 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	anchor: AiAnchor,
 } } | { type: "aiResetCliSession" } | { type: "updateLayout"; payload: {
 	layout: LayoutState,
+	changed_fields?: string[] | null,
+} } | { type: "resetLayout" } | { type: "windowSetWorkspaceMode"; payload: {
+	workspace: boolean,
+	preserve_bounds: boolean,
 } } | { type: "workspaceOpen"; payload: {
 	paths: string[],
 } } | { type: "workspaceRename"; payload: {
@@ -1157,6 +1161,14 @@ export type LayoutState = {
 	stashViewMode: string,
 	branchSidebarCollapsed: boolean,
 	branchSidebarCollapsedSections: string[],
+	detailInfoHeight?: number | null,
+	comparisonSplitRatio?: number | null,
+};
+
+export type LayoutUpdateResult = {
+	layout: LayoutState,
+	revision: number,
+	reset: boolean,
 };
 
 export type LineRange = {
