@@ -29,6 +29,22 @@ afterEach(() => {
 });
 
 describe('native startup window', () => {
+  it.each(['windows', 'linux', 'macos'])('refreshes the %s native background before both window mode changes', async platform => {
+    native.platform.mockReturnValue(platform);
+    const bridge = new TauriBridge();
+    const setter = platform === 'macos' ? native.setBackgroundColor : native.setWebviewBackgroundColor;
+    for (const [workspace, background] of [[true, '#121314'], [false, '#FFFFFF']] as const) {
+      document.documentElement.style.setProperty('--versiondock-bg', background);
+      setter.mockClear();
+      native.invoke.mockImplementation(async () => {
+        expect(setter).toHaveBeenCalledWith(background);
+        return { result: true, error: null };
+      });
+      await bridge.window.setWorkspaceMode(workspace);
+      expect(native.invoke).toHaveBeenLastCalledWith('bridge_request', { envelope: expect.objectContaining({ command: { type: 'windowSetWorkspaceMode', payload: { workspace, preserve_bounds: false } } }) });
+    }
+  });
+
   it('leaves a window hidden when the native close policy rejects startup reveal', async () => {
     native.invoke.mockResolvedValue({ result: false, error: null });
     await new TauriBridge().window.show();

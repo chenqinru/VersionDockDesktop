@@ -258,6 +258,24 @@ export class TauriBridge implements VersionDockBridge {
   private contextGenerations = new Map<string, number>();
   private currentPlatform: 'macos' | 'windows' | 'linux' = (() => { const value = osPlatform(); return value === 'macos' || value === 'windows' ? value : 'linux'; })();
 
+  private async syncWindowBackground(warning: string): Promise<void> {
+    const background = getComputedStyle(document.documentElement).getPropertyValue('--versiondock-bg').trim();
+    if (!background) return;
+    try {
+      if (this.currentPlatform === 'macos') {
+        // WKWebView does not support changing its native background at runtime.
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        await getCurrentWindow().setBackgroundColor(background);
+      } else {
+        // Match both surfaces, including newly exposed pixels during a resize.
+        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+        await getCurrentWebviewWindow().setBackgroundColor(background);
+      }
+    } catch (error) {
+      console.warn(warning, error);
+    }
+  }
+
   readonly window = {
     startDragging: async () => (await import('@tauri-apps/api/window')).getCurrentWindow().startDragging(),
     hasOtherWorkspaceWindows: async () => {
@@ -275,22 +293,7 @@ export class TauriBridge implements VersionDockBridge {
       await invoke('window_set_controls_visible', { visible });
     },
     show: async () => {
-      const currentWindow = (await import('@tauri-apps/api/window')).getCurrentWindow();
-      const background = getComputedStyle(document.documentElement).getPropertyValue('--versiondock-bg').trim();
-      if (background) {
-        try {
-          if (this.currentPlatform === 'macos') {
-            // WKWebView does not support changing its native background at runtime.
-            await currentWindow.setBackgroundColor(background);
-          } else {
-            // Match both the window and webview to the committed theme.
-            const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-            await getCurrentWebviewWindow().setBackgroundColor(background);
-          }
-        } catch (error) {
-          console.warn('Unable to set startup background', error);
-        }
-      }
+      await this.syncWindowBackground('Unable to set startup background');
       // The native close policy rejects a delayed startup reveal after a window was hidden.
       await this.request({ type: 'windowReveal' }, { showProgress: false });
     },
@@ -303,7 +306,10 @@ export class TauriBridge implements VersionDockBridge {
     },
     setCursorIcon: async (icon: 'default' | 'grab' | 'grabbing' | 'copy') => (await import('@tauri-apps/api/window')).getCurrentWindow().setCursorIcon(icon),
     setWorkspaceMode: async (workspace: boolean, preserveBounds = false) => {
-      this.windowModeQueue = this.windowModeQueue.catch(() => undefined).then(() => this.request<void>({ type: 'windowSetWorkspaceMode', payload: { workspace, preserve_bounds: preserveBounds } }, { showProgress: false }));
+      this.windowModeQueue = this.windowModeQueue.catch(() => undefined).then(async () => {
+        await this.syncWindowBackground('Unable to set window transition background');
+        await this.request<void>({ type: 'windowSetWorkspaceMode', payload: { workspace, preserve_bounds: preserveBounds } }, { showProgress: false });
+      });
       await this.windowModeQueue;
     },
     setSize: async (width: number, height: number, center = false) => {

@@ -10,20 +10,16 @@ pub async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
         let env = app.env();
         let binary = tauri::process::current_binary(&env).map_err(|error| error.to_string())?;
         if let Some(bundle) = macos_app_bundle(&binary) {
-            // Launch Services transfers activation to the updated .app. Spawning
-            // Contents/MacOS directly can leave the new instance in the background.
-            let status = tokio::process::Command::new("/usr/bin/open")
-                .arg("-n")
-                .arg(bundle)
-                .arg("--args")
-                .args(env.args_os.iter().skip(1))
-                .status()
-                .await
-                .map_err(|error| format!("Unable to restart application: {error}"))?;
-            if !status.success() {
-                return Err(format!("Unable to restart application: {status}"));
-            }
-            // Exit only after the system has accepted the new application launch.
+            let args = env.args_os.iter().skip(1).cloned().collect::<Vec<_>>();
+            // Keep Launch Services activation, but let the old instance exit before
+            // opening the same bundle. Do not force a simultaneous instance (-n).
+            let _helper = start_macos_restart_helper(macos_restart_command(
+                std::process::id(),
+                std::path::Path::new("/usr/bin/open"),
+                bundle,
+                &args,
+            ))
+            .await?;
             app.exit(0);
             return Ok(());
         }
@@ -31,6 +27,74 @@ pub async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     // Unbundled development binaries and other platforms keep Tauri's restart.
     app.request_restart();
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+const MACOS_RESTART_SCRIPT: &str = r#"
+parent_pid=$1
+opener=$2
+bundle=$3
+shift 3
+printf 'ready\n'
+exec 1>/dev/null
+attempt=0
+while /bin/kill -0 "$parent_pid" 2>/dev/null; do
+    attempt=$((attempt + 1))
+    # If shutdown stalls, leave the running app alone instead of duplicating it.
+    if [ "$attempt" -ge 300 ]; then exit 1; fi
+    /bin/sleep 0.1
+done
+exec "$opener" "$bundle" --args "$@"
+"#;
+
+#[cfg(target_os = "macos")]
+fn macos_restart_command(
+    parent_pid: u32,
+    opener: &std::path::Path,
+    bundle: &std::path::Path,
+    args: &[std::ffi::OsString],
+) -> tokio::process::Command {
+    use std::process::Stdio;
+
+    let mut command = tokio::process::Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg(MACOS_RESTART_SCRIPT)
+        .arg("versiondock-restart")
+        .arg(parent_pid.to_string())
+        .arg(opener)
+        .arg(bundle)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0);
+    command
+}
+
+#[cfg(target_os = "macos")]
+async fn start_macos_restart_helper(
+    mut command: tokio::process::Command,
+) -> Result<tokio::process::Child, String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Unable to restart application: {error}"))?;
+    let mut ready = String::new();
+    let stdout = child.stdout.take().expect("restart helper stdout is piped");
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        BufReader::new(stdout).read_line(&mut ready),
+    )
+    .await;
+    if !matches!(result, Ok(Ok(_))) || ready != "ready\n" {
+        let _ = child.kill().await;
+        return Err("Unable to start application restart helper".into());
+    }
+    // The helper has its own process group and no app-owned stdio. Dropping the
+    // Child must leave it alive to observe this process terminating.
+    Ok(child)
 }
 
 #[cfg(target_os = "macos")]
@@ -46,8 +110,8 @@ fn macos_app_bundle(binary: &std::path::Path) -> Option<&std::path::Path> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod restart_tests {
-    use super::macos_app_bundle;
-    use std::path::Path;
+    use super::{macos_app_bundle, macos_restart_command, start_macos_restart_helper};
+    use std::{ffi::OsString, os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
     #[test]
     fn restart_resolves_the_bundle_with_spaces_and_unicode() {
@@ -62,6 +126,78 @@ mod restart_tests {
             "/tmp/VersionDock.app/Other/MacOS/versiondock-desktop"
         ))
         .is_none());
+    }
+
+    #[tokio::test]
+    async fn restart_helper_survives_drop_and_opens_only_after_old_process_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let opener = directory.path().join("fake opener");
+        let recorded_args = directory.path().join("args");
+        std::fs::write(
+            &opener,
+            "#!/bin/sh\nprintf '%s\\0' \"$@\" > \"$VD_RESTART_ARGS_FILE\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let bundle = directory.path().join("VersionDock's $literal 版本.app");
+        let args = [
+            OsString::from("--project"),
+            OsString::from("a ' \" $()\n树"),
+        ];
+        let mut old_process = tokio::process::Command::new("/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut command = macos_restart_command(old_process.id().unwrap(), &opener, &bundle, &args);
+        command.env("VD_RESTART_ARGS_FILE", &recorded_args);
+        let helper = start_macos_restart_helper(command).await.unwrap();
+        let helper_pid = helper.id().unwrap();
+        // The real caller also drops this handle as it exits.
+        drop(helper);
+        assert_eq!(
+            unsafe { libc::getpgid(helper_pid as i32) },
+            helper_pid as i32
+        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!recorded_args.exists());
+        old_process.kill().await.unwrap();
+        let captured = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(bytes) = std::fs::read(&recorded_args) {
+                    if bytes.ends_with(&[0]) {
+                        break bytes;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let actual: Vec<_> = captured[..captured.len() - 1]
+            .split(|byte| *byte == 0)
+            .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                bundle.to_string_lossy().into_owned(),
+                "--args".into(),
+                "--project".into(),
+                "a ' \" $()\n树".into(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn restart_helper_reports_failure_before_app_exit() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "exit 1"])
+            .stdout(std::process::Stdio::piped());
+        assert!(start_macos_restart_helper(command).await.is_err());
+        let command = tokio::process::Command::new("/nonexistent/versiondock-restart-helper");
+        assert!(start_macos_restart_helper(command).await.is_err());
     }
 }
 

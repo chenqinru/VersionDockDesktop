@@ -7,7 +7,7 @@ import { AiCodeReviewWorkspace } from './components/AiCodeReviewWorkspace';
 import { aiWorkspaceChanged } from './ai/aiStore';
 import { useEffectiveTheme } from './theme/useEffectiveTheme';
 import { useMouseBackNavigation } from './hooks/useMouseBackNavigation';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { WorkspaceChooser } from './components/WorkspaceChooser';
 import { CommitPanel } from './components/CommitPanel';
@@ -35,6 +35,8 @@ import { choiceDialog } from './components/dialogService';
 import { RepositoryCheckoutDialog, type RepositoryCheckoutKind } from './components/RepositoryCheckoutDialog';
 import { startupTransferTab } from './windowing/startupTabTransfer';
 import { useStartupWindowReveal } from './windowing/useStartupWindowReveal';
+import { useWorkspaceWindowMode } from './windowing/useWorkspaceWindowMode';
+import { LoadingState } from './components/LoadingState';
 import { selectWorkspacePaths } from './workspaces/selectWorkspace';
 
 const UI_FONT_SIZE = {
@@ -79,7 +81,7 @@ export function App() {
   const [dropActive, setDropActive] = useState(false);
   const [checkoutKind, setCheckoutKind] = useState<RepositoryCheckoutKind>();
   const [startupTab] = useState(startupTransferTab);
-  const startupTabTransfer = useRef(new URLSearchParams(window.location.search).has('tabTransfer'));
+  const windowTransition = useWorkspaceWindowMode(bridge, ready, Boolean(snapshot));
   // Refresh color helpers throughout the workbench when system appearance changes.
   useEffectiveTheme();
   const themePreference = bootstrap?.state.settings?.theme ?? bootstrap?.state.theme ?? 'system';
@@ -213,20 +215,11 @@ export function App() {
   }, [bridge, openWorkspace, t]);
 
   useEffect(() => { aiWorkspaceChanged(snapshot?.workspace.id); }, [snapshot?.workspace.id]);
-  const hasSnapshot = Boolean(snapshot);
-  useEffect(() => {
-    if (!ready) return;
-    if (startupTabTransfer.current && !hasSnapshot) return;
-    const preserveBounds = startupTabTransfer.current && hasSnapshot;
-    startupTabTransfer.current = false;
-    void bridge.window.setWorkspaceMode(hasSnapshot, preserveBounds)
-      .catch(error => console.warn('Unable to restore window layout', error));
-  }, [bridge, ready, hasSnapshot]);
-
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);
 
   return <I18nContext.Provider value={{ language, preference: languagePreference, t }}>
-    <div className="app-shell" ref={startupFocus} tabIndex={-1}>
+    <div className="app-shell" ref={startupFocus} tabIndex={-1} data-window-transition={windowTransition || undefined} aria-busy={windowTransition || undefined}>
+      {windowTransition && <LoadingState compact={false} className="window-mode-transition" />}
       <TitleBar welcomeMode={ready && !snapshot} startupTab={!ready && !snapshot ? startupTab : undefined} />
       {!ready && !snapshot ? <div className="startup"><Codicon name="loading codicon-modifier-spin" />{t('Loading workspace…')}</div> : !snapshot ? <WorkspaceChooser /> : (
         <main className="main-workspace" ref={(element) => { if (element) element.inert = transferringWorkspace; }} aria-busy={transferringWorkspace || undefined}>

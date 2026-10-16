@@ -440,11 +440,16 @@ pub async fn set_mode(
         .app_handle()
         .clone()
         .run_on_main_thread(move || {
-            let result = window.state::<WindowLayouts>().set_mode(
-                &window.as_ref().window(),
-                workspace,
-                preserve,
-            );
+            let result = window
+                .state::<WindowLayouts>()
+                .set_mode(&window.as_ref().window(), workspace, preserve)
+                .and_then(|()| {
+                    // Apply the content bounds in the same native turn, rather than
+                    // leaving the old webview size until a later OS resize event.
+                    let size = window.inner_size().map_err(native_error)?;
+                    let webview: &tauri::Webview = window.as_ref();
+                    webview.set_size(size).map_err(native_error)
+                });
             let _ = send.send(result);
         })
         .map_err(native_error)?;

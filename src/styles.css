@@ -565,6 +565,13 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
 .codicon, .codicon[class*="codicon-"] { font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }
 .app-shell { height: 100%; display: flex; flex-direction: column; position: relative; }
 .app-shell:focus { outline: none; }
+.app-shell[data-window-transition] > :not(.window-mode-transition) { visibility: hidden; }
+.app-shell > .window-mode-transition {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--versiondock-bg);
+}
 /* ===== 现代一体化 TitleBar 顶栏与标签栏样式 ===== */
 .titlebar {
   --titlebar-tint-strength: 20%;
@@ -586,6 +593,11 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   border-bottom: 1px solid var(--versiondock-border-soft);
   -webkit-app-region: drag;
   app-region: drag;
+}
+
+.titlebar.windows {
+  /* The Windows plugin overlays three caption buttons outside the flex layout. */
+  padding-inline-end: var(--title-bar-controls-width, 138px);
 }
 
 .titlebar-macos-spacer {
