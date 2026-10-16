@@ -1,3 +1,5 @@
+import { isApplicationLog } from '../../activity/scope';
+import { Button } from '../Button';
 import { EmptyState } from '../EmptyState';
 import { SearchInput } from '../SearchInput';
 import { IconButton } from '../IconButton';
@@ -49,6 +51,7 @@ function formatTime(isoString: string): string {
 export function OutputPanel() {
   const { t } = useI18n();
   const bridge = useBridge();
+  const logClearing = useAppStore(state => state.logClearing);
   const logPanelOpen = useAppStore((state) => state.logPanelOpen);
   const logPanelHeight = useAppStore((state) => state.logPanelHeight);
   const logError = useAppStore((state) => state.logError);
@@ -60,6 +63,11 @@ export function OutputPanel() {
   const activeChannel = useAppStore((state) => state.activeLogChannel);
   const activeLevel = useAppStore((state) => state.activeLogLevel);
   const activeProject = useAppStore((state) => state.activeLogProject);
+  const operationId = useAppStore(state => state.logOperationId);
+  const setOperationId = useAppStore(state => state.setLogOperationId);
+  const markLogsRead = useAppStore(state => state.markLogsRead);
+  const recent = useAppStore(state => state.bootstrap?.state.recentWorkspaces);
+  const notifications = useAppStore(state => state.notifications);
   const tabs = useAppStore((state) => state.tabs);
   const activeTabId = useAppStore((state) => state.activeTabId);
   const searchQuery = useAppStore((state) => state.logSearchQuery);
@@ -70,8 +78,15 @@ export function OutputPanel() {
   const setLogChannel = useAppStore((state) => state.setLogChannel);
   const setLogLevel = useAppStore((state) => state.setLogLevel);
   const setLogProject = useAppStore((state) => state.setLogProject);
-  const resolvedProject = activeProject !== 'all' && activeProject !== 'current'
-    && !tabs.some((tab) => tab.id === activeProject) ? 'current' : activeProject;
+  const knownProjects = useMemo(() => {
+    const projects = new Map<string, { id: string; name: string; paths: string[] }>();
+    for (const project of [...tabs, ...(recent ?? [])]) if (!projects.has(project.id)) projects.set(project.id, project);
+    for (const item of notifications) if (item.workspaceId && !projects.has(item.workspaceId)) projects.set(item.workspaceId, { id: item.workspaceId, name: item.workspaceName ?? item.workspaceId, paths: item.workspacePaths ?? [] });
+    for (const entry of logEntries) if (entry.context?.workspaceId && !projects.has(entry.context.workspaceId)) projects.set(entry.context.workspaceId, { id: entry.context.workspaceId, name: entry.context.workspaceName ?? entry.context.workspaceId, paths: [] });
+    return [...projects.values()];
+  }, [tabs, recent, notifications, logEntries]);
+  const resolvedProject = !['all', 'current', 'application'].includes(activeProject)
+    && !knownProjects.some(project => project.id === activeProject) ? 'current' : activeProject;
   useEffect(() => {
     if (resolvedProject !== activeProject) setLogProject(resolvedProject);
   }, [resolvedProject, activeProject, setLogProject]);
@@ -105,14 +120,11 @@ export function OutputPanel() {
     const list: Array<{ id: string; label: string }> = [
       { id: 'current', label: 'Current Project' },
       { id: 'all', label: 'All Projects' },
+      { id: 'application', label: 'Application' },
     ];
-    if (tabs.length > 1 || tabs.some((tab) => tab.id === resolvedProject)) {
-      tabs.forEach((tab) => {
-        list.push({ id: tab.id, label: tab.name });
-      });
-    }
+    knownProjects.forEach(project => list.push({ id: project.id, label: project.name }));
     return list;
-  }, [tabs, resolvedProject]);
+  }, [knownProjects]);
 
   const snapshot = useAppStore((state) => state.snapshot);
   const currentTab = tabs.find((t) => t.id === activeTabId);
@@ -121,20 +133,23 @@ export function OutputPanel() {
     if (snapshot) return snapshot.workspace.paths;
     return [];
   }, [currentTab, snapshot]);
-  const selectedTab = resolvedProject !== 'current' && resolvedProject !== 'all'
-    ? tabs.find((t) => t.id === resolvedProject)
+  const selectedTab = !['current', 'all', 'application'].includes(resolvedProject)
+    ? knownProjects.find(project => project.id === resolvedProject)
     : null;
   const selectedPaths = useMemo(() => selectedTab ? selectedTab.paths : [], [selectedTab]);
 
   const filteredEntries = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return logEntries.filter((entry) => {
-      if (resolvedProject === 'current') {
+      if (operationId && entry.context?.operationId !== operationId) return false;
+      if (resolvedProject === 'application') {
+        if (!isApplicationLog(entry)) return false;
+      } else if (resolvedProject === 'current') {
         const workspaceId = currentTab?.id ?? snapshot?.workspace.id;
         if ((currentPaths.length > 0 || workspaceId) && !isLogEntryInWorkspace(entry, currentPaths, workspaceId)) {
           return false;
         }
-        if (!workspaceId && currentPaths.length === 0 && (entry.context?.workspaceId || entry.cwd)) return false;
+        if (!workspaceId && currentPaths.length === 0 && !isApplicationLog(entry)) return false;
       } else if (resolvedProject !== 'all') {
         if (!isLogEntryInWorkspace(entry, selectedPaths, selectedTab?.id)) {
           return false;
@@ -155,7 +170,11 @@ export function OutputPanel() {
       }
       return true;
     });
-  }, [logEntries, resolvedProject, currentPaths, selectedPaths, activeChannel, activeLevel, searchQuery, currentTab?.id, snapshot?.workspace.id, selectedTab?.id]);
+  }, [logEntries, resolvedProject, currentPaths, selectedPaths, activeChannel, activeLevel, searchQuery, operationId, currentTab?.id, snapshot?.workspace.id, selectedTab?.id]);
+
+  useEffect(() => {
+    if (logPanelOpen) markLogsRead(filteredEntries.map(entry => entry.id));
+  }, [logPanelOpen, filteredEntries, markLogsRead]);
 
   const virtual = filteredEntries.length > 100;
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -353,9 +372,10 @@ export function OutputPanel() {
             <IconButton
               type="button"
               className="output-btn"
-              onClick={() => void runAction(clearLogs, 'Unable to clear logs.')}
-              title={t('Clear output')}
-              aria-label={t('Clear output')}
+              onClick={() => void runAction(() => clearLogs(filteredEntries.map(entry => entry.id)), 'Unable to clear logs.')}
+              disabled={logClearing || !filteredEntries.length}
+              title={t('Clear displayed logs')}
+              aria-label={t('Clear displayed logs')}
             >
               <Codicon name="clear-all" />
             </IconButton>
@@ -382,6 +402,11 @@ export function OutputPanel() {
           </div>
         </div>
       </header>
+      {operationId && <div className="output-operation-scope">
+        <span title={operationId}>{t('Operation: {0}', operationId)}</span>
+        <Button variant="ghost" size="xs" onClick={() => setOperationId(null)}>{t('Show project logs')}</Button>
+      </div>}
+
 
       {(actionError || logError || storageError) && <div className="output-error-banner" role="status">
         <Codicon name="warning" />
@@ -421,8 +446,8 @@ export function OutputPanel() {
                   <span className={`output-log-level ${entry.level}`}>{entry.level.toUpperCase()}</span>
                   <span className="output-log-channel">[{entry.channel.toUpperCase()}]</span>
                   {resolvedProject === 'all' && (() => {
-                    const matchedTab = entry.cwd || entry.context?.workspaceId ? tabs.find((tab) => isLogEntryInWorkspace(entry, tab.paths, tab.id)) : undefined;
-                    const name = entry.context?.workspaceName ?? matchedTab?.name ?? entry.context?.workspaceId;
+                    const matchedTab = entry.cwd || entry.context?.workspaceId ? knownProjects.find(project => isLogEntryInWorkspace(entry, project.paths, project.id)) : undefined;
+                    const name = matchedTab?.name ?? entry.context?.workspaceName ?? entry.context?.workspaceId ?? (isApplicationLog(entry) ? t('Application') : entry.cwd);
                     return name ? <span className="output-log-project" title={entry.cwd ?? undefined}>[{name}]</span> : null;
                   })()}
                   {entry.context?.repositoryName && <span className="output-log-project" title={entry.cwd ?? undefined}>[{entry.context.repositoryName}]</span>}

@@ -377,13 +377,13 @@ describe('StatusBar', () => {
     fireEvent.click(bellBtn);
 
     // 点击清空
-    const clearBtn = screen.getByTitle('Clear all');
+    const clearBtn = screen.getByTitle('Clear displayed notifications');
     fireEvent.click(clearBtn);
 
     expect(screen.getByText('No notifications')).toBeInTheDocument();
   });
 
-  it('isolates notification badge and provides scope switching in multi-project mode', async () => {
+  it('counts notifications across projects and scopes the displayed results', async () => {
     const { container } = renderStatusBar();
 
     useAppStore.setState({
@@ -407,9 +407,8 @@ describe('StatusBar', () => {
 
     const bellBtn = screen.getByRole('button', { name: /Notifications/i });
 
-    // 因为当前激活的是 ws1，状态栏角标不应显示
-    expect(container.querySelector('.notification-status-badge')).toBeNull();
-    expect(bellBtn).toHaveAttribute('title', 'Notifications · 1 in other projects');
+    expect(container.querySelector('.notification-status-badge')).toHaveTextContent('1');
+    expect(bellBtn).toHaveAttribute('title', 'Notifications (1)');
 
     // 添加一条属于当前项目 ws1 的通知
     act(() => {
@@ -425,8 +424,8 @@ describe('StatusBar', () => {
     await waitFor(() => {
       const badge = container.querySelector('.notification-status-badge');
       expect(badge).not.toBeNull();
-      expect(badge?.textContent).toBe('1');
-      expect(bellBtn).toHaveAttribute('title', 'Notifications (1) · 1 in other projects');
+      expect(badge?.textContent).toBe('2');
+      expect(bellBtn).toHaveAttribute('title', 'Notifications (2)');
     });
 
     // 打开通知中心
@@ -434,14 +433,16 @@ describe('StatusBar', () => {
 
     // 应该渲染作用域导航选项卡
     expect(screen.getByRole('tab', { name: /Current Project/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /All Projects/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^All$/ })).toBeInTheDocument();
 
-    // 默认在 Current Project 下，只展示 ws1 的通知
+    expect(screen.getByText('Project 2 Notice')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /Current Project/i }));
+    // 当前项目只展示 ws1 的通知
     expect(screen.getByText('Project 1 Alert')).toBeInTheDocument();
     expect(screen.queryByText('Project 2 Notice')).not.toBeInTheDocument();
 
     // 切换到 All Projects
-    const allTab = screen.getByRole('tab', { name: /All Projects/i });
+    const allTab = screen.getByRole('tab', { name: /^All$/ });
     fireEvent.click(allTab);
 
     // 两个通知均可见，且展示归属项目标签

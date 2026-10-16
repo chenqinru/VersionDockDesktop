@@ -4283,6 +4283,12 @@ async fn dispatch(
             }
             json(true)
         }
+        BridgeCommand::LogClearEntries { entry_ids } => {
+            if let Some(logger) = crate::logger::get_logger() {
+                logger.clear_entries(&entry_ids);
+            }
+            json(true)
+        }
         BridgeCommand::LogFormat { entries } => json(crate::logger::format_entries(&entries)),
         BridgeCommand::LogStorageStatus => {
             json(crate::logger::get_logger().and_then(|logger| logger.storage_error()))

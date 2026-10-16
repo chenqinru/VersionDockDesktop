@@ -61,7 +61,7 @@ function ToastItem({
       </div>
       {notification.actions.length > 0 && (
         <div className="toast-details-row">
-          <span className="toast-source">{t('Source: {0}', 'VersionDock')}</span>
+          <span className="toast-source">{t('Source: {0}', notification.workspaceName ?? (notification.workspaceId || t('Application')))}</span>
           <div className="notification-item-actions toast-actions">
             {notification.actions.map((action, index) => (
               <Button variant={index > 0 ? "secondary" : "primary"}

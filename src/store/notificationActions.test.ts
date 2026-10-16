@@ -40,6 +40,32 @@ afterEach(() => {
 });
 
 describe('notification button parity', () => {
+  it('retains a closed project source and locates its operation logs without changing the active project', async () => {
+    setup();
+    const source = { ...workspace.workspace, id: 'closed', name: 'Closed Project', paths: ['/tmp/closed'] };
+    useAppStore.setState({ tabs: [workspace.workspace, source], activeLogChannel: 'ai', activeLogLevel: 'debug', logSearchQuery: 'old', logOperationId: null });
+    const id = useAppStore.getState().addNotification({ type: 'error', title: 'Failed', message: 'Push failed', workspaceId: 'closed', operationId: 'push-123' });
+    useAppStore.setState({ tabs: [workspace.workspace] });
+    await useAppStore.getState().performNotificationAction(id, 0);
+    expect(useAppStore.getState()).toMatchObject({ activeTabId: 'workspace', activeLogProject: 'closed', logOperationId: 'push-123', logPanelOpen: true, activeLogChannel: 'all', activeLogLevel: 'all', logSearchQuery: '' });
+    expect(useAppStore.getState().notifications[0]).toMatchObject({ workspaceName: 'Closed Project', workspacePaths: ['/tmp/closed'] });
+  });
+
+  it('keeps application notifications separate when reading and clearing one project', async () => {
+    setup();
+    const projectId = useAppStore.getState().addNotification({ type: 'info', title: 'Project notice', message: '', workspaceId: 'workspace' });
+    const appId = useAppStore.getState().addNotification({ type: 'error', title: 'App notice', message: '', workspaceId: null });
+    useAppStore.getState().markAllNotificationsAsRead('workspace');
+    expect(useAppStore.getState().notifications.find(n => n.id === projectId)?.read).toBe(true);
+    expect(useAppStore.getState().notifications.find(n => n.id === appId)?.read).toBe(false);
+    useAppStore.getState().clearNotifications('workspace');
+    expect(useAppStore.getState().notifications.map(n => n.id)).toEqual([appId]);
+    await useAppStore.getState().performNotificationAction(appId, 0);
+    expect(useAppStore.getState()).toMatchObject({ activeLogProject: 'application', logOperationId: null });
+    useAppStore.getState().clearNotifications(null);
+    expect(useAppStore.getState().notifications).toEqual([]);
+  });
+
   it('opens the conflict panel rather than only selecting changes', async () => {
     setup();
     const id = useAppStore.getState().addNotification({ type: 'warning', title: 'Conflicts', message: 'Resolve', actions: [{ type: 'openConflicts', label: 'Resolve Conflicts' }] });

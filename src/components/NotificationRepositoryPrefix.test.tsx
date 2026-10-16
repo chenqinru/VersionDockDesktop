@@ -49,7 +49,7 @@ describe('notification repository prefix parity', () => {
     const next = workspace('other', [repo('One'), repo('Two')]);
     useAppStore.setState({ snapshot: next, allRepositories: next.repositories, activeTabId: 'other', tabs: [original.workspace, next.workspace] });
     render(<I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><NotificationCenterPopover anchorRect={null} anchorRef={{ current: null }} onClose={() => {}} /></I18nContext.Provider>);
-    fireEvent.click(screen.getByRole('tab', { name: /All Projects/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /^All$/ }));
     expect(screen.getByText('VersionDock: 1 unpushed commit ready to push.')).toBeInTheDocument();
   });
 

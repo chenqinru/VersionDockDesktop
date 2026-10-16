@@ -817,6 +817,9 @@ pub enum BridgeCommand {
         limit: Option<u32>,
     },
     LogClear,
+    LogClearEntries {
+        entry_ids: Vec<String>,
+    },
     LogFormat {
         entries: Vec<crate::logger::LogEntry>,
     },

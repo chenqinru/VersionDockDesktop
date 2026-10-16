@@ -544,6 +544,7 @@ input, textarea, select, [contenteditable="true"] {
 .extended-message-card,
 .commit-detail-workspace-heading > strong,
 .detail-commit-summary,
+.output-panel-body,
 .output-panel pre,
 .toast-details pre,
 .commit-popover code {
@@ -5585,7 +5586,6 @@ button.danger:not(:disabled):hover,
   flex-shrink: 0;
   color: var(--versiondock-muted);
   font-size: 11px;
-  user-select: none;
 }
 
 .output-log-level {
@@ -5594,7 +5594,6 @@ button.danger:not(:disabled):hover,
   font-weight: 700;
   padding: 0 4px;
   border-radius: var(--versiondock-radius-badge);
-  user-select: none;
 }
 
 .output-log-level.info {
@@ -5622,7 +5621,6 @@ button.danger:not(:disabled):hover,
   flex-shrink: 0;
   font-weight: 600;
   color: var(--versiondock-text);
-  user-select: none;
 }
 
 .output-log-project {
@@ -5633,7 +5631,6 @@ button.danger:not(:disabled):hover,
   white-space: nowrap;
   font-weight: 600;
   color: var(--versiondock-accent);
-  user-select: none;
 }
 
 .output-log-msg {
@@ -5677,6 +5674,8 @@ button.danger:not(:disabled):hover,
 }
 
 .output-log-details-toggle {
+  -webkit-user-select: none;
+  user-select: none;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -6764,3 +6763,6 @@ button.danger:not(:disabled):hover,
 .settings-nav-item { --selectable-foreground: var(--versiondock-muted); }
 
 .provider-repo-item { --selectable-background: var(--versiondock-surface); --selectable-border: var(--versiondock-border-soft); }
+
+.output-operation-scope { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px; border-bottom: 1px solid var(--versiondock-border-soft); color: var(--versiondock-muted); font-size: calc(11px * var(--versiondock-ui-font-scale, 1)); }
+.output-operation-scope > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

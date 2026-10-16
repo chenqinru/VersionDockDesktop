@@ -448,8 +448,9 @@ export class BrowserDevBridge implements VersionDockBridge {
       return true;
     }).slice(-(limit ?? 3000));
   }
-  async clearLogs(): Promise<void> {
-    this.logs = [];
+  async clearLogs(entryIds?: string[]): Promise<void> {
+    const ids = new Set(entryIds);
+    this.logs = entryIds ? this.logs.filter(entry => !ids.has(entry.id)) : [];
   }
   async formatLogs(entries: LogEntry[]): Promise<string> { return formatDemoLogs(entries); }
   async getLogStorageStatus(): Promise<string | null> { return null; }

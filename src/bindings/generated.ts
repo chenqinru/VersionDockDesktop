@@ -752,7 +752,9 @@ export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities
 	channel: LogChannel | null,
 	level: LogLevel | null,
 	limit: number | null,
-} } | { type: "logClear" } | { type: "logFormat"; payload: {
+} } | { type: "logClear" } | { type: "logClearEntries"; payload: {
+	entry_ids: string[],
+} } | { type: "logFormat"; payload: {
 	entries: LogEntry[],
 } } | { type: "logStorageStatus" } | { type: "logOpenFolder" } | { type: "logExport"; payload: {
 	target_path: string,

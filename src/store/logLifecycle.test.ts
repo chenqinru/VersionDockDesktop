@@ -18,10 +18,37 @@ function deferred<T>() {
 let bridge: MockBridge;
 beforeEach(() => {
   bridge = new MockBridge((command) => command.type === 'bootstrap' ? bootstrap : []);
-  useAppStore.setState({ bridge, logEntries: [], logError: null, logStorageError: null, unreadErrorCount: 0, lastReadLogTimestamps: {}, logPanelOpen: false, tabs: [], snapshot: undefined, activeTabId: null });
+  useAppStore.setState({ bridge, logEntries: [], logError: null, logStorageError: null, unreadErrorCount: 0, readLogEntryIds: [], logPanelOpen: false, tabs: [], snapshot: undefined, activeTabId: null });
 });
 afterEach(() => { useAppStore.getState().dispose(); vi.useRealTimers(); });
 describe('log lifecycle', () => {
+  it('clears only captured records, retains new logs and preserves read state on failure', async () => {
+    const pending = deferred<void>();
+    const clear = vi.spyOn(bridge, 'clearLogs').mockReturnValue(pending.promise);
+    useAppStore.getState().addLogEntry(log('a'));
+    useAppStore.getState().addLogEntry(log('b'));
+    useAppStore.getState().markLogsRead(['a']);
+    const clearing = useAppStore.getState().clearLogs(['a']);
+    expect(clear).toHaveBeenCalledWith(['a']);
+    expect(useAppStore.getState().logEntries.map(e => e.id)).toEqual(['b']);
+    useAppStore.getState().addLogEntry(log('new'));
+    pending.reject(new Error('failed'));
+    await expect(clearing).rejects.toThrow();
+    expect(useAppStore.getState().logEntries.map(e => e.id).sort()).toEqual(['a', 'b', 'new']);
+    expect(useAppStore.getState().readLogEntryIds).toContain('a');
+    expect(useAppStore.getState().unreadErrorCount).toBe(2);
+  });
+
+  it('does not acknowledge hidden errors just because a log panel is open', () => {
+    useAppStore.setState({ logPanelOpen: true });
+    useAppStore.getState().addLogEntry(log('hidden'));
+    expect(useAppStore.getState().unreadErrorCount).toBe(1);
+    useAppStore.getState().markLogsRead(['different-project']);
+    expect(useAppStore.getState().unreadErrorCount).toBe(1);
+    useAppStore.getState().markLogsRead(['hidden']);
+    expect(useAppStore.getState().unreadErrorCount).toBe(0);
+  });
+
   it('does not overwrite live records with an initial snapshot or count duplicates twice', async () => {
     const pending = deferred<LogEntry[]>();
     bridge.getLogs = () => pending.promise;
@@ -38,12 +65,14 @@ describe('log lifecycle', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-04T00:00:00Z'));
     useAppStore.setState({ activeTabId, logPanelOpen: true });
-    useAppStore.getState().addLogEntry(log('viewed'));
+    const viewed = () => ({ ...log('viewed'), ...(activeTabId ? { context: { workspaceId: activeTabId, repositoryId: null, operationId: null, workspaceName: null, repositoryName: null } } : {}) });
+    useAppStore.getState().addLogEntry(viewed());
+    useAppStore.getState().markLogsRead(['viewed']);
     useAppStore.getState().setLogPanelOpen(false);
     vi.advanceTimersByTime(1);
     useAppStore.getState().addLogEntry({ ...log('later-debug'), level: 'debug' });
     expect(useAppStore.getState().unreadErrorCount).toBe(0);
-    useAppStore.getState().addLogEntry(log('new-error'));
+    useAppStore.getState().addLogEntry({ ...viewed(), id: 'new-error' });
     expect(useAppStore.getState().unreadErrorCount).toBe(1);
   });
   it('does not resurrect cleared records when an earlier load resolves', async () => {

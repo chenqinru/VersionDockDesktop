@@ -347,6 +347,14 @@ impl LogManager {
         }
     }
 
+    /// Remove the captured view only; concurrent and unrelated records remain available.
+    pub fn clear_entries(&self, entry_ids: &[String]) {
+        let ids: std::collections::HashSet<_> = entry_ids.iter().collect();
+        if let Ok(mut entries) = self.memory.entries.lock() {
+            entries.retain(|entry| !ids.contains(&entry.id));
+        }
+    }
+
     pub fn export_to_file(&self, target_path: &Path) -> std::io::Result<()> {
         let text = format_entries(&self.get_entries(None, None, None));
         fs::write(target_path, text)
@@ -909,6 +917,25 @@ mod tests {
                 ..Default::default()
             }),
         }
+    }
+
+    #[test]
+    fn scoped_clear_preserves_other_projects_and_new_records() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = LogManager::new(root.path().into());
+        manager.push(sample("project-a"));
+        manager.push(sample("project-b"));
+        let captured = vec!["project-a".to_string()];
+        manager.push(sample("new-project-a"));
+        manager.clear_entries(&captured);
+        let ids: Vec<_> = manager
+            .get_entries(None, None, None)
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(ids, vec!["new-project-a", "project-b"]);
+        manager.clear_entries(&[]);
+        assert_eq!(manager.get_entries(None, None, None).len(), 2);
     }
 
     #[test]

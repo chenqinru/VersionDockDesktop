@@ -61,7 +61,7 @@ describe('OutputPanel & LogStatusBarItem', () => {
   beforeEach(() => {
     bridge = new MockBridge(() => Promise.resolve());
     useAppStore.setState({
-      ready: true,
+      ready: true, readLogEntryIds: [], logOperationId: null, notifications: [], tabs: [], activeTabId: null, snapshot: undefined,
       activeLogProject: 'all',
       logError: null, logStorageError: null,
       logPanelOpen: true,
@@ -85,6 +85,29 @@ describe('OutputPanel & LogStatusBarItem', () => {
     expect(screen.getByText(/git status --porcelain/)).toBeInTheDocument();
     expect(screen.getByText(/svn update with warning/)).toBeInTheDocument();
     expect(screen.getByText(/Failed to connect to remote repository/)).toBeInTheDocument();
+  });
+
+  it('clears only the displayed search results and leaves hidden records intact', async () => {
+    const clear = vi.spyOn(bridge, 'clearLogs').mockResolvedValue(undefined);
+    useAppStore.setState({ bridge, logSearchQuery: sampleLogs[0].message });
+    renderWithProviders(<OutputPanel />, bridge);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear displayed logs' }));
+    expect(clear).toHaveBeenCalledWith([sampleLogs[0].id]);
+    expect(useAppStore.getState().logEntries.map(entry => entry.id)).toEqual(sampleLogs.slice(1).map(entry => entry.id));
+  });
+
+  it('retains a closed project selection and shows only the notified operation until the filter is cleared', () => {
+    const context = { workspaceId: 'closed', workspaceName: 'Closed Project', repositoryId: null, repositoryName: null, operationId: 'push-1' };
+    useAppStore.setState({ activeLogProject: 'closed', logOperationId: 'push-1', logEntries: [
+      { ...sampleLogs[0], id: 'push', message: 'Target operation', context },
+      { ...sampleLogs[0], id: 'fetch', message: 'Different operation', context: { ...context, operationId: 'fetch-2' } },
+    ] });
+    renderWithProviders(<OutputPanel />, bridge);
+    expect(screen.getByLabelText('Filter by project')).toHaveTextContent('Closed Project');
+    expect(screen.getByText('Target operation')).toBeInTheDocument();
+    expect(screen.queryByText('Different operation')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show project logs' }));
+    expect(screen.getByText('Different operation')).toBeInTheDocument();
   });
 
   it('filters the AI channel and displays provider diagnostics for the current project', () => {
@@ -225,9 +248,9 @@ describe('OutputPanel & LogStatusBarItem', () => {
 
     renderWithProviders(<OutputPanel />, bridge);
 
-    // 默认 'current' (Project A): 应该能看到 A 的日志和全局日志，看不到 B 的日志
+    // 当前项目不混入其他项目或应用日志
     expect(screen.getByText('git pull in Project A')).toBeInTheDocument();
-    expect(screen.getByText('Global system log')).toBeInTheDocument();
+    expect(screen.queryByText('Global system log')).not.toBeInTheDocument();
     expect(screen.queryByText('git pull in Project B')).not.toBeInTheDocument();
 
     // 切换到 All Projects

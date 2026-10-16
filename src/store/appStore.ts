@@ -1,3 +1,4 @@
+import { isApplicationLog, matchesNotificationScope } from '../activity/scope';
 import { runGitTagWorkflow, type TagWorkflowRequest, type TagWorkflowResult } from '../services/gitTagWorkflow';
 import { workspaceOpenPaths } from '../workspaces/openPaths';
 import { primeAuthorAvatars, authorAvatarRemoteScope, authorAvatarEpoch } from '../avatars/authorAvatarResolver';
@@ -142,6 +143,8 @@ export interface AppNotification {
   timestamp: number;
   read: boolean;
   workspaceId?: string;
+  workspaceName?: string;
+  workspacePaths?: string[];
   repositoryCount?: number;
   details?: string;
   urgent?: boolean;
@@ -274,10 +277,8 @@ export function isPathInDir(childPath: string, parentDir: string): boolean {
 }
 
 export function isLogEntryInWorkspace(entry: LogEntry, workspacePaths: string[], workspaceId?: string | null): boolean {
-  if (entry.context?.workspaceId && workspaceId) return entry.context.workspaceId === workspaceId;
-  if (!entry.cwd) {
-    return true;
-  }
+  if (entry.context?.workspaceId) return entry.context.workspaceId === workspaceId;
+  if (!entry.cwd) return false;
   return workspacePaths.some((wp) => isPathInDir(entry.cwd!, wp));
 }
 
@@ -285,17 +286,15 @@ export function calculateWorkspaceUnreadErrors(
   entries: LogEntry[],
   workspaceId: string | null,
   tabs: WorkspaceSnapshot['workspace'][],
-  lastReadTimestamps: Record<string, number>,
+  readIds: ReadonlySet<string>,
   fallbackPaths?: string[],
 ): number {
-  const lastRead = lastReadTimestamps[workspaceId ?? '__global__'] ?? 0;
   const currentTab = tabs.find((t) => t.id === workspaceId);
   const paths = currentTab ? currentTab.paths : (fallbackPaths ?? []);
   return entries.filter((entry) => {
     if (entry.level !== 'error') return false;
-    const ts = new Date(entry.timestamp).getTime();
-    if (ts <= lastRead) return false;
-    if (paths.length === 0 && !entry.context?.workspaceId) return true;
+    if (readIds.has(entry.id)) return false;
+    if (!workspaceId && paths.length === 0) return isApplicationLog(entry);
     return isLogEntryInWorkspace(entry, paths, workspaceId);
   }).length;
 }
@@ -617,14 +616,14 @@ export interface AppStore {
   layoutResetVersion: number;
   setBranchSidebarState: (collapsed: boolean, collapsedSections: string[]) => void;
   updateSettings: (patch: Partial<DesktopSettings>) => Promise<void>;
-  addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read' | 'actions'> & { actions?: AppNotificationAction[] }) => string;
+  addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read' | 'actions' | 'workspaceId'> & { workspaceId?: string | null; actions?: AppNotificationAction[] }) => string;
   dismissToast: (id?: string) => void;
   setNotificationCenterOpen: (open: boolean) => void;
   performNotificationAction: (notificationId: string, actionIndex: number) => Promise<void>;
   markNotificationAsRead: (id: string) => void;
-  markAllNotificationsAsRead: (workspaceId?: string) => void;
+  markAllNotificationsAsRead: (workspaceId?: string | null) => void;
   removeNotification: (id: string) => void;
-  clearNotifications: (workspaceId?: string) => void;
+  clearNotifications: (workspaceId?: string | null) => void;
   openIdentityPanel: (repoId?: string) => void;
   closeIdentityPanel: () => void;
   openRemoteManager: (repoId?: string) => void;
@@ -641,7 +640,11 @@ export interface AppStore {
   logSearchQuery: string;
   logAutoScroll: boolean;
   unreadErrorCount: number;
-  lastReadLogTimestamps: Record<string, number>;
+  readLogEntryIds: string[];
+  markLogsRead: (ids: string[]) => void;
+  logOperationId: string | null;
+  logClearing: boolean;
+  setLogOperationId: (id: string | null) => void;
   toggleLogPanel: () => void;
   setLogPanelOpen: (open: boolean) => void;
   setLogPanelHeight: (height: number) => void;
@@ -649,7 +652,7 @@ export interface AppStore {
   setLogLevel: (level: LogLevel | 'all') => void;
   setLogSearchQuery: (query: string) => void;
   setLogAutoScroll: (autoScroll: boolean) => void;
-  clearLogs: () => Promise<void>;
+  clearLogs: (entryIds?: string[]) => Promise<void>;
   addLogEntry: (entry: LogEntry) => void;
   loadLogs: () => Promise<void>;
   openLogFolder: () => Promise<void>;
@@ -1436,13 +1439,12 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (entry.message === 'Log file writing failed; logs remain available in memory.') logStorageError = entry.details || entry.message;
       if (entry.message === 'Log file writing resumed.') logStorageError = null;
     }
+    const retainedIds = new Set(merged.map(entry => entry.id));
     return {
       logEntries: merged, logStorageError,
-      lastReadLogTimestamps: state.logPanelOpen
-        ? { ...state.lastReadLogTimestamps, [state.activeTabId ?? '__global__']: Date.now() }
-        : state.lastReadLogTimestamps,
-      unreadErrorCount: state.logPanelOpen ? 0 : calculateWorkspaceUnreadErrors(
-        merged, state.activeTabId, state.tabs, state.lastReadLogTimestamps, state.snapshot?.workspace.paths,
+      readLogEntryIds: state.readLogEntryIds.filter(id => retainedIds.has(id)),
+      unreadErrorCount: calculateWorkspaceUnreadErrors(
+        merged, state.activeTabId, state.tabs, new Set(state.readLogEntryIds), state.snapshot?.workspace.paths,
       ),
     };
   });
@@ -1460,6 +1462,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     logTimer = undefined;
     pendingLogs = [];
     clearLogPromise = undefined;
+    set({ logClearing: false });
   };
   const enqueueLog = (entry: LogEntry) => {
     pendingLogs.push(entry);
@@ -1505,7 +1508,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       ? [{ type: 'unlockIndex', label: 'Unlock', repoId }]
       : (error instanceof BridgeError && error.restoreWarning?.conflicted) || /CONFLICT|conflicts|冲突/i.test(message) ? [{ type: 'openConflicts', label: 'Resolve Conflicts' }] : [];
     return get().addNotification({
-      type: 'error', title, message: { raw: message }, details: errorDetails(error), workspaceId: targetWorkspace ?? get().snapshot?.workspace.id, actions,
+      type: 'error', title, message: { raw: message }, details: errorDetails(error), operationId: error instanceof BridgeError ? error.operationId : undefined, workspaceId: targetWorkspace ?? get().snapshot?.workspace.id, actions: actions.length ? actions : undefined,
     });
   };
   const notifyUpdateRestoreWarning = async (warning: UpdateRestoreWarning | null | undefined, wid: string, repoId: string) => {
@@ -1699,10 +1702,11 @@ export const useAppStore = create<AppStore>((set, get) => {
         }
         get().addNotification({
           type: 'error',
-          actions,
+          actions: actions.length ? actions : undefined,
           title: domainTitle[domain.split(':', 1)[0]] ?? 'Operation failed',
           message: { raw: msg },
           details: errorDetails(error),
+          operationId: error instanceof BridgeError ? error.operationId : undefined,
           workspaceId: context.workspaceId ?? get().snapshot?.workspace.id,
         });
       }
@@ -2325,7 +2329,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     const selectedRepoId = visibleSnapshot.repositories.some((repo) => repo.meta.id === get().selectedRepoId)
       ? get().selectedRepoId : visibleSnapshot.repositories[0]?.meta.id;
     set(workspaceChanged
-      ? { snapshot: visibleSnapshot, allRepositories, selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], updateDetailCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
+      ? { snapshot: visibleSnapshot, allRepositories, unreadErrorCount: calculateWorkspaceUnreadErrors(get().logEntries, snapshot.workspace.id, get().tabs, new Set(get().readLogEntryIds), snapshot.workspace.paths), selectedRepoId, selectedFile: undefined, fileHistoryTarget: undefined, historyFilter: '', historyQuery: { ...EMPTY_HISTORY_QUERY }, diff: undefined, changesDiff: undefined, changes: undefined, merge: undefined, mergeTarget: undefined, mergeEditorDraft: undefined, mergeResolutions: {}, mergeScope: 'all', mergeResult: '', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections, comparisonTarget: undefined, comparison: undefined, mode: 'history', history: [], historyByRepo: {}, historyTopology: [], historyTopologyByRepo: {}, historyHasMoreByRepo: {}, historyLoading: false, branchesLoading: false, historyScope: { repoIds: null, revisionsByRepo: {} }, branches: [], tags: [], branchesByRepo: {}, tagsByRepo: {}, subtrees: {}, submodules: {}, worktrees: {}, stashes: {}, shelves: {}, changelists: {}, remotes: {}, unpushedCommits: {}, incomingCommits: {}, selectedCommits: [], updateDetailCommits: [], selectedPrimaryKey: undefined, commitSelectionAnchorKey: undefined, selectedCommit: undefined, selectedCommitDetails: {}, selectedCommitLoading: {}, selectedCommitError: {}, mergeCommits: {}, mergeCommitsLoading: {}, mergeParentFiles: {}, mergeParentFilesLoading: {}, mergeParentFilesError: {}, loadErrors: {} }
       : { snapshot: visibleSnapshot, allRepositories, selectedRepoId, commitSelections, amendRepoIds });
     if (JSON.stringify(commitSelections) !== JSON.stringify(storedSelections)) persistCommitSelections(snapshot.workspace.id, commitSelections);
     checkStatusNotifications(allRepositories, snapshot.workspace.id);
@@ -2650,9 +2654,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     logSearchQuery: '',
     logAutoScroll: true,
     unreadErrorCount: 0,
-    lastReadLogTimestamps: {},
+    readLogEntryIds: [],
+    logOperationId: null,
+    logClearing: false,
+    setLogOperationId: logOperationId => set({ logOperationId }),
     activeLogProject: 'current',
-    setLogProject: (project) => set({ activeLogProject: project }),
+    setLogProject: (project) => set({ activeLogProject: project, logOperationId: null }),
 
     operations: {},
     updateChecking: false,
@@ -2775,13 +2782,13 @@ export const useAppStore = create<AppStore>((set, get) => {
         progressTimers.forEach((timer) => window.clearTimeout(timer));
         progressTimers.clear();
         progressMessages.clear();
-        get().notifications.filter((item) => item.operationId).forEach((item) => get().removeNotification(item.id));
+        get().notifications.filter((item) => item.progress && item.operationId).forEach((item) => get().removeNotification(item.id));
       });
       bridgeSubscriptions.push(value.subscribe((event) => {
         if ('operationId' in event) {
           if (event.context.visibility === 'background') return;
           set((state) => ({ operations: { ...state.operations, [event.operationId]: event } }));
-          const progress = get().notifications.find((item) => item.operationId === event.operationId);
+          const progress = get().notifications.find((item) => item.progress && item.operationId === event.operationId);
           if (ACTIVE_OPERATION_STATUSES.has(event.status) && !INTERNAL_PROGRESS_PHASES.has(event.phase)) {
             const progressValue = event.total && event.total > 0
               ? Math.min(100, Math.max(0, (event.completed ?? 0) / event.total * 100))
@@ -2798,7 +2805,7 @@ export const useAppStore = create<AppStore>((set, get) => {
                 if (get().notifications.some((item) => item.progress && item.title === 'Updating Project' && item.workspaceId === current.context.workspaceId)) return;
                 get().addNotification({
                   type: 'info', title: 'VersionDock', message: progressMessages.get(event.operationId) ?? message,
-                  workspaceId: current.context.workspaceId ?? undefined,
+                  workspaceId: current.context.workspaceId ?? null,
                   progress: true, operationId: current.operationId,
                   progressValue: current.total && current.total > 0 ? Math.min(100, Math.max(0, (current.completed ?? 0) / current.total * 100)) : undefined,
                   actions: current.cancellable ? [{ type: 'cancelOperation', label: 'Cancel', operationId: current.operationId }] : [],
@@ -3116,7 +3123,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         get().logEntries,
         workspaceId,
         get().tabs,
-        get().lastReadLogTimestamps,
+        new Set(get().readLogEntryIds),
       );
       if (cachedSession) {
         const missingInRestored = cachedSession.selectedCommits.filter(
@@ -6284,7 +6291,11 @@ export const useAppStore = create<AppStore>((set, get) => {
         ? [{ type: 'openLogPanel', label: 'View Log' }]
         : [];
       const currentWorkspaceId = get().snapshot?.workspace.id ?? get().activeTabId ?? undefined;
-      const targetWorkspaceId = notification.workspaceId ?? currentWorkspaceId;
+      const targetWorkspaceId = notification.workspaceId === null ? undefined : notification.workspaceId ?? currentWorkspaceId;
+      const source = get().tabs.find(tab => tab.id === targetWorkspaceId)
+        ?? (get().snapshot?.workspace.id === targetWorkspaceId ? get().snapshot?.workspace : undefined)
+        ?? get().bootstrap?.state.recentWorkspaces?.find(tab => tab.id === targetWorkspaceId)
+        ?? (targetWorkspaceId ? get().sessions[targetWorkspaceId]?.snapshot?.workspace : undefined);
       const repositories = targetWorkspaceId && targetWorkspaceId === get().snapshot?.workspace.id
         ? get().allRepositories.length ? get().allRepositories : get().snapshot?.repositories
         : targetWorkspaceId ? get().sessions[targetWorkspaceId]?.allRepositories ?? get().sessions[targetWorkspaceId]?.snapshot?.repositories : undefined;
@@ -6296,6 +6307,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         repositoryCount: notification.repositoryCount ?? repositories?.filter(repo => !repo.meta.isWorktree).length,
         actions: notification.actions ?? defaultActions,
         workspaceId: targetWorkspaceId,
+        workspaceName: notification.workspaceName ?? source?.name,
+        workspacePaths: notification.workspacePaths ?? source?.paths,
       };
       set((state) => {
         const nextNotifications = [item, ...state.notifications].slice(0, 100);
@@ -6344,6 +6357,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           return;
         }
         if (action.type === 'openLogPanel') {
+          set({ activeLogProject: notification.workspaceId ?? 'application', activeLogChannel: 'all', activeLogLevel: 'all',
+            logSearchQuery: '', logOperationId: notification.operationId ?? null });
           get().setLogPanelOpen(true);
           return;
         }
@@ -6485,7 +6500,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         actionSucceeded = false;
         publishError('Operation failed', error, notification.workspaceId);
       } finally {
-        set((state) => ({ notifications: state.notifications.map((item) => item.id === notificationId ? { ...item, actionState: { ...Object.fromEntries(Object.entries(item.actionState ?? {}).filter(([index]) => Number(index) !== actionIndex)), ...(actionSucceeded ? { [actionIndex]: 'done' as const } : {}) } } : item) }));
+        set((state) => ({ notifications: state.notifications.map((item) => item.id === notificationId ? { ...item, actionState: { ...Object.fromEntries(Object.entries(item.actionState ?? {}).filter(([index]) => Number(index) !== actionIndex)), ...(actionSucceeded && action.type !== 'openLogPanel' ? { [actionIndex]: 'done' as const } : {}) } } : item) }));
       }
     },
     markNotificationAsRead: (id) => {
@@ -6493,10 +6508,10 @@ export const useAppStore = create<AppStore>((set, get) => {
         notifications: state.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
       }));
     },
-    markAllNotificationsAsRead: (workspaceId?: string) => {
+    markAllNotificationsAsRead: (workspaceId?: string | null) => {
       set((state) => ({
         notifications: state.notifications.map((n) => {
-          if (!workspaceId || n.workspaceId === workspaceId || !n.workspaceId) {
+          if (matchesNotificationScope(n, workspaceId)) {
             return { ...n, read: true };
           }
           return n;
@@ -6509,12 +6524,12 @@ export const useAppStore = create<AppStore>((set, get) => {
         toastNotificationIds: (state.toastNotificationIds ?? []).filter((item) => item !== id),
       }));
     },
-    clearNotifications: (workspaceId?: string) => {
+    clearNotifications: (workspaceId?: string | null) => {
       set((state) => {
-        if (!workspaceId) {
+        if (workspaceId === undefined) {
           return { notifications: [], toastNotificationIds: [] };
         }
-        const filtered = state.notifications.filter((n) => n.workspaceId && n.workspaceId !== workspaceId);
+        const filtered = state.notifications.filter(n => !matchesNotificationScope(n, workspaceId));
         const keptIds = new Set(filtered.map((n) => n.id));
         return {
           notifications: filtered,
@@ -6532,28 +6547,17 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ remoteManagerRepoId: targetRepoId });
     },
     closeRemoteManager: () => set({ remoteManagerRepoId: null }),
-    toggleLogPanel: () => {
-      const next = !get().logPanelOpen;
-      const activeTabId = get().activeTabId;
-      const nextTimestamps = next
-        ? { ...get().lastReadLogTimestamps, [activeTabId ?? '__global__']: Date.now() }
-        : get().lastReadLogTimestamps;
-      set({
-        logPanelOpen: next,
-        unreadErrorCount: next ? 0 : get().unreadErrorCount,
-        lastReadLogTimestamps: nextTimestamps,
-      });
-    },
-    setLogPanelOpen: (open) => {
-      const activeTabId = get().activeTabId;
-      const nextTimestamps = open
-        ? { ...get().lastReadLogTimestamps, [activeTabId ?? '__global__']: Date.now() }
-        : get().lastReadLogTimestamps;
-      set({
-        logPanelOpen: open,
-        unreadErrorCount: open ? 0 : get().unreadErrorCount,
-        lastReadLogTimestamps: nextTimestamps,
-      });
+    toggleLogPanel: () => set(state => ({ logPanelOpen: !state.logPanelOpen })),
+    setLogPanelOpen: logPanelOpen => set({ logPanelOpen }),
+    markLogsRead: ids => {
+      const existing = new Set(get().readLogEntryIds);
+      const retained = new Set(get().logEntries.map(entry => entry.id));
+      const added = ids.filter(id => retained.has(id) && !existing.has(id));
+      if (!added.length) return;
+      added.forEach(id => existing.add(id));
+      set(state => ({ readLogEntryIds: [...existing].filter(id => retained.has(id)),
+        unreadErrorCount: calculateWorkspaceUnreadErrors(state.logEntries, state.activeTabId, state.tabs, existing, state.snapshot?.workspace.paths),
+      }));
     },
     setLogPanelHeight: (height) => {
       const clamped = Math.max(120, Math.min(height, 600));
@@ -6564,21 +6568,26 @@ export const useAppStore = create<AppStore>((set, get) => {
     setLogLevel: (level) => set({ activeLogLevel: level }),
     setLogSearchQuery: (query) => set({ logSearchQuery: query }),
     setLogAutoScroll: (autoScroll) => set({ logAutoScroll: autoScroll }),
-    clearLogs: async () => {
-      if (clearLogPromise) return clearLogPromise;
+    clearLogs: async (entryIds) => {
+      if (clearLogPromise) await clearLogPromise;
       flushLogs();
-      const previous = get().logEntries;
+      const selected = entryIds ? new Set(entryIds) : undefined;
+      if (selected?.size === 0) return;
+      const previous = get().logEntries.filter(entry => !selected || selected.has(entry.id));
+      const previousRead = get().readLogEntryIds;
       const owner = logSession;
       const generation = ++logGeneration;
-      set({ logEntries: [], unreadErrorCount: 0, logError: null });
-      const request = bridge().clearLogs().catch((error: unknown) => {
+      set({ logEntries: get().logEntries.filter(entry => selected && !selected.has(entry.id)), logError: null, logClearing: true });
+      commitLogs([]);
+      const request = bridge().clearLogs(entryIds).catch((error: unknown) => {
         if (owner === logSession && generation === logGeneration) {
           flushLogs();
+          set(state => ({ readLogEntryIds: [...new Set([...state.readLogEntryIds, ...previousRead])] }));
           commitLogs(previous);
           set({ logError: 'Unable to clear logs.' });
         }
         throw error;
-      }).finally(() => { if (owner === logSession) clearLogPromise = undefined; });
+      }).finally(() => { if (owner === logSession) { clearLogPromise = undefined; set({ logClearing: false }); } });
       clearLogPromise = request;
       return request;
     },
@@ -6607,9 +6616,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       return await bridge().exportLogs(targetPath);
     },
     resetUnreadErrors: () => {
-      const activeTabId = get().activeTabId;
-      const nextTimestamps = { ...get().lastReadLogTimestamps, [activeTabId ?? '__global__']: Date.now() };
-      set({ unreadErrorCount: 0, lastReadLogTimestamps: nextTimestamps });
+      const state = get();
+      const paths = state.tabs.find(tab => tab.id === state.activeTabId)?.paths ?? state.snapshot?.workspace.paths ?? [];
+      get().markLogsRead(state.logEntries.filter(entry => state.activeTabId
+        ? isLogEntryInWorkspace(entry, paths, state.activeTabId) : isApplicationLog(entry)).map(entry => entry.id));
     },
   };
 });

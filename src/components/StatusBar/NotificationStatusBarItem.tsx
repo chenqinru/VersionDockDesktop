@@ -13,17 +13,7 @@ export function NotificationStatusBarItem() {
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const notifications = useAppStore((state) => state.notifications);
-  const activeTabId = useAppStore((state) => state.activeTabId);
-  const snapshotWorkspaceId = useAppStore((state) => state.snapshot?.workspace.id);
-  const currentWorkspaceId = activeTabId ?? snapshotWorkspaceId ?? null;
-
-  const currentWorkspaceNotifications = notifications.filter(
-    (n) => !n.workspaceId || !currentWorkspaceId || n.workspaceId === currentWorkspaceId
-  );
-  const unreadCount = currentWorkspaceNotifications.filter((n) => !n.read).length;
-  const otherUnreadCount = currentWorkspaceId
-    ? notifications.filter((n) => !n.read && n.workspaceId && n.workspaceId !== currentWorkspaceId).length
-    : 0;
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleClick = () => {
     if (!open && anchorRef.current) {
@@ -32,14 +22,7 @@ export function NotificationStatusBarItem() {
     setOpen(!open);
   };
 
-  let tooltip = t('Notifications');
-  if (unreadCount > 0 && otherUnreadCount > 0) {
-    tooltip = `${t('Notifications')} (${unreadCount}) · ${t('{0} in other projects', otherUnreadCount)}`;
-  } else if (unreadCount > 0) {
-    tooltip = `${t('Notifications')} (${unreadCount})`;
-  } else if (otherUnreadCount > 0) {
-    tooltip = `${t('Notifications')} · ${t('{0} in other projects', otherUnreadCount)}`;
-  }
+  const tooltip = unreadCount > 0 ? `${t('Notifications')} (${unreadCount})` : t('Notifications');
 
   return (
     <>

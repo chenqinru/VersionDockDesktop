@@ -70,7 +70,7 @@ export interface VersionDockBridge {
   onTabDragState(handler: (state: TabDragPayload | null) => void): Promise<() => void>;
   onLogEntry(handler: (entry: LogEntry) => void): Promise<() => void>;
   getLogs(channel?: LogChannel, level?: LogLevel, limit?: number): Promise<LogEntry[]>;
-  clearLogs(): Promise<void>;
+  clearLogs(entryIds?: string[]): Promise<void>;
   formatLogs(entries: LogEntry[]): Promise<string>;
   getLogStorageStatus(): Promise<string | null>;
   openLogFolder(): Promise<void>;
@@ -132,6 +132,7 @@ export function isAbortError(error: unknown): boolean {
 }
 
 export class BridgeError extends Error implements DesktopError {
+  operationId?: string;
   code: string;
   command: string | null;
   exitCode: number | null;
@@ -476,15 +477,16 @@ export class TauriBridge implements VersionDockBridge {
 
       return response.result as T;
     } catch (error) {
-      if (isAbortError(error) || error instanceof BridgeError) throw error;
-      throw new BridgeError({
+      if (error instanceof BridgeError) { error.operationId ??= id; throw error; }
+      if (isAbortError(error)) throw error;
+      throw Object.assign(new BridgeError({
         code: 'BRIDGE_INVOKE_FAILED',
         message: error instanceof Error ? error.message : String(error),
         command: null,
         exitCode: null,
         stderr: null,
         recoverable: false,
-      });
+      }), { operationId: id });
     } finally {
       this.operationTimers.delete(id);
       if (timeout) clearTimeout(timeout);
@@ -670,8 +672,8 @@ export class TauriBridge implements VersionDockBridge {
       },
     }, { showProgress: false });
   }
-  async clearLogs(): Promise<void> {
-    await this.request({ type: 'logClear' }, { showProgress: false });
+  async clearLogs(entryIds?: string[]): Promise<void> {
+    await this.request(entryIds ? { type: 'logClearEntries', payload: { entry_ids: entryIds } } : { type: 'logClear' }, { showProgress: false });
   }
   async formatLogs(entries: LogEntry[]): Promise<string> {
     return this.request({ type: 'logFormat', payload: { entries } }, { showProgress: false });
@@ -719,7 +721,7 @@ export class MockBridge implements VersionDockBridge {
     this.emit(createOperationRequestEvent(command, options, id));
     let requestError: unknown, result: unknown;
     try { result = await this.responder(command, options); return result as T; }
-    catch (error) { requestError = error; throw error; }
+    catch (error) { if (error instanceof BridgeError) error.operationId ??= id; requestError = error; throw error; }
     finally { this.emit({ type: 'operation-settled', progressEvent: true, requestId: id, error: requestError, result }); }
   }
   async cancelOperation(): Promise<boolean> { return false; }
@@ -783,7 +785,7 @@ export class MockBridge implements VersionDockBridge {
   async getLogs(channel?: LogChannel, level?: LogLevel, limit = 3000): Promise<LogEntry[]> {
     return this.logs.filter((entry) => (!channel || entry.channel === channel) && (!level || logLevelPriority(entry.level) >= logLevelPriority(level))).slice(-limit);
   }
-  async clearLogs(): Promise<void> { this.logs = []; }
+  async clearLogs(entryIds?: string[]): Promise<void> { const ids = new Set(entryIds); this.logs = entryIds ? this.logs.filter(entry => !ids.has(entry.id)) : []; }
   async formatLogs(entries: LogEntry[]): Promise<string> { return formatDemoLogs(entries); }
   async getLogStorageStatus(): Promise<string | null> { return null; }
   async openLogFolder(): Promise<void> { return; }

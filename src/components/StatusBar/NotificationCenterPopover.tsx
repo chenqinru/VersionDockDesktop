@@ -1,3 +1,4 @@
+import { matchesNotificationScope } from '../../activity/scope';
 import { Button } from '../Button';
 import { scrollbarContains } from '../../scrollbars/ownership';
 import { StatusBarPopoverPortal } from './StatusBarPopoverPortal';
@@ -35,24 +36,15 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
   const clearNotifications = useAppStore((state) => state.clearNotifications);
   const performNotificationAction = useAppStore((state) => state.performNotificationAction);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [scope, setScope] = useState<'current' | 'all'>('current');
+  const [scope, setScope] = useState<'current' | 'all' | 'application'>('all');
 
   const snapshotWorkspaceId = useAppStore((state) => state.snapshot?.workspace.id);
   const currentWorkspaceId = activeTabId ?? snapshotWorkspaceId ?? null;
 
-  const hasMultipleTabs = tabs.length > 1;
-  const currentWorkspaceNotifications = notifications.filter(
-    (n) => !n.workspaceId || !currentWorkspaceId || n.workspaceId === currentWorkspaceId
-  );
-  const currentUnreadCount = currentWorkspaceNotifications.filter((n) => !n.read).length;
-  const totalUnreadCount = notifications.filter((n) => !n.read).length;
-
-  const displayNotifications = (hasMultipleTabs && scope === 'current')
-    ? currentWorkspaceNotifications
-    : notifications;
-  const displayUnreadCount = (hasMultipleTabs && scope === 'current')
-    ? currentUnreadCount
-    : totalUnreadCount;
+  const effectiveScope = scope === 'current' && !currentWorkspaceId ? 'all' : scope;
+  const scopeWorkspaceId = effectiveScope === 'all' ? undefined : effectiveScope === 'application' ? null : currentWorkspaceId;
+  const displayNotifications = notifications.filter(n => matchesNotificationScope(n, scopeWorkspaceId));
+  const displayUnreadCount = displayNotifications.filter(n => !n.read).length;
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -127,8 +119,8 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
             <IconButton
               type="button"
               className="notification-action-btn"
-              title={scope === 'current' && hasMultipleTabs ? t('Mark current as read') : t('Mark all as read')}
-              onClick={() => markAllNotificationsAsRead(scope === 'current' && hasMultipleTabs ? (currentWorkspaceId ?? undefined) : undefined)}
+              title={t('Mark displayed as read')}
+              onClick={() => markAllNotificationsAsRead(scopeWorkspaceId)}
             >
               <Codicon name="check-all" />
             </IconButton>
@@ -137,8 +129,8 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
             <IconButton
               type="button"
               className="notification-action-btn"
-              title={scope === 'current' && hasMultipleTabs ? t('Clear current') : t('Clear all')}
-              onClick={() => clearNotifications(scope === 'current' && hasMultipleTabs ? (currentWorkspaceId ?? undefined) : undefined)}
+              title={t('Clear displayed notifications')}
+              onClick={() => clearNotifications(scopeWorkspaceId)}
             >
               <Codicon name="clear-all" />
             </IconButton>
@@ -146,30 +138,14 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
         </div>
       </div>
 
-      {hasMultipleTabs && (
-        <div className="notification-scope-nav" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={scope === 'current'}
-            className={`notification-scope-tab ${scope === 'current' ? 'active' : ''}`}
-            onClick={() => setScope('current')}
-          >
-            <span>{t('Current Project')}</span>
-            {currentUnreadCount > 0 && <span className="notification-scope-badge">{currentUnreadCount}</span>}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={scope === 'all'}
-            className={`notification-scope-tab ${scope === 'all' ? 'active' : ''}`}
-            onClick={() => setScope('all')}
-          >
-            <span>{t('All Projects')}</span>
-            {totalUnreadCount > 0 && <span className="notification-scope-badge">{totalUnreadCount}</span>}
-          </button>
-        </div>
-      )}
+      <div className="notification-scope-nav" role="tablist" aria-label={t('Notification scope')}>
+        {(['all', 'current', 'application'] as const).map(value => <button
+          key={value} type="button" role="tab" aria-selected={effectiveScope === value}
+          disabled={value === 'current' && !currentWorkspaceId}
+          className={`notification-scope-tab ${effectiveScope === value ? 'active' : ''}`}
+          onClick={() => setScope(value)}
+        >{t(value === 'all' ? 'All' : value === 'current' ? 'Current Project' : 'Application')}</button>)}
+      </div>
 
       <div className="statusbar-popover-content notification-list">
         {displayNotifications.length === 0 ? (
@@ -179,7 +155,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
           </div>
         ) : (
           displayNotifications.map((item) => {
-            const workspaceName = tabs.find((t) => t.id === item.workspaceId)?.name;
+            const workspaceName = item.workspaceId ? tabs.find(tab => tab.id === item.workspaceId)?.name ?? item.workspaceName ?? item.workspaceId : t('Application');
             return (
               <article
                 key={item.id}
@@ -193,7 +169,7 @@ export function NotificationCenterPopover({ anchorRect, anchorRef, onClose }: No
                   <div className="notification-item-row">
                     <div className="notification-item-heading">
                       <strong className="notification-item-title">{resolveNotificationText(item.title, t, item.repositoryCount)}</strong>
-                      {workspaceName && (scope === 'all' || !activeTabId) && (
+                      {workspaceName && (
                         <span className="notification-workspace-tag" title={workspaceName}>{workspaceName}</span>
                       )}
                     </div>
