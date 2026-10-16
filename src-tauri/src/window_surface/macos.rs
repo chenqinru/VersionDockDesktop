@@ -82,37 +82,27 @@ pub(super) fn observe(platform: &tauri::webview::PlatformWebview, window: &Webvi
         let center = NSNotificationCenter::defaultCenter();
         let mut tokens = Vec::new();
         let resize = Rc::new(LiveResize::default());
-        let current_resize = resize.clone();
-        let layout_window = window.as_ref().window();
-        let block = RcBlock::new(move |_| {
-            current_resize.start();
-            // Snapshot the normal bounds before AppKit changes them. Waiting
-            // for the disk debounce can lose a just-finished drag if the user
-            // immediately double-clicks to maximize.
-            crate::window_layout::native_resize_boundary(&layout_window);
-        });
-        tokens.push(unsafe {
-            center.addObserverForName_object_queue_usingBlock(
-                Some(NSWindowWillStartLiveResizeNotification),
-                Some(native),
-                None,
-                &block,
-            )
-        });
-        let current_resize = resize.clone();
-        let layout_window = window.as_ref().window();
-        let block = RcBlock::new(move |_| {
-            current_resize.start();
-            crate::window_layout::native_resize_boundary(&layout_window);
-        });
-        tokens.push(unsafe {
-            center.addObserverForName_object_queue_usingBlock(
-                Some(NSWindowDidEndLiveResizeNotification),
-                Some(native),
-                None,
-                &block,
-            )
-        });
+        // Both boundaries reset the drawing guard and snapshot stable bounds.
+        // Capturing before AppKit changes them also preserves a just-finished
+        // drag when the user immediately double-clicks to maximize.
+        for name in unsafe {
+            [NSWindowWillStartLiveResizeNotification, NSWindowDidEndLiveResizeNotification]
+        } {
+            let current_resize = resize.clone();
+            let layout_window = window.as_ref().window();
+            let block = RcBlock::new(move |_| {
+                current_resize.start();
+                crate::window_layout::native_resize_boundary(&layout_window);
+            });
+            tokens.push(unsafe {
+                center.addObserverForName_object_queue_usingBlock(
+                    Some(name),
+                    Some(native),
+                    None,
+                    &block,
+                )
+            });
+        }
         let current_resize = resize.clone();
         let view = Weak::from(webview);
         let block = RcBlock::new(move |_| {

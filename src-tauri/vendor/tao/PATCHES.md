@@ -1,8 +1,10 @@
 # VersionDock Desktop patch
 
 Upstream: `tao` 0.35.3 from crates.io, licensed under Apache-2.0.
-The upstream source, examples and license files are retained. Cargo registry
-metadata and the dependency crate lockfile are omitted.
+The upstream runtime source, README and license files are retained. Unused
+upstream examples, their three development dependencies and target declarations,
+the duplicate `Cargo.toml.orig`, Cargo registry metadata and the dependency
+crate lockfile are omitted. The runtime dependencies and features are unchanged.
 
 ## macOS animated resize reentrancy
 
