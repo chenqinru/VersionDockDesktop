@@ -61,8 +61,8 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Wi
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
 objc2 = "0.6.4"
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSNotification", "NSOperation", "NSString", "block2"] }
-objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKWebView", "block2"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSDate", "NSNotification", "NSOperation", "NSRunLoop", "NSString", "block2"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKContentWorld", "WKFrameInfo", "WKWebView", "block2"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -84,3 +84,8 @@ incremental = false
 strip = "symbols"
 lto = "thin"
 codegen-units = 1
+
+[patch.crates-io]
+# AppKit animations must not run while Tao holds its window-state mutex.
+# See vendor/tao/PATCHES.md for the narrowly scoped macOS change.
+tao = { path = "vendor/tao" }

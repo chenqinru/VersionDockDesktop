@@ -213,6 +213,7 @@ impl WindowLayouts {
     fn capture_inner(&self, window: &Window, save: bool) -> Result<(), DesktopError> {
         if window.is_minimized().map_err(native_error)?
             || window.is_fullscreen().map_err(native_error)?
+            || crate::window_surface::is_presenting_resize(window.label())
         {
             return if save {
                 self.flush_pending(&mut self.windows.lock().unwrap())
@@ -371,6 +372,17 @@ impl WindowLayouts {
     }
     pub fn remove(&self, label: &str) {
         self.windows.lock().unwrap().entries.remove(label);
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn native_resize_boundary(window: &Window) {
+    if let Some(layouts) = window.app_handle().try_state::<WindowLayouts>() {
+        if let Err(error) = layouts.capture_inner(window, false) {
+            // Logging also emits to webviews. Leave AppKit's callback before
+            // doing that; the caller may be inside a native window operation.
+            tauri::async_runtime::spawn(async move { warn(error.message) });
+        }
     }
 }
 

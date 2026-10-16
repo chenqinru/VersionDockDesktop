@@ -20,6 +20,17 @@ fn error(error: impl std::fmt::Display) -> DesktopError {
     DesktopError::new("WINDOW_SURFACE_FAILED", error.to_string(), true)
 }
 
+pub fn is_presenting_resize(_label: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::is_presenting(_label)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 #[cfg(any(not(target_os = "macos"), test))]
 fn fitted(
     size: PhysicalSize<u32>,
@@ -198,7 +209,7 @@ pub fn schedule(window: WebviewWindow) {
         // with_webview to the same UI thread.
         let current = window.clone();
         if let Err(error) = window.with_webview(move |platform| {
-            macos::observe_fullscreen(&platform, &current);
+            macos::observe(&platform, &current);
             if let Err(error) = macos::fit(&platform) {
                 // Logging emits a frontend event; leave the native callback
                 // before re-entering the runtime's webview dispatcher.
