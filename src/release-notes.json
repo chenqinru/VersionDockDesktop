@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.1.14",
+    "date": "2026-10-16",
+    "highlights": {
+      "zh-CN": [
+        "修复 Windows 标题栏工具按钮与最小化、最大化和关闭按钮重叠的问题，为窗口控制区预留独立空间。",
+        "改善打开首个项目及关闭最后一个标签页时的窗口过渡，同步主题背景与网页内容区域尺寸，待布局稳定后显示页面，减少缩放期间的旧画面残留。",
+        "调整 macOS 更新后的重启顺序，等待旧进程退出后通过系统打开原应用，避免强制启动并行实例；辅助任务启动失败时保留当前应用。"
+      ],
+      "en": [
+        "Fix Windows title bar actions overlapping the minimize, maximize and close buttons by reserving a separate area for window controls.",
+        "Improve window transitions when opening the first project or closing the last tab. Synchronize the theme background and webview dimensions, and show the page after layout settles to reduce stale content during resizing.",
+        "Adjust macOS update restarts to wait for the old process to exit before reopening the same app through the system, avoiding a forced parallel instance. Keep the current app running if the restart helper cannot start."
+      ]
+    }
+  },
+  {
     "version": "0.1.13",
     "date": "2026-10-16",
     "highlights": {
