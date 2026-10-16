@@ -567,11 +567,18 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
 .app-shell:focus { outline: none; }
 /* ===== 现代一体化 TitleBar 顶栏与标签栏样式 ===== */
 .titlebar {
+  --titlebar-tint-strength: 20%;
   height: 38px;
   flex: 0 0 38px;
   display: flex;
   align-items: center;
   background: var(--vscode-titleBar-activeBackground);
+  background-image: linear-gradient(105deg,
+    color-mix(in srgb, var(--titlebar-project-color, var(--versiondock-accent)) var(--titlebar-tint-strength), transparent),
+    color-mix(in srgb, var(--titlebar-project-color, var(--versiondock-accent)) 8%, transparent) 46%,
+    transparent 100%);
+  background-size: min(760px, 100%) 100%;
+  background-repeat: no-repeat;
   color: var(--vscode-titleBar-activeForeground);
   user-select: none;
   position: relative;
@@ -588,6 +595,8 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   -webkit-app-region: drag;
   app-region: drag;
 }
+
+:root:is([data-theme="light"], [data-theme="light2026"]) .titlebar { --titlebar-tint-strength: 16%; }
 
 .titlebar-welcome-title {
   position: absolute;
@@ -652,7 +661,7 @@ input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { curs
   border-radius: var(--versiondock-radius-control);
   border: 1px solid transparent;
   background: transparent;
-  color: var(--versiondock-muted);
+  color: color-mix(in srgb, var(--versiondock-text) 65%, var(--versiondock-muted));
   font-size: calc(11.5px * var(--versiondock-ui-font-scale, 1));
   line-height: 1.4;
   cursor: pointer;
@@ -3889,15 +3898,33 @@ button.danger:not(:disabled):hover,
 .statusbar-right { margin-left: auto; }
 
 /* Foreground task progress: compact status entry and independent details layer. */
+.statusbar-operation, .task-progress-row {
+  --task-loading-foreground: var(--versiondock-accent);
+  --task-error-foreground: var(--versiondock-danger);
+  --task-warning-foreground: var(--versiondock-warning);
+}
+:root[data-theme="nord"] :is(.statusbar-operation, .task-progress-row) { --task-error-foreground: var(--versiondock-menu-danger-foreground); }
+:root[data-theme="light2026"] :is(.statusbar-operation, .task-progress-row) { --task-warning-foreground: color-mix(in srgb, var(--versiondock-warning) 75%, var(--versiondock-text)); }
+.statusbar-operation { --task-progress-foreground: var(--vscode-statusBar-foreground); }
+.task-progress-row { --task-progress-foreground: var(--versiondock-muted); }
+:is(.statusbar-operation, .task-progress-row):is([data-task-status="queued"], [data-task-status="running"], [data-task-status="cancelling"]) { --task-progress-foreground: var(--task-loading-foreground); }
+:is(.statusbar-operation, .task-progress-row):is([data-task-status="failed"], [data-task-status="timedOut"]) { --task-progress-foreground: var(--task-error-foreground); }
+:is(.statusbar-operation, .task-progress-row)[data-task-status="partial"] { --task-progress-foreground: var(--task-warning-foreground); }
+/* Light tints retain the theme hue and remain visible on classic blue status bars. */
+:root:is([data-theme="dark"], [data-theme="light"]) .statusbar-operation {
+  --task-loading-foreground: color-mix(in srgb, var(--versiondock-accent) 10%, var(--vscode-statusBar-foreground));
+  --task-error-foreground: color-mix(in srgb, var(--versiondock-danger) 15%, var(--vscode-statusBar-foreground));
+  --task-warning-foreground: color-mix(in srgb, var(--versiondock-warning) 15%, var(--vscode-statusBar-foreground));
+}
 .statusbar-operation { flex: 0 1 auto; min-width: 0; max-width: 240px; height: var(--versiondock-statusbar-item-height); display: inline-flex; align-items: center; gap: 5px; padding: 0 5px; color: var(--vscode-statusBar-foreground); border-radius: var(--versiondock-radius-icon); font: inherit; }
-.statusbar-operation:hover, .statusbar-operation[aria-expanded="true"] { background: var(--vscode-statusBarItem-hoverBackground); color: var(--vscode-statusBar-foreground); }
-.statusbar-operation > .codicon { flex: 0 0 auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); }
+.statusbar-operation:not(:disabled):is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--vscode-statusBarItem-hoverBackground); color: var(--vscode-statusBar-foreground); }
+.statusbar-operation > .codicon { flex: 0 0 auto; font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); color: var(--task-progress-foreground); }
 .statusbar-operation-label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar-operation-fraction, .statusbar-operation-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 .statusbar-operation-count { color: var(--vscode-statusBar-foreground); padding: 0 3px; border-radius: var(--versiondock-radius-badge); background: var(--vscode-statusBarItem-hoverBackground); }
 .task-progress-track { position: relative; display: block; width: 64px; height: 3px; flex: 0 0 64px; overflow: hidden; border-radius: 2px; background: var(--versiondock-border-soft); }
 .task-progress-static { display: none; }
-.task-progress-fill { display: block; height: 100%; background: var(--versiondock-muted); border-radius: inherit; }
+.task-progress-fill { display: block; height: 100%; background: var(--task-progress-foreground, var(--versiondock-accent)); border-radius: inherit; }
 .task-progress-track.indeterminate .task-progress-fill { width: 35%; animation: task-progress-flow 1.6s ease-in-out infinite; }
 .task-progress-track:not(.determinate):not(.indeterminate) .task-progress-fill { width: 0; }
 @keyframes task-progress-flow { from { transform: translateX(-100%); } to { transform: translateX(385%); } }
@@ -3914,9 +3941,7 @@ button.danger:not(:disabled):hover,
 .task-progress-row:last-child { border-bottom: 0; }
 .task-progress-row:focus-visible { background: var(--versiondock-selection-background); box-shadow: inset 0 0 0 1px var(--versiondock-border); }
 .task-progress-row-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.task-progress-row-heading > .codicon { color: var(--versiondock-muted); font-size: 14px; }
-.task-progress-row.failed .task-progress-row-heading > .codicon, .task-progress-row.timedOut .task-progress-row-heading > .codicon { color: var(--versiondock-danger); }
-.task-progress-row.partial .task-progress-row-heading > .codicon { color: var(--versiondock-warning); }
+.task-progress-row-heading > .codicon { color: var(--task-progress-foreground); font-size: 14px; }
 .task-progress-row-heading strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .task-progress-status { color: var(--versiondock-muted); font-size: 10px; white-space: nowrap; }
 .task-progress-owner { margin: 4px 0 0 20px; color: var(--versiondock-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3990,7 +4015,6 @@ button.danger:not(:disabled):hover,
 
 /* Progress stays legible on both neutral and classic blue status bars. */
 .statusbar-operation .task-progress-track { background: var(--vscode-statusBarItem-hoverBackground); }
-.statusbar-operation .task-progress-fill { background: var(--vscode-statusBar-foreground); }
 .statusbar-operation .task-progress-static { color: var(--vscode-statusBar-foreground); font-size: calc(10px * var(--versiondock-ui-font-scale, 1)); }
 
 /* Classic VS Code status bars use white labels on their blue surface. */

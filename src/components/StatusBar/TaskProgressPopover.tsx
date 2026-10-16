@@ -54,7 +54,7 @@ export function TaskProgressPopover({ anchorRef, currentWorkspaceId, onClose }: 
     };
   }, [anchorRef]);
 
-  const row = (task: ProgressTask) => <article key={task.id} tabIndex={0} className={`task-progress-row ${task.status}`}
+  const row = (task: ProgressTask) => <article key={task.id} tabIndex={0} className={`task-progress-row ${task.status}`} data-task-status={task.status}
     onKeyDown={(event) => {
       if (event.target !== event.currentTarget || !['ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', 'ArrowRight', 'ArrowLeft'].includes(event.key)) return;
       event.preventDefault();

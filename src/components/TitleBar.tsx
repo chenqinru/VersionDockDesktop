@@ -7,9 +7,10 @@ import { scrollbarContains } from '../scrollbars/ownership';
 import { isLightTheme } from '../theme';
 import { getEffectiveTheme } from '../theme/useEffectiveTheme';
 import { IconButton } from './IconButton';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Codicon } from './Codicon';
 import { ProjectIcon } from './ProjectIcon';
+import { getProjectColor } from './projectIconUtils';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { useI18n } from '../i18n';
 import { isWorkspaceOpening, useAppStore } from '../store/appStore';
@@ -95,6 +96,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
   // Keep the titlebar on the same surface as the main application during that gap.
   const tabs = welcomeMode ? [] : loadedTabs.length === 0 && startupTab ? [startupTab] : loadedTabs;
   const activeTabId = useAppStore((state) => state.activeTabId) ?? startupTab?.id;
+  const activeProject = tabs.find(tab => tab.id === activeTabId);
   const busy = useAppStore((state) => isWorkspaceOpening(state.operations));
   const recentWorkspaces = useAppStore((state) => state.bootstrap?.state.recentWorkspaces ?? []);
   const filteredRecentWorkspaces = filterWorkspaces(recentWorkspaces, workspaceQuery);
@@ -825,6 +827,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
     <>
       <header
         className={`titlebar ${platform} ${tabs.length === 0 ? 'welcome-mode' : ''}`}
+        style={activeProject ? { '--titlebar-project-color': getProjectColor(activeProject.paths[0] || activeProject.id || activeProject.name) } as CSSProperties : undefined}
         data-tauri-drag-region
         onDoubleClick={(event) => {
           if (tabs.length === 0) {

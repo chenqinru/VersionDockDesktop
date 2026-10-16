@@ -46,7 +46,7 @@ export function OperationStatusBarItem() {
   if (!task && !open) return null;
   const label = task ? onlyOthers ? t('Other projects · {0} tasks', otherCount) : t(isTaskActive(task) ? task.title : taskStatusKey(task.status)) : t('Task progress');
   return <>
-    {task && <button ref={anchorRef} type="button" className="statusbar-operation" title={task ? `${t(task.title)} · ${task.workspaceName} · ${t(task.message)}` : label}
+    {task && <button ref={anchorRef} type="button" className="statusbar-operation" data-task-status={task.status} title={task ? `${t(task.title)} · ${task.workspaceName} · ${t(task.message)}` : label}
       aria-label={t('Task progress')} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
       <Codicon name={!task ? 'check-all' : isTaskActive(task) ? 'loading codicon-modifier-spin' : task.status === 'succeeded' ? 'check' : task.status === 'failed' || task.status === 'timedOut' ? 'error' : task.status === 'partial' ? 'warning' : 'circle-slash'} />
       <span className="statusbar-operation-label">{label}</span>
