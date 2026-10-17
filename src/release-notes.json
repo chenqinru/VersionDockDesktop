@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.16",
+    "date": "2026-10-17",
+    "highlights": {
+      "zh-CN": [
+        "改善 macOS 拖动缩放、双击标题栏最大化与还原时的页面铺满效果，减少窗口边缘留白；全屏时标题栏标签向前排列，退出后恢复系统按钮的预留空间。",
+        "优化欢迎页与项目页之间的切换，移除整页加载遮罩，让页面随窗口尺寸变化直接布局；macOS 使用原生缩放动画，并保留窗口大小与位置记忆。",
+        "修复 Git 后台自动获取远程引用长时间占用仓库而阻塞暂存、提交等本地操作的问题；前台写操作会先停止同仓库的自动获取任务。",
+        "优先响应 Diff、提交详情和文件历史等点击读取，暂停隐藏页签中不必要的列表与详情加载，保留已完成的结果和展开状态，减少切换时的等待。",
+        "加快文件差异的首屏语法高亮，支持先显示已着色的可见内容并复用完整高亮结果；读取与高亮共用加载计时，超过 150 毫秒才显示提示，减少转圈闪烁。",
+        "改善历史列表滚动、面板分割线拖动和滚动条更新的流畅度，修复分支比较面板高度恢复及多窗口布局保存时相互覆盖的问题。"
+      ],
+      "en": [
+        "Improve page fitting on macOS when resizing windows or double-clicking the title bar to maximize and restore, reducing blank edges. Move title bar tabs forward in fullscreen and restore space for system controls when leaving fullscreen.",
+        "Improve transitions between the welcome screen and project workspace by removing the full-page loading overlay and letting content respond directly to window size changes. Use native resize animations on macOS while preserving window size and position.",
+        "Fix slow automatic Git fetches holding up local operations such as staging and committing. Stop automatic fetches for the same repository before running a foreground write operation.",
+        "Prioritize reads triggered by opening diffs, commit details and file history. Pause unnecessary list and detail loading in hidden tabs while retaining completed results and expanded sections to reduce waiting when switching views.",
+        "Speed up syntax highlighting for the first screen of a file diff, showing visible content with colors before the remaining work finishes and reusing complete highlighting results. Share one loading timer across reading and highlighting, showing feedback only after 150 milliseconds to reduce spinner flashes.",
+        "Improve scrolling in commit history, dragging panel dividers and scrollbar updates. Fix branch comparison panel height restoration and prevent layout saves in multiple windows from overwriting unrelated changes."
+      ]
+    }
+  },
+  {
     "version": "0.1.15",
     "date": "2026-10-16",
     "highlights": {
