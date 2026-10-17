@@ -2846,14 +2846,23 @@ async fn real_git_commit_preempts_stalled_automatic_fetch_and_waits_for_process_
         let _ = started.send(());
         loop {
             match stream.read(&mut buffer) {
-                Ok(0) => {
-                    let _ = closed.send(());
+                Ok(0) => break,
+                Ok(_) => {}
+                // Terminating a Git process can close its socket with a reset
+                // on Windows. This still proves the transport has shut down;
+                // read timeouts and other failures must keep failing the test.
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+                    ) =>
+                {
                     break;
                 }
-                Ok(_) => {}
                 Err(error) => panic!("Git transport was not terminated: {error}"),
             }
         }
+        let _ = closed.send(());
     });
 
     let repository = repo(&working, VcsKind::Git);
