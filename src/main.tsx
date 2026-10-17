@@ -22,6 +22,7 @@ let disposeBridge: () => void = () => undefined;
 let cancelHighlightWarmup: () => void = () => undefined;
 
 async function start() {
+  cancelHighlightWarmup = scheduleHighlightWarmup();
   const browserDev = import.meta.env.MODE === 'browser';
   const bridge: VersionDockBridge = browserDev
     ? new (await import('./platform/browserDevBridge')).BrowserDevBridge()
@@ -37,7 +38,6 @@ async function start() {
     try { await initializable.initialize(); } catch (error) { console.warn('Native event channel unavailable', error); }
   }
   await useAppStore.getState().initialize(bridge);
-  cancelHighlightWarmup = scheduleHighlightWarmup();
   if (browserDev) {
     const firstCommit = useAppStore.getState().history[0];
     if (firstCommit) await useAppStore.getState().selectCommit(firstCommit);

@@ -69,7 +69,7 @@ describe('working tree changes workspace', () => {
     expect(diffRequests).toHaveLength(2);
   });
 
-  it('clears previous diff immediately and shows loading placeholder when switching files', async () => {
+  it('clears previous diff immediately and delays the loading indicator when switching files', async () => {
     let resolveSecondDiff: ((value: any) => void) | undefined;
     const secondDiffPromise = new Promise((resolve) => {
       resolveSecondDiff = resolve;
@@ -106,9 +106,10 @@ describe('working tree changes workspace', () => {
     // 切换到 new.txt
     fireEvent.click(screen.getByRole('button', { name: 'new.txt' }));
 
-    // 立即显示 loading，旧文件的差异内容被立刻卸载
-    expect(screen.getByText('Loading diff...')).toBeInTheDocument();
+    // 旧文件立即卸载，只有持续等待才显示加载提示。
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.queryByText((_, el) => el?.tagName.toLowerCase() === 'code' && el.textContent === 'old line')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Loading…'));
 
     // 延迟 resolve 第二个文件的差异
     resolveSecondDiff!({
@@ -122,7 +123,7 @@ describe('working tree changes workspace', () => {
 
     await waitFor(() => {
       expect(screen.getByText((_, el) => el?.tagName.toLowerCase() === 'code' && el.textContent === 'untracked file content')).toBeInTheDocument();
-      expect(screen.queryByText('Loading diff...')).not.toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
     });
   });
 

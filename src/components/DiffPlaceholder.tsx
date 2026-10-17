@@ -2,14 +2,13 @@ import { Button } from './Button';
 import { Codicon } from './Codicon';
 import { useI18n } from '../i18n';
 
-type DiffPlaceholderKind = 'binary' | 'truncated' | 'empty' | 'select' | 'loading' | 'error';
+type DiffPlaceholderKind = 'binary' | 'truncated' | 'empty' | 'select' | 'error';
 
 const ICONS: Record<DiffPlaceholderKind, string> = {
   binary: 'file-binary',
   truncated: 'warning',
   empty: 'diff',
   select: 'diff-multiple',
-  loading: 'loading',
   error: 'error',
 };
 
@@ -33,14 +32,12 @@ export function DiffPlaceholder({
       ? t('Diff is too large to display')
       : kind === 'select'
         ? t('Select a changed file to inspect its diff.')
-        : kind === 'loading'
-          ? t('Loading diff...')
-          : kind === 'error'
-            ? (error || t('Failed to load diff'))
-            : t('No textual differences for this change.');
+        : kind === 'error'
+          ? (error || t('Failed to load diff'))
+          : t('No textual differences for this change.');
 
   return <div className={`diff-placeholder ${kind}`} role="status">
-    <span className={`diff-placeholder-icon ${kind === 'loading' ? 'codicon-modifier-spin' : ''}`}><Codicon name={ICONS[kind]} /></span>
+    <span className="diff-placeholder-icon"><Codicon name={ICONS[kind]} /></span>
     <strong>{message}</strong>
     {path && <code title={path}>{path}</code>}
     {lineCount !== undefined && lineCount > 0 && <small>{lineCount} {t('Lines')}</small>}

@@ -1,7 +1,7 @@
 import { Button } from './Button';
 import { changeStatus, changeStatusLetter } from '../theme/changeStatus';
 import { IconButton } from './IconButton';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { FileIcon } from './FileIcon';
 import { buildFileTree, type FileTreeNode } from './fileTree';
@@ -12,6 +12,8 @@ import { resolveDiffRevisions } from '../history/diffRevisions';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { DiffPlaceholder } from './DiffPlaceholder';
 import { UnifiedDiffView } from './UnifiedDiffView';
+import { LoadingState } from './LoadingState';
+import type { DiffDocument } from '../bindings/generated';
 
 type ChangeTarget = DetailFileTarget | WorkingChangeTarget;
 
@@ -77,6 +79,16 @@ export function CommitChangesWorkspace() {
     && (!diffTarget || diffTarget === currentSelectedKey)
     && diff.path === selected.path
   );
+  const [highlightState, setHighlightState] = useState<{ diff: DiffDocument; loading: boolean }>();
+  const onHighlightLoadingChange = useCallback((loading: boolean) => {
+    if (diff) setHighlightState({ diff, loading });
+  }, [diff]);
+  const hasTextDiff = isDiffMatchingSelected && diff && !diff.binary && !diff.truncated && Boolean(diff.content);
+  // Keep one loading interval across reading and first-screen highlighting.
+  // A newly returned document is pending until its view reports readiness.
+  const previewLoading = Boolean(selected && (diffLoading
+    || !isDiffMatchingSelected && !diffError
+    || hasTextDiff && (highlightState?.diff !== diff || highlightState.loading)));
   const repoNames = useMemo(() => Object.fromEntries(repositories.map((repo) => [repo.meta.id, repo.meta.name])), [repositories]);
   const selectedCommit = selected && !isWorking(selected) && changes?.kind === 'commits' ? changes.commits.find((commit) => commit.repoId === selected.repoId && commit.hash === selected.commitHash) : undefined;
   const selectedRepoKind = repositories.find((repo) => repo.meta.id === selected?.repoId)?.meta.kind ?? 'git';
@@ -196,35 +208,34 @@ export function CommitChangesWorkspace() {
           {changes.kind === 'commits' && changes.files.some((target) => !repoNames[target.repoId]) && <section><h3><Codicon name="repo" />{t('Repository')}</h3>{renderFiles(changes.files.filter((target) => !repoNames[target.repoId]))}</section>}
         </div>
       </aside>
-      <div className="changes-preview">
+      <div className="changes-preview" aria-busy={previewLoading}>
         {selected && <header className="changes-preview-header">
           <div className="diff-file-heading" title={selected.path}><FileIcon name={selected.path.split('/').pop() ?? selected.path} /><span className="diff-file-path">{selected.path}</span></div>
           <span className="changes-preview-revisions" title={`${oldRevision ?? ''} → ${newRevision ?? ''}`}>{oldRevision?.length && oldRevision.length > 12 ? oldRevision.slice(0, 8) : oldRevision} → {newRevision?.length && newRevision.length > 12 ? newRevision.slice(0, 8) : newRevision}</span>
         </header>}
-        {diffLoading ? (
-          <DiffPlaceholder kind="loading" path={selected?.path} />
-        ) : diffError && (!diff || diffTarget === currentSelectedKey) ? (
-          <DiffPlaceholder
-            kind="error"
-            path={selected?.path}
-            error={diffError}
-            onRetry={() => selected && void loadDiff(selected)}
-          />
-        ) : isDiffMatchingSelected && diff && selected ? (
-          diff.truncated ? (
-            <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} />
-          ) : diff.binary ? (
-             <DiffPlaceholder kind="binary" path={diff.path} />
-          ) : diff.content ? (
-            <UnifiedDiffView repoId={selected.repoId} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} />
-          ) : (
-            <DiffPlaceholder kind="empty" path={diff.path} />
-          )
-        ) : selected ? (
-          <DiffPlaceholder kind="loading" path={selected.path} />
-        ) : (
-          <DiffPlaceholder kind="select" />
-        )}
+        <div className="changes-preview-body">
+          <LoadingState active={previewLoading} delayMs={150} resetKey={currentSelectedKey} className="code-highlight-loading" />
+          {diffLoading ? null : diffError && (!diff || diffTarget === currentSelectedKey) ? (
+            <DiffPlaceholder
+              kind="error"
+              path={selected?.path}
+              error={diffError}
+              onRetry={() => selected && void loadDiff(selected)}
+            />
+          ) : isDiffMatchingSelected && diff && selected ? (
+            diff.truncated ? (
+              <DiffPlaceholder kind="truncated" path={diff.path} lineCount={diff.lineCount} />
+            ) : diff.binary ? (
+              <DiffPlaceholder kind="binary" path={diff.path} />
+            ) : diff.content ? (
+              <UnifiedDiffView repoId={selected.repoId} oldRevision={oldRevision} newRevision={newRevision} content={diff.content} path={diff.path} language={diff.language} onLoadingChange={onHighlightLoadingChange} />
+            ) : (
+              <DiffPlaceholder kind="empty" path={diff.path} />
+            )
+          ) : selected ? null : (
+            <DiffPlaceholder kind="select" />
+          )}
+        </div>
       </div>
     </div>
     {context && <ContextMenu x={context.x} y={context.y} items={contextItems} onSelect={runContext} onClose={() => setContext(undefined)} />}

@@ -2,11 +2,11 @@ import { Button } from './Button';
 import { LoadingState } from './LoadingState';
 import { navigationScrollBehavior } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { BundledLanguage, BundledTheme, ThemeRegistrationRaw, ThemedToken } from 'shiki/types';
 import { resolveHighlightLanguage } from '../utils/highlighter';
-import { cachedSyntaxTokens, highlightSyntax } from '../utils/syntaxHighlighting';
+import { cachedSyntaxTokens, highlightSyntax, type HighlightOptions } from '../utils/syntaxHighlighting';
 import { BridgeContext } from '../platform/context';
 import { FileSearchWidget } from './FileSearchWidget';
 import { IconButton } from './IconButton';
@@ -198,10 +198,10 @@ export function extractDiffLineRange(container: HTMLElement, target?: Element | 
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export async function highlightDiffLines(lines: string[], language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw, signal?: AbortSignal): Promise<ThemedToken[][]> {
+export async function highlightDiffLines(lines: string[], language: string, path: string, theme: BundledTheme | ThemeRegistrationRaw, signal?: AbortSignal, options?: HighlightOptions): Promise<ThemedToken[][]> {
   const resolved = resolveDiffHighlightLanguage(language, path, lines);
   if (!resolved) return lines.map(() => []);
-  return highlightSyntax(lines.join('\n'), resolved, theme, signal);
+  return highlightSyntax(lines.join('\n'), resolved, theme, signal, options);
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -240,12 +240,19 @@ export async function highlightParsedDiffSide(parsed: ParsedUnifiedDiff, side: D
   for (const cells of groups) {
     if (options?.signal?.aborted) break;
     try {
-      const tokens = await highlightDiffLines(cells.map((cell) => cell.content || ' '), language, path, theme, options?.signal);
+      let streamed = false;
+      const publish = (tokens: ThemedToken[][], startLine: number) => {
+        if (options?.signal?.aborted) return;
+        streamed = true;
+        const chunkCells = cells.slice(startLine, startLine + tokens.length);
+        chunkCells.forEach((cell, index) => highlighted.set(cell, tokens[index] ?? []));
+        options?.onGroup?.(chunkCells, tokens);
+      };
+      const tokens = await highlightDiffLines(cells.map((cell) => cell.content || ' '), language, path, theme, options?.signal, { onChunk: publish });
       if (options?.signal?.aborted) break;
-      cells.forEach((cell, index) => highlighted.set(cell, tokens[index] ?? []));
-      options?.onGroup?.(cells, tokens);
+      if (!streamed) publish(tokens, 0);
     } catch (error) {
-      if (!options?.signal?.aborted) options?.onError?.(error, cells);
+      if (!options?.signal?.aborted) options?.onError?.(error, cells.filter(cell => !highlighted.has(cell)));
     }
   }
   return highlighted;
@@ -562,6 +569,7 @@ export interface UnifiedDiffViewProps {
   repoId?: string;
   oldRevision?: string;
   newRevision?: string;
+  onLoadingChange?: (loading: boolean) => void;
   onShowSelectionHistory?: (range: DiffSelectionLineRange, revision?: string, path?: string) => void;
 }
 
@@ -575,6 +583,7 @@ export function UnifiedDiffView({
   repoId,
   oldRevision,
   newRevision,
+  onLoadingChange,
   onShowSelectionHistory,
   reveal,
 }: UnifiedDiffViewProps) {
@@ -801,6 +810,9 @@ export function UnifiedDiffView({
       return row.kind === 'split' ? pending(row.oldCell) || pending(row.newCell)
         : row.kind === 'inline' ? pending(row.cell) : false;
     });
+  useLayoutEffect(() => {
+    onLoadingChange?.(highlightPending);
+  }, [highlightPending, onLoadingChange]);
 
   const openSearch = useCallback(() => {
     searchTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1001,7 +1013,7 @@ export function UnifiedDiffView({
     <FileSearchWidget placeholder={t('Find in file')} query={searchQuery} isOpen={searchOpen} inputRef={searchInput} onChange={(query) => { setSearchQuery(query); setSearchIndex(0); }} onClose={closeSearch} count={{ current: searchMatches.length ? selectedSearchIndex + 1 : 0, total: searchMatches.length }} onNavigate={navigateSearch} />
     {historyError && <div className="diff-history-error" role="alert">{historyError}</div>}
     <div ref={scrollRef} className="unified-diff-scroll" aria-busy={highlightPending}>
-      {highlightPending && <LoadingState className="code-highlight-loading" />}
+      {!onLoadingChange && <LoadingState active={highlightPending} delayMs={150} resetKey={cachedTokens} className="code-highlight-loading" />}
       <div className="unified-diff-virtual" style={{ height: virtualizer.getTotalSize(), visibility: highlightPending ? 'hidden' : undefined }}>
         {view === 'split' ? (
           <div className="unified-diff-split-container">

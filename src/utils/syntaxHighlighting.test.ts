@@ -4,14 +4,15 @@ import type { ThemedToken } from 'shiki/types';
 
 class FakeWorker {
   static instances: FakeWorker[] = [];
-  requests: HighlightWorkerRequest[] = [];
+  requests: Extract<HighlightWorkerRequest, { action: 'start' }>[] = [];
+  messages: HighlightWorkerRequest[] = [];
   onmessage?: (event: MessageEvent<HighlightWorkerResponse>) => void;
   onerror?: (event: ErrorEvent) => void;
   terminate = vi.fn();
   constructor() { FakeWorker.instances.push(this); }
-  postMessage(request: HighlightWorkerRequest) { this.requests.push(request); }
-  reply(tokens: ThemedToken[][], error?: string) {
-    this.onmessage?.({ data: { id: this.requests.at(-1)!.id, tokens: error ? undefined : tokens, error } } as MessageEvent<HighlightWorkerResponse>);
+  postMessage(request: HighlightWorkerRequest) { this.messages.push(request); if (request.action === 'start') this.requests.push(request); }
+  reply(tokens: ThemedToken[][], error?: string, startLine = 0, done = true) {
+    this.onmessage?.({ data: { id: this.messages.at(-1)!.id, tokens: error ? undefined : tokens, error, startLine, done } } as MessageEvent<HighlightWorkerResponse>);
   }
 }
 const tokens = (code: string): ThemedToken[][] => [[{ content: code, color: '#ff0000', offset: 0 }]];
@@ -19,6 +20,81 @@ beforeEach(() => { vi.resetModules(); FakeWorker.instances = []; vi.stubGlobal('
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('syntax highlighting worker and cache', () => {
+  it('interleaves chunks, publishes the first screen early, and only caches complete results', async () => {
+    const service = await import('./syntaxHighlighting');
+    const onChunk = vi.fn();
+    const old = service.highlightSyntax('old lines', 'typescript', 'dark-plus', undefined, { onChunk });
+    const next = service.highlightSyntax('new lines', 'typescript', 'dark-plus');
+    const worker = FakeWorker.instances[0];
+    worker.reply(tokens('old first'), undefined, 0, false);
+    expect(onChunk).toHaveBeenCalledWith(tokens('old first'), 0);
+    expect(service.cachedSyntaxTokens('old lines', 'typescript', 'dark-plus')).toBeUndefined();
+    expect(worker.requests.at(-1)?.code).toBe('new lines');
+    worker.reply(tokens('new first')); await next;
+    expect(worker.messages.at(-1)).toEqual({ action: 'continue', id: worker.requests[0].id });
+    worker.reply(tokens('old last'), undefined, 1);
+    expect(await old).toEqual([...tokens('old first'), ...tokens('old last')]);
+    expect(service.cachedSyntaxTokens('old lines', 'typescript', 'dark-plus')).toEqual(await old);
+  });
+
+  it('prioritizes a clicked file over queued background work', async () => {
+    const { highlightSyntax } = await import('./syntaxHighlighting');
+    const first = highlightSyntax('first', 'rust', 'dark-plus');
+    const background = highlightSyntax('background', 'rust', 'dark-plus', undefined, { priority: 'background' });
+    const clicked = highlightSyntax('clicked', 'rust', 'dark-plus');
+    const worker = FakeWorker.instances[0];
+    worker.reply(tokens('first')); await first;
+    expect(worker.requests.at(-1)?.code).toBe('clicked');
+    worker.reply(tokens('clicked')); await clicked;
+    expect(worker.requests.at(-1)?.code).toBe('background');
+    worker.reply(tokens('background')); await background;
+  });
+
+  it('discards a cancelled running chunk and releases the worker before the rest of the old file', async () => {
+    const { highlightSyntax, cachedSyntaxTokens } = await import('./syntaxHighlighting');
+    const controller = new AbortController();
+    const onChunk = vi.fn();
+    const old = expect(highlightSyntax('old file', 'rust', 'dark-plus', controller.signal, { onChunk })).rejects.toMatchObject({ name: 'AbortError' });
+    const clicked = highlightSyntax('clicked', 'rust', 'dark-plus');
+    const worker = FakeWorker.instances[0];
+    controller.abort(); await old;
+    worker.reply(tokens('old first'), undefined, 0, false);
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(cachedSyntaxTokens('old file', 'rust', 'dark-plus')).toBeUndefined();
+    expect(worker.messages.at(-2)).toEqual({ action: 'cancel', id: worker.requests[0].id });
+    expect(worker.requests.at(-1)?.code).toBe('clicked');
+    worker.reply(tokens('clicked')); await clicked;
+  });
+
+  it('replays completed chunks when another consumer shares a partially highlighted file', async () => {
+    const { highlightSyntax } = await import('./syntaxHighlighting');
+    const a = highlightSyntax('shared', 'rust', 'dark-plus');
+    const worker = FakeWorker.instances[0];
+    worker.reply(tokens('first'), undefined, 0, false);
+    const onChunk = vi.fn();
+    const b = highlightSyntax('shared', 'rust', 'dark-plus', undefined, { onChunk });
+    expect(onChunk).toHaveBeenCalledWith(tokens('first'), 0);
+    worker.reply(tokens('last'), undefined, 1);
+    expect(await a).toEqual(await b);
+    expect(onChunk).toHaveBeenLastCalledWith(tokens('last'), 1);
+    expect(worker.requests).toHaveLength(1);
+  });
+
+  it('releases a suspended worker session when its last consumer cancels', async () => {
+    const { highlightSyntax } = await import('./syntaxHighlighting');
+    const controller = new AbortController();
+    const old = expect(highlightSyntax('old', 'rust', 'dark-plus', controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    const current = highlightSyntax('current', 'rust', 'dark-plus');
+    const worker = FakeWorker.instances[0];
+    worker.reply(tokens('first chunk'), undefined, 0, false);
+    controller.abort(); await old;
+    expect(worker.messages.at(-1)).toEqual({ action: 'cancel', id: worker.requests[0].id });
+    worker.onmessage?.({ data: { id: worker.requests[0].id, tokens: tokens('obsolete'), startLine: 1, done: true } } as MessageEvent<HighlightWorkerResponse>);
+    // Reply to the active file, not the preceding cancel command.
+    worker.onmessage?.({ data: { id: worker.requests[1].id, tokens: tokens('current'), startLine: 0, done: true } } as MessageEvent<HighlightWorkerResponse>);
+    expect(await current).toEqual(tokens('current'));
+  });
+
   it('warms grammars without queuing ahead of a real file and cancels remaining warmup work', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('requestIdleCallback', undefined);
