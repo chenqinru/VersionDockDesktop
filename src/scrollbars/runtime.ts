@@ -42,6 +42,8 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
   const resizeTargets = new Map<Element, number>();
   const pendingScan = new Set<Element>();
   const pendingSelf = new Set<Element>();
+  const dirty = new Set<Scroller>();
+  let refreshAll = true;
   const lifecycle = new AbortController();
   const onWindow = <K extends keyof WindowEventMap>(type: K, handler: (event: WindowEventMap[K]) => void) => {
     window.addEventListener(type, handler as EventListener, { signal: lifecycle.signal });
@@ -246,6 +248,7 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
     record.viewport.remove();
     scrollbarOwners.delete(record.viewport);
     scrollers.delete(record.element);
+    dirty.delete(record);
     pressed.delete(record);
     hovered.delete(record);
     if (focused === record) focused = null;
@@ -334,7 +337,7 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
           top: (event.shiftKey ? 0 : event.deltaY) * unit });
       }, { passive: false });
     }
-    update(record);
+    dirty.add(record);
   };
   const inspect = (element: Element) => {
     if (!(element instanceof HTMLElement) || layer?.contains(element)) return;
@@ -350,14 +353,25 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
     if (!enabled() || frame !== null) return;
     frame = requestAnimationFrame(() => {
       frame = null;
-      for (const subtree of pendingScan) if (subtree.isConnected) scan(subtree);
+      // A parent scan already visits its descendants. React can enqueue both
+      // during one commit; scanning each independently multiplies style reads.
+      for (const subtree of pendingScan) {
+        if (!subtree.isConnected) continue;
+        let covered = false;
+        for (let parent = subtree.parentElement; parent; parent = parent.parentElement) {
+          if (pendingScan.has(parent)) { covered = true; break; }
+        }
+        if (!covered) scan(subtree);
+      }
       pendingScan.clear();
       for (const element of pendingSelf) if (element.isConnected) inspect(element);
       pendingSelf.clear();
       for (const record of scrollers.values()) {
         if (!record.element.isConnected || record.element.dataset.versiondockNativeScrollbar === 'hidden') remove(record);
-        else update(record);
+        else if (refreshAll || dirty.has(record)) update(record);
       }
+      dirty.clear();
+      refreshAll = false;
       if (pointer) updateHover(document.elementFromPoint(pointer.x, pointer.y));
       else {
         const hoverPath = document.querySelectorAll(':hover');
@@ -366,11 +380,16 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
       updateFocus(document.activeElement);
     });
   };
+  const refresh = () => { refreshAll = true; schedule(); };
+  const markContaining = (element: Node) => {
+    for (const record of scrollers.values()) if (record.element.contains(element)) dirty.add(record);
+  };
   const stop = () => {
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
     pendingScan.clear();
     pendingSelf.clear();
+    dirty.clear();
     mutationObserver?.disconnect();
     resizeObserver?.disconnect();
     mutationObserver = null;
@@ -389,31 +408,40 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
       layer = document.createElement('div');
       layer.setAttribute('data-versiondock-scrollbar-layer', '');
       document.body.appendChild(layer);
-      resizeObserver = new ResizeObserver(schedule);
+      resizeObserver = new ResizeObserver(refresh);
       mutationObserver = new MutationObserver(mutations => {
+        let geometryChanged = false;
+        let textChanged = false;
         for (const mutation of mutations) {
           if (layer?.contains(mutation.target)) continue;
+          if (mutation.type === 'characterData') {
+            // Text cannot change stacking, but wrapping can move sibling panes
+            // without resizing them. Refresh positions without a subtree scan.
+            textChanged = true;
+            continue;
+          }
+          geometryChanged = true;
           if (mutation.type === 'attributes' && mutation.target instanceof Element) {
             if (mutation.attributeName === 'class') pendingScan.add(mutation.target);
             else pendingSelf.add(mutation.target);
           }
           mutation.addedNodes.forEach(added => { if (added instanceof Element) pendingScan.add(added); });
         }
-        if (mutations.some(mutation => !layer?.contains(mutation.target))) {
+        if (geometryChanged) {
           invalidateStacking();
-          schedule();
         }
+        if (geometryChanged || textChanged) refreshAll = true;
+        if (geometryChanged || textChanged || dirty.size) schedule();
       });
       mutationObserver.observe(root, { subtree: true, childList: true, characterData: true, attributes: true,
         attributeFilter: ['class', 'style', 'id', 'hidden', 'open', 'data-versiondock-native-scrollbar'] });
     }
     pendingScan.add(root);
-    schedule();
+    refresh();
   };
   const rememberPointer = (event: PointerEvent) => {
     pointer = { x: event.clientX, y: event.clientY };
     updateHover(event.target);
-    schedule();
   };
   onDocument('pointerover', rememberPointer);
   onDocument('pointermove', event => {
@@ -424,12 +452,12 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
     if (!event.relatedTarget) pointer = null;
     updateHover(event.relatedTarget);
   });
-  onDocument('focusin', event => { updateFocus(event.target); schedule(); });
+  onDocument('focusin', event => updateFocus(event.target));
   onDocument('focusout', event => updateFocus(event.relatedTarget));
-  onDocument('input', schedule);
-  onDocument('load', schedule);
+  onDocument('input', event => { if (event.target instanceof Node) markContaining(event.target); schedule(); });
+  onDocument('load', refresh);
   // Dialogs and popovers animate their geometry without DOM attribute changes.
-  const afterAnimation = () => { invalidateStacking(); schedule(); };
+  const afterAnimation = () => { invalidateStacking(); refresh(); };
   onDocument('animationend', afterAnimation);
   onDocument('transitionend', afterAnimation);
   onDocument('scroll', event => {
@@ -437,11 +465,16 @@ export function initializeGlobalScrollbars(options: ScrollbarOptions, handleWhee
     const element = event.target instanceof HTMLElement ? event.target : document.scrollingElement;
     const record = element instanceof HTMLElement ? scrollers.get(element) : undefined;
     if (record) revealOnScroll(record);
+    // Scrolling moves this viewport's thumb and any nested scrolling panes,
+    // but does not change the geometry of unrelated sibling panels.
+    if (element instanceof Element) {
+      for (const nested of scrollers.values()) if (element.contains(nested.element)) dirty.add(nested);
+    } else refreshAll = true;
     schedule();
   });
   onWindow('resize', () => {
     invalidateStacking();
-    schedule();
+    refresh();
   });
   onWindow('blur', () => {
     pointer = null;

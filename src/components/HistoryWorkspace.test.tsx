@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Profiler } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryWorkspace } from './HistoryWorkspace';
 import { formatRefLabel } from '../history/refs';
@@ -34,6 +35,22 @@ afterEach(() => {
 });
 
 describe('HistoryWorkspace capabilities', () => {
+  it('does not redraw history for unrelated editor and log updates', async () => {
+    const commit = { repoId: 'repo', hash: 'stable', shortHash: 'stable', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'Stable history', refs: [] };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit], selectedCommits: [] });
+    const rendered = vi.fn();
+    render(<Profiler id="history" onRender={rendered}><HistoryWorkspace /></Profiler>);
+    await act(async () => {});
+    rendered.mockClear();
+    for (let index = 0; index < 20; index++) {
+      act(() => useAppStore.setState({ commitMessage: `input ${index}`, logSearchQuery: `log ${index}` }));
+    }
+    expect(rendered).not.toHaveBeenCalled();
+    act(() => useAppStore.setState({ selectedCommits: [commit] }));
+    expect(rendered).toHaveBeenCalled();
+    expect(screen.getByText(commit.message, { selector: '.commit-subject-text' }).closest('.commit-row')).toHaveAttribute('data-row-selected', 'true');
+    act(() => useAppStore.setState({ commitMessage: '', logSearchQuery: '', selectedCommits: [] }));
+  });
   it('keeps an unmeasured history viewport bounded instead of rendering the entire history', () => {
     const history = Array.from({ length: 2000 }, (_, index) => ({ repoId: 'repo', hash: `hash-${index}`, shortHash: `${index}`, parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `commit ${index}`, refs: [] }));
     useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history, selectedCommits: [] });

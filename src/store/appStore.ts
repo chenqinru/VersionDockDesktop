@@ -1942,10 +1942,15 @@ export const useAppStore = create<AppStore>((set, get) => {
     }
   };
   const updateLayout = (next: LayoutState) => {
-    if (!get().bootstrap) return;
+    const bootstrap = get().bootstrap;
+    if (!bootstrap) return;
     const patch = layoutPatch(layout(), next);
+    if (!Object.keys(patch).length) {
+      // Normalize older bootstrap data even when the requested value is the default.
+      if (!bootstrap.state.layout) applyLayout(next);
+      return;
+    }
     const writer = getLayoutWriter();
-    applyLayout(next);
     writer.update(patch, Object.keys(patch).every(key => ['panelSizes', 'detailInfoHeight', 'comparisonSplitRatio'].includes(key)));
   };
 

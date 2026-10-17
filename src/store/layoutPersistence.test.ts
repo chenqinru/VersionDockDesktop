@@ -24,6 +24,27 @@ async function initialize() {
   return { bridge, commands };
 }
 describe('layout persistence across windows', () => {
+  it('publishes one update per layout change and ignores unchanged dimensions', async () => {
+    await initialize();
+    let updates = 0;
+    const unsubscribe = useAppStore.subscribe((next, previous) => { if (next.bootstrap !== previous.bootstrap) updates++; });
+    try {
+      useAppStore.getState().setPanelSize('commit', 510);
+      expect(updates).toBe(1);
+      useAppStore.getState().setPanelSize('commit', 510);
+      expect(updates).toBe(1);
+    } finally { unsubscribe(); }
+  });
+  it('normalizes older bootstrap data when selecting the default tab without saving unchanged values', async () => {
+    const { commands } = await initialize();
+    const bootstrap = useAppStore.getState().bootstrap!;
+    useAppStore.setState({ bootstrap: { ...bootstrap, state: { ...bootstrap.state, layout: undefined } } });
+    useAppStore.getState().setActiveTab('changes');
+    expect(useAppStore.getState().bootstrap?.state.layout).toEqual(DEFAULT_LAYOUT);
+    window.dispatchEvent(new Event('pointerup'));
+    await Promise.resolve();
+    expect(commands.some(command => command.type === 'updateLayout')).toBe(false);
+  });
   it('merges remote geometric changes without switching the local operation tab or losing a pending drag', async () => {
     const { bridge, commands } = await initialize();
     useAppStore.getState().setPanelSize('commit', 510);

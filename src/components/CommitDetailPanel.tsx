@@ -964,6 +964,7 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
     try { return localStorage.getItem('versiondock:commitMessagesExpandedByDefault') === 'true'; } catch { return false; }
   });
   const storedInfoHeight = useAppStore(state => state.bootstrap?.state.layout?.detailInfoHeight);
+  const layoutResetVersion = useAppStore(state => state.layoutResetVersion);
   const saveInfoHeight = useAppStore(state => state.setDetailInfoHeight);
   const [containerHeight, setContainerHeight] = useState(0);
   const [initialInfoHeight, setInitialInfoHeight] = useState<number>();
@@ -1203,7 +1204,9 @@ export function CommitDetailPanel({ onCollapse, variant = 'sidebar', aiToolbar, 
     return () => observer.disconnect();
   }, [detail, selectedCommits.length, variant, storedInfoHeight]);
   const updateInfoHeight = (height: number) => { const next = clampInfoHeight(height); saveInfoHeight(next); };
-  const resizeInfo = useResizable(infoHeight ?? 220, minInfoHeight, maxInfoHeight, updateInfoHeight, -1, 'y');
+  const resizeInfo = useResizable(infoHeight ?? 220, minInfoHeight, maxInfoHeight, updateInfoHeight, -1, 'y', height => {
+    if (summaryRef.current) Object.assign(summaryRef.current.style, { flex: `0 0 ${height}px`, minHeight: '0', maxHeight: 'none' });
+  }, layoutResetVersion);
 
   useEffect(() => {
     setExpandedMessages(new Set(messagesExpandedByDefault ? selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash)) : []));

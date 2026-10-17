@@ -36,7 +36,12 @@ export class LayoutWriter {
   ) {}
   update(patch: LayoutPatch, debounce = true) {
     if (this.disposed || !layoutFields(patch).length) return;
-    this.pending.push(patch);
+    // Only the latest value of each field matters during a drag. Keep this
+    // bounded instead of replaying every pointer position on every publication.
+    const previous = this.pending[0];
+    this.pending = [{ ...previous, ...patch,
+      ...(previous?.panelSizes || patch.panelSizes ? { panelSizes: { ...previous?.panelSizes, ...patch.panelSizes } } : {}),
+    }];
     this.publish();
     clearTimeout(this.timer);
     if (!debounce) { void this.flush(); return; }

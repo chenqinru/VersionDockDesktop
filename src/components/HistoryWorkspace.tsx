@@ -17,6 +17,7 @@ import { Codicon } from './Codicon';
 import { capabilityAvailable, capabilityReason, mapWithConcurrency, resolveNotificationText, useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { useResizable } from '../hooks/useResizable';
+import { DEFAULT_LAYOUT } from '../settings/defaults';
 import { BranchSidebar } from './BranchSidebar';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { BranchComparePanel } from './BranchComparePanel';
@@ -196,8 +197,8 @@ function CommitList({
   const historyRepoErrors = useAppStore((state) => state.historyRepoErrors);
   const storeHasMore = useAppStore((state) => state.historyHasMore);
   const hasMore = hasMoreOverride ?? storeHasMore;
-  const selected = useAppStore((state) => new Set(state.selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))));
   const selectedCommits = useAppStore((state) => state.selectedCommits);
+  const selected = useMemo(() => new Set(selectedCommits.map((commit) => commitKey(commit.repoId, commit.hash))), [selectedCommits]);
   const selectCommit = useAppStore((state) => state.selectCommit);
   const loadCommitDetail = useAppStore((state) => state.loadCommitDetail);
   const openCommitDetail = useAppStore((state) => state.openCommitDetail);
@@ -733,7 +734,7 @@ export function HistoryWorkspace() {
   const detailWidth = Math.min(680, Math.max(220, storedDetailWidth));
   const setPanelSize = useAppStore((state) => state.setPanelSize);
   const branchSidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
-  const collapsedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
+  const collapsedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? DEFAULT_LAYOUT.branchSidebarCollapsedSections);
   const setBranchSidebarState = useAppStore((state) => state.setBranchSidebarState);
   const layoutResetVersion = useAppStore(state => state.layoutResetVersion);
   const [detailSidebarState, setDetailSidebarState] = useState({ collapsed: false, resetVersion: layoutResetVersion });
@@ -742,8 +743,14 @@ export function HistoryWorkspace() {
   const compareTarget = useAppStore((state) => state.comparisonTarget);
   const openBranchComparison = useAppStore((state) => state.openBranchComparison);
   const closeBranchComparison = useAppStore((state) => state.closeBranchComparison);
-  const resizeBranches = useResizable(branchWidth, 120, 400, (value) => setPanelSize('branches', value));
-  const resizeDetail = useResizable(detailWidth, 220, 680, (value) => setPanelSize('detail', value), -1);
+  const branchSlot = useRef<HTMLDivElement>(null);
+  const detailSlot = useRef<HTMLDivElement>(null);
+  const resizeBranches = useResizable(branchSidebarCollapsed ? 28 : branchWidth, 120, 400, (value) => setPanelSize('branches', value), 1, 'x', value => {
+    if (branchSlot.current) branchSlot.current.style.width = `${value}px`;
+  }, `${snapshotWorkspaceId}:${layoutResetVersion}:${branchSidebarCollapsed}`);
+  const resizeDetail = useResizable(detailSidebarCollapsed ? 28 : detailWidth, 220, 680, (value) => setPanelSize('detail', value), -1, 'x', value => {
+    if (detailSlot.current) detailSlot.current.style.width = `${value}px`;
+  }, `${snapshotWorkspaceId}:${layoutResetVersion}:${detailSidebarCollapsed}`);
 
   const repoKindById = useMemo(() => {
     const map: Record<string, 'git' | 'svn'> = {};
@@ -922,7 +929,7 @@ export function HistoryWorkspace() {
       </div>
     </div>}
     <div className={`history-columns${compareTarget ? ' compare-layout' : ''}`}>
-      <div className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <IconButton className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></IconButton> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} refRepoIds={historyScope.repoIds} onRefFilter={selectSidebarRef} onCompare={openBranchComparison} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
+      <div ref={branchSlot} className={`branch-slot ${branchSidebarCollapsed ? 'branch-slot-collapsed' : ''}`} style={{ width: branchSidebarCollapsed ? 28 : branchWidth }}>{branchSidebarCollapsed ? <IconButton className="branch-sidebar-expand" title={t('Show branches')} aria-label={t('Show branches')} onClick={() => setBranchSidebarState(false, collapsedSections)}><Codicon name="layout-sidebar-left-off" /></IconButton> : <BranchSidebar repoFilter={filters.repoId ? new Set([filters.repoId]) : new Set()} refFilter={filters.ref ? new Set([filters.ref]) : new Set()} onRepoFilter={(repoId) => updateFilters({ repoId })} refRepoIds={historyScope.repoIds} onRefFilter={selectSidebarRef} onCompare={openBranchComparison} onCollapse={() => setBranchSidebarState(true, collapsedSections)} />}</div>
       {!branchSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize branch sidebar')} aria-orientation="vertical" aria-valuemin={120} aria-valuemax={400} aria-valuenow={branchWidth} onPointerDown={resizeBranches} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('branches', Math.min(400, Math.max(120, branchWidth + (event.key === 'ArrowRight' ? 10 : -10)))); } }} />}
       <div className="log-pane">{compareTarget ? <BranchComparePanel
         key={`${compareTarget.repoId}:${compareTarget.target}`}
@@ -932,7 +939,7 @@ export function HistoryWorkspace() {
         renderCommits={(commits) => <CommitList history={commits} loading={false} expandedRepoIds={new Set()} onToggleRepoName={() => undefined} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} isFiltered repoSortKeyById={repoSortKeyById} hasMoreOverride={false} singleRepository />}
       /> : <CommitList history={visibleHistory} loading={historyLoading} expandedRepoIds={expandedRepoIds} onToggleRepoName={(repoId) => setExpandedRepoIds((current) => { const next = new Set(current); if (next.has(repoId)) next.delete(repoId); else next.add(repoId); return next; })} repoKindById={repoKindById} remoteNamesByRepo={remoteNamesByRepo} topologyCommits={topologyCommits} isFiltered={hasTopologyBreakingFilter} hasRevisionFilter={hasBranchFilter} repoSortKeyById={repoSortKeyById} />}</div>
       {!detailSidebarCollapsed && <div className="inner-resize-handle" role="separator" tabIndex={0} aria-label={t('Resize detail sidebar')} aria-orientation="vertical" aria-valuemin={220} aria-valuemax={680} aria-valuenow={detailWidth} onPointerDown={resizeDetail} onKeyDown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPanelSize('detail', Math.min(680, Math.max(220, detailWidth + (event.key === 'ArrowLeft' ? 10 : -10)))); } }} />}
-      <div className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <IconButton className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></IconButton> : <CommitDetailPanel key={snapshotWorkspaceId} onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
+      <div ref={detailSlot} className={`detail-slot ${detailSidebarCollapsed ? 'detail-slot-collapsed' : ''}`} style={{ width: detailSidebarCollapsed ? 28 : detailWidth }}>{detailSidebarCollapsed ? <IconButton className="detail-sidebar-expand" title={t('Show commit detail')} aria-label={t('Show commit detail')} onClick={() => setDetailSidebarCollapsed(false)}><Codicon name="layout-sidebar-right-off" /></IconButton> : <CommitDetailPanel key={snapshotWorkspaceId} onCollapse={() => setDetailSidebarCollapsed(true)} />}</div>
     </div>
   </section>;
 }

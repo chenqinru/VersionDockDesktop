@@ -5,6 +5,7 @@ import { IconButton } from './IconButton';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { Codicon } from './Codicon';
 import { useAppStore } from '../store/appStore';
+import { DEFAULT_LAYOUT } from '../settings/defaults';
 import { useI18n } from '../i18n';
 import { buildSidebarModel, sumBranchAheadBehind, type BranchInstance, type SidebarBranch, type SidebarTag } from './HistoryWorkspace.helpers';
 import type { RepositoryStatus } from '../bindings/generated';
@@ -36,7 +37,7 @@ export function BranchSidebar({ repoFilter, refFilter, onRepoFilter, onRefFilter
   const tagBusy = useAppStore((state) => state.tagBusy);
   const selectedRepoId = useAppStore((state) => state.selectedRepoId);
   const tagOperation = useAppStore((state) => state.tagOperation);
-  const persistedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? []);
+  const persistedSections = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsedSections ?? state.bootstrap?.state.branchSidebarCollapsedSections ?? DEFAULT_LAYOUT.branchSidebarCollapsedSections);
   const sidebarCollapsed = useAppStore((state) => state.bootstrap?.state.layout?.branchSidebarCollapsed ?? state.bootstrap?.state.branchSidebarCollapsed ?? false);
   const setBranchSidebarState = useAppStore((state) => state.setBranchSidebarState);
   const [filter, setFilter] = useState('');

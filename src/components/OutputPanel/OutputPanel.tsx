@@ -53,6 +53,7 @@ export function OutputPanel() {
   const bridge = useBridge();
   const logClearing = useAppStore(state => state.logClearing);
   const logPanelOpen = useAppStore((state) => state.logPanelOpen);
+  const layoutResetVersion = useAppStore((state) => state.layoutResetVersion);
   const logPanelHeight = useAppStore((state) => state.logPanelHeight);
   const logError = useAppStore((state) => state.logError);
   const storageError = useAppStore((state) => state.logStorageError);
@@ -98,6 +99,7 @@ export function OutputPanel() {
   const [copied, setCopied] = useState(false);
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(() => new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const retained = new Set(logEntries.map((entry) => entry.id));
@@ -114,6 +116,8 @@ export function OutputPanel() {
     (value) => setLogPanelHeight(value),
     -1,
     'y',
+    value => { if (panelRef.current) panelRef.current.style.height = `${value}px`; },
+    `${logPanelOpen}:${layoutResetVersion}`,
   );
 
   const projectOptions = useMemo(() => {
@@ -273,6 +277,7 @@ export function OutputPanel() {
 
   return (
     <section
+      ref={panelRef}
       className="output-panel"
       style={{ height: logPanelHeight }}
       role="region"

@@ -192,6 +192,7 @@ export function BranchComparePanel({
   const { t } = useI18n();
   const stack = useRef<HTMLDivElement>(null);
   const storedRatio = useAppStore(state => state.bootstrap?.state.layout?.comparisonSplitRatio);
+  const layoutResetVersion = useAppStore(state => state.layoutResetVersion);
   const saveRatio = useAppStore(state => state.setComparisonSplitRatio);
   const [stackHeight, setStackHeight] = useState(0);
   const ratio = storedRatio ?? .5;
@@ -212,7 +213,9 @@ export function BranchComparePanel({
   }, [activeComparison, compare, current, repoId, target]);
 
   const updateTopHeight = (height: number) => saveRatio(Math.max(minPaneHeight, Math.min(maxTopHeight, height)) / Math.max(1, stackHeight - 4));
-  const resize = useResizable(topHeight ?? 110, minPaneHeight, maxTopHeight, updateTopHeight, 1, 'y');
+  const resize = useResizable(topHeight ?? 110, minPaneHeight, maxTopHeight, updateTopHeight, 1, 'y', height => {
+    if (stack.current) stack.current.style.gridTemplateRows = `${height}px 4px minmax(0, 1fr)`;
+  }, layoutResetVersion);
 
   const baseLabel = formatRef(current);
   const targetLabel = formatRef(target);

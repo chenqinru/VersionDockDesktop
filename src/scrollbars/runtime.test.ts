@@ -47,6 +47,50 @@ afterEach(() => {
 });
 
 describe('global scrollbar runtime', () => {
+  it('does not measure sibling panels when only one scroller moves', async () => {
+    const first = scroller();
+    const second = scroller();
+    dispose = initializeGlobalScrollbars({ visibility: 'visible', modernUi: true, language: 'en' }).dispose;
+    flush();
+    await Promise.resolve(); flush();
+    const measured = vi.spyOn(second, 'getBoundingClientRect');
+    first.scrollTop = 120;
+    first.dispatchEvent(new Event('scroll')); flush();
+    expect(measured).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event('resize')); flush();
+    expect(measured).toHaveBeenCalled();
+  });
+
+  it('keeps cached stacking when only text changes and avoids overlapping subtree scans', async () => {
+    const element = scroller();
+    const child = element.firstElementChild!;
+    const text = document.createTextNode('before');
+    child.append(text);
+    dispose = initializeGlobalScrollbars({ visibility: 'visible', modernUi: true, language: 'en' }).dispose;
+    flush(); await Promise.resolve(); flush();
+    const scan = vi.spyOn(child, 'querySelectorAll');
+    text.data = 'after';
+    await Promise.resolve(); flush();
+    expect(scan).not.toHaveBeenCalled();
+    element.classList.add('changed');
+    child.classList.add('changed');
+    await Promise.resolve(); flush();
+    expect(scan).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a scroller moved by text wrapping outside its subtree', async () => {
+    const label = document.createTextNode('short');
+    document.body.append(label);
+    const element = scroller();
+    dispose = initializeGlobalScrollbars({ visibility: 'visible', modernUi: true, language: 'en' }).dispose;
+    flush(); await Promise.resolve(); flush();
+    const measured = vi.spyOn(element, 'getBoundingClientRect');
+    measured.mockReturnValue({ left: 0, top: 40, right: 200, bottom: 140, width: 200, height: 100, x: 0, y: 40, toJSON: () => ({}) });
+    label.data = 'a longer label that pushes the adjacent panel down';
+    await Promise.resolve(); flush();
+    expect(measured).toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>('[data-versiondock-scrollbar-viewport]')?.style.top).toBe('40px');
+  });
   it.each(['vertical', 'both'])('keeps the native %s resize corner clear of overlay tracks', resize => {
     const element = scroller();
     element.style.resize = resize;
