@@ -75,7 +75,8 @@ function relativeDate(value: string, t: (key: string, ...args: Array<string | nu
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: days > 365 ? 'numeric' : undefined });
 }
 
-function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSelected, onClearSelection, onFileViewModeChange, defaultExpanded = false, prefetchedDetail, query, onDetailLoaded, searching = false }: {
+function SyncCommitRow({ active, repo, item, selected, selectedItems, fileViewMode, onSelected, onClearSelection, onFileViewModeChange, defaultExpanded = false, prefetchedDetail, query, onDetailLoaded, searching = false }: {
+  active: boolean;
   repo: RepositoryStatus;
   item: TimelineCommit;
   selected: boolean;
@@ -111,7 +112,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
   }, [defaultExpanded]);
 
   useEffect(() => {
-    if (!expanded || currentDetail || searching || !bridge || !workspaceId) return;
+    if (!active || !expanded || currentDetail || searching || !bridge || !workspaceId) return;
     let cancelled = false;
     const controller = new AbortController();
     queueMicrotask(() => {
@@ -133,7 +134,7 @@ function SyncCommitRow({ repo, item, selected, selectedItems, fileViewMode, onSe
       cancelled = true;
       controller.abort();
     };
-  }, [expanded, currentDetail, detailRetry, bridge, workspaceId, repo.meta.id, item.commit.hash, onDetailLoaded, searching]);
+  }, [active, expanded, currentDetail, detailRetry, bridge, workspaceId, repo.meta.id, item.commit.hash, onDetailLoaded, searching]);
 
   const commit = item.commit;
   const fullMessage = currentDetail?.fullMessage || commit.fullMessage || (commit.body ? `${commit.message}\n\n${commit.body}` : commit.message);
@@ -311,27 +312,27 @@ function SyncRepoSection({ active, repo, branch, outgoing, incoming, checked, si
   const outgoingHashes = outgoingActive ? outgoing.map((commit) => commit.hash).join(',') : '';
   const incomingHashes = incomingActive ? incoming.map((commit) => commit.hash).join(',') : '';
   useEffect(() => {
-    if (!query.trim() || displayMode !== 'commits' || !bridge || !workspaceId) return;
+    if (!active || !query.trim() || displayMode !== 'commits' || !bridge || !workspaceId) return;
     const hashes = [...new Set(`${outgoingHashes},${incomingHashes}`.split(',').filter(Boolean))];
     const missing = hashes.filter((hash) => !detailCache.current[hash]);
-    let active = true;
+    let current = true;
     const controller = new AbortController();
-    queueMicrotask(() => { if (active) setSearchError(undefined); });
+    queueMicrotask(() => { if (current) setSearchError(undefined); });
     let index = 0;
     const worker = async () => {
-      while (active && index < missing.length) {
+      while (current && index < missing.length) {
         const hash = missing[index++];
         try {
-          const detail = await bridge.request<CommitDetail>({ type: 'commitDetail', payload: { workspace_id: workspaceId, repo_id: repo.meta.id, revision: hash } }, { signal: controller.signal, showProgress: false });
-          if (active) cacheDetail(hash, detail);
+          const detail = await bridge.request<CommitDetail>({ type: 'commitDetail', payload: { workspace_id: workspaceId, repo_id: repo.meta.id, revision: hash } }, { signal: controller.signal, showProgress: false, readPriority: 'background' });
+          if (current) cacheDetail(hash, detail);
         } catch (error) {
-          if (active && !isAbortError(error)) setSearchError(String(error));
+          if (current && !isAbortError(error)) setSearchError(String(error));
         }
       }
     };
     void Promise.all(Array.from({ length: Math.min(4, missing.length) }, worker));
-    return () => { active = false; controller.abort(); };
-  }, [bridge, cacheDetail, displayMode, incomingHashes, outgoingHashes, query, repo.meta.id, searchRetry, workspaceId]);
+    return () => { current = false; controller.abort(); };
+  }, [active, bridge, cacheDetail, displayMode, incomingHashes, outgoingHashes, query, repo.meta.id, searchRetry, workspaceId]);
   const changesEnabled = active && expanded && displayMode === 'changes';
   const outgoingChanges = useSyncRevisionChanges({ bridge, workspaceId, repoId: repo.meta.id, revision: repo.revision, hashes: outgoingHashes, direction: 'outgoing', enabled: changesEnabled });
   const incomingChanges = useSyncRevisionChanges({ bridge, workspaceId, repoId: repo.meta.id, revision: repo.revision, hashes: incomingHashes, direction: 'incoming', enabled: changesEnabled });
@@ -476,7 +477,7 @@ function SyncRepoSection({ active, repo, branch, outgoing, incoming, checked, si
             showToolbar={false}
           />}
         </div>}
-      </> : visibleTimeline.length ? visibleTimeline.map((item) => <SyncCommitRow key={`${item.kind}:${item.commit.hash}`} repo={repo} item={item} defaultExpanded={Boolean(needle && fileMatches(item.commit.hash))} prefetchedDetail={commitDetails[item.commit.hash]} onDetailLoaded={cacheDetail} searching={Boolean(needle)} query={needle && !repoMatches && fileMatches(item.commit.hash) ? query : undefined} selected={selectedCommits.has(`${item.kind}:${item.commit.hash}`)} selectedItems={selectedItems} fileViewMode={fileViewMode} onSelected={selectCommit} onClearSelection={() => setSelectedCommits(new Set())} onFileViewModeChange={onFileViewModeChange} />)
+      </> : visibleTimeline.length ? visibleTimeline.map((item) => <SyncCommitRow key={`${item.kind}:${item.commit.hash}`} active={active} repo={repo} item={item} defaultExpanded={Boolean(needle && fileMatches(item.commit.hash))} prefetchedDetail={commitDetails[item.commit.hash]} onDetailLoaded={cacheDetail} searching={Boolean(needle)} query={needle && !repoMatches && fileMatches(item.commit.hash) ? query : undefined} selected={selectedCommits.has(`${item.kind}:${item.commit.hash}`)} selectedItems={selectedItems} fileViewMode={fileViewMode} onSelected={selectCommit} onClearSelection={() => setSelectedCommits(new Set())} onFileViewModeChange={onFileViewModeChange} />)
         : <div className="sync-empty">{needle && !searchError && timeline.some((item) => !commitDetails[item.commit.hash]) ? t('Loading files...') : query ? t('No commits found') : (outgoingError || incomingError) ? <span style={{ color: 'var(--vscode-errorForeground, #f48771)' }}>{t('Failed to load commits')}</span> : outgoingCount + incomingCount === 0 ? <><Codicon name="check" />{t('Up to date')}</> : t('Fetch to load incoming commit details.')}</div>}
     </div>}
     {headerMenu && <ContextMenu x={headerMenu.x} y={headerMenu.y} items={headerItems.map((entry) => 'separator' in entry ? entry : { ...entry, disabled: entry.id === 'fetch' ? busy || !capabilityAvailable(repo.capabilities, 'syncFetch', true) : entry.disabled })} onSelect={runHeaderAction} onClose={() => setHeaderMenu(undefined)} />}
@@ -522,12 +523,13 @@ export function SyncPanel({ active = true, repos, expansionCommand, selectionCom
   const singleRepo = repos.length === 1;
 
   useEffect(() => {
+    if (!active) return;
     const state = useAppStore.getState();
     for (const repo of repos) {
       if (!state.unpushedCommits[repo.meta.id] && !state.loadErrors[`unpushed:${repo.meta.id}`]) void loadOutgoing(repo.meta.id);
       if (!state.incomingCommits[repo.meta.id] && !state.loadErrors[`incoming:${repo.meta.id}`]) void loadIncoming(repo.meta.id);
     }
-  }, [loadIncoming, loadOutgoing, repos]);
+  }, [active, loadIncoming, loadOutgoing, repos]);
   const selectableRepoIds = useMemo(() => repos.filter((repo) => {
     const branch = branchesByRepo[repo.meta.id]?.find((candidate) => candidate.current);
     return repo.ahead > 0 || repo.behind > 0 || (outgoing[repo.meta.id]?.length ?? 0) > 0 || (incoming[repo.meta.id]?.length ?? 0) > 0 || Boolean(branch && !branch.upstream);

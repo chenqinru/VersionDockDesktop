@@ -439,13 +439,13 @@ export function WorktreePanel({ active = true,
   const worktreeDiff = useAppStore((state) => state.worktreeDiff);
 
   useEffect(() => {
-    if (!customRepos && repos.length > 0) {
+    if (active && !customRepos && repos.length > 0) {
       for (const repo of repos) {
         const state = useAppStore.getState();
         if (!state.worktrees[repo.meta.id] && !state.loadErrors[`worktrees:${repo.meta.id}`]) void loadWorktrees(repo.meta.id);
       }
     }
-  }, [customRepos, loadWorktrees, repos]);
+  }, [active, customRepos, loadWorktrees, repos]);
 
   const ownerContext = (repoId: string) => {
     const state = useAppStore.getState();

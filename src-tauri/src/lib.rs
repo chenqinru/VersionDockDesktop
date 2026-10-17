@@ -26,6 +26,7 @@ mod models;
 mod protection;
 mod provider;
 mod publishing;
+mod read_scheduler;
 mod repository_priority;
 mod shelf;
 mod state;

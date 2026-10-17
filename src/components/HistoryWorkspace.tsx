@@ -328,7 +328,7 @@ function CommitList({
     };
     hoverTimer.current = setTimeout(() => {
       if (!currentContext()) return;
-      void loadCommitDetail(commit, false, workspaceId).then((detail) => {
+      void loadCommitDetail(commit, false, workspaceId, 'background').then((detail) => {
         if (currentContext()) {
           const rect = row.getBoundingClientRect();
           const listRect = parent.current?.getBoundingClientRect();

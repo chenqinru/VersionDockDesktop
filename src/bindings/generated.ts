@@ -1300,6 +1300,9 @@ export type PushProtectionTarget = {
 	proof: string,
 };
 
+/**  Read scheduling is independent of whether an operation shows progress. */
+export type ReadPriority = "interactive" | "background";
+
 export type RecentCommitMessage = {
 	repoId: string,
 	revision: string,
@@ -1453,6 +1456,7 @@ export type RequestEnvelope = {
 	requestId: string,
 	context: RequestContext,
 	command: BridgeCommand,
+	readPriority?: ReadPriority,
 	pushApprovals?: PushProtectionTarget[],
 };
 

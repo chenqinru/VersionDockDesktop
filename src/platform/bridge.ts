@@ -6,7 +6,7 @@ import type {
   AiEvent, BridgeCommand, DesktopError, OperationDomain, LayoutUpdateResult,
   OperationEvent, RepositoryEvent, RequestContext, ResponseEnvelope, WindowTabImport,
   WindowTabTransfer, WindowTabTransferCompleted, WindowViewport, WorkspaceEvent, WorkspaceDescriptor,
-  LogEntry, LogLevel, LogChannel, UpdateRestoreWarning,
+  LogEntry, LogLevel, LogChannel, UpdateRestoreWarning, ReadPriority,
 } from '../bindings/generated';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
 
@@ -16,6 +16,8 @@ export interface RequestOptions {
   timeoutGraceMs?: number;
   signal?: AbortSignal;
   showProgress?: boolean;
+  /** Interactive reads can use the reserved native slot without showing task progress. */
+  readPriority?: ReadPriority;
   onOperationId?: (operationId: string) => void;
   context?: Partial<Omit<RequestContext, 'generation'>> & { generation?: number };
 }
@@ -236,6 +238,20 @@ export function commandProgressVisibility(command: BridgeCommand, options: Reque
   // Passive queries render loading state in their own view, even if a caller opts in.
   if (!commandShowsProgressByDefault(command) || options.showProgress === false) return 'background';
   return options.context?.visibility ?? 'foreground';
+}
+
+export function commandReadPriority(command: BridgeCommand, options: RequestOptions = {}): ReadPriority {
+  if (options.readPriority) return options.readPriority;
+  switch (command.type) {
+    case 'fileDiff': case 'stashFileDiff': case 'shelfFileDiff': case 'worktreeDiff': case 'worktreeFileDiff':
+    case 'branchWorkingDiff': case 'branchWorkingFileDiff': case 'commitDetail': case 'commitMergeCommits':
+    case 'commitMergeParentFiles': case 'branchCompare': case 'branchCompareCommits': case 'fileHistory':
+    case 'fileRevisionContent': case 'diffLineHistoryTarget': case 'conflictVersions':
+    case 'unpushedChanges': case 'incomingChanges':
+      return 'interactive';
+    default:
+      return 'background';
+  }
 }
 
 export function createOperationRequestEvent(command: BridgeCommand, options: RequestOptions, id: string): OperationRequestEvent {
@@ -464,7 +480,7 @@ export class TauriBridge implements VersionDockBridge {
     this.handlers.forEach((handler) => handler({ type: 'operation-request', progressEvent: true, requestId: id, command, context }));
     // Report completion from the actual native promise, not the timeout/abort race:
     // the backend can still be restoring local changes after cancellation.
-    const nativeResponse = invoke<ResponseEnvelope>('bridge_request', { envelope: { requestId: id, context, command, pushApprovals } });
+    const nativeResponse = invoke<ResponseEnvelope>('bridge_request', { envelope: { requestId: id, context, command, readPriority: commandReadPriority(command, options), pushApprovals } });
     void nativeResponse.then(
       (response) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error: response.error ?? undefined, result: response.result })),
       (error) => this.handlers.forEach((handler) => handler({ type: 'operation-settled', progressEvent: true, requestId: id, error })),

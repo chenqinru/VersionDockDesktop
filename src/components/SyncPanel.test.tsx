@@ -184,6 +184,54 @@ describe('SyncPanel aggregate changes loading', () => {
   });
 });
 
+describe('SyncPanel hidden reads', () => {
+  const detail = (path: string): CommitDetail => ({
+    commit: { repoId: gitRepo.meta.id, hash: sampleOutgoing[0].hash, shortHash: 'out1', parents: [], message: 'outgoing commit', author: 'me', email: '', authorDate: '', committerDate: '', refs: [] },
+    fullMessage: 'outgoing commit', files: [{ path, status: 'M', added: 1, removed: 0 }], branches: { local: [], remote: [], tags: [] },
+  });
+
+  it('cancels expanded details when hidden and preserves expansion and completed results on return', async () => {
+    let finish!: (value: CommitDetail) => void;
+    const stale = new Promise<CommitDetail>(resolve => { finish = resolve; });
+    let attempts = 0;
+    const requests = vi.fn<ConstructorParameters<typeof MockBridge>[0]>((command) => command.type === 'commitDetail' ? (++attempts === 1 ? stale : detail('current.ts')) : []);
+    useAppStore.setState({ bridge: new MockBridge(requests), snapshot, unpushedCommits: { 'repo-1': sampleOutgoing }, incomingCommits: { 'repo-1': [] } });
+    const view = render(<SyncPanel active repos={[gitRepo]} fileViewMode="flat" />);
+    fireEvent.click(screen.getByText('outgoing commit'));
+    await waitFor(() => expect(attempts).toBe(1));
+    const signal = requests.mock.calls.find(([command]) => command.type === 'commitDetail')?.[1]?.signal;
+    view.rerender(<SyncPanel active={false} repos={[gitRepo]} fileViewMode="flat" />);
+    expect(signal?.aborted).toBe(true);
+    await act(async () => finish(detail('obsolete.ts')));
+    expect(screen.queryByText('obsolete.ts')).not.toBeInTheDocument();
+    view.rerender(<SyncPanel active repos={[gitRepo]} fileViewMode="flat" />);
+    expect(await screen.findByText('current.ts')).toBeInTheDocument();
+    expect(attempts).toBe(2);
+    view.rerender(<SyncPanel active={false} repos={[gitRepo]} fileViewMode="flat" />);
+    view.rerender(<SyncPanel active repos={[gitRepo]} fileViewMode="flat" />);
+    expect(screen.getByText('current.ts')).toBeInTheDocument();
+    expect(attempts).toBe(2);
+  });
+
+  it('aborts file search immediately on hide without starting the rest of its queue', async () => {
+    const outgoing = Array.from({ length: 7 }, (_, index) => ({ ...sampleOutgoing[0], hash: `out-${index}` }));
+    const completions: Array<(value: CommitDetail) => void> = [];
+    const requests = vi.fn<ConstructorParameters<typeof MockBridge>[0]>((command) => command.type === 'commitDetail' ? new Promise<CommitDetail>(resolve => { completions.push(resolve); }) : []);
+    useAppStore.setState({ bridge: new MockBridge(requests), snapshot, unpushedCommits: { 'repo-1': outgoing }, incomingCommits: { 'repo-1': [] } });
+    const view = render(<SyncPanel active repos={[gitRepo]} fileViewMode="flat" />);
+    await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+    fireEvent.keyDown(window, { key: 'x' });
+    await waitFor(() => expect(completions).toHaveLength(4));
+    const details = requests.mock.calls.filter(([command]) => command.type === 'commitDetail');
+    expect(details.every(([, options]) => options?.readPriority === 'background')).toBe(true);
+    view.rerender(<SyncPanel active={false} repos={[gitRepo]} fileViewMode="flat" />);
+    expect(details.every(([, options]) => options?.signal?.aborted)).toBe(true);
+    await act(async () => completions.forEach(resolve => resolve(detail('obsolete.ts'))));
+    expect(completions).toHaveLength(4);
+    expect(screen.queryByText('obsolete.ts')).not.toBeInTheDocument();
+  });
+});
+
 describe('SyncPanel error handling', () => {
   const initial = useAppStore.getState();
   beforeEach(() => useAppStore.setState({

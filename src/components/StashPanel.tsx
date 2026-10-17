@@ -517,12 +517,13 @@ export function StashPanel({ active = true,
   const [operatingRepos, setOperatingRepos] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    if (!active) return;
     for (const repo of repos) {
       if (repo.meta.kind === 'git' && !stashes[repo.meta.id] && !loadErrors[`stashes:${repo.meta.id}`]) {
         void loadStashes(repo.meta.id);
       }
     }
-  }, [loadStashes, loadErrors, repos, stashes]);
+  }, [active, loadStashes, loadErrors, repos, stashes]);
 
   const handleApply = async (repoId: string, reference: string, expectedHash?: string) => {
     if (operatingRepos.has(repoId)) return;

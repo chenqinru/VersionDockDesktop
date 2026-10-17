@@ -174,10 +174,10 @@ export function SubmodulePanel({ repos, highlight, active = true }: { repos: Rep
   const total = useMemo(() => repos.reduce((sum, repo) => sum + (entries[repo.meta.id]?.length ?? 0), 0), [entries, repos]);
 
   useEffect(() => {
-    if (repos.some((repo) => !repo.meta.isSubmodule && !entries[repo.meta.id] && !loadErrors[`submodules:${repo.meta.id}`])) {
+    if (active && repos.some((repo) => !repo.meta.isSubmodule && !entries[repo.meta.id] && !loadErrors[`submodules:${repo.meta.id}`])) {
       void load();
     }
-  }, [entries, load, loadErrors, repos]);
+  }, [active, entries, load, loadErrors, repos]);
 
   const add = async (repo: RepositoryStatus) => {
     const url = await promptDialog({ title: t('Add Submodule'), message: repo.meta.name, inputLabel: t('Repository URL') });

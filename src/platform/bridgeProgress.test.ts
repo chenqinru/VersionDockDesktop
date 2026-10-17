@@ -19,6 +19,19 @@ afterEach(() => vi.useRealTimers());
 const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 describe('native progress bridge contract', () => {
+  it('sends scheduling priority to native without turning reads into foreground tasks', async () => {
+    invoke.mockImplementation((_name, args) => Promise.resolve({ requestId: args.envelope.requestId, result: true, error: null }));
+    const bridge = new TauriBridge(); await bridge.initialize();
+    const detail = { type: 'commitDetail' as const, payload: { workspace_id: 'workspace', repo_id: 'repo', revision: 'hash' } };
+    await bridge.request(detail, { showProgress: false });
+    expect(invoke.mock.calls[0][1].envelope).toMatchObject({ readPriority: 'interactive', context: { visibility: 'background' } });
+    await bridge.request(detail, { readPriority: 'background' });
+    expect(invoke.mock.calls[1][1].envelope).toMatchObject({ readPriority: 'background', context: { visibility: 'background' } });
+    await bridge.request({ type: 'worktrees', payload: { workspace_id: 'workspace', repo_id: 'repo' } });
+    expect(invoke.mock.calls[2][1].envelope.readPriority).toBe('background');
+    bridge.dispose();
+  });
+
   it('keeps undo commit silent in native requests while other history rewrites keep progress', async () => {
     invoke.mockImplementation((_name, args) => Promise.resolve({ requestId: args.envelope.requestId, result: true, error: null }));
     const bridge = new TauriBridge(); await bridge.initialize();

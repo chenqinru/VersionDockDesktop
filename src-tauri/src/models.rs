@@ -12,7 +12,20 @@ pub struct RequestEnvelope {
     pub command: BridgeCommand,
     #[serde(default)]
     #[cfg_attr(test, specta(optional))]
+    pub read_priority: ReadPriority,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
     pub push_approvals: Vec<PushProtectionTarget>,
+}
+
+/// Read scheduling is independent of whether an operation shows progress.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub enum ReadPriority {
+    Interactive,
+    #[default]
+    Background,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

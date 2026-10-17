@@ -19,7 +19,7 @@ import type {
   RecentCommitMessage, RefreshScope, RepositoryCapabilities, RepositoryUpdateResult, RuntimeCapabilities,
   SyncResult, UpdateRestoreWarning, WindowTabTransfer, BranchOperationResult, BranchRecoveryOperation,
   BranchRecoveryResult, RepositoryCommitSelection, RestoreConflictsResult,
-  ConflictResolutionResult,
+  ConflictResolutionResult, ReadPriority,
   LogEntry, LogLevel, LogChannel, LayoutUpdateResult,
 } from '../bindings/generated';
 import { BridgeError, isAbortError, type VersionDockBridge } from '../platform/bridge';
@@ -544,7 +544,7 @@ export interface AppStore {
   clearHistoryPath: () => Promise<void>;
   setHistoryScope: (scope: HistoryScope) => void;
   selectCommit: (commit: CommitNode, mode?: CommitSelectionMode, rangeSource?: CommitNode[]) => Promise<void>;
-  loadCommitDetail: (commit: CommitNode, force?: boolean, requestedWorkspaceId?: string) => Promise<CommitDetail>;
+  loadCommitDetail: (commit: CommitNode, force?: boolean, requestedWorkspaceId?: string, readPriority?: ReadPriority) => Promise<CommitDetail>;
   reloadSelectedCommits: (targetWorkspaceId?: string) => Promise<void>;
   loadMergeCommits: (commit: CommitNode) => Promise<void>;
   loadMergeParentFiles: (repoId: string, revision: string, parentHash: string) => Promise<CommitFile[]>;
@@ -4513,7 +4513,7 @@ export const useAppStore = create<AppStore>((set, get) => {
               limit: visibleLimit,
               query: { ...get().historyQuery, text: get().historyFilter || get().historyQuery.text, revision: scope.revisionsByRepo[repo.meta.id] ?? null },
             },
-          }, { signal: pageController.signal, showProgress: false });
+          }, { signal: pageController.signal, showProgress: false, readPriority: silent ? 'background' : 'interactive' });
           return { repoId: repo.meta.id, page };
         }));
 
@@ -4679,7 +4679,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
     setHistoryScope: (historyScope) => set({ historyScope }),
 
-    loadCommitDetail: async (commit, force = false, requestedWorkspaceId) => {
+    loadCommitDetail: async (commit, force = false, requestedWorkspaceId, readPriority = 'interactive') => {
       const state = get();
       if (requestedWorkspaceId && state.snapshot?.workspace.id !== requestedWorkspaceId) {
         throw new DOMException('Commit detail context changed', 'AbortError');
@@ -4724,7 +4724,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       try {
         const detail = await bridge().request<CommitDetail>(
           { type: 'commitDetail', payload: { workspace_id: targetWorkspaceId, repo_id: commit.repoId, revision: commit.hash } },
-          { signal: controller.signal },
+          { signal: controller.signal, readPriority },
         );
         const hasExtraRefs = commit.refs?.some((ref) => !(detail.commit?.refs ?? []).includes(ref));
         let mergedDetail = detail;

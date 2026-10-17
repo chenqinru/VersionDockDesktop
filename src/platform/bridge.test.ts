@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commandProgressVisibility, commandShowsProgressByDefault, MockBridge } from './bridge';
+import { commandProgressVisibility, commandReadPriority, commandShowsProgressByDefault, MockBridge } from './bridge';
 
 describe('VersionDockBridge', () => {
   it('keeps components independent from native command names', async () => {
@@ -22,6 +22,14 @@ describe('VersionDockBridge', () => {
     const fetch = { type: 'sync' as const, payload: { workspace_id: 'workspace', repo_id: 'repo', action: 'fetch' as const, remote: null, branch: null } };
     expect(commandProgressVisibility(fetch)).toBe('foreground');
     expect(commandProgressVisibility(fetch, { showProgress: false })).toBe('background');
+  });
+
+  it('prioritizes visible detail reads independently from progress visibility', () => {
+    const detail = { type: 'commitDetail' as const, payload: { workspace_id: 'workspace', repo_id: 'repo', revision: 'hash' } };
+    expect(commandReadPriority(detail)).toBe('interactive');
+    expect(commandProgressVisibility(detail)).toBe('background');
+    expect(commandReadPriority(detail, { readPriority: 'background' })).toBe('background');
+    expect(commandReadPriority({ type: 'stashes', payload: { workspace_id: 'workspace', repo_id: 'repo' } })).toBe('background');
   });
 
 

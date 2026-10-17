@@ -15,9 +15,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::models::{
     AppStateSnapshot, DesktopError, DesktopSettings, LanguagePreference, LayoutState,
-    OperationEvent, OperationStatus, RefreshScope, RepositoryCommitSelection, RepositoryEvent,
-    RepositoryEventSource, RepositoryMeta, RepositoryStatus, RequestContext, ThemePreference,
-    ToolAvailability, UiFontSizePreference, WindowTabTransfer, WorkspaceDescriptor,
+    OperationEvent, OperationStatus, ReadPriority, RefreshScope, RepositoryCommitSelection,
+    RepositoryEvent, RepositoryEventSource, RepositoryMeta, RepositoryStatus, RequestContext,
+    ThemePreference, ToolAvailability, UiFontSizePreference, WindowTabTransfer,
+    WorkspaceDescriptor,
 };
 
 #[derive(Clone)]
@@ -26,6 +27,7 @@ pub struct OperationReporter {
     pub window_label: String,
     pub operation_id: String,
     pub context: RequestContext,
+    pub read_priority: ReadPriority,
     pub started_at: String,
 }
 
@@ -93,7 +95,7 @@ pub struct AppState {
     pub application_session_id: String,
     pub launch_workspace_id: std::sync::Mutex<Option<String>>,
     pub cancellations: Mutex<HashMap<String, CancellationToken>>,
-    pub read_limit: Semaphore,
+    reads: crate::read_scheduler::ReadScheduler,
     pub write_limit: Semaphore,
     background_fetch_limit: Semaphore,
     pub write_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
@@ -177,7 +179,7 @@ impl AppState {
             application_session_id: uuid::Uuid::new_v4().to_string(),
             launch_workspace_id: std::sync::Mutex::new(launch_workspace_id),
             cancellations: Mutex::new(HashMap::new()),
-            read_limit: Semaphore::new(4),
+            reads: Default::default(),
             write_limit: Semaphore::new(2),
             background_fetch_limit: Semaphore::new(2),
             write_locks: Mutex::new(HashMap::new()),
@@ -457,10 +459,10 @@ impl AppState {
             "waitingForReadSlot",
             "Waiting for a repository read slot",
         );
-        let permit = tokio::select! {
-            _ = cancellation.cancelled() => Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)),
-            permit = self.read_limit.acquire() => permit.map_err(|_| DesktopError::new("APP_CLOSING", "Application is closing", true)),
-        }?;
+        let priority = CURRENT_OPERATION
+            .try_with(|reporter| reporter.read_priority)
+            .unwrap_or_default();
+        let permit = self.reads.acquire(priority, cancellation).await?;
         emit_current_operation(
             OperationStatus::Running,
             "readingRepository",

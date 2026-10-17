@@ -605,10 +605,11 @@ export function ShelfPanel({ active = true,
   const loadErrors = useAppStore((state) => state.loadErrors);
 
   useEffect(() => {
+    if (!active) return;
     for (const repo of repos) {
       if (!shelves[repo.meta.id] && !loadErrors[`shelves:${repo.meta.id}`]) void loadShelves(repo.meta.id);
     }
-  }, [loadShelves, loadErrors, repos, shelves]);
+  }, [active, loadShelves, loadErrors, repos, shelves]);
 
 
   const handleUnshelve = async (repoId: string, shelveId: string) => {

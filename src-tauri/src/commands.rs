@@ -129,6 +129,7 @@ pub async fn bridge_request(
         window_label: window.label().to_owned(),
         operation_id: request_id.clone(),
         context: context.clone(),
+        read_priority: envelope.read_priority,
         started_at: started_at.clone(),
     };
     let waits_for_coordinator = error_context.2.is_some()
