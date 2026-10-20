@@ -180,7 +180,7 @@ it('manages remote accounts from the welcome title bar without opening a workspa
   });
   useAppStore.setState({ bootstrap: { state: { recentWorkspaces: [] }, tools: {} } as any, snapshot: undefined });
   const { container } = render(<BridgeContext.Provider value={bridge}><TitleBar /><WorkspaceChooser /></BridgeContext.Provider>);
-  expect(container.querySelectorAll('.titlebar-actions button')).toHaveLength(4);
+  expect(container.querySelectorAll('.titlebar-actions button')).toHaveLength(5);
   expect(container.querySelectorAll('.welcome-action-btn')).toHaveLength(3);
   expect(screen.queryByRole('button', { name: /Connect Remote Accounts/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Manage Remote Accounts (GitHub / GitLab / Gitee)' }));

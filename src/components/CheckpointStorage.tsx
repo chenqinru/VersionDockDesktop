@@ -8,10 +8,11 @@ import { LoadingState } from './LoadingState';
 import { ErrorNotice } from './ErrorNotice';
 import { Codicon } from './Codicon';
 
-export function CheckpointStorage({ taskId, revision }: { taskId?: string; revision?: unknown }) {
+export function CheckpointStorage({ taskId, revision, workspaceId: projectId }: { taskId?: string; revision?: unknown; workspaceId?: string }) {
   const { t } = useI18n();
   const bridge = useAppStore(s => s.bridge);
-  const workspaceId = useAppStore(s => s.snapshot?.workspace.id);
+  const activeWorkspaceId = useAppStore(s => s.snapshot?.workspace.id);
+  const workspaceId = projectId ?? activeWorkspaceId;
   const [retry, setRetry] = useState(0);
   const key = JSON.stringify([workspaceId, taskId, retry, revision]);
   const [result, setResult] = useState<{ key: string; usage?: CheckpointStorageUsage; error?: string }>();

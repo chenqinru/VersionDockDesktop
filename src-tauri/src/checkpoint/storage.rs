@@ -80,6 +80,8 @@ pub(super) struct Transaction {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct Database {
+    #[serde(default)]
+    pub projects: BTreeMap<String, crate::models::WorkspaceDescriptor>,
     pub tasks: Vec<TaskWorkspace>,
     pub previews: Vec<Prepared>,
     pub transactions: Vec<Transaction>,

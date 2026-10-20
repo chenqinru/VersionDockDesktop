@@ -4,6 +4,8 @@ import type { Checkpoint, CheckpointActivity, CheckpointListing, TaskWorkspace, 
 import { checkpointWorkspaceChanged, useCheckpointStore } from '../../checkpoints/store';
 import { useAppStore } from '../../store/appStore';
 import { MockBridge } from '../../platform/bridge';
+import { CheckpointCenterHost } from '../CheckpointCenter';
+import { closeCheckpointCenter } from '../../checkpoints/center';
 import { CheckpointStatusBarItem } from './CheckpointStatusBarItem';
 import { createTranslator, I18nContext } from '../../i18n';
 
@@ -12,17 +14,18 @@ const snapshot: WorkspaceSnapshot = { workspace: { id: 'ws', name: 'Project', pa
 const point = (status: string): Checkpoint => ({ id: 'point', name: 'Turn', createdAt: '2026-10-20T01:00:00Z', status, sessionId: null, turnId: null, before: 'before', after: status === 'recording' ? null : 'after', error: null });
 const task = (id: string, status?: string): TaskWorkspace => ({ id, workspaceId: 'ws', name: id, path: '/project', roots: ['/project'], repositories: [], mode: 'manual', isolation: 'original', createdAt: '', seed: '', sourceSeed: '', lastApplied: null, checkpoints: status ? [point(status)] : [], hookEvents: [], lastHookAt: null, hookError: null, error: null });
 const flush = async () => { await act(async () => {}); };
-afterEach(() => { cleanup(); checkpointWorkspaceChanged(null); useAppStore.setState(original, true); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); closeCheckpointCenter(); checkpointWorkspaceChanged(null); useAppStore.setState(original, true); vi.restoreAllMocks(); vi.useRealTimers(); });
 function setup() {
   const bridge = new MockBridge(() => []);
   let tasks = [task('Current task', 'recording')];
   const request = vi.spyOn(bridge, 'request').mockImplementation(command => {
+    if (command.type === 'checkpointCatalog') return Promise.resolve({ projects: [snapshot.workspace], tasks }) as never;
     if (command.type !== 'checkpoint') return Promise.resolve([]) as never;
     if (command.payload.action.type === 'activity') return Promise.resolve({ tasks, recovery: [] } satisfies CheckpointActivity) as never;
     return Promise.resolve({ tasks, recovery: [], storageBytes: 0, hooksInstalled: false } satisfies CheckpointListing) as never;
   });
   useAppStore.setState({ bridge, snapshot });
-  const view = render(<I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><CheckpointStatusBarItem /></I18nContext.Provider>);
+  const view = render(<I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><CheckpointStatusBarItem /><CheckpointCenterHost /></I18nContext.Provider>);
   return { ...view, request, setTasks: (next: TaskWorkspace[]) => { tasks = next; } };
 }
 it('polls lightweight metadata while closed, updates on completion, and removes its timer on unmount', async () => {
@@ -54,14 +57,14 @@ it('opens the project panel on the task needing attention and keeps status updat
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Tasks and checkpoints · Needs finishing' })).toHaveAttribute('aria-expanded', 'false');
 });
-it('ignores the previous workspace status immediately and closes its panel on workspace remount', async () => {
+it('ignores the previous workspace status immediately while retaining the global center', async () => {
   const view = setup();
   await flush();
   fireEvent.click(screen.getByRole('button', { name: 'Tasks and checkpoints · Recording' }));
   await flush();
   act(() => useAppStore.setState({ snapshot: { ...snapshot, workspace: { ...snapshot.workspace, id: 'other', name: 'Other' } } }));
-  view.rerender(<I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><CheckpointStatusBarItem key="other" /></I18nContext.Provider>);
-  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  view.rerender(<I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><CheckpointStatusBarItem key="other" /><CheckpointCenterHost /></I18nContext.Provider>);
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Tasks and checkpoints · Checking…' })).toBeInTheDocument();
   await flush();
 });

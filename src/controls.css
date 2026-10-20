@@ -15,7 +15,7 @@
 .vd-select-trigger[data-control-size]:disabled { opacity: .55; }
 .vd-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vd-select-trigger > .codicon { flex: 0 0 auto; font-size: 12px; color: var(--versiondock-muted); }
-.vd-select-menu { position: absolute; z-index: 200; top: calc(100% + 4px); right: 0; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; overflow: auto; }
+.vd-select-menu { position: absolute; z-index: 200; top: calc(100% + 4px); right: 0; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 48px)); box-sizing: border-box; padding: 4px; overflow: auto; overscroll-behavior: contain; }
 /* History pickers keep list/calendar geometry while sharing the dropdown surface. */
 .vd-select-menu, .filter-popover, .history-more .more-menu { border: 1px solid var(--versiondock-control-border); border-radius: var(--versiondock-radius-popup); background: var(--versiondock-surface); color: var(--versiondock-text); box-shadow: var(--versiondock-popup-shadow); }
 .vd-select-menu[data-placement="above"] { top: auto; bottom: calc(100% + 4px); }

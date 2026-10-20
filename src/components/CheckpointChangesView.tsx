@@ -13,10 +13,11 @@ import { UnifiedDiffView } from './UnifiedDiffView';
 const fileKey = (file: RestoreFile) => JSON.stringify([file.repository, file.layer, file.path]);
 
 /** Snapshot comparisons use the same renderer as repository diffs, without repository history actions. */
-export function CheckpointChangesView({ files, source }: { files: RestoreFile[]; source: CheckpointDiffSource }) {
+export function CheckpointChangesView({ files, source, workspaceId: projectId }: { files: RestoreFile[]; source: CheckpointDiffSource; workspaceId?: string }) {
   const { t } = useI18n();
   const bridge = useAppStore(state => state.bridge);
-  const workspaceId = useAppStore(state => state.snapshot?.workspace.id);
+  const activeWorkspaceId = useAppStore(state => state.snapshot?.workspace.id);
+  const workspaceId = projectId ?? activeWorkspaceId;
   const layout = useRef<HTMLDivElement>(null);
   const [filesWidth, setFilesWidth] = useState(250);
   const [layoutWidth, setLayoutWidth] = useState(0);

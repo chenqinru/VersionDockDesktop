@@ -671,6 +671,9 @@ async fn runtime_capabilities(app: Option<&AppHandle>) -> RuntimeCapabilities {
 
 fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
     match command {
+        BridgeCommand::CheckpointCatalog | BridgeCommand::CheckpointProject { .. } => {
+            ("checkpoint", "Managing task checkpoints")
+        }
         BridgeCommand::Checkpoint { .. } => ("checkpoint", "Managing task checkpoints"),
         BridgeCommand::AiComposerApply { .. } => ("aiCompose", "Applying AI commit plan"),
         BridgeCommand::AiComposerPrepare { .. } => ("aiPrepare", "Preparing AI change units"),
@@ -1231,6 +1234,11 @@ async fn dispatch(
     push_approvals: &[crate::models::PushProtectionTarget],
 ) -> Result<serde_json::Value, DesktopError> {
     match command {
+        BridgeCommand::CheckpointCatalog => crate::checkpoint::catalog(state, token).await,
+        BridgeCommand::CheckpointProject {
+            workspace_id,
+            paths,
+        } => crate::checkpoint::prepare_project(state, workspace_id.as_deref(), paths, token).await,
         BridgeCommand::Checkpoint {
             workspace_id,
             action,
@@ -1239,7 +1247,6 @@ async fn dispatch(
                 action,
                 crate::checkpoint::types::CheckpointAction::OpenStorage
             ) {
-                state.workspace(&workspace_id).await?;
                 let path = crate::checkpoint::storage_directory(&state.config_dir)?;
                 app.opener()
                     .open_path(path.to_string_lossy(), None::<&str>)

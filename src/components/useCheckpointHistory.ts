@@ -3,9 +3,10 @@ import type { CheckpointListing, CheckpointPage, TaskWorkspace } from '../bindin
 import { useAppStore } from '../store/appStore';
 import { isAbortError } from '../platform/bridge';
 
-export function useCheckpointHistory(task: TaskWorkspace | undefined, listing: CheckpointListing | null, query: string, repository: string, onlyChanges: boolean, offset: number, enabled: boolean) {
+export function useCheckpointHistory(task: TaskWorkspace | undefined, listing: CheckpointListing | null, query: string, repository: string, onlyChanges: boolean, offset: number, enabled: boolean, projectId?: string) {
   const bridge = useAppStore(s => s.bridge);
-  const workspaceId = useAppStore(s => s.snapshot?.workspace.id);
+  const activeWorkspaceId = useAppStore(s => s.snapshot?.workspace.id);
+  const workspaceId = projectId ?? activeWorkspaceId;
   const [retry, setRetry] = useState(0);
   const taskId = task?.id;
   const total = task ? listing?.historyCounts?.[task.id] ?? task.checkpoints.length : 0;

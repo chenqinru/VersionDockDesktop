@@ -4,8 +4,26 @@ use specta::Type;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointCatalog {
+    pub projects: Vec<crate::models::WorkspaceDescriptor>,
+    pub tasks: Vec<TaskWorkspace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointProject {
+    pub workspace: crate::models::WorkspaceDescriptor,
+    pub repositories: Vec<crate::models::RepositoryMeta>,
+    pub tasks: Vec<TaskWorkspace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CheckpointAction {
+    Repositories,
     List,
     Activity,
     Overview,

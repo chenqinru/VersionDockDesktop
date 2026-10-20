@@ -20,10 +20,11 @@ function Message({ message }: { message: CheckpointMessage }) {
   </div>;
 }
 
-export function CheckpointPrompt({ taskId, checkpointId, revision }: { taskId: string; checkpointId: string; revision?: string }) {
+export function CheckpointPrompt({ taskId, checkpointId, revision, workspaceId: projectId }: { taskId: string; checkpointId: string; revision?: string; workspaceId?: string }) {
   const { t } = useI18n();
   const bridge = useAppStore(state => state.bridge);
-  const workspaceId = useAppStore(state => state.snapshot?.workspace.id);
+  const activeWorkspaceId = useAppStore(state => state.snapshot?.workspace.id);
+  const workspaceId = projectId ?? activeWorkspaceId;
   const [retry, setRetry] = useState(0);
   const [result, setResult] = useState<{ key: string; messages?: CheckpointMessage[]; error?: string }>();
   const key = JSON.stringify([workspaceId, taskId, checkpointId, retry, revision]);

@@ -33,6 +33,6 @@ export function checkpointStatus(listing: CheckpointActivity | null, busy: boole
     if (point.status === 'undone') return { state: 'undone', label: 'Checkpoint status: undone', icon: 'discard', taskId: task.id };
     if (point.status === 'abandoned') return { state: 'abandoned', label: 'Checkpoint status: abandoned', icon: 'circle-slash', taskId: task.id };
   }
-  if (!listing.tasks.length) return { state: 'empty', label: 'Not configured', icon: 'layers' };
-  return { state: 'ready', label: 'Ready to record', icon: 'layers', taskId: listing.tasks[0].id };
+  if (!listing.tasks.length) return { state: 'empty', label: 'Not configured', icon: 'checkpoint' };
+  return { state: 'ready', label: 'Ready to record', icon: 'checkpoint', taskId: listing.tasks[0].id };
 }

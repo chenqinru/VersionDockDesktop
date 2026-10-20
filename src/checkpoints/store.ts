@@ -21,14 +21,16 @@ interface CheckpointState {
 const initial: CheckpointState = { workspaceId: null, listing: null, activity: null, selectedTaskId: null, preview: null, details: null, detailsCheckpointId: null, cleanupPreview: null, cleanupReport: null, busy: false, loadingDetailsId: null, error: null, listingError: null };
 export const useCheckpointStore = create<CheckpointState>(() => initial);
 let generation = 0;
+let independentScope = false;
 let operation = 0;
 let refreshing = false;
 let refreshingActivity = false;
 let activityRevision = 0;
 let controller: AbortController | undefined;
 
-export function checkpointWorkspaceChanged(workspaceId: string | null) {
-  if (workspaceId === useCheckpointStore.getState().workspaceId) return;
+export function checkpointWorkspaceChanged(workspaceId: string | null, independent = false) {
+  if (workspaceId === useCheckpointStore.getState().workspaceId && independentScope === independent) return;
+  independentScope = independent;
   generation += 1;
   activityRevision += 1;
   controller?.abort(); controller = undefined;
@@ -37,7 +39,7 @@ export function checkpointWorkspaceChanged(workspaceId: string | null) {
   useCheckpointStore.setState({ ...initial, workspaceId });
 }
 function current(id: string, ticket: number) {
-  return useCheckpointStore.getState().workspaceId === id && ticket === generation && useAppStore.getState().snapshot?.workspace.id === id;
+  return useCheckpointStore.getState().workspaceId === id && ticket === generation && (independentScope || useAppStore.getState().snapshot?.workspace.id === id);
 }
 async function request<T>(action: CheckpointAction, signal?: AbortSignal): Promise<T> {
   const { bridge } = useAppStore.getState();

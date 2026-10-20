@@ -1,4 +1,3 @@
-import { checkpointWorkspaceChanged } from './checkpoints/store';
 import { Button } from './components/Button';
 import { useLayoutDensity } from './layoutDensity';
 import { useGlobalScrollbars } from './scrollbars/useGlobalScrollbars';
@@ -220,7 +219,7 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [bridge, openWorkspace, t]);
 
-  useEffect(() => { aiWorkspaceChanged(snapshot?.workspace.id); checkpointWorkspaceChanged(snapshot?.workspace.id ?? null); }, [snapshot?.workspace.id]);
+  useEffect(() => { aiWorkspaceChanged(snapshot?.workspace.id); }, [snapshot?.workspace.id]);
   useEffect(() => { const block = (event: MouseEvent) => event.preventDefault(); document.addEventListener('contextmenu', block); return () => document.removeEventListener('contextmenu', block); }, []);
 
   return <I18nContext.Provider value={{ language, preference: languagePreference, t }}>

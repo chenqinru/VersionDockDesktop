@@ -239,7 +239,10 @@ export type BranchRecoveryResult = {
 
 export type BranchRecoveryStatus = "completed" | "conflicted" | "partialFailure";
 
-export type BridgeCommand = { type: "checkpoint"; payload: {
+export type BridgeCommand = { type: "checkpointCatalog" } | { type: "checkpointProject"; payload: {
+	workspace_id: string | null,
+	paths: string[],
+} } | { type: "checkpoint"; payload: {
 	workspace_id: string,
 	action: CheckpointAction,
 } } | { type: "bootstrap" } | { type: "runtimeCapabilities" } | { type: "pushProtectionCheck"; payload: {
@@ -807,7 +810,7 @@ export type Checkpoint = {
 	promptHash?: string | null,
 };
 
-export type CheckpointAction = { type: "list" } | { type: "activity" } | { type: "overview" } | { type: "history"; task_id: string; query: string; repository: string | null; only_changes: boolean; offset: number; revision: string | null } | { type: "storageUsage"; task_id: string | null } | { type: "openStorage" } | { type: "previewRedo"; task_id: string } | { type: "create"; name: string; repo_ids: string[]; mode: RecordingMode; isolation: TaskIsolation; include_ignored: string[] } | { type: "setMode"; task_id: string; mode: RecordingMode } | { type: "begin"; task_id: string; name: string } | { type: "finish"; task_id: string } | { type: "abandon"; task_id: string } | { type: "preview"; task_id: string; checkpoint_id: string | null; bring_back: boolean } | { type: "execute"; preview_id: string } | { type: "recover"; transaction_id: string } | { type: "detail"; task_id: string; checkpoint_id: string } | { type: "prompt"; task_id: string; checkpoint_id: string } | { type: "messages"; task_id: string; checkpoint_id: string } | { type: "renameTask"; task_id: string; name: string } | { type: "rename"; task_id: string; checkpoint_id: string; name: string } | { type: "diff"; source: CheckpointDiffSource; repository: string; path: string; layer: string } | { type: "remove"; task_id: string } | { type: "previewCleanup"; task_id: string; keep_recent: number } | { type: "cleanup"; task_id: string; keep_recent: number; fingerprint: string } | { type: "installHooks" };
+export type CheckpointAction = { type: "repositories" } | { type: "list" } | { type: "activity" } | { type: "overview" } | { type: "history"; task_id: string; query: string; repository: string | null; only_changes: boolean; offset: number; revision: string | null } | { type: "storageUsage"; task_id: string | null } | { type: "openStorage" } | { type: "previewRedo"; task_id: string } | { type: "create"; name: string; repo_ids: string[]; mode: RecordingMode; isolation: TaskIsolation; include_ignored: string[] } | { type: "setMode"; task_id: string; mode: RecordingMode } | { type: "begin"; task_id: string; name: string } | { type: "finish"; task_id: string } | { type: "abandon"; task_id: string } | { type: "preview"; task_id: string; checkpoint_id: string | null; bring_back: boolean } | { type: "execute"; preview_id: string } | { type: "recover"; transaction_id: string } | { type: "detail"; task_id: string; checkpoint_id: string } | { type: "prompt"; task_id: string; checkpoint_id: string } | { type: "messages"; task_id: string; checkpoint_id: string } | { type: "renameTask"; task_id: string; name: string } | { type: "rename"; task_id: string; checkpoint_id: string; name: string } | { type: "diff"; source: CheckpointDiffSource; repository: string; path: string; layer: string } | { type: "remove"; task_id: string } | { type: "previewCleanup"; task_id: string; keep_recent: number } | { type: "cleanup"; task_id: string; keep_recent: number; fingerprint: string } | { type: "installHooks" };
 
 /**  Status-bar metadata only: unfinished checkpoints and the latest checkpoint per task. */
 export type CheckpointActivity = {
@@ -825,6 +828,11 @@ export type CheckpointAttachment = {
 	name: string,
 	path: string,
 	image: boolean,
+};
+
+export type CheckpointCatalog = {
+	projects: WorkspaceDescriptor[],
+	tasks: TaskWorkspace[],
 };
 
 export type CheckpointCleanupPreview = {
@@ -872,6 +880,12 @@ export type CheckpointPage = {
 	offset: number,
 	revision: string,
 	followingTurns: { [key in string]: number },
+};
+
+export type CheckpointProject = {
+	workspace: WorkspaceDescriptor,
+	repositories: RepositoryMeta[],
+	tasks: TaskWorkspace[],
 };
 
 export type CheckpointStorageUsage = {

@@ -1,4 +1,5 @@
 //! Local multi-repository checkpoints. The UI and headless Codex hook share this engine.
+mod catalog;
 mod cleanup;
 mod connections;
 mod history;
@@ -30,6 +31,22 @@ use types::*;
 
 pub(crate) fn storage_directory(config: &Path) -> Result<PathBuf, DesktopError> {
     Ok(Storage::new(config)?.root)
+}
+
+pub(crate) async fn catalog(
+    state: &AppState,
+    token: &CancellationToken,
+) -> Result<serde_json::Value, DesktopError> {
+    catalog::read(state, token).await
+}
+
+pub(crate) async fn prepare_project(
+    state: &AppState,
+    workspace_id: Option<&str>,
+    paths: Vec<String>,
+    token: &CancellationToken,
+) -> Result<serde_json::Value, DesktopError> {
+    catalog::prepare(state, workspace_id, paths, token).await
 }
 
 fn now() -> String {
@@ -84,9 +101,12 @@ pub(crate) async fn handle(
     token: &CancellationToken,
 ) -> Result<serde_json::Value, DesktopError> {
     let mut timing = reads::ReadTiming::new(&action);
-    let workspace = state.workspace(workspace_id).await?;
+    let workspace = catalog::resolve_workspace(state, workspace_id).await?;
     let settings = state.app.read().await.settings.clone();
-    let repos = if matches!(action, CheckpointAction::Create { .. }) {
+    let repos = if matches!(
+        action,
+        CheckpointAction::Create { .. } | CheckpointAction::Repositories
+    ) {
         crate::workspace::scan(&workspace, &settings)?
     } else {
         Vec::new()
@@ -94,6 +114,7 @@ pub(crate) async fn handle(
     let reading = matches!(
         action,
         CheckpointAction::List
+            | CheckpointAction::Repositories
             | CheckpointAction::Overview
             | CheckpointAction::History { .. }
             | CheckpointAction::StorageUsage { .. }
@@ -149,6 +170,9 @@ pub(crate) async fn handle(
         store.read()?
     };
     timing.loaded();
+    if matches!(action, CheckpointAction::Repositories) {
+        return value(repos);
+    }
     if matches!(action, CheckpointAction::Activity) {
         let mut output = activity(&db, &workspace);
         for task in &mut output.tasks {
@@ -766,6 +790,7 @@ async fn create(
             hook_error: None,
             error: None,
         };
+        db.projects.insert(workspace.id.clone(), workspace.clone());
         db.tasks.push(task.clone());
         store.save(db)?;
         return Ok(task);
@@ -805,6 +830,7 @@ async fn create(
         error: None,
     };
     // Persist creation intent so a crash never loses ownership of created worktrees.
+    db.projects.insert(workspace.id.clone(), workspace.clone());
     task.error = Some("Task creation is incomplete".into());
     db.tasks.push(task.clone());
     store.save(db)?;

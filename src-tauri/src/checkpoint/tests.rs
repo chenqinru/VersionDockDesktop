@@ -2,6 +2,238 @@ use super::*;
 use std::path::Path;
 
 #[tokio::test]
+async fn prepares_an_unopened_project_for_creation_without_switching_or_modifying_sources() {
+    let mut first = Fixture::new(1).await;
+    first.task(TaskIsolation::Original).await;
+    let other = Fixture::new(2).await;
+    let state = AppState::load(first.store.root.parent().unwrap().to_path_buf());
+    state
+        .app
+        .write()
+        .await
+        .recent_workspaces
+        .push(first.workspace.clone());
+    let app_before = serde_json::to_vec(&*state.app.read().await).unwrap();
+    let source_before = capture(
+        &other.store,
+        &other
+            .repos
+            .iter()
+            .map(|repo| repo.root_path.clone())
+            .collect::<Vec<_>>(),
+        &first.token,
+    )
+    .await
+    .unwrap();
+    let source_before = serde_json::to_vec(&source_before).unwrap();
+    let selected: CheckpointProject = serde_json::from_value(
+        prepare_project(&state, None, other.workspace.paths.clone(), &first.token)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(selected.workspace.id, other.workspace.id);
+    assert_eq!(selected.repositories.len(), 2);
+    assert!(selected.tasks.is_empty());
+    assert_eq!(
+        serde_json::to_vec(&*state.app.read().await).unwrap(),
+        app_before
+    );
+    let catalog_before: CheckpointCatalog =
+        serde_json::from_value(catalog(&state, &first.token).await.unwrap()).unwrap();
+    assert_eq!(
+        catalog_before.projects.len(),
+        1,
+        "selecting a folder must not create a task or empty sidebar group"
+    );
+    let task: TaskWorkspace = serde_json::from_value(
+        handle(
+            &state,
+            &selected.workspace.id,
+            CheckpointAction::Create {
+                name: "Unopened project task".into(),
+                repo_ids: selected
+                    .repositories
+                    .iter()
+                    .map(|repo| repo.id.clone())
+                    .collect(),
+                mode: RecordingMode::Manual,
+                isolation: TaskIsolation::Original,
+                include_ignored: vec![],
+            },
+            &first.token,
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(task.workspace_id, other.workspace.id);
+    let selected_again: CheckpointProject = serde_json::from_value(
+        prepare_project(&state, Some(&selected.workspace.id), vec![], &first.token)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(selected_again.tasks[0].id, task.id);
+    let output: CheckpointCatalog =
+        serde_json::from_value(catalog(&state, &first.token).await.unwrap()).unwrap();
+    assert_eq!(output.projects.len(), 2);
+    let source_after = capture(
+        &other.store,
+        &other
+            .repos
+            .iter()
+            .map(|repo| repo.root_path.clone())
+            .collect::<Vec<_>>(),
+        &first.token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(serde_json::to_vec(&source_after).unwrap(), source_before);
+    assert_eq!(
+        serde_json::to_vec(&*state.app.read().await).unwrap(),
+        app_before
+    );
+    let before = fs::read(first.store.root.join("state.json")).unwrap();
+    assert!(prepare_project(&state, None, vec![], &first.token)
+        .await
+        .is_err());
+    assert!(prepare_project(
+        &state,
+        Some(&selected.workspace.id),
+        selected.workspace.paths,
+        &first.token
+    )
+    .await
+    .is_err());
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(
+        prepare_project(&state, Some(&selected.workspace.id), vec![], &cancelled)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        fs::read(first.store.root.join("state.json")).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
+async fn global_catalog_preserves_owners_and_can_manage_a_project_removed_from_recents() {
+    let mut first = Fixture::new(1).await;
+    let first_task = first.task(TaskIsolation::Original).await;
+    let second = Fixture::new(1).await;
+    let second_task = create(
+        &first.store,
+        &mut first.db,
+        &second.workspace,
+        &second.repos,
+        &second
+            .repos
+            .iter()
+            .map(|repo| repo.id.clone())
+            .collect::<Vec<_>>(),
+        "Second task",
+        RecordingMode::Manual,
+        TaskIsolation::Original,
+        &[],
+        &first.token,
+    )
+    .await
+    .unwrap();
+    let state = AppState::load(first.store.root.parent().unwrap().to_path_buf());
+    state
+        .app
+        .write()
+        .await
+        .recent_workspaces
+        .push(first.workspace.clone());
+    let output: CheckpointCatalog =
+        serde_json::from_value(catalog(&state, &first.token).await.unwrap()).unwrap();
+    assert_eq!(output.projects.len(), 2);
+    assert_eq!(output.tasks.len(), 2);
+    assert!(output.projects.iter().any(
+        |project| project.id == second.workspace.id && project.paths == second.workspace.paths
+    ));
+    let wrong = handle(
+        &state,
+        &first.workspace.id,
+        CheckpointAction::Begin {
+            task_id: second_task.id.clone(),
+            name: "wrong owner".into(),
+        },
+        &first.token,
+    )
+    .await
+    .unwrap_err();
+    assert!(wrong.message.contains("does not belong"));
+    handle(
+        &state,
+        &second.workspace.id,
+        CheckpointAction::Begin {
+            task_id: second_task.id.clone(),
+            name: "second project".into(),
+        },
+        &first.token,
+    )
+    .await
+    .unwrap();
+    let db = first.store.read().unwrap();
+    assert!(db
+        .tasks
+        .iter()
+        .find(|task| task.id == first_task.id)
+        .unwrap()
+        .checkpoints
+        .is_empty());
+    assert_eq!(
+        db.tasks
+            .iter()
+            .find(|task| task.id == second_task.id)
+            .unwrap()
+            .checkpoints[0]
+            .status,
+        "recording"
+    );
+    assert_eq!(
+        state.app.read().await.recent_workspaces.len(),
+        1,
+        "global management must not reopen the project"
+    );
+    handle(
+        &state,
+        &second.workspace.id,
+        CheckpointAction::Finish {
+            task_id: second_task.id.clone(),
+        },
+        &first.token,
+    )
+    .await
+    .unwrap();
+    // Old databases have no saved project descriptor. Keep their tasks discoverable.
+    let mut db = first.store.read().unwrap();
+    db.projects.clear();
+    first.store.save(&db).unwrap();
+    let output: CheckpointCatalog =
+        serde_json::from_value(catalog(&state, &first.token).await.unwrap()).unwrap();
+    assert_eq!(output.projects.len(), 2);
+    let bytes = fs::read(first.store.root.join("state.json")).unwrap();
+    handle(
+        &state,
+        &second.workspace.id,
+        CheckpointAction::Overview,
+        &first.token,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        fs::read(first.store.root.join("state.json")).unwrap(),
+        bytes
+    );
+}
+
+#[tokio::test]
 async fn message_envelopes_repair_legacy_titles_without_touching_restore_identity() {
     let mut f = Fixture::new(1).await;
     let task = f.task(TaskIsolation::Original).await;

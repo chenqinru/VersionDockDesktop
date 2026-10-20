@@ -233,3 +233,24 @@
 .checkpoint-message-attachments li > span:last-child { min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
 .checkpoint-message-attachments strong { font-weight: 500; color: var(--versiondock-text); }
 .checkpoint-message-attachments .selectable-text { font-size: var(--checkpoint-font-small); }
+
+.checkpoint-center-sidebar { min-height: 0; }
+.checkpoint-center-sidebar > .vd-search-input { flex: none; margin: 0 2px 8px; min-width: 0; }
+.checkpoint-center-projects { min-height: 0; overflow: auto; flex: 1; }
+.checkpoint-project + .checkpoint-project { margin-top: 10px; }
+.checkpoint-project-heading { display: flex; align-items: center; width: 100%; gap: 5px; padding: 6px 4px; font: inherit; text-align: start; border: 0; background: transparent; color: var(--versiondock-muted); cursor: pointer; }
+.checkpoint-project-heading strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--checkpoint-font-small); font-weight: 500; }
+.checkpoint-project-heading > span:last-child { font-size: var(--checkpoint-font-small); }
+.checkpoint-center-task { display: flex; width: 100%; align-items: center; gap: 8px; padding: 10px 8px 10px 24px; border: 1px solid transparent; border-radius: var(--versiondock-radius-control); background: transparent; color: inherit; text-align: start; font: inherit; cursor: pointer; }
+.checkpoint-center-task > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkpoint-center-task > small { flex: none; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-center-task > small[data-status="recording"] { color: var(--versiondock-accent); }
+
+.checkpoint-center .checkpoint-layout { grid-template-columns: 240px minmax(0, 1fr); }
+.checkpoint-center .checkpoint-layout.checkpoint-layout-review { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 900px) { .checkpoint-center .checkpoint-layout:not(.checkpoint-layout-review) { grid-template-columns: 210px minmax(0, 1fr); } }
+@media (max-width: 680px) { .checkpoint-center .checkpoint-layout:not(.checkpoint-layout-review) { grid-template-columns: 180px minmax(0, 1fr); } }
+
+.checkpoint-project-picker { display: flex; gap: 8px; min-width: 0; align-items: flex-start; }
+.checkpoint-project-picker > .vd-select { min-width: 0; flex: 1; }
+.checkpoint-project-picker > .vd-button { flex: none; }

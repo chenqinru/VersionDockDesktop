@@ -4,6 +4,7 @@ import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 import { DEFAULT_SETTINGS } from '../settings/defaults';
 import { useAppStore } from '../store/appStore';
+import { closeCheckpointCenter } from '../checkpoints/center';
 import { TitleBarActions } from './TitleBarActions';
 import * as updaterService from '../services/updater';
 
@@ -13,12 +14,12 @@ beforeEach(() => useAppStore.setState({
   aboutOpen: false,
   bootstrap: { state: { settings: DEFAULT_SETTINGS, recentWorkspaces: [] }, tools: { git: true }, capabilities: { availability: {} } } as any,
 }));
-afterEach(() => { cleanup(); useAppStore.setState(original, true); });
+afterEach(() => { cleanup(); closeCheckpointCenter(); useAppStore.setState(original, true); });
 
 describe('TitleBarActions', () => {
-  it('does not expose project checkpoints in the global title bar', () => {
+  it('exposes the global checkpoint center in the title bar', () => {
     render(<TitleBarActions workspaceId="ws" />);
-    expect(screen.queryByRole('button', { name: 'Tasks and checkpoints' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tasks and checkpoints' })).toHaveAttribute('aria-haspopup', 'dialog');
   });
   it.each([
     ['Clone Git Repository', 'Clone Git Repository'],
@@ -44,7 +45,7 @@ describe('TitleBarActions', () => {
 
   it('keeps clone in the welcome body and exposes accounts, settings, GitHub and about in its title bar', () => {
     render(<BridgeContext.Provider value={new MockBridge(() => [])}><TitleBarActions /></BridgeContext.Provider>);
-    expect(screen.getAllByRole('button')).toHaveLength(4);
+    expect(screen.getAllByRole('button')).toHaveLength(5);
     expect(screen.queryByRole('button', { name: 'Clone Git Repository' })).not.toBeInTheDocument();
   });
 
