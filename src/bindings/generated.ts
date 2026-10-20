@@ -239,7 +239,10 @@ export type BranchRecoveryResult = {
 
 export type BranchRecoveryStatus = "completed" | "conflicted" | "partialFailure";
 
-export type BridgeCommand = { type: "bootstrap" } | { type: "runtimeCapabilities" } | { type: "pushProtectionCheck"; payload: {
+export type BridgeCommand = { type: "checkpoint"; payload: {
+	workspace_id: string,
+	action: CheckpointAction,
+} } | { type: "bootstrap" } | { type: "runtimeCapabilities" } | { type: "pushProtectionCheck"; payload: {
 	workspace_id: string,
 	repo_ids: string[],
 	branch: string | null,
@@ -790,6 +793,100 @@ export type CheckoutRepositoryResult = {
 	path: string,
 };
 
+export type Checkpoint = {
+	id: string,
+	name: string,
+	createdAt: string,
+	status: string,
+	sessionId: string | null,
+	turnId: string | null,
+	before: string,
+	after: string | null,
+	error: string | null,
+	summary?: CheckpointSummary | null,
+	promptHash?: string | null,
+};
+
+export type CheckpointAction = { type: "list" } | { type: "activity" } | { type: "overview" } | { type: "history"; task_id: string; query: string; repository: string | null; only_changes: boolean; offset: number; revision: string | null } | { type: "storageUsage"; task_id: string | null } | { type: "openStorage" } | { type: "previewRedo"; task_id: string } | { type: "create"; name: string; repo_ids: string[]; mode: RecordingMode; isolation: TaskIsolation; include_ignored: string[] } | { type: "setMode"; task_id: string; mode: RecordingMode } | { type: "begin"; task_id: string; name: string } | { type: "finish"; task_id: string } | { type: "abandon"; task_id: string } | { type: "preview"; task_id: string; checkpoint_id: string | null; bring_back: boolean } | { type: "execute"; preview_id: string } | { type: "recover"; transaction_id: string } | { type: "detail"; task_id: string; checkpoint_id: string } | { type: "prompt"; task_id: string; checkpoint_id: string } | { type: "messages"; task_id: string; checkpoint_id: string } | { type: "renameTask"; task_id: string; name: string } | { type: "rename"; task_id: string; checkpoint_id: string; name: string } | { type: "diff"; source: CheckpointDiffSource; repository: string; path: string; layer: string } | { type: "remove"; task_id: string } | { type: "previewCleanup"; task_id: string; keep_recent: number } | { type: "cleanup"; task_id: string; keep_recent: number; fingerprint: string } | { type: "installHooks" };
+
+/**  Status-bar metadata only: unfinished checkpoints and the latest checkpoint per task. */
+export type CheckpointActivity = {
+	tasks: TaskWorkspace[],
+	recovery: RestoreReport[],
+	connections?: { [key in string]: HookConnection } | null,
+};
+
+export type CheckpointAnnotation = {
+	text: string,
+	annotation?: string,
+};
+
+export type CheckpointAttachment = {
+	name: string,
+	path: string,
+	image: boolean,
+};
+
+export type CheckpointCleanupPreview = {
+	taskId: string,
+	keepRecent: number,
+	removeCount: number,
+	protectedCount: number,
+	reclaimableBytes: number | null,
+	fingerprint: string,
+};
+
+export type CheckpointCleanupReport = {
+	status: string,
+	removedCount: number,
+	freedBytes: number | null,
+	error: string | null,
+};
+
+export type CheckpointDiffSource = { type: "checkpoint"; task_id: string; checkpoint_id: string } | { type: "preview"; preview_id: string };
+
+export type CheckpointListing = {
+	tasks: TaskWorkspace[],
+	recovery: RestoreReport[],
+	storageBytes: number | null,
+	hooksInstalled: boolean,
+	connections?: { [key in string]: HookConnection } | null,
+	historyCounts?: { [key in string]: number } | null,
+	historyRevisions?: { [key in string]: string } | null,
+	redoTasks?: string[] | null,
+};
+
+export type CheckpointMessage = {
+	body: string,
+	annotations: CheckpointAnnotation[],
+	attachments: CheckpointAttachment[],
+	selections: string[],
+	raw: string | null,
+};
+
+export type CheckpointPage = {
+	taskId: string,
+	points: Checkpoint[],
+	total: number,
+	matching: number,
+	offset: number,
+	revision: string,
+	followingTurns: { [key in string]: number },
+};
+
+export type CheckpointStorageUsage = {
+	path: string,
+	totalBytes: number | null,
+	taskBytes: number | null,
+	reclaimableBytes: number | null,
+	warning: boolean,
+};
+
+export type CheckpointSummary = {
+	files: number,
+	paths: string[],
+};
+
 export type CleanWorkingTreeMethod = "shelve" | "stash";
 
 export type CloneRepositoryResult = {
@@ -1103,6 +1200,12 @@ export type HistoryQuery = {
 	lineRange?: LineRange | null,
 };
 
+export type HookConnection = {
+	status: string,
+	verifiedAt: string | null,
+	error: string | null,
+};
+
 export type IgnoreRules = {
 	directory: string,
 	source: string,
@@ -1310,6 +1413,8 @@ export type RecentCommitMessage = {
 	message: string,
 };
 
+export type RecordingMode = "manual" | "automatic";
+
 export type RefreshScope = "workspaceSnapshot" | "status" | "diff" | "index" | "refs" | "history" | "operation" | "conflicts" | "svnRevision" | "unpushed" | "worktrees" | "subtrees" | "submodules";
 
 export type RemoteInfo = {
@@ -1476,6 +1581,34 @@ export type RestoreConflictsResult = {
 	failures: RestoreConflictFailure[],
 };
 
+export type RestoreFile = {
+	repository: string,
+	path: string,
+	layer: string,
+	status: string,
+	before: string | null,
+	after: string | null,
+};
+
+export type RestorePreview = {
+	id: string,
+	taskId: string,
+	bringBack: boolean,
+	files: RestoreFile[],
+	conflicts: string[],
+	fingerprint: string,
+	redoOf?: string | null,
+};
+
+export type RestoreReport = {
+	id: string,
+	taskId: string,
+	status: string,
+	completed: number,
+	total: number,
+	error: string | null,
+};
+
 export type RevisionChanges = {
 	fromRevision: string,
 	toRevision: string,
@@ -1630,6 +1763,35 @@ export type TagInfo = {
 };
 
 export type TagOperation = { type: "create"; name: string; revision: string | null; message?: string | null } | { type: "delete"; name: string; remote: string | null } | { type: "checkout"; name: string } | { type: "merge"; name: string } | { type: "push"; name: string; remote: string };
+
+export type TaskIsolation = "original" | "worktree";
+
+export type TaskRepository = {
+	sourceId: string,
+	sourcePath: string,
+	taskPath: string,
+	branch: string,
+};
+
+export type TaskWorkspace = {
+	id: string,
+	workspaceId: string,
+	name: string,
+	path: string,
+	roots: string[],
+	repositories: TaskRepository[],
+	mode: RecordingMode,
+	isolation: TaskIsolation,
+	createdAt: string,
+	seed: string,
+	sourceSeed: string,
+	lastApplied: string | null,
+	checkpoints: Checkpoint[],
+	hookEvents: string[],
+	lastHookAt: string | null,
+	hookError: string | null,
+	error: string | null,
+};
 
 export type ThemePreference = "system" | "dark2026" | "light2026" | "githubDarkDimmed" | "oneDarkPro" | "dracula" | "nord" | "light" | "dark";
 

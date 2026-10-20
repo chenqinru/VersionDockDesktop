@@ -32,6 +32,11 @@ const originalUpdateProject = useAppStore.getState().updateProject;
 afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, updateProject: originalUpdateProject, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
 describe('CommitPanel capabilities and file view', () => {
+  it('keeps the project checkpoint entry out of the commit toolbar', () => {
+    useAppStore.setState({ bootstrap: bootstrap(false), snapshot: gitSnapshot });
+    renderPanel();
+    expect(screen.queryByRole('button', { name: 'Tasks and checkpoints' })).not.toBeInTheDocument();
+  });
   it('explains a workspace scan and restores available actions while history and branches load', () => {
     const operation = { operationId: 'scan', status: 'running', context: { domain: 'workspace', workspaceId: 'workspace', target: 'workspaceOpen' } };
     useAppStore.setState({ bootstrap: bootstrap(true), snapshot: gitSnapshot, selectedRepoId: 'repo', operations: { scan: operation } as never });

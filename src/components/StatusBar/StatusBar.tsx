@@ -4,6 +4,7 @@ import { NotificationStatusBarItem } from './NotificationStatusBarItem';
 import { UpdateStatusBarItem } from './UpdateStatusBarItem';
 import { OperationStatusBarItem } from './OperationStatusBarItem';
 import { LogStatusBarItem } from './LogStatusBarItem';
+import { CheckpointStatusBarItem } from './CheckpointStatusBarItem';
 import { useAppStore } from '../../store/appStore';
 
 export function StatusBar() {
@@ -22,6 +23,7 @@ export function StatusBar() {
         {showProfile && <ProfileStatusBarItem key={`profile:${snapshot.workspace.id}`} />}
       </div>
       <div className="statusbar-right">
+        <CheckpointStatusBarItem key={`checkpoints:${snapshot.workspace.id}`} />
         <OperationStatusBarItem />
         <UpdateStatusBarItem />
         <LogStatusBarItem />

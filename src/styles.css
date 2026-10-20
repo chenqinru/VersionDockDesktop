@@ -4026,6 +4026,16 @@ button.danger:not(:disabled):hover,
   color: var(--vscode-statusBar-foreground);
   background: transparent;
 }
+
+.checkpoint-status-item { min-width: 0; max-width: 230px; flex-shrink: 1; }
+.checkpoint-status-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkpoint-status-item > .codicon { flex: none; }
+.checkpoint-status-item[data-checkpoint-status="recording"] > .codicon { color: var(--versiondock-accent); }
+.checkpoint-status-item[data-checkpoint-status="completed"] > .codicon { color: var(--versiondock-success); }
+.checkpoint-status-item:is([data-checkpoint-status="interrupted"], [data-checkpoint-status="recovery"]) > .codicon { color: var(--versiondock-warning); }
+.checkpoint-status-item[data-checkpoint-status="error"] > .codicon { color: var(--versiondock-danger); }
+:root:is([data-theme="dark"], [data-theme="light"]) .checkpoint-status-item > .codicon { color: inherit; }
+@media (prefers-reduced-motion: reduce) { .checkpoint-status-item .codicon-loading { animation: none; } }
 .statusbar-item.branch-status-item.has-behind { color: var(--branch-pull-foreground); }
 .statusbar-item.branch-status-item.has-ahead { color: var(--branch-push-foreground); }
 .statusbar-item.branch-status-item.needs-sync { color: var(--branch-sync-foreground); }

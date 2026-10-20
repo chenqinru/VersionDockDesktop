@@ -176,6 +176,7 @@ function requestId(): string {
 
 const commandDomain = (command: BridgeCommand): OperationDomain => {
   switch (command.type) {
+    case 'checkpoint': return 'workspace';
     case 'bootstrap': case 'runtimeCapabilities': case 'saveAppState': case 'saveCommitSelections': case 'updateSettings': case 'updateLayout': case 'resetLayout': case 'windowSetWorkspaceMode': return 'application';
     case 'workspaceOpen': case 'workspaceRename': case 'workspaceRefresh': case 'workspaceRemoveRecent': case 'initializeRepository': case 'cloneRepository': case 'checkoutSvnRepository': return 'workspace';
     case 'repositoryStatus': return 'status';
@@ -217,6 +218,8 @@ const commandIdentifiers = (command: BridgeCommand) => {
 
 export const commandShowsProgressByDefault = (command: BridgeCommand): boolean => {
   switch (command.type) {
+    // Checkpoints own their progress, cancellation and errors inside the panel.
+    case 'checkpoint': return false;
     case 'unpushedOperation':
       return command.payload.operation.type !== 'undoHead';
     case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent':

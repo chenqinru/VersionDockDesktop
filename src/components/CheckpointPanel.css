@@ -1,0 +1,235 @@
+/* Match FileHistoryPanel's modal chrome and SettingsPanel's navigation. */
+.vd-dialog.checkpoint-panel {
+  --checkpoint-font: calc(12px * var(--versiondock-ui-font-scale, 1));
+  --checkpoint-font-small: calc(11px * var(--versiondock-ui-font-scale, 1));
+  --checkpoint-spacing: 16px;
+  width: min(1060px, calc(100vw - 48px));
+  height: min(700px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  font-size: var(--checkpoint-font);
+}
+.vd-dialog.checkpoint-panel > .checkpoint-header { flex: none; height: 48px; min-height: 48px; margin: 0; padding: 0 16px; gap: 8px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.vd-dialog.checkpoint-panel > .checkpoint-header > .codicon { width: 18px; height: 18px; flex-basis: 18px; font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); background: transparent; }
+.vd-dialog.checkpoint-panel > .checkpoint-header > strong { flex: 0 0 auto; font-size: var(--checkpoint-font); }
+.checkpoint-header .checkpoint-workspace-name { margin-left: 8px; font-family: inherit; font-size: var(--checkpoint-font-small); }
+.checkpoint-layout { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: 210px minmax(0, 1fr); background: var(--versiondock-surface-alt); }
+.checkpoint-layout.checkpoint-layout-review { grid-template-columns: minmax(0, 1fr); }
+.checkpoint-sidebar { gap: 8px; }
+.checkpoint-sidebar-heading { display: flex; align-items: center; gap: 7px; padding: 0 8px 4px; color: var(--versiondock-muted); }
+.checkpoint-sidebar-heading > strong { font-size: var(--checkpoint-font); font-weight: 500; }
+.checkpoint-sidebar-heading > span { font-size: var(--checkpoint-font-small); }
+.checkpoint-sidebar-heading .icon-button { margin-left: auto; }
+.checkpoint-task-button.settings-nav-item { width: 100%; height: auto; min-height: 50px; text-align: start; align-items: center; padding-block: 8px; }
+.checkpoint-task-nav-label { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.checkpoint-task-nav-label > .settings-nav-text { display: block; }
+.checkpoint-task-nav-label > small { color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkpoint-task-button .settings-nav-icon-badge { color: var(--versiondock-muted); }
+.checkpoint-task-button[aria-pressed="true"] { font-weight: 550; }
+.checkpoint-activity-dot, .checkpoint-status-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+.checkpoint-activity-dot { color: var(--versiondock-warning); }
+.checkpoint-sidebar-empty { color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); padding: 0 8px; line-height: 1.6; }
+.checkpoint-connection-link.vd-button { justify-content: flex-start; gap: 8px; flex: none; padding-inline: 8px; }
+.checkpoint-connection-label { flex: 1; min-width: 0; text-align: start; }
+.checkpoint-connection-status { flex: none; font-size: var(--checkpoint-font-small); font-weight: 400; white-space: nowrap; color: var(--versiondock-warning); }
+.checkpoint-connection-status[data-status="connected"] { color: var(--versiondock-success); }
+.checkpoint-connection-status[data-status="error"] { color: var(--versiondock-danger); }
+.checkpoint-connection-link.vd-button:lang(en) { display: grid; grid-template-columns: 14px minmax(0, 1fr) 14px; column-gap: 7px; row-gap: 4px; }
+.checkpoint-connection-link:lang(en) > .checkpoint-connection-status { grid-column: 2; grid-row: 2; text-align: start; }
+.checkpoint-connection-link:lang(en) > .codicon:last-child { grid-column: 3; grid-row: 1 / 3; }
+@media (max-width: 900px) { .checkpoint-connection-link.vd-button { display: grid; grid-template-columns: 14px minmax(0, 1fr) 14px; column-gap: 7px; row-gap: 4px; } .checkpoint-connection-status { grid-column: 2; grid-row: 2; text-align: start; } .checkpoint-connection-link > .codicon:last-child { grid-column: 3; grid-row: 1 / 3; } }
+.checkpoint-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--versiondock-bg); }
+.checkpoint-task-overview { flex: none; min-width: 0; display: grid; gap: 8px; padding: 14px var(--checkpoint-spacing); }
+.checkpoint-task-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.checkpoint-task-title { min-width: 0; flex: 1; }
+.checkpoint-task-heading h3, .checkpoint-page-heading h3 { font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
+.checkpoint-task-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.checkpoint-task-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-task-meta > span { display: inline-flex; align-items: center; gap: 5px; }
+.checkpoint-task-meta .codicon { font-size: calc(12px * var(--versiondock-ui-font-scale, 1)); flex: none; }
+.checkpoint-task-location { min-width: 140px; flex: 1; }
+.checkpoint-task-location > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.checkpoint-hook-indicator.vd-button { gap: 5px; padding: 0; min-height: 18px; font-size: var(--checkpoint-font-small); color: var(--versiondock-warning); }
+.checkpoint-hook-indicator[data-connected="true"] { color: var(--versiondock-muted); }
+.checkpoint-hook-indicator[data-connected="true"] > .checkpoint-status-dot { color: var(--versiondock-success); }
+.checkpoint-record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px var(--checkpoint-spacing); flex: none; }
+.checkpoint-record-actions > .vd-input { flex: 1; min-width: 140px; max-width: 240px; }
+.checkpoint-recording-notice { display: flex; align-items: center; gap: 7px; margin: 0 var(--checkpoint-spacing) 12px; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); flex: none; }
+.checkpoint-recording-notice .codicon { color: var(--versiondock-warning); }
+.checkpoint-recording-notice[data-status="recording"] .codicon { color: var(--versiondock-accent); }
+.checkpoint-history-heading { gap: 7px; border-top: 1px solid var(--versiondock-border-soft); background: var(--versiondock-surface); }
+.checkpoint-history-heading h4 { margin: 0; font-size: var(--checkpoint-font); font-weight: 500; }
+.checkpoint-history-heading > span { flex: none; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-scroll { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; }
+.checkpoint-history-filter { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); font-weight: 400; cursor: pointer; }
+.checkpoint-day-list, .checkpoint-list { list-style: none; padding: 0; margin: 0; }
+.checkpoint-day-heading { margin: 0; padding: 10px 16px 5px; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); font-weight: 500; }
+.checkpoint-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; min-height: 52px; padding: 8px 12px; }
+.checkpoint-entry-open { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.checkpoint-entry-open:disabled { cursor: default; opacity: 1; }
+.checkpoint-entry-open:focus-visible { outline: 1px solid var(--versiondock-control-focus-border); outline-offset: 3px; }
+.checkpoint-entry-open > .codicon { flex: none; color: var(--versiondock-muted); font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); }
+.checkpoint-entry-label { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.checkpoint-entry-title { min-width: 0; font-size: var(--checkpoint-font); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkpoint-entry-meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-entry-meta > :not(.checkpoint-entry-files) { flex: none; }
+.checkpoint-entry-meta > code { font-size: inherit; }
+.checkpoint-entry-files { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkpoint-entry[data-empty="true"] .checkpoint-entry-title { color: var(--versiondock-muted); font-weight: 400; }
+.checkpoint-entry time { font-size: inherit; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.checkpoint-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); white-space: nowrap; }
+.checkpoint-status[data-status="incomplete"], .checkpoint-status[data-status="interrupted"], .checkpoint-entry:is([data-status="incomplete"], [data-status="interrupted"]) .checkpoint-entry-open > .codicon { color: var(--versiondock-warning); }
+.checkpoint-status[data-status="recording"], .checkpoint-entry[data-status="recording"] .checkpoint-entry-open > .codicon { color: var(--versiondock-accent); }
+.checkpoint-entry:has(.checkpoint-entry-error) .checkpoint-entry-open > .codicon { color: var(--versiondock-danger); }
+.checkpoint-entry-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-height: 26px; }
+.checkpoint-entry-error { grid-column: 1 / -1; }
+.checkpoint-notices { padding: 10px var(--checkpoint-spacing) 0; flex: none; }
+.checkpoint-notices .vd-error-notice { margin-bottom: 8px; }
+.checkpoint-page-heading { padding: var(--checkpoint-spacing); flex: none; }
+.checkpoint-page-heading > .vd-button { margin: -4px 0 8px -6px; }
+.checkpoint-page-heading p { color: var(--versiondock-muted); font-size: var(--checkpoint-font); line-height: 1.6; margin: 6px 0 0; }
+.checkpoint-create { display: grid; gap: 16px; padding: 0 var(--checkpoint-spacing) var(--checkpoint-spacing); }
+.checkpoint-form-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.checkpoint-form-hint { margin: 0; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); line-height: 1.6; }
+.checkpoint-repositories { padding: 0; margin: 0; min-width: 0; border: 0; }
+.checkpoint-repositories legend { padding: 0 0 6px; font-size: var(--checkpoint-font); font-weight: 500; }
+.checkpoint-repositories legend > span { margin-left: 8px; color: var(--versiondock-muted); font-weight: 400; font-size: var(--checkpoint-font-small); }
+.checkpoint-repository { display: flex; gap: 8px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--versiondock-border-soft); }
+.checkpoint-repository > .codicon { color: var(--versiondock-muted); }
+.checkpoint-repository > span:not(.codicon):not(.vd-checkbox) { flex: 1; min-width: 0; }
+.checkpoint-repository strong { display: block; font-size: var(--checkpoint-font); font-weight: 400; }
+.checkpoint-repository small { display: block; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.checkpoint-settings { padding: 0 var(--checkpoint-spacing) var(--checkpoint-spacing); }
+.checkpoint-settings-section { padding: 16px 0; border-top: 1px solid var(--versiondock-border-soft); }
+.checkpoint-settings-section h4 { margin: 0 0 10px; display: flex; gap: 8px; align-items: center; font-size: var(--checkpoint-font); font-weight: 600; }
+.checkpoint-settings-note { margin: 6px 0 12px; font-size: var(--checkpoint-font-small); color: var(--versiondock-muted); line-height: 1.6; }
+.checkpoint-full-path { display: block; overflow-wrap: anywhere; font-size: var(--checkpoint-font-small); line-height: 1.6; user-select: text; }
+.checkpoint-full-path code { font-size: inherit; }
+.checkpoint-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.checkpoint-settings-row { max-width: 300px; margin: 16px 0; }
+.checkpoint-scope { margin-top: 12px; font-size: var(--checkpoint-font-small); }
+.checkpoint-scope summary { color: var(--versiondock-muted); cursor: pointer; }
+.checkpoint-scope > p { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; }
+.checkpoint-scope > code { margin-top: 10px; }
+.checkpoint-danger-zone { display: flex; align-items: center; gap: 16px; }
+.checkpoint-danger-zone > div { flex: 1; }
+.checkpoint-danger-zone h4 { margin-bottom: 6px; }
+.checkpoint-danger-zone p { margin: 0; }
+/* File navigation and snapshot diffs share the workbench's row and diff visuals. */
+.checkpoint-review { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.checkpoint-review > .checkpoint-form-hint, .checkpoint-review > .vd-error-notice { flex: none; margin: 10px var(--checkpoint-spacing); }
+.checkpoint-changes { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: 250px 4px minmax(0, 1fr); }
+.checkpoint-changed-files { min-width: 0; min-height: 0; overflow: auto; }
+.checkpoint-repository-group > summary { display: flex; align-items: center; gap: 6px; padding: 10px 8px 4px; cursor: pointer; list-style: none; }
+.checkpoint-repository-group > summary::-webkit-details-marker { display: none; }
+.checkpoint-repository-group > summary > strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.checkpoint-repository-group > summary > span:last-child { color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-repository-group[open] > summary > .codicon:first-child { transform: rotate(90deg); }
+.checkpoint-repository-path { margin: 0 8px 6px 26px; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.checkpoint-changed-file { width: 100%; display: flex; gap: 7px; align-items: center; padding: 7px 10px 7px 26px; text-align: start; }
+.checkpoint-changed-file-label { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.checkpoint-changes > .inner-resize-handle { margin: 0; }
+.checkpoint-changed-file-label > span, .checkpoint-changed-file-label > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkpoint-changed-file-label small, .checkpoint-file-status { font-size: var(--checkpoint-font-small); color: var(--versiondock-muted); }
+.checkpoint-file-status[data-status="deleted"] { color: var(--versiondock-danger); }
+.checkpoint-file-status[data-status="added"] { color: var(--versiondock-success); }
+.checkpoint-file-diff { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.checkpoint-file-diff > .vd-loading-state { flex: 1; justify-content: center; }
+.checkpoint-file-diff .diff-toolbar { flex: none; flex-wrap: wrap; height: auto; padding-block: 3px; }
+.checkpoint-file-diff .diff-toolbar-left, .checkpoint-file-diff .diff-toolbar-right { flex-wrap: wrap; }
+.checkpoint-diff-heading { min-width: 0; flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.checkpoint-diff-heading > strong { min-width: 0; flex: 1; font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.checkpoint-diff-heading > span { color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-empty { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px; padding: var(--checkpoint-spacing); }
+.checkpoint-empty .vd-empty-state { flex: none; }
+.checkpoint-history > .vd-empty-state { padding-top: 40px; padding-bottom: 40px; }
+.vd-dialog.checkpoint-panel > .checkpoint-footer { flex: none; flex-wrap: nowrap; min-height: 44px; margin: 0; padding: 8px 16px; gap: 10px; border-top: 1px solid var(--versiondock-border-soft); }
+.checkpoint-storage { flex: 1; display: flex; align-items: center; gap: 7px; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-footer > .vd-loading-state { font-size: var(--checkpoint-font-small); }
+[data-density="comfortable"] .checkpoint-panel { --checkpoint-spacing: 20px; }
+[data-density="comfortable"] .checkpoint-entry { min-height: 58px; padding-block: 10px; }
+@media (max-width: 900px) { .checkpoint-layout { grid-template-columns: 180px minmax(0, 1fr); } .checkpoint-entry-meta { flex-wrap: wrap; gap: 4px 8px; } .checkpoint-entry-files { flex-basis: 100%; } }
+@media (max-width: 680px) { .checkpoint-layout { grid-template-columns: 148px minmax(0, 1fr); } .checkpoint-form-columns { grid-template-columns: 1fr; } .checkpoint-task-meta { gap: 5px 8px; } .checkpoint-task-heading { flex-wrap: wrap; } .checkpoint-task-title { flex-basis: 100%; } .checkpoint-task-actions { justify-content: flex-start; } .checkpoint-history-heading { flex-wrap: wrap; height: auto; min-height: 32px; padding-block: 6px; } .checkpoint-entry { gap: 8px; } }
+
+.checkpoint-message { grid-column: 1 / -1; min-width: 0; padding: 10px 12px; margin-top: 4px; background: var(--versiondock-surface); border-top: 1px solid var(--versiondock-border-soft); }
+.checkpoint-message > strong { display: block; font-size: var(--checkpoint-font-small); font-weight: 500; color: var(--versiondock-muted); margin-bottom: 8px; }
+.checkpoint-message pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; font-family: inherit; font-size: var(--checkpoint-font); line-height: 1.7; }
+
+/* One compact context header keeps the checkpoint title above its secondary metadata. */
+.checkpoint-review-header { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; column-gap: 10px; row-gap: 8px; flex: none; min-width: 0; padding: 12px var(--checkpoint-spacing); border-bottom: 1px solid var(--versiondock-border-soft); }
+.checkpoint-review-info { min-width: 0; }
+.checkpoint-review-info > h3 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--versiondock-ui-font-scale, 1)); font-weight: 600; line-height: 1.5; }
+.checkpoint-review-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; min-width: 0; color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); line-height: 1.5; }
+.checkpoint-review-meta > * { min-width: 0; white-space: nowrap; }
+.checkpoint-review-meta > :not(:first-child)::before { content: '·'; display: inline-block; margin-right: 10px; color: var(--versiondock-muted); }
+.checkpoint-review-meta > code { font-size: inherit; }
+.checkpoint-review-meta > time { font-variant-numeric: tabular-nums; }
+.checkpoint-review-task { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.checkpoint-review-actions { display: flex; align-items: center; gap: 6px; }
+.checkpoint-review-extra { grid-column: 2 / -1; min-width: 0; margin: 0; }
+.checkpoint-review-extra > .checkpoint-message { margin: 0; }
+.checkpoint-review-extra .checkpoint-message pre { max-height: 140px; }
+@media (max-width: 680px) {
+  .checkpoint-review-header { column-gap: 8px; padding-block: 10px; }
+  .checkpoint-review-info { display: contents; }
+  .checkpoint-review-info > h3 { grid-column: 2; grid-row: 1; }
+  .checkpoint-review-meta { grid-column: 2 / -1; grid-row: 2; margin-top: 0; gap: 3px 8px; }
+  .checkpoint-review-meta > :not(:first-child)::before { margin-right: 8px; }
+  .checkpoint-review-actions { grid-column: 3; grid-row: 1; gap: 4px; }
+}
+
+@media (max-width: 680px) { .checkpoint-task-nav-label > small { white-space: normal; overflow-wrap: anywhere; } }
+
+.checkpoint-settings-heading { display: flex; align-items: center; gap: 8px; min-width: 0; padding-block: 12px; }
+.checkpoint-settings-heading > h3 { flex: none; }
+.checkpoint-settings-task-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--versiondock-muted); font-size: var(--checkpoint-font); }
+.checkpoint-settings-section-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.checkpoint-settings-section-heading > h4 { margin: 0; }
+.checkpoint-settings-section-heading > .vd-button { margin-left: auto; }
+.checkpoint-settings-directory-mode { color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-connection-instructions > .checkpoint-settings-note { display: block; margin: 10px 0 0; }
+.checkpoint-cleanup-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; }
+.checkpoint-cleanup-summary > p { flex: 1; margin: 0; line-height: 1.6; }
+.checkpoint-danger-zone > div { min-width: 0; }
+.checkpoint-danger-zone > .vd-button { flex: none; }
+
+.checkpoint-repository-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 4px; }
+.checkpoint-repository-heading > strong { font-weight: 500; }
+.checkpoint-repository-heading > span { color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-repository-batch { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.checkpoint-create-overlap { display: flex; align-items: flex-start; gap: 8px; color: var(--versiondock-warning); font-size: var(--checkpoint-font-small); line-height: 1.6; }
+.checkpoint-create-overlap > .codicon { flex: none; margin-top: 3px; }
+.checkpoint-create-overlap p { margin: 0 0 8px; }
+.checkpoint-create-overlap-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.checkpoint-footer-note { flex: 1; min-width: 0; }
+.checkpoint-footer-actions { display: flex; flex: none; align-items: center; gap: 8px; margin-left: auto; }
+
+.checkpoint-settings-heading > .icon-button { flex: none; }
+
+.checkpoint-history-search { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--versiondock-border-soft); }
+.checkpoint-history-search > .vd-search-input { flex: 1 1 200px; }
+.checkpoint-history-search > .vd-select { flex: 0 1 210px; min-width: 140px; }
+.checkpoint-history-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--versiondock-border-soft); color: var(--versiondock-muted); font-size: var(--checkpoint-font-small); }
+.checkpoint-unfinished-details { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 16px 10px; font-size: var(--checkpoint-font-small); color: var(--versiondock-muted); }
+.checkpoint-unfinished-details > strong { color: var(--versiondock-text); }
+.checkpoint-unfinished-details > p { flex-basis: 100%; margin: 0; }
+.checkpoint-storage-details { display: grid; gap: 6px; margin-block: 10px; font-size: var(--checkpoint-font-small); color: var(--versiondock-muted); }
+.checkpoint-storage-details p { margin: 0; }
+.checkpoint-storage-warning { display: flex; align-items: center; gap: 6px; color: var(--versiondock-warning); }
+
+.checkpoint-message-entry { min-width: 0; display: grid; gap: 8px; }
+.checkpoint-message-entry + .checkpoint-message-entry { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--versiondock-border-soft); }
+.checkpoint-message-entry details { min-width: 0; color: var(--versiondock-muted); }
+.checkpoint-message-entry summary { cursor: pointer; width: fit-content; font-size: var(--checkpoint-font); }
+.checkpoint-message-entry summary:focus-visible { outline: 1px solid var(--versiondock-control-focus-border); outline-offset: 3px; }
+.checkpoint-message-entry details[open] > pre { margin-top: 6px; }
+.checkpoint-message-annotation { display: grid; gap: 4px; }
+.checkpoint-message-annotation > details { padding-left: 10px; border-left: 2px solid var(--versiondock-border-soft); }
+.checkpoint-message-attachments { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.checkpoint-message-attachments li { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+.checkpoint-message-attachments li > span:last-child { min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.checkpoint-message-attachments strong { font-weight: 500; color: var(--versiondock-text); }
+.checkpoint-message-attachments .selectable-text { font-size: var(--checkpoint-font-small); }

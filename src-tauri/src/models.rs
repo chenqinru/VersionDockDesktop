@@ -175,6 +175,10 @@ impl ResponseEnvelope {
 #[cfg_attr(test, derive(Type))]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum BridgeCommand {
+    Checkpoint {
+        workspace_id: String,
+        action: crate::checkpoint::types::CheckpointAction,
+    },
     Bootstrap,
     RuntimeCapabilities,
     PushProtectionCheck {

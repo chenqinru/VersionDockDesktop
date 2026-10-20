@@ -19,6 +19,24 @@ pub(crate) async fn repository_lock(
     repo_id: &str,
     token: &CancellationToken,
 ) -> Result<std::fs::File, DesktopError> {
+    repository_file_lock(config_dir, repo_id, token, false).await
+}
+
+/// Shared readers may run concurrently; exclusive reclamation waits for them.
+pub(crate) async fn repository_read_lock(
+    config_dir: &Path,
+    repo_id: &str,
+    token: &CancellationToken,
+) -> Result<std::fs::File, DesktopError> {
+    repository_file_lock(config_dir, repo_id, token, true).await
+}
+
+async fn repository_file_lock(
+    config_dir: &Path,
+    repo_id: &str,
+    token: &CancellationToken,
+    shared: bool,
+) -> Result<std::fs::File, DesktopError> {
     use sha2::{Digest, Sha256};
     let directory = config_dir.join("update-locks");
     std::fs::create_dir_all(&directory).map_err(worker_error)?;
@@ -41,7 +59,11 @@ pub(crate) async fn repository_lock(
                 true,
             ));
         }
-        match file.try_lock() {
+        match if shared {
+            file.try_lock_shared()
+        } else {
+            file.try_lock()
+        } {
             Ok(()) => return Ok(file),
             Err(std::fs::TryLockError::WouldBlock) => {
                 tokio::time::sleep(Duration::from_millis(50)).await

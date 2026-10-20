@@ -227,6 +227,16 @@ pub async fn bridge_request(
     state.finish_request(&request_id).await;
     let status = match &result {
         Ok(value)
+            if matches!(command, BridgeCommand::Checkpoint { .. })
+                && value.get("status").and_then(|v| v.as_str()) == Some("failed") =>
+        {
+            if value.get("completed").and_then(|v| v.as_u64()).unwrap_or(0) > 0 {
+                OperationStatus::Partial
+            } else {
+                OperationStatus::Failed
+            }
+        }
+        Ok(value)
             if (value.get("remoteCreated").and_then(|v| v.as_bool()) == Some(true)
                 && value.get("error").is_some_and(|v| !v.is_null()))
                 || value.get("status").and_then(|item| item.as_str()) == Some("partialFailure")
@@ -253,14 +263,30 @@ pub async fn bridge_request(
         }
         Err(_) => OperationStatus::Failed,
     };
-    let event_error = result.as_ref().err().cloned().or_else(|| {
-        result
-            .as_ref()
-            .ok()
-            .and_then(|value| value.get("error"))
-            .filter(|error| !error.is_null())
-            .and_then(|error| serde_json::from_value(error.clone()).ok())
-    });
+    let event_error = result
+        .as_ref()
+        .err()
+        .cloned()
+        .or_else(|| {
+            result
+                .as_ref()
+                .ok()
+                .and_then(|value| value.get("error"))
+                .filter(|error| !error.is_null())
+                .and_then(|error| serde_json::from_value(error.clone()).ok())
+        })
+        .or_else(|| {
+            if matches!(command, BridgeCommand::Checkpoint { .. }) {
+                result
+                    .as_ref()
+                    .ok()
+                    .and_then(|v| v.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(|message| DesktopError::new("CHECKPOINT_FAILED", message, true))
+            } else {
+                None
+            }
+        });
     let result_summary = match &result {
         Ok(value) if value.as_array().is_some() => {
             let items = value.as_array().expect("array checked");
@@ -280,8 +306,9 @@ pub async fn bridge_request(
             })
         }
         Ok(value) => {
-            let partial = value.get("status").and_then(|item| item.as_str())
-                == Some("partialFailure")
+            let partial = (matches!(command, BridgeCommand::Checkpoint { .. })
+                && value.get("status").and_then(|item| item.as_str()) == Some("failed"))
+                || value.get("status").and_then(|item| item.as_str()) == Some("partialFailure")
                 || value
                     .get("failures")
                     .and_then(|item| item.as_array())
@@ -455,6 +482,20 @@ fn emit_refresh_events(
 
 fn command_refresh_scopes(command: &BridgeCommand) -> Vec<RefreshScope> {
     match command {
+        BridgeCommand::Checkpoint {
+            action:
+                crate::checkpoint::types::CheckpointAction::Create { .. }
+                | crate::checkpoint::types::CheckpointAction::Remove { .. }
+                | crate::checkpoint::types::CheckpointAction::Execute { .. }
+                | crate::checkpoint::types::CheckpointAction::Recover { .. },
+            ..
+        } => vec![
+            RefreshScope::WorkspaceSnapshot,
+            RefreshScope::Status,
+            RefreshScope::Index,
+            RefreshScope::Diff,
+            RefreshScope::Worktrees,
+        ],
         BridgeCommand::InitializeRepository { .. } => vec![RefreshScope::WorkspaceSnapshot],
         BridgeCommand::Stage { .. } | BridgeCommand::Unstage { .. } => vec![
             RefreshScope::Index,
@@ -630,6 +671,7 @@ async fn runtime_capabilities(app: Option<&AppHandle>) -> RuntimeCapabilities {
 
 fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
     match command {
+        BridgeCommand::Checkpoint { .. } => ("checkpoint", "Managing task checkpoints"),
         BridgeCommand::AiComposerApply { .. } => ("aiCompose", "Applying AI commit plan"),
         BridgeCommand::AiComposerPrepare { .. } => ("aiPrepare", "Preparing AI change units"),
         BridgeCommand::WorkspaceOpen { .. } | BridgeCommand::WorkspaceRefresh { .. } => {
@@ -819,7 +861,8 @@ fn command_error_context(
     }
     .to_string();
     match command {
-        BridgeCommand::WorkspaceRemoveRecent { workspace_id }
+        BridgeCommand::Checkpoint { workspace_id, .. }
+        | BridgeCommand::WorkspaceRemoveRecent { workspace_id }
         | BridgeCommand::WorkspaceRename { workspace_id, .. }
         | BridgeCommand::WorkspaceRefresh { workspace_id }
         | BridgeCommand::SaveCommitSelections { workspace_id, .. }
@@ -1188,6 +1231,26 @@ async fn dispatch(
     push_approvals: &[crate::models::PushProtectionTarget],
 ) -> Result<serde_json::Value, DesktopError> {
     match command {
+        BridgeCommand::Checkpoint {
+            workspace_id,
+            action,
+        } => {
+            if matches!(
+                action,
+                crate::checkpoint::types::CheckpointAction::OpenStorage
+            ) {
+                state.workspace(&workspace_id).await?;
+                let path = crate::checkpoint::storage_directory(&state.config_dir)?;
+                app.opener()
+                    .open_path(path.to_string_lossy(), None::<&str>)
+                    .map_err(|error| {
+                        DesktopError::new("CHECKPOINT_FAILED", error.to_string(), true)
+                    })?;
+                json(true)
+            } else {
+                crate::checkpoint::handle(state, &workspace_id, action, token).await
+            }
+        }
         BridgeCommand::Bootstrap => {
             // Display saved history without touching external/protected volumes.
             // WorkspaceOpen validates the paths when the user opens a project.
@@ -3677,6 +3740,9 @@ async fn dispatch(
             );
             let common_lock = state.write_lock(&common_key).await;
             let _common = tokio::select! { _ = token.cancelled() => return Err(DesktopError::new("REQUEST_CANCELLED", "Operation cancelled", true)), g = common_lock.lock_owned() => g };
+            let _common_transaction =
+                crate::update_worker::repository_lock(&state.config_dir, &common_key, token)
+                    .await?;
             let target_repo = if let crate::models::WorktreeOperation::Remove { path, .. } =
                 &operation
             {

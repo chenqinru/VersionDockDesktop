@@ -9,6 +9,7 @@ mod ai;
 mod app_updater;
 mod avatar_cache;
 mod changelist;
+mod checkpoint;
 mod cli;
 mod commands;
 mod credentials;
@@ -91,6 +92,9 @@ fn application_menu(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if checkpoint::run_if_hook() {
+        return;
+    }
     if update_worker::run_if_worker() {
         return;
     }

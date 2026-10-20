@@ -32,5 +32,23 @@ describe('VersionDockBridge', () => {
     expect(commandReadPriority({ type: 'stashes', payload: { workspace_id: 'workspace', repo_id: 'repo' } })).toBe('background');
   });
 
+  it('keeps checkpoint reads and writes silent even when callers request foreground progress', () => {
+    const actions = [
+      { type: 'overview' },
+      { type: 'messages', task_id: 'task', checkpoint_id: 'point' },
+      { type: 'begin', task_id: 'task', name: '' },
+      { type: 'finish', task_id: 'task' },
+      { type: 'execute', preview_id: 'preview' },
+      { type: 'recover', transaction_id: 'restore' },
+      { type: 'cleanup', task_id: 'task', keep_recent: 0, fingerprint: 'fp' },
+      { type: 'installHooks' },
+    ] as const;
+    for (const action of actions) {
+      const command = { type: 'checkpoint', payload: { workspace_id: 'workspace', action } } as const;
+      expect(commandShowsProgressByDefault(command)).toBe(false);
+      expect(commandProgressVisibility(command, { showProgress: true, context: { visibility: 'foreground' } })).toBe('background');
+    }
+  });
+
 
 });

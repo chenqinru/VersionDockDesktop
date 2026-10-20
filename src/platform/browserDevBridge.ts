@@ -503,6 +503,7 @@ export class BrowserDevBridge implements VersionDockBridge {
 
   private async respond(command: BridgeCommand): Promise<unknown> {
     switch (command.type) {
+      case 'checkpoint': throw new Error('Tasks and checkpoints require the native VersionDock application.');
       case 'bootstrap': return {
         state: this.state, tools: { git: true, svn: true, svnadmin: true },
         applicationSessionId: 'browser-demo-session',

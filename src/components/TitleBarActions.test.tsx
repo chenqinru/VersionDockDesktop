@@ -16,6 +16,10 @@ beforeEach(() => useAppStore.setState({
 afterEach(() => { cleanup(); useAppStore.setState(original, true); });
 
 describe('TitleBarActions', () => {
+  it('does not expose project checkpoints in the global title bar', () => {
+    render(<TitleBarActions workspaceId="ws" />);
+    expect(screen.queryByRole('button', { name: 'Tasks and checkpoints' })).not.toBeInTheDocument();
+  });
   it.each([
     ['Clone Git Repository', 'Clone Git Repository'],
     ['Manage Remote Accounts (GitHub / GitLab / Gitee)', 'Remote Providers'],

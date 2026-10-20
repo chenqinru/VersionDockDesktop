@@ -10,6 +10,7 @@ import { useAppUpdateStore } from '../../store/appUpdateStore';
 import { configureTaskProgress, resetTaskProgress, useTaskProgressStore } from '../../progress/taskProgressStore';
 import { createOperationRequestEvent } from '../../platform/bridge';
 import { StatusBar } from './StatusBar';
+import { checkpointWorkspaceChanged } from '../../checkpoints/store';
 
 const state = (): AppStateSnapshot => ({
   schemaVersion: 3,
@@ -145,6 +146,7 @@ const renderStatusBar = () => {
 
 afterEach(() => {
   cleanup();
+  checkpointWorkspaceChanged(null);
   useAppStore.setState({ updateChecking: false, updateAvailableInfo: null });
   useAppUpdateStore.setState({ phase: 'idle', targetVersion: null, progress: null, error: null });
   resetTaskProgress();
