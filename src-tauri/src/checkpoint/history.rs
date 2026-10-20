@@ -26,6 +26,7 @@ pub(super) fn overview(
             super::prompt::display_name(store, db, point);
         }
     }
+    let redo_checkpoints = redo::checkpoints(db, workspace);
     Ok(CheckpointListing {
         tasks: output.tasks,
         recovery: output.recovery,
@@ -50,13 +51,8 @@ pub(super) fn overview(
                 .map(|task| Ok((task.id.clone(), history_revision(db, task)?)))
                 .collect::<Result<_, DesktopError>>()?,
         ),
-        redo_tasks: Some(
-            db.tasks
-                .iter()
-                .filter(|task| belongs(task, workspace) && redo::candidate(db, task).is_some())
-                .map(|t| t.id.clone())
-                .collect(),
-        ),
+        redo_tasks: Some(redo_checkpoints.keys().cloned().collect()),
+        redo_checkpoints: Some(redo_checkpoints),
     })
 }
 
@@ -210,6 +206,60 @@ pub(super) fn storage_usage(
         task_bytes: task_bytes as f64,
         reclaimable_bytes,
         warning: total >= 1024 * 1024 * 1024,
+    })
+}
+
+pub(super) fn project_storage_usage(
+    store: &Storage,
+    db: &Database,
+    workspace: &WorkspaceDescriptor,
+) -> Result<ProjectStorageUsage, DesktopError> {
+    let total = store.size()?;
+    let mut subset = db.clone();
+    subset
+        .tasks
+        .retain(|task| task.workspace_id == workspace.id);
+    let ids = subset
+        .tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    subset
+        .previews
+        .retain(|preview| ids.contains(preview.preview.task_id.as_str()));
+    subset
+        .transactions
+        .retain(|tx| ids.contains(tx.report.task_id.as_str()));
+    let unreferenced = store
+        .unreferenced(&subset)?
+        .iter()
+        .map(|(_, bytes)| bytes)
+        .sum::<u64>();
+    let tasks = subset
+        .tasks
+        .iter()
+        .map(|task| {
+            let usage = storage_usage(store, db, Some(&task.id))?;
+            let blocked_reason = cleanup::preview(store, db, &task.id, 0)
+                .err()
+                .map(|error| error.message);
+            Ok(ProjectTaskStorage {
+                task_id: task.id.clone(),
+                name: task.name.clone(),
+                checkpoints: task.checkpoints.len() as u32,
+                referenced_bytes: usage.task_bytes,
+                blocked_reason,
+            })
+        })
+        .collect::<Result<Vec<_>, DesktopError>>()?;
+    Ok(ProjectStorageUsage {
+        project_id: workspace.id.clone(),
+        total_bytes: total as f64,
+        referenced_bytes: total.saturating_sub(unreferenced) as f64,
+        reclaimable_bytes: cleanup::project_preview(store, db, workspace, 0)
+            .ok()
+            .map(|(preview, _)| preview.reclaimable_bytes),
+        tasks,
     })
 }
 

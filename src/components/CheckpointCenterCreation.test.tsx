@@ -60,7 +60,7 @@ it('preserves task inputs across projects and creates under the chosen project w
   fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
   expect(await screen.findByRole('heading', { name: 'Keep my draft' })).toBeInTheDocument();
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ type: 'checkpoint', payload: { workspace_id: 'B', action: { type: 'create', name: 'Keep my draft', repo_ids: ['repo-B'], mode: 'automatic', isolation: 'original', include_ignored: [] } } }), expect.anything());
-  expect(await within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).findByRole('button', { name: /Project B/ })).toBeInTheDocument();
+  expect(await within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).findByRole('button', { name: /^Project B/ })).toBeInTheDocument();
   expect(useAppStore.getState().snapshot?.workspace.id).toBe('A');
   expect(request.mock.calls.filter(([command]) => command.type === 'checkpointProject').every(([, options]) => options?.showProgress === false)).toBe(true);
 });

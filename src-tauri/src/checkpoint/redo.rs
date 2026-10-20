@@ -1,6 +1,7 @@
 //! A redo is a new protected restore transaction reversing the most recent successful undo.
 use super::{active, now, restore::prepare, storage::*, types::*};
-use crate::models::DesktopError;
+use crate::models::{DesktopError, WorkspaceDescriptor};
+use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
 pub(super) fn candidate<'a>(db: &'a Database, task: &TaskWorkspace) -> Option<&'a Transaction> {
@@ -28,6 +29,19 @@ pub(super) fn candidate<'a>(db: &'a Database, task: &TaskWorkspace) -> Option<&'
         return None;
     }
     Some(tx)
+}
+
+pub(super) fn checkpoints(
+    db: &Database,
+    workspace: &WorkspaceDescriptor,
+) -> BTreeMap<String, Vec<String>> {
+    db.tasks
+        .iter()
+        .filter(|task| super::belongs(task, workspace))
+        .filter_map(|task| {
+            candidate(db, task).map(|tx| (task.id.clone(), tx.prepared.checkpoint_ids.clone()))
+        })
+        .collect()
 }
 
 pub(super) async fn prepare_redo(

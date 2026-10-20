@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { CheckpointCatalog, CheckpointProject, TaskWorkspace, WorkspaceDescriptor } from '../bindings/generated';
 import { useAppStore } from '../store/appStore';
 import { useI18n } from '../i18n';
@@ -15,6 +15,9 @@ import { ErrorNotice } from './ErrorNotice';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { ProjectIcon } from './ProjectIcon';
+import { ContextMenu } from './ContextMenu';
+import { CheckpointGlobalSettings } from './CheckpointGlobalSettings';
+import { CheckpointProjectStorage } from './CheckpointProjectStorage';
 
 function taskStatus(task: TaskWorkspace) {
   if (task.error || task.hookError || task.checkpoints.some(point => point.status === 'incomplete')) return 'Checkpoint problem';
@@ -41,6 +44,11 @@ function CheckpointCenter() {
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState(request.projectId ?? snapshot?.workspace.id);
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const projectSearch = useRef<HTMLInputElement>(null);
+  const searchButton = useRef<HTMLButtonElement>(null);
+  const searchId = useId();
+  const searchExpanded = searchOpen || Boolean(query);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [repositories, setRepositories] = useState<{ id: string; data?: CheckpointProject; error?: string }>();
   const [localProjects, setLocalProjects] = useState<WorkspaceDescriptor[]>([]);
@@ -50,6 +58,9 @@ function CheckpointCenter() {
   const [repositoryRetry, setRepositoryRetry] = useState(0);
   const pickerTicket = useRef(0);
   const pickerController = useRef<AbortController>();
+  const [view, setView] = useState<'tasks' | 'settings' | 'storage'>('tasks');
+  const [managementBusy, setManagementBusy] = useState(false);
+  const [projectMenu, setProjectMenu] = useState<{ project: WorkspaceDescriptor; anchor: DOMRect }>();
   const availableProjects = [...new Map([...(catalog?.projects ?? []), ...(recentProjects ?? []), ...(snapshot ? [snapshot.workspace] : []), ...localProjects].map(project => [project.id, project])).values()];
   const project = availableProjects.find(project => project.id === selected) ?? catalog?.projects[0] ?? availableProjects[0];
   const projectId = project?.id;
@@ -95,16 +106,21 @@ function CheckpointCenter() {
 
   const hasMatches = catalog?.projects.some(group => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) || catalog.tasks.some(task => task.workspaceId === group.id && task.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
   const choose = (project: WorkspaceDescriptor, task?: TaskWorkspace) => {
-    if (scope.busy || picking) return;
+    if (scope.busy || picking || managementBusy) return;
     checkpointWorkspaceChanged(project.id, true);
     if (task) selectCheckpointTask(task.id);
     setSelected(project.id);
     setExpanded(previous => ({ ...previous, [project.id]: true }));
   };
   const navigation = (newTask: () => void, blocked: boolean, showTask: () => void) => <aside className="settings-sidebar checkpoint-sidebar checkpoint-center-sidebar">
-    <div className="checkpoint-sidebar-heading"><strong>{t('Projects')}</strong><span>{catalog?.projects.length ?? 0}</span><IconButton title={t('New checkpoint task')} disabled={blocked || picking} onClick={newTask}><Codicon name="add" /></IconButton></div>
-    <SearchInput aria-label={t('Search projects and tasks')} value={query} placeholder={t('Search projects and tasks')} onChange={event => setQuery(event.target.value)} onClear={() => setQuery('')} />
-    <nav className="checkpoint-center-projects" aria-label={t('Checkpoint projects')}>
+    <div className="checkpoint-sidebar-heading" data-search-expanded={searchExpanded || undefined}>
+      {!searchExpanded && <><strong>{t('Projects')}</strong><span>{catalog?.projects.length ?? 0}</span></>}
+      {searchExpanded && <div className="checkpoint-project-search" role="search" aria-label={t('Search projects and tasks')}><SearchInput ref={projectSearch} id={searchId} autoFocus showIcon={false} controlSize="xs" aria-label={t('Search projects and tasks')} value={query} placeholder={t('Search projects and tasks')} onChange={event => setQuery(event.target.value)} onClear={() => setQuery('')}
+        onKeyDown={event => { if (event.key !== 'Escape' || event.nativeEvent.isComposing) return; event.preventDefault(); event.stopPropagation(); if (query) { setQuery(''); setSearchOpen(true); } else { setSearchOpen(false); searchButton.current?.focus({ preventScroll: true }); } }} /></div>}
+      <IconButton ref={searchButton} title={t('Search projects and tasks')} aria-expanded={searchExpanded} aria-controls={searchExpanded ? searchId : undefined} onClick={() => { if (query) projectSearch.current?.focus({ preventScroll: true }); else setSearchOpen(value => !value); }}><Codicon name="search" /></IconButton>
+      <IconButton title={t('New checkpoint task')} disabled={blocked || picking} onClick={() => { setView('tasks'); newTask(); }}><Codicon name="add" /></IconButton>
+    </div>
+    <nav className="checkpoint-center-projects vd-row-scope" aria-label={t('Checkpoint projects')}>
       {!catalog && !error && <LoadingState>{t('Loading…')}</LoadingState>}
       {error && <ErrorNotice onRetry={() => setRetry(value => value + 1)}>{t(error)}</ErrorNotice>}
       {catalog?.projects.map(group => {
@@ -114,10 +130,10 @@ function CheckpointCenter() {
         if (!matching.length) return null;
         const open = Boolean(search) || (expanded[group.id] ?? group.id === projectId);
         return <section className="checkpoint-project" key={group.id}>
-          <button type="button" className="checkpoint-project-heading vd-selectable" aria-expanded={open} disabled={scope.busy || picking} title={group.paths.join('\n')} onClick={() => setExpanded(previous => ({ ...previous, [group.id]: !open }))}>
-            <Codicon name={open ? 'chevron-down' : 'chevron-right'} /><ProjectIcon name={group.name} seed={group.paths[0] || group.id || group.name} size="small" available={group.available} /><strong>{group.name}</strong><span>{tasks.length}</span>
-          </button>
-          {open && matching.map(task => <button type="button" key={task.id} className="checkpoint-center-task vd-selectable" aria-pressed={scope.selectedTaskId === task.id && projectId === group.id} disabled={scope.busy || picking} onClick={() => { choose(group, task); showTask(); }}>
+          <div className="checkpoint-project-row vd-row" aria-disabled={scope.busy || managementBusy || picking || undefined} data-row-context={projectMenu?.project.id === group.id || undefined}><button type="button" className="checkpoint-project-heading vd-selectable" aria-expanded={open} disabled={scope.busy || managementBusy || picking} title={group.paths.join('\n')} onClick={() => setExpanded(previous => ({ ...previous, [group.id]: !open }))}>
+            <Codicon name={open ? 'chevron-down' : 'chevron-right'} /><ProjectIcon name={group.name} seed={group.paths[0] || group.id || group.name} size="small" available={group.available} /><strong>{group.name}</strong>
+          </button><IconButton variant="bare" title={t('Project actions: {0}', group.name)} disabled={scope.busy || managementBusy || picking} aria-haspopup="menu" aria-expanded={projectMenu?.project.id === group.id} onClick={event => setProjectMenu({ project: group, anchor: event.currentTarget.getBoundingClientRect() })}><Codicon name="ellipsis" /></IconButton></div>
+          {open && matching.map(task => <button type="button" key={task.id} className="checkpoint-center-task vd-selectable" aria-pressed={view === 'tasks' && scope.selectedTaskId === task.id && projectId === group.id} disabled={scope.busy || managementBusy || picking} onClick={() => { choose(group, task); showTask(); setView('tasks'); }}>
             <span title={task.name}>{task.name}</span><small data-status={task.checkpoints.some(point => point.status === 'recording') ? 'recording' : undefined}>{t(taskStatus(task))}</small>
           </button>)}
         </section>;
@@ -125,6 +141,8 @@ function CheckpointCenter() {
       {catalog && catalog.tasks.length > 0 && !hasMatches && <EmptyState compact icon="search">{t('No results')}</EmptyState>}
       {catalog && !catalog.tasks.length && <EmptyState compact icon="checkpoint">{t('No checkpoint tasks yet')}</EmptyState>}
     </nav>
+    <div className="checkpoint-center-sidebar-footer"><Button variant="ghost" className="checkpoint-center-settings-link vd-selectable" aria-pressed={view === 'settings'} disabled={scope.busy || managementBusy || picking} onClick={openSettings}><Codicon name="settings-gear" /><span>{t('Checkpoint settings')}</span><Codicon name="chevron-right" /></Button></div>
+    {projectMenu && <ContextMenu x={projectMenu.anchor.right} y={projectMenu.anchor.bottom} anchorRect={projectMenu.anchor} header={projectMenu.project.name} items={[{ id: 'storage', label: t('Project storage'), icon: 'database' }]} onSelect={() => { choose(projectMenu.project); showTask(); setView('storage'); setProjectMenu(undefined); }} onClose={() => setProjectMenu(undefined)} />}
   </aside>;
   const browse = async () => {
     if (!bridge || scope.busy || picking) return;
@@ -153,7 +171,9 @@ function CheckpointCenter() {
     {pickerError && <ErrorNotice>{t(pickerError)}</ErrorNotice>}
     {repositories?.id === projectId && repositories?.error && <ErrorNotice onRetry={() => { setRepositories(undefined); setRepositoryRetry(value => value + 1); }}>{t(repositories.error)}</ErrorNotice>}
   </>;
-  return <CheckpointPanel project={project} projectRepositories={projectRepositories} projectSelection={projectSelection} projectLoading={projectLoading} projectTasks={preparedProject?.tasks} onCreatingChange={value => {
+  const openSettings = () => { setView('settings'); setCreationActive(false); pickerTicket.current += 1; pickerController.current?.abort(); setPicking(false); };
+  const content = view === 'settings' ? <CheckpointGlobalSettings onBusyChange={setManagementBusy} /> : view === 'storage' && project ? <CheckpointProjectStorage key={project.id} project={project} onBusyChange={setManagementBusy} onChanged={() => { void refreshCheckpoints(); setRetry(value => value + 1); }} /> : undefined;
+  return <CheckpointPanel managementContent={content} managementBusy={managementBusy} onOpenGlobalSettings={openSettings} project={project} projectRepositories={projectRepositories} projectSelection={projectSelection} projectLoading={projectLoading} projectTasks={preparedProject?.tasks} onCreatingChange={value => {
     setCreationActive(value);
     if (value) { setRepositories(undefined); setRepositoryRetry(value => value + 1); setPickerError(undefined); }
     else { pickerTicket.current += 1; pickerController.current?.abort(); setPicking(false); }

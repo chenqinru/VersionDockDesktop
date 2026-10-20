@@ -339,6 +339,7 @@ pub(super) async fn prepare(
             files,
             conflicts,
             fingerprint: current_hash.clone(),
+            checkpoint_count: ids.len() as u32,
             redo_of: None,
         },
         current: current_hash,

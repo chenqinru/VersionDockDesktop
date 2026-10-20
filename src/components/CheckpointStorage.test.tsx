@@ -7,17 +7,18 @@ import type { WorkspaceSnapshot } from '../bindings/generated';
 const original = useAppStore.getState();
 const snapshot: WorkspaceSnapshot = { workspace: { id: 'ws', name: 'Project', paths: ['/project'], available: true, lastOpenedAt: '' }, repositories: [], tools: { git: true, svn: false, svnadmin: false }, generation: 1 };
 afterEach(() => { cleanup(); useAppStore.setState(original, true); vi.restoreAllMocks(); });
-it('labels shared/global usage, warns on the documented threshold and opens the native snapshot folder', async () => {
+it('shows task usage without global storage controls', async () => {
   const bridge = new MockBridge(() => []);
   const request = vi.spyOn(bridge, 'request').mockResolvedValue({ path: '/config/checkpoints', totalBytes: 2 * 1024 ** 3, taskBytes: 1048576, reclaimableBytes: 524288, warning: true });
   useAppStore.setState({ bridge, snapshot });
   render(<CheckpointStorage taskId="task" />);
-  expect(await screen.findByText('All projects: 2048.0 MiB')).toBeInTheDocument();
+  expect(await screen.findByText('Referenced by this task: 1.0 MiB')).toBeInTheDocument();
   expect(screen.getByText('Referenced by this task: 1.0 MiB')).toBeInTheDocument();
   expect(screen.getByText('Eligible history could free: 0.5 MiB')).toBeInTheDocument();
-  expect(screen.getByText('Snapshot storage exceeds 1 GiB. Review old history and clean it manually.')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Open snapshot folder' }));
-  await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'openStorage' } } }), expect.objectContaining({ showProgress: false })));
+  expect(screen.queryByText('All projects: 2048.0 MiB')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Open snapshot folder' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh storage usage' }));
+  await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'storageUsage', task_id: 'task' } } }), expect.objectContaining({ showProgress: false })));
 });
 it('discards late statistics after switching task', async () => {
   let resolve!: (value: unknown) => void;

@@ -31,14 +31,14 @@ function setup(withProject = true, extraTasks: TaskWorkspace[] = []) {
   const request = vi.spyOn(bridge, 'request');
   useAppStore.setState({ bridge, snapshot: withProject ? { workspace: projects[0], repositories: [], tools: { git: true, svn: false, svnadmin: false }, generation: 1 } as WorkspaceSnapshot : undefined, operations: {} });
   render(<I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><TitleBarActions workspaceId={withProject ? 'A' : undefined} />{withProject && <CheckpointStatusBarItem />}</I18nContext.Provider>);
-  fireEvent.click(screen.getByRole('button', { name: 'Tasks and checkpoints' }));
+  if (withProject) fireEvent.click(screen.getByRole('button', { name: 'Tasks and checkpoints' }));
   return { request, originalRequest, projects, tasks };
 }
 
 it('groups tasks across projects, searches and collapses them, without switching the main workspace or its status', async () => {
   const { request } = setup();
   await screen.findByRole('navigation', { name: 'Checkpoint projects' });
-  const groupB = await within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).findByRole('button', { name: /Project B/ });
+  const groupB = await within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).findByRole('button', { name: /^Project B/ });
   expect(within(groupB).getByTestId('project-icon')).toHaveAttribute('data-initials', getProjectInitials('Project B'));
   expect(within(groupB).getByTestId('project-icon')).toHaveStyle({ backgroundColor: getProjectColor('/B') });
   expect(groupB).toHaveAttribute('aria-expanded', 'false');
@@ -48,10 +48,11 @@ it('groups tasks across projects, searches and collapses them, without switching
   expect(useAppStore.getState().snapshot?.workspace.id).toBe('A');
   expect(useCheckpointStore.getState()).toMatchObject({ workspaceId: 'B', selectedTaskId: 'B' });
   expect(screen.getByText('Checkpoints · Recording')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Search projects and tasks' }));
   const search = screen.getByRole('textbox', { name: 'Search projects and tasks' });
   fireEvent.change(search, { target: { value: 'Fix A' } });
   expect(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByRole('button', { name: /Fix A/ })).toBeInTheDocument();
-  expect(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).queryByRole('button', { name: /Project B/ })).not.toBeInTheDocument();
+  expect(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).queryByRole('button', { name: /^Project B/ })).not.toBeInTheDocument();
   fireEvent.change(search, { target: { value: 'missing' } });
   expect(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByText('No results')).toBeInTheDocument();
   fireEvent.change(search, { target: { value: '' } });
@@ -61,11 +62,31 @@ it('groups tasks across projects, searches and collapses them, without switching
   expect(request.mock.calls.filter(([command]) => command.type === 'checkpointCatalog').every(([, options]) => options?.showProgress === false)).toBe(true);
 });
 
-it('opens existing tasks globally from the welcome screen', async () => {
-  setup(false);
-  expect(await screen.findByRole('heading', { name: 'Fix A' })).toBeInTheDocument();
+it('keeps the welcome screen free of the checkpoint entry and catalog requests', () => {
+  const { request } = setup(false);
+  expect(screen.queryByRole('button', { name: 'Tasks and checkpoints' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Tasks and checkpoints' })).not.toBeInTheDocument();
   expect(useAppStore.getState().snapshot).toBeUndefined();
-  expect(useCheckpointStore.getState().workspaceId).toBe('A');
+  expect(request.mock.calls.some(([command]) => command.type === 'checkpointCatalog')).toBe(false);
+});
+
+it('keeps project search compact and handles clearing and closing without dismissing the center', async () => {
+  setup();
+  await screen.findByRole('heading', { name: 'Fix A' });
+  const button = screen.getByRole('button', { name: 'Search projects and tasks' });
+  expect(screen.queryByRole('textbox', { name: 'Search projects and tasks' })).not.toBeInTheDocument();
+  fireEvent.click(button);
+  const input = screen.getByRole('textbox', { name: 'Search projects and tasks' });
+  expect(input).toHaveFocus();
+  fireEvent.change(input, { target: { value: 'Fix A' } });
+  fireEvent.click(button);
+  expect(input).toHaveValue('Fix A');
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(input).toHaveValue('');
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(screen.queryByRole('textbox', { name: 'Search projects and tasks' })).not.toBeInTheDocument();
+  expect(button).toHaveFocus();
+  expect(screen.getByRole('dialog', { name: 'Tasks and checkpoints' })).toBeInTheDocument();
 });
 
 it('ignores an old project response when selection changes', async () => {
@@ -73,10 +94,10 @@ it('ignores an old project response when selection changes', async () => {
   await screen.findByRole('heading', { name: 'Fix A' });
   let release!: (value: unknown) => void;
   request.mockImplementation((command, options) => command.type === 'checkpoint' && command.payload.workspace_id === 'B' && command.payload.action.type === 'overview' ? new Promise(resolve => { release = resolve; }) : originalRequest(command, options));
-  fireEvent.click(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByRole('button', { name: /Project B/ }));
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByRole('button', { name: /^Project B/ }));
   fireEvent.click(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByRole('button', { name: /Fix B/ }));
   await waitFor(() => expect(release).toBeTypeOf('function'));
-  const groupA = within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByRole('button', { name: /Project A/ });
+  const groupA = within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByRole('button', { name: /^Project A/ });
   if (groupA.getAttribute('aria-expanded') === 'false') fireEvent.click(groupA);
   fireEvent.click(within(screen.getByRole('navigation', { name: 'Checkpoint projects' })).getByRole('button', { name: /Fix A/ }));
   expect(useCheckpointStore.getState().workspaceId).toBe('A');
@@ -93,7 +114,7 @@ it('keeps the dialog, sidebar position and task focus while another project load
   navigation.scrollTop = 80;
   let release!: (value: unknown) => void;
   request.mockImplementation((command, options) => command.type === 'checkpoint' && command.payload.workspace_id === 'B' && command.payload.action.type === 'overview' ? new Promise(resolve => { release = resolve; }) : originalRequest(command, options));
-  fireEvent.click(within(navigation).getByRole('button', { name: /Project B/ }));
+  fireEvent.click(within(navigation).getByRole('button', { name: /^Project B/ }));
   const target = within(navigation).getByRole('button', { name: /Fix B/ });
   target.focus();
   fireEvent.click(target);

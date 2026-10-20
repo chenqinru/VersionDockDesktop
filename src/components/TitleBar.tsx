@@ -985,7 +985,7 @@ export function TitleBar({ startupTab, welcomeMode = false }: { startupTab?: Wor
           data-tauri-drag-region
           onPointerDown={(event) => { if (event.button === 0) void bridge.window.startDragging(); }}
         />
-        {(workspaceId || initialized) && <TitleBarActions key={workspaceId ?? 'welcome'} workspaceId={workspaceId} />}
+        {(workspaceId || initialized) && <TitleBarActions key={workspaceId ?? 'welcome'} workspaceId={workspaceId} showCheckpoints={!welcomeMode} />}
         {platform === 'linux' && (
           <div className="window-controls linux" onPointerDown={(event) => event.stopPropagation()}>
             <button type="button" aria-label={t('Minimize')} title={t('Minimize')} onClick={() => void bridge.window.minimize()}>

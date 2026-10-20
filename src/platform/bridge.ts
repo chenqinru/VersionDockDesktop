@@ -219,7 +219,7 @@ const commandIdentifiers = (command: BridgeCommand) => {
 export const commandShowsProgressByDefault = (command: BridgeCommand): boolean => {
   switch (command.type) {
     // Checkpoints own their progress, cancellation and errors inside the panel.
-    case 'checkpoint': return false;
+    case 'checkpoint': case 'checkpointSettings': return false;
     case 'unpushedOperation':
       return command.payload.operation.type !== 'undoHead';
     case 'workspaceOpen': case 'workspaceRefresh': case 'workspaceRemoveRecent':

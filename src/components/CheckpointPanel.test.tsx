@@ -7,9 +7,10 @@ import { checkpointWorkspaceChanged } from '../checkpoints/store';
 import type { CheckpointListing, TaskWorkspace, WorkspaceSnapshot } from '../bindings/generated';
 import * as dialogs from './dialogService';
 const original = useAppStore.getState();
+const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 const snapshot: WorkspaceSnapshot = { workspace: { id: 'ws', name: 'project', paths: ['/project'], available: true, lastOpenedAt: '' }, repositories: [{ meta: { id: 'repo', name: 'repo', kind: 'git', rootPath: '/project/repo', color: '#888', depth: 0, parentRepoId: null, isSubmodule: false, isWorktree: false }, branch: 'main', revision: 'abc', ahead: 0, behind: 0, files: [], conflicts: 0, operation: null }], tools: { git: true, svn: false, svnadmin: false }, generation: 1 };
 const listing: CheckpointListing = { tasks: [], recovery: [], storageBytes: 1024, hooksInstalled: false };
-afterEach(() => { cleanup(); checkpointWorkspaceChanged(null); useAppStore.setState(original, true); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); checkpointWorkspaceChanged(null); useAppStore.setState(original, true); vi.restoreAllMocks(); vi.useRealTimers(); if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor); else Reflect.deleteProperty(navigator, 'clipboard'); });
 it.each([
   ['interrupted', 'The next message in this chat will finish this recording and start a new one. Stop background writes before sending.'],
   ['incomplete', 'This recording is incomplete. Stop file writes, then finish or abandon it manually before continuing.'],
@@ -44,7 +45,7 @@ it('does not claim automatic protection before receiving actual hooks', async ()
   expect(await screen.findByRole('button', { name: 'Unverified' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Preview bring back' })).not.toBeInTheDocument();
 });
-it('keeps setup controls out of the daily recording view and makes them available in task settings', async () => {
+it('keeps global setup out of task settings and exposes path actions in the task view', async () => {
   const bridge = new MockBridge(() => []);
   const task: TaskWorkspace = { id: 't', workspaceId: 'ws', name: 'Daily task', path: '/project', roots: ['/project'], repositories: [], mode: 'manual', isolation: 'original', createdAt: '', seed: '', sourceSeed: '', lastApplied: null, checkpoints: [], hookEvents: [], lastHookAt: null, hookError: null, error: null };
   vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing, tasks: [task] });
@@ -52,10 +53,10 @@ it('keeps setup controls out of the daily recording view and makes them availabl
   await screen.findByRole('heading', { name: 'Daily task' });
   expect(screen.getByRole('button', { name: 'Start recording' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Install Codex checkpoint hooks' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Copy Codex project path' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Task settings' }));
-  expect(screen.getByRole('button', { name: 'Install Codex checkpoint hooks' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Copy Codex project path' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Task settings' }));
+  expect(screen.queryByRole('button', { name: 'Install Codex checkpoint hooks' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Copy Codex project path' })).not.toBeInTheDocument();
   expect(screen.getByLabelText('Recording mode')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Back to checkpoints' }));
   expect(screen.getByRole('button', { name: 'Start recording' })).toBeInTheDocument();
@@ -148,14 +149,15 @@ function reviewTask(): TaskWorkspace {
   ], hookEvents: ['UserPromptSubmit', 'Stop'], lastHookAt: null, hookError: null, error: null };
 }
 const reviewFiles = [{ repository: '/project/repo', path: 'src/map/validate.ts', layer: 'working', status: 'modified', before: 'old', after: 'new' }];
-function setupReview(task = reviewTask(), conflicts: string[] = []) {
+function setupReview(task = reviewTask(), conflicts: string[] = [], previewFiles = reviewFiles) {
   const bridge = new MockBridge(() => []);
   const request = vi.spyOn(bridge, 'request').mockImplementation(command => {
     if (command.type !== 'checkpoint') return Promise.resolve(null) as never;
     const action = command.payload.action;
     if (action.type === 'detail') return Promise.resolve(reviewFiles) as never;
+    if (action.type === 'diff') return Promise.resolve({ path: action.path, content: '@@ -1 +1 @@\n-old\n+new\n', language: 'typescript', binary: false, truncated: false, lineCount: 3 }) as never;
     if (action.type === 'messages') return Promise.resolve([{ body: 'Fix map validation\nPreserve existing input', annotations: [], attachments: [], selections: [], raw: null }]) as never;
-    if (action.type === 'preview') return Promise.resolve({ id: 'undo-preview', taskId: task.id, bringBack: false, files: reviewFiles, conflicts, fingerprint: 'fingerprint' }) as never;
+    if (action.type === 'preview') return Promise.resolve({ id: 'undo-preview', taskId: task.id, bringBack: false, files: previewFiles, conflicts, fingerprint: 'fingerprint', checkpointCount: action.checkpoint_id === 'first-turn' ? 2 : 1 }) as never;
     if (action.type === 'execute') { task.checkpoints.forEach(point => { point.status = 'undone'; }); return Promise.resolve({ status: 'succeeded' }) as never; }
     return Promise.resolve({ ...listing, tasks: [task], connections: { [task.id]: { status: 'verified', verifiedAt: '2026-10-20T00:00:00Z', error: null } } }) as never;
   });
@@ -169,6 +171,7 @@ it('focuses review on code and identifies the message, time and checkpoint, with
   expect(await screen.findByText('validate.ts')).toBeInTheDocument();
   expect(screen.queryByRole('navigation', { name: 'Checkpoint tasks' })).not.toBeInTheDocument();
   expect(screen.queryByText('A matching hook round was recorded successfully.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Task settings' })).not.toBeInTheDocument();
   expect(screen.getByText('Fix map validation')).toBeInTheDocument();
   expect(screen.getByText('#first-tu')).toBeInTheDocument();
   expect(document.querySelector('time')).toHaveAttribute('datetime', '2026-10-20T02:00:00Z');
@@ -182,29 +185,42 @@ it('focuses review on code and identifies the message, time and checkpoint, with
   fireEvent.click(screen.getByRole('button', { name: 'Back to checkpoints' }));
   expect(screen.getByRole('navigation', { name: 'Checkpoint tasks' })).toBeInTheDocument();
 });
-it('previews undo for the displayed checkpoint and applies only after confirmation', async () => {
+it('checks undo on the current page and applies only after direct confirmation', async () => {
   const request = setupReview();
   const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(false);
   fireEvent.click((await screen.findAllByRole('button', { name: 'View changes' }))[1]);
-  fireEvent.click(await screen.findByRole('button', { name: 'Undo to before this turn' }));
-  expect(await screen.findByText('Undo preview')).toBeInTheDocument();
-  expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'preview', task_id: 'review-task', checkpoint_id: 'first-turn', bring_back: false } } }), expect.anything());
-  expect(screen.getByText('Fix map validation')).toBeInTheDocument();
-  expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'execute')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm undo' }));
+  await screen.findByText('validate.ts');
+  const diff = document.querySelector('.checkpoint-changes');
+  const calls = request.mock.calls.filter(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'diff').length;
+  fireEvent.click(screen.getByRole('button', { name: 'Undo to before this turn' }));
   await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Confirm undo', danger: true, message: 'Undo 2 turns affecting 1 files? Stop external writes before continuing. Later non-overlapping edits are kept, and your current state will be backed up.' }));
+  expect(screen.getByRole('banner', { name: 'View changes' })).toBeInTheDocument();
+  expect(document.querySelector('.checkpoint-changes')).toBe(diff);
+  expect(request.mock.calls.filter(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'diff')).toHaveLength(calls);
+  expect(screen.queryByRole('button', { name: 'Show undo preview' })).not.toBeInTheDocument();
+  expect(document.querySelector('.checkpoint-undo-check')).not.toBeInTheDocument();
   expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'execute')).toBe(false);
   confirm.mockResolvedValue(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm undo' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Undo to before this turn' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Undo to before this turn' }));
   await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'execute', preview_id: 'undo-preview' } } }), expect.anything()));
   expect(await screen.findByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
 });
-it('blocks applying a conflicted review preview', async () => {
-  setupReview(reviewTask(), ['Overlapping edit in map/validate.ts']);
+it('shows conflicts inline without replacing the historical diff or asking to execute', async () => {
+  const request = setupReview(reviewTask(), ['Overlapping edit in map/validate.ts']);
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(true);
   fireEvent.click((await screen.findAllByRole('button', { name: 'View changes' }))[1]);
-  fireEvent.click(await screen.findByRole('button', { name: 'Undo to before this turn' }));
+  await screen.findByText('validate.ts');
+  const diff = document.querySelector('.checkpoint-changes');
+  fireEvent.click(screen.getByRole('button', { name: 'Undo to before this turn' }));
   expect(await screen.findByText('Overlapping edit in map/validate.ts')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Confirm undo' })).toBeDisabled();
+  expect(document.querySelector('.checkpoint-changes')).toBe(diff);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'execute')).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Show undo preview' })).not.toBeInTheDocument();
+  expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'diff' && cmd.payload.action.source.type === 'preview')).toBe(false);
+  expect(screen.getByRole('banner', { name: 'View changes' })).toBeInTheDocument();
 });
 it.each(['undone', 'recording', 'recovery'] as const)('blocks review undo when %s', async state => {
   const task = reviewTask();
@@ -225,9 +241,81 @@ it('does not apply an old preview if the workspace changes during confirmation',
   vi.spyOn(dialogs, 'confirmDialog').mockImplementation(() => new Promise(done => { resolve = done; }));
   fireEvent.click((await screen.findAllByRole('button', { name: 'View changes' }))[1]);
   fireEvent.click(await screen.findByRole('button', { name: 'Undo to before this turn' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Confirm undo' }));
+  await waitFor(() => expect(resolve).toBeTypeOf('function'));
   const { act } = await import('@testing-library/react');
   await act(async () => { useAppStore.setState({ snapshot: { ...snapshot, workspace: { ...snapshot.workspace, id: 'other' } } }); resolve(true); });
+  expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'execute')).toBe(false);
+});
+
+it.each(['cancel', 'fail'] as const)('keeps the diff visible while checking and handles %s without a confirmation', async outcome => {
+  const request = setupReview();
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(true);
+  fireEvent.click((await screen.findAllByRole('button', { name: 'View changes' }))[1]);
+  await screen.findByText('validate.ts');
+  const diff = document.querySelector('.checkpoint-changes');
+  const previous = request.getMockImplementation()!;
+  let resolve!: (value: unknown) => void;
+  let reject!: (error: Error) => void;
+  request.mockImplementation((command, options) => command.type === 'checkpoint' && command.payload.action.type === 'preview' ? new Promise((done, fail) => { resolve = done; reject = fail; }) : previous(command, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Undo to before this turn' }));
+  expect(await screen.findByRole('button', { name: 'Checking…' })).toBeDisabled();
+  expect(document.querySelector('.checkpoint-changes')).toBe(diff);
+  if (outcome === 'cancel') {
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel operation' }));
+    await act(async () => resolve({ id: 'late', taskId: 'review-task', files: reviewFiles, conflicts: [], bringBack: false, fingerprint: 'fp' }));
+  } else {
+    await act(async () => reject(new Error('Cannot capture stable state')));
+    expect(await screen.findByText('Cannot capture stable state')).toBeInTheDocument();
+  }
+  expect(confirm).not.toHaveBeenCalled();
+  expect(document.querySelector('.checkpoint-changes')).toBe(diff);
+  expect(await screen.findByRole('button', { name: 'Undo to before this turn' })).toBeEnabled();
+});
+
+it.each(['history', 'latest'] as const)('confirms %s undo without opening or loading a change view', async entry => {
+  const request = setupReview();
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(false);
+  const button = entry === 'history' ? (await screen.findAllByRole('button', { name: 'Undo to before this turn' }))[1] : await screen.findByRole('button', { name: 'Undo latest turn' });
+  fireEvent.click(button);
+  await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining(`Undo ${entry === 'history' ? 2 : 1} turns affecting 1 files?`) }));
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+  expect(screen.getByRole('navigation', { name: 'Checkpoint tasks' })).toBeInTheDocument();
+  expect(screen.queryByRole('banner', { name: 'View changes' })).not.toBeInTheDocument();
+  expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && ['detail', 'diff', 'execute'].includes(cmd.payload.action.type))).toBe(false);
+  await waitFor(() => expect(button).toBeEnabled());
+  confirm.mockResolvedValue(true);
+  fireEvent.click(button);
+  await waitFor(() => expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'execute')).toBe(true));
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+  expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && ['detail', 'diff'].includes(cmd.payload.action.type))).toBe(false);
+});
+
+it.each(['conflict', 'empty'] as const)('keeps %s undo results on the history page without confirmation', async outcome => {
+  const notice = outcome === 'conflict' ? 'Overlapping edit in map/validate.ts' : 'No changes to apply';
+  const request = setupReview(reviewTask(), outcome === 'conflict' ? [notice] : [], outcome === 'empty' ? [] : reviewFiles);
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(true);
+  fireEvent.click(await screen.findByRole('button', { name: 'Undo latest turn' }));
+  expect(await screen.findByText(notice)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+  expect(screen.queryByRole('banner', { name: 'View changes' })).not.toBeInTheDocument();
+  expect(confirm).not.toHaveBeenCalled();
+  expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && ['detail', 'diff', 'execute'].includes(cmd.payload.action.type))).toBe(false);
+});
+
+it('does not execute an outer undo after switching tasks during confirmation', async () => {
+  const task = reviewTask();
+  const request = setupReview(task);
+  let resolve!: (value: boolean) => void;
+  vi.spyOn(dialogs, 'confirmDialog').mockImplementation(() => new Promise(done => { resolve = done; }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Undo latest turn' }));
+  await waitFor(() => expect(resolve).toBeTypeOf('function'));
+  const { useCheckpointStore, selectCheckpointTask } = await import('../checkpoints/store');
+  await act(async () => {
+    useCheckpointStore.setState({ listing: { ...listing, tasks: [task, { ...task, id: 'another-task', name: 'Another task', checkpoints: [] }] } });
+    selectCheckpointTask('another-task');
+    resolve(true);
+  });
   expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'execute')).toBe(false);
 });
 
@@ -315,7 +403,7 @@ it('opens changes by clicking the record title and keeps manual and automatic re
   fireEvent.click(title);
   await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'detail', task_id: 'review-task', checkpoint_id: 'first-turn' } } }), expect.anything()));
   fireEvent.click(await screen.findByRole('button', { name: 'Back to checkpoints' }));
-  expect(screen.getByRole('button', { name: 'Preview undo latest turn' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Undo latest turn' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Hooks verified' })).toHaveAttribute('title', 'A matching hook round was recorded successfully.');
 });
 
@@ -340,64 +428,78 @@ it('describes each task mode in the sidebar and updates connection status for th
   expect(within(connection).getByText('Hook state: error')).toHaveAttribute('data-status', 'error');
   expect(connection).toHaveAttribute('title', 'Connection issue task · Hook handler failed');
   fireEvent.click(connection);
-  expect(screen.getByRole('heading', { name: 'Task settings' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Connection details' })).toBeInTheDocument();
   expect(screen.getByText('Hook handler failed')).toBeInTheDocument();
 });
-it('does not claim a connection just because hooks are installed and has a usable entry without tasks', async () => {
+it('keeps an unconfigured task connection separate from global Hook installation', async () => {
   const bridge = new MockBridge(() => []);
   vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing, hooksInstalled: true });
+  const globalSettings = vi.fn();
   useAppStore.setState({ bridge, snapshot });
-  render(<CheckpointPanel onClose={() => {}} />);
+  render(<CheckpointPanel onClose={() => {}} onOpenGlobalSettings={globalSettings} />);
   await screen.findByText('No checkpoint tasks yet');
   const connection = screen.getByRole('button', { name: 'Codex connection' });
   expect(within(connection).getByText('Not configured')).toBeInTheDocument();
   fireEvent.click(connection);
-  expect(screen.getByRole('button', { name: 'Update Codex hooks' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Update Codex hooks' })).not.toBeInTheDocument();
+  fireEvent.click(within(screen.getByRole('main')).getByRole('button', { name: 'Checkpoint settings' }));
+  expect(globalSettings).toHaveBeenCalledOnce();
 });
 
-it('identifies the settings task, places connection before cleanup, and folds usage instructions', async () => {
+it('keeps task configuration and connection diagnostics on separate pages', async () => {
   const task = reviewTask();
   task.lastHookAt = '2026-10-20T04:24:02Z';
   setupReview(task);
   fireEvent.click(await screen.findByRole('button', { name: 'Task settings' }));
   expect(screen.getByText('· Map improvements')).toHaveAttribute('title', 'Map improvements');
-  expect([...document.querySelectorAll('.checkpoint-settings-section h4')].map(node => node.textContent)).toEqual(['Working directory', 'Codex connection', 'Checkpoint storage', 'Remove checkpoint task']);
-  const instructions = screen.getByText('Usage instructions').closest('details')!;
-  expect(instructions).not.toHaveAttribute('open');
-  fireEvent.click(screen.getByText('Usage instructions'));
-  expect(instructions).toHaveAttribute('open');
-  expect(screen.getByText(/Last event:/)).toBeInTheDocument();
+  expect([...document.querySelectorAll('.checkpoint-settings-section h4')].map(node => node.textContent)).toEqual(['Working directory', 'Checkpoint storage', 'Remove checkpoint task']);
+  expect(screen.queryByText('Usage instructions')).not.toBeInTheDocument();
   expect(screen.getByText('Remove this task and its checkpoint history. Original project files are kept.')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Back to checkpoints' }));
   expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
 });
-it('keeps original-directory open actions in More and routes them to the selected task roots', async () => {
-  setupReview();
+it.each(['original', 'worktree'] as const)('opens %s task roots from the directory menu in the task view', async isolation => {
+  setupReview({ ...reviewTask(), isolation, path: '/task workspace', roots: ['/task workspace'] });
   const bridge = useAppStore.getState().bridge!;
   const newWindow = vi.spyOn(bridge, 'openInNewWindow').mockResolvedValue('window');
   const currentWindow = vi.fn().mockResolvedValue(undefined);
   useAppStore.setState({ openWorkspace: currentWindow });
-  fireEvent.click(await screen.findByRole('button', { name: 'Task settings' }));
-  expect(screen.queryByRole('button', { name: 'Open in VersionDock' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Open task in this window' })).not.toBeInTheDocument();
-  const more = screen.getByRole('button', { name: 'More actions' });
-  act(() => more.focus());
-  fireEvent.click(more);
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Open in VersionDock' }));
-  expect(newWindow).toHaveBeenCalledWith(['/project']);
+  const more = await screen.findByRole('button', { name: 'Open task' });
+  expect(more.querySelector('.codicon-link-external')).toBeInTheDocument();
+  act(() => more.focus()); fireEvent.click(more);
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new window' }));
+  expect(newWindow).toHaveBeenCalledWith(['/task workspace']);
   expect(currentWindow).not.toHaveBeenCalled();
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   fireEvent.click(more);
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Open task in this window' }));
-  expect(currentWindow).toHaveBeenCalledWith(['/project']);
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Open in current window' }));
+  expect(currentWindow).toHaveBeenCalledWith(['/task workspace']);
 });
-it('keeps isolated workspace open actions visible', async () => {
-  const task = { ...reviewTask(), isolation: 'worktree' as const };
-  setupReview(task);
-  fireEvent.click(await screen.findByRole('button', { name: 'Task settings' }));
-  expect(screen.getByRole('button', { name: 'Open in VersionDock' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Open task in this window' })).toBeEnabled();
-  expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument();
+it('disables opening the task in the current window when its roots are already open', async () => {
+  setupReview();
+  fireEvent.click(await screen.findByRole('button', { name: 'Open task' }));
+  expect(screen.getByRole('menuitem', { name: 'Open in current window' })).toBeDisabled();
+  expect(screen.getByRole('menuitem', { name: 'Open in new window' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Copy Codex project path' })).toBeInTheDocument();
+});
+it('launches Codex with the registered task id and displays failures in the panel', async () => {
+  const request = setupReview();
+  vi.spyOn(useAppStore.getState().bridge!, 'platform').mockReturnValue('macos');
+  await screen.findByRole('button', { name: 'Open task' });
+  const previous = request.getMockImplementation()!;
+  request.mockImplementation((command, options) => command.type === 'checkpoint' && command.payload.action.type === 'openInCodex' ? Promise.reject(new Error('Codex desktop app is not installed')) : previous(command, options));
+  fireEvent.click(screen.getByRole('button', { name: 'Open task' }));
+  expect(screen.getByRole('menuitem', { name: 'Open in Codex' }).querySelector('svg.codicon-codex')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Open in Codex' }));
+  expect(await screen.findByText('Codex desktop app is not installed')).toBeInTheDocument();
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'openInCodex', task_id: 'review-task' } } }), expect.objectContaining({ showProgress: false }));
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+});
+it.each(['windows', 'linux'] as const)('keeps Codex opening unavailable on %s', async platform => {
+  setupReview();
+  vi.spyOn(useAppStore.getState().bridge!, 'platform').mockReturnValue(platform);
+  fireEvent.click(await screen.findByRole('button', { name: 'Open task' }));
+  expect(screen.getByRole('menuitem', { name: 'Open in Codex' })).toBeDisabled();
 });
 it('shows a simple empty cleanup result but allows reclaiming unused bytes with zero history records', async () => {
   const task = reviewTask();
@@ -479,7 +581,7 @@ it('returns to the existing task directly from the overlap notice', async () => 
   expect(screen.queryByRole('textbox', { name: 'Task name' })).not.toBeInTheDocument();
 });
 
-it('renames the current task from settings and refreshes both the sidebar and title', async () => {
+it('renames the current task from its heading and refreshes both the sidebar and title', async () => {
   const task = reviewTask();
   const request = setupReview(task);
   request.mockImplementation(command => {
@@ -487,9 +589,8 @@ it('renames the current task from settings and refreshes both the sidebar and ti
     return Promise.resolve({ ...listing, tasks: [task], connections: { [task.id]: { status: 'verified', verifiedAt: '2026-10-20T00:00:00Z', error: null } } }) as never;
   });
   const prompt = vi.spyOn(dialogs, 'promptDialog').mockResolvedValue('  地图与权限联调  ');
-  fireEvent.click(await screen.findByRole('button', { name: 'Task settings' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Rename task' }));
-  expect(await screen.findByText('· 地图与权限联调')).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: 'Rename task' }));
+  expect(await screen.findByRole('heading', { name: '地图与权限联调' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '地图与权限联调' })).toBeInTheDocument();
   expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ title: 'Rename task', inputLabel: 'Task name', initialValue: 'Map improvements' }));
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'renameTask', task_id: 'review-task', name: '  地图与权限联调  ' } } }), expect.anything());
@@ -497,8 +598,7 @@ it('renames the current task from settings and refreshes both the sidebar and ti
 it.each([null, ' Map improvements '])('does not rename for a cancelled or unchanged name: %s', async value => {
   const request = setupReview();
   vi.spyOn(dialogs, 'promptDialog').mockResolvedValue(value);
-  fireEvent.click(await screen.findByRole('button', { name: 'Task settings' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Rename task' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Rename task' }));
   await act(async () => {});
   expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'renameTask')).toBe(false);
 });
@@ -512,8 +612,7 @@ it('does not apply a task rename after selection changes during the prompt', asy
   act(() => useCheckpointStore.setState({ listing: { ...listing, tasks: [task, other] } }));
   let resolve!: (value: string) => void;
   vi.spyOn(dialogs, 'promptDialog').mockImplementation(() => new Promise(done => { resolve = done; }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Task settings' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Rename task' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Rename task' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Other task' }));
   await act(async () => resolve('Wrong target'));
   expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'renameTask')).toBe(false);
@@ -541,25 +640,141 @@ it('loads paged history, searches messages, filters repositories and retains the
   fireEvent.click(screen.getByText('Older matching turn'));
   expect(await screen.findByText('Undoing this checkpoint also undoes 72 later completed turns.')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Back to checkpoints' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Search checkpoints' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Search checkpoints' }), { target: { value: '追加正文' } });
   await waitFor(() => expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'history' && command.payload.action.query === '追加正文' && command.payload.action.offset === 0)).toBe(true));
-  fireEvent.click(screen.getByRole('combobox', { name: 'Filter checkpoint repository' }));
-  fireEvent.click(screen.getByRole('option', { name: 'repo' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Filter checkpoint repository' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'repo' }));
   await waitFor(() => expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'history' && command.payload.action.repository === '/project/repo')).toBe(true));
 });
-it('previews redo as a protected restore instead of executing it immediately', async () => {
+function setupRedo(conflicts: string[] = [], files = reviewFiles) {
   const task = reviewTask();
   task.checkpoints.forEach(point => { point.status = 'undone'; });
   const bridge = new MockBridge(() => []);
   const request = vi.spyOn(bridge, 'request').mockImplementation(command => {
-    if (command.type === 'checkpoint' && command.payload.action.type === 'previewRedo') return Promise.resolve({ id: 'redo-preview', taskId: task.id, redoOf: 'undo-tx', bringBack: false, files: reviewFiles, conflicts: [], fingerprint: 'fp' }) as never;
-    return Promise.resolve({ ...listing, tasks: [task], redoTasks: [task.id] }) as never;
+    if (command.type === 'checkpoint' && command.payload.action.type === 'detail') return Promise.resolve(reviewFiles) as never;
+    if (command.type === 'checkpoint' && command.payload.action.type === 'diff') return Promise.resolve({ path: command.payload.action.path, content: '@@ -1 +1 @@\n-old\n+new\n', language: 'typescript', binary: false, truncated: false, lineCount: 3 }) as never;
+    if (command.type === 'checkpoint' && command.payload.action.type === 'previewRedo') return Promise.resolve({ id: 'redo-preview', taskId: task.id, redoOf: 'undo-tx', bringBack: false, files, conflicts, fingerprint: 'fp' }) as never;
+    if (command.type === 'checkpoint' && command.payload.action.type === 'execute') {
+      task.checkpoints.forEach(point => { point.status = 'completed'; });
+      return Promise.resolve({ status: 'succeeded' }) as never;
+    }
+    const available = task.checkpoints.every(point => point.status === 'undone');
+    return Promise.resolve({ ...listing, tasks: [task], redoTasks: available ? [task.id] : [], redoCheckpoints: available ? { [task.id]: task.checkpoints.map(point => point.id) } : {} }) as never;
   });
   useAppStore.setState({ bridge, snapshot });
   render(<CheckpointPanel onClose={() => {}} />);
+  return request;
+}
+it('shows redo only in eligible details and keeps the historical diff when confirmation is cancelled', async () => {
+  const request = setupRedo();
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(false);
+  await screen.findByRole('heading', { name: 'Checkpoint history' });
+  expect(screen.getAllByRole('button', { name: 'Redo last undo' })).toHaveLength(1);
+  fireEvent.click((await screen.findAllByRole('button', { name: 'View changes' }))[1]);
+  await screen.findByText('validate.ts');
+  const diff = document.querySelector('.checkpoint-changes');
+  const count = request.mock.calls.filter(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'diff').length;
+  const button = screen.getByRole('button', { name: 'Redo last undo' });
+  expect(button.closest('footer')).toHaveClass('checkpoint-footer');
+  expect(screen.queryByRole('button', { name: 'Undo to before this turn' })).not.toBeInTheDocument();
+  expect(screen.getByText('Reapplies all 2 turns from the last undo.')).toBeInTheDocument();
+  fireEvent.click(button);
+  await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  expect(document.querySelector('.checkpoint-changes')).toBe(diff);
+  expect(request.mock.calls.filter(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'diff')).toHaveLength(count);
+  expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'execute')).toBe(false);
+  await waitFor(() => expect(button).toBeEnabled());
+  confirm.mockResolvedValue(true);
+  fireEvent.click(button);
+  await waitFor(() => expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'execute')).toBe(true));
+});
+it.each(['older', 'missing', 'invalidated'] as const)('hides detail redo for %s eligibility while retaining historical changes', async reason => {
+  setupRedo();
+  fireEvent.click((await screen.findAllByRole('button', { name: 'View changes' }))[1]);
+  await screen.findByText('validate.ts');
+  const { useCheckpointStore } = await import('../checkpoints/store');
+  act(() => {
+    const current = useCheckpointStore.getState().listing!;
+    useCheckpointStore.setState({ listing: { ...current, redoTasks: reason === 'invalidated' ? [] : current.redoTasks, redoCheckpoints: reason === 'missing' ? undefined : { 'review-task': [reason === 'older' ? 'later-turn' : 'first-turn'] } } });
+  });
+  expect(screen.queryByRole('button', { name: 'Redo last undo' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Undo to before this turn' })).toBeDisabled();
+  expect(screen.getByText('validate.ts')).toBeInTheDocument();
+});
+it('keeps redo conflicts inside the detail page', async () => {
+  const request = setupRedo(['Overlapping redo edit']);
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(true);
+  fireEvent.click((await screen.findAllByRole('button', { name: 'View changes' }))[0]);
+  await screen.findByText('validate.ts');
+  const diff = document.querySelector('.checkpoint-changes');
+  fireEvent.click(screen.getByRole('button', { name: 'Redo last undo' }));
+  expect(await screen.findByText('Overlapping redo edit')).toBeInTheDocument();
+  expect(document.querySelector('.checkpoint-changes')).toBe(diff);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'execute')).toBe(false);
+});
+it('confirms redo directly on the history page and only executes after confirmation', async () => {
+  const request = setupRedo();
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(false);
+  const button = await screen.findByRole('button', { name: 'Redo last undo' });
+  fireEvent.click(button);
+  await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Redo last undo', message: 'Reapply the changes from the last undo, affecting 1 files? Stop external writes before continuing. Later non-overlapping edits are kept, and your current state will be backed up.' }));
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+  expect(screen.queryByRole('banner', { name: 'Redo preview' })).not.toBeInTheDocument();
+  expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && ['detail', 'diff', 'execute'].includes(command.payload.action.type))).toBe(false);
+  await waitFor(() => expect(button).toBeEnabled());
+  confirm.mockResolvedValue(true);
+  fireEvent.click(button);
+  await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'execute', preview_id: 'redo-preview' } } }), expect.anything()));
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+});
+it.each(['conflict', 'empty'] as const)('keeps redo %s on the history page without asking to execute', async outcome => {
+  const notice = outcome === 'conflict' ? 'Later overlapping edit' : 'No changes to apply';
+  const request = setupRedo(outcome === 'conflict' ? [notice] : [], outcome === 'empty' ? [] : reviewFiles);
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(true);
   fireEvent.click(await screen.findByRole('button', { name: 'Redo last undo' }));
-  expect(await screen.findByRole('banner', { name: 'Redo preview' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Apply restore preview' })).toBeEnabled();
+  expect(await screen.findByText(notice)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+  expect(confirm).not.toHaveBeenCalled();
+  expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && ['detail', 'diff', 'execute'].includes(command.payload.action.type))).toBe(false);
+});
+it.each(['cancel', 'fail'] as const)('keeps the history visible during redo preflight and handles %s', async outcome => {
+  const request = setupRedo();
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(true);
+  const button = await screen.findByRole('button', { name: 'Redo last undo' });
+  const previous = request.getMockImplementation()!;
+  let resolve!: (value: unknown) => void;
+  let reject!: (error: Error) => void;
+  request.mockImplementation((command, options) => command.type === 'checkpoint' && command.payload.action.type === 'previewRedo' ? new Promise((done, fail) => { resolve = done; reject = fail; }) : previous(command, options));
+  fireEvent.click(button);
+  expect(button).toBeDisabled();
+  expect(screen.getByRole('heading', { name: 'Checkpoint history' })).toBeInTheDocument();
+  if (outcome === 'cancel') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel operation' }));
+    await act(async () => resolve({ id: 'late-redo', taskId: 'review-task', redoOf: 'undo-tx', bringBack: false, files: reviewFiles, conflicts: [], fingerprint: 'fp' }));
+  } else {
+    await act(async () => reject(new Error('Redo preflight failed')));
+    expect(await screen.findByText('Redo preflight failed')).toBeInTheDocument();
+  }
+  await waitFor(() => expect(button).toBeEnabled());
+  expect(confirm).not.toHaveBeenCalled();
+  expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'execute')).toBe(false);
+});
+it.each(['task', 'preview', 'close'] as const)('does not execute a stale redo confirmation after changing %s', async change => {
+  const request = setupRedo();
+  let resolve!: (value: boolean) => void;
+  vi.spyOn(dialogs, 'confirmDialog').mockImplementation(() => new Promise(done => { resolve = done; }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Redo last undo' }));
+  await waitFor(() => expect(resolve).toBeTypeOf('function'));
+  const { useCheckpointStore, selectCheckpointTask } = await import('../checkpoints/store');
+  await act(async () => {
+    if (change === 'task') selectCheckpointTask('another-task');
+    else if (change === 'preview') useCheckpointStore.setState({ preview: { ...useCheckpointStore.getState().preview!, id: 'replacement' } });
+    else cleanup();
+    resolve(true);
+  });
   expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'execute')).toBe(false);
 });
 it('shows the open recording name, elapsed time and last event without closing it automatically', async () => {
@@ -572,4 +787,54 @@ it('shows the open recording name, elapsed time and last event without closing i
   expect(screen.getByText(/Last event:/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Finish recording' })).toBeEnabled();
   expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && ['finish', 'abandon'].includes(command.payload.action.type))).toBe(false);
+});
+
+it('shows a checkmark and copied tooltip for two seconds without sending a notification', async () => {
+  setupReview();
+  const copy = await screen.findByRole('button', { name: 'Copy Codex project path' });
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const notifications = useAppStore.getState().notifications;
+  vi.useFakeTimers();
+  fireEvent.click(copy);
+  await act(async () => {});
+  expect(writeText).toHaveBeenCalledWith('/project');
+  const copied = screen.getByRole('button', { name: 'Copied' });
+  expect(copied).toHaveAttribute('title', 'Copied');
+  expect(copied.querySelector('.codicon-check')).toBeInTheDocument();
+  expect(useAppStore.getState().notifications).toEqual(notifications);
+  act(() => vi.advanceTimersByTime(1999));
+  expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(1));
+  expect(screen.getByRole('button', { name: 'Copy Codex project path' }).querySelector('.codicon-copy')).toBeInTheDocument();
+  vi.useRealTimers();
+});
+it('keeps failed copies in the panel and clears their error after a successful retry', async () => {
+  setupReview();
+  const copy = await screen.findByRole('button', { name: 'Copy Codex project path' });
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('Clipboard unavailable')).mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  fireEvent.click(copy);
+  expect(await screen.findByText('Copy failed; select and copy the task path.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
+  fireEvent.click(copy);
+  expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  expect(screen.queryByText('Copy failed; select and copy the task path.')).not.toBeInTheDocument();
+});
+it.each(['success', 'failure'] as const)('ignores a late clipboard %s after changing tasks', async outcome => {
+  const task = reviewTask();
+  setupReview(task);
+  const copy = await screen.findByRole('button', { name: 'Copy Codex project path' });
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const writeText = vi.fn(() => new Promise<void>((done, fail) => { resolve = done; reject = fail; }));
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  fireEvent.click(copy);
+  expect(copy).toBeDisabled();
+  const { useCheckpointStore } = await import('../checkpoints/store');
+  act(() => useCheckpointStore.setState({ listing: { ...listing, tasks: [task, { ...task, id: 'other', name: 'Another task', path: '/other' }] }, selectedTaskId: 'other' }));
+  expect(screen.getByRole('button', { name: 'Copy Codex project path' })).toBeEnabled();
+  await act(async () => { if (outcome === 'success') resolve(); else reject(new Error('Old clipboard error')); });
+  expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Copy failed; select and copy the task path.')).not.toBeInTheDocument();
 });

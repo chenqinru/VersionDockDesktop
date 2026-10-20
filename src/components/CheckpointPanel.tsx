@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Checkpoint, RecordingMode, RepositoryMeta, TaskIsolation, TaskWorkspace, WorkspaceDescriptor } from '../bindings/generated';
-import { useAppStore } from '../store/appStore';
+import { useAppStore, workspacePathsEqual } from '../store/appStore';
 import { useI18n } from '../i18n';
 import { checkpointWorkspaceChanged, refreshCheckpoints, runCheckpointAction, cancelCheckpointAction, selectCheckpointTask, useCheckpointStore } from '../checkpoints/store';
 import { DialogSurface } from './DialogSurface';
@@ -8,7 +8,6 @@ import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { Codicon } from './Codicon';
 import { Input } from './Input';
-import { SearchInput } from './SearchInput';
 import { useCheckpointHistory } from './useCheckpointHistory';
 import { CheckpointStorage } from './CheckpointStorage';
 import { taskConnection, compactConnectionLabel, connectionLabel as hookConnectionLabel } from '../checkpoints/connection';
@@ -22,6 +21,8 @@ import { confirmDialog, promptDialog } from './dialogService';
 import { formatHistoryDate } from '../history/dates';
 import { CheckpointChangesView } from './CheckpointChangesView';
 import { CheckpointPrompt } from './CheckpointPrompt';
+import { CheckpointHistoryToolbar } from './CheckpointHistoryToolbar';
+import { useCheckpointUndo } from './useCheckpointUndo';
 import { ContextMenu } from './ContextMenu';
 import './CheckpointPanel.css';
 
@@ -37,7 +38,37 @@ function repositoryDisplayPath(path: string, roots: string[]) {
   return root === undefined ? path : normalized.slice(root.length + 1) || '.';
 }
 
-export function CheckpointPanel({ onClose, project, projectRepositories, navigation, projectSelection, projectLoading = false, projectTasks, onTaskCreated, onCreatingChange }: { onClose: () => void; project?: WorkspaceDescriptor; projectRepositories?: { meta: RepositoryMeta }[]; navigation?: (newTask: () => void, blocked: boolean, showTask: () => void) => ReactNode; projectSelection?: ReactNode; projectLoading?: boolean; projectTasks?: TaskWorkspace[]; onTaskCreated?: () => void; onCreatingChange?: (creating: boolean) => void }) {
+function CopyTaskPathButton({ path, disabled }: { path: string; disabled: boolean }) {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<'idle' | 'copying' | 'copied'>('idle');
+  const mounted = useRef(true);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; clearTimeout(timer.current); };
+  }, []);
+  const copy = async () => {
+    clearTimeout(timer.current);
+    setStatus('copying');
+    const errorMessage = t('Copy failed; select and copy the task path.');
+    try {
+      await navigator.clipboard.writeText(path);
+      if (!mounted.current) return;
+      setStatus('copied');
+      useCheckpointStore.setState(state => state.error === errorMessage ? { error: null } : state);
+      timer.current = setTimeout(() => setStatus('idle'), 2000);
+    } catch {
+      if (!mounted.current) return;
+      setStatus('idle');
+      useCheckpointStore.setState({ error: errorMessage });
+    }
+  };
+  return <IconButton title={t(status === 'copied' ? 'Copied' : 'Copy Codex project path')} style={status === 'copied' ? { color: 'var(--versiondock-success)' } : undefined} disabled={disabled || status === 'copying'} onClick={() => void copy()}>
+    <Codicon name={status === 'copied' ? 'check' : status === 'copying' ? 'loading codicon-modifier-spin' : 'copy'} />
+  </IconButton>;
+}
+
+export function CheckpointPanel({ onClose, project, projectRepositories, navigation, projectSelection, projectLoading = false, projectTasks, onTaskCreated, onCreatingChange, managementContent, managementBusy = false, onOpenGlobalSettings }: { onClose: () => void; project?: WorkspaceDescriptor; projectRepositories?: { meta: RepositoryMeta }[]; navigation?: (newTask: () => void, blocked: boolean, showTask: () => void) => ReactNode; projectSelection?: ReactNode; projectLoading?: boolean; projectTasks?: TaskWorkspace[]; onTaskCreated?: () => void; onCreatingChange?: (creating: boolean) => void; managementContent?: ReactNode; managementBusy?: boolean; onOpenGlobalSettings?: () => void }) {
   const { t, language } = useI18n();
   const currentWorkspace = useAppStore(state => state.snapshot?.workspace);
   const workspace = project ?? currentWorkspace;
@@ -50,6 +81,7 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
   const [creating, setCreatingValue] = useState(false);
   const setCreating = (value: boolean) => { setCreatingValue(value); onCreatingChange?.(value); };
   const [settingsTask, setSettingsTask] = useState<string | null>(null);
+  const [connectionTask, setConnectionTask] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [nameTouched, setNameTouched] = useState(false);
   const [isolation, setIsolation] = useState<TaskIsolation>('original');
@@ -88,18 +120,24 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
   const nameError = nameTouched && !name.trim() ? t('Task name cannot be empty or whitespace') : undefined;
   const active = task ? pending(task) : false;
   const recovery = state.listing?.recovery.filter(report => ['failed', 'pending'].includes(report.status)) ?? [];
-  const blocked = state.busy || recovery.length > 0;
-  const changes = state.preview?.files ?? state.details;
+  const blocked = state.busy || managementBusy || recovery.length > 0;
+  const inlinePreview = state.preview && !state.preview.bringBack ? state.preview : null;
+  const displayedPreview = inlinePreview ? null : state.preview;
+  const changes = displayedPreview?.files ?? state.details;
+  const undo = useCheckpointUndo(workspace?.id, task?.id, independent);
   const showSettings = settingsTask === (task?.id ?? 'global');
-  const reviewing = Boolean(task && changes && !creating && !showSettings);
+  const showConnection = connectionTask === (task?.id ?? 'global');
+  const reviewing = Boolean(task && changes && !creating && !showSettings && !showConnection && !managementContent);
   const reviewPoint = task?.checkpoints.find(point => point.id === state.detailsCheckpointId) ?? (reviewSelection && task && reviewSelection.taskId === task.id ? reviewSelection.point : undefined);
+  const redoCheckpoints = task ? state.listing?.redoCheckpoints?.[task.id] ?? [] : [];
+  const canRedoReview = Boolean(reviewPoint?.status === 'undone' && task && state.listing?.redoTasks?.includes(task.id) && redoCheckpoints.includes(reviewPoint.id));
   const followingTurns = reviewSelection?.point.id === reviewPoint?.id && reviewSelection?.following !== undefined ? reviewSelection.following : task && reviewPoint ? task.checkpoints.slice(task.checkpoints.indexOf(reviewPoint) + 1).filter(point => point.status === 'completed').length : 0;
   const connection = taskConnection(task, state.listing?.connections);
   const hookConnected = connection.status === 'verified';
   const connectionStatus = hookConnected ? 'connected' : ['error', 'invalid'].includes(connection.status) ? 'error' : connection.status;
   const connectionLabel = t(hookConnectionLabel(connection.status));
   const connectionDetail = connection.error ? t(connection.error) : t(hookConnected ? 'A matching hook round was recorded successfully.' : hookConnectionLabel(connection.status));
-  const history = useCheckpointHistory(task, state.listing, historyQuery, historyRepository, onlyChanges, historyOffset, !creating && !showSettings && !reviewing, workspace?.id);
+  const history = useCheckpointHistory(task, state.listing, historyQuery, historyRepository, onlyChanges, historyOffset, !creating && !showSettings && !showConnection && !reviewing && !managementContent, workspace?.id);
   if (history.page && history.page.offset !== historyOffset) setHistoryOffset(history.page.offset);
   const historyPoints = history.page?.points ?? task?.checkpoints ?? [];
   const visiblePoints = history.page ? historyPoints : [...historyPoints].reverse().filter(point => !onlyChanges || !emptyPoint(point));
@@ -113,7 +151,8 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
   useEffect(() => useCheckpointStore.subscribe((next, previous) => {
     if (next.workspaceId !== previous.workspaceId || next.selectedTaskId !== previous.selectedTaskId || next.busy || next.preview || next.details) closeMenu();
   }), [closeMenu]);
-  const directoryMenuOpen = Boolean(directoryMenu && task?.isolation === 'original' && showSettings && !creating && !blocked && directoryMenu.workspaceId === workspace?.id && directoryMenu.taskId === task.id);
+  const directoryMenuOpen = Boolean(directoryMenu && task && !showConnection && !showSettings && !creating && !managementContent && !blocked && directoryMenu.workspaceId === workspace?.id && directoryMenu.taskId === task.id);
+  const taskOpenHere = Boolean(task && currentWorkspace && workspacePathsEqual(currentWorkspace.paths, task.roots));
   const activePoint = task?.checkpoints.find(point => ['recording', 'interrupted', 'incomplete'].includes(point.status));
   const activePointId = activePoint?.id;
   useEffect(() => { if (!activePointId) return; const first = window.setTimeout(() => setNow(Date.now()), 0); const timer = window.setInterval(() => setNow(Date.now()), 60000); return () => { window.clearTimeout(first); window.clearInterval(timer); }; }, [activePointId]);
@@ -125,17 +164,17 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
     setReviewSelection({ taskId: task.id, point, following: history.page?.followingTurns?.[point.id] });
     closeMenu(); void runCheckpointAction({ type: 'detail', task_id: task.id, checkpoint_id: point.id });
   };
-  const previewUndo = (point: Checkpoint) => {
+  const undoCheckpoint = (point: Checkpoint) => {
     if (!task || blocked || active) return;
-    setReviewSelection({ taskId: task.id, point, following: history.page?.followingTurns?.[point.id] });
-    void runCheckpointAction({ type: 'preview', task_id: task.id, checkpoint_id: point.id, bring_back: false });
+    void undo.undo(point, history.page?.followingTurns?.[point.id] ?? task.checkpoints.slice(task.checkpoints.findIndex(item => item.id === point.id) + 1).filter(item => item.status === 'completed').length);
   };
   const newTask = () => {
-    clearReview(); setSettingsTask(null); setCreating(true); setNameTouched(false);
+    clearReview(); setSettingsTask(null); setConnectionTask(null); setCreating(true); setNameTouched(false);
     setSelected(repositories.filter(repo => repo.meta.kind === 'git' && !repo.meta.isSubmodule).map(repo => repo.meta.id));
   };
-  const openSettings = () => { clearReview(); setCreating(false); setSettingsTask(task?.id ?? 'global'); };
-  const showTask = () => { clearReview(); setCreating(false); setSettingsTask(null); setExpandedPrompt(null); setRecordingName(''); };
+  const openSettings = () => { clearReview(); setCreating(false); setConnectionTask(null); setSettingsTask(task?.id ?? 'global'); };
+  const openConnection = () => { clearReview(); setCreating(false); setSettingsTask(null); setConnectionTask(task?.id ?? 'global'); };
+  const showTask = () => { clearReview(); setCreating(false); setSettingsTask(null); setConnectionTask(null); setExpandedPrompt(null); setRecordingName(''); };
 
   useEffect(() => {
     checkpointWorkspaceChanged(workspace?.id ?? null, independent);
@@ -150,9 +189,6 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
   const remove = async () => {
     if (!task) return;
     if (await confirmDialog({ title: t('Remove checkpoint task'), message: t('Remove this task and its checkpoint history? Original directories and task branches are kept. Isolated worktrees are removed only after results have been brought back.') })) await runCheckpointAction({ type: 'remove', task_id: task.id });
-  };
-  const install = async () => {
-    if (await confirmDialog({ title: t('Install Codex checkpoint hooks'), message: t('Add VersionDock handlers to your Codex hooks.json and back up the existing file. Review and trust these hooks in Codex before using automatic recording. Existing handlers are preserved.') })) await runCheckpointAction({ type: 'installHooks' });
   };
   const finish = async () => {
     if (task && await confirmDialog({ title: t('Finish recording'), message: t('Confirm that Codex and other programs have stopped writing to these repositories before capturing the final state.') })) await runCheckpointAction({ type: 'finish', task_id: task.id });
@@ -186,32 +222,32 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
       void useAppStore.getState().refresh(true);
     }
   };
-  return <DialogSurface size="large" onClose={onClose} className={`checkpoint-panel${navigation ? ' checkpoint-center' : ''}`} aria-label={t('Tasks and checkpoints')}>
+  return <DialogSurface size="large" onClose={onClose} closeDisabled={managementBusy} className={`checkpoint-panel${navigation ? ' checkpoint-center' : ''}`} aria-label={t('Tasks and checkpoints')}>
     <header className="file-history-header checkpoint-header">
       <Codicon name="checkpoint" className="checkpoint-heading-icon" /><strong>{t('Tasks and checkpoints')}</strong>
-      <span className="file-history-path checkpoint-workspace-name" title={workspace?.name}>{workspace?.name}</span>
-      <IconButton title={t('Refresh')} disabled={state.busy} onClick={() => void refreshCheckpoints()}><Codicon name="refresh" /></IconButton>
-      <IconButton aria-label={t('Close')} onClick={onClose}><Codicon name="close" /></IconButton>
+      <span className="file-history-path checkpoint-workspace-name" title={managementContent ? undefined : workspace?.name}>{!managementContent && workspace?.name}</span>
+      {!managementContent && <IconButton title={t('Refresh')} disabled={state.busy} onClick={() => void refreshCheckpoints()}><Codicon name="refresh" /></IconButton>}
+      <IconButton aria-label={t('Close')} disabled={managementBusy} onClick={onClose}><Codicon name="close" /></IconButton>
     </header>
     <div className={`checkpoint-layout${reviewing ? ' checkpoint-layout-review' : ''}`}>
       {!reviewing && (navigation ? navigation(newTask, blocked, showTask) : <aside className="settings-sidebar checkpoint-sidebar">
         <div className="checkpoint-sidebar-heading"><strong>{t('Tasks')}</strong><span>{state.listing?.tasks.length ?? 0}</span><IconButton title={t('New checkpoint task')} disabled={blocked} onClick={newTask}><Codicon name="add" /></IconButton></div>
         <nav className="settings-nav checkpoint-tasks" aria-label={t('Checkpoint tasks')}>
-          {state.listing?.tasks.map(item => <button type="button" className="vd-selectable settings-nav-item checkpoint-task-button" aria-label={item.name} aria-describedby={`checkpoint-task-meta-${item.id}`} aria-pressed={!creating && item.id === task?.id} disabled={state.busy} key={item.id} onClick={() => { closeMenu(); selectCheckpointTask(item.id); setCreating(false); setSettingsTask(null); }}>
+          {state.listing?.tasks.map(item => <button type="button" className="vd-selectable settings-nav-item checkpoint-task-button" aria-label={item.name} aria-describedby={`checkpoint-task-meta-${item.id}`} aria-pressed={!creating && item.id === task?.id} disabled={state.busy} key={item.id} onClick={() => { closeMenu(); selectCheckpointTask(item.id); setCreating(false); setSettingsTask(null); setConnectionTask(null); }}>
             <span className="settings-nav-icon-badge"><Codicon name={item.isolation === 'original' ? 'folder' : 'git-branch'} /></span>
             <span className="checkpoint-task-nav-label"><span className="settings-nav-text" title={item.name}>{item.name}</span><small id={`checkpoint-task-meta-${item.id}`} title={`${t(item.isolation === 'original' ? 'Original directories' : 'Isolated worktrees')} · ${t(item.mode === 'automatic' ? 'Automatic recording' : 'Manual recording')}`}>{t(item.isolation === 'original' ? item.mode === 'automatic' ? 'Original · Automatic' : 'Original · Manual' : item.mode === 'automatic' ? 'Isolated · Automatic' : 'Isolated · Manual')}</small></span>
             {pending(item) && <span className="checkpoint-activity-dot" aria-label={t('Recording in progress')} />}
           </button>)}
           {state.listing && !state.listing.tasks.length && <p className="checkpoint-sidebar-empty">{t('Your tasks appear here')}</p>}
         </nav>
-        <Button variant="ghost" className="checkpoint-connection-link" aria-label={t('Codex connection')} aria-describedby={state.listing ? 'checkpoint-connection-status' : undefined} title={state.listing ? `${task ? `${task.name} · ` : ''}${connectionDetail}` : undefined} aria-pressed={showSettings} onClick={openSettings}><Codicon name="plug" /><span className="checkpoint-connection-label">{t('Codex connection')}</span>{state.listing && <span className="checkpoint-connection-status" id="checkpoint-connection-status" data-status={connectionStatus}>{t(compactConnectionLabel(connection.status))}</span>}<Codicon name="chevron-right" /></Button>
+        <Button variant="ghost" className="checkpoint-connection-link" aria-label={t('Codex connection')} aria-describedby={state.listing ? 'checkpoint-connection-status' : undefined} title={state.listing ? `${task ? `${task.name} · ` : ''}${connectionDetail}` : undefined} aria-pressed={showConnection} onClick={openConnection}><Codicon name="plug" /><span className="checkpoint-connection-label">{t('Codex connection')}</span>{state.listing && <span className="checkpoint-connection-status" id="checkpoint-connection-status" data-status={connectionStatus}>{t(compactConnectionLabel(connection.status))}</span>}<Codicon name="chevron-right" /></Button>
       </aside>)}
       <main className="checkpoint-main">
-        {(state.error || state.listingError || recovery.length > 0) && <div className="checkpoint-notices">
+        {!managementContent && (state.error || state.listingError || recovery.length > 0) && <div className="checkpoint-notices">
           {(state.error || state.listingError) && <ErrorNotice onRetry={() => void refreshCheckpoints()}>{t((state.error || state.listingError)!)}</ErrorNotice>}
           {recovery.map(report => <ErrorNotice key={report.id} actions={<Button disabled={state.busy} onClick={() => void runCheckpointAction({ type: 'recover', transaction_id: report.id })}>{t('Recover previous state')}</Button>}><strong>{t('Restore needs recovery')}</strong><p>{report.completed}/{report.total} {report.error && t(report.error)}</p></ErrorNotice>)}
         </div>}
-        {creating ? <>
+        {managementContent ? managementContent : creating ? <>
           <div className="checkpoint-page-heading"><h3>{t('New checkpoint task')}</h3><p>{t('Choose where to work and which repositories to protect.')}</p></div>
           <div className="checkpoint-scroll"><section className="checkpoint-create">
             {projectSelection}
@@ -232,27 +268,27 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
             <p className="checkpoint-form-hint">{t('Only files inside selected Git repositories are protected. Ignored files are excluded. Submodules and nested repositories are not supported.')}</p>
             {isolation === 'worktree' && <FormField label={t('Local configuration path')} description={t('Optional absolute file paths separated by semicolons. These setup files are copied but ignored files are not protected by checkpoints.')}><Input value={ignoredFiles} onChange={e => setIgnoredFiles(e.target.value)} /></FormField>}
           </section></div>
-        </> : !workspace ? <div className="checkpoint-empty"><EmptyState icon="checkpoint" description={t('Choose a project or folder to create a checkpoint task.')}><strong>{t('No checkpoint tasks yet')}</strong></EmptyState><Button variant="primary" disabled={blocked} onClick={newTask}><Codicon name="add" />{t('New checkpoint task')}</Button></div> : !state.listing ? <div className="checkpoint-empty">{!state.error && !state.listingError && <LoadingState>{t('Loading checkpoints…')}</LoadingState>}</div> : showSettings ? <>
-          <div className="checkpoint-page-heading checkpoint-settings-heading"><IconButton title={t('Back to checkpoints')} onClick={() => { closeMenu(); setSettingsTask(null); }}><Codicon name="arrow-left" /></IconButton><h3>{t('Task settings')}</h3>{task && <><span className="checkpoint-settings-task-name" title={task.name}>· {task.name}</span><IconButton title={t('Rename task')} disabled={blocked} onClick={() => void renameTask()}><Codicon name="edit" /></IconButton></>}</div>
+        </> : !workspace ? <div className="checkpoint-empty"><EmptyState icon="checkpoint" description={t('Choose a project or folder to create a checkpoint task.')}><strong>{t('No checkpoint tasks yet')}</strong></EmptyState><Button variant="primary" disabled={blocked} onClick={newTask}><Codicon name="add" />{t('New checkpoint task')}</Button></div> : !state.listing ? <div className="checkpoint-empty">{!state.error && !state.listingError && <LoadingState>{t('Loading checkpoints…')}</LoadingState>}</div> : showConnection ? <>
+          <div className="checkpoint-page-heading checkpoint-settings-heading"><IconButton title={t('Back to checkpoints')} onClick={() => setConnectionTask(null)}><Codicon name="arrow-left" /></IconButton><h3>{t('Connection details')}</h3>{task && <span className="checkpoint-settings-task-name">· {task.name}</span>}</div>
           <div className="checkpoint-scroll checkpoint-settings">
-            {task && <section className="checkpoint-settings-section">
-              <div className="checkpoint-settings-section-heading"><h4>{t('Working directory')}</h4><span className="checkpoint-settings-directory-mode">{t(task.isolation === 'original' ? 'Original directories' : 'Isolated worktrees')}</span></div><code className="selectable-text checkpoint-full-path">{task.path}</code>
-              <div className="checkpoint-toolbar"><Button disabled={state.busy} onClick={() => void navigator.clipboard.writeText(task.path).catch(() => useCheckpointStore.setState({ error: t('Copy failed; select and copy the task path.') }))}><Codicon name="copy" />{t('Copy Codex project path')}</Button>{task.isolation === 'worktree' ? <><Button disabled={state.busy} onClick={() => { if (bridge) void bridge.openInNewWindow(task.roots); }}><Codicon name="link-external" />{t('Open in VersionDock')}</Button><Button disabled={state.busy} onClick={() => { void openWorkspace(task.roots); }}>{t('Open task in this window')}</Button></> : <Button disabled={blocked} aria-haspopup="menu" aria-expanded={directoryMenuOpen} onClick={event => setDirectoryMenu(directoryMenuOpen ? null : { workspaceId: workspace?.id ?? task.workspaceId, taskId: task.id, anchor: event.currentTarget.getBoundingClientRect() })}>{t('More actions')}<Codicon name="chevron-down" /></Button>}</div>
-              <div className="checkpoint-settings-row"><FormField label={t('Recording mode')} description={recordingDescription(task.mode)}><Select disabled={blocked || active} value={task.mode} onChange={v => void runCheckpointAction({ type: 'setMode', task_id: task.id, mode: v as RecordingMode })} options={[{ value: 'manual', label: t('Manual recording') }, { value: 'automatic', label: t('Automatic recording') }]} /></FormField></div>
-              <details className="checkpoint-scope"><summary>{t('Protected Git repositories')} · {task.repositories.length}</summary>{task.repositories.map(repo => <p key={repo.taskPath} className="checkpoint-full-path selectable-text"><Codicon name="repo" /><code>{repo.taskPath}</code></p>)}</details>
-            </section>}
             <section className="checkpoint-settings-section">
-              <div className="checkpoint-settings-section-heading"><h4><Codicon name="plug" />{t('Codex connection')}</h4><span className="checkpoint-connection-status" data-status={connectionStatus} title={connectionDetail}>{connectionLabel}</span><Button size="xs" disabled={blocked} onClick={() => void install()}>{t(state.listing.hooksInstalled ? 'Update Codex hooks' : 'Install Codex checkpoint hooks')}</Button></div>
+              <div className="checkpoint-settings-section-heading"><h4><Codicon name="plug" />{t('Codex connection')}</h4><span className="checkpoint-connection-status" data-status={connectionStatus} title={connectionDetail}>{connectionLabel}</span></div>
               {connection.verifiedAt && <p className="checkpoint-settings-note">{t('Last successful verification: {0}', new Date(connection.verifiedAt).toLocaleString(language))}</p>}
               {task?.lastHookAt && <p className="checkpoint-settings-note">{t('Last event: {0}', new Date(task.lastHookAt).toLocaleString(language))}</p>}
               {connection.error && <ErrorNotice>{t(connection.error)}</ErrorNotice>}
-              <details className="checkpoint-scope checkpoint-connection-instructions" key={`instructions:${workspace?.id}:${task?.id}`}><summary>{t('Usage instructions')}</summary>
-                <p className="checkpoint-settings-note">{t('Automatic checkpoints save your sent message locally. Expand a record to read it; unused message data is removed with checkpoint cleanup.')}</p>
-                <p className="checkpoint-settings-note">{t('Installed configuration does not prove desktop compatibility. Review hooks in Codex, run a short task, and verify that both start and stop events appear here. Use manual mode if events are missing.')}</p>
-              </details>
               {!!task?.hookEvents.length && <details className="checkpoint-scope" key={`diagnostics:${workspace?.id}:${task?.id}`}><summary>{t('Connection diagnostics')}</summary><code className="checkpoint-full-path">{task.hookEvents.join(', ')}</code></details>}
             </section>
-            {!task && <section className="checkpoint-settings-section"><h4>{t('Checkpoint storage')}</h4><CheckpointStorage workspaceId={workspace?.id} /></section>}
+            {onOpenGlobalSettings && <Button size="xs" onClick={onOpenGlobalSettings}>{t('Checkpoint settings')}</Button>}
+          </div>
+        </> : showSettings ? <>
+          <div className="checkpoint-page-heading checkpoint-settings-heading"><IconButton title={t('Back to checkpoints')} onClick={() => { closeMenu(); setSettingsTask(null); }}><Codicon name="arrow-left" /></IconButton><h3>{t('Task settings')}</h3>{task && <><span className="checkpoint-settings-task-name" title={task.name}>· {task.name}</span></>}</div>
+          <div className="checkpoint-scroll checkpoint-settings">
+            {task && <section className="checkpoint-settings-section">
+              <div className="checkpoint-settings-section-heading"><h4>{t('Working directory')}</h4><span className="checkpoint-settings-directory-mode">{t(task.isolation === 'original' ? 'Original directories' : 'Isolated worktrees')}</span></div><code className="selectable-text checkpoint-full-path">{task.path}</code>
+
+              <div className="checkpoint-settings-row"><FormField label={t('Recording mode')} description={recordingDescription(task.mode)}><Select disabled={blocked || active} value={task.mode} onChange={v => void runCheckpointAction({ type: 'setMode', task_id: task.id, mode: v as RecordingMode })} options={[{ value: 'manual', label: t('Manual recording') }, { value: 'automatic', label: t('Automatic recording') }]} /></FormField></div>
+              <details className="checkpoint-scope"><summary>{t('Protected Git repositories')} · {task.repositories.length}</summary>{task.repositories.map(repo => <p key={repo.taskPath} className="checkpoint-full-path selectable-text"><Codicon name="repo" /><code>{repo.taskPath}</code></p>)}</details>
+            </section>}
             {task && <section className="checkpoint-settings-section">
               <h4>{t('Checkpoint storage')}</h4>
               <CheckpointStorage workspaceId={workspace?.id} taskId={task.id} revision={state.cleanupReport} />
@@ -274,44 +310,61 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
         </> : task ? <>
           {!changes && <header className="checkpoint-task-overview">
             <div className="checkpoint-task-heading">
-              <div className="checkpoint-task-title"><h3>{task.name}</h3></div>
+              <div className="checkpoint-task-title"><h3>{task.name}</h3><IconButton title={t('Rename task')} disabled={blocked} onClick={() => void renameTask()}><Codicon name="edit" /></IconButton></div>
               <div className="checkpoint-task-actions">
-                {state.listing?.redoTasks?.includes(task.id) && <Button size="xs" disabled={blocked || active} onClick={() => void runCheckpointAction({ type: 'previewRedo', task_id: task.id })}><Codicon name="redo" />{t('Redo last undo')}</Button>}
-                <Button size="xs" aria-label={t('Preview undo latest turn')} disabled={blocked || active || !task.checkpoints.some(point => point.status === 'completed')} onClick={() => void runCheckpointAction({ type: 'preview', task_id: task.id, checkpoint_id: null, bring_back: false })}><Codicon name="discard" />{t('Undo latest turn')}</Button>
+                {state.listing?.redoTasks?.includes(task.id) && <Button size="xs" aria-label={t('Redo last undo')} disabled={blocked || Boolean(undo.phase) || active} loading={Boolean(undo.kind === 'redo' && undo.phase !== 'confirming')} onClick={() => void undo.redo()}><Codicon name="redo" />{t('Redo last undo')}</Button>}
+                <Button size="xs" aria-label={t('Undo latest turn')} disabled={blocked || Boolean(undo.phase) || active || !task.checkpoints.some(point => point.status === 'completed')} loading={Boolean(undo.kind === 'undo' && undo.phase !== 'confirming')} onClick={() => { const point = task.checkpoints.filter(point => point.status === 'completed').at(-1); if (point) undoCheckpoint(point); }}><Codicon name="discard" />{t('Undo latest turn')}</Button>
                 {task.isolation === 'worktree' && <Button size="xs" aria-label={t('Preview bring back')} disabled={blocked || active} onClick={() => void runCheckpointAction({ type: 'preview', task_id: task.id, checkpoint_id: null, bring_back: true })}><Codicon name="arrow-swap" />{t('Bring back')}</Button>}
                 <IconButton title={t('Task settings')} onClick={openSettings}><Codicon name="settings-gear" /></IconButton>
               </div>
             </div>
             <div className="checkpoint-task-meta">
-              <span>{t(task.isolation === 'original' ? 'Original directories' : 'Isolated worktrees')}</span><span>{t('{0} repositories', task.repositories.length)}</span><span>{t(task.mode === 'automatic' ? 'Automatic recording' : 'Manual recording')}</span>
-              {task.mode === 'automatic' && <Button className="checkpoint-hook-indicator" variant="link" size="xs" title={t(hookConnected ? 'A matching hook round was recorded successfully.' : 'Connection details')} onClick={openSettings} data-connected={hookConnected}><span className="checkpoint-status-dot" />{t(hookConnectionLabel(connection.status))}</Button>}
-              <span className="checkpoint-task-location" title={task.path}><Codicon name="folder-opened" /><span className="selectable-text">{task.path}</span></span>
+              <div className="checkpoint-task-summary">
+                <span>{t(task.isolation === 'original' ? 'Original directories' : 'Isolated worktrees')}</span>
+                <span className="checkpoint-meta-separator" aria-hidden="true">·</span>
+                <span>{t('{0} repositories', task.repositories.length)}</span>
+                <span className="checkpoint-meta-separator" aria-hidden="true">·</span>
+                <span>{t(task.mode === 'automatic' ? 'Automatic recording' : 'Manual recording')}</span>
+                {task.mode === 'automatic' && <><span className="checkpoint-meta-separator" aria-hidden="true">·</span><Button className="checkpoint-hook-indicator" variant="link" size="xs" title={t(hookConnected ? 'A matching hook round was recorded successfully.' : 'Connection details')} onClick={openConnection} data-connected={hookConnected}><span className="checkpoint-status-dot" />{t(hookConnectionLabel(connection.status))}</Button></>}
+              </div>
+              <div className="checkpoint-task-path-actions">
+                <span className="checkpoint-task-location" title={task.path}><Codicon name="folder-opened" /><span className="selectable-text">{task.path}</span></span>
+                <CopyTaskPathButton key={JSON.stringify([workspace?.id, task.id, task.path])} path={task.path} disabled={blocked} />
+                <IconButton title={t('Open task')} disabled={blocked} aria-haspopup="menu" aria-expanded={directoryMenuOpen} onClick={event => setDirectoryMenu(directoryMenuOpen ? null : { workspaceId: workspace?.id ?? task.workspaceId, taskId: task.id, anchor: event.currentTarget.getBoundingClientRect() })}><Codicon name="link-external" /></IconButton>
+              </div>
             </div>
-            {task.mode === 'automatic' && task.hookError && <ErrorNotice actions={<Button variant="link" size="xs" onClick={openSettings}>{t('Connection details')}</Button>}>{t(task.hookError)}</ErrorNotice>}
+            {task.mode === 'automatic' && task.hookError && <ErrorNotice actions={<Button variant="link" size="xs" onClick={openConnection}>{t('Connection details')}</Button>}>{t(task.hookError)}</ErrorNotice>}
           </header>}
           {task.error && <div className="checkpoint-notices"><ErrorNotice>{t(task.error)}</ErrorNotice></div>}
+          {!changes && inlinePreview && (inlinePreview.conflicts.length > 0 || !inlinePreview.files.length) && <div className="checkpoint-notices" role="status">
+            {inlinePreview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}
+            {!inlinePreview.conflicts.length && !inlinePreview.files.length && <p className="checkpoint-form-hint">{t('No changes to apply')}</p>}
+          </div>}
           {changes ? <>
-            <header className="checkpoint-review-header" aria-label={t(state.preview ? state.preview.redoOf ? 'Redo preview' : state.preview.bringBack ? 'Bring-back preview' : 'Undo preview' : 'View changes')}>
+            <header className="checkpoint-review-header" aria-label={t(displayedPreview ? displayedPreview.redoOf ? 'Redo preview' : displayedPreview.bringBack ? 'Bring-back preview' : 'Undo preview' : 'View changes')}>
               <IconButton className="checkpoint-review-back" title={t('Back to checkpoints')} disabled={state.busy} onClick={clearReview}><Codicon name="arrow-left" /></IconButton>
               <div className="checkpoint-review-info">
                 <h3 title={reviewPoint ? pointName(reviewPoint) : task.name}>{reviewPoint ? pointName(reviewPoint) : task.name}</h3>
                 <div className="checkpoint-review-meta">
                   {reviewPoint && <span className="checkpoint-review-task" title={task.name}>{task.name}</span>}
-                  {state.preview && <span>{t(state.preview.redoOf ? 'Redo preview' : state.preview.bringBack ? 'Bring-back preview' : 'Undo preview')}</span>}
+                  {displayedPreview && <span>{t(displayedPreview.redoOf ? 'Redo preview' : displayedPreview.bringBack ? 'Bring-back preview' : 'Undo preview')}</span>}
                   {reviewPoint && <><time dateTime={reviewPoint.createdAt} title={new Date(reviewPoint.createdAt).toLocaleString(language)}>{formatHistoryDate(reviewPoint.createdAt)}</time><code title={reviewPoint.id}>#{reviewPoint.id.slice(0, 8)}</code><CheckpointStatus status={reviewPoint.status} /></>}
                   <span>{t('{0} changes', changes.length)}</span>
                 </div>
               </div>
               <div className="checkpoint-review-actions">
                 {reviewPoint?.promptHash && <IconButton title={t(expandedPrompt === reviewPoint.id ? 'Hide message' : 'View message')} aria-expanded={expandedPrompt === reviewPoint.id} onClick={() => setExpandedPrompt(expandedPrompt === reviewPoint.id ? null : reviewPoint.id)}><Codicon name="comment" /></IconButton>}
-                <IconButton title={t('Task settings')} onClick={openSettings}><Codicon name="settings-gear" /></IconButton>
               </div>
               {reviewPoint?.promptHash && expandedPrompt === reviewPoint.id && <div className="checkpoint-review-extra"><CheckpointPrompt workspaceId={workspace?.id} key={`${workspace?.id}:${task.id}:${reviewPoint.id}`} taskId={task.id} checkpointId={reviewPoint.id} revision={state.listing?.historyRevisions?.[task.id]} /></div>}
               {reviewPoint?.status === 'completed' && followingTurns > 0 && <p className="checkpoint-form-hint checkpoint-review-extra">{t('Undoing this checkpoint also undoes {0} later completed turns.', followingTurns)}</p>}
             </header>
             <div className="checkpoint-review">
-              {state.preview && <><p className="checkpoint-form-hint">{t(state.preview.redoOf ? 'Reapply the changes from the most recent undo. Later non-overlapping edits are kept.' : state.preview.bringBack ? 'Review changes before bringing them back to the original directories.' : 'Returning to an earlier turn also undoes all following completed turns.')}</p>{state.preview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}</>}
-              {!changes.length ? <EmptyState compact icon="check">{t('No changes to apply')}</EmptyState> : (state.preview || state.detailsCheckpointId) && <CheckpointChangesView workspaceId={workspace?.id} key={state.preview?.id ?? state.detailsCheckpointId!} files={changes} source={state.preview ? { type: 'preview', preview_id: state.preview.id } : { type: 'checkpoint', task_id: task.id, checkpoint_id: state.detailsCheckpointId! }} />}
+              {state.preview && !inlinePreview && <><p className="checkpoint-form-hint">{t(state.preview.redoOf ? 'Reapply the changes from the most recent undo. Later non-overlapping edits are kept.' : state.preview.bringBack ? 'Review changes before bringing them back to the original directories.' : 'Returning to an earlier turn also undoes all following completed turns.')}</p>{state.preview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}</>}
+              {inlinePreview && (inlinePreview.conflicts.length > 0 || !inlinePreview.files.length) && <div className="checkpoint-undo-check" role="status">
+                {inlinePreview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}
+                {!inlinePreview.conflicts.length && !inlinePreview.files.length && <p className="checkpoint-form-hint">{t('No changes to apply')}</p>}
+              </div>}
+              {!changes.length ? <EmptyState compact icon="check">{t('No changes to apply')}</EmptyState> : (displayedPreview || state.detailsCheckpointId) && <CheckpointChangesView workspaceId={workspace?.id} key={displayedPreview?.id ?? state.detailsCheckpointId!} files={changes} source={displayedPreview ? { type: 'preview', preview_id: displayedPreview.id } : { type: 'checkpoint', task_id: task.id, checkpoint_id: state.detailsCheckpointId! }} />}
             </div>
           </> : <>
             {(active || task.mode === 'manual') && <div className="checkpoint-record-actions">
@@ -324,13 +377,13 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
               <span>{t('Unfinished for {0} minutes', Math.max(0, Math.floor((now - Date.parse(activePoint.createdAt)) / 60000)) || 0)}</span>
               {task.lastHookAt && <span>{t('Last event: {0}', formatHistoryDate(task.lastHookAt))}</span>}
               {now - Date.parse(activePoint.createdAt) >= 600000 && <p>{t('This interval is still open. Verify that all writes have stopped before finishing; elapsed time does not prove Codex has stopped.')}</p>}
-              <Button variant="link" size="xs" onClick={openSettings}>{t('Connection details')}</Button>
+              <Button variant="link" size="xs" onClick={openConnection}>{t('Connection details')}</Button>
             </div>}
-            <div className="checkpoint-history-search">
-              <SearchInput aria-label={t('Search checkpoints')} placeholder={t('Search names and messages')} value={historyQuery} onChange={e => { setHistoryQuery(e.target.value); setHistoryOffset(0); }} onClear={() => { setHistoryQuery(''); setHistoryOffset(0); }} />
-              <Select aria-label={t('Filter checkpoint repository')} value={historyRepository} onChange={value => { setHistoryRepository(value); setHistoryOffset(0); }} options={[{ value: '', label: t('All repositories') }, ...task.repositories.map(repo => ({ value: repo.taskPath, label: repositoryDisplayPath(repo.taskPath, task.roots) }))]} />
-            </div>
-            <div className="detail-files-title checkpoint-history-heading"><h4>{t('Checkpoint history')}</h4><span>{history.page ? `${history.page.matching}/${history.page.total}` : onlyChanges ? `${visiblePoints.length}/${history.total}` : history.total}</span><label className="checkpoint-history-filter"><Checkbox checked={onlyChanges} onChange={event => { closeMenu(); setOnlyChanges(event.target.checked); setHistoryOffset(0); }} />{t('Only with changes')}</label></div>
+            <CheckpointHistoryToolbar key={filterScope} count={history.page ? `${history.page.matching}/${history.page.total}` : onlyChanges ? `${visiblePoints.length}/${history.total}` : String(history.total)}
+              query={historyQuery} onQueryChange={value => { closeMenu(); setHistoryQuery(value); setHistoryOffset(0); }}
+              repository={historyRepository} repositories={task.repositories.map(repo => ({ value: repo.taskPath, label: repositoryDisplayPath(repo.taskPath, task.roots) }))}
+              onRepositoryChange={value => { closeMenu(); setHistoryRepository(value); setHistoryOffset(0); }}
+              onlyChanges={onlyChanges} onOnlyChangesChange={value => { closeMenu(); setOnlyChanges(value); setHistoryOffset(0); }} disabled={blocked} />
             <div className="checkpoint-scroll checkpoint-history">
               {history.loading ? <LoadingState>{t('Loading checkpoints…')}</LoadingState> : history.error ? <ErrorNotice onRetry={history.retry}>{t(history.error)}</ErrorNotice> : !history.total ? <EmptyState icon="git-commit" description={t(task.mode === 'automatic' ? 'Completed Codex turns will appear here.' : 'Start recording before making changes.')}><strong>{t('No checkpoints yet')}</strong></EmptyState> : !visiblePoints.length ? <EmptyState icon="filter" description={t('Records without file changes are hidden.')} actions={<Button onClick={() => setOnlyChanges(false)}>{t('Show all records')}</Button>}><strong>{t('No checkpoints with changes')}</strong></EmptyState> : <ol className="checkpoint-day-list vd-row-scope">
                 {[...historyGroups].map(([day, points]) => <li key={day} className="checkpoint-day">
@@ -352,7 +405,7 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
                       </button>
                       <div className="checkpoint-entry-actions">
                         {point.promptHash && <IconButton title={t(expandedPrompt === point.id ? 'Hide message' : 'View message')} aria-expanded={expandedPrompt === point.id} onClick={() => setExpandedPrompt(expandedPrompt === point.id ? null : point.id)}><Codicon name="comment" /></IconButton>}
-                        {point.status === 'completed' && <IconButton aria-label={t('Preview return before this turn')} title={t('Preview return before this turn')} disabled={blocked || active} onClick={() => previewUndo(point)}><Codicon name="discard" /></IconButton>}
+                        {point.status === 'completed' && <IconButton aria-label={t('Undo to before this turn')} title={t('Undo to before this turn')} disabled={blocked || Boolean(undo.phase) || active} onClick={() => undoCheckpoint(point)}><Codicon name="discard" /></IconButton>}
                         {point.status === 'applied' && <IconButton title={t('Undo bring back')} disabled={blocked || active} onClick={() => { void confirmDialog({ title: t('Undo bring back'), message: t('Restore the source files changed by this bring-back operation? Later overlapping edits will block recovery.') }).then(confirmed => { if (confirmed && (project ? useCheckpointStore.getState().workspaceId : useAppStore.getState().snapshot?.workspace.id) === workspace?.id && useCheckpointStore.getState().selectedTaskId === task.id) void runCheckpointAction({ type: 'recover', transaction_id: point.id }); }); }}><Codicon name="discard" /></IconButton>}
                         <IconButton title={t('More actions')} aria-describedby={`checkpoint-title-${point.id}`} aria-haspopup="menu" aria-expanded={menuPoint?.id === point.id} disabled={blocked} onClick={event => setMenu(menuPoint?.id === point.id ? null : { workspaceId: task.workspaceId, taskId: task.id, pointId: point.id, anchor: event.currentTarget.getBoundingClientRect() })}><Codicon name="ellipsis" /></IconButton>
                       </div>
@@ -373,21 +426,35 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
       </main>
     </div>
     {menuPoint && menu && <ContextMenu x={menu.anchor.right} y={menu.anchor.bottom} anchorRect={menu.anchor} items={[{ id: 'rename', label: t('Rename checkpoint'), icon: 'edit' }]} onSelect={id => { if (id === 'rename') void rename(menuPoint); }} onClose={closeMenu} />}
-    {directoryMenuOpen && directoryMenu && task && <ContextMenu x={directoryMenu.anchor.right} y={directoryMenu.anchor.bottom} anchorRect={directoryMenu.anchor} items={[{ id: 'newWindow', label: t('Open in VersionDock'), icon: 'link-external' }, { id: 'currentWindow', label: t('Open task in this window'), icon: 'window' }]} onSelect={id => { if (id === 'newWindow' && bridge) void bridge.openInNewWindow(task.roots); else if (id === 'currentWindow') void openWorkspace(task.roots); }} onClose={closeMenu} />}
+    {directoryMenuOpen && directoryMenu && task && <ContextMenu x={directoryMenu.anchor.right} y={directoryMenu.anchor.bottom} anchorRect={directoryMenu.anchor} items={[
+      { id: 'codex', label: t('Open in Codex'), icon: 'codex', disabled: bridge?.platform() !== 'macos', disabledReason: t('Opening task directories in Codex is currently supported on macOS.') },
+      { separator: true },
+      { id: 'currentWindow', label: t('Open in current window'), icon: 'window', disabled: taskOpenHere, disabledReason: t('Already open in this window') },
+      { id: 'newWindow', label: t('Open in new window'), icon: 'link-external' },
+    ]} onSelect={id => {
+      if (id === 'codex') void runCheckpointAction({ type: 'openInCodex', task_id: task.id });
+      else if (id === 'newWindow' && bridge) void bridge.openInNewWindow(task.roots).catch(error => {
+        if (useCheckpointStore.getState().workspaceId === workspace?.id && useCheckpointStore.getState().selectedTaskId === task.id) useCheckpointStore.setState({ error: error instanceof Error ? error.message : String(error) });
+      });
+      else if (id === 'currentWindow' && !taskOpenHere) void openWorkspace(task.roots);
+    }} onClose={closeMenu} />}
     <footer className="checkpoint-footer">
-      {reviewing ? state.preview && <span className="checkpoint-form-hint checkpoint-footer-note">{t(state.preview.conflicts.length ? 'Resolve conflicts before applying.' : 'Your current state is backed up before applying.')}</span> : <span className="checkpoint-storage"><Codicon name="database" />{t('Snapshots are shared across all projects')}</span>}
-      {state.busy && <LoadingState>{t(state.loadingDetailsId ? 'Loading changed files…' : 'Working…')}</LoadingState>}
+      {reviewing && canRedoReview && <span className="checkpoint-form-hint checkpoint-footer-note">{t('Reapplies all {0} turns from the last undo.', redoCheckpoints.length)}</span>}
+      {reviewing && state.preview && !inlinePreview && <span className="checkpoint-form-hint checkpoint-footer-note">{t(state.preview.conflicts.length ? 'Resolve conflicts before applying.' : 'Your current state is backed up before applying.')}</span>}
+      {state.busy && !undo.phase && <LoadingState>{t(state.loadingDetailsId ? 'Loading changed files…' : 'Working…')}</LoadingState>}
       <div className="checkpoint-footer-actions">
         {state.busy && <Button size="xs" onClick={cancelCheckpointAction}>{t('Cancel operation')}</Button>}
-        {creating ? <><Button disabled={state.busy} onClick={() => setCreating(false)}>{t('Cancel')}</Button><Button variant="primary" disabled={blocked || projectLoading || !workspace || !name.trim() || !selectedRepositories.length || Boolean(originalTasks.length)} onClick={() => void create()}>{t('Create task')}</Button></> : !reviewing && <Button onClick={onClose}>{t('Close')}</Button>}
-        {reviewing && !state.preview && reviewPoint && task && <Button variant="primary" danger disabled={blocked || active || Boolean(task.error) || !['completed', 'applied'].includes(reviewPoint.status)} onClick={() => {
-          if (reviewPoint.status === 'applied') {
+        {!managementContent && creating ? <><Button disabled={state.busy} onClick={() => setCreating(false)}>{t('Cancel')}</Button><Button variant="primary" disabled={blocked || projectLoading || !workspace || !name.trim() || !selectedRepositories.length || Boolean(originalTasks.length)} onClick={() => void create()}>{t('Create task')}</Button></> : !reviewing && <Button disabled={managementBusy} onClick={onClose}>{t('Close')}</Button>}
+        {reviewing && (!state.preview || inlinePreview) && reviewPoint && task && <Button variant="primary" danger loading={Boolean(undo.phase && undo.phase !== 'confirming')} disabled={blocked || Boolean(undo.phase) || active || Boolean(task.error) || (!canRedoReview && !['completed', 'applied'].includes(reviewPoint.status))} onClick={() => {
+          if (canRedoReview) {
+            void undo.redo();
+          } else if (reviewPoint.status === 'applied') {
             void confirmDialog({ title: t('Undo bring back'), message: t('Restore the source files changed by this bring-back operation? Later overlapping edits will block recovery.') }).then(confirmed => {
               if (confirmed && (project ? useCheckpointStore.getState().workspaceId : useAppStore.getState().snapshot?.workspace.id) === workspace?.id && useCheckpointStore.getState().selectedTaskId === task.id) void runCheckpointAction({ type: 'recover', transaction_id: reviewPoint.id });
             });
-          } else void runCheckpointAction({ type: 'preview', task_id: task.id, checkpoint_id: reviewPoint.id, bring_back: false });
-        }}><Codicon name="discard" />{t(reviewPoint.status === 'applied' ? 'Undo bring back' : 'Undo to before this turn')}</Button>}
-        {reviewing && state.preview && <Button variant="primary" disabled={blocked || Boolean(state.preview.conflicts.length) || !state.preview.files.length} onClick={() => void execute()}><Codicon name={state.preview.redoOf ? 'redo' : 'discard'} />{t(previewApplyLabel)}</Button>}
+          } else { void undo.undo(reviewPoint, followingTurns); }
+        }}><Codicon name={canRedoReview ? 'redo' : 'discard'} />{t(undo.phase === 'checking' ? 'Checking…' : undo.phase === 'executing' ? 'Working…' : canRedoReview ? 'Redo last undo' : reviewPoint.status === 'applied' ? 'Undo bring back' : 'Undo to before this turn')}</Button>}
+        {reviewing && state.preview && !inlinePreview && <Button variant="primary" disabled={blocked || Boolean(state.preview.conflicts.length) || !state.preview.files.length} onClick={() => void execute()}><Codicon name={state.preview.redoOf ? 'redo' : 'discard'} />{t(previewApplyLabel)}</Button>}
       </div>
     </footer>
   </DialogSurface>;

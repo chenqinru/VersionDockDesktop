@@ -1,6 +1,6 @@
 //! Explicit checkpoint retention. Persist references first, then reclaim unreachable objects.
 use super::{active, storage::*, types::*};
-use crate::models::DesktopError;
+use crate::models::{DesktopError, WorkspaceDescriptor};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 use tokio_util::sync::CancellationToken;
 
@@ -16,6 +16,29 @@ pub(super) fn preview(
     task_id: &str,
     keep_recent: u32,
 ) -> Result<Plan, DesktopError> {
+    let (database, remove_count, protected_count) = prune_task(db, task_id, keep_recent)?;
+    let garbage = store.unreferenced(&database)?;
+    let fingerprint =
+        digest(&serde_json::to_vec(&(task_id, keep_recent, db, &garbage)).map_err(io)?);
+    Ok(Plan {
+        preview: CheckpointCleanupPreview {
+            task_id: task_id.into(),
+            keep_recent,
+            remove_count,
+            protected_count,
+            reclaimable_bytes: garbage.iter().map(|(_, bytes)| *bytes as f64).sum(),
+            fingerprint,
+        },
+        database,
+        garbage,
+    })
+}
+
+fn prune_task(
+    db: &Database,
+    task_id: &str,
+    keep_recent: u32,
+) -> Result<(Database, u32, u32), DesktopError> {
     let task = db
         .tasks
         .iter()
@@ -97,25 +120,75 @@ pub(super) fn preview(
             || (tx.report.status == "succeeded" && tx.prepared.preview.bring_back)
             || !matches!(tx.report.status.as_str(), "succeeded" | "recovered")
     });
+    let protected_count = task
+        .checkpoints
+        .iter()
+        .filter(|point| protected.contains(&point.id))
+        .count() as u32;
+    Ok((database, remove.len() as u32, protected_count))
+}
+
+pub(super) fn project_preview(
+    store: &Storage,
+    db: &Database,
+    workspace: &WorkspaceDescriptor,
+    keep_recent: u32,
+) -> Result<(ProjectCleanupPreview, Database), DesktopError> {
+    let ids = db
+        .tasks
+        .iter()
+        .filter(|task| task.workspace_id == workspace.id)
+        .map(|task| task.id.clone())
+        .collect::<Vec<_>>();
+    if ids.is_empty() {
+        return Err(failure("No checkpoint tasks yet"));
+    }
+    let mut database = db.clone();
+    let mut remove_count = 0;
+    let mut protected_count = 0;
+    for id in ids {
+        let (next, removed, protected) = prune_task(&database, &id, keep_recent)?;
+        database = next;
+        remove_count += removed;
+        protected_count += protected;
+    }
     let garbage = store.unreferenced(&database)?;
     let fingerprint =
-        digest(&serde_json::to_vec(&(task_id, keep_recent, db, &garbage)).map_err(io)?);
-    Ok(Plan {
-        preview: CheckpointCleanupPreview {
-            task_id: task_id.into(),
+        digest(&serde_json::to_vec(&(&workspace.id, keep_recent, db, &garbage)).map_err(io)?);
+    Ok((
+        ProjectCleanupPreview {
+            project_id: workspace.id.clone(),
             keep_recent,
-            remove_count: remove.len() as u32,
-            protected_count: task
-                .checkpoints
-                .iter()
-                .filter(|point| protected.contains(&point.id))
-                .count() as u32,
+            remove_count,
+            protected_count,
             reclaimable_bytes: garbage.iter().map(|(_, bytes)| *bytes as f64).sum(),
             fingerprint,
         },
         database,
-        garbage,
-    })
+    ))
+}
+
+pub(super) fn project_execute(
+    store: &Storage,
+    db: &mut Database,
+    workspace: &WorkspaceDescriptor,
+    keep_recent: u32,
+    fingerprint: &str,
+    token: &CancellationToken,
+) -> Result<CheckpointCleanupReport, DesktopError> {
+    let (preview, database) = project_preview(store, db, workspace, keep_recent)?;
+    if preview.fingerprint != fingerprint {
+        return Err(failure(
+            "Checkpoint cleanup preview is stale; preview again",
+        ));
+    }
+    if token.is_cancelled() {
+        return Err(failure("Checkpoint cleanup cancelled"));
+    }
+    let garbage = store.unreferenced(&database)?;
+    store.save(&database)?;
+    *db = database;
+    Ok(reclaim(preview.remove_count, garbage, token))
 }
 
 pub(super) fn execute(

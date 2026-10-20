@@ -90,7 +90,7 @@ it('does not let late cleanup previews or reports replace a different workspace'
 it('keeps the displayed checkpoint on preview failure and preserves its identity in a successful preview', async () => {
   const bridge = new MockBridge(() => []);
   let fail = true;
-  vi.spyOn(bridge, 'request').mockImplementation(command => {
+  const request = vi.spyOn(bridge, 'request').mockImplementation(command => {
     if (command.type === 'checkpoint' && command.payload.action.type === 'preview') return (fail ? Promise.reject(new Error('Snapshot is unavailable')) : Promise.resolve({ id: 'preview', taskId: 'task', files: [], conflicts: [], bringBack: false, fingerprint: 'fp' })) as never;
     return Promise.resolve(listing) as never;
   });
@@ -101,7 +101,34 @@ it('keeps the displayed checkpoint on preview failure and preserves its identity
   expect(useCheckpointStore.getState()).toMatchObject({ details: files, detailsCheckpointId: 'displayed-turn', preview: null, error: 'Snapshot is unavailable' });
   fail = false;
   await runCheckpointAction({ type: 'preview', task_id: 'task', checkpoint_id: 'displayed-turn', bring_back: false });
-  expect(useCheckpointStore.getState()).toMatchObject({ details: null, detailsCheckpointId: 'displayed-turn', preview: { id: 'preview' }, error: null });
+  expect(useCheckpointStore.getState()).toMatchObject({ details: files, detailsCheckpointId: 'displayed-turn', preview: { id: 'preview' }, error: null });
+  expect(request.mock.calls.filter(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'overview')).toHaveLength(0);
+});
+
+it.each(['success', 'failure'] as const)('does not refresh the history after redo preflight %s', async outcome => {
+  const bridge = new MockBridge(() => []);
+  const request = vi.spyOn(bridge, 'request').mockImplementation(command => {
+    if (command.type === 'checkpoint' && command.payload.action.type === 'previewRedo') return (outcome === 'success' ? Promise.resolve({ id: 'redo', taskId: 'task', redoOf: 'undo', bringBack: false, files: [], conflicts: [], fingerprint: 'fp' }) : Promise.reject(new Error('Cannot prepare redo'))) as never;
+    return Promise.resolve(listing) as never;
+  });
+  useAppStore.setState({ bridge, snapshot: workspace('a') }); checkpointWorkspaceChanged('a');
+  const files = [{ repository: '/tmp/repo', layer: 'working', path: 'map.ts', status: 'modified', before: 'old', after: 'new' }];
+  useCheckpointStore.setState({ details: files, detailsCheckpointId: 'undone-point' });
+  await runCheckpointAction({ type: 'previewRedo', task_id: 'task' });
+  expect(useCheckpointStore.getState()).toMatchObject({ busy: false, details: files, detailsCheckpointId: 'undone-point', error: outcome === 'success' ? null : 'Cannot prepare redo' });
+  expect(request.mock.calls.filter(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'overview')).toHaveLength(0);
+});
+
+it.each(['success', 'failure'] as const)('preserves the current view and stays silent when opening Codex: %s', async outcome => {
+  const bridge = new MockBridge(() => []);
+  const request = vi.spyOn(bridge, 'request').mockImplementation(() => outcome === 'success' ? Promise.resolve(true) : Promise.reject(new Error('Codex desktop app is not installed')));
+  useAppStore.setState({ bridge, snapshot: workspace('a') }); checkpointWorkspaceChanged('a');
+  const details = [{ repository: '/tmp/repo', path: 'map.ts', layer: 'working', status: 'modified', before: 'old', after: 'new' }];
+  useCheckpointStore.setState({ details, detailsCheckpointId: 'point' });
+  await runCheckpointAction({ type: 'openInCodex', task_id: 'task' });
+  expect(useCheckpointStore.getState()).toMatchObject({ busy: false, details, detailsCheckpointId: 'point', error: outcome === 'success' ? null : 'Codex desktop app is not installed' });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request.mock.calls[0][1]).toMatchObject({ showProgress: false });
 });
 
 it('loads file metadata without refreshing all history afterwards and exposes the active record', async () => {

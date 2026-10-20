@@ -6,7 +6,6 @@ import { isAbortError } from '../platform/bridge';
 import { Button } from './Button';
 import { LoadingState } from './LoadingState';
 import { ErrorNotice } from './ErrorNotice';
-import { Codicon } from './Codicon';
 
 export function CheckpointStorage({ taskId, revision, workspaceId: projectId }: { taskId?: string; revision?: unknown; workspaceId?: string }) {
   const { t } = useI18n();
@@ -28,19 +27,12 @@ export function CheckpointStorage({ taskId, revision, workspaceId: projectId }: 
     return () => controller.abort();
   }, [bridge, workspaceId, taskId, key]);
   const current = result?.key === key ? result : undefined;
-  const open = () => {
-    if (!bridge || !workspaceId) return;
-    void bridge.request({ type: 'checkpoint', payload: { workspace_id: workspaceId, action: { type: 'openStorage' } } }, { showProgress: false, context: { workspaceId } }).catch(error => setResult({ key, error: String(error) }));
-  };
   return <div className="checkpoint-storage-details">
     {!current ? <LoadingState>{t('Loading storage usage…')}</LoadingState> : current.error ? <ErrorNotice onRetry={() => setRetry(v => v + 1)}>{t(current.error)}</ErrorNotice> : current.usage && <>
-      <p>{t('All projects: {0} MiB', (current.usage.totalBytes! / 1048576).toFixed(1))}</p>
       {taskId && <p>{t('Referenced by this task: {0} MiB', (current.usage.taskBytes! / 1048576).toFixed(1))}</p>}
       {current.usage.reclaimableBytes !== null && <p>{t('Eligible history could free: {0} MiB', (current.usage.reclaimableBytes / 1048576).toFixed(1))}</p>}
       {taskId && <p className="checkpoint-settings-note">{t('Shared snapshots may be referenced by more than one task; task usage cannot be added together.')}</p>}
-      {current.usage.warning && <p className="checkpoint-storage-warning" role="status"><Codicon name="warning" />{t('Snapshot storage exceeds 1 GiB. Review old history and clean it manually.')}</p>}
-      <code className="selectable-text checkpoint-full-path">{current.usage.path}</code>
     </>}
-    <div className="checkpoint-toolbar"><Button size="xs" onClick={open}>{t('Open snapshot folder')}</Button><Button size="xs" onClick={() => setRetry(v => v + 1)}>{t('Refresh storage usage')}</Button></div>
+    <div className="checkpoint-toolbar"><Button size="xs" onClick={() => setRetry(v => v + 1)}>{t('Refresh storage usage')}</Button></div>
   </div>;
 }

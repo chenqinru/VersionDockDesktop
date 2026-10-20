@@ -176,6 +176,9 @@ impl ResponseEnvelope {
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum BridgeCommand {
     CheckpointCatalog,
+    CheckpointSettings {
+        action: crate::checkpoint::types::CheckpointSettingsAction,
+    },
     CheckpointProject {
         workspace_id: Option<String>,
         paths: Vec<String>,

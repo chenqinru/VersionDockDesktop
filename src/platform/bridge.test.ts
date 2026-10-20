@@ -42,10 +42,17 @@ describe('VersionDockBridge', () => {
       { type: 'recover', transaction_id: 'restore' },
       { type: 'cleanup', task_id: 'task', keep_recent: 0, fingerprint: 'fp' },
       { type: 'installHooks' },
+      { type: 'projectStorageUsage' },
+      { type: 'previewProjectCleanup', keep_recent: 10 },
+      { type: 'projectCleanup', keep_recent: 10, fingerprint: 'fp' },
     ] as const;
     for (const action of actions) {
       const command = { type: 'checkpoint', payload: { workspace_id: 'workspace', action } } as const;
       expect(commandShowsProgressByDefault(command)).toBe(false);
+      expect(commandProgressVisibility(command, { showProgress: true, context: { visibility: 'foreground' } })).toBe('background');
+    }
+    for (const type of ['status', 'installHooks', 'openStorage'] as const) {
+      const command = { type: 'checkpointSettings', payload: { action: { type } } } as const;
       expect(commandProgressVisibility(command, { showProgress: true, context: { visibility: 'foreground' } })).toBe('background');
     }
   });

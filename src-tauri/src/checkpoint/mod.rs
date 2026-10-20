@@ -3,6 +3,7 @@ mod catalog;
 mod cleanup;
 mod connections;
 mod history;
+mod launch;
 mod prompt;
 mod reads;
 mod redo;
@@ -47,6 +48,39 @@ pub(crate) async fn prepare_project(
     token: &CancellationToken,
 ) -> Result<serde_json::Value, DesktopError> {
     catalog::prepare(state, workspace_id, paths, token).await
+}
+
+pub(crate) async fn settings(
+    state: &AppState,
+    action: CheckpointSettingsAction,
+    token: &CancellationToken,
+) -> Result<serde_json::Value, DesktopError> {
+    let _writer = if matches!(action, CheckpointSettingsAction::InstallHooks) {
+        Some(
+            crate::update_worker::repository_lock(
+                &state.config_dir,
+                "checkpoint-storage-v1",
+                token,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let _objects =
+        crate::update_worker::repository_read_lock(&state.config_dir, reads::OBJECT_LOCK, token)
+            .await?;
+    let store = Storage::new(&state.config_dir)?;
+    if matches!(action, CheckpointSettingsAction::InstallHooks) {
+        install_hooks(&state.config_dir)?;
+        let mut db = store.read()?;
+        db.verified_hooks.clear();
+        store.save(&db)?;
+    }
+    value(CheckpointSettings {
+        hooks_installed: hooks_installed(&state.config_dir)?,
+        storage: history::storage_usage(&store, &store.read_cached()?, None)?,
+    })
 }
 
 fn now() -> String {
@@ -118,11 +152,14 @@ pub(crate) async fn handle(
             | CheckpointAction::Overview
             | CheckpointAction::History { .. }
             | CheckpointAction::StorageUsage { .. }
+            | CheckpointAction::ProjectStorageUsage
+            | CheckpointAction::PreviewProjectCleanup { .. }
             | CheckpointAction::Activity
             | CheckpointAction::Detail { .. }
             | CheckpointAction::Diff { .. }
             | CheckpointAction::Prompt { .. }
             | CheckpointAction::Messages { .. }
+            | CheckpointAction::OpenInCodex { .. }
     );
     // Atomically published metadata and immutable objects can be read during capture.
     // Only deletion needs to exclude readers, using a separate object-lifetime lock.
@@ -142,7 +179,9 @@ pub(crate) async fn handle(
     let _objects = if reading
         && !matches!(
             action,
-            CheckpointAction::Activity | CheckpointAction::Overview
+            CheckpointAction::Activity
+                | CheckpointAction::Overview
+                | CheckpointAction::OpenInCodex { .. }
         ) {
         Some(
             crate::update_worker::repository_read_lock(
@@ -154,7 +193,9 @@ pub(crate) async fn handle(
         )
     } else if matches!(
         action,
-        CheckpointAction::Cleanup { .. } | CheckpointAction::Remove { .. }
+        CheckpointAction::Cleanup { .. }
+            | CheckpointAction::ProjectCleanup { .. }
+            | CheckpointAction::Remove { .. }
     ) {
         Some(
             crate::update_worker::repository_lock(&state.config_dir, reads::OBJECT_LOCK, token)
@@ -227,6 +268,7 @@ pub(crate) async fn handle(
             task_id: Some(task_id),
         }
         | CheckpointAction::PreviewRedo { task_id }
+        | CheckpointAction::OpenInCodex { task_id }
         | CheckpointAction::SetMode { task_id, .. }
         | CheckpointAction::Begin { task_id, .. }
         | CheckpointAction::Finish { task_id }
@@ -267,6 +309,26 @@ pub(crate) async fn handle(
     }
     if let CheckpointAction::StorageUsage { task_id } = &action {
         return value(history::storage_usage(&store, &db, task_id.as_deref())?);
+    }
+    if matches!(action, CheckpointAction::ProjectStorageUsage) {
+        return value(history::project_storage_usage(&store, &db, &workspace)?);
+    }
+    if let CheckpointAction::PreviewProjectCleanup { keep_recent } = &action {
+        return value(cleanup::project_preview(&store, &db, &workspace, *keep_recent)?.0);
+    }
+    if let CheckpointAction::ProjectCleanup {
+        keep_recent,
+        fingerprint,
+    } = &action
+    {
+        return value(cleanup::project_execute(
+            &store,
+            &mut db,
+            &workspace,
+            *keep_recent,
+            fingerprint,
+            token,
+        )?);
     }
     // Display metadata is serialized with captures, but needs no Git write lock.
     if let CheckpointAction::RenameTask { task_id, name } = &action {
@@ -310,6 +372,15 @@ pub(crate) async fn handle(
             .and_then(|t| t.checkpoints.iter().find(|p| &p.id == checkpoint_id))
             .ok_or_else(|| failure("Checkpoint not found"))?;
         return value(details(&store, point)?);
+    }
+    if let CheckpointAction::OpenInCodex { task_id } = &action {
+        let task = db
+            .tasks
+            .iter()
+            .find(|task| &task.id == task_id)
+            .ok_or_else(|| failure("Task not found"))?;
+        launch::open(&task.path, token).await?;
+        return value(true);
     }
     let mut lock_paths = repos
         .iter()
@@ -612,6 +683,7 @@ fn listing(
         .filter(|t| tasks.iter().any(|task| task.id == t.report.task_id))
         .map(report)
         .collect();
+    let redo_checkpoints = redo::checkpoints(db, workspace);
     value(CheckpointListing {
         tasks,
         recovery,
@@ -624,13 +696,8 @@ fn listing(
         )),
         history_counts: None,
         history_revisions: None,
-        redo_tasks: Some(
-            db.tasks
-                .iter()
-                .filter(|task| belongs(task, workspace) && redo::candidate(db, task).is_some())
-                .map(|task| task.id.clone())
-                .collect(),
-        ),
+        redo_tasks: Some(redo_checkpoints.keys().cloned().collect()),
+        redo_checkpoints: Some(redo_checkpoints),
     })
 }
 

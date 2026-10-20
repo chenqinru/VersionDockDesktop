@@ -676,6 +676,7 @@ async fn rollback_earlier_turn_also_rolls_back_following_turns() {
     fs::write(root.join("b"), "b").unwrap();
     f.end(&task).await;
     let preview = f.preview(&task, Some(&first), false).await;
+    assert_eq!(preview.preview.checkpoint_count, 2);
     f.execute(preview).await;
     assert!(!root.join("a").exists());
     assert!(!root.join("b").exists());
@@ -1536,6 +1537,200 @@ async fn cleanup_retains_task_and_recent_undo_without_touching_files_or_index() 
             .await
             .unwrap(),
         b"version 1\n"
+    );
+}
+
+#[tokio::test]
+async fn project_cleanup_deduplicates_usage_and_preserves_other_projects_and_source_state() {
+    let mut f = Fixture::new(1).await;
+    let task = f.task(TaskIsolation::Original).await;
+    let root = Path::new(&task.repositories[0].task_path);
+    for version in 0..2 {
+        f.start(&task).await;
+        fs::write(root.join("shared.txt"), format!("shared {version}\n")).unwrap();
+        git(root, &["add", "shared.txt"], None, &f.token)
+            .await
+            .unwrap();
+        fs::write(root.join("shared.txt"), format!("unstaged {version}\n")).unwrap();
+        f.end(&task).await;
+    }
+    let mut sibling = f.db.tasks[0].clone();
+    sibling.id = "sibling".into();
+    for point in &mut sibling.checkpoints {
+        point.id = format!("sibling-{}", point.id);
+    }
+    f.db.tasks.push(sibling);
+    // A project with the same source roots is still a distinct owner.
+    let mut foreign = f.db.tasks[0].clone();
+    foreign.id = "foreign".into();
+    foreign.workspace_id = "other-project".into();
+    for point in &mut foreign.checkpoints {
+        point.id = format!("foreign-{}", point.id);
+    }
+    let foreign_before = serde_json::to_vec(&foreign).unwrap();
+    f.db.tasks.push(foreign);
+    f.store.save(&f.db).unwrap();
+    let before = capture(&f.store, &paths(&task), &f.token).await.unwrap();
+    let database_before = serde_json::to_vec(&f.db).unwrap();
+    let usage = history::project_storage_usage(&f.store, &f.db, &f.workspace).unwrap();
+    assert_eq!(usage.tasks.len(), 2);
+    assert_eq!(usage.referenced_bytes, usage.tasks[0].referenced_bytes);
+    assert!(
+        usage
+            .tasks
+            .iter()
+            .map(|task| task.referenced_bytes)
+            .sum::<f64>()
+            > usage.referenced_bytes
+    );
+    let (preview, _) = cleanup::project_preview(&f.store, &f.db, &f.workspace, 0).unwrap();
+    assert_eq!(preview.remove_count, 4);
+    assert!(preview.reclaimable_bytes < usage.referenced_bytes);
+    assert_eq!(serde_json::to_vec(&f.db).unwrap(), database_before);
+    let report = cleanup::project_execute(
+        &f.store,
+        &mut f.db,
+        &f.workspace,
+        0,
+        &preview.fingerprint,
+        &f.token,
+    )
+    .unwrap();
+    assert_eq!(report.status, "succeeded");
+    assert_eq!(report.freed_bytes, preview.reclaimable_bytes);
+    assert!(f.db.tasks[0].checkpoints.is_empty());
+    assert!(f.db.tasks[1].checkpoints.is_empty());
+    assert_eq!(serde_json::to_vec(&f.db.tasks[2]).unwrap(), foreign_before);
+    let snapshot = f
+        .store
+        .snapshot(f.db.tasks[2].checkpoints[1].after.as_deref().unwrap())
+        .unwrap();
+    let shared = &snapshot.repositories[0].working["shared.txt"].hash;
+    assert_eq!(f.store.get(shared).unwrap(), b"unstaged 1\n");
+    assert_eq!(
+        capture(&f.store, &paths(&task), &f.token).await.unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
+async fn project_cleanup_preflights_all_tasks_and_rejects_stale_or_cancelled_execution() {
+    let mut f = Fixture::new(1).await;
+    let task = f.task(TaskIsolation::Original).await;
+    f.start(&task).await;
+    f.end(&task).await;
+    let mut sibling = f.db.tasks[0].clone();
+    sibling.id = "sibling".into();
+    for point in &mut sibling.checkpoints {
+        point.id = format!("sibling-{}", point.id);
+    }
+    f.db.tasks.push(sibling.clone());
+    let (preview, _) = cleanup::project_preview(&f.store, &f.db, &f.workspace, 0).unwrap();
+    f.start(&sibling).await;
+    let before = serde_json::to_vec(&f.db).unwrap();
+    assert!(cleanup::project_execute(
+        &f.store,
+        &mut f.db,
+        &f.workspace,
+        0,
+        &preview.fingerprint,
+        &f.token
+    )
+    .is_err());
+    assert_eq!(serde_json::to_vec(&f.db).unwrap(), before);
+    assert!(
+        history::project_storage_usage(&f.store, &f.db, &f.workspace)
+            .unwrap()
+            .reclaimable_bytes
+            .is_none()
+    );
+    f.end(&sibling).await;
+    assert!(cleanup::project_execute(
+        &f.store,
+        &mut f.db,
+        &f.workspace,
+        0,
+        &preview.fingerprint,
+        &f.token
+    )
+    .unwrap_err()
+    .message
+    .contains("stale"));
+    let (preview, _) = cleanup::project_preview(&f.store, &f.db, &f.workspace, 0).unwrap();
+    let before = serde_json::to_vec(&f.db).unwrap();
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(cleanup::project_execute(
+        &f.store,
+        &mut f.db,
+        &f.workspace,
+        0,
+        &preview.fingerprint,
+        &cancelled
+    )
+    .is_err());
+    assert_eq!(serde_json::to_vec(&f.db).unwrap(), before);
+    f.store.save(&f.db).unwrap();
+    let state = AppState::load(f.store.root.parent().unwrap().to_path_buf());
+    state
+        .app
+        .write()
+        .await
+        .recent_workspaces
+        .push(f.workspace.clone());
+    let app_before = serde_json::to_vec(&*state.app.read().await).unwrap();
+    let usage: ProjectStorageUsage = serde_json::from_value(
+        handle(
+            &state,
+            &f.workspace.id,
+            CheckpointAction::ProjectStorageUsage,
+            &f.token,
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(usage.tasks.len(), 2);
+    assert!(handle(
+        &state,
+        "missing-project",
+        CheckpointAction::ProjectCleanup {
+            keep_recent: 0,
+            fingerprint: preview.fingerprint.clone()
+        },
+        &f.token
+    )
+    .await
+    .is_err());
+    let result: ProjectCleanupPreview = serde_json::from_value(
+        handle(
+            &state,
+            &f.workspace.id,
+            CheckpointAction::PreviewProjectCleanup { keep_recent: 0 },
+            &f.token,
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    let report: CheckpointCleanupReport = serde_json::from_value(
+        handle(
+            &state,
+            &f.workspace.id,
+            CheckpointAction::ProjectCleanup {
+                keep_recent: 0,
+                fingerprint: result.fingerprint,
+            },
+            &f.token,
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(report.status, "succeeded");
+    assert_eq!(
+        serde_json::to_vec(&*state.app.read().await).unwrap(),
+        app_before
     );
 }
 
@@ -2475,6 +2670,74 @@ async fn unrelated_stop_and_manual_finish_cannot_verify_hooks() {
         .await
         .unwrap();
     assert!(f.store.read().unwrap().verified_hooks.is_empty());
+}
+
+#[tokio::test]
+async fn opening_codex_rejects_a_task_owned_by_another_project_without_launching() {
+    let mut f = Fixture::new(1).await;
+    let task = f.task(TaskIsolation::Original).await;
+    let other = Fixture::new(1).await;
+    let state = AppState::load(f.store.root.parent().unwrap().to_path_buf());
+    state
+        .app
+        .write()
+        .await
+        .recent_workspaces
+        .push(other.workspace.clone());
+    let before = fs::read(f.store.root.join("state.json")).unwrap();
+    let error = handle(
+        &state,
+        &other.workspace.id,
+        CheckpointAction::OpenInCodex { task_id: task.id },
+        &f.token,
+    )
+    .await
+    .unwrap_err();
+    assert!(error
+        .message
+        .contains("Task does not belong to this workspace"));
+    assert_eq!(fs::read(f.store.root.join("state.json")).unwrap(), before);
+}
+
+#[tokio::test]
+async fn redo_listing_identifies_only_the_latest_undo_range() {
+    let mut f = Fixture::new(1).await;
+    let task = f.task(TaskIsolation::Original).await;
+    let root = Path::new(&task.repositories[0].task_path);
+    for name in ["first", "second", "third"] {
+        f.start(&task).await;
+        fs::write(root.join(name), name).unwrap();
+        f.end(&task).await;
+    }
+    let ids = f.db.tasks[0]
+        .checkpoints
+        .iter()
+        .map(|point| point.id.clone())
+        .collect::<Vec<_>>();
+    let undo = f.preview(&task, None, false).await;
+    f.execute(undo).await;
+    assert_eq!(redo::checkpoints(&f.db, &f.workspace)[&task.id], ids[2..]);
+    let undo = f.preview(&task, Some(&ids[0]), false).await;
+    f.execute(undo).await;
+    let overview = history::overview(&f.store, &f.db, &f.workspace).unwrap();
+    let listed: CheckpointListing =
+        serde_json::from_value(listing(&f.store, &f.db, &f.workspace).unwrap()).unwrap();
+    for output in [overview, listed] {
+        assert_eq!(output.redo_tasks.unwrap(), vec![task.id.clone()]);
+        assert_eq!(output.redo_checkpoints.unwrap()[&task.id], ids[..2]);
+    }
+    let mut unrelated = f.workspace.clone();
+    unrelated.id = "unrelated-project".into();
+    unrelated.paths.clear();
+    assert!(redo::checkpoints(&f.db, &unrelated).is_empty());
+    let redo = redo::prepare_redo(&f.store, &f.db, &f.db.tasks[0], &f.token)
+        .await
+        .unwrap();
+    f.execute(redo).await;
+    assert!(redo::checkpoints(&f.db, &f.workspace).is_empty());
+    assert!(root.join("first").exists());
+    assert!(root.join("second").exists());
+    assert!(!root.join("third").exists());
 }
 
 #[tokio::test]

@@ -21,6 +21,10 @@ describe('TitleBarActions', () => {
     render(<TitleBarActions workspaceId="ws" />);
     expect(screen.getByRole('button', { name: 'Tasks and checkpoints' })).toHaveAttribute('aria-haspopup', 'dialog');
   });
+  it('hides checkpoints when a workspace snapshot exists but the welcome screen is displayed', () => {
+    render(<TitleBarActions workspaceId="ws" showCheckpoints={false} />);
+    expect(screen.queryByRole('button', { name: 'Tasks and checkpoints' })).not.toBeInTheDocument();
+  });
   it.each([
     ['Clone Git Repository', 'Clone Git Repository'],
     ['Manage Remote Accounts (GitHub / GitLab / Gitee)', 'Remote Providers'],
@@ -45,7 +49,8 @@ describe('TitleBarActions', () => {
 
   it('keeps clone in the welcome body and exposes accounts, settings, GitHub and about in its title bar', () => {
     render(<BridgeContext.Provider value={new MockBridge(() => [])}><TitleBarActions /></BridgeContext.Provider>);
-    expect(screen.getAllByRole('button')).toHaveLength(5);
+    expect(screen.getAllByRole('button')).toHaveLength(4);
+    expect(screen.queryByRole('button', { name: 'Tasks and checkpoints' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Clone Git Repository' })).not.toBeInTheDocument();
   });
 

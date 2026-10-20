@@ -40,19 +40,20 @@ afterEach(() => {
 });
 
 describe('appStore async lifecycle', () => {
-  it.each([false, true])('keeps slow checkpoint operations out of notifications on success or failure (failed=%s)', async failed => {
+  it.each([[false, 'checkpoint'], [true, 'checkpoint'], [false, 'checkpointSettings'], [true, 'checkpointSettings']] as const)('keeps slow checkpoint operations out of notifications on success or failure (failed=%s, command=%s)', async (failed, type) => {
     const current = snapshot('checkpoints', 1);
     const gate = deferred<unknown>();
-    const bridge = new MockBridge(command => command.type === 'bootstrap' ? bootstrap : command.type === 'checkpoint' ? gate.promise : []);
+    const bridge = new MockBridge(command => command.type === 'bootstrap' ? bootstrap : command.type === type ? gate.promise : []);
     await useAppStore.getState().initialize(bridge);
     useAppStore.setState({ snapshot: current, notifications: [], toastNotificationIds: [] });
     let event!: OperationEvent;
     bridge.subscribe(request => {
-      if ('progressEvent' in request && request.type === 'operation-request' && request.command.type === 'checkpoint') {
+      if ('progressEvent' in request && request.type === 'operation-request' && request.command.type === type) {
         event = { operationId: request.requestId, context: request.context, startedAt: '', status: 'running', phase: 'checkpoint', message: 'Managing task checkpoints', completed: null, total: null, cancellable: true, error: null };
       }
     });
-    const pending = bridge.request({ type: 'checkpoint', payload: { workspace_id: current.workspace.id, action: { type: 'execute', preview_id: 'preview' } } }, { showProgress: true, context: { visibility: 'foreground' } });
+    const command: BridgeCommand = type === 'checkpoint' ? { type: 'checkpoint', payload: { workspace_id: current.workspace.id, action: { type: 'execute', preview_id: 'preview' } } } : { type: 'checkpointSettings', payload: { action: { type: 'installHooks' } } };
+    const pending = bridge.request(command, { showProgress: true, context: { visibility: 'foreground' } });
     expect(event.context.visibility).toBe('background');
     bridge.emit(event);
     await new Promise(resolve => setTimeout(resolve, 300));

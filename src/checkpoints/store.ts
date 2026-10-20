@@ -79,15 +79,20 @@ export async function runCheckpointAction<T>(action: CheckpointAction): Promise<
   if (!workspaceId || busy) return;
   const ticket = generation; const requestId = ++operation;
   activityRevision += 1;
-  controller = new AbortController();
+  const actionController = new AbortController(); controller = actionController;
   useCheckpointStore.setState({ busy: true, loadingDetailsId: action.type === 'detail' ? action.checkpoint_id : null, error: null, ...(action.type === 'detail' ? { preview: null } : {}), ...(['preview', 'previewRedo'].includes(action.type) ? { preview: null } : {}), ...(action.type === 'previewCleanup' ? { cleanupPreview: null, cleanupReport: null } : {}) });
   try {
-    const result = await request<T>(action, controller.signal);
-    if (!current(workspaceId, ticket)) return;
+    const result = await request<T>(action, actionController.signal);
+    if (!current(workspaceId, ticket) || actionController.signal.aborted) return;
     if (action.type === 'previewCleanup') useCheckpointStore.setState({ cleanupPreview: result as CheckpointCleanupPreview });
     else if (action.type === 'cleanup') useCheckpointStore.setState({ cleanupPreview: null, cleanupReport: result as CheckpointCleanupReport, preview: null, details: null, detailsCheckpointId: null });
-    else if (action.type === 'preview' || action.type === 'previewRedo') useCheckpointStore.setState({ preview: result as RestorePreview, details: null, detailsCheckpointId: action.type === 'previewRedo' || action.bring_back ? null : action.checkpoint_id ?? useCheckpointStore.getState().listing?.tasks.find(task => task.id === action.task_id)?.checkpoints.filter(point => point.status === 'completed').at(-1)?.id ?? null });
+    else if (action.type === 'preview' || action.type === 'previewRedo') {
+      const previous = useCheckpointStore.getState();
+      const checkpointId = action.type === 'previewRedo' ? previous.detailsCheckpointId : action.bring_back ? null : action.checkpoint_id ?? previous.listing?.tasks.find(task => task.id === action.task_id)?.checkpoints.filter(point => point.status === 'completed').at(-1)?.id ?? null;
+      useCheckpointStore.setState({ preview: result as RestorePreview, details: checkpointId && checkpointId === previous.detailsCheckpointId ? previous.details : null, detailsCheckpointId: checkpointId });
+    }
     else if (action.type === 'detail') useCheckpointStore.setState({ details: result as RestoreFile[], detailsCheckpointId: action.checkpoint_id });
+    else if (action.type === 'openInCodex') { /* Opening an app preserves the current checkpoint view. */ }
     else {
       useCheckpointStore.setState({ preview: null, details: null, detailsCheckpointId: null, cleanupPreview: null, cleanupReport: null });
       const report = result as RestoreReport;
@@ -99,7 +104,7 @@ export async function runCheckpointAction<T>(action: CheckpointAction): Promise<
   } finally {
     if (current(workspaceId, ticket) && requestId === operation) {
       controller = undefined; useCheckpointStore.setState({ busy: false, loadingDetailsId: null });
-      if (action.type !== 'detail') await refreshCheckpoints();
+      if (!['detail', 'preview', 'previewRedo', 'openInCodex'].includes(action.type)) await refreshCheckpoints();
     }
   }
 }

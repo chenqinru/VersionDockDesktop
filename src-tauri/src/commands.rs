@@ -671,9 +671,9 @@ async fn runtime_capabilities(app: Option<&AppHandle>) -> RuntimeCapabilities {
 
 fn command_progress(command: &BridgeCommand) -> (&'static str, &'static str) {
     match command {
-        BridgeCommand::CheckpointCatalog | BridgeCommand::CheckpointProject { .. } => {
-            ("checkpoint", "Managing task checkpoints")
-        }
+        BridgeCommand::CheckpointCatalog
+        | BridgeCommand::CheckpointProject { .. }
+        | BridgeCommand::CheckpointSettings { .. } => ("checkpoint", "Managing task checkpoints"),
         BridgeCommand::Checkpoint { .. } => ("checkpoint", "Managing task checkpoints"),
         BridgeCommand::AiComposerApply { .. } => ("aiCompose", "Applying AI commit plan"),
         BridgeCommand::AiComposerPrepare { .. } => ("aiPrepare", "Preparing AI change units"),
@@ -1235,6 +1235,22 @@ async fn dispatch(
 ) -> Result<serde_json::Value, DesktopError> {
     match command {
         BridgeCommand::CheckpointCatalog => crate::checkpoint::catalog(state, token).await,
+        BridgeCommand::CheckpointSettings { action } => {
+            if matches!(
+                action,
+                crate::checkpoint::types::CheckpointSettingsAction::OpenStorage
+            ) {
+                let path = crate::checkpoint::storage_directory(&state.config_dir)?;
+                app.opener()
+                    .open_path(path.to_string_lossy(), None::<&str>)
+                    .map_err(|error| {
+                        DesktopError::new("CHECKPOINT_FAILED", error.to_string(), true)
+                    })?;
+                json(true)
+            } else {
+                crate::checkpoint::settings(state, action, token).await
+            }
+        }
         BridgeCommand::CheckpointProject {
             workspace_id,
             paths,

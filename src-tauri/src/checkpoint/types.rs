@@ -39,7 +39,18 @@ pub enum CheckpointAction {
         task_id: Option<String>,
     },
     OpenStorage,
+    ProjectStorageUsage,
+    PreviewProjectCleanup {
+        keep_recent: u32,
+    },
+    ProjectCleanup {
+        keep_recent: u32,
+        fingerprint: String,
+    },
     PreviewRedo {
+        task_id: String,
+    },
+    OpenInCodex {
         task_id: String,
     },
     Create {
@@ -261,6 +272,9 @@ pub struct RestorePreview {
     pub fingerprint: String,
     #[serde(default)]
     #[cfg_attr(test, specta(optional))]
+    pub checkpoint_count: u32,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
     pub redo_of: Option<String>,
 }
 
@@ -297,6 +311,9 @@ pub struct CheckpointListing {
     #[serde(default)]
     #[cfg_attr(test, specta(optional))]
     pub redo_tasks: Option<Vec<String>>,
+    #[serde(default)]
+    #[cfg_attr(test, specta(optional))]
+    pub redo_checkpoints: Option<std::collections::BTreeMap<String, Vec<String>>>,
 }
 
 /// Status-bar metadata only: unfinished checkpoints and the latest checkpoint per task.
@@ -342,6 +359,57 @@ pub struct CheckpointStorageUsage {
     pub task_bytes: f64,
     pub reclaimable_bytes: Option<f64>,
     pub warning: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum CheckpointSettingsAction {
+    Status,
+    InstallHooks,
+    OpenStorage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointSettings {
+    pub hooks_installed: bool,
+    pub storage: CheckpointStorageUsage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectTaskStorage {
+    pub task_id: String,
+    pub name: String,
+    pub checkpoints: u32,
+    pub referenced_bytes: f64,
+    pub blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectStorageUsage {
+    pub project_id: String,
+    pub total_bytes: f64,
+    pub referenced_bytes: f64,
+    pub reclaimable_bytes: Option<f64>,
+    pub tasks: Vec<ProjectTaskStorage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCleanupPreview {
+    pub project_id: String,
+    pub keep_recent: u32,
+    pub remove_count: u32,
+    pub protected_count: u32,
+    pub reclaimable_bytes: f64,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
