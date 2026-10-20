@@ -147,8 +147,7 @@ pub(crate) async fn handle(
     };
     let reading = matches!(
         action,
-        CheckpointAction::List
-            | CheckpointAction::Repositories
+        CheckpointAction::Repositories
             | CheckpointAction::Overview
             | CheckpointAction::History { .. }
             | CheckpointAction::StorageUsage { .. }
@@ -157,7 +156,6 @@ pub(crate) async fn handle(
             | CheckpointAction::Activity
             | CheckpointAction::Detail { .. }
             | CheckpointAction::Diff { .. }
-            | CheckpointAction::Prompt { .. }
             | CheckpointAction::Messages { .. }
             | CheckpointAction::OpenInCodex { .. }
     );
@@ -227,15 +225,6 @@ pub(crate) async fn handle(
     if matches!(action, CheckpointAction::Overview) {
         return value(history::overview(&store, &db, &workspace)?);
     }
-    if matches!(action, CheckpointAction::List) {
-        return listing(&store, &db, &workspace);
-    }
-    if matches!(action, CheckpointAction::InstallHooks) {
-        install_hooks(&state.config_dir)?;
-        db.verified_hooks.clear();
-        store.save(&db)?;
-        return value(true);
-    }
     let allowed = db
         .tasks
         .iter()
@@ -279,7 +268,6 @@ pub(crate) async fn handle(
         | CheckpointAction::Cleanup { task_id, .. }
         | CheckpointAction::RenameTask { task_id, .. }
         | CheckpointAction::Rename { task_id, .. }
-        | CheckpointAction::Prompt { task_id, .. }
         | CheckpointAction::Messages { task_id, .. }
         | CheckpointAction::Detail { task_id, .. } => Some(task_id.clone()),
         _ => None,
@@ -342,13 +330,6 @@ pub(crate) async fn handle(
     {
         return value(prompt::messages(&store, &db, task_id, checkpoint_id)?);
     }
-    if let CheckpointAction::Prompt {
-        task_id,
-        checkpoint_id,
-    } = &action
-    {
-        return value(checkpoint_prompt(&store, &db, task_id, checkpoint_id)?);
-    }
     // Stored snapshots are immutable. Viewing a diff does not need repository write locks
     // and remains available while a failed restore is awaiting recovery.
     if let CheckpointAction::Diff {
@@ -390,12 +371,7 @@ pub(crate) async fn handle(
         lock_paths.extend(paths(task));
         lock_paths.extend(task.repositories.iter().map(|r| r.source_path.clone()));
     }
-    if pending(&store, &db, &lock_paths)?
-        && !matches!(
-            action,
-            CheckpointAction::Recover { .. } | CheckpointAction::Detail { .. }
-        )
-    {
+    if pending(&store, &db, &lock_paths)? && !matches!(action, CheckpointAction::Recover { .. }) {
         return Err(failure(
             "Recover the interrupted restore before making further changes",
         ));
@@ -656,51 +632,6 @@ fn belongs(task: &TaskWorkspace, workspace: &WorkspaceDescriptor) -> bool {
             .iter()
             .any(|p| task.roots.contains(p) || *p == task.path)
 }
-fn listing(
-    store: &Storage,
-    db: &Database,
-    workspace: &WorkspaceDescriptor,
-) -> Result<serde_json::Value, DesktopError> {
-    let mut tasks = db
-        .tasks
-        .iter()
-        .filter(|t| belongs(t, workspace))
-        .cloned()
-        .collect::<Vec<_>>();
-    // Older records get the same file summary without rewriting their names or
-    // reading source contents. A missing summary never prevents viewing history.
-    for task in &mut tasks {
-        for point in &mut task.checkpoints {
-            prompt::display_name(store, db, point);
-            if point.summary.is_none() && point.after.is_some() {
-                point.summary = reads::summary(store, point).ok();
-            }
-        }
-    }
-    let recovery = db
-        .transactions
-        .iter()
-        .filter(|t| tasks.iter().any(|task| task.id == t.report.task_id))
-        .map(report)
-        .collect();
-    let redo_checkpoints = redo::checkpoints(db, workspace);
-    value(CheckpointListing {
-        tasks,
-        recovery,
-        storage_bytes: store.size()?,
-        hooks_installed: hooks_installed(store.root.parent().unwrap()).unwrap_or(false),
-        connections: Some(connections::all(
-            db,
-            workspace,
-            store.root.parent().unwrap(),
-        )),
-        history_counts: None,
-        history_revisions: None,
-        redo_tasks: Some(redo_checkpoints.keys().cloned().collect()),
-        redo_checkpoints: Some(redo_checkpoints),
-    })
-}
-
 fn activity(db: &Database, workspace: &WorkspaceDescriptor) -> CheckpointActivity {
     let tasks = db
         .tasks
@@ -1122,7 +1053,7 @@ async fn begin(
     let mut checkpoint = Checkpoint {
         id: uuid::Uuid::new_v4().to_string(),
         name: if let Some(prompt) = prompt {
-            prompt_title(prompt)
+            prompt::title(prompt)
         } else if name.trim().is_empty() {
             "Checkpoint".into()
         } else {
@@ -1306,36 +1237,6 @@ fn summarize(store: &Storage, point: &Checkpoint) -> Result<CheckpointSummary, D
             })
             .collect(),
     })
-}
-
-fn prompt_title(prompt: &str) -> String {
-    prompt::title(prompt)
-}
-
-fn checkpoint_prompt(
-    store: &Storage,
-    db: &Database,
-    task_id: &str,
-    checkpoint_id: &str,
-) -> Result<Option<String>, DesktopError> {
-    let point = db
-        .tasks
-        .iter()
-        .find(|task| task.id == task_id)
-        .and_then(|task| {
-            task.checkpoints
-                .iter()
-                .find(|point| point.id == checkpoint_id)
-        })
-        .ok_or_else(|| failure("Checkpoint not found"))?;
-    let hashes = point
-        .prompt_hash
-        .iter()
-        .chain(db.additional_messages.get(&point.id).into_iter().flatten());
-    let messages = hashes
-        .map(|hash| String::from_utf8(store.get(hash)?).map_err(io))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((!messages.is_empty()).then(|| messages.join("\n\n---\n\n")))
 }
 
 fn diff_task_id(db: &Database, source: &CheckpointDiffSource) -> Result<String, DesktopError> {
@@ -1656,7 +1557,7 @@ async fn hook(
                         if !db.custom_checkpoint_names.contains(&point.id)
                             && (point.name == "Codex turn" || point.name == "Checkpoint")
                         {
-                            point.name = prompt_title(prompt);
+                            point.name = prompt::title(prompt);
                         }
                     } else {
                         additions.push(hash);

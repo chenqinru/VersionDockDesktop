@@ -25,7 +25,7 @@ function setup(withProject = true, extraTasks: TaskWorkspace[] = []) {
     if (action.type === 'repositories') return [];
     if (action.type === 'detail') return [{ repository: '/B/repo', path: 'file.ts', layer: 'working', status: 'modified', before: null, after: null }];
     if (action.type === 'diff') return { path: 'file.ts', language: 'typescript', content: '@@ -1 +1 @@\n-old\n+new\n', binary: false, truncated: false, lineCount: 3 };
-    return { tasks: tasks.filter(task => task.workspaceId === command.payload.workspace_id), recovery: [], storageBytes: 0, hooksInstalled: false };
+    return { tasks: tasks.filter(task => task.workspaceId === command.payload.workspace_id), recovery: [] };
   });
   const originalRequest = bridge.request.bind(bridge);
   const request = vi.spyOn(bridge, 'request');
@@ -124,7 +124,7 @@ it('keeps the dialog, sidebar position and task focus while another project load
   expect(navigation.scrollTop).toBe(80);
   expect(target).toHaveFocus();
   expect(screen.queryByRole('heading', { name: 'Fix A' })).not.toBeInTheDocument();
-  await act(async () => release({ tasks: [tasks[1]], recovery: [], storageBytes: 0, hooksInstalled: false }));
+  await act(async () => release({ tasks: [tasks[1]], recovery: [] }));
   expect(await screen.findByRole('heading', { name: 'Fix B' })).toBeInTheDocument();
   expect(screen.getByRole('dialog', { name: 'Tasks and checkpoints' })).toBe(dialog);
   expect(target).toHaveFocus();

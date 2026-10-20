@@ -41,7 +41,6 @@ describe('VersionDockBridge', () => {
       { type: 'execute', preview_id: 'preview' },
       { type: 'recover', transaction_id: 'restore' },
       { type: 'cleanup', task_id: 'task', keep_recent: 0, fingerprint: 'fp' },
-      { type: 'installHooks' },
       { type: 'projectStorageUsage' },
       { type: 'previewProjectCleanup', keep_recent: 10 },
       { type: 'projectCleanup', keep_recent: 10, fingerprint: 'fp' },

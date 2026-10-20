@@ -122,15 +122,23 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
   const recovery = state.listing?.recovery.filter(report => ['failed', 'pending'].includes(report.status)) ?? [];
   const blocked = state.busy || managementBusy || recovery.length > 0;
   const inlinePreview = state.preview && !state.preview.bringBack ? state.preview : null;
-  const displayedPreview = inlinePreview ? null : state.preview;
-  const changes = displayedPreview?.files ?? state.details;
+  const bringBackPreview = state.preview?.bringBack ? state.preview : null;
+  const changes = bringBackPreview?.files ?? state.details;
   const undo = useCheckpointUndo(workspace?.id, task?.id, independent);
   const showSettings = settingsTask === (task?.id ?? 'global');
   const showConnection = connectionTask === (task?.id ?? 'global');
   const reviewing = Boolean(task && changes && !creating && !showSettings && !showConnection && !managementContent);
+  const ownsTask = () => {
+    const current = useCheckpointStore.getState();
+    return current.workspaceId === workspace?.id && current.selectedTaskId === task?.id && (independent || useAppStore.getState().snapshot?.workspace.id === workspace?.id);
+  };
+  const restoreNotice = inlinePreview && (inlinePreview.conflicts.length > 0 || !inlinePreview.files.length) ? <>
+    {inlinePreview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}
+    {!inlinePreview.conflicts.length && !inlinePreview.files.length && <p className="checkpoint-form-hint">{t('No changes to apply')}</p>}
+  </> : null;
   const reviewPoint = task?.checkpoints.find(point => point.id === state.detailsCheckpointId) ?? (reviewSelection && task && reviewSelection.taskId === task.id ? reviewSelection.point : undefined);
   const redoCheckpoints = task ? state.listing?.redoCheckpoints?.[task.id] ?? [] : [];
-  const canRedoReview = Boolean(reviewPoint?.status === 'undone' && task && state.listing?.redoTasks?.includes(task.id) && redoCheckpoints.includes(reviewPoint.id));
+  const canRedoReview = Boolean(reviewPoint?.status === 'undone' && redoCheckpoints.includes(reviewPoint.id));
   const followingTurns = reviewSelection?.point.id === reviewPoint?.id && reviewSelection?.following !== undefined ? reviewSelection.following : task && reviewPoint ? task.checkpoints.slice(task.checkpoints.indexOf(reviewPoint) + 1).filter(point => point.status === 'completed').length : 0;
   const connection = taskConnection(task, state.listing?.connections);
   const hookConnected = connection.status === 'verified';
@@ -199,12 +207,12 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
   const renameTask = async () => {
     if (!task || blocked) return;
     const name = await promptDialog({ title: t('Rename task'), message: t('Enter a new name for this task.'), inputLabel: t('Task name'), initialValue: task.name, validateInput: value => !value.trim() || [...value.trim()].length > 100 || /\p{Cc}/u.test(value.trim()) ? t('Enter a single-line task name of 1 to 100 characters') : undefined });
-    if (name !== null && name.trim() !== task.name && (project ? useCheckpointStore.getState().workspaceId : useAppStore.getState().snapshot?.workspace.id) === workspace?.id && useCheckpointStore.getState().selectedTaskId === task.id) await runCheckpointAction({ type: 'renameTask', task_id: task.id, name });
+    if (name !== null && name.trim() !== task.name && ownsTask()) await runCheckpointAction({ type: 'renameTask', task_id: task.id, name });
   };
   const rename = async (point: Checkpoint) => {
     if (!task) return;
     const name = await promptDialog({ title: t('Rename checkpoint'), message: t('Give this checkpoint a name that describes its changes.'), inputLabel: t('Checkpoint name'), initialValue: !point.promptHash && (point.name === 'Codex turn' || point.name === 'Checkpoint') ? '' : point.name, validateInput: value => !value.trim() || [...value.trim()].length > 100 || /[\r\n\t]/.test(value) ? t('Enter a single-line checkpoint name of 1 to 100 characters') : undefined });
-    if (name !== null && (project ? useCheckpointStore.getState().workspaceId : useAppStore.getState().snapshot?.workspace.id) === workspace?.id && useCheckpointStore.getState().selectedTaskId === task.id) await runCheckpointAction({ type: 'rename', task_id: task.id, checkpoint_id: point.id, name });
+    if (name !== null && ownsTask()) await runCheckpointAction({ type: 'rename', task_id: task.id, checkpoint_id: point.id, name });
   };
   const cleanup = async () => {
     const preview = state.cleanupPreview;
@@ -214,12 +222,16 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
       await runCheckpointAction({ type: 'cleanup', task_id: preview.taskId, keep_recent: preview.keepRecent, fingerprint: preview.fingerprint });
     }
   };
-  const previewApplyLabel = state.preview && !state.preview.redoOf && !state.preview.bringBack ? 'Confirm undo' : 'Apply restore preview';
   const execute = async () => {
-    const preview = state.preview;
-    if (preview && await confirmDialog({ title: t(preview.redoOf ? 'Redo last undo' : previewApplyLabel), message: t('Stop external writes to the target directories. Apply this preview to all listed repositories? A recovery record will be saved first.') }) && useCheckpointStore.getState().preview?.id === preview.id && useCheckpointStore.getState().workspaceId === workspace?.id && (project ? useCheckpointStore.getState().workspaceId : useAppStore.getState().snapshot?.workspace.id) === workspace?.id) {
+    const preview = bringBackPreview;
+    if (preview && await confirmDialog({ title: t('Apply restore preview'), message: t('Stop external writes to the target directories. Apply this preview to all listed repositories? A recovery record will be saved first.') }) && ownsTask() && useCheckpointStore.getState().preview?.id === preview.id) {
       await runCheckpointAction({ type: 'execute', preview_id: preview.id });
       void useAppStore.getState().refresh(true);
+    }
+  };
+  const recoverBringBack = async (point: Checkpoint) => {
+    if (await confirmDialog({ title: t('Undo bring back'), message: t('Restore the source files changed by this bring-back operation? Later overlapping edits will block recovery.') }) && ownsTask()) {
+      await runCheckpointAction({ type: 'recover', transaction_id: point.id });
     }
   };
   return <DialogSurface size="large" onClose={onClose} closeDisabled={managementBusy} className={`checkpoint-panel${navigation ? ' checkpoint-center' : ''}`} aria-label={t('Tasks and checkpoints')}>
@@ -312,7 +324,7 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
             <div className="checkpoint-task-heading">
               <div className="checkpoint-task-title"><h3>{task.name}</h3><IconButton title={t('Rename task')} disabled={blocked} onClick={() => void renameTask()}><Codicon name="edit" /></IconButton></div>
               <div className="checkpoint-task-actions">
-                {state.listing?.redoTasks?.includes(task.id) && <Button size="xs" aria-label={t('Redo last undo')} disabled={blocked || Boolean(undo.phase) || active} loading={Boolean(undo.kind === 'redo' && undo.phase !== 'confirming')} onClick={() => void undo.redo()}><Codicon name="redo" />{t('Redo last undo')}</Button>}
+                {redoCheckpoints.length > 0 && <Button size="xs" aria-label={t('Redo last undo')} disabled={blocked || Boolean(undo.phase) || active} loading={Boolean(undo.kind === 'redo' && undo.phase !== 'confirming')} onClick={() => void undo.redo()}><Codicon name="redo" />{t('Redo last undo')}</Button>}
                 <Button size="xs" aria-label={t('Undo latest turn')} disabled={blocked || Boolean(undo.phase) || active || !task.checkpoints.some(point => point.status === 'completed')} loading={Boolean(undo.kind === 'undo' && undo.phase !== 'confirming')} onClick={() => { const point = task.checkpoints.filter(point => point.status === 'completed').at(-1); if (point) undoCheckpoint(point); }}><Codicon name="discard" />{t('Undo latest turn')}</Button>
                 {task.isolation === 'worktree' && <Button size="xs" aria-label={t('Preview bring back')} disabled={blocked || active} onClick={() => void runCheckpointAction({ type: 'preview', task_id: task.id, checkpoint_id: null, bring_back: true })}><Codicon name="arrow-swap" />{t('Bring back')}</Button>}
                 <IconButton title={t('Task settings')} onClick={openSettings}><Codicon name="settings-gear" /></IconButton>
@@ -336,18 +348,15 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
             {task.mode === 'automatic' && task.hookError && <ErrorNotice actions={<Button variant="link" size="xs" onClick={openConnection}>{t('Connection details')}</Button>}>{t(task.hookError)}</ErrorNotice>}
           </header>}
           {task.error && <div className="checkpoint-notices"><ErrorNotice>{t(task.error)}</ErrorNotice></div>}
-          {!changes && inlinePreview && (inlinePreview.conflicts.length > 0 || !inlinePreview.files.length) && <div className="checkpoint-notices" role="status">
-            {inlinePreview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}
-            {!inlinePreview.conflicts.length && !inlinePreview.files.length && <p className="checkpoint-form-hint">{t('No changes to apply')}</p>}
-          </div>}
+          {!changes && restoreNotice && <div className="checkpoint-notices" role="status">{restoreNotice}</div>}
           {changes ? <>
-            <header className="checkpoint-review-header" aria-label={t(displayedPreview ? displayedPreview.redoOf ? 'Redo preview' : displayedPreview.bringBack ? 'Bring-back preview' : 'Undo preview' : 'View changes')}>
+            <header className="checkpoint-review-header" aria-label={t(bringBackPreview ? 'Bring-back preview' : 'View changes')}>
               <IconButton className="checkpoint-review-back" title={t('Back to checkpoints')} disabled={state.busy} onClick={clearReview}><Codicon name="arrow-left" /></IconButton>
               <div className="checkpoint-review-info">
                 <h3 title={reviewPoint ? pointName(reviewPoint) : task.name}>{reviewPoint ? pointName(reviewPoint) : task.name}</h3>
                 <div className="checkpoint-review-meta">
                   {reviewPoint && <span className="checkpoint-review-task" title={task.name}>{task.name}</span>}
-                  {displayedPreview && <span>{t(displayedPreview.redoOf ? 'Redo preview' : displayedPreview.bringBack ? 'Bring-back preview' : 'Undo preview')}</span>}
+                  {bringBackPreview && <span>{t('Bring-back preview')}</span>}
                   {reviewPoint && <><time dateTime={reviewPoint.createdAt} title={new Date(reviewPoint.createdAt).toLocaleString(language)}>{formatHistoryDate(reviewPoint.createdAt)}</time><code title={reviewPoint.id}>#{reviewPoint.id.slice(0, 8)}</code><CheckpointStatus status={reviewPoint.status} /></>}
                   <span>{t('{0} changes', changes.length)}</span>
                 </div>
@@ -359,12 +368,9 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
               {reviewPoint?.status === 'completed' && followingTurns > 0 && <p className="checkpoint-form-hint checkpoint-review-extra">{t('Undoing this checkpoint also undoes {0} later completed turns.', followingTurns)}</p>}
             </header>
             <div className="checkpoint-review">
-              {state.preview && !inlinePreview && <><p className="checkpoint-form-hint">{t(state.preview.redoOf ? 'Reapply the changes from the most recent undo. Later non-overlapping edits are kept.' : state.preview.bringBack ? 'Review changes before bringing them back to the original directories.' : 'Returning to an earlier turn also undoes all following completed turns.')}</p>{state.preview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}</>}
-              {inlinePreview && (inlinePreview.conflicts.length > 0 || !inlinePreview.files.length) && <div className="checkpoint-undo-check" role="status">
-                {inlinePreview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}
-                {!inlinePreview.conflicts.length && !inlinePreview.files.length && <p className="checkpoint-form-hint">{t('No changes to apply')}</p>}
-              </div>}
-              {!changes.length ? <EmptyState compact icon="check">{t('No changes to apply')}</EmptyState> : (displayedPreview || state.detailsCheckpointId) && <CheckpointChangesView workspaceId={workspace?.id} key={displayedPreview?.id ?? state.detailsCheckpointId!} files={changes} source={displayedPreview ? { type: 'preview', preview_id: displayedPreview.id } : { type: 'checkpoint', task_id: task.id, checkpoint_id: state.detailsCheckpointId! }} />}
+              {bringBackPreview && <><p className="checkpoint-form-hint">{t('Review changes before bringing them back to the original directories.')}</p>{bringBackPreview.conflicts.map(conflict => <ErrorNotice key={conflict}>{conflict}</ErrorNotice>)}</>}
+              {restoreNotice && <div className="checkpoint-undo-check" role="status">{restoreNotice}</div>}
+              {!changes.length ? <EmptyState compact icon="check">{t('No changes to apply')}</EmptyState> : (bringBackPreview || state.detailsCheckpointId) && <CheckpointChangesView workspaceId={workspace?.id} key={bringBackPreview?.id ?? state.detailsCheckpointId!} files={changes} source={bringBackPreview ? { type: 'preview', preview_id: bringBackPreview.id } : { type: 'checkpoint', task_id: task.id, checkpoint_id: state.detailsCheckpointId! }} />}
             </div>
           </> : <>
             {(active || task.mode === 'manual') && <div className="checkpoint-record-actions">
@@ -406,7 +412,7 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
                       <div className="checkpoint-entry-actions">
                         {point.promptHash && <IconButton title={t(expandedPrompt === point.id ? 'Hide message' : 'View message')} aria-expanded={expandedPrompt === point.id} onClick={() => setExpandedPrompt(expandedPrompt === point.id ? null : point.id)}><Codicon name="comment" /></IconButton>}
                         {point.status === 'completed' && <IconButton aria-label={t('Undo to before this turn')} title={t('Undo to before this turn')} disabled={blocked || Boolean(undo.phase) || active} onClick={() => undoCheckpoint(point)}><Codicon name="discard" /></IconButton>}
-                        {point.status === 'applied' && <IconButton title={t('Undo bring back')} disabled={blocked || active} onClick={() => { void confirmDialog({ title: t('Undo bring back'), message: t('Restore the source files changed by this bring-back operation? Later overlapping edits will block recovery.') }).then(confirmed => { if (confirmed && (project ? useCheckpointStore.getState().workspaceId : useAppStore.getState().snapshot?.workspace.id) === workspace?.id && useCheckpointStore.getState().selectedTaskId === task.id) void runCheckpointAction({ type: 'recover', transaction_id: point.id }); }); }}><Codicon name="discard" /></IconButton>}
+                        {point.status === 'applied' && <IconButton title={t('Undo bring back')} disabled={blocked || active} onClick={() => void recoverBringBack(point)}><Codicon name="discard" /></IconButton>}
                         <IconButton title={t('More actions')} aria-describedby={`checkpoint-title-${point.id}`} aria-haspopup="menu" aria-expanded={menuPoint?.id === point.id} disabled={blocked} onClick={event => setMenu(menuPoint?.id === point.id ? null : { workspaceId: task.workspaceId, taskId: task.id, pointId: point.id, anchor: event.currentTarget.getBoundingClientRect() })}><Codicon name="ellipsis" /></IconButton>
                       </div>
                       {point.promptHash && expandedPrompt === point.id && <CheckpointPrompt workspaceId={workspace?.id} key={`${workspace?.id}:${task.id}:${point.id}`} taskId={task.id} checkpointId={point.id} revision={state.listing?.historyRevisions?.[task.id]} />}
@@ -440,7 +446,7 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
     }} onClose={closeMenu} />}
     <footer className="checkpoint-footer">
       {reviewing && canRedoReview && <span className="checkpoint-form-hint checkpoint-footer-note">{t('Reapplies all {0} turns from the last undo.', redoCheckpoints.length)}</span>}
-      {reviewing && state.preview && !inlinePreview && <span className="checkpoint-form-hint checkpoint-footer-note">{t(state.preview.conflicts.length ? 'Resolve conflicts before applying.' : 'Your current state is backed up before applying.')}</span>}
+      {reviewing && bringBackPreview && <span className="checkpoint-form-hint checkpoint-footer-note">{t(bringBackPreview.conflicts.length ? 'Resolve conflicts before applying.' : 'Your current state is backed up before applying.')}</span>}
       {state.busy && !undo.phase && <LoadingState>{t(state.loadingDetailsId ? 'Loading changed files…' : 'Working…')}</LoadingState>}
       <div className="checkpoint-footer-actions">
         {state.busy && <Button size="xs" onClick={cancelCheckpointAction}>{t('Cancel operation')}</Button>}
@@ -449,12 +455,10 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
           if (canRedoReview) {
             void undo.redo();
           } else if (reviewPoint.status === 'applied') {
-            void confirmDialog({ title: t('Undo bring back'), message: t('Restore the source files changed by this bring-back operation? Later overlapping edits will block recovery.') }).then(confirmed => {
-              if (confirmed && (project ? useCheckpointStore.getState().workspaceId : useAppStore.getState().snapshot?.workspace.id) === workspace?.id && useCheckpointStore.getState().selectedTaskId === task.id) void runCheckpointAction({ type: 'recover', transaction_id: reviewPoint.id });
-            });
+            void recoverBringBack(reviewPoint);
           } else { void undo.undo(reviewPoint, followingTurns); }
         }}><Codicon name={canRedoReview ? 'redo' : 'discard'} />{t(undo.phase === 'checking' ? 'Checking…' : undo.phase === 'executing' ? 'Working…' : canRedoReview ? 'Redo last undo' : reviewPoint.status === 'applied' ? 'Undo bring back' : 'Undo to before this turn')}</Button>}
-        {reviewing && state.preview && !inlinePreview && <Button variant="primary" disabled={blocked || Boolean(state.preview.conflicts.length) || !state.preview.files.length} onClick={() => void execute()}><Codicon name={state.preview.redoOf ? 'redo' : 'discard'} />{t(previewApplyLabel)}</Button>}
+        {reviewing && bringBackPreview && <Button variant="primary" disabled={blocked || Boolean(bringBackPreview.conflicts.length) || !bringBackPreview.files.length} onClick={() => void execute()}><Codicon name="discard" />{t('Apply restore preview')}</Button>}
       </div>
     </footer>
   </DialogSurface>;

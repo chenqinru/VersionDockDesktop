@@ -1258,22 +1258,7 @@ async fn dispatch(
         BridgeCommand::Checkpoint {
             workspace_id,
             action,
-        } => {
-            if matches!(
-                action,
-                crate::checkpoint::types::CheckpointAction::OpenStorage
-            ) {
-                let path = crate::checkpoint::storage_directory(&state.config_dir)?;
-                app.opener()
-                    .open_path(path.to_string_lossy(), None::<&str>)
-                    .map_err(|error| {
-                        DesktopError::new("CHECKPOINT_FAILED", error.to_string(), true)
-                    })?;
-                json(true)
-            } else {
-                crate::checkpoint::handle(state, &workspace_id, action, token).await
-            }
-        }
+        } => crate::checkpoint::handle(state, &workspace_id, action, token).await,
         BridgeCommand::Bootstrap => {
             // Display saved history without touching external/protected volumes.
             // WorkspaceOpen validates the paths when the user opens a project.

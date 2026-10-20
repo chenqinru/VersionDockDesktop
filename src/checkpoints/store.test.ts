@@ -5,7 +5,7 @@ import { checkpointWorkspaceChanged, refreshCheckpointActivity, refreshCheckpoin
 import type { CheckpointListing, WorkspaceSnapshot } from '../bindings/generated';
 const original = useAppStore.getState();
 const workspace = (id: string) => ({ workspace: { id, name: id, paths: ['/tmp'], available: true, lastOpenedAt: '' }, repositories: [], tools: { git: true, svn: false, svnadmin: false }, generation: 1 }) satisfies WorkspaceSnapshot;
-const listing: CheckpointListing = { tasks: [], recovery: [], storageBytes: 0, hooksInstalled: false };
+const listing: CheckpointListing = { tasks: [], recovery: [] };
 afterEach(() => { checkpointWorkspaceChanged(null); useAppStore.setState(original, true); vi.restoreAllMocks(); });
 it('does not let an old activity result overwrite a mutation and its refreshed listing', async () => {
   let resolve!: (value: unknown) => void;

@@ -34,6 +34,22 @@ pub(super) fn preview(
     })
 }
 
+pub(super) fn check_task(db: &Database, task: &TaskWorkspace) -> Result<(), DesktopError> {
+    if active(task) {
+        return Err(failure(
+            "Finish the active recording before cleaning checkpoints",
+        ));
+    }
+    if db.transactions.iter().any(|tx| {
+        tx.report.task_id == task.id && matches!(tx.report.status.as_str(), "pending" | "failed")
+    }) {
+        return Err(failure(
+            "Recover the interrupted restore before cleaning checkpoints",
+        ));
+    }
+    Ok(())
+}
+
 fn prune_task(
     db: &Database,
     task_id: &str,
@@ -44,18 +60,7 @@ fn prune_task(
         .iter()
         .find(|task| task.id == task_id)
         .ok_or_else(|| failure("Task not found"))?;
-    if active(task) {
-        return Err(failure(
-            "Finish the active recording before cleaning checkpoints",
-        ));
-    }
-    if db.transactions.iter().any(|tx| {
-        tx.report.task_id == task_id && matches!(tx.report.status.as_str(), "pending" | "failed")
-    }) {
-        return Err(failure(
-            "Recover the interrupted restore before cleaning checkpoints",
-        ));
-    }
+    check_task(db, task)?;
     let mut protected = BTreeSet::new();
     let redo = super::redo::candidate(db, task);
     if let Some(tx) = redo {

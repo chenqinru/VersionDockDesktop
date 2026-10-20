@@ -30,8 +30,6 @@ pub(super) fn overview(
     Ok(CheckpointListing {
         tasks: output.tasks,
         recovery: output.recovery,
-        storage_bytes: 0,
-        hooks_installed: super::hooks_installed(store.root.parent().unwrap()).unwrap_or(false),
         connections: Some(connections::all(
             db,
             workspace,
@@ -51,7 +49,6 @@ pub(super) fn overview(
                 .map(|task| Ok((task.id.clone(), history_revision(db, task)?)))
                 .collect::<Result<_, DesktopError>>()?,
         ),
-        redo_tasks: Some(redo_checkpoints.keys().cloned().collect()),
         redo_checkpoints: Some(redo_checkpoints),
     })
 }
@@ -172,6 +169,31 @@ pub(super) fn page(
     })
 }
 
+fn task_referenced_bytes(
+    store: &Storage,
+    db: &Database,
+    task_id: &str,
+    total: u64,
+) -> Result<u64, DesktopError> {
+    if !db.tasks.iter().any(|task| task.id == task_id) {
+        return Err(failure("Task not found"));
+    }
+    let mut subset = db.clone();
+    subset.tasks.retain(|task| task.id == task_id);
+    subset
+        .previews
+        .retain(|preview| preview.preview.task_id == task_id);
+    subset
+        .transactions
+        .retain(|tx| tx.report.task_id == task_id);
+    let unreferenced = store
+        .unreferenced(&subset)?
+        .iter()
+        .map(|(_, bytes)| *bytes)
+        .sum::<u64>();
+    Ok(total.saturating_sub(unreferenced))
+}
+
 pub(super) fn storage_usage(
     store: &Storage,
     db: &Database,
@@ -179,20 +201,8 @@ pub(super) fn storage_usage(
 ) -> Result<CheckpointStorageUsage, DesktopError> {
     let total = store.size()?;
     let (task_bytes, reclaimable_bytes) = if let Some(id) = task_id {
-        if !db.tasks.iter().any(|task| task.id == id) {
-            return Err(failure("Task not found"));
-        }
-        let mut subset = db.clone();
-        subset.tasks.retain(|t| t.id == id);
-        subset.previews.retain(|p| p.preview.task_id == id);
-        subset.transactions.retain(|tx| tx.report.task_id == id);
-        let unreferenced = store
-            .unreferenced(&subset)?
-            .iter()
-            .map(|(_, bytes)| *bytes)
-            .sum::<u64>();
         (
-            total.saturating_sub(unreferenced),
+            task_referenced_bytes(store, db, id, total)?,
             cleanup::preview(store, db, id, 0)
                 .ok()
                 .map(|p| p.preview.reclaimable_bytes),
@@ -239,15 +249,14 @@ pub(super) fn project_storage_usage(
         .tasks
         .iter()
         .map(|task| {
-            let usage = storage_usage(store, db, Some(&task.id))?;
-            let blocked_reason = cleanup::preview(store, db, &task.id, 0)
+            let blocked_reason = cleanup::check_task(db, task)
                 .err()
                 .map(|error| error.message);
             Ok(ProjectTaskStorage {
                 task_id: task.id.clone(),
                 name: task.name.clone(),
                 checkpoints: task.checkpoints.len() as u32,
-                referenced_bytes: usage.task_bytes,
+                referenced_bytes: task_referenced_bytes(store, db, &task.id, total)? as f64,
                 blocked_reason,
             })
         })

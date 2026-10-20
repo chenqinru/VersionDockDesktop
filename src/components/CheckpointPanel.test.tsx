@@ -9,7 +9,7 @@ import * as dialogs from './dialogService';
 const original = useAppStore.getState();
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 const snapshot: WorkspaceSnapshot = { workspace: { id: 'ws', name: 'project', paths: ['/project'], available: true, lastOpenedAt: '' }, repositories: [{ meta: { id: 'repo', name: 'repo', kind: 'git', rootPath: '/project/repo', color: '#888', depth: 0, parentRepoId: null, isSubmodule: false, isWorktree: false }, branch: 'main', revision: 'abc', ahead: 0, behind: 0, files: [], conflicts: 0, operation: null }], tools: { git: true, svn: false, svnadmin: false }, generation: 1 };
-const listing: CheckpointListing = { tasks: [], recovery: [], storageBytes: 1024, hooksInstalled: false };
+const listing: CheckpointListing = { tasks: [], recovery: [] };
 afterEach(() => { cleanup(); checkpointWorkspaceChanged(null); useAppStore.setState(original, true); vi.restoreAllMocks(); vi.useRealTimers(); if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor); else Reflect.deleteProperty(navigator, 'clipboard'); });
 it.each([
   ['interrupted', 'The next message in this chat will finish this recording and start a new one. Stop background writes before sending.'],
@@ -40,7 +40,7 @@ it('creates in the original directories by default and exposes repository scope'
 it('does not claim automatic protection before receiving actual hooks', async () => {
   const bridge = new MockBridge(() => []);
   const task: TaskWorkspace = { id: 't', workspaceId: 'ws', name: 'Automatic task', path: '/project', roots: ['/project'], repositories: [], mode: 'automatic', isolation: 'original', createdAt: '', seed: '', sourceSeed: '', lastApplied: null, checkpoints: [], hookEvents: [], lastHookAt: null, hookError: null, error: null };
-  vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing, tasks: [task], hooksInstalled: true });
+  vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing, tasks: [task] });
   useAppStore.setState({ bridge, snapshot }); render(<CheckpointPanel onClose={() => {}} />);
   expect(await screen.findByRole('button', { name: 'Unverified' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Preview bring back' })).not.toBeInTheDocument();
@@ -221,6 +221,34 @@ it('shows conflicts inline without replacing the historical diff or asking to ex
   expect(screen.queryByRole('button', { name: 'Show undo preview' })).not.toBeInTheDocument();
   expect(request.mock.calls.some(([cmd]) => cmd.type === 'checkpoint' && cmd.payload.action.type === 'diff' && cmd.payload.action.source.type === 'preview')).toBe(false);
   expect(screen.getByRole('banner', { name: 'View changes' })).toBeInTheDocument();
+});
+it.each(['history', 'detail'] as const)('undoes bring-back through the same guarded confirmation from %s', async entry => {
+  const task = reviewTask();
+  task.checkpoints = [{ ...task.checkpoints[0], id: 'bring-back-transaction', status: 'applied' }];
+  const request = setupReview(task);
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(false);
+  if (entry === 'detail') {
+    fireEvent.click(await screen.findByRole('button', { name: 'View changes' }));
+    await screen.findByText('validate.ts');
+  }
+  fireEvent.click(await screen.findByRole('button', { name: 'Undo bring back' }));
+  await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  expect(request.mock.calls.some(([command]) => command.type === 'checkpoint' && command.payload.action.type === 'recover')).toBe(false);
+  confirm.mockResolvedValue(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Undo bring back' }));
+  await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'recover', transaction_id: 'bring-back-transaction' } } }), expect.anything()));
+});
+it('keeps bring-back as a separately reviewed and confirmed restore', async () => {
+  const task = reviewTask();
+  const request = setupReview(task);
+  const confirm = vi.spyOn(dialogs, 'confirmDialog').mockResolvedValue(true);
+  await screen.findByRole('heading', { name: 'Checkpoint history' });
+  const { useCheckpointStore } = await import('../checkpoints/store');
+  act(() => useCheckpointStore.setState({ preview: { id: 'bring-back-preview', taskId: task.id, bringBack: true, files: reviewFiles, conflicts: [], fingerprint: 'fp' } }));
+  expect(screen.getByRole('banner', { name: 'Bring-back preview' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Apply restore preview' }));
+  await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Apply restore preview' })));
+  await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ payload: { workspace_id: 'ws', action: { type: 'execute', preview_id: 'bring-back-preview' } } }), expect.anything()));
 });
 it.each(['undone', 'recording', 'recovery'] as const)('blocks review undo when %s', async state => {
   const task = reviewTask();
@@ -412,7 +440,7 @@ it('describes each task mode in the sidebar and updates connection status for th
   const isolated: TaskWorkspace = { ...task, id: 'isolated', name: 'Isolated task', isolation: 'worktree', mode: 'manual', hookEvents: [], hookError: null, checkpoints: [] };
   const failed: TaskWorkspace = { ...task, id: 'failed', name: 'Connection issue task', hookError: 'Hook handler failed', checkpoints: [] };
   const bridge = new MockBridge(() => []);
-  vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing, hooksInstalled: true, tasks: [task, isolated, failed], connections: { [task.id]: { status: 'verified', verifiedAt: '2026-10-20T00:00:00Z', error: null } } });
+  vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing, tasks: [task, isolated, failed], connections: { [task.id]: { status: 'verified', verifiedAt: '2026-10-20T00:00:00Z', error: null } } });
   useAppStore.setState({ bridge, snapshot });
   render(<CheckpointPanel onClose={() => {}} />);
   const originalTask = await screen.findByRole('button', { name: 'Map improvements' });
@@ -433,7 +461,7 @@ it('describes each task mode in the sidebar and updates connection status for th
 });
 it('keeps an unconfigured task connection separate from global Hook installation', async () => {
   const bridge = new MockBridge(() => []);
-  vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing, hooksInstalled: true });
+  vi.spyOn(bridge, 'request').mockResolvedValue({ ...listing });
   const globalSettings = vi.fn();
   useAppStore.setState({ bridge, snapshot });
   render(<CheckpointPanel onClose={() => {}} onOpenGlobalSettings={globalSettings} />);
@@ -660,7 +688,7 @@ function setupRedo(conflicts: string[] = [], files = reviewFiles) {
       return Promise.resolve({ status: 'succeeded' }) as never;
     }
     const available = task.checkpoints.every(point => point.status === 'undone');
-    return Promise.resolve({ ...listing, tasks: [task], redoTasks: available ? [task.id] : [], redoCheckpoints: available ? { [task.id]: task.checkpoints.map(point => point.id) } : {} }) as never;
+    return Promise.resolve({ ...listing, tasks: [task], redoCheckpoints: available ? { [task.id]: task.checkpoints.map(point => point.id) } : {} }) as never;
   });
   useAppStore.setState({ bridge, snapshot });
   render(<CheckpointPanel onClose={() => {}} />);
@@ -696,7 +724,7 @@ it.each(['older', 'missing', 'invalidated'] as const)('hides detail redo for %s 
   const { useCheckpointStore } = await import('../checkpoints/store');
   act(() => {
     const current = useCheckpointStore.getState().listing!;
-    useCheckpointStore.setState({ listing: { ...current, redoTasks: reason === 'invalidated' ? [] : current.redoTasks, redoCheckpoints: reason === 'missing' ? undefined : { 'review-task': [reason === 'older' ? 'later-turn' : 'first-turn'] } } });
+    useCheckpointStore.setState({ listing: { ...current, redoCheckpoints: reason === 'missing' ? undefined : reason === 'invalidated' ? {} : { 'review-task': ['later-turn'] } } });
   });
   expect(screen.queryByRole('button', { name: 'Redo last undo' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Undo to before this turn' })).toBeDisabled();

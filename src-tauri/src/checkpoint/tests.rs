@@ -303,9 +303,6 @@ async fn message_envelopes_repair_legacy_titles_without_touching_restore_identit
     )
     .unwrap();
     assert_eq!(activity.tasks[0].checkpoints[0].name, "统一优化");
-    let listing: CheckpointListing =
-        serde_json::from_value(listing(&f.store, &f.db, &f.workspace).unwrap()).unwrap();
-    assert_eq!(listing.tasks[0].checkpoints[0].name, "统一优化");
     assert_eq!(
         history::overview(&f.store, &f.db, &f.workspace)
             .unwrap()
@@ -1638,11 +1635,17 @@ async fn project_cleanup_preflights_all_tasks_and_rejects_stale_or_cancelled_exe
     )
     .is_err());
     assert_eq!(serde_json::to_vec(&f.db).unwrap(), before);
-    assert!(
-        history::project_storage_usage(&f.store, &f.db, &f.workspace)
+    let usage = history::project_storage_usage(&f.store, &f.db, &f.workspace).unwrap();
+    assert!(usage.reclaimable_bytes.is_none());
+    assert_eq!(
+        usage
+            .tasks
+            .iter()
+            .find(|task| task.task_id == sibling.id)
             .unwrap()
-            .reclaimable_bytes
-            .is_none()
+            .blocked_reason
+            .as_deref(),
+        Some("Finish the active recording before cleaning checkpoints")
     );
     f.end(&sibling).await;
     assert!(cleanup::project_execute(
@@ -1990,9 +1993,14 @@ async fn cleanup_bridge_commands_enforce_workspace_scope_and_keep_task_registere
     .unwrap();
     assert_eq!(report.status, "succeeded");
     let listing: CheckpointListing = serde_json::from_value(
-        handle(&state, &f.workspace.id, CheckpointAction::List, &f.token)
-            .await
-            .unwrap(),
+        handle(
+            &state,
+            &f.workspace.id,
+            CheckpointAction::Overview,
+            &f.token,
+        )
+        .await
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(listing.tasks.len(), 1);
@@ -2026,16 +2034,8 @@ async fn checkpoint_summaries_deduplicate_layers_and_populate_legacy_history() {
     );
     point.summary = None;
     let before = serde_json::to_vec(&f.db).unwrap();
-    let listing: CheckpointListing =
-        serde_json::from_value(listing(&f.store, &f.db, &f.workspace).unwrap()).unwrap();
-    assert_eq!(
-        listing.tasks[0].checkpoints[0]
-            .summary
-            .as_ref()
-            .unwrap()
-            .files,
-        2
-    );
+    let page = history::page(&f.store, &f.db, &task.id, "", None, false, 0, None).unwrap();
+    assert_eq!(page.points[0].summary.as_ref().unwrap().files, 2);
     assert_eq!(serde_json::to_vec(&f.db).unwrap(), before);
 }
 
@@ -2088,15 +2088,14 @@ async fn automatic_messages_are_exact_lazy_and_preserved_across_interrupt_and_re
     hook(config, message("1", &first), &f.token).await.unwrap();
     f.db = f.store.read().unwrap();
     let point = f.db.tasks[0].checkpoints[0].clone();
-    assert_eq!(point.name, prompt_title(&first));
+    assert_eq!(point.name, prompt::title(&first));
     assert_eq!(point.name.chars().count(), 51);
     assert_eq!(
-        checkpoint_prompt(&f.store, &f.db, &task.id, &point.id)
-            .unwrap()
-            .as_deref(),
-        Some(first.as_str())
+        prompt::messages(&f.store, &f.db, &task.id, &point.id).unwrap()[0].body,
+        first
     );
-    let listed = serde_json::to_string(&listing(&f.store, &f.db, &f.workspace).unwrap()).unwrap();
+    let listed =
+        serde_json::to_string(&history::overview(&f.store, &f.db, &f.workspace).unwrap()).unwrap();
     assert!(!listed.contains("保留完整消息正文"));
     assert!(!listed.contains("duplicate must not replace original"));
     rename(&f.store, &mut f.db, &task.id, &point.id, "自定义标题").unwrap();
@@ -2112,17 +2111,14 @@ async fn automatic_messages_are_exact_lazy_and_preserved_across_interrupt_and_re
     f.db = f.store.read().unwrap();
     assert_eq!(f.db.tasks[0].checkpoints[0].name, "自定义标题");
     assert_eq!(
-        checkpoint_prompt(&f.store, &f.db, &task.id, &point.id)
-            .unwrap()
-            .as_deref(),
-        Some(first.as_str())
+        prompt::messages(&f.store, &f.db, &task.id, &point.id).unwrap()[0].body,
+        first
     );
     assert_eq!(f.db.tasks[0].checkpoints[1].name, "重新编辑的消息");
     assert_eq!(
-        checkpoint_prompt(&f.store, &f.db, &task.id, &f.db.tasks[0].checkpoints[1].id)
-            .unwrap()
-            .as_deref(),
-        Some("重新编辑的消息\n这是第二轮的正文")
+        prompt::messages(&f.store, &f.db, &task.id, &f.db.tasks[0].checkpoints[1].id).unwrap()[0]
+            .body,
+        "重新编辑的消息\n这是第二轮的正文"
     );
     f.store.collect(&f.db).unwrap();
     assert!(f.store.get(point.prompt_hash.as_ref().unwrap()).is_ok());
@@ -2174,10 +2170,8 @@ async fn message_access_is_scoped_and_shared_messages_survive_cleanup() {
     )
     .unwrap();
     assert_eq!(
-        checkpoint_prompt(&f.store, &f.db, "other-task", &point.id)
-            .unwrap()
-            .as_deref(),
-        Some("共享消息\n正文")
+        prompt::messages(&f.store, &f.db, "other-task", &point.id).unwrap()[0].body,
+        "共享消息\n正文"
     );
     let state = AppState::load(f.store.root.parent().unwrap().to_path_buf());
     let foreign_root = f.root.join("foreign");
@@ -2190,21 +2184,18 @@ async fn message_access_is_scoped_and_shared_messages_survive_cleanup() {
         .await
         .recent_workspaces
         .push(foreign.clone());
-    for action in [
-        CheckpointAction::Prompt {
-            task_id: "other-task".into(),
-            checkpoint_id: point.id.clone(),
-        },
+    let err = handle(
+        &state,
+        &foreign.id,
         CheckpointAction::Messages {
             task_id: "other-task".into(),
             checkpoint_id: point.id.clone(),
         },
-    ] {
-        let err = handle(&state, &foreign.id, action, &f.token)
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("does not belong"));
-    }
+        &f.token,
+    )
+    .await
+    .unwrap_err();
+    assert!(err.message.contains("does not belong"));
 }
 
 #[tokio::test]
@@ -2282,12 +2273,12 @@ async fn history_reads_bypass_capture_and_repository_write_locks() {
         held.push(state.write_lock(&repo.id).await.lock_owned().await);
     }
     let actions = [
-        CheckpointAction::List,
+        CheckpointAction::Overview,
         CheckpointAction::Detail {
             task_id: task.id.clone(),
             checkpoint_id: point.id.clone(),
         },
-        CheckpointAction::Prompt {
+        CheckpointAction::Messages {
             task_id: task.id.clone(),
             checkpoint_id: point.id.clone(),
         },
@@ -2396,16 +2387,8 @@ async fn cached_legacy_summary_uses_snapshot_identity_without_rewriting_the_data
     f.db.tasks[0].checkpoints[0].summary = None;
     f.store.save(&f.db).unwrap();
     let bytes = fs::read(f.store.root.join("state.json")).unwrap();
-    let listed: CheckpointListing =
-        serde_json::from_value(listing(&f.store, &f.db, &f.workspace).unwrap()).unwrap();
-    assert_eq!(
-        listed.tasks[0].checkpoints[0]
-            .summary
-            .as_ref()
-            .unwrap()
-            .files,
-        1
-    );
+    let page = history::page(&f.store, &f.db, &task.id, "", None, false, 0, None).unwrap();
+    assert_eq!(page.points[0].summary.as_ref().unwrap().files, 1);
     assert_eq!(fs::read(f.store.root.join("state.json")).unwrap(), bytes);
 }
 
@@ -2640,10 +2623,14 @@ async fn additional_messages_share_one_baseline_deduplicate_and_survive_gc() {
     let point = &f.db.tasks[0].checkpoints[0];
     assert_eq!(point.before, before);
     assert_eq!(f.db.additional_messages[&point.id].len(), 1);
-    let text = checkpoint_prompt(&f.store, &f.db, &task.id, &point.id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(text, "first message\n\n---\n\n追加消息\n保留全文");
+    let messages = prompt::messages(&f.store, &f.db, &task.id, &point.id).unwrap();
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| message.body.as_str())
+            .collect::<Vec<_>>(),
+        ["first message", "追加消息\n保留全文"]
+    );
     assert!(!f.db.verified_hooks.contains_key(&task.id));
     f.send_hook(&task, "Stop", "chat", "one").await.unwrap();
     f.db = f.store.read().unwrap();
@@ -2720,12 +2707,7 @@ async fn redo_listing_identifies_only_the_latest_undo_range() {
     let undo = f.preview(&task, Some(&ids[0]), false).await;
     f.execute(undo).await;
     let overview = history::overview(&f.store, &f.db, &f.workspace).unwrap();
-    let listed: CheckpointListing =
-        serde_json::from_value(listing(&f.store, &f.db, &f.workspace).unwrap()).unwrap();
-    for output in [overview, listed] {
-        assert_eq!(output.redo_tasks.unwrap(), vec![task.id.clone()]);
-        assert_eq!(output.redo_checkpoints.unwrap()[&task.id], ids[..2]);
-    }
+    assert_eq!(overview.redo_checkpoints.unwrap()[&task.id], ids[..2]);
     let mut unrelated = f.workspace.clone();
     unrelated.id = "unrelated-project".into();
     unrelated.paths.clear();

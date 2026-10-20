@@ -24,7 +24,6 @@ pub struct CheckpointProject {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CheckpointAction {
     Repositories,
-    List,
     Activity,
     Overview,
     History {
@@ -38,7 +37,6 @@ pub enum CheckpointAction {
     StorageUsage {
         task_id: Option<String>,
     },
-    OpenStorage,
     ProjectStorageUsage,
     PreviewProjectCleanup {
         keep_recent: u32,
@@ -89,10 +87,6 @@ pub enum CheckpointAction {
         task_id: String,
         checkpoint_id: String,
     },
-    Prompt {
-        task_id: String,
-        checkpoint_id: String,
-    },
     Messages {
         task_id: String,
         checkpoint_id: String,
@@ -124,7 +118,6 @@ pub enum CheckpointAction {
         keep_recent: u32,
         fingerprint: String,
     },
-    InstallHooks,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -296,9 +289,6 @@ pub struct RestoreReport {
 pub struct CheckpointListing {
     pub tasks: Vec<TaskWorkspace>,
     pub recovery: Vec<RestoreReport>,
-    #[cfg_attr(test, specta(type = f64))]
-    pub storage_bytes: u64,
-    pub hooks_installed: bool,
     #[serde(default)]
     #[cfg_attr(test, specta(optional))]
     pub connections: Option<std::collections::BTreeMap<String, HookConnection>>,
@@ -308,9 +298,6 @@ pub struct CheckpointListing {
     #[serde(default)]
     #[cfg_attr(test, specta(optional))]
     pub history_revisions: Option<std::collections::BTreeMap<String, String>>,
-    #[serde(default)]
-    #[cfg_attr(test, specta(optional))]
-    pub redo_tasks: Option<Vec<String>>,
     #[serde(default)]
     #[cfg_attr(test, specta(optional))]
     pub redo_checkpoints: Option<std::collections::BTreeMap<String, Vec<String>>>,

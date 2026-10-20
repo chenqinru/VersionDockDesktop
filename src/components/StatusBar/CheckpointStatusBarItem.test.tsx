@@ -22,7 +22,7 @@ function setup() {
     if (command.type === 'checkpointCatalog') return Promise.resolve({ projects: [snapshot.workspace], tasks }) as never;
     if (command.type !== 'checkpoint') return Promise.resolve([]) as never;
     if (command.payload.action.type === 'activity') return Promise.resolve({ tasks, recovery: [] } satisfies CheckpointActivity) as never;
-    return Promise.resolve({ tasks, recovery: [], storageBytes: 0, hooksInstalled: false } satisfies CheckpointListing) as never;
+    return Promise.resolve({ tasks, recovery: [] } satisfies CheckpointListing) as never;
   });
   useAppStore.setState({ bridge, snapshot });
   const view = render(<I18nContext.Provider value={{ language: 'en', preference: 'en', t: createTranslator('en') }}><CheckpointStatusBarItem /><CheckpointCenterHost /></I18nContext.Provider>);

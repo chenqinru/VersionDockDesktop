@@ -28,7 +28,7 @@ function setup(empty = false) {
     if (action.type === 'projectStorageUsage') return usage(id);
     if (action.type === 'previewProjectCleanup') return { projectId: id, keepRecent: action.keep_recent, removeCount: 2, protectedCount: 1, reclaimableBytes: 262144, fingerprint: `fp-${id}` };
     if (action.type === 'projectCleanup') return { status: 'succeeded', removedCount: 2, freedBytes: 262144, error: null };
-    return { tasks: tasks.filter(task => task.workspaceId === id), recovery: [], storageBytes: 0, hooksInstalled: true, connections: { A: { status: 'verified', verifiedAt: '', error: null } } };
+    return { tasks: tasks.filter(task => task.workspaceId === id), recovery: [], connections: { A: { status: 'verified', verifiedAt: '', error: null } } };
   });
   const originalRequest = bridge.request.bind(bridge);
   const request = vi.spyOn(bridge, 'request');

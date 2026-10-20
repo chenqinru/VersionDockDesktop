@@ -50,14 +50,12 @@ impl ReadTiming {
     pub fn new(action: &CheckpointAction) -> Self {
         Self {
             action: match action {
-                CheckpointAction::List => Some("list"),
                 CheckpointAction::Overview => Some("overview"),
                 CheckpointAction::History { .. } => Some("history"),
                 CheckpointAction::StorageUsage { .. } => Some("storage"),
                 CheckpointAction::Activity => Some("activity"),
                 CheckpointAction::Detail { .. } => Some("detail"),
                 CheckpointAction::Diff { .. } => Some("diff"),
-                CheckpointAction::Prompt { .. } => Some("prompt"),
                 CheckpointAction::Messages { .. } => Some("messages"),
                 _ => None,
             },

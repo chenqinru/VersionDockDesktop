@@ -29,7 +29,7 @@ function setup(withProject = true) {
       return task;
     }
     if (action.type === 'repositories') return [];
-    return { tasks: tasks.filter(task => task.workspaceId === command.payload.workspace_id), recovery: [], storageBytes: 0, hooksInstalled: false };
+    return { tasks: tasks.filter(task => task.workspaceId === command.payload.workspace_id), recovery: [] };
   });
   const originalRequest = bridge.request.bind(bridge);
   const request = vi.spyOn(bridge, 'request');
