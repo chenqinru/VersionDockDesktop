@@ -1363,6 +1363,199 @@ fn installing_hooks_preserves_other_handlers_and_is_idempotent() {
         2
     );
 }
+#[test]
+fn installing_release_and_dev_hooks_keeps_both_targets_and_replaces_moved_executables() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("Codex home").join("hooks.json");
+    let release_config = directory.path().join("VersionDock 数据");
+    let dev_config = directory.path().join("VersionDock 数据.dev");
+    let release_exe = directory.path().join("Release app");
+    let dev_exe = directory.path().join("Dev app");
+    let moved_exe = directory.path().join("Moved dev app");
+    for exe in [&release_exe, &dev_exe, &moved_exe] {
+        fs::write(exe, "test executable").unwrap();
+    }
+    install_hooks_at(&release_config, &target, &release_exe).unwrap();
+    assert!(!has_hooks_for_config(&target, &dev_config).unwrap());
+    assert!(!hooks_installed_at(&target, &dev_config, &dev_exe).unwrap());
+    install_hooks_at(&dev_config, &target, &dev_exe).unwrap();
+    // Reinstall either app without displacing its peer or creating duplicates.
+    install_hooks_at(&release_config, &target, &release_exe).unwrap();
+    install_hooks_at(&dev_config, &target, &dev_exe).unwrap();
+    install_hooks_at(&dev_config, &target, &moved_exe).unwrap();
+    assert!(hooks_installed_at(&target, &release_config, &release_exe).unwrap());
+    assert!(hooks_installed_at(&target, &dev_config, &moved_exe).unwrap());
+    assert!(!hooks_installed_at(&target, &dev_config, &dev_exe).unwrap());
+    assert!(has_hooks_for_config(&target, &release_config).unwrap());
+    assert!(has_hooks_for_config(&target, &dev_config).unwrap());
+    let data: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    for event in ["UserPromptSubmit", "Stop", "Interrupt"] {
+        let commands: Vec<_> = data["hooks"][event]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap())
+            .map(|handler| handler["command"].as_str().unwrap())
+            .collect();
+        assert_eq!(commands.len(), 2);
+        assert!(commands.contains(
+            &hook_command(&release_config, &release_exe)
+                .unwrap()
+                .as_str()
+        ));
+        assert!(commands.contains(&hook_command(&dev_config, &moved_exe).unwrap().as_str()));
+    }
+}
+
+#[tokio::test]
+async fn release_and_dev_hooks_record_independently_when_both_receive_the_same_events() {
+    for shared_project in [false, true] {
+        let mut release = Fixture::new(1).await;
+        let mut dev = Fixture::new(1).await;
+        if shared_project {
+            dev.root = release.root.clone();
+            dev.workspace = release.workspace.clone();
+            dev.repos = release.repos.clone();
+        }
+        let release_task = release.automatic_task().await;
+        let dev_task = dev.automatic_task().await;
+        let targets = if shared_project {
+            vec![&release_task]
+        } else {
+            vec![&release_task, &dev_task]
+        };
+        for (index, task) in targets.into_iter().enumerate() {
+            let turn = index.to_string();
+            let (left, right) = tokio::join!(
+                release.send_hook(task, "UserPromptSubmit", "shared-codex-session", &turn),
+                dev.send_hook(task, "UserPromptSubmit", "shared-codex-session", &turn),
+            );
+            left.unwrap();
+            right.unwrap();
+            fs::write(
+                Path::new(&task.repositories[0].task_path).join("from-codex"),
+                "shared event output",
+            )
+            .unwrap();
+            let (left, right) = tokio::join!(
+                release.send_hook(task, "Stop", "shared-codex-session", &turn),
+                dev.send_hook(task, "Stop", "shared-codex-session", &turn),
+            );
+            left.unwrap();
+            right.unwrap();
+        }
+        let release_db = release.store.read().unwrap();
+        let dev_db = dev.store.read().unwrap();
+        for (db, task, config) in [
+            (
+                &release_db,
+                &release_task,
+                release.store.root.parent().unwrap(),
+            ),
+            (&dev_db, &dev_task, dev.store.root.parent().unwrap()),
+        ] {
+            assert_eq!(db.tasks.len(), 1);
+            assert_eq!(db.tasks[0].id, task.id);
+            assert_eq!(db.tasks[0].checkpoints.len(), 1);
+            assert_eq!(db.tasks[0].checkpoints[0].status, "completed");
+            assert_eq!(
+                db.verified_hooks[&task.id].command_fingerprint,
+                digest(
+                    hook_command(config, &std::env::current_exe().unwrap())
+                        .unwrap()
+                        .as_bytes()
+                )
+            );
+        }
+        assert_ne!(
+            release_db.verified_hooks[&release_task.id].command_fingerprint,
+            dev_db.verified_hooks[&dev_task.id].command_fingerprint
+        );
+    }
+}
+
+#[test]
+fn installing_hooks_preserves_foreign_handlers_in_shared_matcher_groups() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("hooks.json");
+    let config = directory.path().join("app");
+    let foreign_config = directory.path().join("app.dev");
+    let foreign = serde_json::json!({"type":"command", "command":hook_command(&foreign_config, Path::new("/other executable")).unwrap(), "timeout":127, "custom":"retained"});
+    let unrelated = serde_json::json!({"type":"command", "command":"echo --versiondock-checkpoint-hook documentation", "timeout":42});
+    let old = serde_json::json!({"type":"command", "command":hook_command(&config, Path::new("/old executable")).unwrap()});
+    let existing = serde_json::json!({"hooks":{"Stop":[{"matcher":".*", "custom":"group", "hooks":[foreign.clone(), unrelated.clone(), old]}]}});
+    fs::write(&target, serde_json::to_vec(&existing).unwrap()).unwrap();
+    install_hooks_at(&config, &target, Path::new("/new executable")).unwrap();
+    let data: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(
+        data["hooks"]["Stop"][0],
+        serde_json::json!({"matcher":".*", "custom":"group", "hooks":[foreign,unrelated]})
+    );
+}
+
+#[test]
+fn simultaneous_hook_installations_preserve_both_apps() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("hooks.json");
+    let configs = [
+        directory.path().join("release"),
+        directory.path().join("dev"),
+    ];
+    let exes = [
+        directory.path().join("release executable"),
+        directory.path().join("dev executable"),
+    ];
+    for exe in &exes {
+        fs::write(exe, "test executable").unwrap();
+    }
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        for (config, exe) in configs.iter().zip(&exes) {
+            let barrier = &barrier;
+            let target = &target;
+            scope.spawn(move || {
+                barrier.wait();
+                install_hooks_at(config, target, exe).unwrap();
+            });
+        }
+    });
+    for (config, exe) in configs.iter().zip(&exes) {
+        assert!(hooks_installed_at(&target, config, exe).unwrap());
+    }
+}
+
+#[test]
+fn hook_installation_identity_matches_the_complete_quoted_data_directory() {
+    let config = Path::new("/data/VersionDock 中文");
+    let command = hook_command(config, Path::new("/applications/VersionDock app")).unwrap();
+    let quoted = quote_command(&config.to_string_lossy()).unwrap();
+    assert!(hook_targets_config(&command, &quoted));
+    for foreign in [
+        "/data/VersionDock 中文.dev",
+        "/data/VersionDock",
+        "/other/VersionDock 中文",
+    ] {
+        assert!(!hook_targets_config(
+            &command,
+            &quote_command(foreign).unwrap()
+        ));
+    }
+    assert!(!hook_targets_config(&format!("{command} extra"), &quoted));
+    assert!(!hook_targets_config(
+        "echo --versiondock-checkpoint-hook",
+        &quoted
+    ));
+    #[cfg(not(windows))]
+    {
+        let escaped = Path::new("/data/user's --versiondock-checkpoint-hook config");
+        let command = hook_command(escaped, Path::new("/app/VersionDock")).unwrap();
+        assert!(hook_targets_config(
+            &command,
+            &quote_command(&escaped.to_string_lossy()).unwrap()
+        ));
+    }
+}
+
 #[tokio::test]
 async fn two_linked_source_worktrees_can_create_distinct_task_branches() {
     let mut f = Fixture::new(1).await;

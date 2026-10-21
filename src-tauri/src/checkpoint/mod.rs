@@ -1394,6 +1394,38 @@ fn hook_command(config: &Path, executable: &Path) -> Result<String, DesktopError
         quote_command(&config.to_string_lossy())?
     ))
 }
+// The data directory is the installation identity. Executable paths can change
+// after moving/updating an app, while release and dev use distinct directories.
+fn hook_targets_config(command: &str, quoted_config: &str) -> bool {
+    command
+        .strip_suffix(&format!(" --versiondock-checkpoint-hook {quoted_config}"))
+        .is_some_and(|executable| !executable.is_empty())
+}
+fn has_hooks_for_config(target: &Path, config: &Path) -> Result<bool, DesktopError> {
+    let bytes = match fs::read(target) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(io(error)),
+    };
+    let data: serde_json::Value = serde_json::from_slice(&bytes).map_err(io)?;
+    let quoted_config = quote_command(&config.to_string_lossy())?;
+    Ok(data["hooks"].as_object().is_some_and(|events| {
+        events.values().any(|groups| {
+            groups.as_array().is_some_and(|groups| {
+                groups.iter().any(|group| {
+                    group["hooks"].as_array().is_some_and(|handlers| {
+                        handlers.iter().any(|handler| {
+                            handler["type"] == "command"
+                                && handler["command"].as_str().is_some_and(|command| {
+                                    hook_targets_config(command, &quoted_config)
+                                })
+                        })
+                    })
+                })
+            })
+        })
+    }))
+}
 fn hooks_installed(config: &Path) -> Result<bool, DesktopError> {
     hooks_installed_at(
         &codex_home()?.join("hooks.json"),
@@ -1453,6 +1485,33 @@ fn install_hooks(config: &Path) -> Result<(), DesktopError> {
     )
 }
 fn install_hooks_at(config: &Path, target: &Path, executable: &Path) -> Result<(), DesktopError> {
+    // Both installations edit one Codex file. Lock that shared file's directory,
+    // rather than either app's private data directory, through the atomic save.
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(io)?;
+    }
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(target.with_file_name("hooks.versiondock.lock"))
+        .map_err(io)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::Error(error)) => return Err(io(error)),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() >= deadline => {
+                return Err(failure(
+                    "Codex hook configuration changed; retry installation",
+                ));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
     let original = match fs::read(target) {
         Ok(v) => Some(v),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -1470,19 +1529,22 @@ fn install_hooks_at(config: &Path, target: &Path, executable: &Path) -> Result<(
         .as_object_mut()
         .ok_or_else(|| failure("Invalid Codex hook configuration"))?;
     let command = hook_command(config, executable)?;
+    let quoted_config = quote_command(&config.to_string_lossy())?;
     for event in ["UserPromptSubmit", "Stop", "Interrupt"] {
         let groups = hooks
             .entry(event)
             .or_insert_with(|| serde_json::json!([]))
             .as_array_mut()
             .ok_or_else(|| failure("Invalid Codex hook event configuration"))?;
-        // Remove only our handlers, retaining unrelated handlers in shared matcher groups.
+        // Replace this installation only, including an old executable location.
+        // Preserve the other app's handlers and unrelated shared matcher groups.
         for group in groups.iter_mut() {
             if let Some(handlers) = group["hooks"].as_array_mut() {
                 handlers.retain(|h| {
-                    !h["command"]
-                        .as_str()
-                        .is_some_and(|c| c.contains("--versiondock-checkpoint-hook"))
+                    !(h["type"] == "command"
+                        && h["command"]
+                            .as_str()
+                            .is_some_and(|c| hook_targets_config(c, &quoted_config)))
                 });
             }
         }

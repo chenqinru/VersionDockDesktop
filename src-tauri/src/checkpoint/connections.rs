@@ -1,5 +1,7 @@
 //! Connection status comes from a successful matching hook round, not event-name history.
-use super::{belongs, hook_command, hooks_installed, io, storage::*, types::*};
+use super::{
+    belongs, has_hooks_for_config, hook_command, hooks_installed, io, storage::*, types::*,
+};
 use crate::models::WorkspaceDescriptor;
 use std::{collections::BTreeMap, path::Path};
 
@@ -9,12 +11,9 @@ pub(super) fn all(
     config: &Path,
 ) -> BTreeMap<String, HookConnection> {
     let installation = hooks_installed(config);
-    let has_handler = super::codex_home()
-        .ok()
-        .and_then(|home| std::fs::read(home.join("hooks.json")).ok())
-        .is_some_and(|bytes| {
-            String::from_utf8_lossy(&bytes).contains("--versiondock-checkpoint-hook")
-        });
+    let has_handler = super::codex_home().ok().is_some_and(|home| {
+        has_hooks_for_config(&home.join("hooks.json"), config).unwrap_or(false)
+    });
     let expected = std::env::current_exe()
         .map_err(io)
         .and_then(|exe| hook_command(config, &exe))
