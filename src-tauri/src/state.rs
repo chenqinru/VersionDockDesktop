@@ -1033,7 +1033,6 @@ fn watcher_ignored_path(path: &Path, workspace_root: &Path, ignored: &[String]) 
                         | "packed-refs"
                         | "config"
                         | "config.worktree"
-                        | "FETCH_HEAD"
                         | "ORIG_HEAD"
                         | "shallow"
                         | "MERGE_HEAD"
@@ -1080,7 +1079,6 @@ fn watcher_scopes(paths: &[PathBuf], repository_known: bool) -> Vec<RefreshScope
             || value.ends_with("/.git/packed-refs")
             || value.ends_with("/.git/config")
             || value.ends_with("/.git/config.worktree")
-            || value.ends_with("/.git/FETCH_HEAD")
             || value.ends_with("/.git/ORIG_HEAD")
             || value.ends_with("/.git/shallow")
     }) {
@@ -1780,7 +1778,6 @@ mod tests {
             ".git/refs/heads/main",
             ".git/refs/remotes/origin/main",
             ".git/packed-refs",
-            ".git/FETCH_HEAD",
             ".git/config",
             ".git/config.worktree",
             ".git/rebase-merge/done",
@@ -1796,6 +1793,9 @@ mod tests {
             );
         }
         for suffix in [
+            // Fetch rewrites this even when every remote reference is unchanged.
+            // Real updates are observed through refs/ and packed-refs instead.
+            ".git/FETCH_HEAD",
             ".git/index.lock",
             ".git/refs/heads/main.lock",
             ".git/objects/ab/cd",
@@ -1817,6 +1817,77 @@ mod tests {
             root,
             &ignored
         ));
+    }
+
+    #[tokio::test]
+    async fn real_watcher_ignores_unchanged_fetch_but_observes_new_remote_commits() {
+        use std::process::Command;
+        let temp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(temp.path()).unwrap();
+        let remote = root.join("remote.git");
+        let seed = root.join("seed");
+        let checkout = root.join("checkout");
+        let run = |cwd: &Path, args: &[&str]| {
+            let result = Command::new(crate::cli::resolve_executable("git"))
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        };
+        run(
+            &root,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
+        run(
+            &root,
+            &["clone", remote.to_str().unwrap(), seed.to_str().unwrap()],
+        );
+        run(&seed, &["config", "user.name", "Watcher QA"]);
+        run(&seed, &["config", "user.email", "watcher@example.test"]);
+        std::fs::write(seed.join("file.txt"), "base\n").unwrap();
+        run(&seed, &["add", "."]);
+        run(&seed, &["commit", "-m", "base"]);
+        run(&seed, &["push", "origin", "main"]);
+        run(
+            &root,
+            &[
+                "clone",
+                remote.to_str().unwrap(),
+                checkout.to_str().unwrap(),
+            ],
+        );
+        run(&checkout, &["fetch", "--all", "--prune"]);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let _watcher = watch_git_metadata(&checkout, vec![checkout.join(".git")], move |scopes| {
+            let _ = sender.send(scopes);
+        })
+        .unwrap();
+        // A normal fetch rewrites FETCH_HEAD even though the reference graph is unchanged.
+        run(&checkout, &["fetch", "--all", "--prune"]);
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        for scopes in receiver.try_iter() {
+            assert!(!scopes.contains(&RefreshScope::Refs));
+            assert!(!scopes.contains(&RefreshScope::History));
+        }
+        std::fs::write(seed.join("file.txt"), "new commit\n").unwrap();
+        run(&seed, &["add", "."]);
+        run(&seed, &["commit", "-m", "new remote commit"]);
+        run(&seed, &["push", "origin", "main"]);
+        run(&checkout, &["fetch", "--all", "--prune"]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        loop {
+            let scopes = receiver
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("remote reference updates must still reach the watcher");
+            if scopes.contains(&RefreshScope::History) {
+                break;
+            }
+        }
     }
 
     #[tokio::test]

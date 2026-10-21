@@ -104,6 +104,10 @@ Hooks 调用应用可执行文件的无窗口入口，因此 VersionDock 窗口�
 
 ## 验证记录
 
+快照拍摄保留两轮完整内容校验，不跨轮复用文件时间戳。每个仓库用批量 Git 对象读取保留原始暂存内容，Windows 的 CRLF 工作文件不会再逐文件启动 Git；输出通过临时文件接收，支持超过普通命令显示上限的二进制对象。单次拍摄内去重保存和校验对象，第二轮只核验内容；最多四个对象并行落盘，全部完成后才保存任务元数据，保留同步落盘与损坏检测。
+
+创建任务只等待所选仓库的写锁；逐文件读取和保存之间检查取消，后端收到取消后等待已启动的对象写入结束，不登记未完成任务。中心在创建期间显示“正在保存初始检查点”及取消操作。Debug 日志中的 `Checkpoint capture` 记录读取文件数、字节数、批量 Git 调用数与总耗时，`Checkpoint repository locks` 记录仓库锁等待耗时，不记录文件正文。可手动运行 `cargo test --locked --manifest-path src-tauri/Cargo.toml benchmark_checkpoint_capture_multi_repository_crlf -- --ignored --nocapture`，测量四个临时仓库的 CRLF 冷创建与重复拍摄耗时。
+
 Rust 集成测试使用真实临时 Git 仓库验证多仓库撤销、隔离并行、暂存与未暂存分离、后续合并、跨仓库失败恢复、重复事件和异常 Git 锁等场景。前端测试验证默认模式、异步工作区隔离和自动记录状态。
 
 `docs/manual/screenshots/checkpoints/` 和 `docs/manual/screenshots/checkpoints-redesign/` 中的截图是使用浏览器开发 Bridge 和固定展示数据完成的深浅主题、中英文布局检查，仅作为视觉证据，不代表原生 Git 操作或真实 Codex 桌面事件验收。

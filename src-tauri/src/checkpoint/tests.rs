@@ -2,6 +2,323 @@ use super::*;
 use std::path::Path;
 
 #[tokio::test]
+#[ignore = "Manual multi-repository checkpoint capture benchmark"]
+async fn benchmark_checkpoint_capture_multi_repository_crlf() {
+    let mut f = Fixture::new(4).await;
+    for repo in &f.repos {
+        let root = Path::new(&repo.root_path);
+        git(root, &["config", "core.autocrlf", "true"], None, &f.token)
+            .await
+            .unwrap();
+        fs::write(root.join(".gitattributes"), "*.txt text eol=crlf\n").unwrap();
+        for index in 0..256 {
+            fs::write(
+                root.join(format!("中文 file {index}.txt")),
+                format!(
+                    "repository {} file {index}\r\n{}\r\n",
+                    repo.id,
+                    "content".repeat(100)
+                ),
+            )
+            .unwrap();
+        }
+        git(root, &["add", "."], None, &f.token).await.unwrap();
+        git(root, &["commit", "-m", "many text files"], None, &f.token)
+            .await
+            .unwrap();
+        git(
+            root,
+            &["checkout-index", "--all", "--force"],
+            None,
+            &f.token,
+        )
+        .await
+        .unwrap();
+        assert!(fs::read(root.join("中文 file 0.txt"))
+            .unwrap()
+            .contains(&b'\r'));
+        assert!(git(root, &["status", "--porcelain"], None, &f.token)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+    let start = std::time::Instant::now();
+    let task = f.task(TaskIsolation::Original).await;
+    let cold = start.elapsed();
+    let start = std::time::Instant::now();
+    let snapshot = capture(&f.store, &paths(&task), &f.token).await.unwrap();
+    eprintln!(
+        "CHECKPOINT_BENCH repos=4 files={} create_ms={} repeat_ms={}",
+        snapshot
+            .repositories
+            .iter()
+            .map(|repo| repo.working.len())
+            .sum::<usize>(),
+        cold.as_millis(),
+        start.elapsed().as_millis()
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_capture_preserves_crlf_index_and_large_binary_objects() {
+    let mut f = Fixture::new(1).await;
+    let root = Path::new(&f.repos[0].root_path);
+    fs::write(root.join(".gitattributes"), "*.txt text eol=crlf\n").unwrap();
+    for index in 0..48 {
+        fs::write(
+            root.join(format!("中文 file {index}.txt")),
+            format!("before {index}\r\n"),
+        )
+        .unwrap();
+    }
+    // Bigger than cli::MAX_OUTPUT_BYTES: batch object reads must not truncate
+    // binary data or treat its embedded newlines/NULs as framing.
+    let mut binary = vec![0x5a; crate::cli::MAX_OUTPUT_BYTES + 1024];
+    binary[0..4].copy_from_slice(b"\0\n\r\n");
+    fs::write(root.join("large.bin"), &binary).unwrap();
+    git(root, &["add", "."], None, &f.token).await.unwrap();
+    // Preserve an index version different from the working version.
+    fs::write(root.join("large.bin"), b"later working bytes\0").unwrap();
+    fs::write(root.join("中文 file 1.txt"), b"later working text\r\n").unwrap();
+    let task = f.task(TaskIsolation::Original).await;
+    let seed = f.store.snapshot(&task.seed).unwrap();
+    let repo = &seed.repositories[0];
+    assert_eq!(
+        f.store.get(&repo.working["中文 file 0.txt"].hash).unwrap(),
+        b"before 0\r\n"
+    );
+    assert_eq!(
+        f.store.get(&repo.index["中文 file 0.txt"].hash).unwrap(),
+        b"before 0\n"
+    );
+    assert_eq!(
+        f.store.get(&repo.working["中文 file 1.txt"].hash).unwrap(),
+        b"later working text\r\n"
+    );
+    assert_eq!(
+        f.store.get(&repo.index["中文 file 1.txt"].hash).unwrap(),
+        b"before 1\n"
+    );
+    assert_eq!(f.store.get(&repo.index["large.bin"].hash).unwrap(), binary);
+    assert_eq!(
+        f.store.get(&repo.working["large.bin"].hash).unwrap(),
+        b"later working bytes\0"
+    );
+    assert_eq!(
+        capture(&f.store, &paths(&task), &f.token).await.unwrap(),
+        seed
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_capture_rejects_changes_during_capture_and_never_caches_by_mtime() {
+    let f = Fixture::new(1).await;
+    let root = Path::new(&f.repos[0].root_path);
+    for index in 0..8 {
+        fs::write(
+            root.join(format!("file-{index}")),
+            format!("original {index}"),
+        )
+        .unwrap();
+    }
+    let first_object = f.store.root.join("objects").join(digest(b"ignored.txt\n"));
+    let capture_paths = [f.repos[0].root_path.clone()];
+    let (captured, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(capture(&f.store, &capture_paths, &f.token), async {
+            while !first_object.exists() {
+                tokio::task::yield_now().await;
+            }
+            fs::write(root.join(".gitignore"), b"changed.txt\n").unwrap();
+        },)
+    })
+    .await
+    .unwrap();
+    assert!(captured
+        .unwrap_err()
+        .message
+        .contains("Files or index changed"));
+    let before = capture(&f.store, &[f.repos[0].root_path.clone()], &f.token)
+        .await
+        .unwrap();
+    let path = root.join(".gitignore");
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    fs::write(&path, b"another.txt\n").unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    let after = capture(&f.store, &[f.repos[0].root_path.clone()], &f.token)
+        .await
+        .unwrap();
+    assert_ne!(
+        before, after,
+        "same-size content with the same mtime must be reread"
+    );
+}
+
+#[tokio::test]
+async fn cancelled_checkpoint_creation_joins_object_writers_without_publishing_a_task() {
+    let mut f = Fixture::new(1).await;
+    let root = Path::new(&f.repos[0].root_path);
+    for index in 0..32 {
+        fs::write(
+            root.join(format!("file-{index}")),
+            format!("original {index}"),
+        )
+        .unwrap();
+    }
+    let first_object = f.store.root.join("objects").join(digest(b"ignored.txt\n"));
+    let repo_ids = f
+        .repos
+        .iter()
+        .map(|repo| repo.id.clone())
+        .collect::<Vec<_>>();
+    let (created, ()) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(
+            create(
+                &f.store,
+                &mut f.db,
+                &f.workspace,
+                &f.repos,
+                &repo_ids,
+                "cancelled",
+                RecordingMode::Manual,
+                TaskIsolation::Original,
+                &[],
+                &f.token
+            ),
+            async {
+                while !first_object.exists() {
+                    tokio::task::yield_now().await;
+                }
+                f.token.cancel();
+            },
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(created.unwrap_err().code, "REQUEST_CANCELLED");
+    assert!(f.db.tasks.is_empty());
+    assert!(!f.store.root.join("state.json").exists());
+    for object in fs::read_dir(f.store.root.join("objects")).unwrap() {
+        let name = object.unwrap().file_name().to_string_lossy().into_owned();
+        assert_eq!(name.len(), 64, "all temporary writers were joined");
+        f.store.get(&name).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn checkpoint_creation_does_not_wait_for_an_unselected_repository() {
+    let f = Fixture::new(2).await;
+    let state = AppState::load(f.store.root.parent().unwrap().to_path_buf());
+    state
+        .app
+        .write()
+        .await
+        .recent_workspaces
+        .push(f.workspace.clone());
+    let _other_writer = state.write_lock(&f.repos[1].id).await.lock_owned().await;
+    let created = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        handle(
+            &state,
+            &f.workspace.id,
+            CheckpointAction::Create {
+                name: "selected only".into(),
+                repo_ids: vec![f.repos[0].id.clone()],
+                mode: RecordingMode::Manual,
+                isolation: TaskIsolation::Original,
+                include_ignored: vec![],
+            },
+            &f.token,
+        ),
+    )
+    .await
+    .expect("unselected repository must not block capture")
+    .unwrap();
+    let task: TaskWorkspace = serde_json::from_value(created).unwrap();
+    assert_eq!(task.repositories.len(), 1);
+    assert_eq!(task.repositories[0].source_id, f.repos[0].id);
+}
+
+#[tokio::test]
+async fn capture_verifies_existing_objects_but_duplicate_creation_skips_capture() {
+    let mut f = Fixture::new(1).await;
+    let task = f.task(TaskIsolation::Original).await;
+    let seed = f.store.snapshot(&task.seed).unwrap();
+    let hash = &seed.repositories[0].working["file.txt"].hash;
+    fs::write(f.store.root.join("objects").join(hash), "damaged").unwrap();
+    let error = capture(&f.store, &paths(&task), &f.token)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("damaged"));
+    let error = create(
+        &f.store,
+        &mut f.db,
+        &f.workspace,
+        &f.repos,
+        &[f.repos[0].id.clone()],
+        "duplicate",
+        RecordingMode::Manual,
+        TaskIsolation::Original,
+        &[],
+        &f.token,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("already protects"),
+        "duplicates must be rejected before disk capture"
+    );
+}
+
+#[tokio::test]
+async fn batch_capture_supports_sha256_git_indexes() {
+    let f = Fixture::new(0).await;
+    let root = f.root.join("sha256 repo");
+    fs::create_dir(&root).unwrap();
+    git(
+        &root,
+        &["init", "--object-format=sha256", "-b", "main"],
+        None,
+        &f.token,
+    )
+    .await
+    .unwrap();
+    git(&root, &["config", "user.name", "Test"], None, &f.token)
+        .await
+        .unwrap();
+    git(
+        &root,
+        &["config", "user.email", "test@example.invalid"],
+        None,
+        &f.token,
+    )
+    .await
+    .unwrap();
+    fs::write(root.join("file"), b"staged bytes").unwrap();
+    git(&root, &["add", "."], None, &f.token).await.unwrap();
+    git(&root, &["commit", "-m", "initial"], None, &f.token)
+        .await
+        .unwrap();
+    fs::write(root.join("file"), b"working bytes").unwrap();
+    let snapshot = capture(&f.store, &[root.to_string_lossy().into_owned()], &f.token)
+        .await
+        .unwrap();
+    let repo = &snapshot.repositories[0];
+    assert_eq!(
+        f.store.get(&repo.index["file"].hash).unwrap(),
+        b"staged bytes"
+    );
+    assert_eq!(
+        f.store.get(&repo.working["file"].hash).unwrap(),
+        b"working bytes"
+    );
+}
+
+#[tokio::test]
 async fn prepares_an_unopened_project_for_creation_without_switching_or_modifying_sources() {
     let mut first = Fixture::new(1).await;
     first.task(TaskIsolation::Original).await;

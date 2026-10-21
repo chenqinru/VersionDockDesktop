@@ -4,6 +4,7 @@ use sha2::Digest;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -41,6 +42,28 @@ pub(super) fn read_entry(
     root: &Path,
     path: &str,
 ) -> Result<Option<Entry>, DesktopError> {
+    read_content(root, path, None)?
+        .map(|content| {
+            Ok(Entry {
+                hash: store.put(&content.bytes)?,
+                mode: content.mode,
+                kind: content.kind,
+            })
+        })
+        .transpose()
+}
+
+struct FileContent {
+    bytes: Vec<u8>,
+    mode: u32,
+    kind: String,
+}
+
+fn read_content(
+    root: &Path,
+    path: &str,
+    token: Option<&CancellationToken>,
+) -> Result<Option<FileContent>, DesktopError> {
     let target = location(root, path)?;
     let metadata = match fs::symlink_metadata(&target) {
         Ok(m) => m,
@@ -69,33 +92,254 @@ pub(super) fn read_entry(
         };
         #[cfg(not(unix))]
         let mode = 0o644;
-        (fs::read(target).map_err(io)?, mode, "file")
+        let mut file = fs::File::open(target).map_err(io)?;
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 64 * 1024];
+        loop {
+            if let Some(token) = token {
+                check_capture(token)?;
+            }
+            let length = file.read(&mut buffer).map_err(io)?;
+            if length == 0 {
+                break;
+            }
+            bytes.try_reserve(length).map_err(io)?;
+            bytes.extend_from_slice(&buffer[..length]);
+        }
+        (bytes, mode, "file")
     } else {
         return Err(failure(format!("Unsupported checkpoint file: {path}")));
     };
-    Ok(Some(Entry {
-        hash: store.put(&bytes)?,
+    Ok(Some(FileContent {
+        bytes,
         mode,
         kind: kind.into(),
     }))
 }
 fn blob_oid(bytes: &[u8], size: usize) -> String {
-    let mut body = format!("blob {}\0", bytes.len()).into_bytes();
-    body.extend_from_slice(bytes);
+    let header = format!("blob {}\0", bytes.len());
     if size == 64 {
-        hex::encode(sha2::Sha256::digest(&body))
+        let mut hash = sha2::Sha256::new();
+        hash.update(header.as_bytes());
+        hash.update(bytes);
+        hex::encode(hash.finalize())
     } else {
-        hex::encode(sha1::Sha1::digest(&body))
+        let mut hash = sha1::Sha1::new();
+        hash.update(header.as_bytes());
+        hash.update(bytes);
+        hex::encode(hash.finalize())
     }
 }
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn crlf_capture_batches_duplicate_objects_once_across_both_passes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("repository");
+        fs::create_dir(&root).unwrap();
+        let token = CancellationToken::new();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.name", "Checkpoint QA"],
+            vec!["config", "user.email", "checkpoint@example.test"],
+            vec!["config", "core.autocrlf", "true"],
+        ] {
+            git(&root, &args, None, &token).await.unwrap();
+        }
+        fs::write(root.join(".gitattributes"), b"*.txt text eol=crlf\n").unwrap();
+        for index in 0..64 {
+            fs::write(root.join(format!("file-{index}.txt")), b"same content\r\n").unwrap();
+        }
+        git(&root, &["add", "."], None, &token).await.unwrap();
+        git(&root, &["commit", "-m", "baseline"], None, &token)
+            .await
+            .unwrap();
+        assert!(git(&root, &["status", "--porcelain"], None, &token)
+            .await
+            .unwrap()
+            .is_empty());
+        let store = Storage::new(&temp.path().join("config")).unwrap();
+        let mut objects = CaptureObjects::default();
+        let captured = capture_stable(
+            &store,
+            &[root.to_string_lossy().into_owned()],
+            &token,
+            &mut objects,
+        )
+        .await
+        .unwrap();
+        // All 64 CRLF files share one LF index blob. Neither repeated paths nor
+        // the second stability pass may launch another Git object reader.
+        assert_eq!(objects.batches, 1);
+        assert_eq!(objects.index.len(), 2);
+        assert_eq!(objects.file_reads, 2 * 65);
+        let repo = &captured.repositories[0];
+        assert_eq!(repo.index.len(), 65);
+        assert_eq!(
+            store.get(&repo.working["file-0.txt"].hash).unwrap(),
+            b"same content\r\n"
+        );
+        assert_eq!(
+            store.get(&repo.index["file-0.txt"].hash).unwrap(),
+            b"same content\n"
+        );
+    }
+}
+
+pub(super) fn check_capture(token: &CancellationToken) -> Result<(), DesktopError> {
+    if token.is_cancelled() {
+        Err(DesktopError::new(
+            "REQUEST_CANCELLED",
+            "Checkpoint capture cancelled",
+            true,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Scoped to one stable capture. Never trust stat/mtime across recording rounds:
+/// every working file is still read and hashed in both passes.
+#[derive(Default)]
+struct CaptureObjects {
+    saved: BTreeSet<String>,
+    index: BTreeMap<String, String>,
+    file_reads: usize,
+    bytes_read: u64,
+    batches: usize,
+    pending: Vec<Vec<u8>>,
+    pending_bytes: usize,
+}
+impl CaptureObjects {
+    async fn put(
+        &mut self,
+        store: &Storage,
+        bytes: Vec<u8>,
+        token: &CancellationToken,
+        verify: bool,
+    ) -> Result<String, DesktopError> {
+        check_capture(token)?;
+        let hash = digest(&bytes);
+        if !verify && self.saved.insert(hash.clone()) {
+            self.pending_bytes += bytes.len();
+            self.pending.push(bytes);
+            if self.pending.len() == 4 || self.pending_bytes >= 16 * 1024 * 1024 {
+                self.flush(store, token).await?;
+            }
+        }
+        Ok(hash)
+    }
+
+    async fn flush(
+        &mut self,
+        store: &Storage,
+        token: &CancellationToken,
+    ) -> Result<(), DesktopError> {
+        // A small group overlaps durable file syncs without changing the object
+        // format or publishing a manifest before every object is on disk.
+        let mut writes = tokio::task::JoinSet::new();
+        for bytes in std::mem::take(&mut self.pending) {
+            let store = Storage {
+                root: store.root.clone(),
+            };
+            let token = token.clone();
+            writes.spawn_blocking(move || {
+                check_capture(&token)?;
+                // Existing objects are read and verified once per capture.
+                store.put(&bytes)?;
+                check_capture(&token)
+            });
+        }
+        self.pending_bytes = 0;
+        let mut failure = None;
+        // Even on error/cancel, join every started writer before releasing the
+        // capture lock. Object cleanup must never race a detached writer.
+        while let Some(result) = writes.join_next().await {
+            if let Err(error) = result.map_err(io).and_then(|result| result) {
+                failure.get_or_insert(error);
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
+    async fn load_index(
+        &mut self,
+        store: &Storage,
+        root: &Path,
+        oids: &BTreeSet<String>,
+        token: &CancellationToken,
+        verify: bool,
+    ) -> Result<(), DesktopError> {
+        if oids.is_empty() {
+            return Ok(());
+        }
+        check_capture(token)?;
+        let input = oids
+            .iter()
+            .map(|oid| format!("{oid}\n"))
+            .collect::<String>();
+        let output = tempfile::NamedTempFile::new().map_err(io)?;
+        self.batches += 1;
+        cli::git_to_file(
+            &["cat-file".into(), "--batch".into()],
+            root,
+            input.as_bytes(),
+            output.path(),
+            Duration::from_secs(600),
+            token,
+        )
+        .await?;
+        let mut reader = BufReader::new(fs::File::open(output.path()).map_err(io)?);
+        for oid in oids {
+            check_capture(token)?;
+            let mut header = Vec::new();
+            reader
+                .by_ref()
+                .take(256)
+                .read_until(b'\n', &mut header)
+                .map_err(io)?;
+            let header = text(&header)?;
+            let fields = header.split_whitespace().collect::<Vec<_>>();
+            if fields.len() != 3 || fields[0] != oid || fields[1] != "blob" {
+                return Err(failure("Invalid checkpoint Git object response"));
+            }
+            let size = fields[2].parse::<usize>().map_err(io)?;
+            let mut bytes = Vec::new();
+            bytes.try_reserve_exact(size).map_err(io)?;
+            bytes.resize(size, 0);
+            for chunk in bytes.chunks_mut(64 * 1024) {
+                check_capture(token)?;
+                reader.read_exact(chunk).map_err(io)?;
+            }
+            let mut separator = [0];
+            reader.read_exact(&mut separator).map_err(io)?;
+            if separator != *b"\n" || blob_oid(&bytes, oid.len()) != *oid {
+                return Err(failure("Invalid checkpoint Git object contents"));
+            }
+            check_capture(token)?;
+            let hash = self.put(store, bytes, token, verify).await?;
+            self.index.insert(oid.clone(), hash);
+            tokio::task::yield_now().await;
+        }
+        if !reader.fill_buf().map_err(io)?.is_empty() {
+            return Err(failure("Unexpected checkpoint Git object output"));
+        }
+        self.flush(store, token).await?;
+        Ok(())
+    }
+}
+
 async fn capture_repo(
     store: &Storage,
     root: &Path,
     token: &CancellationToken,
+    objects: &mut CaptureObjects,
+    verify: bool,
 ) -> Result<RepoSnapshot, DesktopError> {
-    if token.is_cancelled() {
-        return Err(failure("Checkpoint capture cancelled"));
-    }
+    check_capture(token)?;
     let head = text(&git(root, &["rev-parse", "--verify", "HEAD"], None, token).await?)?
         .trim()
         .to_owned();
@@ -110,6 +354,7 @@ async fn capture_repo(
     )?
     .trim()
     .to_owned();
+    let git_dir = text(&git(root, &["rev-parse", "--absolute-git-dir"], None, token).await?)?;
     for marker in [
         "MERGE_HEAD",
         "CHERRY_PICK_HEAD",
@@ -118,35 +363,29 @@ async fn capture_repo(
         "rebase-apply",
         "BISECT_START",
     ] {
-        let path = text(&git(root, &["rev-parse", "--git-path", marker], None, token).await?)?;
-        if root.join(path.trim()).exists() {
+        if Path::new(git_dir.trim()).join(marker).exists() {
             return Err(failure(
                 "Finish the current Git operation before recording checkpoints",
             ));
         }
     }
-    let flags = git(root, &["ls-files", "-v", "-z"], None, token).await?;
-    if flags
-        .split(|b| *b == 0)
-        .filter(|v| !v.is_empty())
-        .any(|v| v[0] == b'S' || v[0].is_ascii_lowercase())
-    {
-        return Err(failure(
-            "Sparse or assume-unchanged indexes are not supported by checkpoints",
-        ));
-    }
-    let raw = git(root, &["ls-files", "--stage", "-z"], None, token).await?;
+    let raw = git(root, &["ls-files", "--stage", "-v", "-z"], None, token).await?;
     let mut entries = BTreeMap::new();
     for part in raw.split(|b| *b == 0).filter(|v| !v.is_empty()) {
+        if part[0] == b'S' || part[0].is_ascii_lowercase() {
+            return Err(failure(
+                "Sparse or assume-unchanged indexes are not supported by checkpoints",
+            ));
+        }
         let tab = part
             .iter()
             .position(|b| *b == b'\t')
             .ok_or_else(|| failure("Invalid Git index entry"))?;
         let header = text(&part[..tab])?;
         let fields = header.split_whitespace().collect::<Vec<_>>();
-        if fields.len() != 3
-            || fields[2] != "0"
-            || !matches!(fields[0], "100644" | "100755" | "120000")
+        if fields.len() != 4
+            || fields[3] != "0"
+            || !matches!(fields[1], "100644" | "100755" | "120000")
         {
             return Err(failure(
                 "Unmerged indexes and submodules are not supported by checkpoints",
@@ -155,8 +394,8 @@ async fn capture_repo(
         entries.insert(
             text(&part[tab + 1..])?,
             (
-                u32::from_str_radix(fields[0], 8).map_err(io)?,
-                fields[1].to_owned(),
+                u32::from_str_radix(fields[1], 8).map_err(io)?,
+                fields[2].to_owned(),
             ),
         );
     }
@@ -173,18 +412,44 @@ async fn capture_repo(
     }
     let mut working = BTreeMap::new();
     for name in names {
-        if let Some(entry) = read_entry(store, root, &name)? {
-            working.insert(name, entry);
+        check_capture(token)?;
+        if let Some(FileContent { bytes, mode, kind }) = read_content(root, &name, Some(token))? {
+            check_capture(token)?;
+            objects.file_reads += 1;
+            objects.bytes_read += bytes.len() as u64;
+            let matching_oid = entries
+                .get(&name)
+                .map(|(_, oid)| oid)
+                .filter(|oid| {
+                    !objects.index.contains_key(*oid) && blob_oid(&bytes, oid.len()) == **oid
+                })
+                .cloned();
+            let hash = objects.put(store, bytes, token, verify).await?;
+            if let Some(oid) = matching_oid {
+                objects.index.insert(oid, hash.clone());
+            }
+            working.insert(name, Entry { hash, mode, kind });
         }
+        tokio::task::yield_now().await;
     }
+    objects.flush(store, token).await?;
+    let missing = entries
+        .values()
+        .map(|(_, oid)| oid)
+        .filter(|oid| !objects.index.contains_key(*oid))
+        .cloned()
+        .collect();
+    objects
+        .load_index(store, root, &missing, token, verify)
+        .await?;
     let mut index = BTreeMap::new();
     for (name, (mode, oid)) in entries {
-        let hash = match working.get(&name) {
-            Some(entry) if blob_oid(&store.get(&entry.hash)?, oid.len()) == oid => {
-                entry.hash.clone()
-            }
-            _ => store.put(&git(root, &["cat-file", "blob", &oid], None, token).await?)?,
-        };
+        check_capture(token)?;
+        let hash = objects
+            .index
+            .get(&oid)
+            .ok_or_else(|| failure("Missing checkpoint Git object"))?
+            .clone();
         index.insert(
             name,
             Entry {
@@ -207,14 +472,33 @@ pub(super) async fn capture(
     paths: &[String],
     token: &CancellationToken,
 ) -> Result<Snapshot, DesktopError> {
+    let start = std::time::Instant::now();
+    let mut objects = CaptureObjects::default();
+    let result = capture_stable(store, paths, token, &mut objects).await;
+    crate::logger::log_entry(
+        crate::logger::LogLevel::Debug, crate::logger::LogChannel::Core,
+        "Checkpoint capture",
+        Some(format!("repositories={} file_reads={} bytes_read={} objects_saved={} git_batches={} completed={}", paths.len(), objects.file_reads, objects.bytes_read, objects.saved.len(), objects.batches, result.is_ok())),
+        Some(start.elapsed().as_millis().min(u32::MAX as u128) as u32), None,
+    );
+    result
+}
+
+async fn capture_stable(
+    store: &Storage,
+    paths: &[String],
+    token: &CancellationToken,
+    objects: &mut CaptureObjects,
+) -> Result<Snapshot, DesktopError> {
     let mut repos = Vec::new();
     for path in paths {
-        repos.push(capture_repo(store, Path::new(path), token).await?);
+        repos.push(capture_repo(store, Path::new(path), token, objects, false).await?);
     }
     let mut verify = Vec::new();
     for path in paths {
-        verify.push(capture_repo(store, Path::new(path), token).await?);
+        verify.push(capture_repo(store, Path::new(path), token, objects, true).await?);
     }
+    check_capture(token)?;
     if repos != verify {
         return Err(failure(
             "Files or index changed during checkpoint capture; retry after writes stop",

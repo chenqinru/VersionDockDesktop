@@ -365,6 +365,10 @@ pub(crate) async fn handle(
     }
     let mut lock_paths = repos
         .iter()
+        .filter(|repo| match &action {
+            CheckpointAction::Create { repo_ids, .. } => repo_ids.contains(&repo.id),
+            _ => true,
+        })
         .map(|r| r.root_path.clone())
         .collect::<Vec<_>>();
     for task in db.tasks.iter().filter(|t| target.as_ref() == Some(&t.id)) {
@@ -376,8 +380,17 @@ pub(crate) async fn handle(
             "Recover the interrupted restore before making further changes",
         ));
     }
+    let lock_start = std::time::Instant::now();
     let (_in_process, _cross_process) =
         lock_repositories(&state.config_dir, Some(state), &lock_paths, token).await?;
+    crate::logger::log_entry(
+        crate::logger::LogLevel::Debug,
+        crate::logger::LogChannel::Core,
+        "Checkpoint repository locks",
+        Some(format!("repositories={}", lock_paths.len())),
+        Some(lock_start.elapsed().as_millis().min(u32::MAX as u128) as u32),
+        None,
+    );
     match action {
         CheckpointAction::Rename {
             task_id,
@@ -748,17 +761,19 @@ async fn create(
         .iter()
         .map(|r| r.root_path.clone())
         .collect::<Vec<_>>();
-    let source = capture(store, &source_paths, token).await?;
-    if isolation == TaskIsolation::Original {
-        if db.tasks.iter().any(|t| {
+    if isolation == TaskIsolation::Original
+        && db.tasks.iter().any(|t| {
             t.isolation == TaskIsolation::Original
                 && (t.workspace_id == workspace.id
                     || t.repositories
                         .iter()
                         .any(|r| source_paths.contains(&r.task_path)))
-        }) {
-            return Err(failure("An original-directory task already protects these repositories; use that task or create an isolated task"));
-        }
+        })
+    {
+        return Err(failure("An original-directory task already protects these repositories; use that task or create an isolated task"));
+    }
+    let source = capture(store, &source_paths, token).await?;
+    if isolation == TaskIsolation::Original {
         let seed = store.save_snapshot(&source)?;
         let task = TaskWorkspace {
             id: uuid::Uuid::new_v4().to_string(),
@@ -788,6 +803,7 @@ async fn create(
             hook_error: None,
             error: None,
         };
+        check_capture(token)?;
         db.projects.insert(workspace.id.clone(), workspace.clone());
         db.tasks.push(task.clone());
         store.save(db)?;

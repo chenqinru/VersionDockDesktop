@@ -1477,6 +1477,41 @@ export const useAppStore = create<AppStore>((set, get) => {
   let workingTreeLifecycle = 0;
   const workingTreeRequests = new Map<string, () => void>();
   const remoteWorkingTreeRequests = new Set<string>();
+  const fetchRefreshHolds = new Map<string, number>();
+  const fetchRefreshRequests = new Map<string, () => void>();
+  const fetchBranchNotifications = new Set<string>();
+  const fetchKey = (wid: string, repoId: string) => `${wid}\0${repoId}`;
+  const fetchingRefs = (wid: string, repoId: string) => fetchRefreshHolds.has(fetchKey(wid, repoId));
+  const deferFetchScope = (scope: RefreshScope) => scope === 'refs' || scope === 'history' || scope === 'unpushed';
+  const hasReadyWorkspaceEvents = (wid: string) => [...(pendingWorkspaceEvents.get(wid) ?? [])]
+    .some(([repoId, scopes]) => !fetchingRefs(wid, repoId) || [...scopes].some(scope => !deferFetchScope(scope)));
+  const holdFetchRefresh = (wid: string, repoId: string) => {
+    const lifecycle = workingTreeLifecycle;
+    const session = logSession;
+    const key = fetchKey(wid, repoId);
+    fetchRefreshHolds.set(key, (fetchRefreshHolds.get(key) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released || lifecycle !== workingTreeLifecycle || session !== logSession) return;
+      released = true;
+      const depth = (fetchRefreshHolds.get(key) ?? 1) - 1;
+      if (depth) { fetchRefreshHolds.set(key, depth); return; }
+      fetchRefreshHolds.delete(key);
+      if (get().snapshot?.workspace.id !== wid && !get().tabs.some(tab => tab.id === wid)) {
+        fetchBranchNotifications.delete(key);
+        return;
+      }
+      // Include failures/cancellation: fetch may already have updated some refs.
+      recordPendingWorkspaceEvent(wid, repoId, ['status', 'refs', 'history', 'unpushed']);
+      drainPendingWorkspaceEvents(wid);
+    };
+  };
+  const deferFetchingScopes = (wid: string, repoId: string, scopes: Set<RefreshScope>) => {
+    if (!fetchingRefs(wid, repoId)) return;
+    const deferred = [...scopes].filter(deferFetchScope);
+    if (deferred.length) recordPendingWorkspaceEvent(wid, repoId, deferred);
+    deferred.forEach(scope => scopes.delete(scope));
+  };
   const updateEpoch = (wid: string) => `${workingTreeLifecycle}:${workingTreeUpdates.get(wid)?.epoch ?? 0}`;
   const updatingWorkingTree = (wid: string) => (workingTreeUpdates.get(wid)?.depth ?? 0) > 0;
   const queueStableRefresh = (wid: string) => {
@@ -1756,6 +1791,9 @@ export const useAppStore = create<AppStore>((set, get) => {
         branches: state.selectedRepoId === repoId && branchesResult.status === 'fulfilled' ? branchesResult.value : state.branches,
         tags: state.selectedRepoId === repoId && tagsResult.status === 'fulfilled' ? tagsResult.value : state.tags,
       }));
+      if (branchesResult.status === 'fulfilled' && fetchBranchNotifications.delete(fetchKey(wid, repoId))) {
+        notifyGoneBranches(repoId, branchesResult.value, wid);
+      }
       if (propagateErrors) {
         for (const result of [branchesResult, tagsResult, remotesResult]) {
           if (result.status === 'rejected') throw result.reason;
@@ -1848,8 +1886,12 @@ export const useAppStore = create<AppStore>((set, get) => {
     const stopRenewal = () => clearInterval(renewLease);
     controller.signal.addEventListener('abort', stopRenewal, { once: true });
     try {
-      await Promise.allSettled(repos.map((repo) => owner.request({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: 'fetch', remote: null, branch: null, force: false } }, { showProgress: false, timeoutMs: 600_000, signal: controller.signal, context: { target: 'autoFetch' } })));
-      if (!controller.signal.aborted && get().bridge === owner && get().snapshot?.workspace.id === wid) await get().refresh(true);
+      await Promise.allSettled(repos.map(async (repo) => {
+        const release = holdFetchRefresh(wid, repo.meta.id);
+        try {
+          await owner.request({ type: 'sync', payload: { workspace_id: wid, repo_id: repo.meta.id, action: 'fetch', remote: null, branch: null, force: false } }, { showProgress: false, timeoutMs: 600_000, signal: controller.signal, context: { target: 'autoFetch' } });
+        } finally { release(); }
+      }));
     } catch (error) {
       console.debug('Background fetch refresh skipped', error);
     } finally {
@@ -2421,7 +2463,17 @@ export const useAppStore = create<AppStore>((set, get) => {
     drainPendingWorkspaceEvents(wid);
   };
 
-  const refreshFromWatcher = async () => {
+  let watcherRefreshTask: Promise<void> | undefined;
+  const refreshFromWatcher = (): Promise<void> => {
+    if (watcherRefreshInFlight) {
+      watcherRefreshQueued = true;
+      return watcherRefreshTask ?? Promise.resolve();
+    }
+    const task = runWatcherRefresh();
+    watcherRefreshTask = task;
+    return task;
+  };
+  const runWatcherRefresh = async () => {
     const workspaceId = get().snapshot?.workspace.id;
     if (!workspaceId || updatingWorkingTree(workspaceId)) return;
     const retryAt = watcherRetries.get(workspaceId)?.nextAt ?? 0;
@@ -2430,13 +2482,19 @@ export const useAppStore = create<AppStore>((set, get) => {
       watcherTimer = setTimeout(() => void refreshFromWatcher(), retryAt - Date.now());
       return;
     }
-    if (watcherRefreshInFlight) {
-      watcherRefreshQueued = true;
-      return;
+    const queued = pendingWorkspaceEvents.get(workspaceId);
+    if (!queued?.size) return;
+    const pending = new Map<string, Set<RefreshScope>>();
+    for (const [repoId, scopes] of queued) {
+      const ready = new Set([...scopes].filter(scope => !fetchingRefs(workspaceId, repoId) || !deferFetchScope(scope)));
+      if (!ready.size) continue;
+      pending.set(repoId, ready);
+      const deferred = new Set([...scopes].filter(scope => !ready.has(scope)));
+      if (deferred.size) queued.set(repoId, deferred);
+      else queued.delete(repoId);
     }
-    const pending = pendingWorkspaceEvents.get(workspaceId);
-    if (!pending?.size) return;
-    pendingWorkspaceEvents.delete(workspaceId);
+    if (!queued.size) pendingWorkspaceEvents.delete(workspaceId);
+    if (!pending.size) return;
     watcherRefreshInFlight = true;
     const requestGeneration = workspaceRequestGeneration;
     const lifecycle = workingTreeLifecycle;
@@ -2468,6 +2526,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       let failure: { error: unknown } | undefined;
       for (const [repoId, scopes] of pending) {
         if (interrupted()) return;
+        // Another fetch may have started while the preceding repository loaded.
+        deferFetchingScopes(workspaceId, repoId, scopes);
+        if (!scopes.size) continue;
         // Events may outlive a repository removal or a rescan. Never query a
         // repository that is absent from this workspace's current inventory.
         if (!repoId || !get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
@@ -2485,10 +2546,12 @@ export const useAppStore = create<AppStore>((set, get) => {
             applyRepositoryStatus(workspaceId, status);
             checkStatusNotifications(get().allRepositories, workspaceId);
           }
+          deferFetchingScopes(workspaceId, repoId, scopes);
           if (scopes.has('refs') || scopes.has('history')) {
             await refreshRepositoryRefs(workspaceId, repoId, scopes.has('refs'), true);
             if (interrupted()) return;
             if (!get().allRepositories.some((repo) => repo.meta.id === repoId)) continue;
+            deferFetchingScopes(workspaceId, repoId, scopes);
             if (scopes.has('history')) {
               if (get().historyLoading || activeHistoryPage?.workspaceId === workspaceId) {
                 const deferred = deferredHistoryRefreshes.get(workspaceId) ?? new Set<string>();
@@ -2576,7 +2639,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (lifecycle === workingTreeLifecycle) {
         watcherRefreshInFlight = false;
         const activeWorkspace = get().snapshot?.workspace.id;
-        if (watcherRefreshQueued || (activeWorkspace && pendingWorkspaceEvents.get(activeWorkspace)?.size)) {
+        if (watcherRefreshQueued || (activeWorkspace && hasReadyWorkspaceEvents(activeWorkspace))) {
           watcherRefreshQueued = false;
           if (watcherTimer) clearTimeout(watcherTimer);
           const delay = Math.max(300, (watcherRetries.get(activeWorkspace ?? '')?.nextAt ?? 0) - Date.now());
@@ -2598,10 +2661,16 @@ export const useAppStore = create<AppStore>((set, get) => {
   function drainPendingWorkspaceEvents(workspaceId: string): boolean {
     if (get().snapshot?.workspace.id !== workspaceId) return false;
     const pending = pendingWorkspaceEvents.get(workspaceId);
-    if (!pending || pending.size === 0) return false;
+    if (!pending || !hasReadyWorkspaceEvents(workspaceId)) return false;
     if (watcherTimer) clearTimeout(watcherTimer);
     watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
     return true;
+  };
+
+  const flushFetchRefresh = async (wid: string) => {
+    if (get().snapshot?.workspace.id !== wid) return;
+    if (watcherRefreshInFlight) await watcherRefreshTask;
+    if (get().snapshot?.workspace.id === wid && hasReadyWorkspaceEvents(wid)) await refreshFromWatcher();
   };
 
   return {
@@ -2694,6 +2763,9 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     initialize: async (value) => {
       resetLogSession();
+      fetchRefreshHolds.clear();
+      fetchRefreshRequests.clear();
+      fetchBranchNotifications.clear();
       const owner = logSession;
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
       layoutWriter?.writer.dispose(); layoutWriter = undefined; layoutResetRevision = -1;
@@ -2754,9 +2826,20 @@ export const useAppStore = create<AppStore>((set, get) => {
           progress.settled(event);
           workingTreeRequests.get(event.requestId)?.();
           workingTreeRequests.delete(event.requestId);
+          fetchRefreshRequests.get(event.requestId)?.();
+          fetchRefreshRequests.delete(event.requestId);
         }
         else if ('operationId' in event) {
           const wid = event.context.workspaceId;
+          const repoId = event.context.repositoryId;
+          if (wid && repoId && event.context.domain === 'sync' && event.phase === 'fetching'
+            && ACTIVE_OPERATION_STATUSES.has(event.status) && !fetchRefreshRequests.has(event.operationId)) {
+            fetchRefreshRequests.set(event.operationId, holdFetchRefresh(wid, repoId));
+          }
+          if (!ACTIVE_OPERATION_STATUSES.has(event.status)) {
+            fetchRefreshRequests.get(event.operationId)?.();
+            fetchRefreshRequests.delete(event.operationId);
+          }
           if (wid && event.context.domain === 'sync' && ['pulling', 'pullingRebase', 'updating'].includes(event.phase)
             && ACTIVE_OPERATION_STATUSES.has(event.status) && !workingTreeRequests.has(event.operationId)) {
             workingTreeRequests.set(event.operationId, holdWorkingTreeRefresh(wid));
@@ -2842,7 +2925,8 @@ export const useAppStore = create<AppStore>((set, get) => {
             const previousGeneration = repositoryEventGenerations.get(generationKey) ?? 0;
             if (event.generation < previousGeneration) return;
             repositoryEventGenerations.set(generationKey, event.generation);
-            if (event.scopes.some(scope => scope === 'refs' || scope === 'history' || scope === 'workspaceSnapshot')) {
+            if ((!event.repoId || !fetchingRefs(event.workspaceId, event.repoId))
+              && event.scopes.some(scope => scope === 'refs' || scope === 'history' || scope === 'workspaceSnapshot')) {
               const prefix = `refs:${event.workspaceId}:`;
               requestControllers.forEach((controller, key) => {
                 if (key.startsWith(prefix) && (!event.repoId || key === `${prefix}${event.repoId}`)) controller.abort();
@@ -2850,8 +2934,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             }
             watcherRetries.delete(event.workspaceId);
             recordPendingWorkspaceEvent(event.workspaceId, event.repoId, event.scopes);
-            if (watcherTimer) clearTimeout(watcherTimer);
-            watcherTimer = setTimeout(() => void refreshFromWatcher(), 300);
+            drainPendingWorkspaceEvents(event.workspaceId);
           } else {
             watcherRetries.delete(event.workspaceId);
             recordPendingWorkspaceEvent(event.workspaceId, event.repoId, event.scopes);
@@ -2894,7 +2977,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             const allRepos = get().allRepositories.length ? get().allRepositories : (currentSnapshot.repositories ?? []);
             const gitRepos = allRepos.filter((repo) => repo.meta.kind === 'git' && repo.toolAvailable !== false && !repo.meta.isWorktree);
             await Promise.allSettled(gitRepos.map((repo) => get().sync(repo.meta.id, 'fetch', false, { backgroundFetch: true })));
-            await get().refresh(true);
+            await refreshFromWatcher();
           } finally {
             startupFetchPending = false;
             const latestSnapshot = get().snapshot;
@@ -2922,6 +3005,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       workingTreeUpdates.clear();
       workingTreeRequests.clear();
       remoteWorkingTreeRequests.clear();
+      fetchRefreshHolds.clear();
+      fetchRefreshRequests.clear();
+      fetchBranchNotifications.clear();
+      watcherRefreshTask = undefined;
       set({ transferringTabIds: {} });
       cancelRequests();
       bridgeSubscriptions.splice(0).forEach((dispose) => dispose());
@@ -3296,6 +3383,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             activeTabId: null,
             sessions: nextSessions,
             snapshot: undefined,
+            logPanelOpen: false,
             allRepositories: [],
             selectedRepoId: undefined,
             selectedFile: undefined,
@@ -3385,6 +3473,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         activeTabId: null,
         sessions: {},
         snapshot: undefined,
+        logPanelOpen: false,
         allRepositories: [],
         selectedRepoId: undefined,
         selectedFile: undefined,
@@ -4135,7 +4224,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             throw error;
           }
         }));
-        if (get().snapshot?.workspace.id === wid) await get().refresh(true);
+        if (get().snapshot?.workspace.id === wid) await refreshFromWatcher();
         if (!taskProgress.isStopped(taskId) && notifyCompletion && results.every((result) => result.status === 'fulfilled')) get().addNotification({
           type: 'info', title: 'Fetch All', workspaceId: wid,
           message: repositories.length === 1 ? { key: 'VersionDock [{0}]: Fetch complete.', args: [repositories[0].meta.name] } : 'VersionDock: Fetch complete.',
@@ -4148,6 +4237,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     sync: async (repoId, action, notify = true, options = {}, targetWorkspaceId) => {
       const wid = targetWorkspaceId ?? get().snapshot?.workspace.id ?? workspaceId();
+      let releaseFetchRefresh: (() => void) | undefined;
       const source = get().snapshot?.workspace.id === wid ? get().snapshot : get().sessions[wid]?.snapshot;
       const repoName = source?.repositories.find(repo => repo.meta.id === repoId)?.meta.name ?? repoId;
       const progress = action === 'push' && notify && options.showProgress !== false
@@ -4159,6 +4249,7 @@ export const useAppStore = create<AppStore>((set, get) => {
             if (options.rethrow) throw new Error(`Capability ${capability} unavailable`);
             return undefined;
           }
+          if (action === 'fetch') releaseFetchRefresh = holdFetchRefresh(wid, repoId);
           let result: SyncResult;
           // Manual fetch keeps its existing silent notification behavior, while the
           // independent task entry still tracks the foreground operation.
@@ -4182,8 +4273,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           }
           await notifyUpdateRestoreWarning(result.restoreWarning, wid, repoId);
           if (notify && action === 'fetch') {
-            const refs = await bridge().request<BranchInfo[]>({ type: 'branches', payload: { workspace_id: wid, repo_id: repoId } }, { showProgress: false }).catch(() => []);
-            notifyGoneBranches(repoId, refs, wid);
+            fetchBranchNotifications.add(fetchKey(wid, repoId));
           }
           if (notify && action === 'push') await get().notifyPushSuccess(repoId, wid, options.remote, options.branch);
           if (notify && result.update) {
@@ -4203,8 +4293,13 @@ export const useAppStore = create<AppStore>((set, get) => {
               actions: commitCount ? [{ type: 'viewUpdateDetails', label: 'View update details', result: result.update }] : [],
             });
           }
-          if (action !== 'update') {
+          if (action !== 'update' && action !== 'fetch') {
             await Promise.all([get().loadUnpushedCommits(repoId, wid), get().loadIncomingCommits(repoId, wid)]);
+          }
+          if (action === 'fetch') {
+            releaseFetchRefresh?.();
+            if (get().snapshot?.workspace.id === wid) await flushFetchRefresh(wid);
+            else await Promise.all([get().loadUnpushedCommits(repoId, wid), get().loadIncomingCommits(repoId, wid)]);
           }
           return result.update ?? undefined;
         }, `sync:${repoId}`, { workspaceId: wid, repositoryId: repoId, remote: options.remote, branch: options.branch }, {
@@ -4214,7 +4309,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           // sync or commit actions. Manual fetch and all writes retain their guard.
           trackBusy: action !== 'fetch' || notify,
         });
-      } finally { progress?.finish(); }
+      } finally { releaseFetchRefresh?.(); progress?.finish(); }
     },
 
     updateProject: async (strategy) => {

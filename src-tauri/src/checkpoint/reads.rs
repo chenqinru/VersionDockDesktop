@@ -57,6 +57,9 @@ impl ReadTiming {
                 CheckpointAction::Detail { .. } => Some("detail"),
                 CheckpointAction::Diff { .. } => Some("diff"),
                 CheckpointAction::Messages { .. } => Some("messages"),
+                CheckpointAction::Create { .. } => Some("create"),
+                CheckpointAction::Begin { .. } => Some("begin"),
+                CheckpointAction::Finish { .. } => Some("finish"),
                 _ => None,
             },
             start: std::time::Instant::now(),
@@ -82,7 +85,11 @@ impl Drop for ReadTiming {
         crate::logger::log_entry(
             crate::logger::LogLevel::Debug,
             crate::logger::LogChannel::Core,
-            "Checkpoint history read",
+            if matches!(action, "create" | "begin" | "finish") {
+                "Checkpoint recording operation"
+            } else {
+                "Checkpoint history read"
+            },
             Some(format!(
                 "action={action} object_lock_ms={} metadata_ms={} work_ms={}",
                 locked.duration_since(self.start).as_millis(),

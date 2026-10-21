@@ -447,10 +447,10 @@ export function CheckpointPanel({ onClose, project, projectRepositories, navigat
     <footer className="checkpoint-footer">
       {reviewing && canRedoReview && <span className="checkpoint-form-hint checkpoint-footer-note">{t('Reapplies all {0} turns from the last undo.', redoCheckpoints.length)}</span>}
       {reviewing && bringBackPreview && <span className="checkpoint-form-hint checkpoint-footer-note">{t(bringBackPreview.conflicts.length ? 'Resolve conflicts before applying.' : 'Your current state is backed up before applying.')}</span>}
-      {state.busy && !undo.phase && <LoadingState>{t(state.loadingDetailsId ? 'Loading changed files…' : 'Working…')}</LoadingState>}
+      {state.busy && !undo.phase && <LoadingState>{t(state.loadingDetailsId ? 'Loading changed files…' : creating ? 'Saving the initial checkpoint…' : 'Working…')}</LoadingState>}
       <div className="checkpoint-footer-actions">
         {state.busy && <Button size="xs" onClick={cancelCheckpointAction}>{t('Cancel operation')}</Button>}
-        {!managementContent && creating ? <><Button disabled={state.busy} onClick={() => setCreating(false)}>{t('Cancel')}</Button><Button variant="primary" disabled={blocked || projectLoading || !workspace || !name.trim() || !selectedRepositories.length || Boolean(originalTasks.length)} onClick={() => void create()}>{t('Create task')}</Button></> : !reviewing && <Button disabled={managementBusy} onClick={onClose}>{t('Close')}</Button>}
+        {!managementContent && creating ? <><Button disabled={state.busy} onClick={() => setCreating(false)}>{t('Cancel')}</Button><Button variant="primary" loading={state.busy} disabled={blocked || projectLoading || !workspace || !name.trim() || !selectedRepositories.length || Boolean(originalTasks.length)} onClick={() => void create()}>{t('Create task')}</Button></> : !reviewing && <Button disabled={managementBusy} onClick={onClose}>{t('Close')}</Button>}
         {reviewing && (!state.preview || inlinePreview) && reviewPoint && task && <Button variant="primary" danger loading={Boolean(undo.phase && undo.phase !== 'confirming')} disabled={blocked || Boolean(undo.phase) || active || Boolean(task.error) || (!canRedoReview && !['completed', 'applied'].includes(reviewPoint.status))} onClick={() => {
           if (canRedoReview) {
             void undo.redo();

@@ -37,6 +37,31 @@ it('creates in the original directories by default and exposes repository scope'
   fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
   await waitFor(() => expect(requests).toHaveBeenCalledWith(expect.objectContaining({ type: 'checkpoint', payload: { workspace_id: 'ws', action: { type: 'create', name: 'Fix login', repo_ids: ['repo'], mode: 'manual', isolation: 'original', include_ignored: [] } } }), expect.anything()));
 });
+it('shows initial snapshot work and allows cancelling task creation', async () => {
+  const bridge = new MockBridge(() => []);
+  let fail!: (reason: Error) => void;
+  let signal: AbortSignal | undefined;
+  vi.spyOn(bridge, 'request').mockImplementation((command, options) => {
+    if (command.type === 'checkpoint' && command.payload.action.type === 'create') {
+      signal = options?.signal;
+      return new Promise((_resolve, reject) => { fail = reject; });
+    }
+    return Promise.resolve(listing) as never;
+  });
+  useAppStore.setState({ bridge, snapshot });
+  render(<CheckpointPanel onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'New checkpoint task' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Task name' }), { target: { value: 'Initial capture' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+  expect(await screen.findByText('Saving the initial checkpoint…')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create task' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel operation' }));
+  expect(signal?.aborted).toBe(true);
+  await act(async () => fail(new DOMException('Operation aborted', 'AbortError')));
+  expect(screen.queryByText('Saving the initial checkpoint…')).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Task name' })).toHaveValue('Initial capture');
+});
+
 it('does not claim automatic protection before receiving actual hooks', async () => {
   const bridge = new MockBridge(() => []);
   const task: TaskWorkspace = { id: 't', workspaceId: 'ws', name: 'Automatic task', path: '/project', roots: ['/project'], repositories: [], mode: 'automatic', isolation: 'original', createdAt: '', seed: '', sourceSeed: '', lastApplied: null, checkpoints: [], hookEvents: [], lastHookAt: null, hookError: null, error: null };

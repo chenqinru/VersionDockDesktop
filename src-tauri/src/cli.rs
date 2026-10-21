@@ -402,6 +402,56 @@ async fn run_once(
     secret_env: &[(String, String)],
     exit_policy: ExitPolicy,
 ) -> Result<CommandOutput, DesktopError> {
+    run_once_stdout(
+        program,
+        args,
+        cwd,
+        stdin,
+        timeout,
+        cancellation,
+        secret_env,
+        exit_policy,
+        None,
+    )
+    .await
+}
+
+/// Spool raw Git objects without the display-output cap or a repository-sized
+/// allocation. The caller owns and removes the temporary output file.
+pub(crate) async fn git_to_file(
+    args: &[String],
+    cwd: &Path,
+    stdin: &[u8],
+    output: &Path,
+    timeout: Duration,
+    token: &CancellationToken,
+) -> Result<(), DesktopError> {
+    run_once_stdout(
+        "git",
+        args,
+        cwd,
+        Some(stdin),
+        timeout,
+        token,
+        &[],
+        ExitPolicy::Strict,
+        Some(output),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn run_once_stdout(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    secret_env: &[(String, String)],
+    exit_policy: ExitPolicy,
+    output: Option<&Path>,
+) -> Result<CommandOutput, DesktopError> {
     let start_time = std::time::Instant::now();
     let channel = if program.contains("svn") {
         crate::logger::LogChannel::Svn
@@ -427,7 +477,12 @@ async fn run_once(
         .args(args)
         .current_dir(cwd)
         .kill_on_drop(true)
-        .stdout(Stdio::piped())
+        .stdout(match output {
+            Some(path) => Stdio::from(std::fs::File::create(path).map_err(|error| {
+                DesktopError::new("COMMAND_IO_FAILED", error.to_string(), true)
+            })?),
+            None => Stdio::piped(),
+        })
         .stderr(Stdio::piped())
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -469,22 +524,43 @@ async fn run_once(
         )
     })?;
 
-    if let Some(input) = stdin {
-        if let Some(mut pipe) = child.stdin.take() {
-            pipe.write_all(input).await.map_err(|error| {
-                DesktopError::new("COMMAND_STDIN_FAILED", error.to_string(), true)
-            })?;
-        }
-    }
-
-    let stdout = child.stdout.take().ok_or_else(|| {
-        DesktopError::new("COMMAND_PIPE_FAILED", "Unable to capture stdout", true)
-    })?;
+    let pipe = child.stdin.take();
+    let stdout = child.stdout.take();
     let stderr = child.stderr.take().ok_or_else(|| {
         DesktopError::new("COMMAND_PIPE_FAILED", "Unable to capture stderr", true)
     })?;
-    let stdout_task = tokio::spawn(read_capped(stdout));
+    let stdout_task = tokio::spawn(async move {
+        match stdout {
+            Some(stdout) => read_capped(stdout).await,
+            None => Ok((Vec::new(), false)),
+        }
+    });
     let mut stderr_task = tokio::spawn(read_capped(stderr));
+
+    // Read both outputs while feeding stdin. A large cat-file request otherwise
+    // deadlocks once the child fills stdout while the parent is still writing.
+    // The timeout and cancellation also cover a child that never reads stdin.
+    let exchange = async {
+        tokio::try_join!(
+            async {
+                child.wait().await.map_err(|error| {
+                    DesktopError::new("COMMAND_IO_FAILED", error.to_string(), true)
+                })
+            },
+            async {
+                if let (Some(input), Some(mut pipe)) = (stdin, pipe) {
+                    pipe.write_all(input).await.map_err(|error| {
+                        DesktopError::new("COMMAND_STDIN_FAILED", error.to_string(), true)
+                    })?;
+                    pipe.shutdown().await.map_err(|error| {
+                        DesktopError::new("COMMAND_STDIN_FAILED", error.to_string(), true)
+                    })?;
+                }
+                Ok(())
+            },
+        )
+        .map(|(status, ())| status)
+    };
 
     let status = tokio::select! {
         _ = cancellation.cancelled() => {
@@ -503,9 +579,15 @@ async fn run_once(
             );
             return Err(error);
         }
-        result = tokio::time::timeout(timeout, child.wait()) => {
+        result = tokio::time::timeout(timeout, exchange) => {
             match result {
-                Ok(value) => value.map_err(|error| DesktopError::new("COMMAND_IO_FAILED", error.to_string(), true))?,
+                Ok(Ok(value)) => value,
+                Ok(Err(error)) => {
+                    terminate_process_tree(&mut child).await;
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    return Err(error);
+                },
                 Err(_) => {
                     terminate_process_tree(&mut child).await;
                     stdout_task.abort();
@@ -1970,6 +2052,110 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.exit_code, Some(128));
         assert!(error.stderr.unwrap().contains("unable to access"));
+    }
+
+    #[tokio::test]
+    async fn git_batch_handles_large_duplex_input_and_spooled_output() {
+        let root = tempfile::tempdir().unwrap();
+        let token = CancellationToken::new();
+        run(
+            "git",
+            &["init".into()],
+            root.path(),
+            None,
+            DEFAULT_TIMEOUT,
+            &token,
+        )
+        .await
+        .unwrap();
+        let oid = run(
+            "git",
+            &["hash-object".into(), "-w".into(), "--stdin".into()],
+            root.path(),
+            Some(b"fixture\0\n"),
+            DEFAULT_TIMEOUT,
+            &token,
+        )
+        .await
+        .unwrap();
+        let input = format!("{}\n", oid.stdout_text().trim()).repeat(4096);
+        let args = ["cat-file".into(), "--batch".into()];
+        let output = tokio::time::timeout(
+            Duration::from_secs(10),
+            run(
+                "git",
+                &args,
+                root.path(),
+                Some(input.as_bytes()),
+                Duration::from_secs(5),
+                &token,
+            ),
+        )
+        .await
+        .expect("stdin/stdout must not deadlock")
+        .unwrap();
+        let path = root.path().join("spooled");
+        git_to_file(
+            &args,
+            root.path(),
+            input.as_bytes(),
+            &path,
+            Duration::from_secs(5),
+            &token,
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), output.stdout);
+        assert_eq!(
+            output.stdout.iter().filter(|byte| **byte == 0).count(),
+            4096
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn large_stdin_is_drained_concurrently_and_remains_cancellable() {
+        let root = tempfile::tempdir().unwrap();
+        let input = vec![b'x'; 1024 * 1024];
+        let output = run(
+            "sh",
+            &["-c".into(), "cat".into()],
+            root.path(),
+            Some(&input),
+            Duration::from_secs(5),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.stdout, input);
+        let error = run(
+            "sh",
+            &["-c".into(), "sleep 2".into()],
+            root.path(),
+            Some(&input),
+            Duration::from_millis(30),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "COMMAND_TIMEOUT");
+        let token = CancellationToken::new();
+        let cancel = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            cancel.cancel();
+        });
+        let error = run(
+            "sh",
+            &["-c".into(), "sleep 2".into()],
+            root.path(),
+            Some(&input),
+            Duration::from_secs(5),
+            &token,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "REQUEST_CANCELLED");
     }
 
     #[cfg(unix)]

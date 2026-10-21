@@ -45,9 +45,10 @@ describe('visible content during native mode changes', () => {
     let finish!: (viewport: WindowViewport) => void;
     mode.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
 
-    act(() => useAppStore.setState({ snapshot, tabs: [snapshot.workspace], activeTabId: snapshot.workspace.id }));
+    act(() => useAppStore.setState({ bridge, snapshot, tabs: [snapshot.workspace], activeTabId: snapshot.workspace.id, logPanelOpen: true }));
     const project = screen.getByText('No repositories found', { selector: 'strong' });
     expect(project).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Output and Logs' })).toBeVisible();
     expect(document.querySelector('.app-shell')).not.toHaveAttribute('aria-busy');
     expect(document.querySelector('.window-mode-transition')).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
@@ -56,8 +57,10 @@ describe('visible content during native mode changes', () => {
 
     // Closing the last tab must reveal welcome immediately, including when
     // the preceding project resize has not returned yet.
-    act(() => useAppStore.setState({ snapshot: undefined, tabs: [], activeTabId: null }));
+    await act(async () => useAppStore.getState().closeTab(snapshot.workspace.id, { closeWindowIfLast: false }));
     expect(screen.getByRole('heading', { name: 'VersionDock' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Output and Logs' })).toBeNull();
+    expect(useAppStore.getState().logPanelOpen).toBe(false);
     expect(screen.queryByText('No repositories found', { selector: 'strong' })).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(32); });
     expect(mode).toHaveBeenLastCalledWith(false, false);

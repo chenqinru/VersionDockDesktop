@@ -379,6 +379,38 @@ describe('appStore async lifecycle', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it.each(['last', 'all'] as const)('closes output when closing %s tabs without losing logs or preferences', async action => {
+    const bridge = new MockBridge(() => []);
+    const current = snapshot('current-output', 1);
+    const other = snapshot('other-output', 1);
+    const logEntries = [{ id: 'retained', timestamp: '2026-10-21T00:00:00Z', level: 'debug' as const, channel: 'core' as const, message: 'Retained output', details: null, durationMs: null, exitCode: null, cwd: null }];
+    useAppStore.setState({ bridge, bootstrap, snapshot: current,
+      tabs: action === 'last' ? [current.workspace] : [current.workspace, other.workspace], activeTabId: current.workspace.id,
+      logPanelOpen: true, logPanelHeight: 430, activeLogProject: 'all', activeLogChannel: 'core', activeLogLevel: 'debug', logSearchQuery: 'Retained', logEntries,
+    });
+    if (action === 'last') await useAppStore.getState().closeTab(current.workspace.id);
+    else await useAppStore.getState().closeAllTabs();
+    expect(useAppStore.getState()).toMatchObject({ snapshot: undefined, tabs: [], activeTabId: null,
+      logPanelOpen: false, logPanelHeight: 430, activeLogProject: 'all', activeLogChannel: 'core', activeLogLevel: 'debug', logSearchQuery: 'Retained', logEntries,
+    });
+    // Opening another workspace must not resurrect the old output panel.
+    useAppStore.setState({ snapshot: other, tabs: [other.workspace], activeTabId: other.workspace.id });
+    expect(useAppStore.getState().logPanelOpen).toBe(false);
+    useAppStore.getState().setLogPanelOpen(true);
+    expect(useAppStore.getState().logEntries).toEqual(logEntries);
+    useAppStore.setState({ logPanelOpen: false, logPanelHeight: 200, activeLogProject: 'current', activeLogChannel: 'all', activeLogLevel: 'info', logSearchQuery: '', logEntries: [] });
+  });
+
+  it('keeps output open while closing a tab if another workspace remains', async () => {
+    const bridge = new MockBridge(command => command.type === 'history' ? { commits: [], hasMore: false } : []);
+    const current = snapshot('current-output', 1);
+    const other = snapshot('other-output', 1);
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, tabs: [current.workspace, other.workspace], activeTabId: current.workspace.id, logPanelOpen: true });
+    await useAppStore.getState().closeTab(other.workspace.id);
+    expect(useAppStore.getState()).toMatchObject({ logPanelOpen: true, snapshot: current, tabs: [current.workspace] });
+    useAppStore.setState({ logPanelOpen: false });
+  });
+
   it.each([false, true])('shows immediate batch commit progress in notifications and tasks (push=%s)', async push => {
     const current = snapshot('commit-progress', 1);
     current.repositories = [repository('a', 'A'), repository('b', 'B'), repository('c', 'C')];
@@ -665,10 +697,12 @@ describe('appStore async lifecycle', () => {
     let readRequested = false;
     const bridge = new MockBridge(command => {
       if (command.type === 'sync') return pendingSync;
+      if (command.type === 'repositoryStatus') return current.repositories[0];
+      if (command.type === 'history') return { commits: [], hasMore: false };
       if (command.type === 'unpushedCommits') { readRequested = true; return pendingRead; }
       return [];
     });
-    useAppStore.setState({ bridge, bootstrap, snapshot: current });
+    useAppStore.setState({ bridge, bootstrap, snapshot: current, allRepositories: current.repositories });
     const request = useAppStore.getState().sync('repo', action, notify);
     const active = () => isOperationActiveForRepositories(useAppStore.getState().operations, ['repo'], { workspaceId: 'workspace', domain: 'sync' });
     expect(active()).toBe(busy);
