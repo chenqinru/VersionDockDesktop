@@ -1,6 +1,7 @@
 import { Button } from './Button';
 import { scrollToPosition } from '../scrolling/navigation';
 import { useEffectiveTheme } from '../theme/useEffectiveTheme';
+import { usePaneVirtualWindow } from '../hooks/usePaneVirtualWindow';
 import { resolveShikiTheme } from '../theme';
 import { IconButton } from './IconButton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1141,64 +1142,6 @@ function NormalSideBlocks({ blocks, side, startLine, language, selections, onSel
   );
 }
 
-function usePaneVirtualWindow(
-  ref: React.RefObject<HTMLElement>,
-  totalLines: number,
-  lineHeight: number = CODE_LINE_HEIGHT,
-  threshold: number = 40,
-): [number, number] {
-  const [range, setRange] = useState<[number, number]>([0, Math.min(totalLines, 60)]);
-
-  useEffect(() => {
-    if (totalLines <= threshold) {
-      return;
-    }
-
-    const el = ref.current;
-    if (!el) return;
-    const pane = el.closest<HTMLElement>('.versiondock-merge-pane');
-    if (!pane) return;
-
-    let frameId: number | null = null;
-    const update = () => {
-      if (frameId !== null) return;
-      frameId = requestAnimationFrame(() => {
-        frameId = null;
-        if (!ref.current || !pane) return;
-        const paneRect = pane.getBoundingClientRect();
-        const blockRect = ref.current.getBoundingClientRect();
-        const relativeTop = blockRect.top - paneRect.top;
-        const relativeBottom = blockRect.bottom - paneRect.top;
-
-        if (relativeBottom < -200 || relativeTop > paneRect.height + 200) {
-          return;
-        }
-
-        const visibleStartPx = Math.max(0, -relativeTop);
-        const visibleEndPx = Math.min(blockRect.height, paneRect.height - relativeTop);
-
-        const overscan = 20;
-        const start = Math.max(0, Math.floor(visibleStartPx / lineHeight) - overscan);
-        const end = Math.min(totalLines, Math.ceil(visibleEndPx / lineHeight) + overscan);
-
-        setRange(prev => (prev[0] === start && prev[1] === end ? prev : [start, end]));
-      });
-    };
-
-    update();
-    pane.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update, { passive: true });
-
-    return () => {
-      if (frameId !== null) cancelAnimationFrame(frameId);
-      pane.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-    };
-  }, [ref, totalLines, lineHeight, threshold]);
-
-  return totalLines <= threshold ? [0, totalLines] : range;
-}
-
 function CodeLines({ lines, startLine, language, dim, changeFlags, changeTone }: {
   lines: string[];
   startLine: number;
@@ -1212,7 +1155,7 @@ function CodeLines({ lines, startLine, language, dim, changeFlags, changeTone }:
   const colorTheme = useEffectiveTheme();
   const displayedLines = useMemo(() => lines.length > 0 ? lines : [''], [lines]);
 
-  const [startIdx, endIdx] = usePaneVirtualWindow(containerRef, displayedLines.length);
+  const [startIdx, endIdx] = usePaneVirtualWindow(containerRef, displayedLines.length, CODE_LINE_HEIGHT);
 
   const visibleLines = useMemo(() => {
     return displayedLines.slice(startIdx, endIdx);
@@ -1268,7 +1211,7 @@ function EditableCodeBlock({ value, startLine, language, ariaLabel, dim, changeF
   }, [value]);
 
   const lineTotal = Math.max(lines.length, 1);
-  const [startIdx, endIdx] = usePaneVirtualWindow(containerRef, lineTotal);
+  const [startIdx, endIdx] = usePaneVirtualWindow(containerRef, lineTotal, CODE_LINE_HEIGHT);
 
   const visibleLines = useMemo(() => {
     return lines.slice(startIdx, endIdx);

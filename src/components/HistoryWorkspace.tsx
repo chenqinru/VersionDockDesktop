@@ -380,6 +380,7 @@ function CommitList({
       const allUnpushed = selection.every((item) => item.unpushed);
       const containsMerge = selection.some((item) => item.parents.length > 1);
       return [
+        { id: 'copy', label: t('Copy Revision Number'), icon: 'copy' },
         { id: 'ai-explain', label: t('AI Explain'), icon: 'sparkle-filled' },
         { separator: true },
         { id: 'patch-multi', label: t('Create Patch...'), icon: 'diff' },
@@ -440,12 +441,18 @@ function CommitList({
     const newestFirst = [...selection].sort((left, right) => (index.get(commitKey(left.repoId, left.hash)) ?? 0) - (index.get(commitKey(right.repoId, right.hash)) ?? 0));
     const repoName = repoMap.get(commit.repoId)?.meta.name ?? commit.repoId;
     if (id === 'copy') {
-      await navigator.clipboard?.writeText(commit.hash).catch(() => undefined);
+      const targets = selected.has(commitKey(commit.repoId, commit.hash)) ? [...selectedCommits] : [commit];
+      targets.sort((left, right) => (index.get(commitKey(left.repoId, left.hash)) ?? Number.MAX_SAFE_INTEGER)
+        - (index.get(commitKey(right.repoId, right.hash)) ?? Number.MAX_SAFE_INTEGER));
+      const copied = await navigator.clipboard?.writeText(targets.map((item) => item.hash).join('\n')).then(() => true, () => false);
+      if (!copied) return;
       useAppStore.getState().addNotification({
         type: 'info',
         title: t('Revision copied'),
-        message: { key: 'VersionDock [{0}]: revision {1} copied to clipboard.', args: [repoName, commit.shortHash || commit.hash.slice(0, 7)] },
-        workspaceId: useAppStore.getState().snapshot?.workspace.id,
+        message: targets.length > 1
+          ? { key: 'Copied {0} revisions to clipboard.', args: [targets.length] }
+          : { key: 'VersionDock [{0}]: revision {1} copied to clipboard.', args: [repoName, commit.shortHash || commit.hash.slice(0, 7)] },
+        workspaceId,
       });
     }
     if (id === 'patch' || id === 'patch-multi') {

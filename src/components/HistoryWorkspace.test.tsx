@@ -251,6 +251,50 @@ describe('HistoryWorkspace capabilities', () => {
     expect(useAppStore.getState().notifications.some((n) => n.title === 'Revision copied')).toBe(true);
   });
 
+  it.each(['git', 'svn', 'mixed'] as const)('copies all selected %s revisions in displayed order', async (kind) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const primaryRepo = { ...snapshot.repositories[0], meta: { ...snapshot.repositories[0].meta, kind: kind === 'svn' ? 'svn' as const : 'git' as const } };
+    const otherRepo = { ...primaryRepo, meta: { ...primaryRepo.meta, id: 'other', name: 'Other', kind: 'svn' as const, rootPath: '/tmp/other' } };
+    const commits = ['new', 'middle', 'old'].map((label, position) => ({
+      repoId: kind === 'mixed' && position === 2 ? 'other' : 'repo',
+      hash: kind === 'svn' || kind === 'mixed' && position === 2 ? String(100 - position) : String(position + 1).repeat(40),
+      shortHash: label, parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `Copy ${label}`, refs: [],
+    }));
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot: { ...snapshot, repositories: kind === 'mixed' ? [primaryRepo, otherRepo] : [primaryRepo] }, selectedRepoId: 'repo', history: commits, selectedCommits: [commits[2], commits[0]], notifications: [] });
+    const { container } = render(<HistoryWorkspace />);
+    const displayed = [...container.querySelectorAll('.commit-subject-text')].map((element) => element.textContent);
+    const expected = displayed.flatMap((message) => commits.filter((commit) => commit.message === message && commit !== commits[1]).map((commit) => commit.hash)).join('\n');
+    fireEvent.contextMenu(screen.getByText('Copy new', { selector: '.commit-subject-text' }).closest('.commit-row')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Revision Number' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith(expected));
+    await waitFor(() => expect(useAppStore.getState().notifications).toEqual([expect.objectContaining({ title: 'Revision copied', message: { key: 'Copied {0} revisions to clipboard.', args: [2] } })]));
+    expect(useAppStore.getState().selectedCommits).toEqual([commits[2], commits[0]]);
+    act(() => useAppStore.setState({ selectedCommits: [], notifications: [] }));
+  });
+
+  it('copies only the context revision when right-clicking outside the selection', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const commits = ['selected-1', 'selected-2', 'context'].map(hash => ({ repoId: 'repo', hash, shortHash: hash, parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: `Copy ${hash}`, refs: [] }));
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: commits, selectedCommits: commits.slice(0, 2) });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('Copy context', { selector: '.commit-subject-text' }).closest('.commit-row')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Revision Number' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith('context'));
+    act(() => useAppStore.setState({ selectedCommits: [] }));
+  });
+
+  it.each(['unavailable', 'rejected'])('does not announce copy success when the clipboard is %s', async (failure) => {
+    Object.assign(navigator, { clipboard: failure === 'unavailable' ? undefined : { writeText: vi.fn().mockRejectedValue(new Error('Clipboard denied')) } });
+    const commit = { repoId: 'repo', hash: 'failed', shortHash: 'failed', parents: [], author: 'Ada', email: '', authorDate: '', committerDate: '', message: 'Copy failure', refs: [] };
+    useAppStore.setState({ bootstrap: bootstrap(true, true), snapshot, selectedRepoId: 'repo', history: [commit], selectedCommits: [], notifications: [] });
+    render(<HistoryWorkspace />);
+    fireEvent.contextMenu(screen.getByText('Copy failure', { selector: '.commit-subject-text' }).closest('.commit-row')!);
+    await act(async () => fireEvent.click(screen.getByRole('menuitem', { name: 'Copy Revision Number' })));
+    expect(useAppStore.getState().notifications).toEqual([]);
+  });
+
   it('checks out revision directly when no local branch points to it', async () => {
     const historyOperation = vi.fn().mockResolvedValue(true);
     const commit = { repoId: 'repo', hash: 'abcdef1234567', shortHash: 'abcdef1', parents: [], author: 'Ada', email: 'ada@example.test', authorDate: '2026-01-01T00:00:00Z', committerDate: '2026-01-01T00:00:00Z', message: 'feat: checkout directly', refs: [] };

@@ -39,6 +39,7 @@ import { FileSearchWidget } from './FileSearchWidget';
 import { ChangeSearchContext, changeSearchKey, hasSearchMatch, useChangeSearch } from './changeSearch';
 import { ChangeSearchText } from './ChangeSearchText';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useVirtualScrollMargin } from '../hooks/useVirtualScrollMargin';
 import { SubmoduleDiffModal } from './SubmoduleDiffModal';
 import { VscodeChangesView } from './VscodeChangesView';
 import { useBridge } from '../platform/context';
@@ -205,14 +206,16 @@ function RepoFiles({ repo, selected, setFiles, onFile, onContext, onFolderContex
   }, [expansion, folderExpansion, repo.meta.id, repo.files, tree, viewMode, search]);
   const [filesContainer, setFilesContainer] = useState<HTMLDivElement | null>(null);
   const shouldVirtualize = flatItems.length > 40;
+  const scrollElement = filesContainer?.closest<HTMLElement>('.changes-scroll') ?? null;
+  const scrollMargin = useVirtualScrollMargin(filesContainer, scrollElement, shouldVirtualize && expanded);
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: shouldVirtualize ? flatItems.length : 0,
-    getScrollElement: () => filesContainer?.closest<HTMLElement>('.changes-scroll') ?? null,
+    getScrollElement: () => scrollElement,
     estimateSize: () => 22,
-    scrollMargin: filesContainer?.offsetTop ?? 0,
+    scrollMargin,
     overscan: 10,
-    enabled: shouldVirtualize,
+    enabled: shouldVirtualize && expanded,
   });
   useEffect(() => {
     if (!search.activeKey || !shouldVirtualize) return;

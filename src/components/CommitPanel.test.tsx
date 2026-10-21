@@ -32,6 +32,44 @@ const originalUpdateProject = useAppStore.getState().updateProject;
 afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, updateProject: originalUpdateProject, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
 describe('CommitPanel capabilities and file view', () => {
+  it('renders later repositories when virtual lists share a scroll container with positioned groups', () => {
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('changes-scroll') ? 220 : 0;
+    });
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(400);
+    // Comfortable density makes each repository an offsetParent. Its local
+    // offset must not be used as an origin in the shared scroll container.
+    const offset = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockReturnValue(28);
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('changes-scroll')) return new DOMRect(0, 100, 400, 220);
+      if (this.classList.contains('virtual-change-files')) {
+        const scroll = this.closest('.changes-scroll')!;
+        const groups = [...scroll.querySelectorAll('.repo-change-group')];
+        const index = groups.indexOf(this.closest('.repo-change-group')!);
+        const precedingHeight = groups.slice(0, index).reduce((sum, group) => sum + 28 + Number.parseFloat((group.querySelector('.virtual-change-files') as HTMLElement)?.style.height || '0'), 0);
+        return new DOMRect(0, 100 + precedingHeight + 28 - scroll.scrollTop, 400, Number.parseFloat(this.style.height || '0'));
+      }
+      return originalRect.call(this);
+    });
+    try {
+      const repositories = ['first', 'second'].map((id) => ({
+        ...gitRepo, meta: { ...gitRepo.meta, id, name: id },
+        files: Array.from({ length: 60 }, (_, index) => ({ path: `file-${String(index).padStart(3, '0')}.ts`, status: 'modified', staged: false, unstaged: true, conflicted: false })),
+      }));
+      useAppStore.setState({ bootstrap: bootstrap(false), snapshot: { ...gitSnapshot, repositories } });
+      const { container } = renderPanel();
+      const scroll = container.querySelector('.changes-scroll')!;
+      fireEvent.scroll(scroll, { target: { scrollTop: 1450 } });
+      const second = container.querySelectorAll('.repo-change-group')[1] as HTMLElement;
+      expect(within(second).getByTitle('file-005.ts')).toBeInTheDocument();
+      expect(within(second).queryByTitle('file-059.ts')).not.toBeInTheDocument();
+    } finally {
+      cleanup();
+      rect.mockRestore(); offset.mockRestore(); width.mockRestore(); height.mockRestore();
+    }
+  });
+
   it('keeps the project checkpoint entry out of the commit toolbar', () => {
     useAppStore.setState({ bootstrap: bootstrap(false), snapshot: gitSnapshot });
     renderPanel();
