@@ -808,7 +808,10 @@ impl AppState {
                     let paths: Vec<_> = event
                         .paths
                         .into_iter()
-                        .filter(|path| !watcher_ignored_path(path, &watched_root, &ignored))
+                        .filter(|path| {
+                            !watcher_directory_metadata_event(path, &event.kind)
+                                && !watcher_ignored_path(path, &watched_root, &ignored)
+                        })
                         .collect();
                     if paths.is_empty() {
                         return;
@@ -984,11 +987,14 @@ fn watch_git_metadata(
         if matches!(event.kind, notify::EventKind::Access(_)) {
             return;
         }
+        #[cfg(all(test, windows))]
+        eprintln!("Git metadata event: {:?} {:?}", event.kind, event.paths);
         // Project external paths onto the existing metadata filter/classifier;
         // do not apply working-tree ignored folders to the actual Git directory.
         let paths = event
             .paths
             .iter()
+            .filter(|path| !watcher_directory_metadata_event(path, &event.kind))
             .filter_map(|path| {
                 event_dirs
                     .iter()
@@ -1008,6 +1014,19 @@ fn watch_git_metadata(
             .map_err(|error| DesktopError::new("WATCHER_START_FAILED", error.to_string(), true))?;
     }
     Ok(watcher)
+}
+
+fn watcher_directory_metadata_event(path: &Path, kind: &notify::EventKind) -> bool {
+    // ReadDirectoryChangesW reports directory timestamp changes as Modify(Any),
+    // including refs directories touched by creating/removing transient locks.
+    // Their child create/remove/rename events carry the real reference changes.
+    // Do not filter directory renames/removals or overflow/rescan notifications.
+    cfg!(windows)
+        && matches!(
+            kind,
+            notify::EventKind::Modify(notify::event::ModifyKind::Any)
+        )
+        && path.is_dir()
 }
 
 fn watcher_ignored_path(path: &Path, workspace_root: &Path, ignored: &[String]) -> bool {
@@ -1717,6 +1736,35 @@ mod tests {
         let defaults = DesktopSettings::default();
         assert!(defaults.notify_incoming_commits);
         assert!(defaults.notify_unpushed_commits);
+    }
+
+    #[test]
+    fn directory_metadata_filter_keeps_child_writes_and_directory_renames() {
+        use notify::{
+            event::{ModifyKind, RenameMode},
+            EventKind,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("refs");
+        std::fs::create_dir(&directory).unwrap();
+        let reference = directory.join("main");
+        std::fs::write(&reference, "reference hash").unwrap();
+        assert_eq!(
+            watcher_directory_metadata_event(&directory, &EventKind::Modify(ModifyKind::Any)),
+            cfg!(windows)
+        );
+        assert!(!watcher_directory_metadata_event(
+            &reference,
+            &EventKind::Modify(ModifyKind::Any)
+        ));
+        assert!(!watcher_directory_metadata_event(
+            &directory,
+            &EventKind::Modify(ModifyKind::Name(RenameMode::Both))
+        ));
+        assert!(!watcher_directory_metadata_event(
+            &directory,
+            &EventKind::Any
+        ));
     }
 
     #[test]
