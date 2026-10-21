@@ -497,8 +497,9 @@ mod tests {
             });
             let finished = Rc::new(Cell::new(false));
             let result = finished.clone();
-            view.run_javascript(
+            view.evaluate_javascript(
                 &format!("if (Math.abs(innerWidth-{width})>1 || Math.abs(innerHeight-{height})>1) throw new Error('Stale viewport'); true"),
+                None, None,
                 None::<&webkit2gtk::gio::Cancellable>, move |reply| { assert!(reply.is_ok()); result.set(true); },
             );
             spin_until(|| finished.get());

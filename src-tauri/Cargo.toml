@@ -68,7 +68,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
-webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
 
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["test-util"] }
