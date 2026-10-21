@@ -2,11 +2,15 @@
 //! Window geometry and webview geometry are separate on Windows/WebView2.
 use crate::models::{DesktopError, WindowViewport};
 use tauri::{Manager, WebviewWindow};
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(not(any(target_os = "macos", target_os = "linux")), test))]
 use tauri::{PhysicalPosition, PhysicalSize};
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
 
 pub struct Surface {
     pub viewport: WindowViewport,
@@ -31,7 +35,7 @@ pub fn is_presenting_resize(_label: &str) -> bool {
     }
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(not(any(target_os = "macos", target_os = "linux")), test))]
 fn fitted(
     size: PhysicalSize<u32>,
     origin: PhysicalPosition<i32>,
@@ -45,13 +49,13 @@ fn fitted(
 pub async fn synchronize(window: &WebviewWindow) -> Result<Surface, DesktopError> {
     let (send, receive) = tokio::sync::oneshot::channel();
     let current = window.clone();
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     window
         .with_webview(move |platform| {
             let _ = send.send(inspect(current, platform));
         })
         .map_err(error)?;
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     window
         .app_handle()
         .run_on_main_thread(move || {
@@ -63,7 +67,7 @@ pub async fn synchronize(window: &WebviewWindow) -> Result<Surface, DesktopError
 
 fn inspect(
     window: WebviewWindow,
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     platform: tauri::webview::PlatformWebview,
 ) -> Result<Surface, DesktopError> {
     let size = window.inner_size().map_err(error)?;
@@ -85,92 +89,24 @@ fn inspect(
 
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::{
-            Foundation::RECT,
-            UI::WindowsAndMessaging::{
-                GetClientRect, GetParent, GetWindowRect, SetWindowPos, SWP_NOACTIVATE,
-                SWP_NOCOPYBITS, SWP_NOZORDER,
-            },
-        };
-        let controller = platform.controller();
-        let mut host = Default::default();
-        let mut controller_bounds = Default::default();
-        let mut host_bounds = RECT::default();
-        let outer = window.hwnd().map_err(error)?.0;
-        let mut origin = PhysicalPosition::new(0, 0);
-        // Tauri exposes the controller, so no Wry class-name lookup or
-        // private window implementation is needed to locate its host.
-        unsafe {
-            controller.ParentWindow(&mut host).map_err(error)?;
-            controller.Bounds(&mut controller_bounds).map_err(error)?;
-            if GetClientRect(host.0, &mut host_bounds) == 0 {
-                return Err(error(std::io::Error::last_os_error()));
-            }
-            if host.0 != outer {
-                if GetParent(host.0) != outer {
-                    return Err(error("Unexpected WebView2 host parent"));
-                }
-                let mut host_rect = RECT::default();
-                if GetWindowRect(host.0, &mut host_rect) == 0 {
-                    return Err(error(std::io::Error::last_os_error()));
-                }
-                let client_origin = window.inner_position().map_err(error)?;
-                origin = PhysicalPosition::new(
-                    host_rect.left - client_origin.x,
-                    host_rect.top - client_origin.y,
-                );
-            }
-        }
-        let host_ready = fitted(
-            size,
-            origin,
-            PhysicalSize::new(
-                (host_bounds.right - host_bounds.left).max(0) as u32,
-                (host_bounds.bottom - host_bounds.top).max(0) as u32,
-            ),
-        );
-        let controller_ready = fitted(
-            size,
-            PhysicalPosition::new(controller_bounds.left, controller_bounds.top),
-            PhysicalSize::new(
-                (controller_bounds.right - controller_bounds.left).max(0) as u32,
-                (controller_bounds.bottom - controller_bounds.top).max(0) as u32,
-            ),
-        );
-        surface.ready = host_ready && controller_ready;
-        if !surface.ready {
-            controller_bounds.left = 0;
-            controller_bounds.top = 0;
-            controller_bounds.right = i32::try_from(size.width).map_err(error)?;
-            controller_bounds.bottom = i32::try_from(size.height).map_err(error)?;
-            unsafe {
-                // Wry normally positions this HWND asynchronously. Fit
-                // both layers synchronously and discard copied old pixels.
-                if host.0 != outer
-                    && SetWindowPos(
-                        host.0,
-                        std::ptr::null_mut(),
-                        0,
-                        0,
-                        controller_bounds.right,
-                        controller_bounds.bottom,
-                        SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOCOPYBITS,
-                    ) == 0
-                {
-                    return Err(error(std::io::Error::last_os_error()));
-                }
-                controller.SetBounds(controller_bounds).map_err(error)?;
-                controller
-                    .NotifyParentWindowPositionChanged()
-                    .map_err(error)?;
-            }
-        }
+        surface.ready = windows::fit(&window, &platform)?;
     }
     #[cfg(target_os = "macos")]
     {
         surface.ready = macos::fit(&platform)?;
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        // Main GTK webviews are packed in a Box: Wry's set_bounds only
+        // allocates Fixed children and cannot repair this layout.
+        surface.ready = linux::fit(
+            &platform.inner(),
+            logical.width.round() as i32,
+            logical.height.round() as i32,
+        )
+        .map_err(error)?;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         let webview: &tauri::Webview = window.as_ref();
         let bounds = webview.bounds().map_err(error)?;
@@ -188,11 +124,9 @@ fn inspect(
                 .map_err(error)?;
         }
     }
-    // Only enable proportional resizing once the measured ratio is 1:1.
-    // Enabling it while the webview is still small preserves that ratio.
-    // macOS main webviews use AppKit's native autoresizing, not Wry's
-    // proportional set_bounds (which only handles child webviews on macOS).
-    #[cfg(not(target_os = "macos"))]
+    // Business windows on macOS, Windows and Linux use native filling. Only
+    // the fallback needs proportional bounds, enabled after a measured 1:1 fit.
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     if surface.ready {
         let webview: &tauri::Webview = window.as_ref();
         webview.set_auto_resize(true).map_err(error)?;
@@ -219,7 +153,26 @@ pub fn schedule(window: WebviewWindow) {
             warn(self::error(error));
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        // Resize events already run on the UI thread. Do not queue one Tokio
+        // task per drag step before coming back to the same native thread.
+        let current = window.clone();
+        if let Err(error) = window.with_webview(move |platform| {
+            #[cfg(target_os = "windows")]
+            let result = windows::observe(&current, &platform)
+                .and_then(|()| inspect(current, platform).map(|_| ()));
+            #[cfg(target_os = "linux")]
+            let result = inspect(current, platform).map(|_| ());
+            if let Err(error) = result {
+                // Emitting log events must not re-enter a native callback.
+                tauri::async_runtime::spawn(async move { warn(error) });
+            }
+        }) {
+            warn(self::error(error));
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     tauri::async_runtime::spawn(async move {
         if let Err(error) = synchronize(&window).await {
             warn(error);
