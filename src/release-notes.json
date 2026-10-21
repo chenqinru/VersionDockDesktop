@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.17",
+    "date": "2026-10-21",
+    "highlights": {
+      "zh-CN": [
+        "新增任务与检查点中心，按项目管理多个 Git 仓库的任务，支持在原目录或独立 worktree 中记录工作区与暂存区状态。",
+        "支持检查点撤销、重做与隔离任务成果带回，操作前检查冲突，并提供失败恢复入口；可按仓库查看历史 Diff，并查看记录消息。",
+        "提供 Codex Hooks 安装与连接验证，支持配置自动记录；可查看快照存储用量并预览清理旧历史，保留仍用于恢复的记录。",
+        "改善 Windows 和 Linux 窗口缩放，让页面随原生窗口尺寸变化铺满内容区，减少边缘留白及缩小后无法继续调整的问题。",
+        "修复提交面板在多仓库滚动、折叠和切换标签后出现空白的问题，以及合并编辑器中的长文本缩短后不再显示的问题。",
+        "历史列表支持多选复制修订号，按显示顺序逐行复制完整版本号，并兼容跨仓库及 Git、SVN 多选。"
+      ],
+      "en": [
+        "Add a task and checkpoint center for managing tasks across multiple Git repositories by project. Record working tree and staging area states in the original directories or isolated worktrees.",
+        "Support checkpoint undo, redo and bringing changes from isolated tasks back to the original workspace. Check for conflicts before applying changes and provide recovery after failures, with historical diffs grouped by repository and recorded messages available for inspection.",
+        "Provide Codex Hooks installation and connection verification for configuring automatic recording. Show snapshot storage usage and preview cleanup of old history while preserving records still needed for recovery.",
+        "Improve window resizing on Windows and Linux so content fills the native window as its dimensions change, reducing blank edges and problems resizing to smaller dimensions.",
+        "Fix blank areas in the commit panel after scrolling across repositories, collapsing groups or switching tabs, and fix long text disappearing in the merge editor after its contents become shorter.",
+        "Support copying multiple selected revision numbers from history, one full revision per line in displayed order, including selections across repositories and Git or SVN history."
+      ]
+    }
+  },
+  {
     "version": "0.1.16",
     "date": "2026-10-17",
     "highlights": {
