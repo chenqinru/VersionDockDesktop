@@ -20,8 +20,102 @@ pub struct Surface {
     pub ready: bool,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaintedViewport {
+    pub width: f64,
+    pub height: f64,
+    pub visible: bool,
+    pub reduced_motion: bool,
+}
+
+/// Native bounds can match while the renderer still displays the old viewport.
+/// Await a page paint without blocking the native event loop or a runtime lock.
+pub async fn paint(
+    window: &WebviewWindow,
+    target: Option<WindowViewport>,
+) -> Option<PaintedViewport> {
+    use tauri::Listener;
+    let event = format!("window-paint-{}", uuid::Uuid::new_v4());
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let listener = window.once(event.clone(), move |event| {
+        let _ = send.send(serde_json::from_str::<PaintedViewport>(event.payload()).ok());
+    });
+    let script = format!(
+        "{}({}, {})",
+        include_str!("window_surface/paint.js"),
+        serde_json::to_string(&event).ok()?,
+        serde_json::to_string(&target).ok()?,
+    );
+    let result = if window.eval(script).is_ok() {
+        tokio::time::timeout(std::time::Duration::from_millis(180), receive)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten()
+    } else {
+        None
+    };
+    window.unlisten(listener);
+    result
+}
+
+/// Lay out the next growing viewport while the native window still clips it.
+/// Expanding the window afterwards reveals pixels the renderer already painted.
+pub async fn prepare(
+    window: &WebviewWindow,
+    target: WindowViewport,
+    epoch: u64,
+) -> Result<(), DesktopError> {
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let current = window.clone();
+    window
+        .with_webview(move |platform| {
+            if !crate::window_layout::current_request(&current, epoch) {
+                let _ = send.send(Err(error("Window layout request superseded")));
+                return;
+            }
+            #[cfg(target_os = "windows")]
+            let result = current.scale_factor().map_err(error).and_then(|scale| {
+                windows::prepare(
+                    &current,
+                    &platform,
+                    tauri::LogicalSize::new(target.width, target.height).to_physical::<u32>(scale),
+                )
+            });
+            #[cfg(target_os = "linux")]
+            let result = {
+                linux::prepare(
+                    &platform.inner(),
+                    current.label(),
+                    target.width.round() as i32,
+                    target.height.round() as i32,
+                );
+                Ok(())
+            };
+            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+            let result = {
+                let _ = (current, platform, target);
+                Ok(())
+            };
+            let _ = send.send(result);
+        })
+        .map_err(error)?;
+    receive.await.map_err(error)?
+}
+
 fn error(error: impl std::fmt::Display) -> DesktopError {
     DesktopError::new("WINDOW_SURFACE_FAILED", error.to_string(), true)
+}
+
+#[cfg(target_os = "linux")]
+pub fn begin_transition(label: &str) {
+    linux::clear_frame(label);
+}
+
+#[cfg(target_os = "linux")]
+pub fn finish_preparation(label: &str) {
+    linux::release_prepared(label);
 }
 
 pub fn is_presenting_resize(_label: &str) -> bool {
@@ -163,7 +257,10 @@ pub fn schedule(window: WebviewWindow) {
             let result = windows::observe(&current, &platform)
                 .and_then(|()| inspect(current, platform).map(|_| ()));
             #[cfg(target_os = "linux")]
-            let result = inspect(current, platform).map(|_| ());
+            let result = {
+                linux::observe(&platform.inner(), current.label());
+                inspect(current, platform).map(|_| ())
+            };
             if let Err(error) = result {
                 // Emitting log events must not re-enter a native callback.
                 tauri::async_runtime::spawn(async move { warn(error) });
@@ -192,6 +289,10 @@ fn warn(error: DesktopError) {
 }
 
 pub fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    #[cfg(target_os = "linux")]
+    if matches!(event, tauri::WindowEvent::Destroyed) {
+        linux::forget(window.label());
+    }
     #[cfg(target_os = "macos")]
     if matches!(event, tauri::WindowEvent::Destroyed) {
         let label = window.label().to_owned();

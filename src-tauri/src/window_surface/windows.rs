@@ -65,7 +65,7 @@ pub(super) fn observe(
 ) -> Result<(), DesktopError> {
     let hwnd = window.hwnd().map_err(error)?.0;
     if !installed(hwnd) {
-        let fit = native_fit(window, platform)?;
+        let fit = native_fit(window, platform, None)?;
         install(
             hwnd,
             Box::new(move || {
@@ -80,12 +80,21 @@ pub(super) fn fit(
     window: &WebviewWindow,
     platform: &tauri::webview::PlatformWebview,
 ) -> Result<bool, DesktopError> {
-    native_fit(window, platform)?()
+    native_fit(window, platform, None)?()
+}
+
+pub(super) fn prepare(
+    window: &WebviewWindow,
+    platform: &tauri::webview::PlatformWebview,
+    size: PhysicalSize<u32>,
+) -> Result<(), DesktopError> {
+    native_fit(window, platform, Some(size))?().map(|_| ())
 }
 
 fn native_fit(
     window: &WebviewWindow,
     platform: &tauri::webview::PlatformWebview,
+    target: Option<PhysicalSize<u32>>,
 ) -> Result<impl Fn() -> Result<bool, DesktopError> + 'static, DesktopError> {
     use windows_sys::Win32::{
         Foundation::RECT,
@@ -105,10 +114,12 @@ fn native_fit(
         let mut host = Default::default();
         let mut controller_bounds = Default::default();
         let mut host_bounds = RECT::default();
-        let size = PhysicalSize::new(
-            (client.right - client.left).max(0) as u32,
-            (client.bottom - client.top).max(0) as u32,
-        );
+        let size = target.unwrap_or_else(|| {
+            PhysicalSize::new(
+                (client.right - client.left).max(0) as u32,
+                (client.bottom - client.top).max(0) as u32,
+            )
+        });
         if size.width == 0 || size.height == 0 {
             return Ok(false);
         }

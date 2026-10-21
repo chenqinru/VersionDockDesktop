@@ -26,6 +26,37 @@ impl Geometry {
             && self.width >= 320.0
             && self.height >= 240.0
     }
+
+    fn between(self, target: Self, step: u32, steps: u32) -> Self {
+        let progress = f64::from(step) / f64::from(steps);
+        let progress = progress * progress * (3.0 - 2.0 * progress);
+        let mix = |from, to| from + (to - from) * progress;
+        Self {
+            x: mix(self.x, target.x),
+            y: mix(self.y, target.y),
+            width: mix(self.width, target.width),
+            height: mix(self.height, target.height),
+            maximized: false,
+        }
+    }
+}
+
+#[derive(Default)]
+struct ModeChange {
+    target: Option<Geometry>,
+    from: Option<Geometry>,
+}
+
+fn apply_bounds(window: &Window, geometry: Geometry) -> Result<(), DesktopError> {
+    window
+        .set_size(tauri::LogicalSize::new(geometry.width, geometry.height))
+        .map_err(native_error)?;
+    window
+        .set_position(tauri::PhysicalPosition::new(
+            geometry.x.round() as i32,
+            geometry.y.round() as i32,
+        ))
+        .map_err(native_error)
 }
 #[derive(Debug, Clone, Copy)]
 struct Area {
@@ -269,7 +300,8 @@ impl WindowLayouts {
         window: &Window,
         workspace: bool,
         preserve: bool,
-    ) -> Result<Option<Geometry>, DesktopError> {
+        animate: bool,
+    ) -> Result<ModeChange, DesktopError> {
         self.register(window.label(), preserve && workspace);
         let (same_mode, initialized) = {
             let windows = self.windows.lock().unwrap();
@@ -277,7 +309,7 @@ impl WindowLayouts {
             (entry.workspace == workspace, entry.epoch > 0)
         };
         if same_mode && initialized {
-            return Ok(None);
+            return Ok(ModeChange::default());
         }
         // Capture the project before making the same native window a welcome screen.
         if initialized && !same_mode {
@@ -300,7 +332,37 @@ impl WindowLayouts {
         };
         let result = (|| {
             let area = Self::area(window, saved);
-            window.set_resizable(workspace).map_err(native_error)?;
+            let animate = animate
+                && cfg!(any(target_os = "windows", target_os = "linux"))
+                && initialized
+                && !same_mode
+                && !preserve
+                && window.is_visible().map_err(native_error)?
+                && !window.is_minimized().map_err(native_error)?
+                && !window.is_fullscreen().map_err(native_error)?
+                && !window.is_maximized().map_err(native_error)?
+                && !saved.is_some_and(|geometry| geometry.maximized);
+            let from = if animate {
+                let scale = window.scale_factor().map_err(native_error)?;
+                let position = window.outer_position().map_err(native_error)?;
+                let size = window
+                    .inner_size()
+                    .map_err(native_error)?
+                    .to_logical::<f64>(scale);
+                Some(Geometry {
+                    x: f64::from(position.x),
+                    y: f64::from(position.y),
+                    width: size.width,
+                    height: size.height,
+                    maximized: false,
+                })
+            } else {
+                None
+            };
+            // GTK must remain resizable until a shrinking transition finishes.
+            window
+                .set_resizable(workspace || animate)
+                .map_err(native_error)?;
             window.set_maximizable(workspace).map_err(native_error)?;
             window
                 .set_min_size(Some(tauri::LogicalSize::new(
@@ -318,18 +380,10 @@ impl WindowLayouts {
                 let applied = macos::set_geometry(window, geometry, initialized && !same_mode)?;
                 #[cfg(not(target_os = "macos"))]
                 let applied = false;
-                if !applied {
+                if !applied && !animate {
                     window.set_fullscreen(false).map_err(native_error)?;
                     window.unmaximize().map_err(native_error)?;
-                    window
-                        .set_size(tauri::LogicalSize::new(geometry.width, geometry.height))
-                        .map_err(native_error)?;
-                    window
-                        .set_position(tauri::PhysicalPosition::new(
-                            geometry.x.round() as i32,
-                            geometry.y.round() as i32,
-                        ))
-                        .map_err(native_error)?;
+                    apply_bounds(window, geometry)?;
                 }
                 // Set normal bounds before maximizing, including the first launch.
                 if workspace {
@@ -345,7 +399,7 @@ impl WindowLayouts {
                     }
                 }
             }
-            Ok(target)
+            Ok(ModeChange { target, from })
         })();
         if let Some(entry) = self.windows.lock().unwrap().entries.get_mut(window.label()) {
             if entry.epoch == epoch {
@@ -377,7 +431,7 @@ impl WindowLayouts {
                 })
                 .unwrap_or(false)
         };
-        self.set_mode(window, workspace, false).map(|_| ())
+        self.set_mode(window, workspace, false, false).map(|_| ())
     }
     pub fn remove(&self, label: &str) {
         self.windows.lock().unwrap().entries.remove(label);
@@ -480,14 +534,149 @@ fn matches_target(viewport: &WindowViewport, maximized: bool, target: Option<Geo
         })
 }
 
+pub(crate) fn current_request(window: &tauri::WebviewWindow, epoch: u64) -> bool {
+    window
+        .state::<WindowLayouts>()
+        .windows
+        .lock()
+        .unwrap()
+        .entries
+        .get(window.label())
+        .is_some_and(|entry| entry.epoch == epoch)
+}
+
+async fn animate_bounds(
+    window: &tauri::WebviewWindow,
+    from: Geometry,
+    target: Geometry,
+    epoch: u64,
+) -> Result<(), DesktopError> {
+    let initial = crate::window_surface::paint(window, None).await;
+    let steps = if initial.is_some_and(|frame| frame.visible && !frame.reduced_motion) {
+        8
+    } else {
+        1
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(400);
+    let mut previous = from;
+    for step in 1..=steps {
+        let last = step == steps || tokio::time::Instant::now() >= deadline;
+        let next = if last {
+            target
+        } else {
+            from.between(target, step, steps)
+        };
+        let viewport = WindowViewport {
+            width: next.width,
+            height: next.height,
+        };
+        let growing = next.width > previous.width || next.height > previous.height;
+        let prepared = if growing {
+            on_main_thread(window, move |window| {
+                if !current_request(&window, epoch) {
+                    return Err(native_error("Window layout request superseded"));
+                }
+                Ok(())
+            })
+            .await?;
+            let prepared = WindowViewport {
+                width: next.width.max(previous.width),
+                height: next.height.max(previous.height),
+            };
+            crate::window_surface::prepare(window, prepared.clone(), epoch).await?;
+            crate::window_surface::paint(window, Some(prepared))
+                .await
+                .filter(|frame| {
+                    (frame.width - next.width).abs() <= 1.0
+                        && (frame.height - next.height).abs() <= 1.0
+                })
+        } else {
+            None
+        };
+        on_main_thread(window, move |window| {
+            if !current_request(&window, epoch) {
+                return Err(native_error("Window layout request superseded"));
+            }
+            apply_bounds(&window.as_ref().window(), next)
+        })
+        .await?;
+        // GTK queues native window changes. Do not prepare the following frame
+        // before the preceding native configure has consumed its own bounds.
+        let native_deadline = tokio::time::Instant::now() + Duration::from_millis(120);
+        loop {
+            let arrived = on_main_thread(window, move |window| {
+                if !current_request(&window, epoch) {
+                    return Err(native_error("Window layout request superseded"));
+                }
+                let scale = window.scale_factor().map_err(native_error)?;
+                let size = window
+                    .inner_size()
+                    .map_err(native_error)?
+                    .to_logical::<f64>(scale);
+                Ok((size.width - next.width).abs() <= 1.0
+                    && (size.height - next.height).abs() <= 1.0)
+            })
+            .await?;
+            if arrived || tokio::time::Instant::now() >= native_deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(4)).await;
+        }
+        #[cfg(target_os = "linux")]
+        on_main_thread(window, move |window| {
+            if !current_request(&window, epoch) {
+                return Err(native_error("Window layout request superseded"));
+            }
+            // Mixed grow/shrink transitions prepare the union of both sizes.
+            // Release it after the native configure so GTK can fit the smaller axis.
+            crate::window_surface::finish_preparation(window.label());
+            crate::window_surface::schedule(window);
+            Ok(())
+        })
+        .await?;
+        // Native dimensions and renderer dimensions are separate. Keep each
+        // intermediate frame on screen until the page has laid it out.
+        let frame = if prepared.is_some() {
+            prepared
+        } else {
+            crate::window_surface::paint(window, Some(viewport)).await
+        };
+        previous = next;
+        if last {
+            break;
+        }
+        if frame.is_none_or(|frame| {
+            !frame.visible
+                || frame.reduced_motion
+                || (frame.width - next.width).abs() > 1.0
+                || (frame.height - next.height).abs() > 1.0
+        }) {
+            // A stalled/hidden renderer must not add a timeout at every step.
+            on_main_thread(window, move |window| {
+                if !current_request(&window, epoch) {
+                    return Err(native_error("Window layout request superseded"));
+                }
+                #[cfg(target_os = "linux")]
+                crate::window_surface::finish_preparation(window.label());
+                apply_bounds(&window.as_ref().window(), target)
+            })
+            .await?;
+            break;
+        }
+    }
+    Ok(())
+}
+
 pub async fn set_mode(
     window: tauri::WebviewWindow,
     workspace: bool,
     preserve: bool,
 ) -> Result<WindowViewport, DesktopError> {
-    let (target, epoch) = on_main_thread(&window, move |window| {
+    let (change, epoch) = on_main_thread(&window, move |window| {
+        #[cfg(target_os = "linux")]
+        crate::window_surface::begin_transition(window.label());
         let layouts = window.state::<WindowLayouts>();
-        let target = layouts.set_mode(&window.as_ref().window(), workspace, preserve)?;
+        let change = layouts.set_mode(&window.as_ref().window(), workspace, preserve, true)?;
         let mut windows = layouts.windows.lock().unwrap();
         let entry = windows
             .entries
@@ -495,10 +684,16 @@ pub async fn set_mode(
             .ok_or_else(|| native_error("Window closed"))?;
         // Do not persist intermediate unmaximize/resize events as user geometry.
         entry.transitioning = true;
-        Ok((target, entry.epoch))
+        Ok((change, entry.epoch))
     })
     .await?;
-    let result = confirm_viewport(&window, target, epoch).await;
+    let result = async {
+        if let (Some(from), Some(target)) = (change.from, change.target) {
+            animate_bounds(&window, from, target, epoch).await?;
+        }
+        confirm_viewport(&window, change.target, epoch).await
+    }
+    .await;
     let confirmed = result.as_ref().is_ok_and(|(_, confirmed)| *confirmed);
     let cleanup = on_main_thread(&window, move |window| {
         let layouts = window.state::<WindowLayouts>();
@@ -515,8 +710,13 @@ pub async fn set_mode(
                 false
             }
         };
-        if current && confirmed {
-            layouts.capture(&window.as_ref().window())?;
+        if current {
+            #[cfg(target_os = "linux")]
+            crate::window_surface::finish_preparation(window.label());
+            window.set_resizable(workspace).map_err(native_error)?;
+            if confirmed {
+                layouts.capture(&window.as_ref().window())?;
+            }
         }
         Ok(())
     })
@@ -595,6 +795,35 @@ pub async fn reset(window: tauri::WebviewWindow) -> Result<(), DesktopError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn continuous_mode_bounds_keep_exact_endpoints_without_overshooting() {
+        let from = Geometry {
+            x: -1000.0,
+            y: -120.0,
+            width: 880.0,
+            height: 540.0,
+            maximized: false,
+        };
+        let target = Geometry {
+            x: -1500.0,
+            y: 50.0,
+            width: 1600.0,
+            height: 900.0,
+            maximized: false,
+        };
+        assert_eq!(from.between(target, 0, 8), from);
+        assert_eq!(from.between(target, 8, 8), target);
+        let mut previous = from;
+        for step in 1..=8 {
+            let next = from.between(target, step, 8);
+            assert!(next.width >= previous.width && next.width <= target.width);
+            assert!(next.height >= previous.height && next.height <= target.height);
+            assert!(next.x <= previous.x && next.x >= target.x);
+            assert!(next.y >= previous.y && next.y <= target.y);
+            previous = next;
+        }
+        assert_eq!(target.between(from, 8, 8), from);
+    }
     #[test]
     fn resize_confirmation_requires_target_content_size_and_maximize_state() {
         let target = Geometry {
