@@ -43,6 +43,9 @@ export function CheckpointStatusBarItem() {
   const activity = result?.id === workspace.id ? result.activity ?? null : null;
   const error = result?.id === workspace.id ? result.error ?? null : null;
   const status = checkpointStatus(activity, current && checkpoints.busy, error || (current ? checkpoints.error : null));
+  // The center owns idle/history details; the status bar only surfaces active
+  // recordings and problems that need attention. Keep polling while hidden.
+  if (!['recording', 'error', 'interrupted', 'recovery'].includes(status.state)) return null;
   const task = activity?.tasks.find(task => task.id === status.taskId);
   const label = `${t('Checkpoints')} · ${t(status.label)}${(status.count ?? 0) > 1 ? ` (${status.count})` : ''}`;
   const title = [t('Tasks and checkpoints'), workspace.name, task?.name, t(status.label), error || (current ? checkpoints.error : null),

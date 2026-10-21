@@ -1,7 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
-import { checkCommitSafety, isSensitivePath } from './safetyCheck';
+import { checkCommitSafety, formatSafetyCheckReason, isSensitivePath } from './safetyCheck';
+import { createTranslator } from '../i18n';
 
 describe('safetyCheck', () => {
+  it.each([
+    ['contains characters forbidden on Windows (: * ? " < > |)', '包含 Windows 禁止使用的字符（: * ? " < > |）'],
+    ['ends with space or dot', '以空格或句点结尾'],
+    ['uses Windows-reserved name "con"', '使用了 Windows 保留名称“con”'],
+    ['case collision with "src/中文\nfile.ts"', '与“src/中文\nfile.ts”存在大小写冲突'],
+    ['external-tool: raw error', 'external-tool: raw error'],
+  ])('translates known safety reasons and preserves diagnostic values: %s', (reason, chinese) => {
+    expect(formatSafetyCheckReason(reason, createTranslator('zh-CN'))).toBe(chinese);
+    expect(formatSafetyCheckReason(reason, createTranslator('en'))).toBe(reason);
+  });
+
   it('detects sensitive files correctly', () => {
     expect(isSensitivePath('.env')).toBe(true);
     expect(isSensitivePath('.env.local')).toBe(true);

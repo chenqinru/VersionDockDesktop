@@ -106,7 +106,7 @@ export function AboutDialog({ onClose, initialTab = 'about' }: AboutDialogProps)
     <DialogSurface size="medium" className="about-modal" onClose={onClose} aria-labelledby="about-dialog-title">
         <header className="about-header">
           <div className="about-brand-header">
-            <img src="/icons/versiondock-logo-dark.png" alt="VersionDock Logo" className="about-brand-logo" />
+            <img src="/icons/versiondock-logo-dark.png" alt={t('VersionDock Logo')} className="about-brand-logo" />
             <div className="about-brand-text">
               <h2 id="about-dialog-title">VersionDock Desktop</h2>
               <div className="about-brand-meta">

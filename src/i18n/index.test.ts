@@ -9,11 +9,31 @@ describe('i18n', () => {
   it('uses English on non-Chinese systems and Chinese on Chinese systems', () => {
     expect(resolveLanguage('system', 'en-US')).toBe('en');
     expect(resolveLanguage('system', 'zh-Hans-CN')).toBe('zh-CN');
+    expect(resolveLanguage('system', 'zh-TW')).toBe('zh-CN');
+    expect(resolveLanguage('zhCn', 'en-US')).toBe('zh-CN');
+    expect(resolveLanguage('en', 'zh-CN')).toBe('en');
   });
 
   it('supports existing positional placeholders', () => {
-    const t = createTranslator('en', { 'Changed {0} files': 'Changed {0} files' });
-    expect(t('Changed {0} files', 3)).toBe('Changed 3 files');
+    const t = createTranslator('en');
+    expect(t('CRLF line separators: {0}', 'App.vue')).toBe('CRLF line separators: App.vue');
+  });
+
+  it('loads shared dialog translations immediately and keeps translators in different languages independent', () => {
+    const zh = createTranslator('zh-CN');
+    const en = createTranslator('en');
+    expect(zh('Commit Safety Check')).toBe('提交安全检查');
+    expect(zh('Commit Anyway')).toBe('仍然提交');
+    expect(zh('CRLF line separators: {0}', 'App.vue')).toBe('包含 CRLF 行分隔符: App.vue');
+    expect(en('Commit Anyway')).toBe('Commit Anyway');
+    expect(createTranslator('zh-CN')('Commit Anyway')).toBe('仍然提交');
+    expect(zh('VersionDock Warning: The commit contains potential issues:\n{0}\nDo you want to commit anyway?', '风险')).toBe('VersionDock 警告：即将提交的内容存在潜在风险:\n风险\n是否仍要继续提交？');
+  });
+
+  it('preserves unknown diagnostic text and placeholder values literally', () => {
+    const t = createTranslator('zh-CN');
+    expect(t('external-tool: unknown diagnostic')).toBe('external-tool: unknown diagnostic');
+    expect(t('CRLF line separators: {0}', 'src/{1}.vue')).toBe('包含 CRLF 行分隔符: src/{1}.vue');
   });
 
   it('translates notification messages before the plugin bundle finishes loading', () => {

@@ -49,21 +49,62 @@ for (const statement of i18nSource.statements) {
   }
 }
 
-const nativeMessages = new Set();
-// Calling t() is not enough if the built-in catalogs lack the requested key.
-for (const path of ['src/components/AboutDialog.tsx', 'src/components/StatusBar/UpdateStatusBarItem.tsx', 'src/components/ShelfPanel.tsx', 'src/components/StashPanel.tsx']) {
-  const source = ts.createSourceFile(path, readFileSync(join(root, path), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function visitBuiltInText(node) {
-    if (ts.isCallExpression(node) && node.expression.getText(source) === 't' && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
-      const message = node.arguments[0].text;
-      if (!catalogs.desktopEn.has(message) || !catalogs.desktopZh.has(message)) {
-        violations.push(`UI text requires built-in English and Chinese translations: ${message}`);
+// Both shared catalogs are bundled with the app, including non-React callers.
+for (const [catalog, file] of [['desktopEn', 'bundle.l10n.json'], ['desktopZh', 'bundle.l10n.zh-cn.json']]) {
+  catalogs[catalog] = new Map([...Object.entries(JSON.parse(readFileSync(join(root, 'src/i18n', file), 'utf8'))), ...catalogs[catalog]]);
+}
+for (const message of new Set([...catalogs.desktopEn.keys(), ...catalogs.desktopZh.keys()])) {
+  if (!catalogs.desktopEn.has(message) || !catalogs.desktopZh.has(message)) {
+    violations.push(`Translation catalog is missing an English or Chinese entry: ${message}`);
+    continue;
+  }
+  const placeholders = (value) => [...new Set(value.match(/\{\d+\}/g))].sort().join(',');
+  if (placeholders(catalogs.desktopEn.get(message)) !== placeholders(catalogs.desktopZh.get(message))) {
+    violations.push(`English and Chinese placeholders differ: ${message}`);
+  }
+}
+
+function staticText(node) {
+  if (ts.isStringLiteralLike(node)) return [node.text];
+  if (ts.isConditionalExpression(node)) return [...staticText(node.whenTrue), ...staticText(node.whenFalse)];
+  if (ts.isParenthesizedExpression(node)) return staticText(node.expression);
+  if (ts.isBinaryExpression(node) && [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) {
+    return [...staticText(node.left), ...staticText(node.right)];
+  }
+  return [];
+}
+const requiredCatalogText = (message, location) => {
+  if (!message || !/[A-Za-z]/.test(message) || technicalAllowlist.has(message)) return;
+  if (!catalogs.desktopEn.has(message) || !catalogs.desktopZh.has(message)) {
+    violations.push(`${location}: Missing English or Chinese translation: ${message}`);
+  }
+};
+// Check every static translator call, not just a few selected dialogs. Empty
+// strings and technical names do not need translated entries.
+let translatedCalls = 0;
+for (const file of files(join(root, 'src')).filter((path) => /\.tsx?$/.test(path) && !/\.(?:test|spec|generated)\./.test(path))) {
+  const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  function visit(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === 't' && node.arguments[0]) {
+      for (const message of staticText(node.arguments[0])) {
+        translatedCalls += 1;
+        const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+        requiredCatalogText(message, `${relative(root, file)}:${line}`);
       }
     }
-    ts.forEachChild(node, visitBuiltInText);
+    // Declarative labels and notification titles are often passed to t() later.
+    // Demo fixture descriptions intentionally contain arbitrary sample content.
+    if (!file.endsWith('browserDevBridge.ts') && ts.isPropertyAssignment(node)
+      && ['title', 'label', 'description', 'message', 'confirmLabel', 'cancelLabel', 'inputLabel', 'placeholder'].includes(node.name.getText(source))) {
+      const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+      staticText(node.initializer).forEach(message => requiredCatalogText(message, `${relative(root, file)}:${line}`));
+    }
+    ts.forEachChild(node, visit);
   }
-  visitBuiltInText(source);
+  visit(source);
 }
+
+const nativeMessages = new Set();
 
 for (const path of ['src-tauri/src/commands.rs', 'src-tauri/src/state.rs']) {
   const source = readFileSync(join(root, path), 'utf8');
@@ -110,7 +151,7 @@ for (const message of notificationMessages) {
 for (const file of sourceRoots.flatMap(files).filter((path) => path.endsWith('.tsx') && !path.endsWith('.test.tsx'))) {
   const source = readFileSync(file, 'utf8');
   const patterns = [
-    /(?:aria-label|title|placeholder)="([^"{]*[A-Za-z][^"]*)"/g,
+    /(?:aria-label|title|placeholder|alt)="([^"{]*[A-Za-z][^"]*)"/g,
     />\s*([A-Z][A-Za-z0-9 &:+.()-]{2,})\s*</g,
   ];
   for (const pattern of patterns) {
@@ -127,4 +168,4 @@ if (violations.length) {
   console.error('Visible English text must use the shared translator:\n' + violations.join('\n'));
   process.exit(1);
 }
-console.log(`Visible text and ${[...nativeMessages].filter((text) => /^[A-Z].*\s/.test(text)).length} native operation translations passed.`);
+console.log(`Visible text, ${translatedCalls} translator calls and ${[...nativeMessages].filter((text) => /^[A-Z].*\s/.test(text)).length} native operation translations passed.`);

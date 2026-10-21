@@ -4,6 +4,7 @@
  */
 
 import { useAppStore } from '../store/appStore';
+import type { I18nContextValue } from '../i18n';
 
 export const SENSITIVE_FILENAME_PATTERNS = [
   /^\.env(?:\.local|\.production|\.development|\.staging)?$/i,
@@ -49,6 +50,16 @@ export interface CommitSafetyCheckResult {
 
 export interface CommitSafetyOptions {
   warnOnInvalidFileNames?: boolean;
+}
+
+// Native checks and the local fallback return the same reason strings. Translate
+// known templates here, keeping file names and unknown diagnostic text intact.
+export function formatSafetyCheckReason(reason: string, t: I18nContextValue['t']): string {
+  const reserved = /^uses Windows-reserved name "([\s\S]*)"$/.exec(reason);
+  if (reserved) return t('uses Windows-reserved name "{0}"', reserved[1]);
+  const collision = /^case collision with "([\s\S]*)"$/.exec(reason);
+  if (collision) return t('case collision with "{0}"', collision[1]);
+  return t(reason);
 }
 
 export function checkCommitSafety(paths: string[], options?: CommitSafetyOptions): CommitSafetyCheckResult {

@@ -1,5 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { LanguagePreference } from '../bindings/generated';
+import sharedEn from './bundle.l10n.json';
+import sharedZh from './bundle.l10n.zh-cn.json';
 
 type Messages = Record<string, string>;
 
@@ -3738,8 +3740,15 @@ export function resolveLanguage(preference: LanguagePreference, systemLanguage =
   return systemLanguage.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 }
 
-export function createTranslator(language: 'en' | 'zh-CN', pluginBundle: Messages = {}) {
-  const messages = language === 'zh-CN' ? { ...pluginBundle, ...desktopZh } : { ...pluginBundle, ...desktopEn };
+// Load both catalogs with the application so dialogs and store notifications never
+// depend on a network request or a previously selected language's bundle.
+const catalogs: Record<'en' | 'zh-CN', Messages> = {
+  en: { ...sharedEn, ...desktopEn },
+  'zh-CN': { ...sharedZh, ...desktopZh },
+};
+
+export function createTranslator(language: 'en' | 'zh-CN') {
+  const messages = catalogs[language];
   return (message: string, ...args: Array<string | number>) => {
     const translated = messages[message] ?? message;
     return args.reduce<string>((value, arg, index) => value.replaceAll(`{${index}}`, String(arg)), translated);

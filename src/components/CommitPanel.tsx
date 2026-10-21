@@ -32,7 +32,7 @@ import { BranchWorkingDiffPanel } from './BranchWorkingDiffPanel';
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap';
 import { BranchMenuPopover } from './StatusBar/BranchMenuPopover';
 import { InvertSelectionIcon, SelectAllIcon, WarningConflictIcon } from './CustomIcons';
-import { performCommitSafetyCheck } from '../history/safetyCheck';
+import { formatSafetyCheckReason, performCommitSafetyCheck } from '../history/safetyCheck';
 import { useFileSearch } from '../hooks/useFileSearch';
 import { useFileSearchMatches } from '../hooks/useFileSearchMatches';
 import { FileSearchWidget } from './FileSearchWidget';
@@ -1089,7 +1089,7 @@ export function CommitPanel() {
       if (hasIssues) {
         const issues: string[] = [];
         if (checkErrors.length > 0) {
-          issues.push(`${t('Safety check service error (large file and CRLF checks skipped): {0}', checkErrors.join('; '))}`);
+          issues.push(t('Safety check service error (large file and CRLF checks skipped): {0}', checkErrors.map(error => t(error)).join('; ')));
         }
         if (rebaseInProgressRepos.length > 0) {
           issues.push(`${t('Rebase in progress')}: ${rebaseInProgressRepos.map((r) => r.meta.name).join(', ')}`);
@@ -1105,7 +1105,7 @@ export function CommitPanel() {
           issues.push(`${t('Large files: {0}', list)}`);
         }
         if (invalidFileNameFiles.length > 0) {
-          issues.push(`${t('Incompatible / invalid file names: {0}', invalidFileNameFiles.map((f) => `${f.path} (${f.reason})`).join(', '))}`);
+          issues.push(t('Incompatible / invalid file names: {0}', invalidFileNameFiles.map((f) => `${f.path} (${formatSafetyCheckReason(f.reason, t)})`).join(', ')));
         }
         if (crlfFiles.length > 0) {
           const list = crlfFiles.slice(0, 5).join(', ') + (crlfFiles.length > 5 ? ` (+${crlfFiles.length - 5})` : '');

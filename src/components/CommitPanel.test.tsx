@@ -9,6 +9,7 @@ import { BridgeContext } from '../platform/context';
 import { MockBridge } from '../platform/bridge';
 import { DialogHost } from './DialogHost';
 import { DEFAULT_SETTINGS } from '../settings/defaults';
+import { createTranslator, I18nContext } from '../i18n';
 
 import * as dialogService from './dialogService';
 
@@ -32,6 +33,44 @@ const originalUpdateProject = useAppStore.getState().updateProject;
 afterEach(() => { cleanup(); useAppStore.setState({ bootstrap: undefined, snapshot: undefined, stashes: {}, shelves: {}, subtrees: {}, unpushedCommits: {}, worktreeDiff: undefined, batchCommitReport: undefined, operations: {}, notifications: [], toastNotificationIds: [], mode: 'history', commitMessage: '', mergeMessageSuggestion: undefined, amendRepoIds: [], commitSelections: {}, refresh: originalRefresh, updateProject: originalUpdateProject, loadStashes: originalLoadStashes, unstage: originalUnstage, stage: originalStage }); });
 
 describe('CommitPanel capabilities and file view', () => {
+  it.each(['zh-CN', 'en'] as const)('translates the entire safety dialog and buttons immediately in %s', async (language) => {
+    const previous = useAppStore.getState();
+    const safetyBridge = new MockBridge(() => []);
+    const request = vi.spyOn(safetyBridge, 'request').mockResolvedValue({
+      hasIssues: true,
+      sensitiveFiles: ['.env'],
+      largeFiles: [{ path: 'large.bin', sizeBytes: 60000000, sizeFormatted: '57.2 MB' }],
+      invalidFileNameFiles: [{ path: 'con.txt', reason: 'uses Windows-reserved name "con"' }],
+      crlfFiles: ['App.vue', 'plugins/authority-plugin.js'],
+    });
+    const commitMany = vi.fn();
+    const t = createTranslator(language);
+    try {
+      useAppStore.setState({
+        bridge: safetyBridge, bootstrap: bootstrap(false), selectedRepoId: 'repo',
+        snapshot: { ...gitSnapshot, repositories: [{ ...gitRepo, files: [{ path: 'App.vue', status: 'modified', staged: false, unstaged: true, conflicted: false }] }] },
+        commitMessage: 'fix: line endings', commitSelections: { repo: ['App.vue'] }, commitMany,
+      });
+      render(<BridgeContext.Provider value={safetyBridge}><I18nContext.Provider value={{ language, preference: language === 'en' ? 'en' : 'zhCn', t }}><CommitPanel /><DialogHost /></I18nContext.Provider></BridgeContext.Provider>);
+      fireEvent.click(screen.getByRole('button', { name: t('Commit') }));
+      const dialog = await screen.findByRole('dialog', { name: language === 'zh-CN' ? '提交安全检查' : 'Commit Safety Check' });
+      expect(dialog).toHaveTextContent(language === 'zh-CN' ? '包含 CRLF 行分隔符: App.vue, plugins/authority-plugin.js' : 'CRLF line separators: App.vue, plugins/authority-plugin.js');
+      expect(dialog).toHaveTextContent(language === 'zh-CN' ? '敏感文件: .env' : 'Sensitive files: .env');
+      expect(dialog).toHaveTextContent(language === 'zh-CN' ? '大文件' : 'Large files');
+      expect(dialog).toHaveTextContent(language === 'zh-CN' ? 'con.txt (使用了 Windows 保留名称“con”)' : 'con.txt (uses Windows-reserved name "con")');
+      expect(within(dialog).getByRole('button', { name: language === 'zh-CN' ? '仍然提交' : 'Commit Anyway' })).toBeInTheDocument();
+      expect(dialog).toHaveTextContent(language === 'zh-CN' ? '是否仍要继续提交？' : 'Do you want to commit anyway?');
+      fireEvent.click(within(dialog).getByRole('button', { name: language === 'zh-CN' ? '取消' : 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(commitMany).not.toHaveBeenCalled();
+    } finally {
+      dialogService.publishDialog(undefined);
+      cleanup();
+      request.mockRestore();
+      useAppStore.setState({ bridge: previous.bridge, commitMany: previous.commitMany });
+    }
+  });
+
   it('renders later repositories when virtual lists share a scroll container with positioned groups', () => {
     const originalRect = HTMLElement.prototype.getBoundingClientRect;
     const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {

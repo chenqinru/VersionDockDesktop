@@ -644,7 +644,7 @@ export function SettingsPanel({ onClose, scope = 'workspace' }: SettingsPanelPro
                       <div className="settings-about-brand">
                         <img
                           src={theme === 'light' || theme === 'light2026' ? './icons/versiondock-logo-light.png' : './icons/versiondock-logo-dark.png'}
-                          alt="VersionDock Logo"
+                          alt={t('VersionDock Logo')}
                           className="settings-about-logo"
                           onError={(e) => {
                             (e.currentTarget as HTMLImageElement).src = './icons/versiondock-logo-dark.png';

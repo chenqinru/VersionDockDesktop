@@ -78,7 +78,6 @@ export function App() {
   const aboutOpen = useAppStore((state) => state.aboutOpen);
   const aboutInitialTab = useAppStore((state) => state.aboutInitialTab);
   const closeAbout = useAppStore((state) => state.closeAbout);
-  const [pluginMessages, setPluginMessages] = useState<Record<string, string>>({});
   const [dropActive, setDropActive] = useState(false);
   const [checkoutKind, setCheckoutKind] = useState<RepositoryCheckoutKind>();
   const [startupTab] = useState(startupTransferTab);
@@ -95,7 +94,7 @@ export function App() {
     bootstrap?.state.settings?.smoothScrolling ?? DEFAULT_SETTINGS.smoothScrolling!,
     bootstrap?.state.settings?.smoothMouseWheelScrolling ?? DEFAULT_SETTINGS.smoothMouseWheelScrolling!,
   );
-  const t = useMemo(() => createTranslator(language, pluginMessages), [language, pluginMessages]);
+  const t = useMemo(() => createTranslator(language), [language]);
   useWindowsCaptionLabels(bridge, t);
   const commitWidth = bootstrap?.state.layout?.panelSizes.commit ?? bootstrap?.state.panelSizes?.commit ?? 360;
   const missingTools = snapshot && !snapshot.tools.git && !snapshot.tools.svn;
@@ -155,8 +154,6 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.lang = language;
-    const source = language === 'zh-CN' ? '/l10n/bundle.l10n.zh-cn.json' : '/l10n/bundle.l10n.json';
-    void fetch(source).then((response) => response.json()).then(setPluginMessages).catch(() => setPluginMessages({}));
   }, [language]);
 
   useEffect(() => {
