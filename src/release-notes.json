@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.1.18",
+    "date": "2026-10-21",
+    "highlights": {
+      "zh-CN": [
+        "加快多仓库检查点创建和重复拍摄，减少 Windows 换行符转换导致的大量逐文件 Git 调用；保留两轮内容校验，并改善创建进度与取消反馈。",
+        "合并自动、启动和手动 Fetch 后的重复刷新，避免没有新提交时反复重载历史；抓取期间仍可更新工作文件状态和其他仓库。",
+        "开发版与正式版的 Codex Hooks 可共存并同时启用，安装或更新仅替换本版本配置，保留另一版本及其他 Hook，并修复连接状态误判。",
+        "改善 Windows 和 Linux 欢迎页与项目页切换时的窗口动画和内容重绘；关闭最后一个标签或全部标签后自动收起日志，避免挤占欢迎页。",
+        "修复启动和切换语言时部分界面、检查点状态及提交安全检查提示翻译缺失的问题，让中英文文案随应用完整加载。",
+        "底部检查点状态仅在正在记录、失败、中断或恢复待处理时显示，隐藏就绪和完成等常驻提示，点击仍可直达对应任务。"
+      ],
+      "en": [
+        "Speed up checkpoint creation and repeated captures across multiple repositories, reducing per-file Git calls caused by Windows line-ending conversion. Preserve two-pass content verification and improve creation progress and cancellation feedback.",
+        "Coalesce duplicate refreshes after automatic, startup and manual Fetch operations, avoiding repeated history reloads when there are no new commits while keeping working-file status and other repositories responsive.",
+        "Allow development and release Codex Hooks to coexist and run together. Installation and updates replace only the current installation’s configuration, preserving the other installation and unrelated hooks, and fix incorrect connection status reporting.",
+        "Improve window animations and content repainting when switching between the welcome screen and project workspace on Windows and Linux. Automatically collapse logs after closing the last tab or all tabs so they no longer crowd the welcome screen.",
+        "Fix missing translations in parts of the interface, checkpoint status and commit safety warnings during startup and language changes by bundling complete English and Chinese messages with the app.",
+        "Show checkpoint status in the bottom bar only while recording or when failures, interruptions or recovery need attention. Hide persistent ready and completed indicators while retaining direct access to the relevant task."
+      ]
+    }
+  },
+  {
     "version": "0.1.17",
     "date": "2026-10-21",
     "highlights": {
